@@ -6,7 +6,6 @@
 
 #include <limits>
 
-#include "app/l10n_util.h"
 #include "base/atomicops.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
@@ -15,9 +14,20 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+
+ChildProcessInfo::ChildProcessInfo(ProcessType type, int id) :
+    type_(type),
+    renderer_type_(RENDERER_UNKNOWN) {
+  if (id == -1)
+    id_ = GenerateChildProcessUniqueId();
+  else
+    id_ = id;
+}
 
 ChildProcessInfo::ChildProcessInfo(const ChildProcessInfo& original)
     : type_(original.type_),
+      renderer_type_(original.renderer_type_),
       name_(original.name_),
       version_(original.version_),
       id_(original.id_),
@@ -31,6 +41,7 @@ ChildProcessInfo& ChildProcessInfo::operator=(
     const ChildProcessInfo& original) {
   if (&original != this) {
     type_ = original.type_;
+    renderer_type_ = original.renderer_type_;
     name_ = original.name_;
     version_ = original.version_;
     id_ = original.id_;
@@ -39,6 +50,7 @@ ChildProcessInfo& ChildProcessInfo::operator=(
   return *this;
 }
 
+// static
 std::string ChildProcessInfo::GetTypeNameInEnglish(
     ChildProcessInfo::ProcessType type) {
   switch (type) {
@@ -72,6 +84,41 @@ std::string ChildProcessInfo::GetTypeNameInEnglish(
       return "Unknown";
   }
 }
+
+// static
+std::string ChildProcessInfo::GetRendererTypeNameInEnglish(
+    ChildProcessInfo::RendererProcessType type) {
+  switch (type) {
+    case RENDERER_NORMAL:
+      return "Tab";
+    case RENDERER_CHROME:
+      return "Tab (Chrome)";
+    case RENDERER_EXTENSION:
+      return "Extension";
+    case RENDERER_DEVTOOLS:
+      return "Devtools";
+    case RENDERER_INTERSTITIAL:
+      return "Interstitial";
+    case RENDERER_NOTIFICATION:
+      return "Notification";
+    case RENDERER_BACKGROUND_APP:
+      return "Background App";
+    case RENDERER_UNKNOWN:
+    default:
+      NOTREACHED() << "Unknown renderer process type!";
+      return "Unknown";
+  }
+}
+
+// static
+std::string ChildProcessInfo::GetFullTypeNameInEnglish(
+    ChildProcessInfo::ProcessType type,
+    ChildProcessInfo::RendererProcessType rtype) {
+  if (type == RENDER_PROCESS)
+    return GetRendererTypeNameInEnglish(rtype);
+  return GetTypeNameInEnglish(type);
+}
+
 
 string16 ChildProcessInfo::GetLocalizedTitle() const {
   string16 title = WideToUTF16Hack(name_);
@@ -122,13 +169,6 @@ string16 ChildProcessInfo::GetLocalizedTitle() const {
   }
 
   return title;
-}
-
-ChildProcessInfo::ChildProcessInfo(ProcessType type, int id) : type_(type) {
-  if (id == -1)
-    id_ = GenerateChildProcessUniqueId();
-  else
-    id_ = id;
 }
 
 std::string ChildProcessInfo::GenerateRandomChannelID(void* instance) {

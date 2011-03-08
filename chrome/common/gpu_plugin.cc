@@ -9,36 +9,27 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "gpu/gpu_plugin/gpu_plugin.h"
-#include "webkit/glue/plugins/plugin_list.h"
-
-#if defined(ENABLE_GPU)
-#include "webkit/glue/plugins/plugin_constants_win.h"
-#endif
+#include "webkit/plugins/npapi/plugin_list.h"
 
 namespace chrome {
 
 void RegisterInternalGPUPlugin() {
 #if defined(ENABLE_GPU)
-  static const std::wstring kWideMimeType = ASCIIToWide(kGPUPluginMimeType);
-  static const NPAPI::PluginVersionInfo kGPUPluginInfo = {
-    FilePath(FILE_PATH_LITERAL("gpu-plugin")),
-    L"GPU Plug-in",
-    L"GPU Rendering Plug-in",
-    L"1",
-    kWideMimeType.c_str(),
-    L"",
-    L"",
-    {
+  const webkit::npapi::PluginEntryPoints entry_points = {
 #if !defined(OS_POSIX) || defined(OS_MACOSX)
-      gpu_plugin::NP_GetEntryPoints,
+    gpu_plugin::NP_GetEntryPoints,
 #endif
-      gpu_plugin::NP_Initialize,
-      gpu_plugin::NP_Shutdown
-    }
+    gpu_plugin::NP_Initialize,
+    gpu_plugin::NP_Shutdown
   };
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableGPUPlugin))
-    NPAPI::PluginList::Singleton()->RegisterInternalPlugin(kGPUPluginInfo);
+    webkit::npapi::PluginList::Singleton()->RegisterInternalPlugin(
+        FilePath(FILE_PATH_LITERAL("gpu-plugin")),
+        "GPU Plug-in",
+        "GPU Rendering Plug-in",
+        "application/vnd.google.chrome.gpu-plugin",
+        entry_points);
 #endif  // ENABLE_GPU
 }
 

@@ -1,9 +1,10 @@
-// Copyright (c) 20010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/blob/blob_url_request_job.h"
 
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
@@ -30,20 +31,20 @@ static const int kHTTPMethodNotAllow = 405;
 static const int kHTTPRequestedRangeNotSatisfiable = 416;
 static const int kHTTPInternalError = 500;
 
-static const char* kHTTPOKText = "OK";
-static const char* kHTTPPartialContentText = "Partial Content";
-static const char* kHTTPNotAllowedText = "Not Allowed";
-static const char* kHTTPNotFoundText = "Not Found";
-static const char* kHTTPMethodNotAllowText = "Method Not Allowed";
-static const char* kHTTPRequestedRangeNotSatisfiableText =
+static const char kHTTPOKText[] = "OK";
+static const char kHTTPPartialContentText[] = "Partial Content";
+static const char kHTTPNotAllowedText[] = "Not Allowed";
+static const char kHTTPNotFoundText[] = "Not Found";
+static const char kHTTPMethodNotAllowText[] = "Method Not Allowed";
+static const char kHTTPRequestedRangeNotSatisfiableText[] =
     "Requested Range Not Satisfiable";
-static const char* kHTTPInternalErrorText = "Internal Server Error";
+static const char kHTTPInternalErrorText[] = "Internal Server Error";
 
 BlobURLRequestJob::BlobURLRequestJob(
-    URLRequest* request,
+    net::URLRequest* request,
     BlobData* blob_data,
     base::MessageLoopProxy* file_thread_proxy)
-    : URLRequestJob(request),
+    : net::URLRequestJob(request),
       callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       blob_data_(blob_data),
       file_thread_proxy_(file_thread_proxy),
@@ -58,7 +59,8 @@ BlobURLRequestJob::BlobURLRequestJob(
       read_buf_remaining_bytes_(0),
       error_(false),
       headers_set_(false),
-      byte_range_set_(false) {
+      byte_range_set_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 }
 
 BlobURLRequestJob::~BlobURLRequestJob() {
@@ -66,8 +68,9 @@ BlobURLRequestJob::~BlobURLRequestJob() {
 
 void BlobURLRequestJob::Start() {
   // Continue asynchronously.
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &BlobURLRequestJob::DidStart));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(&BlobURLRequestJob::DidStart));
 }
 
 void BlobURLRequestJob::DidStart() {
@@ -89,7 +92,9 @@ void BlobURLRequestJob::DidStart() {
 void BlobURLRequestJob::Kill() {
   stream_.Close();
 
-  URLRequestJob::Kill();
+  net::URLRequestJob::Kill();
+  callback_factory_.RevokeAll();
+  method_factory_.RevokeAll();
 }
 
 void BlobURLRequestJob::ResolveFile(const FilePath& file_path) {
@@ -109,18 +114,16 @@ void BlobURLRequestJob::ResolveFile(const FilePath& file_path) {
   bool exists = file_util::GetFileInfo(file_path, &file_info);
 
   // Continue asynchronously.
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &BlobURLRequestJob::DidResolve,
-      (exists ? base::PLATFORM_FILE_OK : base::PLATFORM_FILE_ERROR_NOT_FOUND),
-      file_info));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(
+          &BlobURLRequestJob::DidResolve,
+          exists ? base::PLATFORM_FILE_OK : base::PLATFORM_FILE_ERROR_NOT_FOUND,
+          file_info));
 }
 
 void BlobURLRequestJob::DidResolve(base::PlatformFileError rv,
                                    const base::PlatformFileInfo& file_info) {
-  // We may have been orphaned...
-  if (!request_)
-    return;
-
   // If an error occured, bail out.
   if (rv == base::PLATFORM_FILE_ERROR_NOT_FOUND) {
     NotifyFailure(net::ERR_FILE_NOT_FOUND);
@@ -334,7 +337,7 @@ bool BlobURLRequestJob::ReadFile(const BlobData::Item& item,
 
   // If I/O pending error is returned, we just need to wait.
   if (rv == net::ERR_IO_PENDING) {
-    SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
+    SetStatus(net::URLRequestStatus(net::URLRequestStatus::IO_PENDING, 0));
     return false;
   }
 
@@ -354,7 +357,7 @@ void BlobURLRequestJob::DidRead(int result) {
     NotifyFailure(net::ERR_FAILED);
     return;
   }
-  SetStatus(URLRequestStatus());  // Clear the IO_PENDING status
+  SetStatus(net::URLRequestStatus());  // Clear the IO_PENDING status
 
   AdvanceBytesRead(result);
 
@@ -463,7 +466,8 @@ void BlobURLRequestJob::NotifyFailure(int error_code) {
   // If we already return the headers on success, we can't change the headers
   // now. Instead, we just error out.
   if (headers_set_) {
-    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, error_code));
+    NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                     error_code));
     return;
   }
 

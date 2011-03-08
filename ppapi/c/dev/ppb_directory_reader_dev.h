@@ -1,12 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_DEV_PPB_DIRECTORY_READER_DEV_H_
 #define PPAPI_C_DEV_PPB_DIRECTORY_READER_DEV_H_
 
-#include "ppapi/c/pp_bool.h"
 #include "ppapi/c/dev/pp_file_info_dev.h"
+#include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 
@@ -16,8 +17,9 @@ struct PP_DirectoryEntry_Dev {
   PP_Resource file_ref;
   PP_FileType_Dev file_type;
 };
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_DirectoryEntry_Dev, 8);
 
-#define PPB_DIRECTORYREADER_DEV_INTERFACE "PPB_DirectoryReader(Dev);0.2"
+#define PPB_DIRECTORYREADER_DEV_INTERFACE "PPB_DirectoryReader(Dev);0.4"
 
 struct PPB_DirectoryReader_Dev {
   // Creates a DirectoryReader for the given directory.  Upon success, the
@@ -52,4 +54,5 @@ struct PPB_DirectoryReader_Dev {
                           struct PP_CompletionCallback callback);
 };
 
-#endif  // PPAPI_C_DEV_PPB_DIRECTORY_READER_DEV_H_
+#endif  /* PPAPI_C_DEV_PPB_DIRECTORY_READER_DEV_H_ */
+

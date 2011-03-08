@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,18 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/platform_thread.h"
-#include "chrome/browser/browser_thread.h"
+#include "base/test/test_timeouts.h"
+#include "base/threading/platform_thread.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
+#include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
 
@@ -51,10 +52,8 @@ class MetricsServiceTest : public UITest {
   // that was saved by the app as it closed.  The caller takes ownership of the
   // returned PrefService object.
   PrefService* GetLocalState() {
-    FilePath local_state_path = user_data_dir()
-        .Append(chrome::kLocalStateFilename);
-
-    return PrefService::CreateUserPrefService(local_state_path);
+    FilePath path = user_data_dir().Append(chrome::kLocalStateFilename);
+    return PrefServiceMockBuilder().WithUserFilePrefs(path).Create();
   }
 };
 
@@ -73,9 +72,9 @@ TEST_F(MetricsServiceTest, CloseRenderersNormally) {
   EXPECT_EQ(0, local_state->GetInteger(prefs::kStabilityRendererCrashCount));
 }
 
-TEST_F(MetricsServiceTest, CrashRenderers) {
+TEST_F(MetricsServiceTest, DISABLED_CrashRenderers) {
   // This doesn't make sense to test in single process mode.
-  if (in_process_renderer_)
+  if (ProxyLauncher::in_process_renderer())
     return;
 
   OpenTabs();
@@ -97,11 +96,12 @@ TEST_F(MetricsServiceTest, CrashRenderers) {
     defined(GOOGLE_CHROME_BUILD)
     expected_crashes_ = 1;
 #endif
+
     ASSERT_TRUE(tab->NavigateToURLAsync(GURL(chrome::kAboutCrashURL)));
   }
 
   // Give the browser a chance to notice the crashed tab.
-  PlatformThread::Sleep(sleep_timeout_ms());
+  base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
 
   QuitBrowser();
 

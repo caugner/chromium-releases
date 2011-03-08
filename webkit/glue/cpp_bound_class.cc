@@ -15,9 +15,9 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "webkit/glue/cpp_bound_class.h"
 
 using WebKit::WebBindings;
@@ -319,7 +319,7 @@ CppVariant* CppBoundClass::GetAsCppVariant() {
 }
 
 void CppBoundClass::BindToJavascript(WebFrame* frame,
-                                     const std::wstring& classname) {
+                                     const std::string& classname) {
 #if WEBKIT_USING_JSC
 #error "This is not going to work anymore...but it's not clear what the solution is...or if it's still necessary."
   JSC::JSLock lock(false);
@@ -328,7 +328,7 @@ void CppBoundClass::BindToJavascript(WebFrame* frame,
   // BindToWindowObject will take its own reference to the NPObject, and clean
   // up after itself.  It will also (indirectly) register the object with V8,
   // so we must remember this so we can unregister it when we're destroyed.
-  frame->bindToWindowObject(WideToUTF16Hack(classname),
+  frame->bindToWindowObject(ASCIIToUTF16(classname),
                             NPVARIANT_TO_OBJECT(*GetAsCppVariant()));
   bound_to_frame_ = true;
 }

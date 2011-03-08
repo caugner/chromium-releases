@@ -4,7 +4,6 @@
 
 #include <vector>
 
-#include "app/message_box_flags.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_thread.h"
@@ -27,6 +26,7 @@
 #include "chrome/test/testing_profile.h"
 #include "ipc/ipc_channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/message_box_flags.h"
 
 using webkit_glue::PasswordForm;
 
@@ -120,8 +120,8 @@ class TestInterstitialPage : public InterstitialPage {
     DidNavigate(render_view_host(), params);
   }
 
-  void TestRenderViewGone() {
-    RenderViewGone(render_view_host());
+  void TestRenderViewGone(base::TerminationStatus status, int error_code) {
+    RenderViewGone(render_view_host(), status, error_code);
   }
 
   bool is_showing() const {
@@ -765,13 +765,13 @@ TEST_F(TabContentsTest, WebKitPrefs) {
 
   // These should still be the default values.
 #if defined(OS_MACOSX)
-  const wchar_t kDefaultFont[] = L"Times";
+  const char kDefaultFont[] = "Times";
 #elif defined(OS_CHROMEOS)
-  const wchar_t kDefaultFont[] = L"Tinos";
+  const char kDefaultFont[] = "Tinos";
 #else
-  const wchar_t kDefaultFont[] = L"Times New Roman";
+  const char kDefaultFont[] = "Times New Roman";
 #endif
-  EXPECT_EQ(kDefaultFont, webkit_prefs.standard_font_family);
+  EXPECT_EQ(ASCIIToUTF16(kDefaultFont), webkit_prefs.standard_font_family);
   EXPECT_TRUE(webkit_prefs.javascript_enabled);
 }
 
@@ -1151,7 +1151,9 @@ TEST_F(TabContentsTest, ShowInterstitialCrashRendererThenGoBack) {
   interstitial->TestDidNavigate(2, interstitial_url);
 
   // Crash the renderer
-  rvh()->TestOnMessageReceived(ViewHostMsg_RenderViewGone(0));
+  rvh()->TestOnMessageReceived(
+      ViewHostMsg_RenderViewGone(
+          0, base::TERMINATION_STATUS_PROCESS_CRASHED, -1));
 
   // While the interstitial is showing, go back.
   controller().GoBack();
@@ -1186,7 +1188,9 @@ TEST_F(TabContentsTest, ShowInterstitialCrashRendererThenNavigate) {
   interstitial->Show();
 
   // Crash the renderer
-  rvh()->TestOnMessageReceived(ViewHostMsg_RenderViewGone(0));
+  rvh()->TestOnMessageReceived(
+      ViewHostMsg_RenderViewGone(
+          0, base::TERMINATION_STATUS_PROCESS_CRASHED, -1));
 
   interstitial->TestDidNavigate(2, interstitial_url);
 }
@@ -1429,7 +1433,8 @@ TEST_F(TabContentsTest, InterstitialCrasher) {
   TestInterstitialPageStateGuard state_guard(interstitial);
   interstitial->Show();
   // Simulate a renderer crash before the interstitial is shown.
-  interstitial->TestRenderViewGone();
+  interstitial->TestRenderViewGone(
+      base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
   // The interstitial should have been dismissed.
   EXPECT_TRUE(deleted);
   EXPECT_EQ(TestInterstitialPage::CANCELED, state);
@@ -1440,7 +1445,8 @@ TEST_F(TabContentsTest, InterstitialCrasher) {
   interstitial->Show();
   interstitial->TestDidNavigate(1, url);
   // Simulate a renderer crash.
-  interstitial->TestRenderViewGone();
+  interstitial->TestRenderViewGone(
+      base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
   // The interstitial should have been dismissed.
   EXPECT_TRUE(deleted);
   EXPECT_EQ(TestInterstitialPage::CANCELED, state);
@@ -1518,7 +1524,7 @@ TEST_F(TabContentsTest, NoJSMessageOnInterstitials) {
   IPC::Message* dummy_message = new IPC::Message;
   bool did_suppress_message = false;
   contents()->RunJavaScriptMessage(L"This is an informative message", L"OK",
-      kGURL, MessageBoxFlags::kIsJavascriptAlert, dummy_message,
+      kGURL, ui::MessageBoxFlags::kIsJavascriptAlert, dummy_message,
       &did_suppress_message);
   EXPECT_TRUE(did_suppress_message);
 }

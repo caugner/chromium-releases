@@ -22,7 +22,7 @@ class CreditCard : public FormGroup {
   virtual ~CreditCard();
 
   // FormGroup implementation:
-  FormGroup* Clone() const;
+  virtual FormGroup* Clone() const;
   virtual void GetPossibleFieldTypes(const string16& text,
                                      FieldTypeSet* possible_types) const;
   virtual void GetAvailableFieldTypes(FieldTypeSet* available_types) const;
@@ -32,7 +32,7 @@ class CreditCard : public FormGroup {
   virtual string16 GetFieldText(const AutoFillType& type) const;
   virtual string16 GetPreviewText(const AutoFillType& type) const;
   virtual void SetInfo(const AutoFillType& type, const string16& value);
-  virtual const string16 Label() const { return label_; }
+  virtual const string16 Label() const;
 
   // The number altered for display, for example: ******1234
   string16 ObfuscatedNumber() const;
@@ -151,5 +151,15 @@ class CreditCard : public FormGroup {
 
 // So we can compare CreditCards with EXPECT_EQ().
 std::ostream& operator<<(std::ostream& os, const CreditCard& credit_card);
+
+// The string identifiers for credit card icon resources.
+extern const char* const kAmericanExpressCard;
+extern const char* const kDinersCard;
+extern const char* const kDiscoverCard;
+extern const char* const kGenericCard;
+extern const char* const kJCBCard;
+extern const char* const kMasterCard;
+extern const char* const kSoloCard;
+extern const char* const kVisaCard;
 
 #endif  // CHROME_BROWSER_AUTOFILL_CREDIT_CARD_H_

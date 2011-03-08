@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -149,10 +149,6 @@ class ATL_NO_VTABLE ProxyDIChromeFrameEvents
 
 extern bool g_first_launch_by_process_;
 
-// Posted when the worker thread used for handling URL requests in IE finishes
-// uninitialization.
-#define WM_WORKER_THREAD_UNINITIALIZED_MSG (WM_APP + 1)
-
 // Common implementation for ActiveX and Active Document
 template <class T, const CLSID& class_id>
 class ATL_NO_VTABLE ChromeFrameActivexBase :  // NOLINT
@@ -183,8 +179,7 @@ class ATL_NO_VTABLE ChromeFrameActivexBase :  // NOLINT
       : ready_state_(READYSTATE_UNINITIALIZED),
       url_fetcher_(new UrlmonUrlRequestManager()),
       failed_to_fetch_in_place_frame_(false),
-      draw_sad_tab_(false),
-      prev_resource_instance_(NULL) {
+      draw_sad_tab_(false) {
     m_bWindowOnly = TRUE;
     url_fetcher_->set_container(static_cast<IDispatch*>(this));
   }
@@ -251,17 +246,11 @@ END_MSG_MAP()
 
   DECLARE_PROTECT_FINAL_CONSTRUCT()
 
-  virtual void SetResourceModule() {
-    DCHECK(NULL == prev_resource_instance_);
-    SimpleResourceLoader* loader_instance = SimpleResourceLoader::instance();
+  void SetResourceModule() {
+    SimpleResourceLoader* loader_instance = SimpleResourceLoader::GetInstance();
     DCHECK(loader_instance);
     HMODULE res_dll = loader_instance->GetResourceModuleHandle();
-    prev_resource_instance_ = _AtlBaseModule.SetResourceInstance(res_dll);
-  }
-
-  virtual void ClearResourceModule() {
-    _AtlBaseModule.SetResourceInstance(prev_resource_instance_);
-    prev_resource_instance_ = NULL;
+    _AtlBaseModule.SetResourceInstance(res_dll);
   }
 
   HRESULT FinalConstruct() {
@@ -286,8 +275,6 @@ END_MSG_MAP()
 
   void FinalRelease() {
     Uninitialize();
-
-    ClearResourceModule();
   }
 
   void ResetUrlRequestManager() {
@@ -360,8 +347,7 @@ END_MSG_MAP()
     return CComControlBase::IOleObject_SetClientSite(client_site);
   }
 
-  bool HandleContextMenuCommand(UINT cmd,
-                                const IPC::MiniContextMenuParams& params) {
+  bool HandleContextMenuCommand(UINT cmd, const MiniContextMenuParams& params) {
     if (cmd == IDC_ABOUT_CHROME_FRAME) {
       int tab_handle = automation_client_->tab()->handle();
       HostNavigate(GURL("about:version"), GURL(), NEW_WINDOW);
@@ -397,7 +383,7 @@ END_MSG_MAP()
   // The base implementation returns true unless we are in privileged
   // mode, in which case we always trust our container so we return false.
   bool is_frame_busting_enabled() const {
-    return !is_privileged_;
+    return !is_privileged();
   }
 
   // Needed to support PostTask.
@@ -426,7 +412,7 @@ END_MSG_MAP()
     DVLOG(1) << __FUNCTION__ << ": " << profile_path->value();
   }
 
-  void OnLoad(int tab_handle, const GURL& url) {
+  void OnLoad(const GURL& url) {
     if (ready_state_ < READYSTATE_COMPLETE) {
       ready_state_ = READYSTATE_COMPLETE;
       FireOnChanged(DISPID_READYSTATE);
@@ -439,7 +425,7 @@ END_MSG_MAP()
     HRESULT hr = InvokeScriptFunction(onerror_handler_, url);
   }
 
-  void OnMessageFromChromeFrame(int tab_handle, const std::string& message,
+  void OnMessageFromChromeFrame(const std::string& message,
                                 const std::string& origin,
                                 const std::string& target) {
     base::win::ScopedComPtr<IDispatch> message_event;
@@ -451,7 +437,7 @@ END_MSG_MAP()
     }
   }
 
-  virtual void OnTabbedOut(int tab_handle, bool reverse) {
+  virtual void OnTabbedOut(bool reverse) {
     DCHECK(m_bInPlaceActive);
 
     HWND parent = ::GetParent(m_hWnd);
@@ -462,7 +448,7 @@ END_MSG_MAP()
       control_site->OnFocus(FALSE);
   }
 
-  virtual void OnOpenURL(int tab_handle, const GURL& url_to_open,
+  virtual void OnOpenURL(const GURL& url_to_open,
                          const GURL& referrer, int open_disposition) {
     HostNavigate(url_to_open, referrer, open_disposition);
   }
@@ -491,8 +477,7 @@ END_MSG_MAP()
     return TRUE;
   }
 
-  virtual void OnAttachExternalTab(int tab_handle,
-      const IPC::AttachExternalTabParams& params) {
+  virtual void OnAttachExternalTab(const AttachExternalTabParams& params) {
     std::wstring wide_url = url_;
     GURL parsed_url(WideToUTF8(wide_url));
 
@@ -503,7 +488,7 @@ END_MSG_MAP()
     // passing mechanism between this CF instance, and the BHO that will
     // be constructed in the new IE tab.
     if (parsed_url.SchemeIs("chrome-extension") &&
-        is_privileged_) {
+        is_privileged()) {
       const char kScheme[] = "http";
       const char kHost[] = "local_host";
 
@@ -526,12 +511,11 @@ END_MSG_MAP()
     HostNavigate(GURL(url), GURL(), params.disposition);
   }
 
-  virtual void OnHandleContextMenu(int tab_handle, HANDLE menu_handle,
+  virtual void OnHandleContextMenu(HANDLE menu_handle,
                                    int align_flags,
-                                   const IPC::MiniContextMenuParams& params) {
+                                   const MiniContextMenuParams& params) {
     scoped_refptr<BasePlugin> ref(this);
-    ChromeFramePlugin<T>::OnHandleContextMenu(tab_handle, menu_handle,
-                                              align_flags, params);
+    ChromeFramePlugin<T>::OnHandleContextMenu(menu_handle, align_flags, params);
   }
 
   LRESULT OnCreate(UINT message, WPARAM wparam, LPARAM lparam,
@@ -578,7 +562,7 @@ END_MSG_MAP()
     FireOnChanged(DISPID_READYSTATE);
   }
 
-  virtual void OnCloseTab(int tab_handle) {
+  virtual void OnCloseTab() {
     Fire_onclose();
   }
 
@@ -618,7 +602,7 @@ END_MSG_MAP()
     // of navigation just after CreateExternalTab is done.
     if (!automation_client_->InitiateNavigation(full_url,
                                                 GetDocumentUrl(),
-                                                is_privileged_)) {
+                                                this)) {
       // TODO(robertshield): Make InitiateNavigation return more useful
       // error information.
       return E_INVALIDARG;
@@ -728,7 +712,7 @@ END_MSG_MAP()
   }
 
   STDMETHOD(put_useChromeNetwork)(VARIANT_BOOL use_chrome_network) {
-    if (!is_privileged_) {
+    if (!is_privileged()) {
       DLOG(ERROR) << "Attempt to set useChromeNetwork in non-privileged mode";
       return E_ACCESSDENIED;
     }
@@ -825,7 +809,7 @@ END_MSG_MAP()
     if (NULL == message)
       return E_INVALIDARG;
 
-    if (!is_privileged_) {
+    if (!is_privileged()) {
       DLOG(ERROR) << "Attempt to postPrivateMessage in non-privileged mode";
       return E_ACCESSDENIED;
     }
@@ -854,7 +838,7 @@ END_MSG_MAP()
       return E_INVALIDARG;
     }
 
-    if (!is_privileged_) {
+    if (!is_privileged()) {
       DLOG(ERROR) << "Attempt to installExtension in non-privileged mode";
       return E_ACCESSDENIED;
     }
@@ -874,7 +858,7 @@ END_MSG_MAP()
       return E_INVALIDARG;
     }
 
-    if (!is_privileged_) {
+    if (!is_privileged()) {
       DLOG(ERROR) << "Attempt to loadExtension in non-privileged mode";
       return E_ACCESSDENIED;
     }
@@ -889,7 +873,7 @@ END_MSG_MAP()
   STDMETHOD(getEnabledExtensions)() {
     DCHECK(automation_client_.get());
 
-    if (!is_privileged_) {
+    if (!is_privileged()) {
       DLOG(ERROR) << "Attempt to getEnabledExtensions in non-privileged mode";
       return E_ACCESSDENIED;
     }
@@ -902,7 +886,7 @@ END_MSG_MAP()
     DCHECK(automation_client_.get());
     DCHECK(session_id);
 
-    if (!is_privileged_) {
+    if (!is_privileged()) {
       DLOG(ERROR) << "Attempt to getSessionId in non-privileged mode";
       return E_ACCESSDENIED;
     }
@@ -936,7 +920,7 @@ END_MSG_MAP()
     } else if (LowerCaseEqualsASCII(event_type, event_type_end,
                                     "privatemessage")) {
       // This event handler is only available in privileged mode.
-      if (is_privileged_) {
+      if (is_privileged()) {
         *handlers = &onprivatemessage_;
       } else {
         Error("Event type 'privatemessage' is privileged");
@@ -945,7 +929,7 @@ END_MSG_MAP()
     } else if (LowerCaseEqualsASCII(event_type, event_type_end,
                                     "extensionready")) {
       // This event handler is only available in privileged mode.
-      if (is_privileged_) {
+      if (is_privileged()) {
         *handlers = &onextensionready_;
       } else {
         Error("Event type 'extensionready' is privileged");
@@ -1104,7 +1088,7 @@ END_MSG_MAP()
     return hr;
   }
 
-  virtual void OnAcceleratorPressed(int tab_handle, const MSG& accel_message) {
+  virtual void OnAcceleratorPressed(const MSG& accel_message) {
     DCHECK(m_spInPlaceSite != NULL);
     // Allow our host a chance to handle the accelerator.
     // This catches things like Ctrl+F, Ctrl+O etc, but not browser
@@ -1118,19 +1102,21 @@ END_MSG_MAP()
              << base::StringPrintf("0x%08x", hr);
 
     if (hr != S_OK) {
-      // The WM_SYSCHAR message is not processed by the IOleControlSite
-      // implementation and the IBrowserService2::v_MayTranslateAccelerator
-      // implementation. We need to understand this better. That is for
-      // another day. For now we just post the WM_SYSCHAR message back to our
-      // parent which forwards it off to the frame. This should not cause major
-      // grief for Chrome as it does not need to handle WM_SYSCHAR accelerators
-      // when running in ChromeFrame mode.
+      // The WM_SYSKEYDOWN/WM_SYSKEYUP messages are not processed by the
+      // IOleControlSite and IBrowserService2::v_MayTranslateAccelerator
+      // implementations. We need to understand this better. That is for
+      // another day. For now we just post these messages back to the parent
+      // which forwards it off to the frame. This should not cause major
+      // grief for Chrome as it does not need to handle WM_SYSKEY* messages in
+      // in ChromeFrame mode.
       // TODO(iyengar)
       // Understand and fix WM_SYSCHAR handling
       // We should probably unify the accelerator handling for the active
       // document and the activex.
-      if (accel_message.message == WM_SYSCHAR) {
-        ::PostMessage(GetParent(), WM_SYSCHAR, accel_message.wParam,
+      if (accel_message.message == WM_SYSCHAR ||
+          accel_message.message == WM_SYSKEYDOWN ||
+          accel_message.message == WM_SYSKEYUP) {
+        ::PostMessage(GetParent(), accel_message.message, accel_message.wParam,
                       accel_message.lParam);
         return;
       }
@@ -1236,8 +1222,21 @@ END_MSG_MAP()
       http_headers.Set(referrer_header.c_str());
     }
 
-    web_browser2->Navigate2(url.AsInput(), &flags, &empty, &empty,
-                            http_headers.AsInput());
+    HRESULT hr = web_browser2->Navigate2(url.AsInput(), &flags, &empty, &empty,
+                                         http_headers.AsInput());
+    // If the current window is a popup window then attempting to open a new
+    // tab for the navigation will fail. We attempt to issue the navigation in
+    // a new window in this case.
+    // http://msdn.microsoft.com/en-us/library/aa752133(v=vs.85).aspx
+    if (FAILED(hr) && V_I4(&flags) != navOpenInNewWindow) {
+      V_I4(&flags) = navOpenInNewWindow;
+      hr = web_browser2->Navigate2(url.AsInput(), &flags, &empty, &empty,
+                                   http_headers.AsInput());
+
+      DLOG_IF(ERROR, FAILED(hr))
+          << "Navigate2 failed with error: "
+          << base::StringPrintf("0x%08X", hr);
+    }
   }
 
   void InitializeAutomationSettings() {
@@ -1282,8 +1281,6 @@ END_MSG_MAP()
   // Handle network requests when host network stack is used. Passed to the
   // automation client on initialization.
   scoped_ptr<UrlmonUrlRequestManager> url_fetcher_;
-
-  HINSTANCE prev_resource_instance_;
 };
 
 #endif  // CHROME_FRAME_CHROME_FRAME_ACTIVEX_BASE_H_

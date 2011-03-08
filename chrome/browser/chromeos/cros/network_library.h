@@ -11,12 +11,11 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/observer_list.h"
-#include "base/platform_thread.h"
 #include "base/scoped_vector.h"
 #include "base/singleton.h"
 #include "base/string16.h"
 #include "base/timer.h"
-#include "cros/chromeos_network.h"
+#include "third_party/cros/chromeos_network.h"
 
 class Value;
 
@@ -219,6 +218,7 @@ typedef ScopedVector<CellularDataPlan> CellularDataPlanVector;
 class CellularNetwork : public WirelessNetwork {
  public:
   enum DataLeft {
+    DATA_UNKNOWN,
     DATA_NORMAL,
     DATA_LOW,
     DATA_VERY_LOW,
@@ -361,7 +361,6 @@ class WifiNetwork : public WirelessNetwork {
   bool encrypted() const { return encryption_ != SECURITY_NONE; }
   ConnectionSecurity encryption() const { return encryption_; }
   const std::string& passphrase() const { return passphrase_; }
-  bool passphrase_required() const { return passphrase_required_; }
   const std::string& identity() const { return identity_; }
   const std::string& cert_path() const { return cert_path_; }
 
@@ -384,6 +383,9 @@ class WifiNetwork : public WirelessNetwork {
   // Return a string representation of the encryption code.
   // This not translated and should be only used for debugging purposes.
   std::string GetEncryptionString();
+
+  // Return true if a passphrase or other input is required to connect.
+  bool IsPassphraseRequired() const;
 
   // Return true if cert_path_ indicates that we have loaded the certificate.
   bool IsCertificateLoaded() const;
@@ -494,23 +496,32 @@ class NetworkLibrary {
   // Stop |observer| from observing any networks
   virtual void RemoveObserverForAllNetworks(NetworkObserver* observer) = 0;
 
+  // Temporarily locks down certain functionality in network library to prevent
+  // unplanned side effects. During the lock down, Enable*Device() calls cannot
+  // be made.
+  virtual void Lock() = 0;
+  // Removes temporarily lock of network library.
+  virtual void Unlock() = 0;
+  // Checks if access to network library is locked.
+  virtual bool IsLocked() = 0;
+
   virtual void AddCellularDataPlanObserver(
       CellularDataPlanObserver* observer) = 0;
   virtual void RemoveCellularDataPlanObserver(
       CellularDataPlanObserver* observer) = 0;
 
   // Return the active Ethernet network (or a default structure if inactive).
-  virtual EthernetNetwork* ethernet_network() = 0;
+  virtual const EthernetNetwork* ethernet_network() const = 0;
   virtual bool ethernet_connecting() const = 0;
   virtual bool ethernet_connected() const = 0;
 
   // Return the active Wifi network (or a default structure if none active).
-  virtual WifiNetwork* wifi_network() = 0;
+  virtual const WifiNetwork* wifi_network() const = 0;
   virtual bool wifi_connecting() const = 0;
   virtual bool wifi_connected() const = 0;
 
   // Return the active Cellular network (or a default structure if none active).
-  virtual CellularNetwork* cellular_network() = 0;
+  virtual const CellularNetwork* cellular_network() const = 0;
   virtual bool cellular_connecting() const = 0;
   virtual bool cellular_connected() const = 0;
 
@@ -576,6 +587,12 @@ class NetworkLibrary {
   // Initiates cellular data plan refresh. Plan data will be passed through
   // Network::Observer::CellularDataPlanChanged callback.
   virtual void RefreshCellularDataPlans(const CellularNetwork* network) = 0;
+
+  // Records information that cellular play payment had happened.
+  virtual void SignalCellularPlanPayment() = 0;
+
+  // Returns true if cellular plan payment had been recorded recently.
+  virtual bool HasRecentCellularPlanPayment() = 0;
 
   // Disconnect from the specified wireless (either cellular or wifi) network.
   virtual void DisconnectFromWirelessNetwork(

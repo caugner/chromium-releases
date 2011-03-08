@@ -1,7 +1,7 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_PPB_TRANSPORT_DEV_H_
 #define PPAPI_C_PPB_TRANSPORT_DEV_H_
 
@@ -13,12 +13,12 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_var.h"
 
-#define PPB_TRANSPORT_DEV_INTERFACE "PPB_Transport;0.2"
+#define PPB_TRANSPORT_DEV_INTERFACE "PPB_Transport;0.4"
 
 struct PPB_Transport_Dev {
   // Creates a new transport object with the specified name
   // using the specified protocol.
-  PP_Resource (*CreateTransport)(PP_Module module,
+  PP_Resource (*CreateTransport)(PP_Instance instance,
                                  const char* name,
                                  const char* proto);
 
@@ -67,4 +67,5 @@ struct PPB_Transport_Dev {
   int32_t (*Close)(PP_Resource transport);
 };
 
-#endif  // PPAPI_C_PPB_TRANSPORT_DEV_H_
+#endif  /* PPAPI_C_PPB_TRANSPORT_DEV_H_ */
+

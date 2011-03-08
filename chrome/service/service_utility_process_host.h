@@ -12,6 +12,7 @@
 #include <windows.h>
 #endif  // defined(OS_WIN)
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -35,6 +36,7 @@ class Rect;
 
 namespace printing {
 struct PageRange;
+struct PrinterCapsAndDefaults;
 }  // namespace printing
 
 // Acts as the service-side host to a utility child process. A
@@ -60,6 +62,17 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
     // Called when no page in the passed in PDF could be rendered.
     virtual void OnRenderPDFPagesToMetafileFailed() {}
 
+    // Called when the printer capabilities and defaults have been
+    // retrieved successfully.
+    virtual void OnGetPrinterCapsAndDefaultsSucceeded(
+        const std::string& printer_name,
+        const printing::PrinterCapsAndDefaults& caps_and_defaults) {}
+
+    // Called when the printer capabilities and defaults could not be
+    // retrieved successfully.
+    virtual void OnGetPrinterCapsAndDefaultsFailed(
+        const std::string& printer_name) {}
+
    protected:
     virtual ~Client() {}
 
@@ -67,7 +80,7 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
     friend class base::RefCountedThreadSafe<Client>;
     friend class ServiceUtilityProcessHost;
 
-    void OnMessageReceived(const IPC::Message& message);
+    bool OnMessageReceived(const IPC::Message& message);
     // Invoked when a metafile file is ready.
     void MetafileAvailable(const FilePath& metafile_path,
                            int highest_rendered_page_number);
@@ -88,26 +101,28 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
       int render_dpi,
       const std::vector<printing::PageRange>& page_ranges);
 
-  // Since we handle a sync IPC message (UtilityHostMsg_PreCacheFont), we need
-  // an Send method.
-  bool Send(IPC::Message* message) {
-    return SendOnChannel(message);
-  }
+  // Starts a process to get capabilities and defaults for the specified
+  // printer. Used on Windows to isolate the service process from printer driver
+  // crashes by executing this in a separate process. The process does not run
+  // in a sandbox.
+  bool StartGetPrinterCapsAndDefaults(const std::string& printer_name);
 
  protected:
   // Allows this method to be overridden for tests.
   virtual FilePath GetUtilityProcessCmd();
 
   // Overriden from ChildProcessHost.
-  virtual bool CanShutdown() { return true; }
+  virtual bool CanShutdown();
   virtual void OnChildDied();
 
  private:
-  // Starts a process.  Returns true iff it succeeded.
-  bool StartProcess(const FilePath& exposed_dir);
+  // Starts a process.  Returns true iff it succeeded. |exposed_dir| is the
+  // path to tbe exposed to the sandbox. This is ignored if |no_sandbox| is
+  // true.
+  bool StartProcess(bool no_sandbox, const FilePath& exposed_dir);
 
   // IPC messages:
-  void OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message);
   // Called when at least one page in the specified PDF has been rendered
   // successfully into metafile_path_;
   void OnRenderPDFPagesToMetafileSucceeded(int highest_rendered_page_number);

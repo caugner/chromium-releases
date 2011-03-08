@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,10 +8,13 @@
 
 #include "chrome/common/net/url_request_intercept_job.h"
 
+#include <vector>
+
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_plugin_lib.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_source.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/x509_certificate.h"
@@ -25,13 +28,14 @@ using base::TimeDelta;
 // URLRequestInterceptJob
 //
 
-URLRequestInterceptJob::URLRequestInterceptJob(URLRequest* request,
+URLRequestInterceptJob::URLRequestInterceptJob(net::URLRequest* request,
                                                ChromePluginLib* plugin,
                                                ScopableCPRequest* cprequest)
-    : URLRequestJob(request),
+    : net::URLRequestJob(request),
       cprequest_(cprequest),
       plugin_(plugin),
-      read_buffer_(NULL) {
+      read_buffer_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   cprequest_->data = this;  // see FromCPRequest().
 
   registrar_.Add(this, NotificationType::CHROME_PLUGIN_UNLOADED,
@@ -53,8 +57,10 @@ void URLRequestInterceptJob::DetachPlugin() {
 void URLRequestInterceptJob::Start() {
   // Start reading asynchronously so that all error reporting and data
   // callbacks happen as they would for network requests.
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &URLRequestInterceptJob::StartAsync));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(
+          &URLRequestInterceptJob::StartAsync));
 }
 
 void URLRequestInterceptJob::Kill() {
@@ -63,7 +69,8 @@ void URLRequestInterceptJob::Kill() {
                                                     CPERR_CANCELLED);
     DetachPlugin();
   }
-  URLRequestJob::Kill();
+  net::URLRequestJob::Kill();
+  method_factory_.RevokeAll();
 }
 
 bool URLRequestInterceptJob::ReadRawData(net::IOBuffer* dest, int dest_size,
@@ -84,10 +91,11 @@ bool URLRequestInterceptJob::ReadRawData(net::IOBuffer* dest, int dest_size,
   if (rv == CPERR_IO_PENDING) {
     read_buffer_ = dest;
     read_buffer_size_ = dest_size;
-    SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
+    SetStatus(net::URLRequestStatus(net::URLRequestStatus::IO_PENDING, 0));
   } else {
     // TODO(mpcomplete): better error code
-    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, net::ERR_FAILED));
+    NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                     net::ERR_FAILED));
   }
 
   return false;
@@ -201,8 +209,8 @@ void URLRequestInterceptJob::StartAsync() {
 
 void URLRequestInterceptJob::OnStartCompleted(int result) {
   if (result != CPERR_SUCCESS) {
-    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
-                                net::ERR_CONNECTION_FAILED));
+    NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                     net::ERR_CONNECTION_FAILED));
     return;
   }
 
@@ -211,11 +219,12 @@ void URLRequestInterceptJob::OnStartCompleted(int result) {
 
 void URLRequestInterceptJob::OnReadCompleted(int bytes_read) {
   if (bytes_read < 0) {
-    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, net::ERR_FAILED));
+    NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                     net::ERR_FAILED));
     return;
   }
 
-  SetStatus(URLRequestStatus());  // clear the async flag
+  SetStatus(net::URLRequestStatus());  // clear the async flag
   NotifyReadComplete(bytes_read);
 }
 

@@ -13,8 +13,8 @@
 #include "base/time.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/page_transition_types.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 
 namespace webkit_glue {
 struct PasswordForm;
@@ -27,6 +27,8 @@ class UserScriptIdleScheduler;
 // WebDataSource (see RenderView::DidCreateDataSource).
 class NavigationState : public WebKit::WebDataSource::ExtraData {
  public:
+  // The exact values of this enum are used in histograms, so new values must be
+  // added to the end.
   enum LoadType {
     UNDEFINED_LOAD,            // Not yet initialized.
     RELOAD,                    // User pressed reload.
@@ -37,6 +39,8 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     LINK_LOAD_RELOAD,          // JS/link directed reload.
     LINK_LOAD_CACHE_STALE_OK,  // back/forward or encoding change.
     LINK_LOAD_CACHE_ONLY,      // Allow stale data (avoid doing a re-post)
+    PRERENDER_LOAD,            // Navigation started as the speculatively
+                               // prendering of a linked page.
     kLoadTypeMax               // Bounding value for this enum.
   };
 
@@ -66,6 +70,7 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     return user_script_idle_scheduler_.get();
   }
   void set_user_script_idle_scheduler(UserScriptIdleScheduler* scheduler);
+  void swap_user_script_idle_scheduler(NavigationState* state);
 
   // Contains the page_id for this navigation or -1 if there is none yet.
   int32 pending_page_id() const { return pending_page_id_; }
@@ -160,6 +165,13 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     load_histograms_recorded_ = value;
   }
 
+  bool web_timing_histograms_recorded() const {
+    return web_timing_histograms_recorded_;
+  }
+  void set_web_timing_histograms_recorded(bool value) {
+    web_timing_histograms_recorded_ = value;
+  }
+
   // True if we have already processed the "DidCommitLoad" event for this
   // request.  Used by session history.
   bool request_committed() const { return request_committed_; }
@@ -201,6 +213,11 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   void clear_postponed_data() { postponed_data_.clear(); }
   void append_postponed_data(const char* data, size_t data_len) {
     postponed_data_.append(data, data_len);
+  }
+
+  bool is_prerendering() const { return is_prerendering_; }
+  void set_is_prerendering(bool is_prerendering) {
+    is_prerendering_ = is_prerendering;
   }
 
   int http_status_code() const { return http_status_code_; }
@@ -281,6 +298,7 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   base::Time first_paint_time_;
   base::Time first_paint_after_load_time_;
   bool load_histograms_recorded_;
+  bool web_timing_histograms_recorded_;
   bool request_committed_;
   bool is_content_initiated_;
   int32 pending_page_id_;
@@ -292,6 +310,10 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   std::string security_info_;
   bool postpone_loading_data_;
   std::string postponed_data_;
+
+  // True if page is being prerendered.  False once prerendered page is
+  // displayed.
+  bool is_prerendering_;
 
   bool cache_policy_override_set_;
   WebKit::WebURLRequest::CachePolicy cache_policy_override_;

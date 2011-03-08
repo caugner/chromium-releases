@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,14 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
-#include "chrome/browser/views/tabs/base_tab.h"
-#include "chrome/browser/views/tabs/tab_controller.h"
+#include "chrome/browser/ui/views/tabs/base_tab.h"
+#include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "views/animation/bounds_animator.h"
 #include "views/view.h"
 
 class BaseTab;
 class DraggedTabController;
 class TabStripController;
-class ThemeProvider;
 
 // Base class for the view tab strip implementations.
 class BaseTabStrip : public views::View,
@@ -131,6 +130,9 @@ class BaseTabStrip : public views::View,
   // Returns true if a drag session is currently active.
   bool IsDragSessionActive() const;
 
+  // Returns true if a tab is being dragged into this tab strip.
+  bool IsActiveDropTarget() const;
+
   // TabController overrides:
   virtual void SelectTab(BaseTab* tab);
   virtual void CloseTab(BaseTab* tab);
@@ -221,7 +223,7 @@ class BaseTabStrip : public views::View,
 
   // Creates an AnimationDelegate that resets state after a remove animation
   // completes. The caller owns the returned object.
-  AnimationDelegate* CreateRemoveTabDelegate(BaseTab* tab);
+  ui::AnimationDelegate* CreateRemoveTabDelegate(BaseTab* tab);
 
   // Invoked from Layout if the size changes or layout is really needed.
   virtual void DoLayout();

@@ -50,18 +50,21 @@ typedef pthread_mutex_t* MutexHandle;
 #include "base/debug/debugger.h"
 #include "base/debug/stack_trace.h"
 #include "base/eintr_wrapper.h"
-#include "base/lock_impl.h"
+#include "base/string_piece.h"
+#include "base/synchronization/lock_impl.h"
+#include "base/utf_string_conversions.h"
+#include "base/vlog.h"
 #if defined(OS_POSIX)
 #include "base/safe_strerror_posix.h"
 #endif
-#include "base/process_util.h"
-#include "base/string_piece.h"
-#include "base/utf_string_conversions.h"
-#include "base/vlog.h"
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_cftyperef.h"
+#include "base/sys_string_conversions.h"
+#endif
 
 namespace logging {
 
-bool g_enable_dcheck = false;
+DcheckState g_dcheck_state = DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS;
 VlogInfo* g_vlog_info = NULL;
 
 const char* const log_severity_names[LOG_NUM_SEVERITIES] = {
@@ -240,7 +243,7 @@ class LoggingLock {
       }
 #endif
     } else {
-      log_lock = new LockImpl();
+      log_lock = new base::internal::LockImpl();
     }
     initialized = true;
   }
@@ -279,7 +282,7 @@ class LoggingLock {
   // The lock is used if log file locking is false. It helps us avoid problems
   // with multiple threads writing to the log file at the same time.  Use
   // LockImpl directly instead of using Lock, because Lock makes logging calls.
-  static LockImpl* log_lock;
+  static base::internal::LockImpl* log_lock;
 
   // When we don't use a lock, we are using a global mutex. We need to do this
   // because LockFileEx is not thread safe.
@@ -296,7 +299,7 @@ class LoggingLock {
 // static
 bool LoggingLock::initialized = false;
 // static
-LockImpl* LoggingLock::log_lock = NULL;
+base::internal::LockImpl* LoggingLock::log_lock = NULL;
 // static
 LogLockingState LoggingLock::lock_log_file = LOCK_LOG_FILE;
 
@@ -350,10 +353,10 @@ bool InitializeLogFileHandle() {
 bool BaseInitLoggingImpl(const PathChar* new_log_file,
                          LoggingDestination logging_dest,
                          LogLockingState lock_log,
-                         OldFileDeletionState delete_old) {
+                         OldFileDeletionState delete_old,
+                         DcheckState dcheck_state) {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  g_enable_dcheck =
-      command_line->HasSwitch(switches::kEnableDCHECK);
+  g_dcheck_state = dcheck_state;
   delete g_vlog_info;
   g_vlog_info = NULL;
   // Don't bother initializing g_vlog_info unless we use one of the
@@ -457,6 +460,9 @@ template std::string* MakeCheckOpString<std::string, std::string>(
 
 // Displays a message box to the user with the error message in it.
 // Used for fatal messages, where we close the app simultaneously.
+// This is for developers only; we don't use this in circumstances
+// (like release builds) where users could see it, since users don't
+// understand these messages anyway.
 void DisplayDebugMessageInDialog(const std::string& str) {
   if (str.empty())
     return;
@@ -497,19 +503,15 @@ void DisplayDebugMessageInDialog(const std::string& str) {
     MessageBoxW(NULL, &cmdline[0], L"Fatal error",
                 MB_OK | MB_ICONHAND | MB_TOPMOST);
   }
-#elif defined(USE_X11) && !defined(OS_CHROMEOS)
-  // Shell out to xmessage, which behaves like debug_message.exe, but is
-  // way more retro.  We could use zenity/kdialog but then we're starting
-  // to get into needing to check the desktop env and this dialog should
-  // only be coming up in Very Bad situations.
-  std::vector<std::string> argv;
-  argv.push_back("xmessage");
-  argv.push_back(str);
-  base::LaunchApp(argv, base::file_handle_mapping_vector(), true /* wait */,
-                  NULL);
+#elif defined(OS_MACOSX)
+  base::mac::ScopedCFTypeRef<CFStringRef> message(
+      base::SysUTF8ToCFStringRef(str));
+  CFUserNotificationDisplayNotice(0, kCFUserNotificationStopAlertLevel,
+                                  NULL, NULL, NULL, CFSTR("Fatal Error"),
+                                  message, NULL);
 #else
-  // http://code.google.com/p/chromium/issues/detail?id=37026
-  NOTIMPLEMENTED();
+  // We intentionally don't implement a dialog on other platforms.
+  // You can just look at stderr.
 #endif
 }
 
@@ -528,6 +530,16 @@ LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
   Init(file, line);
 }
 
+LogMessage::LogMessage(const char* file, int line)
+    : severity_(LOG_INFO), file_(file), line_(line) {
+  Init(file, line);
+}
+
+LogMessage::LogMessage(const char* file, int line, LogSeverity severity)
+    : severity_(severity), file_(file), line_(line) {
+  Init(file, line);
+}
+
 LogMessage::LogMessage(const char* file, int line, const CheckOpString& result)
     : severity_(LOG_FATAL), file_(file), line_(line) {
   Init(file, line);
@@ -539,60 +551,6 @@ LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
     : severity_(severity), file_(file), line_(line) {
   Init(file, line);
   stream_ << "Check failed: " << (*result.str_);
-}
-
-LogMessage::LogMessage(const char* file, int line)
-    : severity_(LOG_INFO), file_(file), line_(line) {
-  Init(file, line);
-}
-
-LogMessage::LogMessage(const char* file, int line, LogSeverity severity)
-    : severity_(severity), file_(file), line_(line) {
-  Init(file, line);
-}
-
-// writes the common header info to the stream
-void LogMessage::Init(const char* file, int line) {
-  base::StringPiece filename(file);
-  size_t last_slash_pos = filename.find_last_of("\\/");
-  if (last_slash_pos != base::StringPiece::npos)
-    filename.remove_prefix(last_slash_pos + 1);
-
-  // TODO(darin): It might be nice if the columns were fixed width.
-
-  stream_ <<  '[';
-  if (log_process_id)
-    stream_ << CurrentProcessId() << ':';
-  if (log_thread_id)
-    stream_ << CurrentThreadId() << ':';
-  if (log_timestamp) {
-    time_t t = time(NULL);
-    struct tm local_time = {0};
-#if _MSC_VER >= 1400
-    localtime_s(&local_time, &t);
-#else
-    localtime_r(&t, &local_time);
-#endif
-    struct tm* tm_time = &local_time;
-    stream_ << std::setfill('0')
-            << std::setw(2) << 1 + tm_time->tm_mon
-            << std::setw(2) << tm_time->tm_mday
-            << '/'
-            << std::setw(2) << tm_time->tm_hour
-            << std::setw(2) << tm_time->tm_min
-            << std::setw(2) << tm_time->tm_sec
-            << ':';
-  }
-  if (log_tickcount)
-    stream_ << TickCount() << ':';
-  if (severity_ >= 0)
-    stream_ << log_severity_names[severity_];
-  else
-    stream_ << "VERBOSE" << -severity_;
-
-  stream_ << ":" << file << "(" << line << ")] ";
-
-  message_start_ = stream_.tellp();
 }
 
 LogMessage::~LogMessage() {
@@ -686,6 +644,50 @@ LogMessage::~LogMessage() {
       DisplayDebugMessageInDialog(stream_.str());
     }
   }
+}
+
+// writes the common header info to the stream
+void LogMessage::Init(const char* file, int line) {
+  base::StringPiece filename(file);
+  size_t last_slash_pos = filename.find_last_of("\\/");
+  if (last_slash_pos != base::StringPiece::npos)
+    filename.remove_prefix(last_slash_pos + 1);
+
+  // TODO(darin): It might be nice if the columns were fixed width.
+
+  stream_ <<  '[';
+  if (log_process_id)
+    stream_ << CurrentProcessId() << ':';
+  if (log_thread_id)
+    stream_ << CurrentThreadId() << ':';
+  if (log_timestamp) {
+    time_t t = time(NULL);
+    struct tm local_time = {0};
+#if _MSC_VER >= 1400
+    localtime_s(&local_time, &t);
+#else
+    localtime_r(&t, &local_time);
+#endif
+    struct tm* tm_time = &local_time;
+    stream_ << std::setfill('0')
+            << std::setw(2) << 1 + tm_time->tm_mon
+            << std::setw(2) << tm_time->tm_mday
+            << '/'
+            << std::setw(2) << tm_time->tm_hour
+            << std::setw(2) << tm_time->tm_min
+            << std::setw(2) << tm_time->tm_sec
+            << ':';
+  }
+  if (log_tickcount)
+    stream_ << TickCount() << ':';
+  if (severity_ >= 0)
+    stream_ << log_severity_names[severity_];
+  else
+    stream_ << "VERBOSE" << -severity_;
+
+  stream_ << ":" << filename << "(" << line << ")] ";
+
+  message_start_ = stream_.tellp();
 }
 
 #if defined(OS_WIN)

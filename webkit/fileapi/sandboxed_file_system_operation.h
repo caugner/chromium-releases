@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,14 +21,11 @@ class SandboxedFileSystemContext;
 //    via |file_system_context|.
 class SandboxedFileSystemOperation : public FileSystemOperation {
  public:
-  // This class doesn't hold a reference or ownership of |file_system_context|.
-  // It is the caller's responsibility to keep the pointer alive *until*
-  // it calls any of the operation methods.  The |file_system_context| won't be
-  // used in the callback path and can be deleted after the operation is
-  // made (e.g. after one of CreateFile, CreateDirectory, Copy, etc is called).
-  SandboxedFileSystemOperation(FileSystemCallbackDispatcher* dispatcher,
-                               scoped_refptr<base::MessageLoopProxy> proxy,
-                               SandboxedFileSystemContext* file_system_context);
+  SandboxedFileSystemOperation(
+      FileSystemCallbackDispatcher* dispatcher,
+      scoped_refptr<base::MessageLoopProxy> proxy,
+      scoped_refptr<SandboxedFileSystemContext> file_system_context);
+  virtual ~SandboxedFileSystemOperation();
 
   void OpenFileSystem(const GURL& origin_url,
                       fileapi::FileSystemType type,
@@ -50,7 +47,7 @@ class SandboxedFileSystemOperation : public FileSystemOperation {
   virtual void ReadDirectory(const FilePath& path);
   virtual void Remove(const FilePath& path, bool recursive);
   virtual void Write(
-      scoped_refptr<URLRequestContext> url_request_context,
+      scoped_refptr<net::URLRequestContext> url_request_context,
       const FilePath& path, const GURL& blob_url, int64 offset);
   virtual void Truncate(const FilePath& path, int64 length);
   virtual void TouchFile(const FilePath& path,
@@ -71,6 +68,8 @@ class SandboxedFileSystemOperation : public FileSystemOperation {
   // Returns true if the given |path| is a valid FileSystem path.
   // Otherwise it calls dispatcher's DidFail method with
   // PLATFORM_FILE_ERROR_SECURITY and returns false.
+  // (Note: this doesn't delete this when it calls DidFail and returns false;
+  // it's the caller's responsibility.)
   bool VerifyFileSystemPathForRead(const FilePath& path);
 
   // Checks the validity of a given |path| for writing.
@@ -85,12 +84,13 @@ class SandboxedFileSystemOperation : public FileSystemOperation {
   // If |create| flag is true this also checks if the |path| contains
   // any restricted names and chars. If it does, the call fires dispatcher's
   // DidFail with PLATFORM_FILE_ERROR_SECURITY and returns false.
+  // (Note: this doesn't delete this when it calls DidFail and returns false;
+  // it's the caller's responsibility.)
   bool VerifyFileSystemPathForWrite(const FilePath& path,
                                     bool create,
                                     int64 growth);
 
-  // Not owned.  See the comment at the constructor.
-  SandboxedFileSystemContext* file_system_context_;
+  scoped_refptr<SandboxedFileSystemContext> file_system_context_;
 
   base::ScopedCallbackFactory<SandboxedFileSystemOperation> callback_factory_;
 

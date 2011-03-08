@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -11,35 +11,31 @@
 #endif
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/file_util.h"
 #include "base/i18n/rtl.h"
 #include "base/i18n/time_formatting.h"
+#include "base/lazy_instance.h"
 #include "base/path_service.h"
-#include "base/singleton.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/history/download_create_info.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
@@ -55,29 +51,30 @@
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "app/os_exchange_data.h"
+#include "ui/base/dragdrop/os_exchange_data.h"
 #include "views/drag_utils.h"
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
 #if defined(TOOLKIT_VIEWS)
-#include "app/drag_drop_types.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
 #include "views/widget/widget_gtk.h"
 #elif defined(TOOLKIT_GTK)
-#include "chrome/browser/gtk/custom_drag.h"
+#include "chrome/browser/ui/gtk/custom_drag.h"
 #endif  // defined(TOOLKIT_GTK)
 #endif  // defined(TOOLKIT_USES_GTK)
 
 #if defined(OS_WIN)
-#include "app/os_exchange_data_provider_win.h"
-#include "app/win_util.h"
-#include "app/win/drag_source.h"
+#include "app/win/win_util.h"
 #include "base/win/scoped_comptr.h"
-#include "base/win_util.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "ui/base/dragdrop/drag_source.h"
+#include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #endif
 
 namespace download_util {
@@ -92,6 +89,39 @@ static const int kCompleteAnimationCycles = 5;
 // extension, where 1 <= nnn <= kMaxUniqueFiles.
 // Also used by code that cleans up said files.
 static const int kMaxUniqueFiles = 100;
+
+namespace {
+
+#if defined(OS_WIN)
+// Returns whether the specified extension is automatically integrated into the
+// windows shell.
+bool IsShellIntegratedExtension(const string16& extension) {
+  string16 extension_lower = StringToLowerASCII(extension);
+
+  static const wchar_t* const integrated_extensions[] = {
+    // See <http://msdn.microsoft.com/en-us/library/ms811694.aspx>.
+    L"local",
+    // Right-clicking on shortcuts can be magical.
+    L"lnk",
+  };
+
+  for (int i = 0; i < arraysize(integrated_extensions); ++i) {
+    if (extension_lower == integrated_extensions[i])
+      return true;
+  }
+
+  // See <http://www.juniper.net/security/auto/vulnerabilities/vuln2612.html>.
+  // That vulnerability report is not exactly on point, but files become magical
+  // if their end in a CLSID.  Here we block extensions that look like CLSIDs.
+  if (extension_lower.size() > 0 && extension_lower.at(0) == L'{' &&
+      extension_lower.at(extension_lower.length() - 1) == L'}')
+    return true;
+
+  return false;
+}
+#endif  // OS_WIN
+
+}  // namespace
 
 // Download temporary file creation --------------------------------------------
 
@@ -109,12 +139,15 @@ class DefaultDownloadDirectory {
       }
     }
   }
-  friend struct DefaultSingletonTraits<DefaultDownloadDirectory>;
+  friend struct base::DefaultLazyInstanceTraits<DefaultDownloadDirectory>;
   FilePath path_;
 };
 
+static base::LazyInstance<DefaultDownloadDirectory>
+    g_default_download_directory(base::LINKER_INITIALIZED);
+
 const FilePath& GetDefaultDownloadDirectory() {
-  return Singleton<DefaultDownloadDirectory>::get()->path();
+  return g_default_download_directory.Get().path();
 }
 
 bool CreateTemporaryFileForDownload(FilePath* temp_file) {
@@ -155,7 +188,7 @@ void GenerateExtension(const FilePath& file_name,
       FILE_PATH_LITERAL("download");
 
   // Rename shell-integrated extensions.
-  if (win_util::IsShellIntegratedExtension(extension))
+  if (IsShellIntegratedExtension(extension))
     extension.assign(default_extension);
 #endif
 
@@ -184,12 +217,14 @@ void GenerateFileName(const GURL& url,
                       const std::string& referrer_charset,
                       const std::string& mime_type,
                       FilePath* generated_name) {
-  std::wstring default_name =
-      l10n_util::GetString(IDS_DEFAULT_DOWNLOAD_FILENAME);
 #if defined(OS_WIN)
-  FilePath default_file_path(default_name);
+  FilePath default_file_path(
+      l10n_util::GetStringUTF16(IDS_DEFAULT_DOWNLOAD_FILENAME));
 #elif defined(OS_POSIX)
-  FilePath default_file_path(base::SysWideToNativeMB(default_name));
+  std::string default_file =
+      l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME);
+  FilePath default_file_path(
+      base::SysWideToNativeMB(base::SysUTF8ToWide(default_file)));
 #endif
 
   *generated_name = net::GetSuggestedFilename(GURL(url),
@@ -212,7 +247,7 @@ void GenerateSafeFileName(const std::string& mime_type, FilePath* file_name) {
   // Prepend "_" to the file name if it's a reserved name
   FilePath::StringType leaf_name = file_name->BaseName().value();
   DCHECK(!leaf_name.empty());
-  if (win_util::IsReservedName(leaf_name)) {
+  if (app::win::IsReservedName(leaf_name)) {
     leaf_name = FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
     *file_name = file_name->DirName();
     if (file_name->value() == FilePath::kCurrentDirectory) {
@@ -230,7 +265,7 @@ void OpenChromeExtension(Profile* profile,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(download_item.is_extension_install());
 
-  ExtensionsService* service = profile->GetExtensionsService();
+  ExtensionService* service = profile->GetExtensionService();
   CHECK(service);
   NotificationService* nservice = NotificationService::current();
   GURL nonconst_download_url = download_item.url();
@@ -433,11 +468,11 @@ void DragDownload(const DownloadItem* download,
   DCHECK(download);
 
   // Set up our OLE machinery
-  OSExchangeData data;
+  ui::OSExchangeData data;
 
   if (icon) {
     drag_utils::CreateDragImageForFile(
-        download->GetFileNameToReportUser().value(), icon, &data);
+        download->GetFileNameToReportUser(), icon, &data);
   }
 
   const FilePath full_path = download->full_path();
@@ -454,12 +489,12 @@ void DragDownload(const DownloadItem* download,
   }
 
 #if defined(OS_WIN)
-  scoped_refptr<app::win::DragSource> drag_source(new app::win::DragSource);
+  scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
 
   // Run the drag and drop loop
   DWORD effects;
-  DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source.get(),
-             DROPEFFECT_COPY | DROPEFFECT_LINK, &effects);
+  DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
+             drag_source.get(), DROPEFFECT_COPY | DROPEFFECT_LINK, &effects);
 #elif defined(TOOLKIT_USES_GTK)
   GtkWidget* root = gtk_widget_get_toplevel(view);
   if (!root)
@@ -468,7 +503,8 @@ void DragDownload(const DownloadItem* download,
   if (!widget)
     return;
 
-  widget->DoDrag(data, DragDropTypes::DRAG_COPY | DragDropTypes::DRAG_LINK);
+  widget->DoDrag(data,
+                 ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK);
 #endif  // OS_WIN
 }
 #elif defined(USE_X11)
@@ -487,7 +523,7 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   file_value->SetString("since_string",
       TimeFormat::RelativeDate(download->start_time(), NULL));
   file_value->SetString("date_string",
-      WideToUTF16Hack(base::TimeFormatShortDate(download->start_time())));
+      base::TimeFormatShortDate(download->start_time()));
   file_value->SetInteger("id", id);
   file_value->SetString("file_path",
       WideToUTF16Hack(download->GetTargetFilePath().ToWStringHack()));
@@ -509,7 +545,7 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
     }
 
     file_value->SetString("progress_status_text",
-       WideToUTF16Hack(GetProgressStatusText(download)));
+       GetProgressStatusText(download));
 
     file_value->SetInteger("percent",
         static_cast<int>(download->PercentComplete()));
@@ -531,13 +567,12 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   return file_value;
 }
 
-std::wstring GetProgressStatusText(DownloadItem* download) {
+string16 GetProgressStatusText(DownloadItem* download) {
   int64 total = download->total_bytes();
   int64 size = download->received_bytes();
   DataUnits amount_units = GetByteDisplayUnits(size);
-  std::wstring received_size = UTF16ToWideHack(FormatBytes(size, amount_units,
-                                                           true));
-  std::wstring amount = received_size;
+  string16 received_size = FormatBytes(size, amount_units, true);
+  string16 amount = received_size;
 
   // Adjust both strings for the locale direction since we don't yet know which
   // string we'll end up using for constructing the final progress string.
@@ -545,21 +580,19 @@ std::wstring GetProgressStatusText(DownloadItem* download) {
 
   if (total) {
     amount_units = GetByteDisplayUnits(total);
-    std::wstring total_text =
-        UTF16ToWideHack(FormatBytes(total, amount_units, true));
+    string16 total_text = FormatBytes(total, amount_units, true);
     base::i18n::AdjustStringForLocaleDirection(&total_text);
 
     base::i18n::AdjustStringForLocaleDirection(&received_size);
-    amount = l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_SIZE,
-                                   received_size,
-                                   total_text);
+    amount = l10n_util::GetStringFUTF16(IDS_DOWNLOAD_TAB_PROGRESS_SIZE,
+                                        received_size,
+                                        total_text);
   } else {
     amount.assign(received_size);
   }
   int64 current_speed = download->CurrentSpeed();
   amount_units = GetByteDisplayUnits(current_speed);
-  std::wstring speed_text = UTF16ToWideHack(FormatSpeed(current_speed,
-                                                        amount_units, true));
+  string16 speed_text = FormatSpeed(current_speed, amount_units, true);
   base::i18n::AdjustStringForLocaleDirection(&speed_text);
 
   base::TimeDelta remaining;
@@ -571,11 +604,11 @@ std::wstring GetProgressStatusText(DownloadItem* download) {
 
   if (time_remaining.empty()) {
     base::i18n::AdjustStringForLocaleDirection(&amount);
-    return l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_STATUS_TIME_UNKNOWN,
-                                 speed_text, amount);
+    return l10n_util::GetStringFUTF16(
+        IDS_DOWNLOAD_TAB_PROGRESS_STATUS_TIME_UNKNOWN, speed_text, amount);
   }
-  return l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_STATUS, speed_text,
-                               amount, UTF16ToWideHack(time_remaining));
+  return l10n_util::GetStringFUTF16(IDS_DOWNLOAD_TAB_PROGRESS_STATUS,
+                                    speed_text, amount, time_remaining);
 }
 
 #if !defined(OS_MACOSX)
@@ -604,7 +637,11 @@ void UpdateAppIconDownloadProgress(int download_count,
   // Iterate through all the browser windows, and draw the progress bar.
   for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
       browser_iterator != BrowserList::end(); browser_iterator++) {
-    HWND frame = (*browser_iterator)->window()->GetNativeHandle();
+    Browser* browser = *browser_iterator;
+    BrowserWindow* window = browser->window();
+    if (!window)
+      continue;
+    HWND frame = window->GetNativeHandle();
     if (download_count == 0 || progress == 1.0f)
       taskbar->SetProgressState(frame, TBPF_NOPROGRESS);
     else if (!progress_known)
@@ -652,7 +689,8 @@ void DownloadUrl(
     URLRequestContextGetter* request_context_getter) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  URLRequestContext* context = request_context_getter->GetURLRequestContext();
+  net::URLRequestContext* context =
+      request_context_getter->GetURLRequestContext();
   context->set_referrer_charset(referrer_charset);
 
   rdh->BeginDownload(url,
@@ -699,7 +737,7 @@ void DeleteUniqueDownloadFile(const FilePath& path, int index) {
   file_util::Delete(new_path, false);
 }
 
-}
+}  // namespace
 
 void EraseUniqueDownloadFiles(const FilePath& path) {
   FilePath cr_path = GetCrDownloadPath(path);
@@ -721,18 +759,22 @@ FilePath GetCrDownloadPath(const FilePath& suggested_path) {
 
 // TODO(erikkay,phajdan.jr): This is apparently not being exercised in tests.
 bool IsDangerous(DownloadCreateInfo* info, Profile* profile) {
-  // Downloads can be marked as dangerous for two reasons:
-  // a) They have a dangerous-looking filename
-  // b) They are an extension that is not from the gallery
-  if (IsExecutableFile(info->suggested_path.BaseName())) {
+  DownloadDangerLevel danger_level = GetFileDangerLevel(
+      info->suggested_path.BaseName());
+
+  if (danger_level == Dangerous) {
+    return true;
+  } else if (danger_level == AllowOnUserGesture && !info->has_user_gesture) {
     return true;
   } else if (info->is_extension_install) {
-    ExtensionsService* service = profile->GetExtensionsService();
+    ExtensionService* service = profile->GetExtensionService();
     if (!service ||
         !service->IsDownloadFromGallery(info->url, info->referrer_url)) {
+      // Extensions that are not from the gallery are considered dangerous.
       return true;
     }
   }
+
   return false;
 }
 

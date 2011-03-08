@@ -4,7 +4,6 @@
 
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/platform_thread.h"
 #include "base/scoped_ptr.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/install_util.h"
@@ -27,16 +26,16 @@ class MiniInstallTest : public testing::Test {
 
   static void CleanTheSystem() {
     const CommandLine* cmd = CommandLine::ForCurrentProcess();
-    if (cmd->HasSwitch(installer_util::switches::kChromeFrame)) {
+    if (cmd->HasSwitch(installer::switches::kChromeFrame)) {
       ChromeMiniInstaller systeminstall(kSystemInstall,
-          cmd->HasSwitch(installer_util::switches::kChromeFrame));
+          cmd->HasSwitch(installer::switches::kChromeFrame));
       systeminstall.UnInstall();
     } else {
       ChromeMiniInstaller userinstall(kUserInstall,
-          cmd->HasSwitch(installer_util::switches::kChromeFrame));
+          cmd->HasSwitch(installer::switches::kChromeFrame));
       userinstall.UnInstall();
       ChromeMiniInstaller systeminstall(kSystemInstall,
-          cmd->HasSwitch(installer_util::switches::kChromeFrame));
+          cmd->HasSwitch(installer::switches::kChromeFrame));
       systeminstall.UnInstall();
     }
   }
@@ -48,7 +47,7 @@ class MiniInstallTest : public testing::Test {
         cmd->GetSwitchValueNative(switches::kInstallerTestBuild);
     if (build.empty())
       build = L"latest";
-    chrome_frame_ = cmd->HasSwitch(installer_util::switches::kChromeFrame);
+    chrome_frame_ = cmd->HasSwitch(installer::switches::kChromeFrame);
 
     CleanTheSystem();
     // Separate the test output from cleaning output

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/diagnostics/diagnostics_model.h"
 #include "chrome/common/chrome_paths.h"
+#include "ui/base/ui_base_paths.h"
 
 namespace {
 // This is a minimalistic interface to wrap the platform console.  This will be
@@ -204,8 +205,13 @@ class TestWriter {
  public:
   // The |console| must be valid and properly initialized. This
   // class does not own it.
-  explicit TestWriter(SimpleConsole* console) : console_(console) {
+  explicit TestWriter(SimpleConsole* console)
+      : console_(console),
+        failures_(0) {
   }
+
+  // How many tests reported failure.
+  int failures() { return failures_; }
 
   // Write an informational line of text in white over black.
   bool WriteInfoText(const std::wstring& txt) {
@@ -224,6 +230,7 @@ class TestWriter {
     } else {
       console_->SetColor(SimpleConsole::RED);
       console_->Write(L"[FAIL] ");
+      failures_++;
     }
     WriteInfoText(name + L"\n");
     std::wstring second_line(L"   ");
@@ -234,6 +241,9 @@ class TestWriter {
  private:
 
   SimpleConsole* console_;
+
+  // Keeps track of how many tests reported failure.
+  int failures_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWriter);
 };
@@ -290,7 +300,12 @@ class TestController : public DiagnosticsModel::Observer {
   }
 
   virtual void OnDoneAll(DiagnosticsModel* model) {
-    writer_->WriteInfoText(L"DONE\n\n");
+    if (writer_->failures() > 0) {
+      writer_->WriteInfoText(StringPrintf(L"DONE. %d failure(s)\n\n",
+                             writer_->failures()));
+    } else {
+      writer_->WriteInfoText(L"DONE\n\n");
+    }
   }
 
  private:
@@ -315,8 +330,8 @@ class TestController : public DiagnosticsModel::Observer {
 // -(all)   RegisterInvalidParamHandler()
 // -(all)   base::AtExitManager::AtExitManager()
 // -(macOS) base::ScopedNSAutoreleasePool
-// -(posix) Singleton<base::GlobalDescriptors>::Set(kPrimaryIPCChannel)
-// -(linux) Singleton<base::GlobalDescriptors>::Set(kCrashDumpSignal)
+// -(posix) base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel)
+// -(linux) base::GlobalDescriptors::GetInstance()->Set(kCrashDumpSignal)
 // -(posix) setlocale(LC_ALL,..)
 // -(all)   CommandLine::Init();
 
@@ -329,6 +344,7 @@ int DiagnosticsMain(const CommandLine& command_line) {
   // We need to have the path providers registered. They both
   // return void so there is no early error signal that we can use.
   app::RegisterPathProvider();
+  ui::RegisterPathProvider();
   chrome::RegisterPathProvider();
 
   TestWriter writer(console);

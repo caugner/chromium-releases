@@ -10,10 +10,10 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
+#include "base/threading/non_thread_safe.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
@@ -29,7 +29,7 @@ class HttpRequestHeaders;
 struct HttpRequestInfo;
 
 class HttpAuthController : public base::RefCounted<HttpAuthController>,
-                           public NonThreadSafe {
+                           public base::NonThreadSafe {
  public:
   // The arguments are self explanatory except possibly for |auth_url|, which
   // should be both the auth target and auth path in a single url argument.
@@ -63,18 +63,14 @@ class HttpAuthController : public base::RefCounted<HttpAuthController>,
   virtual void ResetAuth(const string16& username,
                          const string16& password);
 
-  virtual bool HaveAuthHandler() const {
-    return handler_.get() != NULL;
-  }
+  virtual bool HaveAuthHandler() const;
 
-  virtual bool HaveAuth() const {
-    return handler_.get() && !identity_.invalid;
-  }
+  virtual bool HaveAuth() const;
 
   virtual scoped_refptr<AuthChallengeInfo> auth_info();
 
-  virtual bool IsAuthSchemeDisabled(const std::string& scheme) const;
-  virtual void DisableAuthScheme(const std::string& scheme);
+  virtual bool IsAuthSchemeDisabled(HttpAuth::Scheme scheme) const;
+  virtual void DisableAuthScheme(HttpAuth::Scheme scheme);
 
  private:
   // So that we can mock this object.
@@ -150,7 +146,7 @@ class HttpAuthController : public base::RefCounted<HttpAuthController>,
   HttpAuthCache* const http_auth_cache_;
   HttpAuthHandlerFactory* const http_auth_handler_factory_;
 
-  std::set<std::string> disabled_schemes_;
+  std::set<HttpAuth::Scheme> disabled_schemes_;
 
   CompletionCallbackImpl<HttpAuthController> io_callback_;
   CompletionCallback* user_callback_;

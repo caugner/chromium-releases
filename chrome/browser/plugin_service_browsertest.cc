@@ -11,7 +11,7 @@
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 
 namespace {
 
@@ -26,7 +26,7 @@ class MockPluginProcessHostClient : public PluginProcessHost::Client {
 
   MOCK_METHOD0(ID, int());
   MOCK_METHOD0(OffTheRecord, bool());
-  MOCK_METHOD1(SetPluginInfo, void(const WebPluginInfo& info));
+  MOCK_METHOD1(SetPluginInfo, void(const webkit::npapi::WebPluginInfo& info));
   MOCK_METHOD1(OnChannelOpened, void(const IPC::ChannelHandle& handle));
   MOCK_METHOD0(OnError, void());
 
@@ -73,16 +73,16 @@ IN_PROC_BROWSER_TEST_F(PluginServiceTest, StartAndFindPluginProcess) {
   // calls to FindPluginProcess should return non-zero values.
   PluginProcessHost* default_plugin_process_host =
       plugin_service_->FindOrStartPluginProcess(
-          FilePath(kDefaultPluginLibraryName));
+          FilePath(webkit::npapi::kDefaultPluginLibraryName));
 
-  EXPECT_EQ(default_plugin_process_host,
-      plugin_service_->FindPluginProcess(FilePath(kDefaultPluginLibraryName)));
+  EXPECT_EQ(default_plugin_process_host, plugin_service_->FindPluginProcess(
+      FilePath(webkit::npapi::kDefaultPluginLibraryName)));
 }
 
 IN_PROC_BROWSER_TEST_F(PluginServiceTest, OpenChannelToPlugin) {
   MockPluginProcessHostClient mock_client;
   EXPECT_CALL(mock_client, SetPluginInfo(testing::_)).Times(1);
-  plugin_service_->OpenChannelToPlugin(GURL("http://google.com/"),
+  plugin_service_->OpenChannelToPlugin(0, 0, GURL("http://google.com/"),
                                        "audio/mp3",
                                        &mock_client);
   message_loop_.RunAllPending();
@@ -95,9 +95,9 @@ IN_PROC_BROWSER_TEST_F(PluginServiceTest, GetFirstAllowedPluginInfo) {
   // We should always get a positive response no matter whether we really have
   // a plugin to support that particular mime type because the Default plugin
   // supports all mime types.
-  WebPluginInfo plugin_info;
+  webkit::npapi::WebPluginInfo plugin_info;
   std::string plugin_mime_type;
-  plugin_service_->GetFirstAllowedPluginInfo(GURL("http://google.com/"),
+  plugin_service_->GetFirstAllowedPluginInfo(0, 0, GURL("http://google.com/"),
                                              "application/pdf",
                                              &plugin_info,
                                              &plugin_mime_type);

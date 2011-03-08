@@ -8,10 +8,10 @@
 #include <uxtheme.h>
 #include <Vssym32.h>
 
-#include "app/l10n_util_win.h"
 #include "base/logging.h"
-#include "base/win_util.h"
+#include "base/win/win_util.h"
 #include "gfx/native_theme_win.h"
+#include "ui/base/l10n/l10n_util_win.h"
 
 using gfx::NativeTheme;
 
@@ -26,7 +26,7 @@ MenuConfig* MenuConfig::Create() {
       COLOR_MENUTEXT);
 
   NONCLIENTMETRICS metrics;
-  win_util::GetNonClientMetrics(&metrics);
+  base::win::GetNonClientMetrics(&metrics);
   l10n_util::AdjustUIFont(&(metrics.lfMenuFont));
   HFONT font = CreateFontIndirect(&metrics.lfMenuFont);
   DLOG_ASSERT(font);

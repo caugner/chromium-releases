@@ -13,8 +13,7 @@
 #include "chrome/test/ui_test_utils.h"
 
 class ServiceProcessControlBrowserTest
-    : public InProcessBrowserTest,
-      public ServiceProcessControl::MessageHandler {
+    : public InProcessBrowserTest {
  public:
   ServiceProcessControlBrowserTest()
       : service_process_handle_(base::kNullProcessHandle) {
@@ -23,13 +22,13 @@ class ServiceProcessControlBrowserTest
     base::CloseProcessHandle(service_process_handle_);
     service_process_handle_ = base::kNullProcessHandle;
     // Delete all instances of ServiceProcessControl.
-    ServiceProcessControlManager::instance()->Shutdown();
+    ServiceProcessControlManager::GetInstance()->Shutdown();
   }
 
  protected:
   void LaunchServiceProcessControl() {
     ServiceProcessControl* process =
-        ServiceProcessControlManager::instance()->GetProcessControl(
+        ServiceProcessControlManager::GetInstance()->GetProcessControl(
             browser()->profile());
     process_ = process;
 
@@ -46,16 +45,22 @@ class ServiceProcessControlBrowserTest
     ui_test_utils::RunMessageLoop();
   }
 
-  void SayHelloAndWait() {
-    // Send a hello message to the service process and wait for a reply.
-    process()->SendHello();
+  // Send a remoting host status request and wait reply from the service.
+  void SendRequestAndWait() {
+    process()->GetCloudPrintProxyStatus(NewCallback(
+        this, &ServiceProcessControlBrowserTest::CloudPrintStatusCallback));
     ui_test_utils::RunMessageLoop();
+  }
+
+  void CloudPrintStatusCallback(
+      bool enabled, std::string email) {
+    MessageLoop::current()->Quit();
   }
 
   void Disconnect() {
     // This will delete all instances of ServiceProcessControl and close the IPC
     // connections.
-    ServiceProcessControlManager::instance()->Shutdown();
+    ServiceProcessControlManager::GetInstance()->Shutdown();
     process_ = NULL;
   }
 
@@ -72,7 +77,6 @@ class ServiceProcessControlBrowserTest
         service_pid,
         base::kProcessAccessWaitForTermination,
         &service_process_handle_));
-    process()->SetMessageHandler(this);
     // Quit the current message. Post a QuitTask instead of just calling Quit()
     // because this can get invoked in the context of a Launch() call and we
     // may not be in Run() yet.
@@ -85,11 +89,6 @@ class ServiceProcessControlBrowserTest
     MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
   }
 
-  // ServiceProcessControl::MessageHandler implementations.
-  virtual void OnGoodDay() {
-    MessageLoop::current()->Quit();
-  }
-
   ServiceProcessControl* process() { return process_; }
 
  private:
@@ -100,12 +99,14 @@ class ServiceProcessControlBrowserTest
 #if defined(OS_WIN)
 // They way that the IPC is implemented only works on windows. This has to
 // change when we implement a different scheme for IPC.
-IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchAndIPC) {
+// Times out flakily, http://crbug.com/70076.
+IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest,
+                       DISABLED_LaunchAndIPC) {
   LaunchServiceProcessControl();
 
   // Make sure we are connected to the service process.
   EXPECT_TRUE(process()->is_connected());
-  SayHelloAndWait();
+  SendRequestAndWait();
 
   // And then shutdown the service process.
   EXPECT_TRUE(process()->Shutdown());
@@ -119,12 +120,12 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchTwice) {
 
   // Make sure we are connected to the service process.
   EXPECT_TRUE(process()->is_connected());
-  SayHelloAndWait();
+  SendRequestAndWait();
 
   // Launch the service process again.
   LaunchServiceProcessControl();
   EXPECT_TRUE(process()->is_connected());
-  SayHelloAndWait();
+  SendRequestAndWait();
 
   // And then shutdown the service process.
   EXPECT_TRUE(process()->Shutdown());
@@ -140,7 +141,7 @@ static void DecrementUntilZero(int* count) {
 // get invoked.
 IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MultipleLaunchTasks) {
   ServiceProcessControl* process =
-      ServiceProcessControlManager::instance()->GetProcessControl(
+      ServiceProcessControlManager::GetInstance()->GetProcessControl(
           browser()->profile());
   int launch_count = 5;
   for (int i = 0; i < launch_count; i++) {
@@ -159,7 +160,7 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MultipleLaunchTasks) {
 // Make sure using the same task for success and failure tasks works.
 IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, SameLaunchTask) {
   ServiceProcessControl* process =
-      ServiceProcessControlManager::instance()->GetProcessControl(
+      ServiceProcessControlManager::GetInstance()->GetProcessControl(
           browser()->profile());
   int launch_count = 5;
   for (int i = 0; i < launch_count; i++) {

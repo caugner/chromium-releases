@@ -16,11 +16,12 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/version.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/util_constants.h"
-#include "chrome/installer/util/version.h"
 
 class WorkItemList;
+class BrowserDistribution;
 
 namespace base {
 namespace win {
@@ -39,21 +40,27 @@ class InstallUtil {
   // Reads the uninstall command for Chromium from registry and returns it.
   // If system_install is true the command is read from HKLM, otherwise
   // from HKCU.
-  static std::wstring GetChromeUninstallCmd(bool system_install);
+  static std::wstring GetChromeUninstallCmd(bool system_install,
+                                            BrowserDistribution* dist);
+
   // Find the version of Chrome installed on the system by checking the
   // Google Update registry key. Returns the version or NULL if no version is
   // found.
   // system_install: if true, looks for version number under the HKLM root,
   //                 otherwise looks under the HKCU.
-  static installer::Version* GetChromeVersion(bool system_install);
+  static Version* GetChromeVersion(BrowserDistribution* dist,
+                                   bool system_install);
 
   // This function checks if the current OS is supported for Chromium.
   static bool IsOSSupported();
 
   // This function sets installer error information in registry so that Google
-  // Update can read it and display to the user.
+  // Update can read it and display to the user.  |state_key| should be
+  // obtained via the state_key method of an InstallerState instance created
+  // before the machine state is modified by the installer.
   static void WriteInstallerResult(bool system_install,
-                                   installer_util::InstallStatus status,
+                                   const std::wstring& state_key,
+                                   installer::InstallStatus status,
                                    int string_resource_id,
                                    const std::wstring* const launch_cmd);
 
@@ -62,32 +69,11 @@ class InstallUtil {
   // Program Files).
   static bool IsPerUserInstall(const wchar_t* const exe_path);
 
-  // Returns true if this is a Chrome Frame installation (as indicated by the
-  // presence of --chrome-frame on the command line) or if this is running
-  // inside of the Chrome Frame dll. Also returns true if a master.preferences
-  // file containing chrome_frame: true is specified on the command line.
-  static bool IsChromeFrameProcess();
-
   // Returns true if this is running setup process for Chrome SxS (as
   // indicated by the presence of --chrome-sxs on the command line) or if this
   // is running Chrome process from the Chrome SxS installation (as indicated
   // by either --chrome-sxs or the executable path).
   static bool IsChromeSxSProcess();
-
-  // Returns true if this setup process is running as an install managed by an
-  // MSI wrapper. There are three things that are checked:
-  // 1) the presence of --msi on the command line
-  // 2) the presence of "msi": true in the master preferences file
-  // 3) the presence of a DWORD value in the ClientState key called msi with
-  //    value 1
-  // NOTE: This method is NOT thread safe.
-  static bool IsMSIProcess(bool system_level);
-
-
-  // Sets the boolean MSI marker for this installation if set is true or clears
-  // it otherwise. The MSI marker is stored in the registry under the
-  // ClientState key.
-  static bool SetMSIMarker(bool system_level, bool set);
 
   // Adds all DLLs in install_path whose names are given by dll_names to a
   // work item list containing registration or unregistration actions.
@@ -118,11 +104,11 @@ class InstallUtil {
   static bool DeleteRegistryValue(HKEY reg_root, const std::wstring& key_path,
                                   const std::wstring& value_name);
 
-  // Returns a static preference object that has been initialized with the
-  // CommandLine object for the current process.
-  // NOTE: Must not be called before CommandLine::Init() is called!
-  static const installer_util::MasterPreferences&
-      GetMasterPreferencesForCurrentProcess();
+  // Returns zero on install success, or an InstallStatus value otherwise.
+  static int GetInstallReturnCode(installer::InstallStatus install_status);
+
+  // Returns a string in the form YYYYMMDD of the current date.
+  static std::wstring GetCurrentDate();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InstallUtil);

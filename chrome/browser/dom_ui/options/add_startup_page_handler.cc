@@ -4,17 +4,17 @@
 
 #include "chrome/browser/dom_ui/options/add_startup_page_handler.h"
 
-#include "app/l10n_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/possible_url_model.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
+#include "ui/base/l10n/l10n_util.h"
 
 AddStartupPageHandler::AddStartupPageHandler() {
 }
@@ -75,10 +75,9 @@ void AddStartupPageHandler::OnModelChanged() {
   ListValue pages;
   for (int i = 0; i < url_table_model_->RowCount(); ++i) {
     DictionaryValue* dict = new DictionaryValue();
-    dict->SetString("title", WideToUTF16Hack(url_table_model_->GetText(
-        i, IDS_ASI_PAGE_COLUMN)));
-    dict->SetString("displayURL", WideToUTF16Hack(url_table_model_->GetText(
-        i, IDS_ASI_URL_COLUMN)));
+    dict->SetString("title", url_table_model_->GetText(i, IDS_ASI_PAGE_COLUMN));
+    dict->SetString("displayURL",
+                    url_table_model_->GetText(i, IDS_ASI_URL_COLUMN));
     dict->SetString("url", url_table_model_->GetURL(i).spec());
     pages.Append(dict);
   }

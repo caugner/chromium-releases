@@ -4,20 +4,17 @@
 
 #include "chrome/browser/chromeos/status/clock_menu_button.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/status/status_area_host.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/common/pref_names.h"
 #include "gfx/canvas.h"
 #include "gfx/font.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace chromeos {
 
@@ -41,7 +38,7 @@ ClockMenuButton::ClockMenuButton(StatusAreaHost* host)
   set_use_menu_button_paint(true);
   SetFont(ResourceBundle::GetSharedInstance().GetFont(
       ResourceBundle::BaseFont).DeriveFont(kFontSizeDelta));
-  SetEnabledColor(0xB3FFFFFF); // White with 70% Alpha
+  SetEnabledColor(0xB3FFFFFF);  // White with 70% Alpha
   SetShowMultipleIconStates(false);
   set_alignment(TextButton::ALIGN_CENTER);
   UpdateTextAndSetNextTimer();
@@ -77,13 +74,13 @@ void ClockMenuButton::UpdateTextAndSetNextTimer() {
 
 void ClockMenuButton::UpdateText() {
   base::Time time(base::Time::Now());
-  SetText(base::TimeFormatTimeOfDay(time));
-  SetTooltipText(base::TimeFormatShortDate(time));
+  SetText(UTF16ToWide(base::TimeFormatTimeOfDay(time)));
+  SetTooltipText(UTF16ToWide(base::TimeFormatShortDate(time)));
   SchedulePaint();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ClockMenuButton, menus::MenuModel implementation:
+// ClockMenuButton, ui::MenuModel implementation:
 
 int ClockMenuButton::GetItemCount() const {
   // If options dialog is unavailable, don't count a separator and configure
@@ -91,16 +88,16 @@ int ClockMenuButton::GetItemCount() const {
   return host_->ShouldOpenButtonOptions(this) ? 3 : 1;
 }
 
-menus::MenuModel::ItemType ClockMenuButton::GetTypeAt(int index) const {
+ui::MenuModel::ItemType ClockMenuButton::GetTypeAt(int index) const {
   // There's a separator between the current date and the menu item to open
   // the options menu.
-  return index == 1 ? menus::MenuModel::TYPE_SEPARATOR:
-                      menus::MenuModel::TYPE_COMMAND;
+  return index == 1 ? ui::MenuModel::TYPE_SEPARATOR:
+                      ui::MenuModel::TYPE_COMMAND;
 }
 
 string16 ClockMenuButton::GetLabelAt(int index) const {
   if (index == 0)
-    return WideToUTF16(base::TimeFormatFriendlyDate(base::Time::Now()));
+    return base::TimeFormatFriendlyDate(base::Time::Now());
   return l10n_util::GetStringUTF16(IDS_STATUSBAR_CLOCK_OPEN_OPTIONS_DIALOG);
 }
 

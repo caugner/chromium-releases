@@ -9,9 +9,11 @@
 #include <windows.h>
 #include <deque>
 #include <queue>
-#include "base/lock.h"
-#include "base/non_thread_safe.h"
+
+#include "base/synchronization/lock.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/time.h"
+
 class Task;
 namespace tracked_objects {
   class Location;
@@ -21,7 +23,7 @@ namespace tracked_objects {
 // in cases where we do not control the thread lifetime and message retrieval
 // and dispatching. It uses a HWND to ::PostMessage to it as a signal that
 // the task queue is not empty.
-class TaskMarshallerThroughMessageQueue : public NonThreadSafe {
+class TaskMarshallerThroughMessageQueue : public base::NonThreadSafe {
  public:
   TaskMarshallerThroughMessageQueue();
   ~TaskMarshallerThroughMessageQueue();
@@ -57,7 +59,7 @@ class TaskMarshallerThroughMessageQueue : public NonThreadSafe {
 
   std::priority_queue<DelayedTask> delayed_tasks_;
   std::queue<Task*> pending_tasks_;
-  Lock lock_;
+  base::Lock lock_;
   HWND wnd_;
   UINT msg_;
   int invoke_task_;

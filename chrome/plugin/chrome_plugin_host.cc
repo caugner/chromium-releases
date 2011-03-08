@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
 #include "webkit/appcache/appcache_interfaces.h"
-#include "webkit/glue/plugins/plugin_instance.h"
+#include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/resource_type.h"
 #include "webkit/glue/webkit_glue.h"
@@ -111,7 +111,7 @@ class PluginRequestHandlerProxy
     }
   }
 
-  virtual void OnCompletedRequest(const URLRequestStatus& status,
+  virtual void OnCompletedRequest(const net::URLRequestStatus& status,
                                   const std::string& security_info,
                                   const base::Time& completion_time) {
     completed_ = true;
@@ -415,8 +415,8 @@ CPBrowsingContext STDCALL CPB_GetBrowsingContextFromNPP(NPP npp) {
   if (!npp)
     return CPERR_INVALID_PARAMETER;
 
-  NPAPI::PluginInstance* instance =
-      static_cast<NPAPI::PluginInstance *>(npp->ndata);
+  webkit::npapi::PluginInstance* instance =
+      static_cast<webkit::npapi::PluginInstance *>(npp->ndata);
   WebPluginProxy* webplugin =
       static_cast<WebPluginProxy*>(instance->webplugin());
 

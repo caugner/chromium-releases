@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/offline/offline_load_page.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
 #include "base/string_piece.h"
@@ -14,8 +12,8 @@
 #include "base/values.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_thread.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -23,23 +21,18 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/jstemplate_builder.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
 // Maximum time to show a blank page.
 const int kMaxBlankPeriod = 3000;
-
-// This is a workaround for  crosbug.com/8285.
-// Chrome sometimes fails to load the page silently
-// when the load is requested right after network is
-// restored. This happens more often in HTTPS than HTTP.
-// This should be removed once the root cause is fixed.
-const int kSecureDelayMs = 1000;
-const int kDefaultDelayMs = 300;
 
 // A utility function to set the dictionary's value given by |resource_id|.
 void SetString(DictionaryValue* strings, const char* name, int resource_id) {
@@ -108,7 +101,7 @@ std::string OfflineLoadPage::GetHTMLContents() {
   Profile* profile = tab()->profile();
   DCHECK(profile);
   const Extension* extension = NULL;
-  ExtensionsService* extensions_service = profile->GetExtensionsService();
+  ExtensionService* extensions_service = profile->GetExtensionService();
   // Extension service does not exist in test.
   if (extensions_service)
     extension = extensions_service->GetExtensionByWebExtent(url());
@@ -184,17 +177,7 @@ void OfflineLoadPage::CommandReceived(const std::string& cmd) {
 
 void OfflineLoadPage::Proceed() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  int delay = url().SchemeIsSecure() ? kSecureDelayMs : kDefaultDelayMs;
-  if (in_test_)
-    delay = 0;
   proceeded_ = true;
-  BrowserThread::PostDelayedTask(
-      BrowserThread::UI, FROM_HERE,
-      method_factory_.NewRunnableMethod(&OfflineLoadPage::DoProceed),
-      delay);
-}
-
-void OfflineLoadPage::DoProceed() {
   delegate_->OnBlockingPageComplete(true);
   InterstitialPage::Proceed();
 }

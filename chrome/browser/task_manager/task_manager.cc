@@ -1,18 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/task_manager/task_manager.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/compiler_specific.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
@@ -20,18 +18,21 @@
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/task_manager/task_manager_resource_providers.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/result_codes.h"
 #include "chrome/common/url_constants.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "unicode/coll.h"
 
 #if defined(OS_MACOSX)
@@ -585,11 +586,11 @@ void TaskManagerModel::RemoveResourceProvider(
 }
 
 void TaskManagerModel::RegisterForJobDoneNotifications() {
-  g_url_request_job_tracker.AddObserver(this);
+  net::g_url_request_job_tracker.AddObserver(this);
 }
 
 void TaskManagerModel::UnregisterForJobDoneNotifications() {
-  g_url_request_job_tracker.RemoveObserver(this);
+  net::g_url_request_job_tracker.RemoveObserver(this);
 }
 
 void TaskManagerModel::AddResource(TaskManager::Resource* resource) {
@@ -627,7 +628,7 @@ void TaskManagerModel::AddResource(TaskManager::Resource* resource) {
         base::ProcessMetrics::CreateProcessMetrics(process);
 #else
         base::ProcessMetrics::CreateProcessMetrics(process,
-                                                   MachBroker::instance());
+                                                   MachBroker::GetInstance());
 #endif
 
     metrics_map_[process] = pm;
@@ -844,10 +845,17 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
     if (resource)
       break;
   }
+
   if (resource == NULL) {
-    // We may not have that resource anymore (example: close a tab while a
-    // a network resource is being retrieved), in which case we just ignore the
-    // notification.
+    // We can't match a resource to the notification.  That might mean the
+    // tab that started a download was closed, or the request may have had
+    // no originating resource associated with it in the first place.
+    // We attribute orphaned/unaccounted activity to the Browser process.
+    int browser_pid = base::GetCurrentProcId();
+    CHECK(param.origin_child_id != browser_pid);
+    param.origin_child_id = browser_pid;
+    param.render_process_host_child_id = param.routing_id = -1;
+    BytesRead(param);
     return;
   }
 
@@ -865,31 +873,37 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
 }
 
 
-// In order to retrieve the network usage, we register for URLRequestJob
+// In order to retrieve the network usage, we register for net::URLRequestJob
 // notifications. Every time we get notified some bytes were read we bump a
 // counter of read bytes for the associated resource. When the timer ticks,
 // we'll compute the actual network usage (see the Refresh method).
-void TaskManagerModel::OnJobAdded(URLRequestJob* job) {
+void TaskManagerModel::OnJobAdded(net::URLRequestJob* job) {
 }
 
-void TaskManagerModel::OnJobRemoved(URLRequestJob* job) {
+void TaskManagerModel::OnJobRemoved(net::URLRequestJob* job) {
 }
 
-void TaskManagerModel::OnJobDone(URLRequestJob* job,
-                                 const URLRequestStatus& status) {
+void TaskManagerModel::OnJobDone(net::URLRequestJob* job,
+                                 const net::URLRequestStatus& status) {
 }
 
-void TaskManagerModel::OnJobRedirect(URLRequestJob* job,
+void TaskManagerModel::OnJobRedirect(net::URLRequestJob* job,
                                      const GURL& location,
                                      int status_code) {
 }
 
-void TaskManagerModel::OnBytesRead(URLRequestJob* job, const char* buf,
+void TaskManagerModel::OnBytesRead(net::URLRequestJob* job, const char* buf,
                                    int byte_count) {
+  // Only net::URLRequestJob instances created by the ResourceDispatcherHost
+  // have a render view associated.  All other jobs will have -1 returned for
+  // the render process child and routing ids - the jobs may still match a
+  // resource based on their origin id, otherwise BytesRead() will attribute
+  // the activity to the Browser resource.
   int render_process_host_child_id = -1, routing_id = -1;
   ResourceDispatcherHost::RenderViewForRequest(job->request(),
                                                &render_process_host_child_id,
                                                &routing_id);
+
   // This happens in the IO thread, post it to the UI thread.
   int origin_child_id =
       chrome_browser_net::GetOriginProcessUniqueIDForRequest(job->request());
@@ -944,7 +958,7 @@ void TaskManager::KillProcess(int index) {
   base::ProcessHandle process = model_->GetResourceProcessHandle(index);
   DCHECK(process);
   if (process != base::GetCurrentProcessHandle())
-    base::KillProcess(process, base::PROCESS_END_KILLED_BY_USER, false);
+    base::KillProcess(process, ResultCodes::KILLED, false);
 }
 
 void TaskManager::ActivateProcess(int index) {

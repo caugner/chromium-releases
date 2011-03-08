@@ -9,11 +9,10 @@
 #include "base/message_loop.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,7 +23,13 @@ static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("popup_blocker");
 
 typedef InProcessBrowserTest PopupBlockerBrowserTest;
 
-IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, PopupBlockedPostBlank) {
+#if defined(OS_CHROMEOS)
+// Flakily crashes on ChromeOS: http://crbug.com/70192
+#define MAYBE_PopupBlockedPostBlank DISABLED_PopupBlockedPostBlank
+#else
+#define MAYBE_PopupBlockedPostBlank PopupBlockedPostBlank
+#endif
+IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, MAYBE_PopupBlockedPostBlank) {
   FilePath file_name(FILE_PATH_LITERAL("popup-blocked-to-post-blank.html"));
   FilePath test_dir(kTestDir);
   GURL url(ui_test_utils::GetTestUrl(test_dir, file_name));
@@ -41,4 +46,3 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, PopupBlockedPostBlank) {
 }
 
 }  // namespace
-

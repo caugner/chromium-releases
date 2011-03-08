@@ -9,6 +9,7 @@
 #pragma once
 
 #include <bitset>
+#include <list>
 #include <string>
 #include <vector>
 
@@ -57,11 +58,6 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   // Set this if you want commit to perform commit time rename. Will request
   // that the client renames all commited entries, prepending this string.
   void SetCommitTimeRename(string prepend);
-
-  // Control of get updates response. All updates set will only be returned
-  // once. This mock object doesn't simulate a changelist, it simulates server
-  // responses.
-  void ResetUpdates();
 
   // Generic versions of AddUpdate functions. Tests using these function should
   // compile for both the int64 and string id based versions of the server.
@@ -117,8 +113,13 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   void SetLastUpdateOriginatorFields(const string& client_id,
                                      const string& entry_id);
   void SetLastUpdatePosition(int64 position_in_parent);
-  void SetNewTimestamp(int64 ts);
-  void SetChangesRemaining(int64 timestamp);
+  void SetNewTimestamp(int ts);
+  void SetChangesRemaining(int64 count);
+
+  // Add a new batch of updates after the current one.  Allows multiple
+  // GetUpdates responses to be buffered up, since the syncer may
+  // issue multiple requests during a sync cycle.
+  void NextUpdateBatch();
 
   // For AUTHENTICATE responses.
   void SetAuthenticationResponseInfo(const std::string& valid_auth_token,
@@ -190,7 +191,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   void set_store_birthday(string new_birthday) {
     // Multiple threads can set store_birthday_ in our tests, need to lock it to
     // ensure atomic read/writes and avoid race conditions.
-    AutoLock lock(store_birthday_lock_);
+    base::AutoLock lock(store_birthday_lock_);
     store_birthday_ = new_birthday;
   }
 
@@ -218,7 +219,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   // Const necessary to avoid any hidden copy-on-write issues that would break
   // in multithreaded scenarios (see |set_store_birthday|).
   const std::string& store_birthday() {
-    AutoLock lock(store_birthday_lock_);
+    base::AutoLock lock(store_birthday_lock_);
     return store_birthday_;
   }
 
@@ -255,10 +256,17 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
     return next_position_in_parent_--;
   }
 
-  // Determine whether an EntitySpecifics filter (like that sent in
-  // GetUpdates.requested_types) indicates that a particular ModelType
+  // Get a mutable update response which will eventually be returned to the
+  // client.
+  sync_pb::GetUpdatesResponse* GetUpdateResponse();
+  void ApplyToken();
+
+  // Determine whether an progress marker array (like that sent in
+  // GetUpdates.from_progress_marker) indicates that a particular ModelType
   // should be included.
-  bool IsModelTypePresentInSpecifics(const sync_pb::EntitySpecifics& filter,
+  bool IsModelTypePresentInSpecifics(
+      const google::protobuf::RepeatedPtrField<
+          sync_pb::DataTypeProgressMarker>& filter,
       syncable::ModelType value);
 
   // All IDs that have been committed.
@@ -277,7 +285,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   // The store birthday we send to the client.
   string store_birthday_;
-  Lock store_birthday_lock_;
+  base::Lock store_birthday_lock_;
   bool store_birthday_sent_;
   bool client_stuck_;
   string commit_time_rename_prepended_string_;
@@ -290,7 +298,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   std::string directory_name_;
 
   // The updates we'll return to the next request.
-  sync_pb::GetUpdatesResponse updates_;
+  std::list<sync_pb::GetUpdatesResponse> update_queue_;
   scoped_ptr<Callback0::Type> mid_commit_callback_;
   MidCommitObserver* mid_commit_observer_;
 
@@ -312,7 +320,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   // Protected by |response_code_override_lock_|.
   bool fail_with_auth_invalid_;
 
-  Lock response_code_override_lock_;
+  base::Lock response_code_override_lock_;
 
   // True if we are only accepting GetUpdatesCallerInfo::PERIODIC requests.
   bool fail_non_periodic_get_updates_;
@@ -330,6 +338,8 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   std::bitset<syncable::MODEL_TYPE_COUNT> expected_filter_;
 
   int num_get_updates_requests_;
+
+  std::string next_token_;
 
   sync_pb::ClientToServerMessage last_request_;
 

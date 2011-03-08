@@ -6,7 +6,6 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/debug_on_start.h"
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
@@ -14,19 +13,11 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_message.h"
-#include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_switches.h"
 #include "testing/multiprocess_func_list.h"
 
-// Declaration of IPC Messages used for this test.
-#define MESSAGES_INTERNAL_FILE \
-    "chrome/browser/importer/firefox_importer_unittest_messages_internal.h"
-#include "ipc/ipc_message_macros.h"
-
-// Definition of IPC Messages used for this test.
-#define MESSAGES_INTERNAL_IMPL_FILE \
-  "chrome/browser/importer/firefox_importer_unittest_messages_internal.h"
-#include "ipc/ipc_message_impl_macros.h"
+#define IPC_MESSAGE_IMPL
+#include "chrome/browser/importer/firefox_importer_unittest_messages_internal.h"
 
 namespace {
 
@@ -102,11 +93,14 @@ class FFDecryptorServerChannelListener : public IPC::Channel::Listener {
       sender_->Send(new Msg_Decryptor_Quit());
   }
 
-  virtual void OnMessageReceived(const IPC::Message& msg) {
+  virtual bool OnMessageReceived(const IPC::Message& msg) {
+    bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(FFDecryptorServerChannelListener, msg)
       IPC_MESSAGE_HANDLER(Msg_Decryptor_InitReturnCode, OnInitDecryptorResponse)
       IPC_MESSAGE_HANDLER(Msg_Decryptor_Response, OnDecryptedTextResonse)
+      IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
+    return handled;
   }
 
   // If an error occured, just kill the message Loop.
@@ -239,12 +233,15 @@ class FFDecryptorClientChannelListener : public IPC::Channel::Listener {
     MessageLoop::current()->Quit();
   }
 
-  virtual void OnMessageReceived(const IPC::Message& msg) {
+  virtual bool OnMessageReceived(const IPC::Message& msg) {
+    bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(FFDecryptorClientChannelListener, msg)
       IPC_MESSAGE_HANDLER(Msg_Decryptor_Init, OnDecryptor_Init)
       IPC_MESSAGE_HANDLER(Msg_Decrypt, OnDecrypt)
       IPC_MESSAGE_HANDLER(Msg_Decryptor_Quit, OnQuitRequest)
+      IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
+    return handled;
   }
 
   virtual void OnChannelError() {

@@ -74,6 +74,11 @@ void PyUITestBase::NavigateToURL(const char* url_string) {
   UITestBase::NavigateToURL(url);
 }
 
+void PyUITestBase::NavigateToURL(const char* url_string, int window_index) {
+  GURL url(url_string);
+  UITestBase::NavigateToURL(url, window_index);
+}
+
 void PyUITestBase::NavigateToURL(
     const char* url_string, int window_index, int tab_index) {
   GURL url(url_string);
@@ -169,6 +174,15 @@ FilePath PyUITestBase::GetDownloadDirectory() {
 
 bool PyUITestBase::OpenNewBrowserWindow(bool show) {
   return automation()->OpenNewBrowserWindow(Browser::TYPE_NORMAL, show);
+}
+
+bool PyUITestBase::CloseBrowserWindow(int window_index) {
+  scoped_refptr<BrowserProxy> browser_proxy =
+      automation()->GetBrowserWindow(window_index);
+  if (!browser_proxy.get())
+    return false;
+  bool app_closed;
+  return CloseBrowser(browser_proxy.get(), &app_closed);
 }
 
 int PyUITestBase::GetBrowserWindowCount() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,9 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_handle.h"
 
 #pragma comment(lib, "crypt32.lib")
 
@@ -25,7 +26,7 @@ namespace {
 bool LaunchTestServerAsJob(const CommandLine& cmdline,
                            bool start_hidden,
                            base::ProcessHandle* process_handle,
-                           ScopedHandle* job_handle) {
+                           base::win::ScopedHandle* job_handle) {
   // Launch test server process.
   STARTUPINFO startup_info = {0};
   startup_info.cb = sizeof(startup_info);
@@ -191,8 +192,8 @@ bool TestServer::LaunchPython(const FilePath& testserver_path) {
 }
 
 bool TestServer::WaitToStart() {
-  ScopedHandle read_fd(child_read_fd_.Take());
-  ScopedHandle write_fd(child_write_fd_.Take());
+  base::win::ScopedHandle read_fd(child_read_fd_.Take());
+  base::win::ScopedHandle write_fd(child_write_fd_.Take());
 
   uint32 server_data_len = 0;
   if (!ReadData(read_fd.Get(), write_fd.Get(), sizeof(server_data_len),
@@ -210,34 +211,6 @@ bool TestServer::WaitToStart() {
 
   if (!ParseServerData(server_data)) {
     LOG(ERROR) << "Could not parse server_data: " << server_data;
-    return false;
-  }
-
-  return true;
-}
-
-bool TestServer::CheckCATrusted() {
-  HCERTSTORE cert_store = CertOpenSystemStore(NULL, L"ROOT");
-  if (!cert_store) {
-    LOG(ERROR) << " could not open trusted root CA store";
-    return false;
-  }
-  PCCERT_CONTEXT cert =
-      CertFindCertificateInStore(cert_store,
-                                 X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-                                 0,
-                                 CERT_FIND_ISSUER_STR,
-                                 L"Test CA",
-                                 NULL);
-  if (cert)
-    CertFreeCertificateContext(cert);
-  CertCloseStore(cert_store, 0);
-
-  if (!cert) {
-    LOG(ERROR) << " TEST CONFIGURATION ERROR: you need to import the test ca "
-                  "certificate to your trusted roots for this test to work. "
-                  "For more info visit:\n"
-                  "http://dev.chromium.org/developers/testing\n";
     return false;
   }
 

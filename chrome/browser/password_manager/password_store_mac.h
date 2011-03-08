@@ -9,12 +9,12 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store.h"
-#include "chrome/common/notification_service.h"
 
 class MacKeychain;
+class NotificationService;
 
 // Implements PasswordStore on top of the OS X Keychain, with an internal
 // database for extra metadata. For an overview of the interactions with the

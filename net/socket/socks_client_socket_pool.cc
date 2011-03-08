@@ -75,11 +75,6 @@ LoadState SOCKSConnectJob::GetLoadState() const {
   }
 }
 
-int SOCKSConnectJob::ConnectInternal() {
-  next_state_ = STATE_TCP_CONNECT;
-  return DoLoop(OK);
-}
-
 void SOCKSConnectJob::OnIOComplete(int result) {
   int rv = DoLoop(result);
   if (rv != ERR_IO_PENDING)
@@ -163,6 +158,11 @@ int SOCKSConnectJob::DoSOCKSConnectComplete(int result) {
   return result;
 }
 
+int SOCKSConnectJob::ConnectInternal() {
+  next_state_ = STATE_TCP_CONNECT;
+  return DoLoop(OK);
+}
+
 ConnectJob* SOCKSClientSocketPool::SOCKSConnectJobFactory::NewConnectJob(
     const std::string& group_name,
     const PoolBase::Request& request,
@@ -236,6 +236,10 @@ void SOCKSClientSocketPool::CloseIdleSockets() {
   base_.CloseIdleSockets();
 }
 
+int SOCKSClientSocketPool::IdleSocketCount() const {
+  return base_.idle_socket_count();
+}
+
 int SOCKSClientSocketPool::IdleSocketCountInGroup(
     const std::string& group_name) const {
   return base_.IdleSocketCountInGroup(group_name);
@@ -260,5 +264,13 @@ DictionaryValue* SOCKSClientSocketPool::GetInfoAsValue(
   }
   return dict;
 }
+
+base::TimeDelta SOCKSClientSocketPool::ConnectionTimeout() const {
+  return base_.ConnectionTimeout();
+}
+
+ClientSocketPoolHistograms* SOCKSClientSocketPool::histograms() const {
+  return base_.histograms();
+};
 
 }  // namespace net

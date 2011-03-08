@@ -8,24 +8,44 @@
 #define CHROME_INSTALLER_UTIL_BROWSER_DISTRIBUTION_H_
 #pragma once
 
-#include "base/basictypes.h"
-#include "chrome/installer/util/util_constants.h"
-#include "chrome/installer/util/version.h"
+#include <string>
+#include <vector>
 
-namespace base {
-namespace win {
-class RegKey;
-}  // namespace win
-}  // namespace base
+#include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/version.h"
+#include "chrome/installer/util/util_constants.h"
+
+#if defined(OS_WIN)
+#include <windows.h>  // NOLINT
+#endif
+
+class CommandLine;
+
+namespace installer {
+class ChannelInfo;
+class MasterPreferences;
+class Product;
+}
 
 class BrowserDistribution {
  public:
   virtual ~BrowserDistribution() {}
 
+  enum Type {
+    CHROME_BROWSER,
+    CHROME_FRAME,
+  };
+
   static BrowserDistribution* GetDistribution();
 
-  virtual void DoPostUninstallOperations(const installer::Version& version,
-                                         const std::wstring& local_data_path,
+  static BrowserDistribution* GetSpecificDistribution(
+      Type type, const installer::MasterPreferences& prefs);
+
+  Type GetType() const { return type_; }
+
+  virtual void DoPostUninstallOperations(const Version& version,
+                                         const FilePath& local_data_path,
                                          const std::wstring& distribution_data);
 
   virtual std::wstring GetAppGuid();
@@ -46,9 +66,6 @@ class BrowserDistribution {
 
   virtual std::wstring GetLongAppDescription();
 
-  virtual int GetInstallReturnCode(
-      installer_util::InstallStatus install_status);
-
   virtual std::string GetSafeBrowsingName();
 
   virtual std::wstring GetStateKey();
@@ -57,7 +74,9 @@ class BrowserDistribution {
 
   virtual std::wstring GetStatsServerURL();
 
-  virtual std::wstring GetDistributionData(base::win::RegKey* key);
+#if defined(OS_WIN)
+  virtual std::wstring GetDistributionData(HKEY root_key);
+#endif
 
   virtual std::wstring GetUninstallLinkName();
 
@@ -65,32 +84,63 @@ class BrowserDistribution {
 
   virtual std::wstring GetVersionKey();
 
-  virtual std::wstring GetEnvVersionKey();
-
   virtual bool CanSetAsDefault();
 
   virtual int GetIconIndex();
 
   virtual bool GetChromeChannel(std::wstring* channel);
 
-  virtual void UpdateDiffInstallStatus(bool system_install,
-      bool incremental_install, installer_util::InstallStatus install_status);
+  virtual void UpdateInstallStatus(bool system_install,
+      bool incremental_install, bool multi_install,
+      installer::InstallStatus install_status);
 
   // After an install or upgrade the user might qualify to participate in an
   // experiment. This function determines if the user qualifies and if so it
   // sets the wheels in motion or in simple cases does the experiment itself.
-  virtual void LaunchUserExperiment(installer_util::InstallStatus status,
-                                    const installer::Version& version,
-                                    bool system_install);
+  virtual void LaunchUserExperiment(installer::InstallStatus status,
+      const Version& version, const installer::Product& installation,
+      bool system_level);
 
   // The user has qualified for the inactive user toast experiment and this
   // function just performs it.
-  virtual void InactiveUserToastExperiment(int flavor, bool system_install);
+  virtual void InactiveUserToastExperiment(int flavor,
+      const installer::Product& installation);
+
+  // A key-file is a file such as a DLL on Windows that is expected to be
+  // in use when the product is being used.  For example "chrome.dll" for
+  // Chrome.  Before attempting to delete an installation directory during
+  // an uninstallation, the uninstaller will check if any one of a potential
+  // set of key files is in use and if they are, abort the delete operation.
+  // Only if none of the key files are in use, can the folder be deleted.
+  // Note that this function does not return a full path to the key file(s),
+  // only (a) file name(s).
+  virtual std::vector<FilePath> GetKeyFiles();
+
+  // Returns the list of Com Dlls that this product cares about having
+  // registered and unregistered. The list may be empty.
+  virtual std::vector<FilePath> GetComDllList();
+
+  // Given a command line, appends the set of uninstall flags the uninstaller
+  // for this distribution will require.
+  virtual void AppendUninstallCommandLineFlags(CommandLine* cmd_line);
+
+  // Returns true if install should create an uninstallation entry in the
+  // Add/Remove Programs dialog for this distribution.
+  virtual bool ShouldCreateUninstallEntry();
+
+  // Adds or removes product-specific flags in |channel_info|.  Returns true if
+  // |channel_info| is modified.
+  virtual bool SetChannelFlags(bool set, installer::ChannelInfo* channel_info);
 
  protected:
-  BrowserDistribution() {}
+  explicit BrowserDistribution(const installer::MasterPreferences& prefs);
 
-  static BrowserDistribution* GetDistribution(bool chrome_frame);
+  template<class DistributionClass>
+  static BrowserDistribution* GetOrCreateBrowserDistribution(
+      const installer::MasterPreferences& prefs,
+      BrowserDistribution** dist);
+
+  Type type_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserDistribution);

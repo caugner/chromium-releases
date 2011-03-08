@@ -5,7 +5,7 @@
 #include "chrome/browser/tab_contents/tab_specific_content_settings.h"
 
 #include "chrome/test/testing_profile.h"
-#include "net/base/cookie_options.h"
+#include "net/base/cookie_monster.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -53,7 +53,7 @@ TEST(TabSpecificContentSettingsTest, BlockedContent) {
   EXPECT_FALSE(content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
 
   // Set a cookie, block access to images, block a popup.
-  content_settings.OnCookieAccessed(
+  content_settings.OnCookieChanged(
       GURL("http://google.com"), "A=B", options, false);
   EXPECT_TRUE(test_delegate.SettingsChanged());
   EXPECT_FALSE(test_delegate.ContentBlocked());
@@ -77,11 +77,11 @@ TEST(TabSpecificContentSettingsTest, BlockedContent) {
   EXPECT_FALSE(
       content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_TRUE(content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS));
-  content_settings.OnCookieAccessed(
+  content_settings.OnCookieChanged(
       GURL("http://google.com"), "A=B", options, false);
 
   // Block a cookie.
-  content_settings.OnCookieAccessed(
+  content_settings.OnCookieChanged(
       GURL("http://google.com"), "C=D", options, true);
   EXPECT_TRUE(
       content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
@@ -124,16 +124,33 @@ TEST(TabSpecificContentSettingsTest, AllowedContent) {
       content_settings.IsContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES));
   ASSERT_FALSE(
       content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
-  content_settings.OnCookieAccessed(
+  content_settings.OnCookieChanged(
       GURL("http://google.com"), "A=B", options, false);
   ASSERT_TRUE(
       content_settings.IsContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES));
   ASSERT_FALSE(
       content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
-  content_settings.OnCookieAccessed(
+  content_settings.OnCookieChanged(
       GURL("http://google.com"), "C=D", options, true);
   ASSERT_TRUE(
       content_settings.IsContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES));
   ASSERT_TRUE(
+      content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
+}
+
+TEST(TabSpecificContentSettingsTest, EmptyCookieList) {
+  TestContentSettingsDelegate test_delegate;
+  TestingProfile profile;
+  TabSpecificContentSettings content_settings(&test_delegate, &profile);
+
+  ASSERT_FALSE(
+      content_settings.IsContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES));
+  ASSERT_FALSE(
+      content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
+  content_settings.OnCookiesRead(
+      GURL("http://google.com"), net::CookieList(), true);
+  ASSERT_FALSE(
+      content_settings.IsContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES));
+  ASSERT_FALSE(
       content_settings.IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
 }

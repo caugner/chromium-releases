@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 
 #include <map>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -17,10 +16,9 @@
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -31,19 +29,21 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_MACOSX)
-#include "chrome/browser/cocoa/extension_installed_bubble_bridge.h"
+#include "chrome/browser/ui/cocoa/extensions/extension_installed_bubble_bridge.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/extensions/extension_installed_bubble.h"
+#include "chrome/browser/ui/views/extensions/extension_installed_bubble.h"
 #endif
 
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/extensions/gtk_theme_installed_infobar_delegate.h"
-#include "chrome/browser/gtk/extension_installed_bubble_gtk.h"
-#include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/ui/gtk/extension_installed_bubble_gtk.h"
+#include "chrome/browser/ui/gtk/gtk_theme_provider.h"
 #endif
 
 // static
@@ -228,9 +228,10 @@ void ExtensionInstallUI::OnImageLoaded(
   }
 }
 
-void ExtensionInstallUI::ShowThemeInfoBar(
-    const std::string& previous_theme_id, bool previous_use_system_theme,
-    const Extension* new_theme, Profile* profile) {
+void ExtensionInstallUI::ShowThemeInfoBar(const std::string& previous_theme_id,
+                                          bool previous_use_system_theme,
+                                          const Extension* new_theme,
+                                          Profile* profile) {
   if (!new_theme->is_theme())
     return;
 
@@ -263,10 +264,8 @@ void ExtensionInstallUI::ShowThemeInfoBar(
   }
 
   // Then either replace that old one or add a new one.
-  InfoBarDelegate* new_delegate =
-      GetNewThemeInstalledInfoBarDelegate(
-          tab_contents, new_theme,
-          previous_theme_id, previous_use_system_theme);
+  InfoBarDelegate* new_delegate = GetNewThemeInstalledInfoBarDelegate(
+      tab_contents, new_theme, previous_theme_id, previous_use_system_theme);
 
   if (old_delegate)
     tab_contents->ReplaceInfoBar(old_delegate, new_delegate);
@@ -296,25 +295,29 @@ void ExtensionInstallUI::ShowGenericExtensionInstalledInfoBar(
   if (!tab_contents)
     return;
 
+  string16 extension_name = UTF8ToUTF16(new_extension->name());
+  base::i18n::AdjustStringForLocaleDirection(&extension_name);
   string16 msg =
       l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
-                                 UTF8ToUTF16(new_extension->name())) +
+                                 extension_name) +
       UTF8ToUTF16(" ") +
       l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_MANAGE_INFO_MAC);
-  InfoBarDelegate* delegate = new SimpleAlertInfoBarDelegate(
-      tab_contents, msg, new SkBitmap(icon_), true);
+  InfoBarDelegate* delegate = new SimpleAlertInfoBarDelegate(tab_contents,
+      new SkBitmap(icon_), msg, true);
   tab_contents->AddInfoBar(delegate);
 }
 #endif
 
 InfoBarDelegate* ExtensionInstallUI::GetNewThemeInstalledInfoBarDelegate(
-    TabContents* tab_contents, const Extension* new_theme,
-    const std::string& previous_theme_id, bool previous_use_system_theme) {
+    TabContents* tab_contents,
+    const Extension* new_theme,
+    const std::string& previous_theme_id,
+    bool previous_use_system_theme) {
 #if defined(TOOLKIT_GTK)
   return new GtkThemeInstalledInfoBarDelegate(tab_contents, new_theme,
       previous_theme_id, previous_use_system_theme);
 #else
   return new ThemeInstalledInfoBarDelegate(tab_contents, new_theme,
-      previous_theme_id);
+                                           previous_theme_id);
 #endif
 }

@@ -1,14 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/theme_install_bubble_view.h"
+#include "chrome/browser/ui/views/theme_install_bubble_view.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/notification_service.h"
 #include "gfx/canvas_skia.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/widget/widget.h"
 
 namespace {
@@ -24,14 +26,14 @@ static const int kTextVertPadding = 45;
 // track of number of loads happening.  Close bubble when num_loads < 1.
 static int num_loads_extant_ = 0;
 
-}
+}  // namespace
 
 ThemeInstallBubbleView::ThemeInstallBubbleView(TabContents* tab_contents)
     : popup_(NULL) {
   if (!tab_contents)
     Close();
 
-  text_ = l10n_util::GetString(IDS_THEME_LOADING_TITLE);
+  text_ = l10n_util::GetStringUTF16(IDS_THEME_LOADING_TITLE);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   gfx::Font font(rb.GetFont(ResourceBundle::LargeFont));
   SetFont(font);
@@ -133,8 +135,12 @@ void ThemeInstallBubbleView::Paint(gfx::Canvas* canvas) {
   body_bounds.set_x(MirroredLeftPointForRect(body_bounds));
 
   SkColor text_color = SK_ColorWHITE;
-  canvas->DrawStringInt(text_, views::Label::font(), text_color,
-                        body_bounds.x(), body_bounds.y(), body_bounds.width(),
+  canvas->DrawStringInt(text_,
+                        views::Label::font(),
+                        text_color,
+                        body_bounds.x(),
+                        body_bounds.y(),
+                        body_bounds.width(),
                         body_bounds.height());
 }
 
@@ -162,4 +168,3 @@ void ThemeInstallBubbleView::Show(TabContents* tab_contents) {
   if (num_loads_extant_ < 2)
     new ThemeInstallBubbleView(tab_contents);
 }
-

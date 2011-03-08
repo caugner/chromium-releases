@@ -10,6 +10,8 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/render_view_host_manager.h"
 #include "chrome/browser/tab_contents/test_tab_contents.h"
+#include "chrome/common/notification_details.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
@@ -251,8 +253,6 @@ TEST_F(RenderViewHostManagerTest, DOMUI) {
   EXPECT_TRUE(host);
   EXPECT_TRUE(host == manager.current_host());
   EXPECT_FALSE(manager.pending_render_view_host());
-  EXPECT_TRUE(manager.pending_dom_ui());
-  EXPECT_FALSE(manager.dom_ui());
 
   // It's important that the site instance get set on the DOM UI page as soon
   // as the navigation starts, rather than lazily after it commits, so we don't
@@ -261,11 +261,13 @@ TEST_F(RenderViewHostManagerTest, DOMUI) {
   EXPECT_TRUE(host->site_instance()->has_site());
   EXPECT_EQ(url, host->site_instance()->site());
 
-  // Commit.
-  manager.DidNavigateMainFrame(host);
-
+  // The DOM UI is committed immediately because the RenderViewHost has not been
+  // used yet. UpdateRendererStateForNavigate() took the short cut path.
   EXPECT_FALSE(manager.pending_dom_ui());
   EXPECT_TRUE(manager.dom_ui());
+
+  // Commit.
+  manager.DidNavigateMainFrame(host);
 }
 
 // Tests that chrome: URLs that are not DOM UI pages do not get grouped into
@@ -311,13 +313,8 @@ TEST_F(RenderViewHostManagerTest, PageDoesBackAndReload) {
   contents()->NavigateAndCommit(url2);
   RenderViewHost* evil_rvh = contents()->render_view_host();
 
-  // Casts the TabContents to a RenderViewHostDelegate::BrowserIntegration so we
-  // can call GoToEntryAtOffset which is private.
-  RenderViewHostDelegate::BrowserIntegration* rvh_delegate =
-      static_cast<RenderViewHostDelegate::BrowserIntegration*>(contents());
-
   // Now let's simulate the evil page calling history.back().
-  rvh_delegate->GoToEntryAtOffset(-1);
+  contents()->OnGoToEntryAtOffset(-1);
   // We should have a new pending RVH.
   // Note that in this case, the navigation has not committed, so evil_rvh will
   // not be deleted yet.

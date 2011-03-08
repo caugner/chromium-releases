@@ -35,9 +35,9 @@ PpapiThread::~PpapiThread() {
 // Note that this function is called only for messages from the channel to the
 // browser process. Messages from the renderer process are sent via a different
 // channel that ends up at Dispatcher::OnMessageReceived.
-void PpapiThread::OnMessageReceived(const IPC::Message& msg) {
+bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PpapiThread, msg)
-    IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnLoadPlugin)
+    IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnMsgLoadPlugin)
 
     // The rest of the messages go to the dispatcher.
     /*IPC_MESSAGE_UNHANDLED(
@@ -45,11 +45,14 @@ void PpapiThread::OnMessageReceived(const IPC::Message& msg) {
         dispatcher_->OnMessageReceived(msg)
     )*/
   IPC_END_MESSAGE_MAP()
+  return true;
 }
 
-void PpapiThread::OnLoadPlugin(const FilePath& path, int renderer_id) {
+void PpapiThread::OnMsgLoadPlugin(base::ProcessHandle host_process_handle,
+                                  const FilePath& path,
+                                  int renderer_id) {
   IPC::ChannelHandle channel_handle;
-  if (!LoadPluginLib(path) ||
+  if (!LoadPluginLib(host_process_handle, path) ||
       !SetupRendererChannel(renderer_id, &channel_handle)) {
     // An empty channel handle indicates error.
     Send(new PpapiHostMsg_PluginLoaded(IPC::ChannelHandle()));
@@ -59,7 +62,8 @@ void PpapiThread::OnLoadPlugin(const FilePath& path, int renderer_id) {
   Send(new PpapiHostMsg_PluginLoaded(channel_handle));
 }
 
-bool PpapiThread::LoadPluginLib(const FilePath& path) {
+bool PpapiThread::LoadPluginLib(base::ProcessHandle host_process_handle,
+                                const FilePath& path) {
   base::ScopedNativeLibrary library(base::LoadNativeLibrary(path));
   if (!library.is_valid())
     return false;
@@ -88,37 +92,27 @@ bool PpapiThread::LoadPluginLib(const FilePath& path) {
           library.GetFunctionPointer("PPP_ShutdownModule"));
 
   library_.Reset(library.Release());
-  dispatcher_.reset(new pp::proxy::PluginDispatcher(get_interface, init_module,
-                                                    shutdown_module));
+  dispatcher_.reset(new pp::proxy::PluginDispatcher(
+      host_process_handle, get_interface, init_module, shutdown_module));
   pp::proxy::PluginDispatcher::SetGlobal(dispatcher_.get());
   return true;
 }
 
 bool PpapiThread::SetupRendererChannel(int renderer_id,
                                        IPC::ChannelHandle* handle) {
-  std::string channel_key = StringPrintf(
-      "%d.r%d", base::GetCurrentProcId(), renderer_id);
-
-#if defined(OS_POSIX)
-  // This gets called when the PluginChannel is initially created. At this
-  // point, create the socketpair and assign the plugin side FD to the channel
-  // name. Keep the renderer side FD as a member variable in the PluginChannel
-  // to be able to transmit it through IPC.
-  int plugin_fd;
-  if (!IPC::SocketPair(&plugin_fd, &renderer_fd_))
-    return false;
-  IPC::AddChannelSocket(channel_key, plugin_fd);
-#endif
-
+  IPC::ChannelHandle plugin_handle;
+  plugin_handle.name = StringPrintf("%d.r%d", base::GetCurrentProcId(),
+                                    renderer_id);
   if (!dispatcher_->InitWithChannel(
           ChildProcess::current()->io_message_loop(),
-          channel_key, false,
+          plugin_handle, false,
           ChildProcess::current()->GetShutDownEvent()))
     return false;
 
-  handle->name = channel_key;
+  handle->name = plugin_handle.name;
 #if defined(OS_POSIX)
   // On POSIX, pass the renderer-side FD.
+  renderer_fd_ = dispatcher_->channel()->GetClientFileDescriptor();
   handle->socket = base::FileDescriptor(renderer_fd_, false);
 #endif
   return true;

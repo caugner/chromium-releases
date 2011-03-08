@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@ cr.define('options', function() {
   var OptionsPage = options.OptionsPage;
 
   /**
-   * ClearBrowserData class
+   * ClearBrowserDataOverlay class
    * Encapsulated handling of the 'Clear Browser Data' overlay page.
    * @class
    */
@@ -32,10 +32,6 @@ cr.define('options', function() {
       // Call base class implementation to starts preference initialization.
       OptionsPage.prototype.initializePage.call(this);
 
-      // Setup option values for the time period select control.
-      $('clearBrowsingDataTimePeriod').initializeValues(
-          templateData.clearBrowsingDataTimeList);
-
       var f = this.updateCommitButtonState_.bind(this);
       var types = ['browser.clear_data.browsing_history',
                    'browser.clear_data.download_history',
@@ -48,14 +44,16 @@ cr.define('options', function() {
       });
 
       var checkboxes = document.querySelectorAll(
-          '#checkboxListData input[type=checkbox]');
+          '#cbdContentArea input[type=checkbox]');
       for (var i = 0; i < checkboxes.length; i++) {
         checkboxes[i].onclick = f;
       }
       this.updateCommitButtonState_();
 
-      // Setup click handler for the clear(Ok) button.
-      $('clearBrowsingDataCommit').onclick = function(event) {
+      $('clearBrowserDataDismiss').onclick = function(event) {
+        ClearBrowserDataOverlay.dismiss();
+      };
+      $('clearBrowserDataCommit').onclick = function(event) {
         chrome.send('performClearBrowserData');
       };
     },
@@ -63,7 +61,7 @@ cr.define('options', function() {
     // Set the enabled state of the commit button.
     updateCommitButtonState_: function() {
       var checkboxes = document.querySelectorAll(
-          '#checkboxListData input[type=checkbox]');
+          '#cbdContentArea input[type=checkbox]');
       var isChecked = false;
       for (var i = 0; i < checkboxes.length; i++) {
         if (checkboxes[i].checked) {
@@ -71,7 +69,7 @@ cr.define('options', function() {
           break;
         }
       }
-      $('clearBrowsingDataCommit').disabled = !isChecked;
+      $('clearBrowserDataCommit').disabled = !isChecked;
     },
   };
 
@@ -85,39 +83,35 @@ cr.define('options', function() {
     $('deleteCookiesCheckbox').disabled = state;
     $('deletePasswordsCheckbox').disabled = state;
     $('deleteFormDataCheckbox').disabled = state;
-    $('clearBrowsingDataTimePeriod').disabled = state;
-    $('clearBrowsingDataDismiss').disabled = state;
+    $('clearBrowserDataTimePeriod').disabled = state;
     $('cbdThrobber').style.visibility = state ? 'visible' : 'hidden';
 
     if (state)
-      $('clearBrowsingDataCommit').disabled = true;
+      $('clearBrowserDataCommit').disabled = true;
     else
       ClearBrowserDataOverlay.getInstance().updateCommitButtonState_();
+  };
 
-    function advanceThrobber() {
-      var throbber = $('cbdThrobber');
-      // TODO(csilv): make this smoother using time-based animation?
-      throbber.style.backgroundPositionX =
-          ((parseInt(getComputedStyle(throbber).backgroundPositionX, 10) - 16) %
-          576) + 'px';
-    }
-    if (state) {
-      ClearBrowserDataOverlay.throbIntervalId =
-          setInterval(advanceThrobber, 30);
-    } else {
-      clearInterval(ClearBrowserDataOverlay.throbIntervalId);
-    }
-  }
+  ClearBrowserDataOverlay.setClearLocalDataLabel = function(label) {
+    $('deleteCookiesLabel').innerText = label;
+  };
+
+  ClearBrowserDataOverlay.doneClearing = function() {
+    // The delay gives the user some feedback that the clearing
+    // actually worked. Otherwise the dialog just vanishes instantly in most
+    // cases.
+    window.setTimeout(function() {
+      ClearBrowserDataOverlay.dismiss();
+    }, 200);
+  };
 
   ClearBrowserDataOverlay.dismiss = function() {
     OptionsPage.clearOverlays();
     this.setClearingState(false);
-  }
+  };
 
   // Export
   return {
     ClearBrowserDataOverlay: ClearBrowserDataOverlay
   };
-
 });
-

@@ -1,21 +1,25 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 
+#include <algorithm>
+
 #include "unicode/ubidi.h"
 
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "chrome/browser/autocomplete/search_provider.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_details.h"
+#include "chrome/common/notification_source.h"
 #include "gfx/rect.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -48,14 +52,15 @@ void AutocompletePopupModel::StartAutocomplete(
     const std::wstring& text,
     const std::wstring& desired_tld,
     bool prevent_inline_autocomplete,
-    bool prefer_keyword) {
+    bool prefer_keyword,
+    bool allow_exact_keyword_match) {
   // The user is interacting with the edit, so stop tracking hover.
   SetHoveredLine(kNoMatch);
 
   manually_selected_match_.Clear();
 
   controller_->Start(text, desired_tld, prevent_inline_autocomplete,
-                     prefer_keyword, true, false);
+                     prefer_keyword, allow_exact_keyword_match, false);
 }
 
 void AutocompletePopupModel::StopAutocomplete() {
@@ -203,7 +208,7 @@ bool AutocompletePopupModel::GetKeywordForMatch(const AutocompleteMatch& match,
 
   // If the current match is a keyword, return that as the selected keyword.
   if (TemplateURL::SupportsReplacement(match.template_url)) {
-    keyword->assign(match.template_url->keyword());
+    keyword->assign(UTF16ToWideHack(match.template_url->keyword()));
     return false;
   }
 
@@ -211,8 +216,8 @@ bool AutocompletePopupModel::GetKeywordForMatch(const AutocompleteMatch& match,
   if (!profile_->GetTemplateURLModel())
     return false;
   profile_->GetTemplateURLModel()->Load();
-  const std::wstring keyword_hint(
-      TemplateURLModel::CleanUserInputKeyword(match.fill_into_edit));
+  const string16 keyword_hint(TemplateURLModel::CleanUserInputKeyword(
+      WideToUTF16Hack(match.fill_into_edit)));
   if (keyword_hint.empty())
     return false;
 
@@ -224,15 +229,15 @@ bool AutocompletePopupModel::GetKeywordForMatch(const AutocompleteMatch& match,
 
   // Don't provide a hint for inactive/disabled extension keywords.
   if (template_url->IsExtensionKeyword()) {
-    const Extension* extension = profile_->GetExtensionsService()->
+    const Extension* extension = profile_->GetExtensionService()->
         GetExtensionById(template_url->GetExtensionId(), false);
     if (!extension ||
         (profile_->IsOffTheRecord() &&
-         !profile_->GetExtensionsService()->IsIncognitoEnabled(extension)))
+         !profile_->GetExtensionService()->IsIncognitoEnabled(extension)))
       return false;
   }
 
-  keyword->assign(keyword_hint);
+  keyword->assign(UTF16ToWideHack(keyword_hint));
   return true;
 }
 
@@ -313,7 +318,6 @@ void AutocompletePopupModel::Observe(NotificationType type,
     SetHoveredLine(kNoMatch);
 
   view_->UpdatePopupAppearance();
-  edit_model_->ResultsUpdated();
   edit_model_->PopupBoundsChangedTo(view_->GetTargetBounds());
 }
 
@@ -322,6 +326,6 @@ const SkBitmap* AutocompletePopupModel::GetSpecialIconForMatch(
   if (!match.template_url || !match.template_url->IsExtensionKeyword())
     return NULL;
 
-  return &profile_->GetExtensionsService()->GetOmniboxPopupIcon(
+  return &profile_->GetExtensionService()->GetOmniboxPopupIcon(
       match.template_url->GetExtensionId());
 }

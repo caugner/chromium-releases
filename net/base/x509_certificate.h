@@ -24,7 +24,7 @@
 #include <CoreFoundation/CFArray.h>
 #include <Security/SecBase.h>
 
-#include "base/lock.h"
+#include "base/synchronization/lock.h"
 #elif defined(USE_OPENSSL)
 // Forward declaration; real one in <x509.h>
 struct x509_st;
@@ -35,6 +35,10 @@ struct CERTCertificateStr;
 #endif
 
 class Pickle;
+
+namespace base {
+class RSAPrivateKey;
+}  // namespace base
 
 namespace net {
 
@@ -105,6 +109,11 @@ class X509Certificate : public base::RefCountedThreadSafe<X509Certificate> {
                   FORMAT_PKCS7,
   };
 
+  // Creates a X509Certificate from the ground up.  Used by tests that simulate
+  // SSL connections.
+  X509Certificate(const std::string& subject, const std::string& issuer,
+                  base::Time start_date, base::Time expiration_date);
+
   // Create an X509Certificate from a handle to the certificate object in the
   // underlying crypto library. |source| specifies where |cert_handle| comes
   // from.  Given two certificate handles for the same certificate, our
@@ -148,10 +157,28 @@ class X509Certificate : public base::RefCountedThreadSafe<X509Certificate> {
                                                         int length,
                                                         int format);
 
-  // Creates a X509Certificate from the ground up.  Used by tests that simulate
-  // SSL connections.
-  X509Certificate(const std::string& subject, const std::string& issuer,
-                  base::Time start_date, base::Time expiration_date);
+  // Create a self-signed certificate containing the public key in |key|.
+  // Subject, serial number and validity period are given as parameters.
+  // The certificate is signed by the private key in |key|. The hashing
+  // algorithm for the signature is SHA-1.
+  //
+  // |subject| is a distinguished name defined in RFC4514.
+  //
+  // An example:
+  // CN=Michael Wong,O=FooBar Corporation,DC=foobar,DC=com
+  //
+  // SECURUITY WARNING
+  //
+  // Using self-signed certificates has the following security risks:
+  // 1. Encryption without authentication and thus vulnerable to
+  //    man-in-the-middle attacks.
+  // 2. Self-signed certificates cannot be revoked.
+  //
+  // Use this certificate only after the above risks are acknowledged.
+  static X509Certificate* CreateSelfSigned(base::RSAPrivateKey* key,
+                                           const std::string& subject,
+                                           uint32 serial_number,
+                                           base::TimeDelta valid_duration);
 
   // Appends a representation of this object to the given pickle.
   void Persist(Pickle* pickle);
@@ -220,7 +247,7 @@ class X509Certificate : public base::RefCountedThreadSafe<X509Certificate> {
   static bool GetSSLClientCertificates(
       const std::string& server_domain,
       const std::vector<CertPrincipal>& valid_issuers,
-      std::vector<scoped_refptr<X509Certificate> >* certs);
+      CertificateList* certs);
 
   // Creates the chain of certs to use for this client identity cert.
   CFArrayRef CreateClientCertificateChain() const;
@@ -260,6 +287,11 @@ class X509Certificate : public base::RefCountedThreadSafe<X509Certificate> {
              int flags,
              CertVerifyResult* verify_result) const;
 
+  // This method returns the DER encoded certificate.
+  // If the return value is true then the DER encoded certificate is available.
+  // The content of the DER encoded certificate is written to |encoded|.
+  bool GetDEREncoded(std::string* encoded);
+
   OSCertHandle os_cert_handle() const { return cert_handle_; }
 
   // Returns true if two OSCertHandles refer to identical certificates.
@@ -283,6 +315,7 @@ class X509Certificate : public base::RefCountedThreadSafe<X509Certificate> {
 
  private:
   friend class base::RefCountedThreadSafe<X509Certificate>;
+  friend class TestRootCerts;  // For unit tests
   FRIEND_TEST_ALL_PREFIXES(X509CertificateTest, Cache);
   FRIEND_TEST_ALL_PREFIXES(X509CertificateTest, IntermediateCertificates);
 
@@ -301,6 +334,12 @@ class X509Certificate : public base::RefCountedThreadSafe<X509Certificate> {
                const char* policy_oid) const;
 #endif
   bool VerifyEV() const;
+
+#if defined(USE_OPENSSL)
+  // Resets the store returned by cert_store() to default state. Used by
+  // TestRootCerts to undo modifications.
+  static void ResetCertStore();
+#endif
 
   // Calculates the SHA-1 fingerprint of the certificate.  Returns an empty
   // (all zero) fingerprint on failure.
@@ -331,7 +370,7 @@ class X509Certificate : public base::RefCountedThreadSafe<X509Certificate> {
 #if defined(OS_MACOSX)
   // Blocks multiple threads from verifying the cert simultaneously.
   // (Marked mutable because it's used in a const method.)
-  mutable Lock verification_lock_;
+  mutable base::Lock verification_lock_;
 #endif
 
   // Where the certificate comes from.

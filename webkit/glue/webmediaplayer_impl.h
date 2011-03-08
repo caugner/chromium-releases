@@ -53,21 +53,26 @@
 #ifndef WEBKIT_GLUE_WEBMEDIAPLAYER_IMPL_H_
 #define WEBKIT_GLUE_WEBMEDIAPLAYER_IMPL_H_
 
-#include "base/lock.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/thread.h"
-#include "base/waitable_event.h"
+#include "base/threading/thread.h"
+#include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
 #include "media/base/filters.h"
+#include "media/base/message_loop_factory.h"
 #include "media/base/pipeline.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebMediaPlayer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebMediaPlayerClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
 
 class GURL;
+
+namespace WebKit {
+class WebFrame;
+}
 
 namespace webkit_glue {
 
@@ -91,12 +96,12 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
     Proxy(MessageLoop* render_loop,
           WebMediaPlayerImpl* webmediaplayer);
 
-    // Methods for MediaFilter -> WebMediaPlayerImpl communication.
+    // Methods for Filter -> WebMediaPlayerImpl communication.
     void Repaint();
     void SetVideoRenderer(scoped_refptr<WebVideoRenderer> video_renderer);
     void SetDataSource(scoped_refptr<WebDataSource> data_source);
 
-    // Methods for WebMediaPlayerImpl -> MediaFilter communication.
+    // Methods for WebMediaPlayerImpl -> Filter communication.
     void Paint(skia::PlatformCanvas* canvas, const gfx::Rect& dest_rect);
     void SetSize(const gfx::Rect& rect);
     void Detach();
@@ -144,7 +149,7 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
     scoped_refptr<WebDataSource> data_source_;
     scoped_refptr<WebVideoRenderer> video_renderer_;
 
-    Lock lock_;
+    base::Lock lock_;
     int outstanding_repaints_;
   };
 
@@ -171,13 +176,13 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   //
   // Callers must call |Initialize()| before they can use the object.
   WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
-                     media::MediaFilterCollection* collection);
+                     media::FilterCollection* collection,
+                     media::MessageLoopFactory* message_loop_factory);
   virtual ~WebMediaPlayerImpl();
 
   // Finalizes initialization of the object.
   bool Initialize(
-      MediaResourceLoaderBridgeFactory* bridge_factory_simple,
-      MediaResourceLoaderBridgeFactory* bridge_factory_buffered,
+      WebKit::WebFrame* frame,
       bool use_simple_data_source,
       scoped_refptr<WebVideoRenderer> web_video_renderer);
 
@@ -223,12 +228,8 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   // Internal states of loading and network.
   // TODO(hclam): Ask the pipeline about the state rather than having reading
   // them from members which would cause race conditions.
-  virtual WebKit::WebMediaPlayer::NetworkState networkState() const {
-    return network_state_;
-  }
-  virtual WebKit::WebMediaPlayer::ReadyState readyState() const {
-    return ready_state_;
-  }
+  virtual WebKit::WebMediaPlayer::NetworkState networkState() const;
+  virtual WebKit::WebMediaPlayer::ReadyState readyState() const;
 
   virtual unsigned long long bytesLoaded() const;
   virtual unsigned long long totalBytes() const;
@@ -285,11 +286,12 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   MessageLoop* main_loop_;
 
   // A collection of filters.
-  scoped_ptr<media::MediaFilterCollection> filter_collection_;
+  scoped_ptr<media::FilterCollection> filter_collection_;
 
   // The actual pipeline and the thread it runs on.
   scoped_refptr<media::Pipeline> pipeline_;
-  base::Thread pipeline_thread_;
+
+  scoped_ptr<media::MessageLoopFactory> message_loop_factory_;
 
   // Playback state.
   //
@@ -304,6 +306,7 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   // clock can creep forward a little bit while the asynchronous
   // SetPlaybackRate(0) is being executed.
   bool paused_;
+  bool seeking_;
   float playback_rate_;
   base::TimeDelta paused_time_;
 

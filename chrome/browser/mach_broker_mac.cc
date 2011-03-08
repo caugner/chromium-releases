@@ -7,9 +7,9 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/mach_ipc_mac.h"
-#include "base/platform_thread.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/threading/platform_thread.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -54,7 +54,7 @@ class RegisterNotificationTask : public Task {
   DISALLOW_COPY_AND_ASSIGN(RegisterNotificationTask);
 };
 
-class MachListenerThreadDelegate : public PlatformThread::Delegate {
+class MachListenerThreadDelegate : public base::PlatformThread::Delegate {
  public:
   MachListenerThreadDelegate(MachBroker* broker) : broker_(broker) {
     DCHECK(broker_);
@@ -91,7 +91,7 @@ class MachListenerThreadDelegate : public PlatformThread::Delegate {
       // leaking MachBroker map entries in this case, lock around both these
       // calls.  If the child dies, the death notification will be processed
       // after the call to FinalizePid(), ensuring proper cleanup.
-      AutoLock lock(broker_->GetLock());
+      base::AutoLock lock(broker_->GetLock());
 
       int pid;
       err = pid_for_task(child_task, &pid);
@@ -121,7 +121,7 @@ class MachListenerThreadDelegate : public PlatformThread::Delegate {
 };
 
 // Returns the global MachBroker.
-MachBroker* MachBroker::instance() {
+MachBroker* MachBroker::GetInstance() {
   return Singleton<MachBroker, LeakySingletonTraits<MachBroker> >::get();
 }
 
@@ -136,7 +136,8 @@ void MachBroker::PrepareForFork() {
         BrowserThread::UI, FROM_HERE, new RegisterNotificationTask(this));
 
     // Intentional leak.  This thread is never joined or reaped.
-    PlatformThread::CreateNonJoinable(0, new MachListenerThreadDelegate(this));
+    base::PlatformThread::CreateNonJoinable(
+        0, new MachListenerThreadDelegate(this));
   }
 }
 
@@ -169,7 +170,7 @@ void MachBroker::FinalizePid(base::ProcessHandle pid,
 
 // Removes all mappings belonging to |pid| from the broker.
 void MachBroker::InvalidatePid(base::ProcessHandle pid) {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   MachBroker::MachMap::iterator it = mach_map_.find(pid);
   if (it == mach_map_.end())
     return;
@@ -182,13 +183,13 @@ void MachBroker::InvalidatePid(base::ProcessHandle pid) {
   mach_map_.erase(it);
 }
 
-Lock& MachBroker::GetLock() {
+base::Lock& MachBroker::GetLock() {
   return lock_;
 }
 
 // Returns the mach task belonging to |pid|.
 mach_port_t MachBroker::TaskForPid(base::ProcessHandle pid) const {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   MachBroker::MachMap::const_iterator it = mach_map_.find(pid);
   if (it == mach_map_.end())
     return MACH_PORT_NULL;

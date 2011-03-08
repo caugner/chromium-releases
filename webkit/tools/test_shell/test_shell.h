@@ -41,7 +41,7 @@
 #include "base/ref_counted.h"
 #include "base/weak_ptr.h"
 #include "gfx/native_widget_types.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebNavigationPolicy.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNavigationPolicy.h"
 #include "webkit/tools/test_shell/event_sending_controller.h"
 #include "webkit/tools/test_shell/layout_test_controller.h"
 #include "webkit/tools/test_shell/plain_text_controller.h"
@@ -67,6 +67,7 @@ class StringPiece;
 
 namespace WebKit {
 class WebDeviceOrientationClientMock;
+class WebGeolocationClientMock;
 class WebSpeechInputControllerMock;
 class WebSpeechInputListener;
 }
@@ -215,7 +216,7 @@ public:
     bool Navigate(const TestNavigationEntry& entry, bool reload);
 
     bool PromptForSaveFile(const wchar_t* prompt_title, FilePath* result);
-    std::wstring GetDocumentText();
+    string16 GetDocumentText();
     void DumpDocumentText();
     void DumpRenderTree();
 
@@ -259,13 +260,13 @@ public:
 
     // Writes the back-forward list data for every open window into result.
     // Should call DumpBackForwardListOfWindow on each TestShell window.
-    static void DumpAllBackForwardLists(std::wstring* result);
+    static void DumpAllBackForwardLists(string16* result);
 
     // Writes the single back-forward entry into result.
-    void DumpBackForwardEntry(int index, std::wstring* result);
+    void DumpBackForwardEntry(int index, string16* result);
 
     // Writes the back-forward list data for this test shell into result.
-    void DumpBackForwardList(std::wstring* result);
+    void DumpBackForwardList(string16* result);
 
     // Dumps the output from given test as text and/or image depending on
     // the flags set.
@@ -359,8 +360,8 @@ public:
     // Show the "attach to me" dialog, for debugging test shell startup.
     static void ShowStartupDebuggingDialog();
 
-    // This is called indirectly by the network layer to access resources.
-    static base::StringPiece NetResourceProvider(int key);
+    // This is called indirectly by the modules that need access resources.
+    static base::StringPiece ResourceProvider(int key);
 
     TestShellDevToolsAgent* dev_tools_agent() {
       return dev_tools_agent_.get();
@@ -371,6 +372,8 @@ public:
     WebKit::WebSpeechInputControllerMock* CreateSpeechInputControllerMock(
         WebKit::WebSpeechInputListener* listener);
     WebKit::WebSpeechInputControllerMock* speech_input_controller_mock();
+
+    WebKit::WebGeolocationClientMock* geolocation_client_mock();
 
 protected:
     void CreateDevToolsClient(TestShellDevToolsAgent* agent);
@@ -455,6 +458,7 @@ private:
         device_orientation_client_mock_;
     scoped_ptr<WebKit::WebSpeechInputControllerMock>
         speech_input_controller_mock_;
+    scoped_ptr<WebKit::WebGeolocationClientMock> geolocation_client_mock_;
 
     const TestParams* test_params_;
 

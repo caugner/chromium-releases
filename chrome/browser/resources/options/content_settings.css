@@ -4,22 +4,60 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 */
 
-.contentSettingsHeader {
-   /* TODO(dhg): something nice. */
-  margin: 0px;
-  margin-bottom: 1em;
+.exception-pattern {
+  -webkit-box-flex: 1;
+  -webkit-margin-end: 10px;
+  -webkit-margin-start: 14px;
+  display: -webkit-box;
+  margin-right: 4px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-.zippy div[mode=otr] {
-  display: none;
+.exception-setting {
+  -webkit-margin-end: 20px;
+  display: inline-block;
+  width: 100px;
 }
 
-.zippy.show-otr div[mode=otr] {
+select.exception-setting {
+  vertical-align: middle;
+}
+
+/* Hacks to make the <select> align better with the <input>. */
+html[toolkit=gtk] select.exception-setting {
+  height: 22px;
+  margin-top: 1px;
+}
+
+#exception-column-headers {
+  -webkit-margin-start: 17px;
+  display: -webkit-box;
+  margin-top: 17px;
+}
+
+#exception-column-headers > div {
+  font-weight: bold;
+}
+
+#exception-pattern-column {
+  -webkit-box-flex: 1;
+}
+
+#exception-behavior-column {
+  width: 140px;
+}
+
+.otr-explanation {
+  font-style: italic;
+}
+
+#content-settings-exceptions-area list {
+  margin-bottom: 10px;
+  margin-top: 4px;
+}
+
+#plugins-tab {
   display: block;
-  /* background reminiscent of an incognito window, but faded */
-  background: -webkit-gradient(linear,
-                               left top,
-                               left bottom,
-                               from(rgba(97, 122, 156, .25)),
-                               to(rgba(82, 108, 145, .25)));
+  margin: 7px 0px;
 }

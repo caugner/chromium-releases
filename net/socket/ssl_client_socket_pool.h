@@ -22,6 +22,7 @@
 
 namespace net {
 
+class CertVerifier;
 class ClientSocketFactory;
 class ConnectJobFactory;
 class DnsCertProvenanceChecker;
@@ -95,6 +96,7 @@ class SSLConnectJob : public ConnectJob {
       HttpProxyClientSocketPool* http_proxy_pool,
       ClientSocketFactory* client_socket_factory,
       HostResolver* host_resolver,
+      CertVerifier* cert_verifier,
       DnsRRResolver* dnsrr_resolver,
       DnsCertProvenanceChecker* dns_cert_checker,
       SSLHostInfoFactory* ssl_host_info_factory,
@@ -120,11 +122,6 @@ class SSLConnectJob : public ConnectJob {
     STATE_NONE,
   };
 
-  // Starts the SSL connection process.  Returns OK on success and
-  // ERR_IO_PENDING if it cannot immediately service the request.
-  // Otherwise, it returns a net error code.
-  virtual int ConnectInternal();
-
   void OnIOComplete(int result);
 
   // Runs the state transition loop.
@@ -139,12 +136,18 @@ class SSLConnectJob : public ConnectJob {
   int DoSSLConnect();
   int DoSSLConnectComplete(int result);
 
+  // Starts the SSL connection process.  Returns OK on success and
+  // ERR_IO_PENDING if it cannot immediately service the request.
+  // Otherwise, it returns a net error code.
+  virtual int ConnectInternal();
+
   scoped_refptr<SSLSocketParams> params_;
   TCPClientSocketPool* const tcp_pool_;
   SOCKSClientSocketPool* const socks_pool_;
   HttpProxyClientSocketPool* const http_proxy_pool_;
   ClientSocketFactory* const client_socket_factory_;
-  HostResolver* const resolver_;
+  HostResolver* const host_resolver_;
+  CertVerifier* const cert_verifier_;
   DnsRRResolver* const dnsrr_resolver_;
   DnsCertProvenanceChecker* dns_cert_checker_;
   SSLHostInfoFactory* const ssl_host_info_factory_;
@@ -173,6 +176,7 @@ class SSLClientSocketPool : public ClientSocketPool,
       int max_sockets_per_group,
       ClientSocketPoolHistograms* histograms,
       HostResolver* host_resolver,
+      CertVerifier* cert_verifier,
       DnsRRResolver* dnsrr_resolver,
       DnsCertProvenanceChecker* dns_cert_checker,
       SSLHostInfoFactory* ssl_host_info_factory,
@@ -209,9 +213,7 @@ class SSLClientSocketPool : public ClientSocketPool,
 
   virtual void CloseIdleSockets();
 
-  virtual int IdleSocketCount() const {
-    return base_.idle_socket_count();
-  }
+  virtual int IdleSocketCount() const;
 
   virtual int IdleSocketCountInGroup(const std::string& group_name) const;
 
@@ -222,22 +224,18 @@ class SSLClientSocketPool : public ClientSocketPool,
                                           const std::string& type,
                                           bool include_nested_pools) const;
 
-  virtual base::TimeDelta ConnectionTimeout() const {
-    return base_.ConnectionTimeout();
-  }
+  virtual base::TimeDelta ConnectionTimeout() const;
 
-  virtual ClientSocketPoolHistograms* histograms() const {
-    return base_.histograms();
-  };
+  virtual ClientSocketPoolHistograms* histograms() const;
 
  private:
+  typedef ClientSocketPoolBase<SSLSocketParams> PoolBase;
+
   // SSLConfigService::Observer methods:
 
   // When the user changes the SSL config, we flush all idle sockets so they
   // won't get re-used.
   virtual void OnSSLConfigChanged();
-
-  typedef ClientSocketPoolBase<SSLSocketParams> PoolBase;
 
   class SSLConnectJobFactory : public PoolBase::ConnectJobFactory {
    public:
@@ -247,6 +245,7 @@ class SSLClientSocketPool : public ClientSocketPool,
         HttpProxyClientSocketPool* http_proxy_pool,
         ClientSocketFactory* client_socket_factory,
         HostResolver* host_resolver,
+        CertVerifier* cert_verifier,
         DnsRRResolver* dnsrr_resolver,
         DnsCertProvenanceChecker* dns_cert_checker,
         SSLHostInfoFactory* ssl_host_info_factory,
@@ -268,6 +267,7 @@ class SSLClientSocketPool : public ClientSocketPool,
     HttpProxyClientSocketPool* const http_proxy_pool_;
     ClientSocketFactory* const client_socket_factory_;
     HostResolver* const host_resolver_;
+    CertVerifier* const cert_verifier_;
     DnsRRResolver* const dnsrr_resolver_;
     DnsCertProvenanceChecker* const dns_cert_checker_;
     SSLHostInfoFactory* const ssl_host_info_factory_;

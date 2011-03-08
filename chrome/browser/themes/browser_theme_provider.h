@@ -10,20 +10,24 @@
 #include <set>
 #include <string>
 
-#include "app/theme_provider.h"
-#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
-
-namespace color_utils {
-  struct HSL;
-}
+#include "base/threading/non_thread_safe.h"
+#include "ui/base/theme_provider.h"
 
 class BrowserThemePack;
 class BrowserThemeProviderTest;
 class Extension;
 class FilePath;
 class Profile;
+
+namespace color_utils {
+struct HSL;
+}
+
+namespace ui {
 class ResourceBundle;
+}
+using ui::ResourceBundle;
 
 #ifdef __OBJC__
 @class NSString;
@@ -32,8 +36,8 @@ class ResourceBundle;
 extern "C" NSString* const kBrowserThemeDidChangeNotification;
 #endif  // __OBJC__
 
-class BrowserThemeProvider : public NonThreadSafe,
-                             public ThemeProvider {
+class BrowserThemeProvider : public base::NonThreadSafe,
+                             public ui::ThemeProvider {
  public:
   // Public constants used in BrowserThemeProvider and its subclasses:
 
@@ -130,7 +134,7 @@ class BrowserThemeProvider : public NonThreadSafe,
     REPEAT = 3
   } Tiling;
 
-  // ThemeProvider implementation.
+  // ui::ThemeProvider implementation.
   virtual void Init(Profile* profile);
   virtual SkBitmap* GetBitmapNamed(int id) const;
   virtual SkColor GetColor(int id) const;
@@ -159,7 +163,7 @@ class BrowserThemeProvider : public NonThreadSafe,
 
   // Set the current theme to the native theme. On some platforms, the native
   // theme is the default theme.
-  virtual void SetNativeTheme() { UseDefaultTheme(); }
+  virtual void SetNativeTheme();
 
   // Whether we're using the chrome default theme. Virtual so linux can check
   // if we're using the GTK theme.

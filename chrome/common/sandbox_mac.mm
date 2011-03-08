@@ -4,18 +4,20 @@
 
 #include "chrome/common/sandbox_mac.h"
 
-#include "base/debug_util.h"
-
 #import <Cocoa/Cocoa.h>
+#import <OpenGL/OpenGL.h>
+
 extern "C" {
 #include <sandbox.h>
 }
+#include <signal.h>
 #include <sys/param.h>
 
+#include "app/gfx/gl/gl_context.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "base/rand_util_c.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -24,6 +26,7 @@ extern "C" {
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/chrome_application_mac.h"
 #include "chrome/common/chrome_switches.h"
 #include "unicode/uchar.h"
 
@@ -177,7 +180,7 @@ bool Sandbox::QuoteStringForRegex(const std::string& str_utf8,
 //     10.5.6, 10.6.0
 
 // static
-void Sandbox::SandboxWarmup() {
+void Sandbox::SandboxWarmup(SandboxProcessType sandbox_type) {
   base::mac::ScopedNSAutoreleasePool scoped_pool;
 
   { // CGColorSpaceCreateWithName(), CGBitmapContextCreate() - 10.5.6
@@ -193,8 +196,8 @@ void Sandbox::SandboxWarmup() {
                                   kCGBitmapByteOrder32Host));
 
     // Load in the color profiles we'll need (as a side effect).
-    (void) mac_util::GetSRGBColorSpace();
-    (void) mac_util::GetSystemColorSpace();
+    (void) base::mac::GetSRGBColorSpace();
+    (void) base::mac::GetSystemColorSpace();
 
     // CGColorSpaceCreateSystemDefaultCMYK - 10.6
     base::mac::ScopedCFTypeRef<CGColorSpaceRef> cmyk_colorspace(
@@ -228,8 +231,41 @@ void Sandbox::SandboxWarmup() {
     CGImageSourceGetStatus(img);
   }
 
-  { // Native Client access to /dev/random.
-    GetUrandomFD();
+  // Process-type dependent warm-up.
+  switch (sandbox_type) {
+    case SANDBOX_TYPE_NACL_LOADER:
+      {
+        // Native Client access to /dev/random.
+        GetUrandomFD();
+      }
+      break;
+
+    case SANDBOX_TYPE_GPU:
+      {  // GPU-related stuff is very slow without this, probably because
+         // the sandbox prevents loading graphics drivers or some such.
+         CGLPixelFormatAttribute attribs[] = { (CGLPixelFormatAttribute)0 };
+         CGLPixelFormatObj format;
+         GLint n;
+         CGLChoosePixelFormat(attribs, &format, &n);
+         if (format)
+           CGLReleasePixelFormat(format);
+      }
+
+      {
+         // Preload either the desktop GL or the osmesa so, depending on the
+         // --use-gl flag.
+         gfx::GLContext::InitializeOneOff();
+      }
+
+      {
+        // Access to /dev/random is required for the field trial code.
+        GetUrandomFD();
+      }
+      break;
+
+    default:
+      // To shut up a gcc warning.
+      break;
   }
 }
 
@@ -314,6 +350,9 @@ NSString* LoadSandboxTemplate(Sandbox::SandboxProcessType sandbox_type) {
       // untrusted code within Native Client.
       sandbox_config_filename = @"nacl_loader";
       break;
+    case Sandbox::SANDBOX_TYPE_GPU:
+      sandbox_config_filename = @"gpu";
+      break;
     default:
       NOTREACHED();
       return nil;
@@ -321,7 +360,7 @@ NSString* LoadSandboxTemplate(Sandbox::SandboxProcessType sandbox_type) {
 
   // Read in the sandbox profile and the common prefix file.
   NSString* common_sandbox_prefix_path =
-      [mac_util::MainAppBundle() pathForResource:@"common"
+      [base::mac::MainAppBundle() pathForResource:@"common"
                                           ofType:@"sb"];
   NSString* common_sandbox_prefix_data =
       [NSString stringWithContentsOfFile:common_sandbox_prefix_path
@@ -335,7 +374,7 @@ NSString* LoadSandboxTemplate(Sandbox::SandboxProcessType sandbox_type) {
   }
 
   NSString* sandbox_profile_path =
-      [mac_util::MainAppBundle() pathForResource:sandbox_config_filename
+      [base::mac::MainAppBundle() pathForResource:sandbox_config_filename
                                           ofType:@"sb"];
   NSString* sandbox_data =
       [NSString stringWithContentsOfFile:sandbox_profile_path
@@ -465,7 +504,7 @@ bool Sandbox::EnableSandbox(SandboxProcessType sandbox_type,
 
   // Enable verbose logging if enabled on the command line. (See common.sb
   // for details).
-  const CommandLine *command_line = CommandLine::ForCurrentProcess();
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
   bool enable_logging =
       command_line->HasSwitch(switches::kEnableSandboxLogging);;
   if (enable_logging) {

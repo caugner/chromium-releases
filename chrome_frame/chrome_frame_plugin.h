@@ -9,11 +9,12 @@
 #include <vector>
 
 #include "base/ref_counted.h"
-#include "base/win_util.h"
+#include "base/win/win_util.h"
 #include "chrome_frame/chrome_frame_automation.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome_frame/simple_resource_loader.h"
+#include "chrome_frame/navigation_constraints.h"
 #include "chrome_frame/utils.h"
 #include "grit/chromium_strings.h"
 
@@ -22,11 +23,11 @@
 // A class to implement common functionality for all types of
 // plugins: NPAPI. ActiveX and ActiveDoc
 template <typename T>
-class ChromeFramePlugin : public ChromeFrameDelegateImpl {
+class ChromeFramePlugin
+    : public ChromeFrameDelegateImpl,
+      public NavigationConstraintsImpl  {
  public:
-  ChromeFramePlugin()
-      : ignore_setfocus_(false),
-        is_privileged_(false) {
+  ChromeFramePlugin() : ignore_setfocus_(false){
   }
   ~ChromeFramePlugin() {
     Uninitialize();
@@ -67,7 +68,7 @@ END_MSG_MAP()
     DCHECK(launch_params_ == NULL);
     // We don't want to do incognito when privileged, since we're
     // running in browser chrome or some other privileged context.
-    bool incognito_mode = !is_privileged_ && incognito;
+    bool incognito_mode = !is_privileged() && incognito;
     FilePath profile_path;
     GetProfilePath(profile_name, &profile_path);
     // The profile name could change based on the browser version. For e.g. for
@@ -99,7 +100,7 @@ END_MSG_MAP()
   virtual void OnAutomationServerReady() {
     // Issue the extension automation request if we're privileged to
     // allow this control to handle extension requests from Chrome.
-    if (is_privileged_ && IsValid())
+    if (is_privileged() && IsValid())
       automation_client_->SetEnableExtensionAutomation(functions_enabled_);
   }
 
@@ -113,14 +114,13 @@ END_MSG_MAP()
   }
 
  protected:
-  virtual void OnNavigationFailed(int tab_handle, int error_code,
-                                  const GURL& gurl) {
+  virtual void OnNavigationFailed(int error_code, const GURL& gurl) {
     OnLoadFailed(error_code, gurl.spec());
   }
 
-  virtual void OnHandleContextMenu(int tab_handle, HANDLE menu_handle,
+  virtual void OnHandleContextMenu(HANDLE menu_handle,
                                    int align_flags,
-                                   const IPC::MiniContextMenuParams& params) {
+                                   const MiniContextMenuParams& params) {
     if (!menu_handle || !automation_client_.get()) {
       NOTREACHED();
       return;
@@ -219,7 +219,7 @@ END_MSG_MAP()
   // Return true if menu command is processed, otherwise the command will be
   // passed to Chrome for execution. Override in most-derived class if needed.
   bool HandleContextMenuCommand(UINT cmd,
-                                const IPC::MiniContextMenuParams& params) {
+                                const MiniContextMenuParams& params) {
     return false;
   }
 
@@ -234,7 +234,7 @@ END_MSG_MAP()
       HWND chrome_window = automation_client_->tab_window();
       if (tab && ::IsWindow(chrome_window)) {
         DVLOG(1) << "Setting initial focus";
-        tab->SetInitialFocus(win_util::IsShiftPressed(), restore_focus_to_view);
+        tab->SetInitialFocus(base::win::IsShiftPressed(), restore_focus_to_view);
       }
     }
   }
@@ -261,14 +261,6 @@ END_MSG_MAP()
   // When the flag is not set, we transfer the focus to chrome.
   bool ignore_setfocus_;
 
-  // The plugin is privileged if it is:
-  // * Invoked by a window running under the system principal in FireFox.
-  // * Being hosted by a custom host exposing the SID_ChromeFramePrivileged
-  //   service.
-  //
-  // When privileged, additional interfaces are made available to the user.
-  bool is_privileged_;
-
   // List of functions to enable for automation, or a single entry "*" to
   // enable all functions for automation.  Ignored unless is_privileged_ is
   // true.  Defaults to the empty list, meaning automation will not be
@@ -277,4 +269,3 @@ END_MSG_MAP()
 };
 
 #endif  // CHROME_FRAME_CHROME_FRAME_PLUGIN_H_
-

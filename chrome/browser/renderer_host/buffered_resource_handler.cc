@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
-#include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 
 namespace {
 
@@ -52,7 +52,7 @@ void RecordSnifferMetrics(bool sniffing_blocked,
 
 BufferedResourceHandler::BufferedResourceHandler(ResourceHandler* handler,
                                                  ResourceDispatcherHost* host,
-                                                 URLRequest* request)
+                                                 net::URLRequest* request)
     : real_handler_(handler),
       host_(host),
       request_(request),
@@ -89,7 +89,7 @@ bool BufferedResourceHandler::OnResponseStarted(int request_id,
 
 bool BufferedResourceHandler::OnResponseCompleted(
     int request_id,
-    const URLRequestStatus& status,
+    const net::URLRequestStatus& status,
     const std::string& security_info) {
   return real_handler_->OnResponseCompleted(request_id, status, security_info);
 }
@@ -422,19 +422,20 @@ bool BufferedResourceHandler::ShouldDownload(bool* need_plugin_list) {
     return false;
 
   if (need_plugin_list) {
-    if (!NPAPI::PluginList::Singleton()->PluginsLoaded()) {
+    if (!webkit::npapi::PluginList::Singleton()->PluginsLoaded()) {
       *need_plugin_list = true;
       return true;
     }
   } else {
-    DCHECK(NPAPI::PluginList::Singleton()->PluginsLoaded());
+    DCHECK(webkit::npapi::PluginList::Singleton()->PluginsLoaded());
   }
 
   // Finally, check the plugin list.
-  WebPluginInfo info;
+  webkit::npapi::WebPluginInfo info;
   bool allow_wildcard = false;
-  return !NPAPI::PluginList::Singleton()->GetPluginInfo(
-      GURL(), type, allow_wildcard, &info, NULL) || !info.enabled;
+  return !webkit::npapi::PluginList::Singleton()->GetPluginInfo(
+      GURL(), type, allow_wildcard, &info, NULL) ||
+      !webkit::npapi::IsPluginEnabled(info);
 }
 
 void BufferedResourceHandler::UseAlternateResourceHandler(
@@ -455,7 +456,7 @@ void BufferedResourceHandler::UseAlternateResourceHandler(
   // Inform the original ResourceHandler that this will be handled entirely by
   // the new ResourceHandler.
   real_handler_->OnResponseStarted(info->request_id(), response_);
-  URLRequestStatus status(URLRequestStatus::HANDLED_EXTERNALLY, 0);
+  net::URLRequestStatus status(net::URLRequestStatus::HANDLED_EXTERNALLY, 0);
   real_handler_->OnResponseCompleted(info->request_id(), status, std::string());
 
   // Remove the non-owning pointer to the CrossSiteResourceHandler, if any,
@@ -469,8 +470,8 @@ void BufferedResourceHandler::UseAlternateResourceHandler(
 }
 
 void BufferedResourceHandler::LoadPlugins() {
-  std::vector<WebPluginInfo> plugins;
-  NPAPI::PluginList::Singleton()->GetPlugins(false, &plugins);
+  std::vector<webkit::npapi::WebPluginInfo> plugins;
+  webkit::npapi::PluginList::Singleton()->GetPlugins(false, &plugins);
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,

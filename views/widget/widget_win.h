@@ -15,14 +15,14 @@
 #include <vector>
 
 #include "base/message_loop.h"
-#include "base/scoped_comptr_win.h"
 #include "base/scoped_vector.h"
-#include "gfx/window_impl.h"
+#include "base/win/scoped_comptr.h"
+#include "ui/base/win/window_impl.h"
 #include "views/focus/focus_manager.h"
 #include "views/layout_manager.h"
 #include "views/widget/widget.h"
 
-namespace app {
+namespace ui {
 class ViewProp;
 }
 
@@ -74,7 +74,7 @@ const int WM_NCUAHDRAWFRAME = 0xAF;
 //  then responsible for cleaning up after it.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class WidgetWin : public gfx::WindowImpl,
+class WidgetWin : public ui::WindowImpl,
                   public Widget,
                   public MessageLoopForUI::Observer,
                   public FocusTraversable {
@@ -229,7 +229,7 @@ class WidgetWin : public gfx::WindowImpl,
   virtual TooltipManager* GetTooltipManager();
   virtual void GenerateMousePressedForView(View* view,
                                            const gfx::Point& point);
-  virtual bool GetAccelerator(int cmd_id, menus::Accelerator* accelerator);
+  virtual bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator);
   virtual Window* GetWindow();
   virtual const Window* GetWindow() const;
   virtual void SetNativeWindowProperty(const char* name, void* value);
@@ -484,7 +484,7 @@ class WidgetWin : public gfx::WindowImpl,
   bool is_window_;
 
  private:
-  typedef ScopedVector<app::ViewProp> ViewProps;
+  typedef ScopedVector<ui::ViewProp> ViewProps;
 
   // Implementation of GetWindow. Ascends the parents of |hwnd| returning the
   // first ancestor that is a Window.
@@ -570,7 +570,7 @@ class WidgetWin : public gfx::WindowImpl,
   bool restore_focus_when_enabled_;
 
   // Instance of accessibility information and handling for MSAA root
-  ScopedComPtr<IAccessible> accessibility_root_;
+  base::win::ScopedComPtr<IAccessible> accessibility_root_;
 
   scoped_ptr<DefaultThemeProvider> default_theme_provider_;
 

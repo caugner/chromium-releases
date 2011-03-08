@@ -47,8 +47,8 @@ void TestVarDeprecated::RunTest() {
 }
 
 std::string TestVarDeprecated::TestBasicString() {
-  uint32_t before_object = testing_interface_->GetLiveObjectCount(
-      pp::Module::Get()->pp_module());
+  uint32_t before_object = testing_interface_->GetLiveObjectsForInstance(
+      instance_->pp_instance());
   {
     const uint32_t kStrLen = 5;
     const char kStr[kStrLen + 1] = "Hello";
@@ -70,10 +70,10 @@ std::string TestVarDeprecated::TestBasicString() {
   }
 
   // Make sure nothing leaked.
-  ASSERT_TRUE(testing_interface_->GetLiveObjectCount(
-      pp::Module::Get()->pp_module()) == before_object);
+  ASSERT_TRUE(testing_interface_->GetLiveObjectsForInstance(
+      instance_->pp_instance()) == before_object);
 
-  return std::string();
+  PASS();
 }
 
 std::string TestVarDeprecated::TestInvalidAndEmpty() {
@@ -101,7 +101,7 @@ std::string TestVarDeprecated::TestInvalidAndEmpty() {
   ASSERT_EQ(0, len);
   ASSERT_NE(NULL, result);
 
-  return std::string();
+  PASS();
 }
 
 std::string TestVarDeprecated::TestInvalidUtf8() {
@@ -111,7 +111,7 @@ std::string TestVarDeprecated::TestInvalidUtf8() {
   if (!sjis.is_null())
     return "Non-UTF8 string permitted.";
 
-  return "";
+  PASS();
 }
 
 std::string TestVarDeprecated::TestNullInputInUtf8Conversion() {
@@ -145,7 +145,7 @@ std::string TestVarDeprecated::TestNullInputInUtf8Conversion() {
     return "Expected NULL input to make an empty string Var.";
   }
 
-  return "";
+  PASS();
 }
 
 std::string TestVarDeprecated::TestValidUtf8() {
@@ -169,7 +169,7 @@ std::string TestVarDeprecated::TestValidUtf8() {
     return "String mismatches on conversion back from PP_Var.";
   }
 
-  return "";
+  PASS();
 }
 
 std::string TestVarDeprecated::TestUtf8WithEmbeddedNulls() {
@@ -193,7 +193,7 @@ std::string TestVarDeprecated::TestUtf8WithEmbeddedNulls() {
     return "String mismatches on conversion back from PP_Var.";
   }
 
-  return "";
+  PASS();
 }
 
 std::string TestVarDeprecated::TestVarToUtf8ForWrongType() {
@@ -247,12 +247,12 @@ std::string TestVarDeprecated::TestVarToUtf8ForWrongType() {
     return "Expected NULL on string conversion from Double var.";
   }
 
-  return "";
+  PASS();
 }
 
 std::string TestVarDeprecated::TestHasPropertyAndMethod() {
-  uint32_t before_objects = testing_interface_->GetLiveObjectCount(
-      pp::Module::Get()->pp_module());
+  uint32_t before_objects = testing_interface_->GetLiveObjectsForInstance(
+      instance_->pp_instance());
   {
     pp::Var window = instance_->GetWindowObject();
     ASSERT_TRUE(window.is_object());
@@ -321,9 +321,9 @@ std::string TestVarDeprecated::TestHasPropertyAndMethod() {
   }
 
   // Make sure nothing leaked.
-  ASSERT_TRUE(testing_interface_->GetLiveObjectCount(
-      pp::Module::Get()->pp_module()) == before_objects);
+  ASSERT_TRUE(testing_interface_->GetLiveObjectsForInstance(
+      instance_->pp_instance()) == before_objects);
 
-  return std::string();
+  PASS();
 }
 

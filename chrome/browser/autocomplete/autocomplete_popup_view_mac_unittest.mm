@@ -4,12 +4,12 @@
 
 #import "chrome/browser/autocomplete/autocomplete_popup_view_mac.h"
 
-#include "app/text_elider.h"
 #include "base/scoped_ptr.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "testing/platform_test.h"
+#include "ui/base/text/text_elider.h"
 
 namespace {
 
@@ -27,7 +27,7 @@ class AutocompletePopupViewMacTest : public PlatformTest {
     color_ = [NSColor blackColor];
     dimColor_ = [NSColor darkGrayColor];
     font_ = gfx::Font(
-        base::SysNSStringToWide([[NSFont userFontOfSize:12] fontName]), 12);
+        base::SysNSStringToUTF16([[NSFont userFontOfSize:12] fontName]), 12);
   }
 
   // Returns the length of the run starting at |location| for which
@@ -461,7 +461,7 @@ TEST_F(AutocompletePopupViewMacTest, ElideString) {
 
   // When elided, result is the same as ElideText().
   ret = AutocompletePopupViewMac::ElideString(as, wideContents, font_, kNarrow);
-  std::wstring elided(UTF16ToWideHack(ElideText(WideToUTF16Hack(
+  std::wstring elided(UTF16ToWideHack(ui::ElideText(WideToUTF16Hack(
       wideContents), font_, kNarrow, false)));
   EXPECT_TRUE(ret == as);
   EXPECT_FALSE([[as string] isEqualToString:contents]);
@@ -469,7 +469,7 @@ TEST_F(AutocompletePopupViewMacTest, ElideString) {
 
   // When elided, result is the same as ElideText().
   ret = AutocompletePopupViewMac::ElideString(as, wideContents, font_, 0.0);
-  elided = UTF16ToWideHack(ElideText(WideToUTF16Hack(wideContents), font_,
+  elided = UTF16ToWideHack(ui::ElideText(WideToUTF16Hack(wideContents), font_,
                                      0.0, false));
   EXPECT_TRUE(ret == as);
   EXPECT_FALSE([[as string] isEqualToString:contents]);

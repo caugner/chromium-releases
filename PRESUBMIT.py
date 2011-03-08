@@ -9,10 +9,11 @@ for more details about the presubmit API built into gcl.
 """
 
 _EXCLUDED_PATHS = (
-    r"breakpad[\\\/].*",
-    r"net/tools/spdyshark/[\\\/].*",
-    r"skia[\\\/].*",
-    r"v8[\\\/].*",
+    r"^breakpad[\\\/].*",
+    r"^net/tools/spdyshark/[\\\/].*",
+    r"^skia[\\\/].*",
+    r"^v8[\\\/].*",
+    r".*MakeFile$",
 )
 
 _TEXT_FILES = (
@@ -28,6 +29,86 @@ _LICENSE_HEADER = (
      r".*? found in the LICENSE file\."
        "\n"
 )
+
+def _CheckNoInterfacesInBase(input_api, output_api, source_file_filter):
+  """Checks to make sure no files in libbase.a have |@interface|."""
+  pattern = input_api.re.compile(r'@interface')
+  files = []
+  for f in input_api.AffectedSourceFiles(source_file_filter):
+    if (f.LocalPath().find('base/') != -1 and
+        f.LocalPath().find('base/test/') == -1):
+      contents = input_api.ReadFile(f)
+      if pattern.search(contents):
+        files.append(f)
+
+  if len(files):
+    return [ output_api.PresubmitError(
+        'Objective-C interfaces or categories are forbidden in libbase. ' +
+        'See http://groups.google.com/a/chromium.org/group/chromium-dev/' +
+        'browse_thread/thread/efb28c10435987fd',
+        files) ]
+  return []
+
+def _CheckSingletonInHeaders(input_api, output_api, source_file_filter):
+  """Checks to make sure no header files have |Singleton<|."""
+  pattern = input_api.re.compile(r'Singleton<')
+  files = []
+  for f in input_api.AffectedSourceFiles(source_file_filter):
+    if (f.LocalPath().endswith('.h') or f.LocalPath().endswith('.hxx') or
+        f.LocalPath().endswith('.hpp') or f.LocalPath().endswith('.inl')):
+      contents = input_api.ReadFile(f)
+      if pattern.search(contents):
+        files.append(f)
+
+  if len(files):
+    return [ output_api.PresubmitError(
+        'Found Singleton<T> in the following header files.\n' +
+        'Please move them to an appropriate source file so that the ' +
+        'template gets instantiated in a single compilation unit.',
+        files) ]
+  return []
+
+
+def _CheckSubversionConfig(input_api, output_api):
+  """Verifies the subversion config file is correctly setup.
+
+  Checks that autoprops are enabled, returns an error otherwise.
+  """
+  join = input_api.os_path.join
+  if input_api.platform == 'win32':
+    appdata = input_api.environ.get('APPDATA', '')
+    if not appdata:
+      return [output_api.PresubmitError('%APPDATA% is not configured.')]
+    path = join(appdata, 'Subversion', 'config')
+  else:
+    home = input_api.environ.get('HOME', '')
+    if not home:
+      return [output_api.PresubmitError('$HOME is not configured.')]
+    path = join(home, '.subversion', 'config')
+
+  error_msg = (
+      'Please look at http://dev.chromium.org/developers/coding-style to\n'
+      'configure your subversion configuration file. This enables automatic\n'
+      'properties to simplify the project maintenance.')
+
+  try:
+    lines = open(path, 'r').read().splitlines()
+    # Make sure auto-props is enabled and check for 2 Chromium standard
+    # auto-prop.
+    if (not '*.cc = svn:eol-style=LF' in lines or
+        not '*.pdf = svn:mime-type=application/pdf' in lines or
+        not 'enable-auto-props = yes' in lines):
+      return [
+          output_api.PresubmitError(
+              'It looks like you have not configured your subversion config '
+              'file.\n' + error_msg)
+      ]
+  except (OSError, IOError):
+    return [
+        output_api.PresubmitError(
+            'Can\'t find your subversion config file.\n' + error_msg)
+    ]
+  return []
 
 
 def _CheckConstNSObject(input_api, output_api, source_file_filter):
@@ -69,10 +150,6 @@ def _CommonChecks(input_api, output_api):
       input_api, output_api, source_file_filter=sources))
   results.extend(input_api.canned_checks.CheckChangeHasNoStrayWhitespace(
       input_api, output_api, source_file_filter=sources))
-  results.extend(input_api.canned_checks.CheckChangeHasBugField(
-      input_api, output_api))
-  results.extend(input_api.canned_checks.CheckChangeHasTestField(
-      input_api, output_api))
   results.extend(input_api.canned_checks.CheckChangeSvnEolStyle(
       input_api, output_api, source_file_filter=text_files))
   results.extend(input_api.canned_checks.CheckSvnForCommonMimeTypes(
@@ -80,6 +157,10 @@ def _CommonChecks(input_api, output_api):
   results.extend(input_api.canned_checks.CheckLicense(
       input_api, output_api, _LICENSE_HEADER, source_file_filter=sources))
   results.extend(_CheckConstNSObject(
+      input_api, output_api, source_file_filter=sources))
+  results.extend(_CheckSingletonInHeaders(
+      input_api, output_api, source_file_filter=sources))
+  results.extend(_CheckNoInterfacesInBase(
       input_api, output_api, source_file_filter=sources))
   return results
 
@@ -127,9 +208,14 @@ def CheckChangeOnCommit(input_api, output_api):
   results.extend(input_api.canned_checks.CheckBuildbotPendingBuilds(
       input_api,
       output_api,
-      'http://build.chromium.org/buildbot/waterfall/json/builders?filter=1',
+      'http://build.chromium.org/p/chromium/json/builders?filter=1',
       6,
       IGNORED_BUILDERS))
+  results.extend(input_api.canned_checks.CheckChangeHasBugField(
+      input_api, output_api))
+  results.extend(input_api.canned_checks.CheckChangeHasTestField(
+      input_api, output_api))
+  results.extend(_CheckSubversionConfig(input_api, output_api))
   return results
 
 

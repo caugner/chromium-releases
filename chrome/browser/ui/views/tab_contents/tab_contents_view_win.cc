@@ -1,13 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/tab_contents/tab_contents_view_win.h"
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_win.h"
 
 #include <windows.h>
 
+#include <vector>
+
 #include "base/time.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -17,10 +18,9 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/web_drop_target_win.h"
-#include "chrome/browser/ui/browser.h"  // TODO(beng): this dependency is awful.
-#include "chrome/browser/views/sad_tab_view.h"
-#include "chrome/browser/views/tab_contents/render_view_context_menu_views.h"
-#include "chrome/browser/views/tab_contents/tab_contents_drag_win.h"
+#include "chrome/browser/ui/views/sad_tab_view.h"
+#include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
+#include "chrome/browser/ui/views/tab_contents/tab_contents_drag_win.h"
 #include "gfx/canvas_skia_paint.h"
 #include "views/focus/view_storage.h"
 #include "views/screen.h"
@@ -42,7 +42,7 @@ TabContentsViewWin::TabContentsViewWin(TabContents* tab_contents)
       close_tab_after_drag_ends_(false),
       sad_tab_(NULL) {
   last_focused_view_storage_id_ =
-      views::ViewStorage::GetSharedInstance()->CreateStorageID();
+      views::ViewStorage::GetInstance()->CreateStorageID();
 }
 
 TabContentsViewWin::~TabContentsViewWin() {
@@ -50,7 +50,7 @@ TabContentsViewWin::~TabContentsViewWin() {
   //
   // It is possible the view went away before us, so we only do this if the
   // view is registered.
-  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
   if (view_storage->RetrieveView(last_focused_view_storage_id_) != NULL)
     view_storage->RemoveView(last_focused_view_storage_id_);
 }
@@ -156,7 +156,8 @@ void TabContentsViewWin::SetPageTitle(const std::wstring& title) {
   }
 }
 
-void TabContentsViewWin::OnTabCrashed() {
+void TabContentsViewWin::OnTabCrashed(base::TerminationStatus /* status */,
+                                      int /* error_code */) {
   // Force an invalidation to render sad tab. We will notice we crashed when we
   // paint.
   // Note that it's possible to get this message after the window was destroyed.
@@ -183,9 +184,6 @@ void TabContentsViewWin::SizeContents(const gfx::Size& size) {
 }
 
 void TabContentsViewWin::Focus() {
-  views::FocusManager* focus_manager =
-      views::FocusManager::GetFocusManagerForNativeView(GetNativeView());
-
   if (tab_contents()->interstitial_page()) {
     tab_contents()->interstitial_page()->Focus();
     return;
@@ -214,7 +212,7 @@ void TabContentsViewWin::SetInitialFocus() {
 }
 
 void TabContentsViewWin::StoreFocus() {
-  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
 
   if (view_storage->RetrieveView(last_focused_view_storage_id_) != NULL)
     view_storage->RemoveView(last_focused_view_storage_id_);
@@ -244,7 +242,7 @@ void TabContentsViewWin::StoreFocus() {
 }
 
 void TabContentsViewWin::RestoreFocus() {
-  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
   views::View* last_focused_view =
       view_storage->RetrieveView(last_focused_view_storage_id_);
 
@@ -283,6 +281,10 @@ void TabContentsViewWin::CancelDragAndCloseTab() {
   // the drag and when the drag nested message loop ends, close the tab.
   drag_handler_->CancelDrag();
   close_tab_after_drag_ends_ = true;
+}
+
+void TabContentsViewWin::GetViewBounds(gfx::Rect* out) const {
+  GetBounds(out, true);
 }
 
 void TabContentsViewWin::UpdateDragCursor(WebDragOperation operation) {
@@ -402,7 +404,12 @@ void TabContentsViewWin::OnPaint(HDC junk_dc) {
   if (tab_contents()->render_view_host() &&
       !tab_contents()->render_view_host()->IsRenderViewLive()) {
     if (sad_tab_ == NULL) {
-      sad_tab_ = new SadTabView(tab_contents());
+      base::TerminationStatus status =
+          tab_contents()->render_view_host()->render_view_termination_status();
+      SadTabView::Kind kind =
+          status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED ?
+          SadTabView::KILLED : SadTabView::CRASHED;
+      sad_tab_ = new SadTabView(tab_contents(), kind);
       SetContentsView(sad_tab_);
     }
     CRect cr;

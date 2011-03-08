@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,6 +6,22 @@
   'variables': {
     'chromium_code': 1,
   },
+
+  'conditions': [
+    [ 'OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
+      'conditions': [
+        ['sysroot!=""', {
+          'variables': {
+            'pkg-config': './pkg-config-wrapper "<(sysroot)"',
+          },
+        }, {
+          'variables': {
+            'pkg-config': 'pkg-config'
+          },
+        }],]
+    }],
+  ],
+
   'target_defaults': {
     'sources/': [
       ['exclude', '/(cocoa|gtk|win)/'],
@@ -33,6 +49,8 @@
       ]}],
       ['touchui==0', {'sources/': [
         ['exclude', 'event_x.cc$'],
+        ['exclude', 'native_menu_x.cc$'],
+        ['exclude', 'native_menu_x.h$'],
         ['exclude', 'touchui/'],
         ['exclude', '_(touch)\\.cc$'],
       ]}],
@@ -64,8 +82,6 @@
         'background.h',
         'border.cc',
         'border.h',
-        'box_layout.h',
-        'box_layout.cc',
         'controls/button/button.cc',
         'controls/button/button.h',
         'controls/button/button_dropdown.cc',
@@ -146,6 +162,8 @@
         'controls/menu/native_menu_gtk.h',
         'controls/menu/native_menu_win.cc',
         'controls/menu/native_menu_win.h',
+        'controls/menu/native_menu_x.cc',
+        'controls/menu/native_menu_x.h',
         'controls/menu/nested_dispatcher_gtk.cc',
         'controls/menu/nested_dispatcher_gtk.h',
         'controls/menu/radio_button_image_gtk.cc',
@@ -167,6 +185,8 @@
         'controls/native/native_view_host_gtk.h',
         'controls/native/native_view_host_win.cc',
         'controls/native/native_view_host_win.h',
+        'controls/native/native_view_host_views.cc',
+        'controls/native/native_view_host_views.h',
         'controls/native/native_view_host_wrapper.h',
         'controls/progress_bar.h',
         'controls/progress_bar.cc',
@@ -219,11 +239,15 @@
         'controls/textfield/gtk_views_textview.h',
         'controls/textfield/textfield.cc',
         'controls/textfield/textfield.h',
+        'controls/textfield/textfield_views_model.cc',
+        'controls/textfield/textfield_views_model.h',
         'controls/textfield/native_textfield_gtk.cc',
         'controls/textfield/native_textfield_gtk.h',
         'controls/textfield/native_textfield_win.cc',
         'controls/textfield/native_textfield_win.h',
         'controls/textfield/native_textfield_wrapper.h',
+        'controls/textfield/native_textfield_views.cc',
+        'controls/textfield/native_textfield_views.h',
         'controls/throbber.cc',
         'controls/throbber.h',
         'controls/tree/tree_view.cc',
@@ -259,6 +283,8 @@
         'grid_layout.h',
         'layout_manager.cc',
         'layout_manager.h',
+        'layout/box_layout.cc',
+        'layout/box_layout.h',
         'mouse_watcher.cc',
         'mouse_watcher.h',
         'painter.cc',
@@ -271,6 +297,8 @@
         'standard_layout.h',
         'touchui/gesture_manager.cc',
         'touchui/gesture_manager.h',
+        'touchui/touch_factory.cc',
+        'touchui/touch_factory.h',
         'view.cc',
         'view.h',
         'view_constants.cc',
@@ -380,6 +408,16 @@
           'defines': ['TOUCH_UI=1'],
           'sources/': [
             ['exclude', 'focus/accelerator_handler_gtk.cc'],
+            ['exclude', 'controls/menu/native_menu_gtk.cc'],
+          ],
+          'conditions': [
+            ['"<!@(<(pkg-config) --atleast-version=2.0 inputproto || echo $?)"!=""', {
+              # Exclude TouchFactory if XInput2 is not available.
+              'sources/': [
+                ['exclude', 'touchui/touch_factory.cc'],
+                ['exclude', 'touchui/touch_factory.h'],
+              ],
+            }],
           ],
         }],
         ['OS=="win"', {
@@ -414,16 +452,22 @@
       ],
       'sources': [
         'animation/bounds_animator_unittest.cc',
-        'box_layout_unittest.cc',
         'controls/label_unittest.cc',
         'controls/progress_bar_unittest.cc',
+        'controls/single_split_view_unittest.cc',
         'controls/tabbed_pane/tabbed_pane_unittest.cc',
         'controls/table/table_view_unittest.cc',
+        'controls/textfield/native_textfield_views_unittest.cc',
+        'controls/textfield/textfield_views_model_unittest.cc',
         'focus/accelerator_handler_gtk_unittest.cc',
         'focus/focus_manager_unittest.cc',
         'grid_layout_unittest.cc',
+        'layout/box_layout_unittest.cc',
+        'test/views_test_base.h',
         'run_all_unittests.cc',
+        'test/test_views_delegate.h',
         'view_unittest.cc',
+        'widget/widget_win_unittest.cc',
 
         '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
       ],
@@ -485,9 +529,13 @@
         'examples/menu_example.h',
         'examples/radio_button_example.h',
         'examples/scroll_view_example.h',
+        'examples/single_split_view_example.cc',
         'examples/single_split_view_example.h',
         'examples/slider_example.h',
+        'examples/tabbed_pane_example.cc',
         'examples/tabbed_pane_example.h',
+	'examples/table2_example.cc',
+	'examples/table2_example.h',
         'examples/textfield_example.h',
         'examples/throbber_example.cc',
         'examples/throbber_example.h',

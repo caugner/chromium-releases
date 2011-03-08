@@ -3,12 +3,12 @@
 	<data>
 		<int key="IBDocument.SystemTarget">1050</int>
 		<string key="IBDocument.SystemVersion">10F569</string>
-		<string key="IBDocument.InterfaceBuilderVersion">762</string>
+		<string key="IBDocument.InterfaceBuilderVersion">804</string>
 		<string key="IBDocument.AppKitVersion">1038.29</string>
 		<string key="IBDocument.HIToolboxVersion">461.00</string>
 		<object class="NSMutableDictionary" key="IBDocument.PluginVersions">
 			<string key="NS.key.0">com.apple.InterfaceBuilder.CocoaPlugin</string>
-			<string key="NS.object.0">762</string>
+			<string key="NS.object.0">804</string>
 		</object>
 		<object class="NSMutableArray" key="IBDocument.EditedObjectIDs">
 			<bool key="EncodedWithXMLCoder">YES</bool>
@@ -1219,7 +1219,7 @@
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
-					<string>{{321, 437}, {608, 34}}</string>
+					<string>{{357, 437}, {608, 34}}</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 					<boolean value="YES"/>
 					<string>ClickHoldButtonCell</string>
@@ -1257,7 +1257,7 @@
 					<string>WrenchMenuButtonCell</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
-					<string>DelayedMenuButton</string>
+					<string>MenuButton</string>
 					<object class="NSMutableDictionary">
 						<string key="NS.key.0">ToolTip</string>
 						<object class="IBToolTipAttribute" key="NS.object.0">
@@ -1304,7 +1304,7 @@
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
 					<string>AutocompleteTextField</string>
 					<string>com.apple.InterfaceBuilder.CocoaPlugin</string>
-					<string>DelayedMenuButton</string>
+					<string>MenuButton</string>
 					<object class="NSMutableDictionary">
 						<string key="NS.key.0">ToolTip</string>
 						<object class="IBToolTipAttribute" key="NS.object.0">
@@ -1353,7 +1353,7 @@
 					<string key="superclassName">StyledTextField</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/location_bar/autocomplete_text_field.h</string>
+						<string key="minorKey">browser/ui/cocoa/location_bar/autocomplete_text_field.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1361,7 +1361,7 @@
 					<string key="superclassName">StyledTextFieldCell</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/location_bar/autocomplete_text_field_cell.h</string>
+						<string key="minorKey">browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1369,7 +1369,7 @@
 					<string key="superclassName">NSView</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/background_gradient_view.h</string>
+						<string key="minorKey">browser/ui/cocoa/background_gradient_view.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1377,7 +1377,7 @@
 					<string key="superclassName">NSView</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/extensions/browser_actions_container_view.h</string>
+						<string key="minorKey">browser/ui/cocoa/extensions/browser_actions_container_view.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1385,7 +1385,7 @@
 					<string key="superclassName">GTMUILocalizer</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/ui_localizer.h</string>
+						<string key="minorKey">browser/ui/cocoa/ui_localizer.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1395,17 +1395,16 @@
 						<string key="NS.key.0">clickHoldTarget_</string>
 						<string key="NS.object.0">id</string>
 					</object>
-					<object class="IBClassDescriptionSource" key="sourceIdentifier">
-						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/clickhold_button_cell.h</string>
+					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
+						<string key="NS.key.0">clickHoldTarget_</string>
+						<object class="IBToOneOutletInfo" key="NS.object.0">
+							<string key="name">clickHoldTarget_</string>
+							<string key="candidateClassName">id</string>
+						</object>
 					</object>
-				</object>
-				<object class="IBPartialClassDescription">
-					<string key="className">DelayedMenuButton</string>
-					<string key="superclassName">NSButton</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/delayedmenu_button.h</string>
+						<string key="minorKey">browser/ui/cocoa/clickhold_button_cell.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1422,6 +1421,25 @@
 							<bool key="EncodedWithXMLCoder">YES</bool>
 							<string>id</string>
 							<string>id</string>
+						</object>
+					</object>
+					<object class="NSMutableDictionary" key="actionInfosByName">
+						<bool key="EncodedWithXMLCoder">YES</bool>
+						<object class="NSArray" key="dict.sortedKeys">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<string>commandDispatch:</string>
+							<string>commandDispatchUsingKeyModifiers:</string>
+						</object>
+						<object class="NSMutableArray" key="dict.values">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<object class="IBActionInfo">
+								<string key="name">commandDispatch:</string>
+								<string key="candidateClassName">id</string>
+							</object>
+							<object class="IBActionInfo">
+								<string key="name">commandDispatchUsingKeyModifiers:</string>
+								<string key="candidateClassName">id</string>
+							</object>
 						</object>
 					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
@@ -1447,6 +1465,30 @@
 							<string>id</string>
 						</object>
 					</object>
+					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
+						<bool key="EncodedWithXMLCoder">YES</bool>
+						<object class="NSArray" key="dict.sortedKeys">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<string>otherObjectToLocalize_</string>
+							<string>owner_</string>
+							<string>yetAnotherObjectToLocalize_</string>
+						</object>
+						<object class="NSMutableArray" key="dict.values">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<object class="IBToOneOutletInfo">
+								<string key="name">otherObjectToLocalize_</string>
+								<string key="candidateClassName">id</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">owner_</string>
+								<string key="candidateClassName">id</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">yetAnotherObjectToLocalize_</string>
+								<string key="candidateClassName">id</string>
+							</object>
+						</object>
+					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
 						<string key="minorKey">../third_party/GTM/AppKit/GTMUILocalizer.h</string>
@@ -1470,6 +1512,30 @@
 							<string>NSView</string>
 						</object>
 					</object>
+					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
+						<bool key="EncodedWithXMLCoder">YES</bool>
+						<object class="NSArray" key="dict.sortedKeys">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<string>viewToResize_</string>
+							<string>viewToSlideAndResize_</string>
+							<string>viewToSlide_</string>
+						</object>
+						<object class="NSMutableArray" key="dict.values">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<object class="IBToOneOutletInfo">
+								<string key="name">viewToResize_</string>
+								<string key="candidateClassName">id</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">viewToSlideAndResize_</string>
+								<string key="candidateClassName">NSView</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">viewToSlide_</string>
+								<string key="candidateClassName">NSView</string>
+							</object>
+						</object>
+					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
 						<string key="minorKey">../third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h</string>
@@ -1480,19 +1546,26 @@
 					<string key="superclassName">NSButtonCell</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/gradient_button_cell.h</string>
+						<string key="minorKey">browser/ui/cocoa/gradient_button_cell.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
 					<string key="className">MenuButton</string>
 					<string key="superclassName">NSButton</string>
 					<object class="NSMutableDictionary" key="outlets">
-						<string key="NS.key.0">attachedMenu_</string>
+						<string key="NS.key.0">attachedMenu</string>
 						<string key="NS.object.0">NSMenu</string>
+					</object>
+					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
+						<string key="NS.key.0">attachedMenu</string>
+						<object class="IBToOneOutletInfo" key="NS.object.0">
+							<string key="name">attachedMenu</string>
+							<string key="candidateClassName">NSMenu</string>
+						</object>
 					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/menu_button.h</string>
+						<string key="minorKey">browser/ui/cocoa/menu_button.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1500,7 +1573,7 @@
 					<string key="superclassName">NSObject</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/menu_controller.h</string>
+						<string key="minorKey">browser/ui/cocoa/menu_controller.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1508,7 +1581,7 @@
 					<string key="superclassName">NSButton</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/menu_tracked_button.h</string>
+						<string key="minorKey">browser/ui/cocoa/menu_tracked_button.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1516,7 +1589,7 @@
 					<string key="superclassName">NSView</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/menu_tracked_root_view.h</string>
+						<string key="minorKey">browser/ui/cocoa/menu_tracked_root_view.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1530,28 +1603,28 @@
 					<string key="className">NSObject</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/objc_zombie.h</string>
+						<string key="minorKey">browser/ui/cocoa/objc_zombie.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
 					<string key="className">NSObject</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/status_bubble_mac.h</string>
+						<string key="minorKey">browser/ui/cocoa/status_bubble_mac.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
 					<string key="className">NSObject</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/tab_strip_model_observer_bridge.h</string>
+						<string key="minorKey">browser/ui/cocoa/tab_strip_model_observer_bridge.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
 					<string key="className">NSView</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/view_id_util.h</string>
+						<string key="minorKey">browser/ui/cocoa/view_id_util.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1559,7 +1632,7 @@
 					<string key="superclassName">NSButton</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/reload_button.h</string>
+						<string key="minorKey">browser/ui/cocoa/reload_button.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1567,7 +1640,7 @@
 					<string key="superclassName">NSTextField</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/styled_text_field.h</string>
+						<string key="minorKey">browser/ui/cocoa/styled_text_field.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1575,7 +1648,7 @@
 					<string key="superclassName">NSTextFieldCell</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/styled_text_field_cell.h</string>
+						<string key="minorKey">browser/ui/cocoa/styled_text_field_cell.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1597,9 +1670,9 @@
 						</object>
 						<object class="NSMutableArray" key="dict.values">
 							<bool key="EncodedWithXMLCoder">YES</bool>
-							<string>DelayedMenuButton</string>
+							<string>MenuButton</string>
 							<string>BrowserActionsContainerView</string>
-							<string>DelayedMenuButton</string>
+							<string>MenuButton</string>
 							<string>NSButton</string>
 							<string>AutocompleteTextField</string>
 							<string>ReloadButton</string>
@@ -1608,9 +1681,63 @@
 							<string>WrenchMenuController</string>
 						</object>
 					</object>
+					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
+						<bool key="EncodedWithXMLCoder">YES</bool>
+						<object class="NSArray" key="dict.sortedKeys">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<string>backButton_</string>
+							<string>browserActionsContainerView_</string>
+							<string>forwardButton_</string>
+							<string>homeButton_</string>
+							<string>locationBar_</string>
+							<string>reloadButton_</string>
+							<string>resizeDelegate_</string>
+							<string>wrenchButton_</string>
+							<string>wrenchMenuController_</string>
+						</object>
+						<object class="NSMutableArray" key="dict.values">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<object class="IBToOneOutletInfo">
+								<string key="name">backButton_</string>
+								<string key="candidateClassName">MenuButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">browserActionsContainerView_</string>
+								<string key="candidateClassName">BrowserActionsContainerView</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">forwardButton_</string>
+								<string key="candidateClassName">MenuButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">homeButton_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">locationBar_</string>
+								<string key="candidateClassName">AutocompleteTextField</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">reloadButton_</string>
+								<string key="candidateClassName">ReloadButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">resizeDelegate_</string>
+								<string key="candidateClassName">id</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">wrenchButton_</string>
+								<string key="candidateClassName">MenuButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">wrenchMenuController_</string>
+								<string key="candidateClassName">WrenchMenuController</string>
+							</object>
+						</object>
+					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/toolbar_controller.h</string>
+						<string key="minorKey">browser/ui/cocoa/toolbar_controller.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1618,7 +1745,7 @@
 					<string key="superclassName">BackgroundGradientView</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/toolbar_view.h</string>
+						<string key="minorKey">browser/ui/cocoa/toolbar_view.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1634,7 +1761,7 @@
 					<string key="superclassName">NSButtonCell</string>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/wrench_menu_button_cell.h</string>
+						<string key="minorKey">browser/ui/cocoa/wrench_menu_button_cell.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
@@ -1643,6 +1770,13 @@
 					<object class="NSMutableDictionary" key="actions">
 						<string key="NS.key.0">dispatchWrenchMenuCommand:</string>
 						<string key="NS.object.0">id</string>
+					</object>
+					<object class="NSMutableDictionary" key="actionInfosByName">
+						<string key="NS.key.0">dispatchWrenchMenuCommand:</string>
+						<object class="IBActionInfo" key="NS.object.0">
+							<string key="name">dispatchWrenchMenuCommand:</string>
+							<string key="candidateClassName">id</string>
+						</object>
 					</object>
 					<object class="NSMutableDictionary" key="outlets">
 						<bool key="EncodedWithXMLCoder">YES</bool>
@@ -1671,9 +1805,63 @@
 							<string>NSButton</string>
 						</object>
 					</object>
+					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
+						<bool key="EncodedWithXMLCoder">YES</bool>
+						<object class="NSArray" key="dict.sortedKeys">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<string>editCopy_</string>
+							<string>editCut_</string>
+							<string>editItem_</string>
+							<string>editPaste_</string>
+							<string>zoomDisplay_</string>
+							<string>zoomFullScreen_</string>
+							<string>zoomItem_</string>
+							<string>zoomMinus_</string>
+							<string>zoomPlus_</string>
+						</object>
+						<object class="NSMutableArray" key="dict.values">
+							<bool key="EncodedWithXMLCoder">YES</bool>
+							<object class="IBToOneOutletInfo">
+								<string key="name">editCopy_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">editCut_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">editItem_</string>
+								<string key="candidateClassName">MenuTrackedRootView</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">editPaste_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">zoomDisplay_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">zoomFullScreen_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">zoomItem_</string>
+								<string key="candidateClassName">MenuTrackedRootView</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">zoomMinus_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">zoomPlus_</string>
+								<string key="candidateClassName">NSButton</string>
+							</object>
+						</object>
+					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/cocoa/wrench_menu_controller.h</string>
+						<string key="minorKey">browser/ui/cocoa/wrench_menu_controller.h</string>
 					</object>
 				</object>
 			</object>
@@ -2346,6 +2534,13 @@
 					<object class="NSMutableDictionary" key="outlets">
 						<string key="NS.key.0">view</string>
 						<string key="NS.object.0">NSView</string>
+					</object>
+					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
+						<string key="NS.key.0">view</string>
+						<object class="IBToOneOutletInfo" key="NS.object.0">
+							<string key="name">view</string>
+							<string key="candidateClassName">NSView</string>
+						</object>
 					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBFrameworkSource</string>

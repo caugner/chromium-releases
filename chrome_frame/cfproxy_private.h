@@ -10,8 +10,9 @@
 #include <set>
 #include <string>
 #include <vector>
+
 #include "chrome_frame/cfproxy.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 // Since we can't forward declare IPC::Message::Sender or IPC::Channel::Listener
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_channel.h"
@@ -55,7 +56,7 @@ class SyncMsgSender {
   SingleSentMessage* RemoveMessage(int id);
   typedef std::map<int, SingleSentMessage*> SentMessages;
   SentMessages messages_;
-  Lock messages_lock_;
+  base::Lock messages_lock_;
   TabsMap* tab2delegate_;
 };
 
@@ -155,7 +156,7 @@ class CFProxy : public Interface2IPCMessage,
   virtual void Tab_OverrideEncoding(int tab, const char* encoding);
   virtual void Tab_Navigate(int tab, const GURL& url, const GURL& referrer);
   virtual void CreateTab(ChromeProxyDelegate* delegate,
-                         const IPC::ExternalTabSettings& p);
+                         const ExternalTabSettings& p);
   virtual void ConnectTab(ChromeProxyDelegate* delegate, HWND hwnd,
                           uint64 cookie);
   virtual void BlockTab(uint64 cookie);
@@ -163,12 +164,12 @@ class CFProxy : public Interface2IPCMessage,
 
   //////////////////////////////////////////////////////////////////////////
   // IPC::Channel::Listener
-  virtual void OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message);
   virtual void OnChannelConnected(int32 peer_pid);
   virtual void OnChannelError();
 
   bool CalledOnIpcThread() const {
-    return PlatformThread::CurrentId() == ipc_thread_.thread_id();
+    return base::PlatformThread::CurrentId() == ipc_thread_.thread_id();
   }
 
   base::Thread ipc_thread_;
@@ -183,9 +184,6 @@ DISABLE_RUNNABLE_METHOD_REFCOUNT(CFProxy);
 
 // Support functions.
 std::string GenerateChannelId();
-int IsTabMessage(const IPC::Message& message);
-bool DispatchTabMessageToDelegate(ChromeProxyDelegate* delegate,
-                                  const IPC::Message& m);
 std::wstring BuildCmdLine(const std::string& channel_id,
                           const FilePath& profile_path,
                           const std::wstring& extra_args);

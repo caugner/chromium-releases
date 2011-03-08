@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,14 +17,10 @@
 #include "base/file_util.h"
 #include "base/process_util.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/net_util.h"
 
 #if defined(OS_WIN)
-#include "base/scoped_handle_win.h"
-#endif
-
-#if defined(USE_NSS)
-#include "base/ref_counted.h"
-#include "net/base/x509_certificate.h"
+#include "base/win/scoped_handle.h"
 #endif
 
 class CommandLine;
@@ -39,6 +35,8 @@ class AddressList;
 // that can provide various responses useful for testing.
 class TestServer {
  public:
+  typedef std::pair<std::string, std::string> StringPair;
+
   enum Type {
     TYPE_FTP,
     TYPE_HTTP,
@@ -130,7 +128,6 @@ class TestServer {
                                  const std::string& user,
                                  const std::string& password) const;
 
-  typedef std::pair<std::string, std::string> StringPair;
   static bool GetFilePathWithReplacements(
       const std::string& original_path,
       const std::vector<StringPair>& text_to_replace,
@@ -155,9 +152,6 @@ class TestServer {
   // Returns path to the root certificate.
   FilePath GetRootCertificatePath();
 
-  // Returns false if our test root certificate is not trusted.
-  bool CheckCATrusted() WARN_UNUSED_RESULT;
-
   // Load the test root cert, if it hasn't been loaded yet.
   bool LoadTestRootCert() WARN_UNUSED_RESULT;
 
@@ -180,15 +174,17 @@ class TestServer {
   // Handle of the Python process running the test server.
   base::ProcessHandle process_handle_;
 
+  scoped_ptr<net::ScopedPortException> allowed_port_;
+
 #if defined(OS_WIN)
   // JobObject used to clean up orphaned child processes.
-  ScopedHandle job_handle_;
+  base::win::ScopedHandle job_handle_;
 
   // The pipe file handle we read from.
-  ScopedHandle child_read_fd_;
+  base::win::ScopedHandle child_read_fd_;
 
   // The pipe file handle the child and we write to.
-  ScopedHandle child_write_fd_;
+  base::win::ScopedHandle child_write_fd_;
 #endif
 
 #if defined(OS_POSIX)
@@ -199,10 +195,6 @@ class TestServer {
 
   // If |type_| is TYPE_HTTPS, the TLS settings to use for the test server.
   HTTPSOptions https_options_;
-
-#if defined(USE_NSS)
-  scoped_refptr<X509Certificate> cert_;
-#endif
 
   Type type_;
 

@@ -7,7 +7,8 @@
     # TODO: remove this helper when we have loops in GYP
     'apply_locales_cmd': ['python', '<(DEPTH)/build/apply_locales.py',],
     'chromium_code': 1,
-    'grit_info_cmd': ['python', '../tools/grit/grit_info.py',],
+    'grit_info_cmd': ['python', '../tools/grit/grit_info.py',
+                      '<@(grit_defines)'],
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/app',
     'grit_cmd': ['python', '../tools/grit/grit.py'],
     'localizable_resources': [
@@ -33,31 +34,32 @@
         '../testing/gtest.gyp:gtest',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
-        '../third_party/libjpeg/libjpeg.gyp:libjpeg',
         '../third_party/libpng/libpng.gyp:libpng',
         '../third_party/zlib/zlib.gyp:zlib',
+        '<(libjpeg_gyp_path):libjpeg',
       ],
       'sources': [
-        'animation_container_unittest.cc',
-        'animation_unittest.cc',
-        'clipboard/clipboard_unittest.cc',
-        'l10n_util_mac_unittest.mm',
-        'l10n_util_unittest.cc',
-        'multi_animation_unittest.cc',
-        'os_exchange_data_win_unittest.cc',
+        '../ui/base/animation/animation_container_unittest.cc',
+        '../ui/base/animation/animation_unittest.cc',
+        '../ui/base/animation/multi_animation_unittest.cc',
+        '../ui/base/animation/slide_animation_unittest.cc',
+        '../ui/base/clipboard/clipboard_unittest.cc',
+        '../ui/base/dragdrop/os_exchange_data_win_unittest.cc',
+        '../ui/base/l10n/l10n_util_mac_unittest.mm',
+        '../ui/base/l10n/l10n_util_unittest.cc',
+        '../ui/base/models/tree_node_iterator_unittest.cc',
+        '../ui/base/models/tree_node_model_unittest.cc',
+        '../ui/base/resource/data_pack_unittest.cc',
+        '../ui/base/system_monitor/system_monitor_unittest.cc',
+        '../ui/base/test/data/resource.h',
+        '../ui/base/text/text_elider_unittest.cc',
+        '../ui/base/view_prop_unittest.cc',
         'run_all_unittests.cc',
-        'slide_animation_unittest.cc',
         'sql/connection_unittest.cc',
         'sql/statement_unittest.cc',
         'sql/transaction_unittest.cc',
-        'system_monitor_unittest.cc',
         'test_suite.h',
-        'test/data/resource.h',
-        'text_elider_unittest.cc',
-        'tree_node_iterator_unittest.cc',
-        'tree_node_model_unittest.cc',
-        'view_prop_unittest.cc',
-        'win_util_unittest.cc',
+        'win/win_util_unittest.cc',
       ],
       'include_dirs': [
         '..',
@@ -65,7 +67,7 @@
       'conditions': [
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'sources': [
-            'gtk_dnd_util_unittest.cc',
+            '../ui/base/dragdrop/gtk_dnd_util_unittest.cc',
           ],
           'dependencies': [
             'app_unittest_strings',
@@ -75,8 +77,8 @@
         }],
         ['OS!="win"', {
           'sources!': [
-            'os_exchange_data_win_unittest.cc',
-            'view_prop_unittest.cc',
+            '../ui/base/dragdrop/os_exchange_data_win_unittest.cc',
+            '../ui/base/view_prop_unittest.cc',
             'win_util_unittest.cc',
           ],
         }],
@@ -108,16 +110,9 @@
             '>!@(<(apply_locales_cmd) \'<(grit_out_dir)/<(RULE_INPUT_ROOT)/<(RULE_INPUT_ROOT)_ZZLOCALE.pak\' <(locales))',
           ],
           'action': ['<@(grit_cmd)', '-i', '<(RULE_INPUT_PATH)',
-            'build', '-o', '<(grit_out_dir)/<(RULE_INPUT_ROOT)'],
+            'build', '-o', '<(grit_out_dir)/<(RULE_INPUT_ROOT)',
+            '<@(grit_defines)'],
           'message': 'Generating resources from <(RULE_INPUT_PATH)',
-          'conditions': [
-            ['use_titlecase_in_grd_files==1', {
-              'action': ['-D', 'use_titlecase'],
-            }],
-            ['chromeos==1', {
-              'action': ['-D', 'chromeos'],
-            }],
-          ],
         },
       ],
       'sources': [
@@ -153,12 +148,8 @@
           ],
           'action': ['<@(grit_cmd)',
                      '-i', '<(input_path)', 'build',
-                     '-o', '<(grit_out_dir)/app_resources'],
-          'conditions': [
-            ['toolkit_views==1', {
-              'action': ['-D', 'toolkit_views'],
-            }],
-          ],
+                     '-o', '<(grit_out_dir)/app_resources',
+                     '<@(grit_defines)' ],
           'message': 'Generating resources from <(input_path)',
         },
       ],

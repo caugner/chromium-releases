@@ -18,23 +18,23 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_util.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebAnimationController.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDeviceOrientation.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebGeolocationServiceMock.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSettings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputControllerMock.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAnimationController.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDeviceOrientation.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClientMock.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSettings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechInputControllerMock.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/dom_operations.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
@@ -52,7 +52,6 @@ using std::wstring;
 using WebKit::WebBindings;
 using WebKit::WebConsoleMessage;
 using WebKit::WebElement;
-using WebKit::WebGeolocationServiceMock;
 using WebKit::WebScriptSource;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebSize;
@@ -1174,12 +1173,12 @@ int32 LayoutTestController::CppVariantToInt32(const CppVariant& value) {
   return 0;
 }
 
-std::wstring LayoutTestController::CppVariantToWstring(
+string16 LayoutTestController::CppVariantToString16(
     const CppVariant& value) {
   if (value.isString())
-    return UTF8ToWide(value.ToString());
+    return UTF8ToUTF16(value.ToString());
   LogErrorToConsole("Invalid value for preference. Expected string value.");
-  return std::wstring();
+  return string16();
 }
 
 void LayoutTestController::overridePreference(
@@ -1189,17 +1188,17 @@ void LayoutTestController::overridePreference(
     CppVariant value = args[1];
     WebPreferences* preferences = shell_->GetWebPreferences();
     if (key == "WebKitStandardFont")
-      preferences->standard_font_family = CppVariantToWstring(value);
+      preferences->standard_font_family = CppVariantToString16(value);
     else if (key == "WebKitFixedFont")
-      preferences->fixed_font_family = CppVariantToWstring(value);
+      preferences->fixed_font_family = CppVariantToString16(value);
     else if (key == "WebKitSerifFont")
-      preferences->serif_font_family = CppVariantToWstring(value);
+      preferences->serif_font_family = CppVariantToString16(value);
     else if (key == "WebKitSansSerifFont")
-      preferences->sans_serif_font_family = CppVariantToWstring(value);
+      preferences->sans_serif_font_family = CppVariantToString16(value);
     else if (key == "WebKitCursiveFont")
-      preferences->cursive_font_family = CppVariantToWstring(value);
+      preferences->cursive_font_family = CppVariantToString16(value);
     else if (key == "WebKitFantasyFont")
-      preferences->fantasy_font_family = CppVariantToWstring(value);
+      preferences->fantasy_font_family = CppVariantToString16(value);
     else if (key == "WebKitDefaultFontSize")
       preferences->default_font_size = CppVariantToInt32(value);
     else if (key == "WebKitDefaultFixedFontSize")
@@ -1334,12 +1333,12 @@ void LayoutTestController::counterValueForElementById(
   result->SetNull();
   if (args.size() < 1 || !args[0].isString())
     return;
-  std::wstring counterValue;
+  string16 counterValue;
   if (!webkit_glue::CounterValueForElementById(shell_->webView()->mainFrame(),
                                                args[0].ToString(),
                                                &counterValue))
     return;
-  result->Set(WideToUTF8(counterValue));
+  result->Set(UTF16ToUTF8(counterValue));
 }
 
 static bool ParsePageSizeParameters(const CppArgumentList& args,
@@ -1493,7 +1492,8 @@ void LayoutTestController::setGeolocationPermission(const CppArgumentList& args,
                                                     CppVariant* result) {
   if (args.size() < 1 || !args[0].isBool())
     return;
-  shell_->delegate()->SetGeolocationPermission(args[0].ToBoolean());
+  shell_->geolocation_client_mock()->setPermission(
+      args[0].ToBoolean());
 }
 
 void LayoutTestController::setMockGeolocationPosition(
@@ -1501,7 +1501,7 @@ void LayoutTestController::setMockGeolocationPosition(
   if (args.size() < 3 ||
       !args[0].isNumber() || !args[1].isNumber() || !args[2].isNumber())
     return;
-  WebGeolocationServiceMock::setMockGeolocationPosition(
+  shell_->geolocation_client_mock()->setPosition(
       args[0].ToDouble(), args[1].ToDouble(), args[2].ToDouble());
 }
 
@@ -1509,7 +1509,7 @@ void LayoutTestController::setMockGeolocationError(const CppArgumentList& args,
                                                    CppVariant* result) {
   if (args.size() < 2 || !args[0].isNumber() || !args[1].isString())
     return;
-  WebGeolocationServiceMock::setMockGeolocationError(
+  shell_->geolocation_client_mock()->setError(
       args[0].ToInt32(), WebString::fromUTF8(args[1].ToString()));
 }
 

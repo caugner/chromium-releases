@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,25 +32,29 @@ struct FetchResult {
 };
 
 // A non-mock URL request which can access http:// and file:// urls.
-class RequestContext : public URLRequestContext {
+class RequestContext : public net::URLRequestContext {
  public:
   RequestContext() {
     net::ProxyConfig no_proxy;
     host_resolver_ =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
                                       NULL, NULL);
+    cert_verifier_ = new net::CertVerifier;
     proxy_service_ = net::ProxyService::CreateFixed(no_proxy);
     ssl_config_service_ = new net::SSLConfigServiceDefaults;
 
     http_transaction_factory_ = new net::HttpCache(
-        net::HttpNetworkLayer::CreateFactory(host_resolver_, NULL, NULL, NULL,
-            proxy_service_, ssl_config_service_, NULL, NULL, NULL),
+        net::HttpNetworkLayer::CreateFactory(host_resolver_, cert_verifier_,
+            NULL, NULL, NULL, proxy_service_, ssl_config_service_, NULL, NULL,
+            NULL),
+        NULL,
         net::HttpCache::DefaultBackend::InMemory(0));
   }
 
  private:
   ~RequestContext() {
     delete http_transaction_factory_;
+    delete cert_verifier_;
     delete host_resolver_;
   }
 };
@@ -72,7 +76,7 @@ GURL GetTestFileUrl(const std::string& relpath) {
 class ProxyScriptFetcherImplTest : public PlatformTest {
  public:
   ProxyScriptFetcherImplTest()
-      : test_server_(net::TestServer::TYPE_HTTP, FilePath(kDocRoot)) {
+      : test_server_(TestServer::TYPE_HTTP, FilePath(kDocRoot)) {
   }
 
   static void SetUpTestCase() {
@@ -80,7 +84,7 @@ class ProxyScriptFetcherImplTest : public PlatformTest {
   }
 
  protected:
-  net::TestServer test_server_;
+  TestServer test_server_;
 };
 
 TEST_F(ProxyScriptFetcherImplTest, FileUrl) {

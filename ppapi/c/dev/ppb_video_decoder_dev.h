@@ -1,7 +1,7 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_DEV_PPB_VIDEO_DECODER_DEV_H_
 #define PPAPI_C_DEV_PPB_VIDEO_DECODER_DEV_H_
 
@@ -12,7 +12,7 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_completion_callback.h"
 
-#define PPB_VIDEODECODER_DEV_INTERFACE "PPB_VideoDecoder(Dev);0.2"
+#define PPB_VIDEODECODER_DEV_INTERFACE "PPB_VideoDecoder(Dev);0.4"
 
 struct PPB_VideoDecoder_Dev {
   // Queries capability of the decoder for |codec|.
@@ -84,4 +84,5 @@ struct PPB_VideoDecoder_Dev {
       struct PP_VideoUncompressedDataBuffer_Dev* buffer);
 };
 
-#endif  // PPAPI_C_DEV_PPB_VIDEO_DECODER_DEV_H_
+#endif  /* PPAPI_C_DEV_PPB_VIDEO_DECODER_DEV_H_ */
+

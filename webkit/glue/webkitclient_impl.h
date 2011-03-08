@@ -7,11 +7,13 @@
 
 #include "base/platform_file.h"
 #include "base/timer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
 #if defined(OS_WIN)
 #include "webkit/glue/webthemeengine_impl_win.h"
 #elif defined(OS_LINUX)
 #include "webkit/glue/webthemeengine_impl_linux.h"
+#elif defined(OS_MACOSX)
+#include "webkit/glue/webthemeengine_impl_mac.h"
 #endif
 
 
@@ -52,6 +54,9 @@ class WebKitClientImpl : public WebKit::WebKitClient {
   virtual void traceEventBegin(const char* name, void* id, const char* extra);
   virtual void traceEventEnd(const char* name, void* id, const char* extra);
   virtual WebKit::WebData loadResource(const char* name);
+  virtual bool loadAudioResource(
+      WebKit::WebAudioBus* destination_bus, const char* audio_file_data,
+      size_t data_size, double sample_rate);
   virtual WebKit::WebString queryLocalizedString(
       WebKit::WebLocalizedString::Name name);
   virtual WebKit::WebString queryLocalizedString(
@@ -71,19 +76,22 @@ class WebKitClientImpl : public WebKit::WebKitClient {
   void SuspendSharedTimer();
   void ResumeSharedTimer();
 
- private:
+  // Hack for http://crbug.com/71735.
+  // TODO(jamesr): move this back to the private section once
+  // http://crbug.com/72007 is fixed.
   void DoTimeout() {
     if (shared_timer_func_ && !shared_timer_suspended_)
       shared_timer_func_();
   }
 
+ private:
   MessageLoop* main_loop_;
   base::OneShotTimer<WebKitClientImpl> shared_timer_;
   void (*shared_timer_func_)();
   double shared_timer_fire_time_;
   int shared_timer_suspended_;  // counter
 
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
   WebThemeEngineImpl theme_engine_;
 #endif
 };

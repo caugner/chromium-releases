@@ -68,7 +68,7 @@ HttpAuthCache::~HttpAuthCache() {
 // Performance: O(n), where n is the number of realm entries.
 HttpAuthCache::Entry* HttpAuthCache::Lookup(const GURL& origin,
                                             const std::string& realm,
-                                            const std::string& scheme) {
+                                            HttpAuth::Scheme scheme) {
   CheckOriginIsValid(origin);
 
   // Linear scan through the realm entries.
@@ -104,7 +104,7 @@ HttpAuthCache::Entry* HttpAuthCache::LookupByPath(const GURL& origin,
 
 HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
                                          const std::string& realm,
-                                         const std::string& scheme,
+                                         HttpAuth::Scheme scheme,
                                          const std::string& auth_challenge,
                                          const string16& username,
                                          const string16& password,
@@ -143,6 +143,12 @@ HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
 HttpAuthCache::Entry::~Entry() {
 }
 
+void HttpAuthCache::Entry::UpdateStaleChallenge(
+    const std::string& auth_challenge) {
+  auth_challenge_ = auth_challenge;
+  nonce_count_ = 1;
+}
+
 HttpAuthCache::Entry::Entry()
     : nonce_count_(0) {
 }
@@ -175,15 +181,9 @@ bool HttpAuthCache::Entry::HasEnclosingPath(const std::string& dir) {
   return false;
 }
 
-void HttpAuthCache::Entry::UpdateStaleChallenge(
-    const std::string& auth_challenge) {
-  auth_challenge_ = auth_challenge;
-  nonce_count_ = 1;
-}
-
 bool HttpAuthCache::Remove(const GURL& origin,
                            const std::string& realm,
-                           const std::string& scheme,
+                           HttpAuth::Scheme scheme,
                            const string16& username,
                            const string16& password) {
   for (EntryList::iterator it = entries_.begin(); it != entries_.end(); ++it) {
@@ -201,7 +201,7 @@ bool HttpAuthCache::Remove(const GURL& origin,
 
 bool HttpAuthCache::UpdateStaleChallenge(const GURL& origin,
                                          const std::string& realm,
-                                         const std::string& scheme,
+                                         HttpAuth::Scheme scheme,
                                          const std::string& auth_challenge) {
   HttpAuthCache::Entry* entry = Lookup(origin, realm, scheme);
   if (!entry)

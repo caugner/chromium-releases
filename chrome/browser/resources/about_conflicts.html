@@ -19,14 +19,10 @@ div#header {
   min-height: 67px;
   overflow: hidden;
   padding-bottom: 20px;
-  padding-left: 0;
+  -webkit-padding-start: 0;
   padding-top: 20px;
   position: relative;
-  -webkit-box-sizing: border-box;
-}
-
-html[dir=rtl] #header {
-  padding-right: 0;
+  box-sizing: border-box;
 }
 
 #header h1 {
@@ -66,14 +62,9 @@ div.content {
   border-top: 1px solid #b5c7de;
   font-size: 99%;
   padding-bottom: 2px;
-  padding-left: 5px;
+  -webkit-padding-start: 5px;
   padding-top: 3px;
   width: 100%;
-}
-
-html[dir=rtl] .section-header {
-  padding-right: 5px;
-  padding-left: 0;
 }
 
 .section-header > table > tr > td:first-child {
@@ -100,12 +91,7 @@ html[dir=rtl] .section-header {
 }
 
 #top {
-  padding-right: 5px;
-}
-
-html[dir=rtl] #top {
-  padding-left: 5px;
-  padding-right: 0;
+  -webkit-padding-end: 5px;
 }
 
 .module-loaded > td {
@@ -142,6 +128,20 @@ html[dir=rtl] #top {
 .extra-info-text {
   margin-top: -1em;
   margin-bottom: 1em;
+}
+
+.clearing {
+  clear: left;
+  float: left;
+}
+
+html[dir=rtl] .clearing {
+  clear: right;
+  float: right;
+}
+
+.datacell {
+  border-bottom: 1px solid #aaa;
 }
 </style>
 <script>
@@ -244,32 +244,50 @@ html[dir=rtl] #top {
       <tr class="module-loaded">
       <td valign="top">
         <table cellpadding="2" cellspacing="0" border="0">
+          <tr>
+            <td class="datacell"><span dir="ltr" i18n-content="headerSoftware"
+                    >SOFTWARE</span></td>
+            <td class="datacell"><span dir="ltr" i18n-content="headerSignedBy"
+                    >SIGNER</span></td>
+            <td class="datacell"><span dir="ltr" i18n-content="headerVersion"
+                    >VERSION</span></td>
+            <td class="datacell"><span dir="ltr" i18n-content="headerLocation"
+                    >LOCATION</span></td>
+          </tr>
           <tr jsselect="moduleList">
-            <td valign="top">
+            <td valign="top" class="datacell">
               <span dir="ltr"
-                    jsvalues=".innerHTML:description" class="nowrap"></span>
+                    jsvalues=".innerHTML:description"
+                    class="clearing nowrap"></span>
               <div jsdisplay="status == 2 || status == 3"
-                   class="extra-info-text"><br>
-                <span jsdisplay="status == 2"
-                      i18n-content="moduleSuspectedBad"
-                      class="suspected-bad">SUSPECTED_BAD</span>
-                <span jsdisplay="status == 3"
-                      i18n-content="moduleConfirmedBad"
-                      class="confirmed-bad">CONFIRMED_BAD</span>
-                <a jsdisplay="help_url.length &gt; 0"
-                   jsvalues=".href:help_url"><span
-                      i18n-content="helpCenterLink">HELP_CENTER</span></a>
-                <span jsdisplay="possibleResolution.length &gt; 0"><br>
-                  <span jscontent="possibleResolution"
-                      >POSSIBLE_RESOLUTION</span>
+                   class="extra-info-text">
+                <span class="clearing">
+                  <span jsdisplay="status == 2"
+                        i18n-content="moduleSuspectedBad"
+                        class="suspected-bad">SUSPECTED_BAD</span>
+                  <span jsdisplay="status == 3"
+                        i18n-content="moduleConfirmedBad"
+                        class="confirmed-bad">CONFIRMED_BAD</span>
+                </span>
+                <span class="clearing">
+                  <span jsdisplay="possibleResolution.length &gt; 0">
+                    <span jscontent="possibleResolution"
+                        >POSSIBLE_RESOLUTION</span>
+                  </span>
+                  <a jsdisplay="help_url.length &gt; 0"
+                     jsvalues=".href:help_url"
+                     i18n-content="helpCenterLink">HELP_CENTER</a>
                 </span>
               </div>
             </td>
-            <td valign="top"><span dir="ltr" jscontent="digital_signer"
+            <td valign="top" class="datacell"><span dir="ltr"
+                                                    jscontent="digital_signer"
                                    class="nowrap">SIGNER</span></td>
-            <td valign="top"><span dir="ltr" jscontent="version"
-                                   class="nowrap">VERSION</span></td>
-            <td valign="top">
+            <td valign="top" class="datacell"><span dir="ltr"
+                                                    jscontent="version"
+                                                    class="nowrap">VERSION</span
+            ></td>
+            <td valign="top" class="datacell">
               <span class="nowrap">
                 <span dir="ltr" jscontent="location">LOCATION</span><strong
                     ><span dir="ltr" jscontent="name">NAME</span></strong>

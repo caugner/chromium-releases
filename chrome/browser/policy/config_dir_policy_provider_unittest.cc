@@ -8,6 +8,7 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/policy/config_dir_policy_provider.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/mock_configuration_policy_store.h"
@@ -49,7 +50,7 @@ class ConfigDirPolicyLoaderTest
 // The preferences dictionary is expected to be empty when there are no files to
 // load.
 TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsEmpty) {
-  ConfigDirPolicyLoader loader(test_dir());
+  ConfigDirPolicyProviderDelegate loader(test_dir());
   scoped_ptr<DictionaryValue> policy(loader.Load());
   EXPECT_TRUE(policy.get());
   EXPECT_TRUE(policy->empty());
@@ -59,7 +60,7 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsEmpty) {
 // dictionary.
 TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsNonExistentDirectory) {
   FilePath non_existent_dir(test_dir().Append(FILE_PATH_LITERAL("not_there")));
-  ConfigDirPolicyLoader loader(non_existent_dir);
+  ConfigDirPolicyProviderDelegate loader(non_existent_dir);
   scoped_ptr<DictionaryValue> policy(loader.Load());
   EXPECT_TRUE(policy.get());
   EXPECT_TRUE(policy->empty());
@@ -71,7 +72,7 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsSinglePref) {
   test_dict.SetString("HomepageLocation", "http://www.google.com");
   WriteConfigFile(test_dict, "config_file");
 
-  ConfigDirPolicyLoader loader(test_dir());
+  ConfigDirPolicyProviderDelegate loader(test_dir());
   scoped_ptr<DictionaryValue> policy(loader.Load());
   EXPECT_TRUE(policy.get());
   EXPECT_TRUE(policy->Equals(&test_dict));
@@ -93,7 +94,7 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsMergePrefs) {
   for (unsigned int i = 5; i <= 8; ++i)
     WriteConfigFile(test_dict_bar, base::IntToString(i));
 
-  ConfigDirPolicyLoader loader(test_dir());
+  ConfigDirPolicyProviderDelegate loader(test_dir());
   scoped_ptr<DictionaryValue> policy(loader.Load());
   EXPECT_TRUE(policy.get());
   EXPECT_TRUE(policy->Equals(&test_dict_foo));
@@ -252,11 +253,17 @@ INSTANTIATE_TEST_CASE_P(
             kPolicyDefaultSearchProviderSuggestURL,
             key::kDefaultSearchProviderSuggestURL),
         ValueTestParams::ForStringPolicy(
+            kPolicyDefaultSearchProviderInstantURL,
+            key::kDefaultSearchProviderInstantURL),
+        ValueTestParams::ForStringPolicy(
             kPolicyDefaultSearchProviderIconURL,
             key::kDefaultSearchProviderIconURL),
         ValueTestParams::ForStringPolicy(
             kPolicyDefaultSearchProviderEncodings,
             key::kDefaultSearchProviderEncodings),
+        ValueTestParams::ForStringPolicy(
+            kPolicyProxyMode,
+            key::kProxyMode),
         ValueTestParams::ForIntegerPolicy(
             kPolicyProxyServerMode,
             key::kProxyServerMode),
@@ -313,6 +320,9 @@ INSTANTIATE_TEST_CASE_P(
             key::kShowHomeButton),
         ValueTestParams::ForBooleanPolicy(
             kPolicyPrintingEnabled,
-            key::kPrintingEnabled)));
+            key::kPrintingEnabled),
+        ValueTestParams::ForIntegerPolicy(
+            kPolicyPolicyRefreshRate,
+            key::kPolicyRefreshRate)));
 
 }  // namespace policy

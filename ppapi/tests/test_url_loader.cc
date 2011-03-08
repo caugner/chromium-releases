@@ -1,13 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/tests/test_url_loader.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <string>
 
 #include "ppapi/c/dev/ppb_file_io_dev.h"
+#include "ppapi/c/dev/ppb_file_io_trusted_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_url_loader.h"
@@ -24,7 +26,17 @@
 
 REGISTER_TEST_CASE(URLLoader);
 
+TestURLLoader::TestURLLoader(TestingInstance* instance)
+    : TestCase(instance),
+      file_io_trusted_interface_(NULL) {
+}
+
 bool TestURLLoader::Init() {
+  file_io_trusted_interface_ = static_cast<const PPB_FileIOTrusted_Dev*>(
+      pp::Module::Get()->GetBrowserInterface(PPB_FILEIOTRUSTED_DEV_INTERFACE));
+  if (!file_io_trusted_interface_) {
+    instance_->AppendError("FileIOTrusted interface not available");
+  }
   return InitTestingInterface() && EnsureRunningOverHTTP();
 }
 
@@ -39,6 +51,7 @@ void TestURLLoader::RunTest() {
   RUN_TEST(SameOriginRestriction);
   RUN_TEST(StreamToFile);
   RUN_TEST(AuditURLRedirect);
+  RUN_TEST(AbortCalls);
 }
 
 std::string TestURLLoader::ReadEntireFile(pp::FileIO_Dev* file_io,
@@ -59,13 +72,13 @@ std::string TestURLLoader::ReadEntireFile(pp::FileIO_Dev* file_io,
     data->append(buf, rv);
   }
 
-  return "";
+  PASS();
 }
 
 std::string TestURLLoader::ReadEntireResponseBody(pp::URLLoader* loader,
                                                   std::string* body) {
   TestCompletionCallback callback;
-  char buf[256];
+  char buf[2];  // Small so that multiple reads are needed.
 
   for (;;) {
     int32_t rv = loader->ReadResponseBody(buf, sizeof(buf), callback);
@@ -78,7 +91,7 @@ std::string TestURLLoader::ReadEntireResponseBody(pp::URLLoader* loader,
     body->append(buf, rv);
   }
 
-  return "";
+  PASS();
 }
 
 std::string TestURLLoader::LoadAndCompareBody(
@@ -110,7 +123,7 @@ std::string TestURLLoader::LoadAndCompareBody(
   if (body != expected_body)
     return "URLLoader::ReadResponseBody returned unexpected content";
 
-  return "";
+  PASS();
 }
 
 std::string TestURLLoader::TestBasicGET() {
@@ -226,11 +239,12 @@ std::string TestURLLoader::TestStreamToFile() {
   if (data != expected_body)
     return "ReadEntireFile returned unexpected content";
 
-  int32_t file_descriptor = reader.GetOSFileDescriptor();
+  int32_t file_descriptor = file_io_trusted_interface_->GetOSFileDescriptor(
+      reader.pp_resource());
   if (file_descriptor < 0)
     return "FileIO::GetOSFileDescriptor() returned a bad file descriptor.";
 
-  return "";
+  PASS();
 }
 
 std::string TestURLLoader::TestSameOriginRestriction() {
@@ -253,7 +267,7 @@ std::string TestURLLoader::TestSameOriginRestriction() {
     }
   }
 
-  return "";
+  PASS();
 }
 
 // This test should cause a redirect and ensure that the loader runs
@@ -284,7 +298,66 @@ std::string TestURLLoader::TestAuditURLRedirect() {
   if (response_info.GetRedirectURL().AsString() != "www.google.com")
     return "Redirect URL should be www.google.com";
 
-  return "";
+  PASS();
 }
 
+std::string TestURLLoader::TestAbortCalls() {
+  pp::URLRequestInfo request;
+  request.SetURL("test_url_loader_data/hello.txt");
+
+  TestCompletionCallback callback;
+  int32_t rv;
+
+  // Abort |Open()|.
+  {
+    callback.reset_run_count();
+    rv = pp::URLLoader(*instance_).Open(request, callback);
+    if (callback.run_count() > 0)
+      return "URLLoader::Open ran callback synchronously.";
+    if (rv == PP_ERROR_WOULDBLOCK) {
+      rv = callback.WaitForResult();
+      if (rv != PP_ERROR_ABORTED)
+        return "URLLoader::Open not aborted.";
+    } else if (rv != PP_OK) {
+      return ReportError("URLLoader::Open", rv);
+    }
+  }
+
+  // Abort |ReadResponseBody()|.
+  {
+    char buf[2] = { 0 };
+    {
+      pp::URLLoader loader(*instance_);
+      rv = loader.Open(request, callback);
+      if (rv == PP_ERROR_WOULDBLOCK)
+        rv = callback.WaitForResult();
+      if (rv != PP_OK)
+        return ReportError("URLLoader::Open", rv);
+
+      callback.reset_run_count();
+      rv = loader.ReadResponseBody(buf, sizeof(buf), callback);
+    }  // Destroy |loader|.
+    if (rv == PP_ERROR_WOULDBLOCK) {
+      // Save a copy and make sure |buf| doesn't get written to.
+      char buf_copy[2];
+      memcpy(&buf_copy, &buf, sizeof(buf));
+      rv = callback.WaitForResult();
+      if (rv != PP_ERROR_ABORTED)
+        return "URLLoader::ReadResponseBody not aborted.";
+      if (memcmp(&buf_copy, &buf, sizeof(buf)) != 0)
+        return "URLLoader::ReadResponseBody wrote data after resource "
+               "destruction.";
+    } else if (rv != PP_OK) {
+      return ReportError("URLLoader::ReadResponseBody", rv);
+    }
+  }
+
+  // TODO(viettrungluu): More abort tests (but add basic tests first).
+  // Also test that Close() aborts properly. crbug.com/69457
+
+  PASS();
+}
+
+// TODO(viettrungluu): Add tests for FollowRedirect,
+// Get{Upload,Download}Progress, Close (including abort tests if applicable).
 // TODO(darin): Add a test for GrantUniversalAccess.

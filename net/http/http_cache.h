@@ -23,9 +23,9 @@
 #include "base/file_path.h"
 #include "base/hash_tables.h"
 #include "base/message_loop_proxy.h"
-#include "base/non_thread_safe.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/weak_ptr.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_callback.h"
@@ -41,6 +41,7 @@ class Entry;
 
 namespace net {
 
+class CertVerifier;
 class DnsCertProvenanceChecker;
 class DnsRRResolver;
 class HostResolver;
@@ -57,10 +58,8 @@ class ViewCacheHelper;
 
 class HttpCache : public HttpTransactionFactory,
                   public base::SupportsWeakPtr<HttpCache>,
-                  public NonThreadSafe {
+                  public base::NonThreadSafe {
  public:
-  ~HttpCache();
-
   // The cache mode of operation.
   enum Mode {
     // Normal mode just behaves like a standard web cache.
@@ -86,7 +85,8 @@ class HttpCache : public HttpTransactionFactory,
     // notification arrives.
     // The implementation must not access the factory object after invoking the
     // |callback| because the object can be deleted from within the callback.
-    virtual int CreateBackend(disk_cache::Backend** backend,
+    virtual int CreateBackend(NetLog* net_log,
+                              disk_cache::Backend** backend,
                               CompletionCallback* callback) = 0;
   };
 
@@ -104,7 +104,8 @@ class HttpCache : public HttpTransactionFactory,
     static BackendFactory* InMemory(int max_bytes);
 
     // BackendFactory implementation.
-    virtual int CreateBackend(disk_cache::Backend** backend,
+    virtual int CreateBackend(NetLog* net_log,
+                              disk_cache::Backend** backend,
                               CompletionCallback* callback);
 
    private:
@@ -117,6 +118,7 @@ class HttpCache : public HttpTransactionFactory,
   // The disk cache is initialized lazily (by CreateTransaction) in this case.
   // The HttpCache takes ownership of the |backend_factory|.
   HttpCache(HostResolver* host_resolver,
+            CertVerifier* cert_verifier,
             DnsRRResolver* dnsrr_resolver,
             DnsCertProvenanceChecker* dns_cert_checker,
             ProxyService* proxy_service,
@@ -138,7 +140,10 @@ class HttpCache : public HttpTransactionFactory,
   // by the HttpCache and will be destroyed using |delete| when the HttpCache is
   // destroyed.
   HttpCache(HttpTransactionFactory* network_layer,
+            NetLog* net_log,
             BackendFactory* backend_factory);
+
+  ~HttpCache();
 
   HttpTransactionFactory* network_layer() { return network_layer_.get(); }
 
@@ -151,12 +156,6 @@ class HttpCache : public HttpTransactionFactory,
 
   // Returns the current backend (can be NULL).
   disk_cache::Backend* GetCurrentBackend();
-
-  // HttpTransactionFactory implementation:
-  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans);
-  virtual HttpCache* GetCache();
-  virtual HttpNetworkSession* GetSession();
-  virtual void Suspend(bool suspend);
 
   // Given a header data blob, convert it to a response info object.
   static bool ParseResponseInfo(const char* data, int len,
@@ -179,9 +178,11 @@ class HttpCache : public HttpTransactionFactory,
   // immediately, but they will not be reusable. This is for debugging.
   void CloseCurrentConnections();
 
-  void set_enable_range_support(bool value) {
-    enable_range_support_ = value;
-  }
+  // HttpTransactionFactory implementation:
+  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans);
+  virtual HttpCache* GetCache();
+  virtual HttpNetworkSession* GetSession();
+  virtual void Suspend(bool suspend);
 
  protected:
   // Disk cache entry data indices.
@@ -210,20 +211,21 @@ class HttpCache : public HttpTransactionFactory,
   typedef std::list<WorkItem*> WorkItemList;
 
   struct ActiveEntry {
+    explicit ActiveEntry(disk_cache::Entry* entry);
+    ~ActiveEntry();
+
     disk_cache::Entry* disk_entry;
     Transaction*       writer;
     TransactionList    readers;
     TransactionList    pending_queue;
     bool               will_process_pending_queue;
     bool               doomed;
-
-    explicit ActiveEntry(disk_cache::Entry*);
-    ~ActiveEntry();
   };
 
   typedef base::hash_map<std::string, ActiveEntry*> ActiveEntriesMap;
   typedef base::hash_map<std::string, PendingOp*> PendingOpsMap;
   typedef std::set<ActiveEntry*> ActiveEntriesSet;
+  typedef base::hash_map<std::string, int> PlaybackCacheMap;
 
   // Methods ------------------------------------------------------------------
 
@@ -346,6 +348,8 @@ class HttpCache : public HttpTransactionFactory,
 
   // Variables ----------------------------------------------------------------
 
+  NetLog* net_log_;
+
   // Used when lazily constructing the disk_cache_.
   scoped_ptr<BackendFactory> backend_factory_;
   bool building_backend_;
@@ -368,9 +372,6 @@ class HttpCache : public HttpTransactionFactory,
 
   ScopedRunnableMethodFactory<HttpCache> task_factory_;
 
-  bool enable_range_support_;
-
-  typedef base::hash_map<std::string, int> PlaybackCacheMap;
   scoped_ptr<PlaybackCacheMap> playback_cache_map_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpCache);

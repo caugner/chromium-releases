@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/uninstall_view.h"
+#include "chrome/browser/ui/views/uninstall_view.h"
 
-#include "app/l10n_util.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/string16.h"
@@ -13,6 +12,7 @@
 #include "chrome/common/result_codes.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/shell_util.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/label.h"
 #include "views/standard_layout.h"
@@ -38,7 +38,7 @@ void UninstallView::SetupControls() {
   using views::ColumnSet;
   using views::GridLayout;
 
-  GridLayout* layout = CreatePanelGridLayout(this);
+  GridLayout* layout = GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   // Message to confirm uninstallation.
@@ -47,7 +47,8 @@ void UninstallView::SetupControls() {
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
   layout->StartRow(0, column_set_id);
-  confirm_label_ = new views::Label(l10n_util::GetString(IDS_UNINSTALL_VERIFY));
+  confirm_label_ = new views::Label(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_UNINSTALL_VERIFY)));
   confirm_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   layout->AddView(confirm_label_);
 
@@ -61,14 +62,15 @@ void UninstallView::SetupControls() {
                         GridLayout::USE_PREF, 0, 0);
   layout->StartRow(0, column_set_id);
   delete_profile_ = new views::Checkbox(
-      l10n_util::GetString(IDS_UNINSTALL_DELETE_PROFILE));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_UNINSTALL_DELETE_PROFILE)));
   layout->AddView(delete_profile_);
 
   // Set default browser combo box
-  if (BrowserDistribution::GetDistribution()->CanSetAsDefault() &&
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  if (dist->CanSetAsDefault() &&
       ShellIntegration::IsDefaultBrowser()) {
     browsers_.reset(new BrowsersMap());
-    ShellUtil::GetRegisteredBrowsers(browsers_.get());
+    ShellUtil::GetRegisteredBrowsers(dist, browsers_.get());
     if (!browsers_->empty()) {
       layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
@@ -81,8 +83,8 @@ void UninstallView::SetupControls() {
       column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                             GridLayout::USE_PREF, 0, 0);
       layout->StartRow(0, column_set_id);
-      change_default_browser_ = new views::Checkbox(
-          l10n_util::GetString(IDS_UNINSTALL_SET_DEFAULT_BROWSER));
+      change_default_browser_ = new views::Checkbox(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_UNINSTALL_SET_DEFAULT_BROWSER)));
       change_default_browser_->set_listener(this);
       layout->AddView(change_default_browser_);
       browsers_combo_ = new views::Combobox(this);
@@ -118,7 +120,7 @@ std::wstring UninstallView::GetDialogButtonLabel(
   // button remains same.
   std::wstring label = L"";
   if (button == MessageBoxFlags::DIALOGBUTTON_OK)
-    label = l10n_util::GetString(IDS_UNINSTALL_BUTTON_TEXT);
+    label = UTF16ToWide(l10n_util::GetStringUTF16(IDS_UNINSTALL_BUTTON_TEXT));
   return label;
 }
 
@@ -132,7 +134,7 @@ void UninstallView::ButtonPressed(
 }
 
 std::wstring UninstallView::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_UNINSTALL_CHROME);
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_UNINSTALL_CHROME));
 }
 
 views::View* UninstallView::GetContentsView() {

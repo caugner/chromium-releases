@@ -8,17 +8,15 @@
 #include <cryptuiapi.h>
 #pragma comment(lib, "cryptui.lib")
 
-#include "app/l10n_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/ssl/ssl_client_auth_handler.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/ui/browser.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace browser {
 
@@ -42,10 +40,11 @@ void ShowSSLClientCertificateSelector(
     DCHECK(ok);
   }
 
-  std::wstring title = l10n_util::GetString(IDS_CLIENT_CERT_DIALOG_TITLE);
-  std::wstring text = l10n_util::GetStringF(
+  std::wstring title =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CLIENT_CERT_DIALOG_TITLE));
+  std::wstring text = UTF16ToWide(l10n_util::GetStringFUTF16(
       IDS_CLIENT_CERT_DIALOG_TEXT,
-      ASCIIToWide(cert_request_info->host_and_port));
+      ASCIIToUTF16(cert_request_info->host_and_port)));
   PCCERT_CONTEXT cert_context = CryptUIDlgSelectCertificateFromStore(
       client_certs, parent->GetMessageBoxRootWindow(),
       title.c_str(), text.c_str(), 0, 0, NULL);

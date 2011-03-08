@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,9 @@
 #define CHROME_BROWSER_UI_VIEWS_THEME_INSTALL_BUBBLE_VIEW_H_
 #pragma once
 
-#include <string>
-
+#include "base/string16.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
 #include "gfx/canvas.h"
 #include "views/controls/label.h"
 
@@ -67,7 +65,7 @@ class ThemeInstallBubbleView : public NotificationObserver,
   views::Widget* popup_;
 
   // Text to show warning that theme is being installed.
-  std::wstring text_;
+  string16 text_;
 
   // A scoped container for notification registries.
   NotificationRegistrar registrar_;
@@ -76,4 +74,3 @@ class ThemeInstallBubbleView : public NotificationObserver,
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_THEME_INSTALL_BUBBLE_VIEW_H_
-

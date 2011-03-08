@@ -6,18 +6,22 @@
 #define VIEWS_EVENT_H_
 #pragma once
 
-#include "app/keyboard_codes.h"
 #include "base/basictypes.h"
 #include "gfx/point.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 
 #if defined(OS_LINUX)
 typedef struct _GdkEventKey GdkEventKey;
 #endif
+
 #if defined(TOUCH_UI)
 typedef union _XEvent XEvent;
 #endif
 
+namespace ui {
 class OSExchangeData;
+}
+using ui::OSExchangeData;
 
 namespace views {
 
@@ -327,14 +331,24 @@ class KeyEvent : public Event {
  public:
   // Create a new key event
   KeyEvent(EventType type,
-           app::KeyboardCode key_code,
+           ui::KeyboardCode key_code,
            int event_flags,
            int repeat_count,
            int message_flags);
-#if defined(OS_LINUX)
-  explicit KeyEvent(GdkEventKey* event);
-#endif
 
+#if defined(OS_WIN)
+  KeyEvent(EventType type,
+           ui::KeyboardCode key_code,
+           int event_flags,
+           int repeat_count,
+           int message_flags,
+           UINT message);
+#endif
+#if defined(OS_LINUX)
+  explicit KeyEvent(const GdkEventKey* event);
+
+  const GdkEventKey* native_event() const { return native_event_; }
+#endif
 #if defined(TOUCH_UI)
   // Create a key event from an X key event.
   explicit KeyEvent(XEvent* xevent);
@@ -344,12 +358,16 @@ class KeyEvent : public Event {
   // the Windows value.
   // On GTK, you can use the methods in keyboard_code_conversion_gtk.cc to
   // convert this value back to a GDK value if needed.
-  app::KeyboardCode GetKeyCode() const {
+  ui::KeyboardCode GetKeyCode() const {
     return key_code_;
   }
 
 #if defined(OS_WIN)
   bool IsExtendedKey() const;
+
+  UINT message() const {
+    return message_;
+  }
 #endif
 
   int GetRepeatCount() const {
@@ -357,16 +375,19 @@ class KeyEvent : public Event {
   }
 
 #if defined(OS_WIN)
-  // Returns the current state of the KeyState.
   static int GetKeyStateFlags();
 #endif
 
  private:
 
-  app::KeyboardCode key_code_;
+  ui::KeyboardCode key_code_;
   int repeat_count_;
   int message_flags_;
-
+#if defined(OS_WIN)
+  UINT message_;
+#elif defined(OS_LINUX)
+  const GdkEventKey* native_event_;
+#endif
   DISALLOW_COPY_AND_ASSIGN(KeyEvent);
 };
 
@@ -421,7 +442,7 @@ class DropTargetEvent : public LocatedEvent {
   // Data associated with the drag/drop session.
   const OSExchangeData& GetData() const { return data_; }
 
-  // Bitmask of supported DragDropTypes::DragOperation by the source.
+  // Bitmask of supported ui::DragDropTypes::DragOperation by the source.
   int GetSourceOperations() const { return source_operations_; }
 
  private:

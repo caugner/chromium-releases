@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ void ResourceQueue::Shutdown() {
 }
 
 void ResourceQueue::AddRequest(
-    URLRequest* request,
+    net::URLRequest* request,
     const ResourceDispatcherHostRequestInfo& request_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!shutdown_);
@@ -84,9 +84,9 @@ void ResourceQueue::StartDelayedRequest(ResourceQueueDelegate* delegate,
     interested_delegates_.erase(request_id);
 
     if (ContainsKey(requests_, request_id)) {
-      URLRequest* request = requests_[request_id];
+      net::URLRequest* request = requests_[request_id];
       // The request shouldn't have started (SUCCESS is the initial state).
-      DCHECK_EQ(URLRequestStatus::SUCCESS, request->status().status());
+      DCHECK_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
       request->Start();
     }
   }

@@ -10,98 +10,121 @@
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "net/base/completion_callback.h"
-#include "net/base/io_buffer.h"
+#include "remoting/base/compound_buffer.h"
 #include "remoting/protocol/message_decoder.h"
 
+class MessageLoop;
+
 namespace net {
+class IOBuffer;
 class Socket;
 }  // namespace net
 
 namespace remoting {
+namespace protocol {
 
-class ChromotocolConnection;
-class MessageReader;
+// MessageReader reads data from the socket asynchronously and calls
+// callback for each message it receives. It stops calling the
+// callback as soon as the socket is closed, so the socket should
+// always be closed before the callback handler is destroyed.
+//
+// In order to throttle the stream, MessageReader doesn't try to read
+// new data from the socket until all previously received messages are
+// processed by the receiver (|done_task| is called for each message).
+// It is still possible that the MessageReceivedCallback is called
+// twice (so that there is more than one outstanding message),
+// e.g. when we the sender sends multiple messages in one TCP packet.
+class MessageReader : public base::RefCountedThreadSafe<MessageReader> {
+ public:
+  // The callback is given ownership of the second argument
+  // (|done_task|).  The buffer (first argument) is owned by
+  // MessageReader and is freed when the task specified by the second
+  // argument is called.
+  typedef Callback2<CompoundBuffer*, Task*>::Type MessageReceivedCallback;
 
-namespace internal {
+  MessageReader();
+  virtual ~MessageReader();
 
-template <class T>
-class MessageReaderPrivate {
+  // Initialize the MessageReader with a socket. If a message is received
+  // |callback| is called.
+  void Init(net::Socket* socket, MessageReceivedCallback* callback);
+
  private:
-  friend class remoting::MessageReader;
+  void DoRead();
+  void OnRead(int result);
+  void HandleReadResult(int result);
+  void OnDataReceived(net::IOBuffer* data, int data_size);
+  void OnMessageDone(CompoundBuffer* message);
+  void ProcessDoneEvent();
 
-  typedef typename Callback1<T*>::Type MessageReceivedCallback;
+  net::Socket* socket_;
 
-  MessageReaderPrivate(MessageReceivedCallback* callback)
-      : message_received_callback_(callback) {
-  }
+  // The network message loop this object runs on.
+  MessageLoop* message_loop_;
 
-  ~MessageReaderPrivate() { }
+  // Set to true, when we have a socket read pending, and expecting
+  // OnRead() to be called when new data is received.
+  bool read_pending_;
 
-  void OnDataReceived(net::IOBuffer* buffer, int data_size) {
-    typedef typename std::list<T*>::iterator MessageListIterator;
+  // Number of messages that we received, but haven't finished
+  // processing yet, i.e. |done_task| hasn't been called for these
+  // messages.
+  int pending_messages_;
 
-    std::list<T*> message_list;
-    message_decoder_.ParseMessages(buffer, data_size, &message_list);
-    for (MessageListIterator it = message_list.begin();
-         it != message_list.end(); ++it) {
-      message_received_callback_->Run(*it);
-    }
-  }
+  bool closed_;
+  scoped_refptr<net::IOBuffer> read_buffer_;
+  net::CompletionCallbackImpl<MessageReader> read_callback_;
 
-  void Destroy() {
-    delete this;
-  }
-
-  // Message decoder is used to decode bytes into protobuf message.
   MessageDecoder message_decoder_;
 
   // Callback is called when a message is received.
   scoped_ptr<MessageReceivedCallback> message_received_callback_;
 };
 
-}  // namespace internal
-
-// MessageReader reads data from the socket asynchronously and uses
-// MessageReaderPrivate to decode the data received.
-class MessageReader {
+// Version of MessageReader for protocol buffer messages, that parses
+// each incoming message.
+template <class T>
+class ProtobufMessageReader {
  public:
-  MessageReader();
-  virtual ~MessageReader();
+  typedef typename Callback2<T*, Task*>::Type MessageReceivedCallback;
 
-  // Stops reading. Must be called on the same thread as Init().
-  void Close();
+  ProtobufMessageReader() { };
+  ~ProtobufMessageReader() { };
 
-  // Initialize the MessageReader with a socket. If a message is received
-  // |callback| is called.
-  template <class T>
-  void Init(net::Socket* socket, typename Callback1<T*>::Type* callback) {
-    internal::MessageReaderPrivate<T>* reader =
-        new internal::MessageReaderPrivate<T>(callback);
-    data_received_callback_.reset(
-        ::NewCallback(
-            reader, &internal::MessageReaderPrivate<T>::OnDataReceived));
-    destruction_callback_.reset(
-        ::NewCallback(reader, &internal::MessageReaderPrivate<T>::Destroy));
-    Init(socket);
+  void Init(net::Socket* socket, MessageReceivedCallback* callback) {
+    message_received_callback_.reset(callback);
+    message_reader_ = new MessageReader();
+    message_reader_->Init(
+        socket, NewCallback(this, &ProtobufMessageReader<T>::OnNewData));
   }
 
  private:
-  void Init(net::Socket* socket);
+  void OnNewData(CompoundBuffer* buffer, Task* done_task) {
+    T* message = new T();
+    CompoundBufferInputStream stream(buffer);
+    bool ret = message->ParseFromZeroCopyStream(&stream);
+    if (!ret) {
+      LOG(WARNING) << "Received message that is not a valid protocol buffer.";
+      delete message;
+    } else {
+      DCHECK_EQ(stream.position(), buffer->total_bytes());
+      message_received_callback_->Run(
+          message, NewRunnableFunction(
+              &ProtobufMessageReader<T>::OnDone, message, done_task));
+    }
+  }
 
-  void DoRead();
-  void OnRead(int result);
-  void HandleReadResult(int result);
+  static void OnDone(T* message, Task* done_task) {
+    delete message;
+    done_task->Run();
+    delete done_task;
+  }
 
-  net::Socket* socket_;
-
-  bool closed_;
-  scoped_refptr<net::IOBuffer> read_buffer_;
-  net::CompletionCallbackImpl<MessageReader> read_callback_;
-
-  scoped_ptr<Callback2<net::IOBuffer*, int>::Type> data_received_callback_;
-  scoped_ptr<Callback0::Type> destruction_callback_;
+  scoped_refptr<MessageReader> message_reader_;
+  scoped_ptr<MessageReceivedCallback> message_received_callback_;
 };
 
+}  // namespace protocol
 }  // namespace remoting
 
 #endif  // REMOTING_PROTOCOL_MESSAGE_READER_H_

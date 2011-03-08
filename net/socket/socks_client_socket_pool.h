@@ -75,11 +75,6 @@ class SOCKSConnectJob : public ConnectJob {
     STATE_NONE,
   };
 
-  // Begins the tcp connection and the SOCKS handshake.  Returns OK on success
-  // and ERR_IO_PENDING if it cannot immediately service the request.
-  // Otherwise, it returns a net error code.
-  virtual int ConnectInternal();
-
   void OnIOComplete(int result);
 
   // Runs the state transition loop.
@@ -89,6 +84,11 @@ class SOCKSConnectJob : public ConnectJob {
   int DoTCPConnectComplete(int result);
   int DoSOCKSConnect();
   int DoSOCKSConnectComplete(int result);
+
+  // Begins the tcp connection and the SOCKS handshake.  Returns OK on success
+  // and ERR_IO_PENDING if it cannot immediately service the request.
+  // Otherwise, it returns a net error code.
+  virtual int ConnectInternal();
 
   scoped_refptr<SOCKSSocketParams> socks_params_;
   TCPClientSocketPool* const tcp_pool_;
@@ -138,9 +138,7 @@ class SOCKSClientSocketPool : public ClientSocketPool {
 
   virtual void CloseIdleSockets();
 
-  virtual int IdleSocketCount() const {
-    return base_.idle_socket_count();
-  }
+  virtual int IdleSocketCount() const;
 
   virtual int IdleSocketCountInGroup(const std::string& group_name) const;
 
@@ -151,13 +149,9 @@ class SOCKSClientSocketPool : public ClientSocketPool {
                                           const std::string& type,
                                           bool include_nested_pools) const;
 
-  virtual base::TimeDelta ConnectionTimeout() const {
-    return base_.ConnectionTimeout();
-  }
+  virtual base::TimeDelta ConnectionTimeout() const;
 
-  virtual ClientSocketPoolHistograms* histograms() const {
-    return base_.histograms();
-  };
+  virtual ClientSocketPoolHistograms* histograms() const;
 
  private:
   typedef ClientSocketPoolBase<SOCKSSocketParams> PoolBase;

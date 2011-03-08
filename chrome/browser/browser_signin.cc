@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "app/resource_bundle.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/message_loop.h"
@@ -20,7 +19,7 @@
 #include "chrome/browser/dom_ui/dom_ui_util.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
@@ -32,6 +31,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 
 class BrowserSigninResourcesSource : public ChromeURLDataManager::DataSource {
  public:
@@ -218,7 +218,7 @@ BrowserSignin::BrowserSignin(Profile* profile)
   BrowserSigninResourcesSource* source = new BrowserSigninResourcesSource();
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
                         &ChromeURLDataManager::AddDataSource,
                         make_scoped_refptr(source)));
 }

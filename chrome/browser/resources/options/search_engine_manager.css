@@ -1,32 +1,70 @@
-#searchEngineList > div, #searchEngineHeading {
+.search-engine-list > div {
   display: -webkit-box;
 }
 
-#searchEngineManagerPage .name {
-  -webkit-box-sizing: border-box;
-  width: 50%;
+.search-engine-list .favicon {
+  padding: 1px 7px 0px 7px;
+  height: 16px;
 }
 
-#searchEngineManagerPage .keyword {
-  -webkit-box-flex: 1;
+.search-engine-list .name-column {
+  -webkit-padding-end: 1ex;
+  box-sizing: border-box;
+  width: 37%;
 }
 
-#searchEngineList .keyword {
+.search-engine-list .keyword-column {
+  width: 26%;
+}
+
+.search-engine-list .url-column {
+  width: 37%;
+}
+
+.search-engine-list .keyword-column,
+.search-engine-list .url-column {
+  -webkit-padding-end: 1ex;
   color: #666666;
 }
 
-#searchEngineList .default {
+.search-engine-list .default .name-column,
+.search-engine-list .default .keyword-column {
   font-weight: bold;
 }
 
-#searchEngineList .name, #searchEngineList .keyword {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.search-engine-list .name-column {
+  display: -webkit-box;
 }
 
-#searchEngineHeading {
-  font-weight: bold;
-  padding: 4px;
-  border-bottom: solid 1px black;
-  border-top: 1px solid black;
+.search-engine-list .name-column :last-child {
+  -webkit-box-flex: 1;
 }
+
+.search-engine-list input {
+  box-sizing: border-box;
+  margin: 0;
+  width: 100%;
+}
+
+/* For temporary Make Default button */
+.search-engine-list .url-column {
+  display: -webkit-box;
+  -webkit-box-align: center;
+}
+
+.search-engine-list .url-column :first-child {
+  -webkit-box-flex: 1;
+}
+
+.search-engine-list .url-column button {
+  -webkit-margin-start: 3px;
+  -webkit-margin-end: 5px;
+  background: #8aaaed;
+  color: #fff;
+  margin-top: 0;
+}
+
+.search-engine-list > :not(:hover):not([editing]) .url-column button {
+  display: none;
+}
+/* End temporary Make Default button styling */

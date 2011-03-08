@@ -1,11 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
   const OptionsPage = options.OptionsPage;
   const ArrayDataModel = cr.ui.ArrayDataModel;
-  const ListSelectionModel = cr.ui.ListSelectionModel;
+  const ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
 
   //
   // BrowserOptions class
@@ -41,13 +41,11 @@ cr.define('options', function() {
       OptionsPage.prototype.initializePage.call(this);
 
       // Wire up controls.
-      $('startupAddButton').onclick = function(event) {
-        OptionsPage.showOverlay('addStartupPageOverlay');
-      };
-      $('startupRemoveButton').onclick =
-          this.removeSelectedStartupPages_.bind(this);
       $('startupUseCurrentButton').onclick = function(event) {
         chrome.send('setStartupPagesToCurrentPages');
+      };
+      $('startupAddButton').onclick = function(event) {
+        OptionsPage.showOverlay('addStartupPageOverlay');
       };
       $('defaultSearchManageEnginesButton').onclick = function(event) {
         OptionsPage.showPageByName('searchEngines');
@@ -64,20 +62,26 @@ cr.define('options', function() {
           OptionsPage.showOverlay('instantConfirmOverlay');
         }
       };
+      $('defaultSearchEngine').onchange = this.setDefaultSearchEngine;
 
       var homepageField = $('homepageURL');
       $('homepageUseNTPButton').onchange =
           this.handleHomepageUseNTPButtonChange_.bind(this);
       $('homepageUseURLButton').onchange =
           this.handleHomepageUseURLButtonChange_.bind(this);
-      homepageField.onchange =
-          this.handleHomepageURLChange_.bind(this);
+      homepageField.onchange = this.handleHomepageURLChange_.bind(this);
+      homepageField.oninput = this.handleHomepageURLChange_.bind(this);
 
       // Ensure that changes are committed when closing the page.
       window.addEventListener('unload', function() {
-          if (document.activeElement == homepageField)
-            homepageField.blur();
-          });
+        if (document.activeElement == homepageField)
+          homepageField.blur();
+      });
+
+      // Remove Windows-style accelerators from button labels.
+      // TODO(stuartmorgan): Remove this once the strings are updated.
+      $('startupAddButton').textContent =
+          localStrings.getStringWithoutAccelerator('startupAddButton');
 
       if (!cr.isChromeOS) {
         $('defaultBrowserUseAsDefaultButton').onclick = function(event) {
@@ -85,25 +89,15 @@ cr.define('options', function() {
         };
       }
 
-      var list = $('startupPages');
+      var list = $('startupPagesList');
       options.browser_options.StartupPageList.decorate(list);
-      list.selectionModel = new ListSelectionModel;
-
-      list.selectionModel.addEventListener(
-          'change', this.updateRemoveButtonState_.bind(this));
-
-      this.addEventListener('visibleChange', function(event) {
-        $('startupPages').redraw();
-      });
+      list.autoExpands = true;
+      list.selectionModel = new ListSingleSelectionModel;
 
       // Check if we are in the guest mode.
       if (cr.commandLine.options['--bwsi']) {
-        // Disable input and button elements under the startup section.
-        var elements = $('startupSection').querySelectorAll('input, button');
-        for (var i = 0; i < elements.length; i++) {
-          elements[i].disabled = true;
-          elements[i].manually_disabled = true;
-        }
+        // Hide the startup section.
+        $('startupSection').classList.add('hidden');
       } else {
         // Initialize control enabled states.
         Preferences.getInstance().addEventListener('session.restore_on_startup',
@@ -115,13 +109,6 @@ cr.define('options', function() {
 
         this.updateCustomStartupPageControlStates_();
       }
-
-      // Remove Windows-style accelerators from button labels.
-      // TODO(stuartmorgan): Remove this once the strings are updated.
-      $('startupAddButton').textContent =
-          localStrings.getStringWithoutAccelerator('startupAddButton');
-      $('startupRemoveButton').textContent =
-          localStrings.getStringWithoutAccelerator('startupRemoveButton');
     },
 
     /**
@@ -152,7 +139,7 @@ cr.define('options', function() {
     /**
      * Updates the search engine popup with the given entries.
      * @param {Array} engines List of available search engines.
-     * @param {Integer} defaultValue The value of the current default engine.
+     * @param {number} defaultValue The value of the current default engine.
      */
     updateSearchEngines_: function(engines, defaultValue) {
       this.clearSearchEngines_();
@@ -187,8 +174,7 @@ cr.define('options', function() {
      * @param {Array} pages List of startup pages.
      */
     updateStartupPages_: function(pages) {
-      $('startupPages').dataModel = new ArrayDataModel(pages);
-      this.updateRemoveButtonState_();
+      $('startupPagesList').dataModel = new ArrayDataModel(pages);
     },
 
     /**
@@ -210,12 +196,13 @@ cr.define('options', function() {
     },
 
     /**
-     * Handles change events of the text field 'homepageURL'.
+     * Handles input and change events of the text field 'homepageURL'.
      * @private
-     * @param {event} change event.
+     * @param {event} input/change event.
      */
     handleHomepageURLChange_: function(event) {
-      Preferences.setStringPref('homepage', $('homepageURL').value);
+      var doFixup = event.type == 'change' ? '1' : '0';
+      chrome.send('setHomePage', [$('homepageURL').value, doFixup]);
     },
 
     /**
@@ -350,39 +337,9 @@ cr.define('options', function() {
      */
     updateCustomStartupPageControlStates_: function() {
       var disable = !this.shouldEnableCustomStartupPageControls_();
-      $('startupAddButton').disabled = disable;
+      $('startupPagesList').disabled = disable;
       $('startupUseCurrentButton').disabled = disable;
-      this.updateRemoveButtonState_();
-    },
-
-    /**
-     * Sets the enabled state of the startup page Remove button based on
-     * the current selection in the startup pages list.
-     * @private
-     */
-    updateRemoveButtonState_: function() {
-      var groupEnabled = this.shouldEnableCustomStartupPageControls_();
-      $('startupRemoveButton').disabled = !groupEnabled ||
-          ($('startupPages').selectionModel.selectedIndex == -1);
-    },
-
-    /**
-     * Removes the selected startup pages.
-     * @private
-     */
-    removeSelectedStartupPages_: function() {
-      var selections =
-          $('startupPages').selectionModel.selectedIndexes.map(String);
-      chrome.send('removeStartupPages', selections);
-    },
-
-    /**
-     * Adds the given startup page at the current selection point.
-     * @private
-     */
-    addStartupPage_: function(url) {
-      var firstSelection = $('startupPages').selectionModel.selectedIndex;
-      chrome.send('addStartupPage', [url, String(firstSelection)]);
+      $('startupAddButton').disabled = disable;
     },
 
     /**
@@ -395,6 +352,16 @@ cr.define('options', function() {
         var selection = engineSelect.options[selectedIndex];
         chrome.send('setDefaultSearchEngine', [String(selection.value)]);
       }
+    },
+
+    /**
+     * Adds the given startup page at the current selection point.
+     * @private
+     */
+    addStartupPage_: function(url) {
+      var selectedIndex =
+          $('startupPagesList').selectionModel.selectedIndex;
+      chrome.send('addStartupPage', [url, String(selectedIndex)]);
     },
   };
 

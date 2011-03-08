@@ -1,11 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 
-#include <atlbase.h>
-#include <atlwin.h>
+#include <atlapp.h>
+#include <atlmisc.h>
 #include <iepmapi.h>
 #include <sddl.h>
 
@@ -14,19 +14,21 @@
 #include "base/file_version_info.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_handle.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
 #include "base/win/registry.h"
+#include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "ceee/ie/common/ceee_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome_frame/utils.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
 
 namespace chrome_frame_test {
 
@@ -49,6 +51,9 @@ const char kChromeImageName[] = "chrome.exe";
 const wchar_t kIEProfileName[] = L"iexplore";
 const wchar_t kChromeLauncher[] = L"chrome_launcher.exe";
 const int kChromeFrameLongNavigationTimeoutInSeconds = 10;
+
+const wchar_t TempRegKeyOverride::kTempTestKeyPath[] =
+    L"Software\\Chromium\\TempTestKeys";
 
 // Callback function for EnumThreadWindows.
 BOOL CALLBACK CloseWindowsThreadCallback(HWND hwnd, LPARAM param) {
@@ -90,7 +95,8 @@ int CloseVisibleWindowsOnAllThreads(HANDLE process) {
     return 0;
   }
 
-  ScopedHandle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
+  base::win::ScopedHandle snapshot(
+      CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
   if (!snapshot.IsValid()) {
     NOTREACHED();
     return 0;
@@ -304,7 +310,7 @@ BOOL LowIntegrityToken::Impersonate() {
     return ok;
   }
 
-  ScopedHandle process_token(process_token_handle);
+  base::win::ScopedHandle process_token(process_token_handle);
   // Create impersonation low integrity token.
   HANDLE impersonation_token_handle = NULL;
   ok = ::DuplicateTokenEx(process_token,
@@ -317,7 +323,7 @@ BOOL LowIntegrityToken::Impersonate() {
 
   // TODO(stoyan): sandbox/src/restricted_token_utils.cc has
   // SetTokenIntegrityLevel function already.
-  ScopedHandle impersonation_token(impersonation_token_handle);
+  base::win::ScopedHandle impersonation_token(impersonation_token_handle);
   PSID integrity_sid = NULL;
   TOKEN_MANDATORY_LABEL tml = {0};
   ok = ::ConvertStringSidToSid(SDDL_ML_LOW, &integrity_sid);
@@ -482,6 +488,21 @@ std::wstring GetPathAndQueryFromUrl(const std::wstring& url) {
   return UTF8ToWide(gurl.PathForRequest());
 }
 
+std::wstring GetClipboardText() {
+  ui::Clipboard clipboard;
+  string16 text16;
+  clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &text16);
+  return UTF16ToWide(text16);
+}
+
+void SetClipboardText(const std::wstring& text) {
+  ui::Clipboard clipboard;
+  {
+    ui::ScopedClipboardWriter clipboard_writer(&clipboard);
+    clipboard_writer.WriteText(WideToUTF16(text));
+  }
+}
+
 bool AddCFMetaTag(std::string* html_data) {
   if (!html_data) {
     NOTREACHED();
@@ -520,7 +541,7 @@ CloseIeAtEndOfScope::~CloseIeAtEndOfScope() {
 bool DetectRunningCrashService(int timeout_ms) {
   // Wait for the crash_service.exe to be ready for clients.
   base::Time start = base::Time::Now();
-  ScopedHandle new_pipe;
+  base::win::ScopedHandle new_pipe;
 
   while (true) {
     new_pipe.Set(::CreateFile(kCrashServicePipeName,
@@ -544,8 +565,8 @@ bool DetectRunningCrashService(int timeout_ms) {
         // Wait a bit longer
         break;
       default:
-        DLOG(WARNING) << "Unexpected error while checking crash_service.exe's "
-                      << "pipe: " << win_util::FormatLastWin32Error();
+        DPLOG(WARNING) << "Unexpected error while checking crash_service.exe's "
+                       << "pipe.";
         // Go ahead and wait in case it clears up.
         break;
     }
@@ -605,6 +626,52 @@ base::ProcessHandle StartCrashService() {
     }
     return NULL;
   }
+}
+
+TempRegKeyOverride::TempRegKeyOverride(HKEY override, const wchar_t* temp_name)
+    : override_(override), temp_name_(temp_name) {
+  DCHECK(temp_name && lstrlenW(temp_name));
+  std::wstring key_path(kTempTestKeyPath);
+  key_path += L"\\" + temp_name_;
+  EXPECT_EQ(ERROR_SUCCESS, temp_key_.Create(HKEY_CURRENT_USER, key_path.c_str(),
+                                            KEY_ALL_ACCESS));
+  EXPECT_EQ(ERROR_SUCCESS,
+            ::RegOverridePredefKey(override_, temp_key_.Handle()));
+}
+
+TempRegKeyOverride::~TempRegKeyOverride() {
+  ::RegOverridePredefKey(override_, NULL);
+  // The temp key will be deleted via a call to DeleteAllTempKeys().
+}
+
+// static
+void TempRegKeyOverride::DeleteAllTempKeys() {
+  base::win::RegKey key;
+  if (key.Open(HKEY_CURRENT_USER, L"", KEY_ALL_ACCESS) == ERROR_SUCCESS) {
+    key.DeleteKey(kTempTestKeyPath);
+  }
+}
+
+ScopedVirtualizeHklmAndHkcu::ScopedVirtualizeHklmAndHkcu() {
+  TempRegKeyOverride::DeleteAllTempKeys();
+  hklm_.reset(new TempRegKeyOverride(HKEY_LOCAL_MACHINE, L"hklm_fake"));
+  hkcu_.reset(new TempRegKeyOverride(HKEY_CURRENT_USER, L"hkcu_fake"));
+}
+
+ScopedVirtualizeHklmAndHkcu::~ScopedVirtualizeHklmAndHkcu() {
+  hkcu_.reset(NULL);
+  hklm_.reset(NULL);
+  TempRegKeyOverride::DeleteAllTempKeys();
+}
+
+bool KillProcesses(const std::wstring& executable_name, int exit_code,
+                   bool wait) {
+  bool result = true;
+  base::NamedProcessIterator iter(executable_name, NULL);
+  while (const base::ProcessEntry* entry = iter.NextProcessEntry()) {
+    result &= base::KillProcessById(entry->pid(), exit_code, wait);
+  }
+  return result;
 }
 
 }  // namespace chrome_frame_test

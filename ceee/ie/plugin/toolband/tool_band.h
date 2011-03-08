@@ -19,9 +19,9 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/scoped_comptr_win.h"
 #include "base/scoped_ptr.h"
-#include "base/win/rgs_helper.h"
+#include "base/win/scoped_comptr.h"
+#include "ceee/ie/common/rgs_helper.h"
 #include "ceee/ie/plugin/toolband/resource.h"
 
 #include "chrome_tab.h"  // NOLINT
@@ -39,6 +39,16 @@ typedef IDispEventSimpleImpl<0, ToolBand, &DIID_DIChromeFrameEvents>
 typedef IDispEventSimpleImpl<1, ToolBand, &DIID_DWebBrowserEvents2>
     HostingBrowserEvents;
 
+// WS_CHILD | WS_VISIBLE | TBSTYLE_TRANSPARENT | CCS_NODIVIDER are critical for
+// painting toolband background while chrome frame is hidden.
+// TBSTYLE_TRANSPARENT makes toolbar same color as rest of IE controls.
+// CCS_NODIVIDER removes line above toolbar.
+// Rest was copied from IE favorite bar.
+typedef CWinTraits<WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS |
+                   TBSTYLE_TOOLTIPS | TBSTYLE_TRANSPARENT | TBSTYLE_LIST |
+                   TBSTYLE_FLAT | CCS_NODIVIDER | CCS_NOPARENTALIGN |
+                   CCS_NORESIZE | CCS_TOP, 0> ToolbandWindowTraits;
+
 // Implements an IE toolband which gets instantiated for every IE browser tab
 // and renders by hosting chrome frame as an ActiveX control.
 class ATL_NO_VTABLE ToolBand : public CComObjectRootEx<CComSingleThreadModel>,
@@ -50,10 +60,13 @@ class ATL_NO_VTABLE ToolBand : public CComObjectRootEx<CComSingleThreadModel>,
     public IPersistStream,
     public ChromeFrameEvents,
     public HostingBrowserEvents,
-    public CWindowImpl<ToolBand> {
+    public CWindowImpl<ToolBand, CWindow, ToolbandWindowTraits> {
  public:
   ToolBand();
   ~ToolBand();
+
+  // Subclass TOOLBARCLASSNAME to use TBSTYLE_TRANSPARENT.
+  DECLARE_WND_SUPERCLASS(NULL, TOOLBARCLASSNAME)
 
   DECLARE_REGISTRY_RESOURCEID_EX(IDR_TOOL_BAND)
   BEGIN_REGISTRY_MAP(ToolBand)
@@ -179,7 +192,6 @@ class ATL_NO_VTABLE ToolBand : public CComObjectRootEx<CComSingleThreadModel>,
 
   // @name Message handlers.
   // @{
-  void OnPaint(CDCHandle dc);
   void OnSize(UINT type, CSize size);
   // @}
 
@@ -198,6 +210,13 @@ class ATL_NO_VTABLE ToolBand : public CComObjectRootEx<CComSingleThreadModel>,
   virtual HRESULT SendSessionIdToBho(IUnknown* bho);
 
  private:
+  class EmptyWindow :
+      public CWindowImpl<EmptyWindow, CWindow, CWinTraits<WS_CHILD, 0>> {
+   public:
+    BEGIN_MSG_MAP(EmptyWindow)
+    END_MSG_MAP()
+  };
+
   // Initializes the toolband to the given site.
   // Called from SetSite.
   HRESULT Initialize(IUnknown *site);
@@ -225,7 +244,7 @@ class ATL_NO_VTABLE ToolBand : public CComObjectRootEx<CComSingleThreadModel>,
   virtual HRESULT CreateBhoInstance(IObjectWithSite** new_bho_instance);
 
   // The web browser that initialized this toolband.
-  ScopedComPtr<IWebBrowser2> web_browser_;
+  base::win::ScopedComPtr<IWebBrowser2> web_browser_;
   // Our parent window, yielded by our site's IOleWindow.
   CWindow parent_window_;
   // Our band id, provided by GetBandInfo.
@@ -240,7 +259,9 @@ class ATL_NO_VTABLE ToolBand : public CComObjectRootEx<CComSingleThreadModel>,
 
   // Our Chrome frame instance and its window.
   CComPtr<IChromeFrame> chrome_frame_;
-  CWindow chrome_frame_window_;
+
+  // Hides chrome frame during initialization.
+  EmptyWindow chrome_frame_container_window_;
 
   // Indicates whether CloseDW() is being called on this tool band.
   bool is_quitting_;

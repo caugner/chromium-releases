@@ -3,18 +3,19 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import commands
 import filecmp
 import logging
 import os
 import shutil
 import sys
 import tempfile
-import time
 import urllib
 
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
 import pyauto_utils
+import test_utils
 
 
 class DownloadsTest(pyauto.PyUITest):
@@ -61,7 +62,7 @@ class DownloadsTest(pyauto.PyUITest):
     os.path.exists(crdownload) and os.remove(crdownload)
 
   def _GetDangerousDownload(self):
-    """Returns the file url for a dangerous download for this OS."""
+    """Returns the file path for a dangerous download for this OS."""
     sub_path = os.path.join(self.DataDir(), 'downloads', 'dangerous')
     if self.IsMac():
       return os.path.join(sub_path, 'invalid-dummy.dmg')
@@ -92,19 +93,6 @@ class DownloadsTest(pyauto.PyUITest):
     os.close(fd)
     logging.debug('Created temporary file %s of size %d' % (file_path, size))
     return file_path
-
-  def _CallFunctionWithNewTimeout(self, new_timeout, function):
-    """Sets the timeout to |new_timeout| and calls |function|.
-
-    This method resets the timeout before returning.
-    """
-    timeout_changer = pyauto.PyUITest.CmdExecutionTimeoutChanger(
-        self, new_timeout)
-    logging.info('Automation execution timeout has been changed to %d. '
-                 'If the timeout is large the test might appear to hang.'
-                 % new_timeout)
-    function()
-    del timeout_changer
 
   def _GetAllDownloadIDs(self):
     """Return a list of all download ids."""
@@ -145,25 +133,28 @@ class DownloadsTest(pyauto.PyUITest):
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
                                   'a_zip_file.zip')
     self._ClearLocalDownloadState(downloaded_pkg)
+    self.RunCommand(pyauto.IDC_NEW_INCOGNITO_WINDOW)
 
-    self.RunCommand(pyauto.IDC_NEW_INCOGNITO_WINDOW)  # open incognito window
-    # Downloads from incognito window do not figure in GetDownloadsInfo()
-    # since the download manager's list doesn't contain it.
-    # Using WaitUntil is the only resort.
-    self.NavigateToURL(file_url, 1, 0)
-    self.assertTrue(self.WaitUntil(lambda: os.path.exists(downloaded_pkg)))
-    self.assertTrue(self._EqualFileContents(file_path, downloaded_pkg))
+    # Trigger download and wait in new incognito window.
+    self.DownloadAndWaitForStart(file_url, 1)
+    self.WaitForAllDownloadsToComplete(1)
+    incognito_downloads = self.GetDownloadsInfo(1).Downloads()
+
+    # Verify that download info exists in the correct profile.
+    self.assertEqual(len(incognito_downloads), 1)
+    self.assertTrue(self._EqualFileContents(file_path, downloaded_pkg),
+        msg='%s (size %d) and %s (size %d) do not match' % (
+            file_path, os.path.getsize(file_path),
+            downloaded_pkg, os.path.getsize(downloaded_pkg)))
     self.assertTrue(self.IsDownloadShelfVisible(1))
 
   def testSaveDangerousFile(self):
     """Verify that we can download and save a dangerous file."""
     file_path = self._GetDangerousDownload()
-    file_url = self.GetFileURLForPath(file_path)
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
                                   os.path.basename(file_path))
     self._ClearLocalDownloadState(downloaded_pkg)
-
-    self.DownloadAndWaitForStart(file_url)
+    self._TriggerUnsafeDownload(os.path.basename(file_path))
     self.PerformActionOnDownload(self._GetDownloadId(),
                                  'save_dangerous_download')
     self.WaitForDownloadToComplete(downloaded_pkg)
@@ -176,12 +167,10 @@ class DownloadsTest(pyauto.PyUITest):
   def testDeclineDangerousDownload(self):
     """Verify that we can decline dangerous downloads"""
     file_path = self._GetDangerousDownload()
-    file_url = self.GetFileURLForPath(file_path)
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
                                   os.path.basename(file_path))
     self._ClearLocalDownloadState(downloaded_pkg)
-
-    self.DownloadAndWaitForStart(file_url)
+    self._TriggerUnsafeDownload(os.path.basename(file_path))
     self.PerformActionOnDownload(self._GetDownloadId(),
                                  'decline_dangerous_download')
     self.assertFalse(os.path.exists(downloaded_pkg))
@@ -225,8 +214,8 @@ class DownloadsTest(pyauto.PyUITest):
     self._DeleteAfterShutdown(downloaded_pkg)
     # Waiting for big file to download might exceed automation timeout.
     # Temporarily increase the automation timeout.
-    self._CallFunctionWithNewTimeout(4 * 60 * 1000,  # 4 min.
-                                     self.WaitForAllDownloadsToComplete)
+    test_utils.CallFunctionWithNewTimeout(self, 4 * 60 * 1000,  # 4 min.
+                                          self.WaitForAllDownloadsToComplete)
     # Verify that the file was correctly downloaded
     self.assertTrue(os.path.exists(downloaded_pkg),
                     'Downloaded file %s missing.' % downloaded_pkg)
@@ -307,14 +296,41 @@ class DownloadsTest(pyauto.PyUITest):
                                   os.path.join(temp_dir, filename)))
       os.path.exists(downloaded_file) and os.remove(downloaded_file)
 
+  def _TriggerUnsafeDownload(self, filename, tab_index=0, windex=0):
+    """Trigger download of an unsafe/dangerous filetype.
+
+    Files explictly requested by the user (like navigating to a package, or
+    clicking on a link) aren't marked unsafe.
+    Only the ones where the user didn't directly initiate a download are
+    marked unsafe.
+
+    Navigates to download-dangerous.html which triggers the download.
+    Waits until the download starts.
+
+    Args:
+      filename: the name of the file to trigger the download.
+                This should exist in the 'dangerous' directory.
+      tab_index: tab index. Default 0.
+      windex: window index. Default 0.
+    """
+    dangerous_dir = os.path.join(
+        self.DataDir(), 'downloads', 'dangerous')
+    assert os.path.isfile(os.path.join(dangerous_dir, filename))
+    file_url = self.GetFileURLForPath(os.path.join(
+        dangerous_dir, 'download-dangerous.html')) + '?' + filename
+    num_downloads = len(self.GetDownloadsInfo().Downloads())
+    self.NavigateToURL(file_url, windex, tab_index)
+    # It might take a while for the download to kick in, hold on until then.
+    self.assertTrue(self.WaitUntil(
+        lambda: len(self.GetDownloadsInfo().Downloads()) == num_downloads + 1))
+
   def testNoUnsafeDownloadsOnRestart(self):
     """Verify that unsafe file should not show up on session restart."""
     file_path = self._GetDangerousDownload()
-    file_url = self.GetFileURLForPath(file_path)
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
                                   os.path.basename(file_path))
     self._ClearLocalDownloadState(downloaded_pkg)
-    self.DownloadAndWaitForStart(file_url)
+    self._TriggerUnsafeDownload(os.path.basename(file_path))
     self.assertTrue(self.IsDownloadShelfVisible())
     # Restart the browser and assert that the download was removed.
     self.RestartBrowser(clear_profile=False)
@@ -358,8 +374,8 @@ class DownloadsTest(pyauto.PyUITest):
 
     # Waiting for big file to download might exceed automation timeout.
     # Temporarily increase the automation timeout.
-    self._CallFunctionWithNewTimeout(2 * 60 * 1000,  # 2 min.
-                                     self.WaitForAllDownloadsToComplete)
+    test_utils.CallFunctionWithNewTimeout(self, 2 * 60 * 1000,  # 2 min.
+                                          self.WaitForAllDownloadsToComplete)
 
     # Verify that the file was correctly downloaded after pause and resume.
     self.assertTrue(os.path.exists(downloaded_pkg),
@@ -431,6 +447,152 @@ class DownloadsTest(pyauto.PyUITest):
     self.assertTrue(self.WaitUntilDownloadedThemeSet('camo theme'))
     self.assertTrue(self.WaitUntil(lambda path: not os.path.exists(path),
                                    args=[downloaded_pkg]))
+
+  def testAlwaysOpenFileType(self):
+    """Verify "Always Open Files of this Type" download option
+
+    If 'always open' option is set for any filetype, downloading that type of
+    file gets opened always after the download.
+    A cross-platform trick to verify it, by downloading a .zip file and
+    expecting it to get unzipped.  Just check if it got unzipped or not.
+    This way you won't have to worry about which application might 'open'
+    it.
+    """
+    if not self.IsMac():
+      logging.info('Don\'t have a standard way to test when a file "opened"')
+      logging.info('Bailing out')
+      return
+    file_path = os.path.join(self.DataDir(), 'downloads', 'a_zip_file.zip')
+    file_url = self.GetFileURLForPath(file_path)
+    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
+                                  os.path.basename(file_path))
+    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+    self.DownloadAndWaitForStart(file_url)
+    self.WaitForAllDownloadsToComplete()
+    id = self._GetDownloadId()
+    self.PerformActionOnDownload(id, 'toggle_open_files_like_this')
+    # Retesting the flag we set
+    file_url2 = self.GetFileURLForDataPath(os.path.join('zip', 'test.zip'))
+    unzip_path = os.path.join(self.GetDownloadDirectory().value(),
+                              'test', 'foo')
+    os.path.exists(unzip_path) and pyauto_utils.RemovePath(unzip_path)
+    self.DownloadAndWaitForStart(file_url2)
+    self.WaitForAllDownloadsToComplete()
+    # When the downloaded zip gets 'opened', a_file.txt will become available.
+    self.assertTrue(self.WaitUntil(lambda: os.path.exists(unzip_path)),
+                    'Did not open the filetype')
+    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+    os.path.exists(unzip_path) and pyauto_utils.RemovePath(unzip_path)
+
+  def testExtendedAttributesOnMac(self):
+    """Verify that Chrome sets the extended attributes on a file.
+       This test is for mac only.
+    """
+    if not self.IsMac():
+      logging.info('Skipping testExtendedAttributesOnMac on non-Mac')
+      return
+    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
+                                  'a_zip_file.zip')
+    self._ClearLocalDownloadState(downloaded_pkg)
+    file_url = 'http://src.chromium.org/viewvc/chrome/trunk/src/chrome/'\
+               'test/data/downloads/a_zip_file.zip'
+    self.DownloadAndWaitForStart(file_url)
+    self.WaitForAllDownloadsToComplete()
+    import xattr
+    self.assertTrue('com.apple.quarantine' in xattr.listxattr(downloaded_pkg))
+
+  def testOpenWhenDone(self):
+    """Verify "Open When Done" download option.
+
+    Test creates a zip file on the fly and downloads it.
+    Set this option when file is downloading. Once file is downloaded,
+    verify that downloaded zip file is unzipped.
+    """
+    if not self.IsMac():
+      logging.info('Don\'t have a standard way to test when a file "opened"')
+      logging.info('Bailing out')
+      return
+    # Creating a temp zip file.
+    file_path = self._MakeFile(2**24)
+    file_url = self.GetFileURLForPath(file_path)
+    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
+                                  os.path.basename(file_path))
+    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+    self.DownloadAndWaitForStart(file_url)
+    id = self._GetDownloadId()
+    self.PerformActionOnDownload(id, 'open')
+    self.WaitForAllDownloadsToComplete()
+    unzip_file_name = downloaded_pkg + '.cpgz'
+    # Verify that the file was correctly downloaded.
+    self.assertTrue(self.WaitUntil(lambda: os.path.exists(unzip_file_name)),
+                    'Unzipped folder %s missing.' % unzip_file_name)
+    self.assertTrue(os.path.exists(downloaded_pkg),
+                    'Downloaded file %s missing.' % downloaded_pkg)
+    self.assertTrue(self._EqualFileContents(file_path, downloaded_pkg),
+                    'Downloaded file %s does not match original' %
+                      downloaded_pkg)
+    os.path.exists(file_path) and os.remove(file_path)
+    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+    os.path.exists(unzip_file_name) and os.remove(unzip_file_name)
+
+  def testDownloadPercentage(self):
+    """Verify that during downloading, % values increases,
+       and once download is over, % value is 100"""
+    file_path = self._MakeFile(2**24)
+    file_url = self.GetFileURLForPath(file_path)
+    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
+                                  os.path.basename(file_path))
+    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+    self.DownloadAndWaitForStart(file_url)
+    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
+                                  os.path.basename(file_path))
+    downloads = self.GetDownloadsInfo().Downloads()
+    old_percentage = downloads[0]['PercentComplete']
+    def _PercentInc():
+      percent = self.GetDownloadsInfo().Downloads()[0]['PercentComplete']
+      return old_percentage == 100 or percent > old_percentage,
+    self.assertTrue(self.WaitUntil(_PercentInc),
+        msg='Download percentage value is not increasing')
+    # Once download is completed, percentage is 100.
+    self.WaitForAllDownloadsToComplete()
+    downloads = self.GetDownloadsInfo().Downloads()
+    self.assertEqual(downloads[0]['PercentComplete'], 100,
+        'Download percentage should be 100 after download completed')
+    os.path.exists(file_path) and os.remove(file_path)
+    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+
+  def testDownloadIncognitoAndRegular(self):
+    """Download the same zip file in regular and incognito window and
+       verify that it downloaded correctly with same file name appended with
+       counter for the second download in regular window.
+    """
+    test_dir = os.path.join(os.path.abspath(self.DataDir()), 'downloads')
+    file_path = os.path.join(test_dir, 'a_zip_file.zip')
+    file_url = self.GetFileURLForPath(file_path)
+    downloaded_pkg_regul = os.path.join(self.GetDownloadDirectory().value(),
+                                        'a_zip_file.zip')
+    downloaded_pkg_incog = os.path.join(self.GetDownloadDirectory().value(),
+                                        'a_zip_file (1).zip')
+    self._ClearLocalDownloadState(downloaded_pkg_regul)
+    self._ClearLocalDownloadState(downloaded_pkg_incog)
+
+    self.DownloadAndWaitForStart(file_url, 0)
+    self.WaitForAllDownloadsToComplete(0)
+
+    self.RunCommand(pyauto.IDC_NEW_INCOGNITO_WINDOW)
+    self.DownloadAndWaitForStart(file_url, 1)
+    self.WaitForAllDownloadsToComplete(1)
+
+    # Verify download in regular window.
+    self.assertTrue(os.path.exists(downloaded_pkg_regul))
+    self.assertTrue(self._EqualFileContents(file_path, downloaded_pkg_regul))
+
+    # Verify download in incognito window.
+    # bug 69738 WaitForAllDownloadsToComplete is flaky for this test case.
+    # Using extra WaitUntil until this is resolved.
+    self.assertTrue(self.WaitUntil(
+        lambda: os.path.exists(downloaded_pkg_incog)))
+    self.assertTrue(self._EqualFileContents(file_path, downloaded_pkg_incog))
 
 
 if __name__ == '__main__':

@@ -8,11 +8,12 @@
 
 #include <list>
 #include <string>
+#include <vector>
 
 #include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "base/message_loop_proxy.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
 #include "chrome/service/cloud_print/cloud_print_url_fetcher.h"
 #include "chrome/service/cloud_print/job_status_updater.h"
@@ -72,18 +73,16 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
     PRINT_FAILED,
   };
   struct JobDetails {
+    JobDetails();
+    ~JobDetails();
+    void Clear();
+
     std::string job_id_;
     std::string job_title_;
     std::string print_ticket_;
     FilePath print_data_file_path_;
     std::string print_data_mime_type_;
-    void Clear() {
-      job_id_.clear();
-      job_title_.clear();
-      print_ticket_.clear();
-      print_data_mime_type_.clear();
-      print_data_file_path_ = FilePath();
-    }
+    std::vector<std::string> tags_;
   };
 
  public:
@@ -230,6 +229,12 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   bool UpdatePrinterInfo();
   bool HavePendingTasks();
   void FailedFetchingJobData();
+
+  // Callback that asynchronously receives printer caps and defaults.
+  void OnReceivePrinterCaps(
+    bool succeeded,
+    const std::string& printer_name,
+    const printing::PrinterCapsAndDefaults& caps_and_defaults);
 
   // Called on print_thread_.
   void DoPrint(const JobDetails& job_details,

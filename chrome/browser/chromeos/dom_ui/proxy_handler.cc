@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/dom_ui/proxy_handler.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/stl_util-inl.h"
@@ -13,12 +11,13 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/proxy_cros_settings_provider.h"
-#include "chrome/common/notification_service.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace chromeos {
 
@@ -69,4 +68,4 @@ void ProxyHandler::GetLocalizedValues(
      l10n_util::GetStringUTF16(IDS_PROXY_BYPASS));
 }
 
-} // namespace chromeos
+}  // namespace chromeos

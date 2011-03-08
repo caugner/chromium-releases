@@ -50,12 +50,31 @@ class Layer : public ObjectBase {
  public:
   typedef SmartPointer<Layer> Ref;
 
+  enum PaintOperator {
+    BLEND,
+    BLEND_WITH_TRANSPARENCY,
+    COPY,
+    COPY_WITH_FADING,
+  };
+
+  virtual ~Layer();
+
+  // Methods exposed to JS.
+
   Pattern* pattern() const {
     return pattern_;
   }
 
   void set_pattern(Pattern* pattern) {
     pattern_ = Pattern::Ref(pattern);
+  }
+
+  bool visible() const {
+    return visible_;
+  }
+
+  void set_visible(bool visible) {
+    visible_ = visible;
   }
 
   double alpha() const {
@@ -80,6 +99,14 @@ class Layer : public ObjectBase {
 
   void set_y(double y) {
     y_ = y;
+  }
+
+  double z() const {
+    return z_;
+  }
+
+  void set_z(double z) {
+    z_ = z;
   }
 
   double width() const {
@@ -114,6 +141,30 @@ class Layer : public ObjectBase {
     scale_y_ = scale_y;
   }
 
+  PaintOperator paint_operator() const {
+    return paint_operator_;
+  }
+
+  void set_paint_operator(PaintOperator paint_operator) {
+    paint_operator_ = paint_operator;
+  }
+
+  // Methods not exposed to JS.
+
+  // Whether we should currently paint this layer.
+  bool ShouldPaint() const {
+    return visible() && pattern() != NULL;
+  }
+
+  // Whether this layer should currently clip content behind it (i.e.,
+  // prevent it from being drawn in the first place).
+  bool ShouldClip() const {
+    // When alpha blending is used we cannot clip the background because our
+    // content will be blended with it.
+    return ShouldPaint() &&
+        (paint_operator() == COPY || paint_operator() == COPY_WITH_FADING);
+  }
+
  private:
   explicit Layer(ServiceLocator* service_locator);
 
@@ -123,7 +174,11 @@ class Layer : public ObjectBase {
   // The pattern used to paint this Layer.
   Pattern::Ref pattern_;
 
-  // Transparancy of this layer.
+  // Whether this layer should be visible or not.
+  bool visible_;
+
+  // The transparency for the BLEND_WITH_TRANSPARENCY operator or the fading for
+  // the COPY_WITH_FADING operator.
   double alpha_;
 
   // The x coordinate of the top-left corner of this layer.
@@ -131,6 +186,9 @@ class Layer : public ObjectBase {
 
   // The y coordinate of the top-left corner of this layer.
   double y_;
+
+  // The z coordinate of the layer (used only to determine stacking order).
+  double z_;
 
   // The width of this layer.
   double width_;
@@ -143,6 +201,9 @@ class Layer : public ObjectBase {
 
   // A scaling factor to apply to the pattern's y-axis.
   double scale_y_;
+
+  // The paint operator to use for painting this Layer.
+  PaintOperator paint_operator_;
 
   O3D_DECL_CLASS(Layer, ObjectBase)
 };  // Layer

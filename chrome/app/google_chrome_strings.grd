@@ -241,11 +241,16 @@ Chrome supports. -->
         Google Inc.
       </message>
       <message name="IDS_ABOUT_VERSION_COPYRIGHT" desc="Copyright information on the about pages">
-        Copyright © 2006-2010 Google Inc. All Rights Reserved.
+        Copyright © 2006-2011 Google Inc. All Rights Reserved.
       </message>
       <message name="IDS_ABOUT_VERSION_LICENSE" desc="The label below the copyright message, containing the URLs.">
         Google Chrome is made possible by the <ph name="BEGIN_LINK_CHROMIUM">BEGIN_LINK_CHR</ph>Chromium<ph name="END_LINK_CHROMIUM">END_LINK_CHR</ph> open source project and other <ph name="BEGIN_LINK_OSS">BEGIN_LINK_OSS</ph>open source software<ph name="END_LINK_OSS">END_LINK_OSS</ph>.
       </message>
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_ABOUT_CROS_VERSION_LICENSE" desc="Additional text displayed beneath the Chromium open source URLs for Chrome OS.">
+          Google Chrome OS is made possible by additional <ph name="BEGIN_LINK_CROS_OSS">BEGIN_LINK_CROS_OSS</ph>open source software<ph name="END_LINK_CROS_OSS">END_LINK_CROS_OSS</ph>.
+        </message>
+      </if>
       <message name="IDS_ABOUT_TERMS_OF_SERVICE" desc="The terms of service label in the About box.">
         Google Chrome <ph name="TERMS_OF_SERVICE_LINK">$1<ex>Terms of Service</ex></ph>
       </message>
@@ -294,23 +299,11 @@ Chrome supports. -->
       <message name="IDS_FIRSTRUN_DLG_TITLE" desc="Dialog title for first-run dialog">
         Welcome to Google Chrome
       </message>
-      <message name="IDS_FIRSTRUN_DLG_TEXT" desc="Explains what the first-run dialog does">
-        Google Chrome is ready to complete your installation.
-      </message>
-      <message name="IDS_FIRSTRUN_DLG_DETAIL" desc="Text for detailed explanation of actions">
-        Google Chrome will do these tasks:
-      </message>
       <message name="IDS_FIRSTRUN_DLG_OK" desc="Text for OK button on first-run dialog">
         Start Google Chrome
       </message>
-      <message name="IDS_FIRSTRUN_DLG_ACTION2" desc="Second action item on first-run dialog">
-        Add Google Chrome shortcuts to your desktop, quick launch bar, and Start menu
-      </message>
       <message name="IDS_FR_CUSTOMIZE_DEFAULT_BROWSER" desc="Default browser checkbox label">
         Make Google Chrome the default browser
-      </message>
-      <message name="IDS_FR_CUSTOMIZE_SHORTCUTS" desc="Create shortcuts preface text">
-        Create Google Chrome shortcuts in these locations:
       </message>
       <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
                desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
@@ -349,14 +342,12 @@ Chrome supports. -->
           Please sign out of Google Chrome OS and sign in again for this change to take effect.
         </message>
       </if>
+      <!--TODO(kmadhusu): Remove "IDS_OPTIONS_RESET_MESSAGE" after platform-specific dialogs are removed.-->
       <message name="IDS_OPTIONS_RESET_MESSAGE" desc="The message shown when the user presses the 'Reset Chrome options' button">
         When you reset Google Chrome options any changes you've made will be reverted to the default settings. Do you want to reset Chrome options?
       </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
         Google Chrome cannot read and write to its data directory:\n\n<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph>
-      </message>
-      <message name="IDS_OPTIONS_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging">
-        Help make Google Chrome better by automatically sending usage statistics and crash reports to Google
       </message>
       <message name="IDS_EULA_CHECKBOX_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging on EULA screen.">
         Optional: Help make Chrome OS better by automatically sending usage statistics and crash reports to Google.
@@ -379,9 +370,6 @@ Chrome supports. -->
       </message>
       <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Info bar message to save a password">
         Do you want Google Chrome to save your password?
-      </message>
-      <message name="IDS_IMPORT_PROGRESS_STATUS_CANCEL_CONFIRM" desc="Import cancellation confirmation">
-        If you cancel now, not all items will be imported. You can import again later from the Google Chrome menu.
       </message>
       <message name="IDS_FR_BUBBLE_QUESTION" desc="Main text for the bubble">
         Google Chrome uses your default search engine, which is currently set to <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>. Do you want to keep your default search engine?
@@ -446,9 +434,22 @@ Chrome supports. -->
       <message name="IDS_INSTALL_DIR_IN_USE" desc="Error during install if Google Chrome version is missing from registry but the installation directory exists and can not be deleted.">
         Google Chrome installation directory seems to be in use. Please reboot your computer and try again.
       </message>
+      <message name="IDS_INSTALL_NON_MULTI_INSTALLATION_EXISTS" desc="Error during install if a single-install Google Chrome or Google Chrome Frame is present, thereby preventing the installation of a multi-install Google Chrome or Google Chrome Frame.">
+        A conflicting installation of Google Chrome or Google Chrome Frame was found on the system. Please uninstall it and try again.
+      </message>
+      <message name="IDS_INSTALL_MULTI_INSTALLATION_EXISTS" desc="Error during install if a multi-install Google Chrome or Google Chrome Frame is present, thereby preventing the installation of a single-install Google Chrome or Google Chrome Frame.">
+        A conflicting installation of Google Chrome or Google Chrome Frame was found on the system. Please uninstall it and try again.
+      </message>
+      <message name="IDS_INSTALL_CONFLICTING_CHANNEL_EXISTS" desc="Error during install if a version of Google Chrome on a different update channel exists when installing Google Chrome Frame.">
+        A conflicting installation of Google Chrome was found on the system. Please uninstall it and try again.
+      </message>
       <!-- Options Dialog -->
+      <!-- TODO(kmadhusu): Remove "IDS_OPTIONS_DISABLE_SERVICES" after platform-specific dialogs are removed.-->
       <message name="IDS_OPTIONS_DISABLE_SERVICES" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
         Google Chrome may use web services to improve your browsing experience. You may optionally disable these services.
+      </message>
+      <message name="IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
+        Google Chrome may use web services to improve your browsing experience.
       </message>
       <message name="IDS_IMPORT_BOOKMARKS" desc="Explanatory text for the importing progress dialog when importing a bookmarks.html file from the bookmark manager">
         Google Chrome is now importing Favorites/Bookmarks.
@@ -539,12 +540,6 @@ Chrome supports. -->
         </message>
         <message name="IDS_SHORT_UTILITY_APP_NAME" desc="The utility application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Utility, not Google Chrome Utility.">
           Chrome Utility
-        </message>
-        <message name="IDS_PROFILEIMPORTER_APP_NAME" desc="The profile importer application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Profile Importer.">
-          Google Chrome Profile Importer
-        </message>
-        <message name="IDS_SHORT_PROFILEIMPORTER_APP_NAME" desc="The profile importer application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Profile Importer, not Google Chrome Profile Importer.">
-          Chrome Profile Importer
         </message>
       </if>
     </messages>

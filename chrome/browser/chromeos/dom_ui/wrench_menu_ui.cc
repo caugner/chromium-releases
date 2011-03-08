@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/dom_ui/wrench_menu_ui.h"
 
-#include "app/l10n_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -22,6 +21,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/controls/menu/menu_2.h"
 
 namespace {
@@ -37,12 +37,12 @@ class WrenchMenuSourceDelegate : public chromeos::MenuSourceDelegate {
     config->SetInteger("IDC_ZOOM_PLUS", IDC_ZOOM_PLUS);
     config->SetInteger("IDC_FULLSCREEN", IDC_FULLSCREEN);
 
-    config->SetString("IDS_EDIT2", WideToUTF8(l10n_util::GetString(IDS_EDIT2)));
+    config->SetString("IDS_EDIT2", l10n_util::GetStringUTF8(IDS_EDIT2));
     config->SetString("IDS_ZOOM_MENU2",
-                      WideToUTF8(l10n_util::GetString(IDS_ZOOM_MENU2)));
-    config->SetString("IDS_CUT", WideToUTF8(l10n_util::GetString(IDS_CUT)));
-    config->SetString("IDS_COPY", WideToUTF8(l10n_util::GetString(IDS_COPY)));
-    config->SetString("IDS_PASTE", WideToUTF8(l10n_util::GetString(IDS_PASTE)));
+                      l10n_util::GetStringUTF8(IDS_ZOOM_MENU2));
+    config->SetString("IDS_CUT", l10n_util::GetStringUTF8(IDS_CUT));
+    config->SetString("IDS_COPY", l10n_util::GetStringUTF8(IDS_COPY));
+    config->SetString("IDS_PASTE", l10n_util::GetStringUTF8(IDS_PASTE));
   }
 };
 
@@ -69,7 +69,7 @@ WrenchMenuUI::WrenchMenuUI(TabContents* contents)
                  Source<Profile>(GetProfile()));
 }
 
-void WrenchMenuUI::ModelUpdated(const menus::MenuModel* new_model) {
+void WrenchMenuUI::ModelUpdated(const ui::MenuModel* new_model) {
   MenuUI::ModelUpdated(new_model);
   UpdateZoomControls();
 }
@@ -104,7 +104,7 @@ void WrenchMenuUI::UpdateZoomControls() {
   CallJavascriptFunction(L"updateZoomControls", params);
 }
 
-views::Menu2* WrenchMenuUI::CreateMenu2(menus::MenuModel* model) {
+views::Menu2* WrenchMenuUI::CreateMenu2(ui::MenuModel* model) {
   views::Menu2* menu = new views::Menu2(model);
   NativeMenuDOMUI::SetMenuURL(
       menu, GURL(StringPrintf("chrome://%s", chrome::kChromeUIWrenchMenu)));

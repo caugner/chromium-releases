@@ -12,6 +12,8 @@
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/proxy/interface_proxy.h"
+#include "ppapi/proxy/image_data.h"
+
 
 struct PPB_ImageData;
 
@@ -30,19 +32,19 @@ class PPB_ImageData_Proxy : public InterfaceProxy {
   // InterfaceProxy implementation.
   virtual const void* GetSourceInterface() const;
   virtual InterfaceID GetInterfaceId() const;
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
   // Message handlers.
   void OnMsgGetNativeImageDataFormat(int32* result);
   void OnMsgIsImageDataFormatSupported(int32 format, PP_Bool* result);
-  void OnMsgCreate(PP_Module module,
+  void OnMsgCreate(PP_Instance instance,
                    int32_t format,
                    const PP_Size& size,
                    PP_Bool init_to_zero,
                    PP_Resource* result,
                    std::string* image_data_desc,
-                   uint64_t* result_shm_handle);
+                   ImageHandle* result_image_handle);
 };
 
 }  // namespace proxy

@@ -4,21 +4,21 @@
 
 #include "chrome/browser/ui/views/location_bar/content_setting_image_view.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_setting_bubble_model.h"
 #include "chrome/browser/content_setting_image_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents_wrapper.h"
-#include "chrome/browser/views/content_setting_bubble_contents.h"
-#include "chrome/browser/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/views/content_setting_bubble_contents.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "gfx/canvas.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/skia_util.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/border.h"
 
 namespace {
@@ -48,7 +48,7 @@ ContentSettingImageView::ContentSettingImageView(
     ContentSettingsType content_type,
     LocationBarView* parent,
     Profile* profile)
-    : LinearAnimation(kMoveTimeMs, kFrameRateHz, NULL),
+    : ui::LinearAnimation(kMoveTimeMs, kFrameRateHz, NULL),
       content_setting_image_model_(
           ContentSettingImageModel::CreateContentSettingImageModel(
               content_type)),
@@ -104,7 +104,7 @@ void ContentSettingImageView::UpdateFromTabContents(TabContents* tab_contents) {
     animation_in_progress_ = true;
     // Initialize animated string. It will be cleared when animation is
     // completed.
-    animated_text_ = l10n_util::GetString(animated_string_id);
+    animated_text_ = l10n_util::GetStringUTF16(animated_string_id);
     text_size_ = ResourceBundle::GetSharedInstance().GetFont(
         ResourceBundle::MediumFont).GetStringWidth(animated_text_);
     text_size_ += 2 * kTextMarginPixels + kIconLeftMargin;

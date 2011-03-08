@@ -54,6 +54,16 @@ class TestingAutocompleteEditView : public AutocompleteEditView {
   virtual bool OnAfterPossibleChange() { return false; }
   virtual gfx::NativeView GetNativeView() const { return 0; }
   virtual CommandUpdater* GetCommandUpdater() { return NULL; }
+  virtual void SetInstantSuggestion(const string16& input) {}
+  virtual int TextWidth() const { return 0; }
+  virtual bool IsImeComposing() const { return false; }
+
+#if defined(TOOLKIT_VIEWS)
+  virtual views::View* AddToView(views::View* parent) { return NULL; }
+  virtual bool CommitInstantSuggestion(
+      const std::wstring& typed_text,
+      const std::wstring& suggested_text) { return false;}
+#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestingAutocompleteEditView);
@@ -68,7 +78,9 @@ class TestingAutocompleteEditController : public AutocompleteEditController {
   virtual bool OnCommitSuggestedText(const std::wstring& typed_text) {
     return false;
   }
-  virtual void OnSetSuggestedSearchText(const string16& suggested_text) {}
+  virtual bool AcceptCurrentInstantPreview() {
+    return false;
+  }
   virtual void OnPopupBoundsChanged(const gfx::Rect& bounds) {}
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,

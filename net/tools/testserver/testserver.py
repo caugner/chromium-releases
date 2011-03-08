@@ -151,17 +151,22 @@ class SyncHTTPServer(StoppableHTTPServer):
     """This is a merge of asyncore.loop() and SocketServer.serve_forever().
     """
 
-    def RunDispatcherHandler(dispatcher, handler):
-      """Handles a single event for an asyncore.dispatcher.
+    def HandleXmppSocket(fd, socket_map, handler):
+      """Runs the handler for the xmpp connection for fd.
 
       Adapted from asyncore.read() et al.
       """
+      xmpp_connection = socket_map.get(fd)
+      # This could happen if a previous handler call caused fd to get
+      # removed from socket_map.
+      if xmpp_connection is None:
+        return
       try:
-        handler(dispatcher)
+        handler(xmpp_connection)
       except (asyncore.ExitNow, KeyboardInterrupt, SystemExit):
         raise
       except:
-        dispatcher.handle_error()
+        xmpp_connection.handle_error()
 
     while True:
       read_fds = [ self.fileno() ]
@@ -191,19 +196,16 @@ class SyncHTTPServer(StoppableHTTPServer):
         if fd == self.fileno():
           self.HandleRequestNoBlock()
           continue
-        xmpp_connection = self._xmpp_socket_map.get(fd)
-        RunDispatcherHandler(xmpp_connection,
-                             asyncore.dispatcher.handle_read_event)
+        HandleXmppSocket(fd, self._xmpp_socket_map,
+                         asyncore.dispatcher.handle_read_event)
 
       for fd in write_fds:
-        xmpp_connection = self._xmpp_socket_map.get(fd)
-        RunDispatcherHandler(xmpp_connection,
-                             asyncore.dispatcher.handle_write_event)
+        HandleXmppSocket(fd, self._xmpp_socket_map,
+                         asyncore.dispatcher.handle_write_event)
 
       for fd in exceptional_fds:
-        xmpp_connection = self._xmpp_socket_map.get(fd)
-        RunDispatcherHandler(xmpp_connection,
-                             asyncore.dispatcher.handle_expt_event)
+        HandleXmppSocket(fd, self._xmpp_socket_map,
+                         asyncore.dispatcher.handle_expt_event)
 
 
 class BasePageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
@@ -302,11 +304,12 @@ class TestPageHandler(BasePageHandler):
 
     self._mime_types = {
       'crx' : 'application/x-chrome-extension',
+      'exe' : 'application/octet-stream',
       'gif': 'image/gif',
       'jpeg' : 'image/jpeg',
       'jpg' : 'image/jpeg',
-      'xml' : 'text/xml',
-      'pdf' : 'application/pdf'
+      'pdf' : 'application/pdf',
+      'xml' : 'text/xml'
     }
     self._default_mime_type = 'text/html'
 
@@ -910,8 +913,18 @@ class TestPageHandler(BasePageHandler):
       return False
 
     username = userpass = password = b64str = ""
+    expected_password = 'secret'
+    realm = 'testrealm'
+    set_cookie_if_challenged = False
 
-    set_cookie_if_challenged = self.path.find('?set-cookie-if-challenged') > 0
+    _, _, url_path, _, query, _ = urlparse.urlparse(self.path)
+    query_params = cgi.parse_qs(query, True)
+    if 'set-cookie-if-challenged' in query_params:
+      set_cookie_if_challenged = True
+    if 'password' in query_params:
+      expected_password = query_params['password'][0]
+    if 'realm' in query_params:
+      realm = query_params['realm'][0]
 
     auth = self.headers.getheader('authorization')
     try:
@@ -920,12 +933,12 @@ class TestPageHandler(BasePageHandler):
       b64str = re.findall(r'Basic (\S+)', auth)[0]
       userpass = base64.b64decode(b64str)
       username, password = re.findall(r'([^:]+):(\S+)', userpass)[0]
-      if password != 'secret':
+      if password != expected_password:
         raise Exception('wrong password')
     except Exception, e:
       # Authentication failed.
       self.send_response(401)
-      self.send_header('WWW-Authenticate', 'Basic realm="testrealm"')
+      self.send_header('WWW-Authenticate', 'Basic realm="%s"' % realm)
       self.send_header('Content-type', 'text/html')
       if set_cookie_if_challenged:
         self.send_header('Set-Cookie', 'got_challenged=true')
@@ -948,6 +961,24 @@ class TestPageHandler(BasePageHandler):
     if if_none_match == "abc":
       self.send_response(304)
       self.end_headers()
+    elif url_path.endswith(".gif"):
+      # Using chrome/test/data/google/logo.gif as the test image
+      test_image_path = ['google', 'logo.gif']
+      gif_path = os.path.join(self.server.data_dir, *test_image_path)
+      if not os.path.isfile(gif_path):
+        self.send_error(404)
+        return True
+
+      f = open(gif_path, "rb")
+      data = f.read()
+      f.close()
+
+      self.send_response(200)
+      self.send_header('Content-type', 'image/gif')
+      self.send_header('Cache-control', 'max-age=60000')
+      self.send_header('Etag', 'abc')
+      self.end_headers()
+      self.wfile.write(data)
     else:
       self.send_response(200)
       self.send_header('Content-type', 'text/html')

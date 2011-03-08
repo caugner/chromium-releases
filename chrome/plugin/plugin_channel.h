@@ -30,15 +30,15 @@ class PluginChannel : public PluginChannelBase {
   // Send a message to all renderers that the process is going to shutdown.
   static void NotifyRenderersOfPendingShutdown();
 
-  ~PluginChannel();
+  virtual ~PluginChannel();
 
   virtual bool Send(IPC::Message* msg);
-  virtual void OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message);
 
   base::ProcessHandle renderer_handle() const { return renderer_handle_; }
   int renderer_id() { return renderer_id_; }
 
-  int GenerateRouteID();
+  virtual int GenerateRouteID();
 
   // Returns the event that's set when a call to the renderer causes a modal
   // dialog to come up.
@@ -50,7 +50,7 @@ class PluginChannel : public PluginChannelBase {
   void set_off_the_record(bool value) { off_the_record_ = value; }
 
 #if defined(OS_POSIX)
-  int renderer_fd() const { return renderer_fd_; }
+  int renderer_fd() const { return channel_->GetClientFileDescriptor(); }
 #endif
 
  protected:
@@ -69,23 +69,16 @@ class PluginChannel : public PluginChannelBase {
   // Called on the plugin thread
   PluginChannel();
 
-  void OnControlMessageReceived(const IPC::Message& msg);
+  virtual bool OnControlMessageReceived(const IPC::Message& msg);
 
   static PluginChannelBase* ClassFactory() { return new PluginChannel(); }
 
   void OnCreateInstance(const std::string& mime_type, int* instance_id);
   void OnDestroyInstance(int instance_id, IPC::Message* reply_msg);
   void OnGenerateRouteID(int* route_id);
-  void OnClearSiteData(uint64 flags,
-                       const std::string& domain,
+  void OnClearSiteData(const std::string& site,
+                       uint64 flags,
                        base::Time begin_time);
-
-#if defined(OS_POSIX)
-  // Close the plugin process' copy of the renderer's side of the plugin
-  // channel.  This can be called after the renderer is known to have its own
-  // copy of renderer_fd_.
-  void CloseRendererFD();
-#endif
 
   std::vector<scoped_refptr<WebPluginDelegateStub> > plugin_stubs_;
 
@@ -94,13 +87,6 @@ class PluginChannel : public PluginChannelBase {
 
   // The id of the renderer who is on the other side of the channel.
   int renderer_id_;
-
-#if defined(OS_POSIX)
-  // FD for the renderer end of the socket. It is closed when the IPC layer
-  // indicates that the channel is connected, proving that the renderer has
-  // access to its side of the socket.
-  int renderer_fd_;
-#endif
 
   int in_send_;  // Tracks if we're in a Send call.
   bool log_messages_;  // True if we should log sent and received messages.

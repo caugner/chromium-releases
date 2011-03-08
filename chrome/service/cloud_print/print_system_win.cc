@@ -8,20 +8,23 @@
 #include <winspool.h>
 
 #include "base/file_path.h"
-#include "base/object_watcher.h"
 #include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/object_watcher.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/scoped_hdc.h"
 #include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/service_process.h"
 #include "chrome/service/service_utility_process_host.h"
 #include "gfx/rect.h"
+#include "grit/generated_resources.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/print_backend_consts.h"
 #include "printing/backend/win_helper.h"
 #include "printing/native_metafile.h"
 #include "printing/page_range.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using base::win::ScopedBstr;
 using base::win::ScopedComPtr;
@@ -75,6 +78,11 @@ HRESULT PrintTicketToDevMode(const std::string& printer_name,
                              const std::string& print_ticket,
                              DevMode* dev_mode) {
   DCHECK(dev_mode);
+  printing::ScopedXPSInitializer xps_initializer;
+  if (!xps_initializer.initialized()) {
+    // TODO(sanjeevr): Handle legacy proxy case (with no prntvpt.dll)
+    return E_FAIL;
+  }
 
   ScopedComPtr<IStream> pt_stream;
   HRESULT hr = StreamFromPrintTicket(print_ticket, pt_stream.Receive());
@@ -109,8 +117,7 @@ HRESULT PrintTicketToDevMode(const std::string& printer_name,
 
 namespace cloud_print {
 
-class PrintSystemWatcherWin
-    : public base::ObjectWatcher::Delegate {
+class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
  public:
   PrintSystemWatcherWin()
       : printer_(NULL),
@@ -223,7 +230,7 @@ class PrintSystemWatcherWin
   }
 
  private:
-  base::ObjectWatcher watcher_;
+  base::win::ObjectWatcher watcher_;
   HANDLE printer_;            // The printer being watched
   HANDLE printer_change_;     // Returned by FindFirstPrinterChangeNotifier
   Delegate* delegate_;        // Delegate to notify
@@ -241,13 +248,13 @@ class PrintSystemWin : public PrintSystem {
   PrintSystemWin();
 
   // PrintSystem implementation.
-  virtual void Init();
+  virtual PrintSystemResult Init();
 
   virtual void EnumeratePrinters(printing::PrinterList* printer_list);
 
-  virtual bool GetPrinterCapsAndDefaults(
+  virtual void GetPrinterCapsAndDefaults(
       const std::string& printer_name,
-      printing::PrinterCapsAndDefaults* printer_info);
+      PrinterCapsAndDefaultsCallback* callback);
 
   virtual bool IsValidPrinter(const std::string& printer_name);
 
@@ -348,7 +355,9 @@ class PrintSystemWin : public PrintSystem {
                        const std::string& print_data_mime_type,
                        const std::string& printer_name,
                        const std::string& job_title,
+                       const std::vector<std::string>& tags,
                        JobSpooler::Delegate* delegate) {
+      // TODO(gene): add tags handling.
       return core_->Spool(print_ticket, print_data_file_path,
                           print_data_mime_type, printer_name, job_title,
                           delegate);
@@ -381,10 +390,6 @@ class PrintSystemWin : public PrintSystem {
           return false;
         }
 
-        if (!printing::XPSModule::Init()) {
-          // TODO(sanjeevr): Handle legacy proxy case (with no prntvpt.dll)
-          return false;
-        }
         DevMode pt_dev_mode;
         HRESULT hr = PrintTicketToDevMode(printer_name, print_ticket,
                                           &pt_dev_mode);
@@ -392,6 +397,7 @@ class PrintSystemWin : public PrintSystem {
           NOTREACHED();
           return false;
         }
+
         HDC dc = CreateDC(L"WINSPOOL", UTF8ToWide(printer_name).c_str(),
                           NULL, pt_dev_mode.dm_);
         if (!dc) {
@@ -506,13 +512,76 @@ class PrintSystemWin : public PrintSystem {
       PlatformJobId job_id_;
       PrintSystem::JobSpooler::Delegate* delegate_;
       int saved_dc_;
-      ScopedHDC printer_dc_;
+      base::win::ScopedHDC printer_dc_;
       FilePath print_data_file_path_;
       DISALLOW_COPY_AND_ASSIGN(JobSpoolerWin::Core);
     };
     scoped_refptr<Core> core_;
     DISALLOW_COPY_AND_ASSIGN(JobSpoolerWin);
   };
+
+  // A helper class to handle the response from the utility process to the
+  // request to fetch printer capabilities and defaults.
+  class PrinterCapsHandler : public ServiceUtilityProcessHost::Client {
+   public:
+    PrinterCapsHandler(
+        const std::string& printer_name,
+        PrinterCapsAndDefaultsCallback* callback)
+            : printer_name_(printer_name), callback_(callback) {
+    }
+    virtual void Start() {
+      g_service_process->io_thread()->message_loop_proxy()->PostTask(
+          FROM_HERE,
+          NewRunnableMethod(
+              this,
+              &PrinterCapsHandler::GetPrinterCapsAndDefaultsImpl,
+              base::MessageLoopProxy::CreateForCurrentThread()));
+    }
+
+    virtual void OnChildDied() {
+      OnGetPrinterCapsAndDefaultsFailed(printer_name_);
+    }
+    virtual void OnGetPrinterCapsAndDefaultsSucceeded(
+        const std::string& printer_name,
+        const printing::PrinterCapsAndDefaults& caps_and_defaults) {
+      callback_->Run(true, printer_name, caps_and_defaults);
+      callback_.reset();
+      Release();
+    }
+
+    virtual void OnGetPrinterCapsAndDefaultsFailed(
+        const std::string& printer_name) {
+      printing::PrinterCapsAndDefaults caps_and_defaults;
+      callback_->Run(false, printer_name, caps_and_defaults);
+      callback_.reset();
+      Release();
+    }
+   private:
+      // Called on the service process IO thread.
+    void GetPrinterCapsAndDefaultsImpl(
+        const scoped_refptr<base::MessageLoopProxy>&
+            client_message_loop_proxy) {
+      DCHECK(g_service_process->io_thread()->message_loop_proxy()->
+          BelongsToCurrentThread());
+      scoped_ptr<ServiceUtilityProcessHost> utility_host(
+          new ServiceUtilityProcessHost(this, client_message_loop_proxy));
+      if (utility_host->StartGetPrinterCapsAndDefaults(printer_name_)) {
+        // The object will self-destruct when the child process dies.
+        utility_host.release();
+      } else {
+        client_message_loop_proxy->PostTask(
+            FROM_HERE,
+            NewRunnableMethod(
+                this,
+                &PrinterCapsHandler::OnGetPrinterCapsAndDefaultsFailed,
+                printer_name_));
+      }
+    }
+
+    std::string printer_name_;
+    scoped_ptr<PrinterCapsAndDefaultsCallback> callback_;
+  };
+
 
   virtual PrintSystem::PrintServerWatcher* CreatePrintServerWatcher();
   virtual PrintSystem::PrinterWatcher* CreatePrinterWatcher(
@@ -527,17 +596,29 @@ PrintSystemWin::PrintSystemWin() {
   print_backend_ = printing::PrintBackend::CreateInstance(NULL);
 }
 
-void PrintSystemWin::Init() {
+PrintSystem::PrintSystemResult PrintSystemWin::Init() {
+  if (!printing::XPSModule::Init()) {
+    std::string message = l10n_util::GetStringUTF8(
+        IDS_CLOUD_PRINT_XPS_UNAVAILABLE);
+    return PrintSystemResult(false, message);
+  }
+  return PrintSystemResult(true, std::string());
 }
 
 void PrintSystemWin::EnumeratePrinters(printing::PrinterList* printer_list) {
   print_backend_->EnumeratePrinters(printer_list);
 }
 
-bool PrintSystemWin::GetPrinterCapsAndDefaults(
+void PrintSystemWin::GetPrinterCapsAndDefaults(
     const std::string& printer_name,
-    printing::PrinterCapsAndDefaults* printer_info) {
-  return print_backend_->GetPrinterCapsAndDefaults(printer_name, printer_info);
+    PrinterCapsAndDefaultsCallback* callback) {
+  // Launch as child process to retrieve the capabilities and defaults because
+  // this involves invoking a printer driver DLL and crashes have been known to
+  // occur.
+  PrinterCapsHandler* handler =
+      new PrinterCapsHandler(printer_name, callback);
+  handler->AddRef();
+  handler->Start();
 }
 
 bool PrintSystemWin::IsValidPrinter(const std::string& printer_name) {
@@ -547,7 +628,8 @@ bool PrintSystemWin::IsValidPrinter(const std::string& printer_name) {
 bool PrintSystemWin::ValidatePrintTicket(
     const std::string& printer_name,
     const std::string& print_ticket_data) {
-  if (!printing::XPSModule::Init()) {
+  printing::ScopedXPSInitializer xps_initializer;
+  if (!xps_initializer.initialized()) {
     // TODO(sanjeevr): Handle legacy proxy case (with no prntvpt.dll)
     return false;
   }

@@ -4,6 +4,7 @@
 
 #include "webkit/support/webkit_support.h"
 
+#include "app/gfx/gl/gl_context.h"
 #include "app/gfx/gl/gl_implementation.h"
 #include "base/at_exit.h"
 #include "base/base64.h"
@@ -24,26 +25,25 @@
 #include "base/utf_string_conversions.h"
 #include "base/weak_ptr.h"
 #include "grit/webkit_chromium_resources.h"
+#include "media/base/filter_collection.h"
+#include "media/base/message_loop_factory_impl.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystemCallbacks.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
-#include "webkit/glue/media/buffered_data_source.h"
-#include "webkit/glue/media/media_resource_loader_bridge_factory.h"
-#include "webkit/glue/media/simple_data_source.h"
 #include "webkit/glue/media/video_renderer_impl.h"
-#include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/glue/plugins/webplugin_impl.h"
-#include "webkit/glue/plugins/webplugin_page_delegate.h"
-#include "webkit/glue/plugins/webplugininfo.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitclient_impl.h"
 #include "webkit/glue/webmediaplayer_impl.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/npapi/webplugin_impl.h"
+#include "webkit/plugins/npapi/webplugin_page_delegate.h"
+#include "webkit/plugins/npapi/webplugininfo.h"
 #include "webkit/support/platform_support.h"
 #include "webkit/support/test_webplugin_page_delegate.h"
 #include "webkit/support/test_webkit_client.h"
@@ -95,7 +95,8 @@ void InitLogging(bool enable_gp_fault_error_box) {
       logging::LOG_ONLY_TO_FILE,
       // We might have multiple DumpRenderTree processes going at once.
       logging::LOCK_LOG_FILE,
-      logging::DELETE_OLD_LOG_FILE);
+      logging::DELETE_OLD_LOG_FILE,
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
   // We want process and thread IDs because we may have multiple processes.
   const bool kProcessId = true;
@@ -111,10 +112,6 @@ class TestEnvironment {
     if (!unit_test_mode) {
       at_exit_manager_.reset(new base::AtExitManager);
       InitLogging(false);
-
-      // Default to OSMesa for GL, for testing WebGL, 3D CSS and other
-      // GPU-related APIs.
-      gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL);
     }
     main_message_loop_.reset(new MessageLoopForUI);
     // TestWebKitClient must be instantiated after the MessageLoopForUI.
@@ -127,7 +124,7 @@ class TestEnvironment {
 
   TestWebKitClient* webkit_client() const { return webkit_client_.get(); }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   void set_theme_engine(WebKit::WebThemeEngine* engine) {
     DCHECK(webkit_client_ != 0);
     webkit_client_->SetThemeEngine(engine);
@@ -147,14 +144,14 @@ class TestEnvironment {
 class WebPluginImplWithPageDelegate
     : public webkit_support::TestWebPluginPageDelegate,
       public base::SupportsWeakPtr<WebPluginImplWithPageDelegate>,
-      public webkit_glue::WebPluginImpl {
+      public webkit::npapi::WebPluginImpl {
  public:
   WebPluginImplWithPageDelegate(WebFrame* frame,
                                 const WebPluginParams& params,
                                 const FilePath& path,
                                 const std::string& mime_type)
       : webkit_support::TestWebPluginPageDelegate(),
-        webkit_glue::WebPluginImpl(
+        webkit::npapi::WebPluginImpl(
             frame, params, path, mime_type, AsWeakPtr()) {}
   virtual ~WebPluginImplWithPageDelegate() {}
  private:
@@ -252,11 +249,11 @@ WebKit::WebKitClient* GetWebKitClient() {
 WebPlugin* CreateWebPlugin(WebFrame* frame,
                            const WebPluginParams& params) {
   const bool kAllowWildcard = true;
-  WebPluginInfo info;
+  webkit::npapi::WebPluginInfo info;
   std::string actual_mime_type;
-  if (!NPAPI::PluginList::Singleton()->GetPluginInfo(
+  if (!webkit::npapi::PluginList::Singleton()->GetPluginInfo(
           params.url, params.mimeType.utf8(), kAllowWildcard, &info,
-          &actual_mime_type) || !info.enabled) {
+          &actual_mime_type) || !webkit::npapi::IsPluginEnabled(info)) {
     return NULL;
   }
 
@@ -266,41 +263,21 @@ WebPlugin* CreateWebPlugin(WebFrame* frame,
 
 WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
                                           WebMediaPlayerClient* client) {
-  scoped_ptr<media::MediaFilterCollection> collection(
-      new media::MediaFilterCollection());
+  scoped_ptr<media::MessageLoopFactory> message_loop_factory(
+      new media::MessageLoopFactoryImpl());
 
-  appcache::WebApplicationCacheHostImpl* appcache_host =
-      appcache::WebApplicationCacheHostImpl::FromFrame(frame);
-
-  // TODO(hclam): this is the same piece of code as in RenderView, maybe they
-  // should be grouped together.
-  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_simple =
-      new webkit_glue::MediaResourceLoaderBridgeFactory(
-          GURL(),  // referrer
-          "null",  // frame origin
-          "null",  // main_frame_origin
-          base::GetCurrentProcId(),
-          appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
-          0);
-  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_buffered =
-      new webkit_glue::MediaResourceLoaderBridgeFactory(
-          GURL(),  // referrer
-          "null",  // frame origin
-          "null",  // main_frame_origin
-          base::GetCurrentProcId(),
-          appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
-          0);
+  scoped_ptr<media::FilterCollection> collection(
+      new media::FilterCollection());
 
   scoped_refptr<webkit_glue::VideoRendererImpl> video_renderer(
       new webkit_glue::VideoRendererImpl(false));
   collection->AddVideoRenderer(video_renderer);
 
   scoped_ptr<webkit_glue::WebMediaPlayerImpl> result(
-      new webkit_glue::WebMediaPlayerImpl(client, collection.release()));
-  if (!result->Initialize(bridge_factory_simple,
-                          bridge_factory_buffered,
-                          false,
-                          video_renderer)) {
+      new webkit_glue::WebMediaPlayerImpl(client,
+                                          collection.release(),
+                                          message_loop_factory.release()));
+  if (!result->Initialize(frame, false, video_renderer)) {
     return NULL;
   }
   return result.release();
@@ -314,6 +291,19 @@ WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
 WebKit::WebString GetWebKitRootDir() {
   FilePath path = GetWebKitRootDirFilePath();
   return WebKit::WebString::fromUTF8(WideToUTF8(path.ToWStringHack()).c_str());
+}
+
+void SetUpGLBindings(GLBindingPreferences bindingPref) {
+  switch(bindingPref) {
+    case GL_BINDING_DEFAULT:
+      gfx::GLContext::InitializeOneOff();
+      break;
+    case GL_BINDING_SOFTWARE_RENDERER:
+      gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 void RegisterMockedURL(const WebKit::WebURL& url,
@@ -517,7 +507,7 @@ void SetAcceptAllCookies(bool accept) {
 }
 
 // Theme engine
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
 
 void SetThemeEngine(WebKit::WebThemeEngine* engine) {
   DCHECK(test_environment);

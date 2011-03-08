@@ -5,14 +5,16 @@
 // A struct for managing webkit's settings.
 //
 // Adding new values to this class probably involves updating
-// WebKit::WebSettings, common/render_messages.h, and
-// browser/profile.cc.
+// WebKit::WebSettings, common/render_messages.cc, browser/tab_contents/
+// render_view_host_delegate_helper.cc, and browser/profiles/profile.cc.
 
 #ifndef WEBKIT_GLUE_WEBPREFERENCES_H__
 #define WEBKIT_GLUE_WEBPREFERENCES_H__
 
 #include <string>
 #include <vector>
+
+#include "base/string16.h"
 #include "googleurl/src/gurl.h"
 
 namespace WebKit {
@@ -20,12 +22,12 @@ class WebView;
 }
 
 struct WebPreferences {
-  std::wstring standard_font_family;
-  std::wstring fixed_font_family;
-  std::wstring serif_font_family;
-  std::wstring sans_serif_font_family;
-  std::wstring cursive_font_family;
-  std::wstring fantasy_font_family;
+  string16 standard_font_family;
+  string16 fixed_font_family;
+  string16 serif_font_family;
+  string16 sans_serif_font_family;
+  string16 cursive_font_family;
+  string16 fantasy_font_family;
   int default_font_size;
   int default_fixed_font_size;
   int minimum_font_size;
@@ -64,12 +66,16 @@ struct WebPreferences {
   bool frame_flattening_enabled;
   bool allow_universal_access_from_file_urls;
   bool allow_file_access_from_file_urls;
+  bool webaudio_enabled;
   bool experimental_webgl_enabled;
   bool show_composited_layer_borders;
   bool accelerated_compositing_enabled;
   bool accelerated_layers_enabled;
+  bool accelerated_video_enabled;
   bool accelerated_2d_canvas_enabled;
+  bool accelerated_plugins_enabled;
   bool memory_info_enabled;
+  bool interactive_form_validation_enabled;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for

@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/string16.h"
 #include "gfx/native_widget_types.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -150,17 +151,6 @@ void DragDownload(const DownloadItem* download,
                   SkBitmap* icon,
                   gfx::NativeView view);
 
-// Executable file support -----------------------------------------------------
-
-// Tests if a file is considered executable, based on its type.
-bool IsExecutableFile(const FilePath& path);
-
-// Determine if the specified extension is an executable extension.
-bool IsExecutableExtension(const FilePath::StringType& extension);
-
-// Tests if we think the server means for this mime_type to be executable.
-bool IsExecutableMimeType(const std::string& mime_type);
-
 // Helpers ---------------------------------------------------------------------
 
 // Creates a representation of a download in a format that the downloads
@@ -168,7 +158,7 @@ bool IsExecutableMimeType(const std::string& mime_type);
 DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id);
 
 // Get the localized status text for an in-progress download.
-std::wstring GetProgressStatusText(DownloadItem* download);
+string16 GetProgressStatusText(DownloadItem* download);
 
 // Update the application icon to indicate overall download progress.
 // |download_count| is the number of downloads currently in progress. If

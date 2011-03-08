@@ -17,11 +17,12 @@
 #include "base/string_tokenizer.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/gpu_channel_host.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
     : context_(NULL),
@@ -86,10 +87,14 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     ggl::GGL_NONE,
   };
 
+  GPUInfo gpu_info = host->gpu_info();
+  UMA_HISTOGRAM_ENUMERATION(
+      "GPU.WebGraphicsContext3D_Init_CanLoseContext",
+      attributes.canRecoverFromContextLoss * 2 + gpu_info.can_lose_context(),
+      4);
   if (attributes.canRecoverFromContextLoss == false) {
-    GPUInfo gpu_info = host->gpu_info();
     if (gpu_info.can_lose_context())
-        return false;
+      return false;
   }
 
   if (render_directly_to_web_view) {
@@ -111,6 +116,12 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
         renderview->routing_id(),
         kWebGraphicsContext3DPerferredGLExtensions,
         attribs);
+    if (context_) {
+      ggl::SetSwapBuffersCallback(
+          context_,
+          NewCallback(this,
+                      &WebGraphicsContext3DCommandBufferImpl::OnSwapBuffers));
+    }
   } else {
     bool compositing_enabled = !CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kDisableAcceleratedCompositing);
@@ -364,6 +375,16 @@ void WebGraphicsContext3DCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToParentTextureCHROMIUM(
     unsigned texture, unsigned parentTexture) {
   copyTextureToCompositor(texture, parentTexture);
+}
+
+WebKit::WebString WebGraphicsContext3DCommandBufferImpl::
+    getRequestableExtensionsCHROMIUM() {
+  return WebKit::WebString::fromUTF8(glGetRequestableExtensionsCHROMIUM());
+}
+
+void WebGraphicsContext3DCommandBufferImpl::requestExtensionCHROMIUM(
+    const char* extension) {
+  glRequestExtensionCHROMIUM(extension);
 }
 
 // Helper macros to reduce the amount of code.
@@ -693,7 +714,7 @@ WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getProgramInfoLog(
   scoped_array<GLchar> log(new GLchar[logLength]);
   if (!log.get())
     return WebKit::WebString();
-  GLsizei returnedLogLength;
+  GLsizei returnedLogLength = 0;
   glGetProgramInfoLog(program, logLength, &returnedLogLength, log.get());
   DCHECK_EQ(logLength, returnedLogLength + 1);
   WebKit::WebString res =
@@ -716,7 +737,7 @@ WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getShaderInfoLog(
   scoped_array<GLchar> log(new GLchar[logLength]);
   if (!log.get())
     return WebKit::WebString();
-  GLsizei returnedLogLength;
+  GLsizei returnedLogLength = 0;
   glGetShaderInfoLog(shader, logLength, &returnedLogLength, log.get());
   DCHECK_EQ(logLength, returnedLogLength + 1);
   WebKit::WebString res =
@@ -734,7 +755,7 @@ WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getShaderSource(
   scoped_array<GLchar> log(new GLchar[logLength]);
   if (!log.get())
     return WebKit::WebString();
-  GLsizei returnedLogLength;
+  GLsizei returnedLogLength = 0;
   glGetShaderSource(shader, logLength, &returnedLogLength, log.get());
   DCHECK_EQ(logLength, returnedLogLength + 1);
   WebKit::WebString res =
@@ -1011,6 +1032,14 @@ void WebGraphicsContext3DCommandBufferImpl::copyTextureToCompositor(
   makeContextCurrent();
   glCopyTextureToParentTextureCHROMIUM(texture, parentTexture);
   glFlush();
+}
+
+void WebGraphicsContext3DCommandBufferImpl::OnSwapBuffers() {
+  // This may be called after tear-down of the RenderView.
+  RenderView* renderview =
+      web_view_ ? RenderView::FromWebView(web_view_) : NULL;
+  if (renderview)
+    renderview->DidFlushPaint();
 }
 
 #endif  // defined(ENABLE_GPU)

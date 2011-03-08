@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,7 @@
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
+#include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/cookie_monster.h"
@@ -119,7 +120,7 @@ void CheckSSLInfo(const net::SSLInfo& ssl_info) {
 class URLRequestTest : public PlatformTest {
  public:
   static void SetUpTestCase() {
-    URLRequest::AllowFileAccess();
+    net::URLRequest::AllowFileAccess();
   }
 };
 
@@ -150,11 +151,11 @@ class URLRequestTestHTTP : public URLRequestTest {
     }
     uploadBytes[kMsgSize] = '\0';
 
-    scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+    scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
 
     for (int i = 0; i < kIterations; ++i) {
       TestDelegate d;
-      URLRequest r(test_server_.GetURL("echo"), &d);
+      net::URLRequest r(test_server_.GetURL("echo"), &d);
       r.set_context(context);
       r.set_method(method.c_str());
 
@@ -188,7 +189,7 @@ TEST_F(URLRequestTestHTTP, ProxyTunnelRedirectTest) {
 
   TestDelegate d;
   {
-    URLRequest r(GURL("https://www.redirect.com/"), &d);
+    net::URLRequest r(GURL("https://www.redirect.com/"), &d);
     r.set_context(
         new TestURLRequestContext(test_server_.host_port_pair().ToString()));
 
@@ -197,7 +198,7 @@ TEST_F(URLRequestTestHTTP, ProxyTunnelRedirectTest) {
 
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(URLRequestStatus::FAILED, r.status().status());
+    EXPECT_EQ(net::URLRequestStatus::FAILED, r.status().status());
     EXPECT_EQ(net::ERR_TUNNEL_CONNECTION_FAILED, r.status().os_error());
     EXPECT_EQ(1, d.response_started_count());
     // We should not have followed the redirect.
@@ -213,7 +214,7 @@ TEST_F(URLRequestTestHTTP, UnexpectedServerAuthTest) {
 
   TestDelegate d;
   {
-    URLRequest r(GURL("https://www.server-auth.com/"), &d);
+    net::URLRequest r(GURL("https://www.server-auth.com/"), &d);
     r.set_context(
         new TestURLRequestContext(test_server_.host_port_pair().ToString()));
 
@@ -222,7 +223,7 @@ TEST_F(URLRequestTestHTTP, UnexpectedServerAuthTest) {
 
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(URLRequestStatus::FAILED, r.status().status());
+    EXPECT_EQ(net::URLRequestStatus::FAILED, r.status().status());
     EXPECT_EQ(net::ERR_TUNNEL_CONNECTION_FAILED, r.status().os_error());
   }
 }
@@ -386,7 +387,7 @@ class SSLClientAuthTestDelegate : public TestDelegate {
   SSLClientAuthTestDelegate() : on_certificate_requested_count_(0) {
   }
   virtual void OnCertificateRequested(
-      URLRequest* request,
+      net::URLRequest* request,
       net::SSLCertRequestInfo* cert_request_info) {
     on_certificate_requested_count_++;
     MessageLoop::current()->Quit();
@@ -475,7 +476,7 @@ TEST_F(URLRequestTestHTTP, CancelTest2) {
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_EQ(0, d.bytes_received());
     EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(URLRequestStatus::CANCELED, r.status().status());
+    EXPECT_EQ(net::URLRequestStatus::CANCELED, r.status().status());
   }
 }
 
@@ -499,7 +500,7 @@ TEST_F(URLRequestTestHTTP, CancelTest3) {
     // or it could have been all the bytes.
     // EXPECT_EQ(0, d.bytes_received());
     EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(URLRequestStatus::CANCELED, r.status().status());
+    EXPECT_EQ(net::URLRequestStatus::CANCELED, r.status().status());
   }
 }
 
@@ -531,28 +532,28 @@ TEST_F(URLRequestTestHTTP, CancelTest4) {
 TEST_F(URLRequestTestHTTP, CancelTest5) {
   ASSERT_TRUE(test_server_.Start());
 
-  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+  scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
 
   // populate cache
   {
     TestDelegate d;
-    URLRequest r(test_server_.GetURL("cachetime"), &d);
+    net::URLRequest r(test_server_.GetURL("cachetime"), &d);
     r.set_context(context);
     r.Start();
     MessageLoop::current()->Run();
-    EXPECT_EQ(URLRequestStatus::SUCCESS, r.status().status());
+    EXPECT_EQ(net::URLRequestStatus::SUCCESS, r.status().status());
   }
 
   // cancel read from cache (see bug 990242)
   {
     TestDelegate d;
-    URLRequest r(test_server_.GetURL("cachetime"), &d);
+    net::URLRequest r(test_server_.GetURL("cachetime"), &d);
     r.set_context(context);
     r.Start();
     r.Cancel();
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(URLRequestStatus::CANCELED, r.status().status());
+    EXPECT_EQ(net::URLRequestStatus::CANCELED, r.status().status());
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_EQ(0, d.bytes_received());
     EXPECT_FALSE(d.received_data_before_response());
@@ -1031,7 +1032,7 @@ TEST_F(URLRequestTestHTTP, RestrictRedirects) {
   req.Start();
   MessageLoop::current()->Run();
 
-  EXPECT_EQ(URLRequestStatus::FAILED, req.status().status());
+  EXPECT_EQ(net::URLRequestStatus::FAILED, req.status().status());
   EXPECT_EQ(net::ERR_UNSAFE_REDIRECT, req.status().os_error());
 }
 
@@ -1044,7 +1045,7 @@ TEST_F(URLRequestTestHTTP, RedirectToInvalidURL) {
   req.Start();
   MessageLoop::current()->Run();
 
-  EXPECT_EQ(URLRequestStatus::FAILED, req.status().status());
+  EXPECT_EQ(net::URLRequestStatus::FAILED, req.status().status());
   EXPECT_EQ(net::ERR_INVALID_URL, req.status().os_error());
 }
 
@@ -1075,7 +1076,7 @@ TEST_F(URLRequestTestHTTP, CancelRedirect) {
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_EQ(0, d.bytes_received());
     EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+    EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
   }
 }
 
@@ -1097,7 +1098,7 @@ TEST_F(URLRequestTestHTTP, DeferredRedirect) {
 
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(URLRequestStatus::SUCCESS, req.status().status());
+    EXPECT_EQ(net::URLRequestStatus::SUCCESS, req.status().status());
 
     FilePath path;
     PathService::Get(base::DIR_SOURCE_ROOT, &path);
@@ -1131,19 +1132,19 @@ TEST_F(URLRequestTestHTTP, CancelDeferredRedirect) {
     EXPECT_EQ(1, d.response_started_count());
     EXPECT_EQ(0, d.bytes_received());
     EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+    EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
   }
 }
 
 TEST_F(URLRequestTestHTTP, VaryHeader) {
   ASSERT_TRUE(test_server_.Start());
 
-  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+  scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
 
   // populate the cache
   {
     TestDelegate d;
-    URLRequest req(test_server_.GetURL("echoheader?foo"), &d);
+    net::URLRequest req(test_server_.GetURL("echoheader?foo"), &d);
     req.set_context(context);
     net::HttpRequestHeaders headers;
     headers.SetHeader("foo", "1");
@@ -1155,7 +1156,7 @@ TEST_F(URLRequestTestHTTP, VaryHeader) {
   // expect a cache hit
   {
     TestDelegate d;
-    URLRequest req(test_server_.GetURL("echoheader?foo"), &d);
+    net::URLRequest req(test_server_.GetURL("echoheader?foo"), &d);
     req.set_context(context);
     net::HttpRequestHeaders headers;
     headers.SetHeader("foo", "1");
@@ -1169,7 +1170,7 @@ TEST_F(URLRequestTestHTTP, VaryHeader) {
   // expect a cache miss
   {
     TestDelegate d;
-    URLRequest req(test_server_.GetURL("echoheader?foo"), &d);
+    net::URLRequest req(test_server_.GetURL("echoheader?foo"), &d);
     req.set_context(context);
     net::HttpRequestHeaders headers;
     headers.SetHeader("foo", "2");
@@ -1184,7 +1185,7 @@ TEST_F(URLRequestTestHTTP, VaryHeader) {
 TEST_F(URLRequestTestHTTP, BasicAuth) {
   ASSERT_TRUE(test_server_.Start());
 
-  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+  scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
 
   // populate the cache
   {
@@ -1192,7 +1193,7 @@ TEST_F(URLRequestTestHTTP, BasicAuth) {
     d.set_username(kUser);
     d.set_password(kSecret);
 
-    URLRequest r(test_server_.GetURL("auth-basic"), &d);
+    net::URLRequest r(test_server_.GetURL("auth-basic"), &d);
     r.set_context(context);
     r.Start();
 
@@ -1209,7 +1210,7 @@ TEST_F(URLRequestTestHTTP, BasicAuth) {
     d.set_username(kUser);
     d.set_password(kSecret);
 
-    URLRequest r(test_server_.GetURL("auth-basic"), &d);
+    net::URLRequest r(test_server_.GetURL("auth-basic"), &d);
     r.set_context(context);
     r.set_load_flags(net::LOAD_VALIDATE_CACHE);
     r.Start();
@@ -1234,12 +1235,12 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
   // Request a page that will give a 401 containing a Set-Cookie header.
   // Verify that when the transaction is restarted, it includes the new cookie.
   {
-    scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+    scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
     TestDelegate d;
     d.set_username(kUser);
     d.set_password(kSecret);
 
-    URLRequest r(url_requiring_auth, &d);
+    net::URLRequest r(url_requiring_auth, &d);
     r.set_context(context);
     r.Start();
 
@@ -1255,7 +1256,7 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
   // Same test as above, except this time the restart is initiated earlier
   // (without user intervention since identity is embedded in the URL).
   {
-    scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+    scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
     TestDelegate d;
 
     GURL::Replacements replacements;
@@ -1265,7 +1266,7 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
     replacements.SetPasswordStr(password);
     GURL url_with_identity = url_requiring_auth.ReplaceComponents(replacements);
 
-    URLRequest r(url_with_identity, &d);
+    net::URLRequest r(url_with_identity, &d);
     r.set_context(context);
     r.Start();
 
@@ -1283,12 +1284,12 @@ TEST_F(URLRequestTest, DoNotSendCookies) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+  scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
@@ -1332,13 +1333,13 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
+  scoped_refptr<net::URLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
-                   &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
+                        &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
@@ -1351,7 +1352,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
   // Try to set-up another cookie and update the previous cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL(
+    net::URLRequest req(test_server.GetURL(
         "set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"), &d);
     req.set_load_flags(net::LOAD_DO_NOT_SAVE_COOKIES);
     req.set_context(context);
@@ -1393,7 +1394,7 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy) {
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
@@ -1447,8 +1448,8 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
-                   &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
+                        &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
@@ -1463,7 +1464,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
     context->set_cookie_policy(&cookie_policy);
 
     TestDelegate d;
-    URLRequest req(test_server.GetURL(
+    net::URLRequest req(test_server.GetURL(
         "set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"), &d);
     req.set_context(context);
     req.Start();
@@ -1504,7 +1505,7 @@ TEST_F(URLRequestTest, DoNotSaveEmptyCookies) {
   // Set up an empty cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie"), &d);
+    net::URLRequest req(test_server.GetURL("set-cookie"), &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
@@ -1524,7 +1525,7 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy_Async) {
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"), &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
@@ -1579,8 +1580,8 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
-                   &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
+                        &d);
     req.set_context(context);
     req.Start();
     MessageLoop::current()->Run();
@@ -1596,7 +1597,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
     context->set_cookie_policy(&cookie_policy);
 
     TestDelegate d;
-    URLRequest req(test_server.GetURL(
+    net::URLRequest req(test_server.GetURL(
         "set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"), &d);
     req.set_context(context);
     req.Start();
@@ -1639,8 +1640,8 @@ TEST_F(URLRequestTest, CancelTest_During_CookiePolicy) {
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?A=1&B=2&C=3"),
-                   &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?A=1&B=2&C=3"),
+                        &d);
     req.set_context(context);
     req.Start();  // Triggers an asynchronous cookie policy check.
 
@@ -1654,7 +1655,7 @@ TEST_F(URLRequestTest, CancelTest_During_CookiePolicy) {
   context->set_cookie_policy(NULL);
 
   // Let the cookie policy complete.  Make sure it handles the destruction of
-  // the URLRequest properly.
+  // the net::URLRequest properly.
   MessageLoop::current()->RunAllPending();
 }
 
@@ -1671,14 +1672,14 @@ TEST_F(URLRequestTest, CancelTest_During_OnGetCookies) {
   {
     TestDelegate d;
     d.set_cancel_in_get_cookies_blocked(true);
-    URLRequest req(test_server.GetURL("set-cookie?A=1&B=2&C=3"),
-                   &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?A=1&B=2&C=3"),
+                        &d);
     req.set_context(context);
     req.Start();  // Triggers an asynchronous cookie policy check.
 
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+    EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
 
     EXPECT_EQ(1, d.blocked_get_cookies_count());
     EXPECT_EQ(0, d.blocked_set_cookie_count());
@@ -1700,14 +1701,14 @@ TEST_F(URLRequestTest, CancelTest_During_OnSetCookie) {
   {
     TestDelegate d;
     d.set_cancel_in_set_cookie_blocked(true);
-    URLRequest req(test_server.GetURL("set-cookie?A=1&B=2&C=3"),
-                   &d);
+    net::URLRequest req(test_server.GetURL("set-cookie?A=1&B=2&C=3"),
+                        &d);
     req.set_context(context);
     req.Start();  // Triggers an asynchronous cookie policy check.
 
     MessageLoop::current()->Run();
 
-    EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+    EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
 
     // Even though the response will contain 3 set-cookie headers, we expect
     // only one to be blocked as that first one will cause OnSetCookie to be
@@ -1733,7 +1734,7 @@ TEST_F(URLRequestTest, CookiePolicy_ForceSession) {
   // Set up a cookie.
   {
     TestDelegate d;
-    URLRequest req(test_server.GetURL(
+    net::URLRequest req(test_server.GetURL(
         "set-cookie?A=1;expires=\"Fri, 05 Feb 2010 23:42:01 GMT\""), &d);
     req.set_context(context);
     req.Start();  // Triggers an asynchronous cookie policy check.
@@ -1745,7 +1746,7 @@ TEST_F(URLRequestTest, CookiePolicy_ForceSession) {
   }
 
   // Now, check the cookie store.
-  net::CookieMonster::CookieList cookies =
+  net::CookieList cookies =
       context->cookie_store()->GetCookieMonster()->GetAllCookies();
   EXPECT_EQ(1U, cookies.size());
   EXPECT_FALSE(cookies[0].IsPersistent());
@@ -1820,10 +1821,10 @@ TEST_F(URLRequestTestHTTP, Post307RedirectPost) {
 }
 
 // Custom URLRequestJobs for use with interceptor tests
-class RestartTestJob : public URLRequestTestJob {
+class RestartTestJob : public net::URLRequestTestJob {
  public:
-  explicit RestartTestJob(URLRequest* request)
-    : URLRequestTestJob(request, true) {}
+  explicit RestartTestJob(net::URLRequest* request)
+    : net::URLRequestTestJob(request, true) {}
  protected:
   virtual void StartAsync() {
     this->NotifyRestartRequired();
@@ -1832,10 +1833,10 @@ class RestartTestJob : public URLRequestTestJob {
   ~RestartTestJob() {}
 };
 
-class CancelTestJob : public URLRequestTestJob {
+class CancelTestJob : public net::URLRequestTestJob {
  public:
-  explicit CancelTestJob(URLRequest* request)
-    : URLRequestTestJob(request, true) {}
+  explicit CancelTestJob(net::URLRequest* request)
+    : net::URLRequestTestJob(request, true) {}
  protected:
   virtual void StartAsync() {
     request_->Cancel();
@@ -1844,10 +1845,10 @@ class CancelTestJob : public URLRequestTestJob {
   ~CancelTestJob() {}
 };
 
-class CancelThenRestartTestJob : public URLRequestTestJob {
+class CancelThenRestartTestJob : public net::URLRequestTestJob {
  public:
-  explicit CancelThenRestartTestJob(URLRequest* request)
-      : URLRequestTestJob(request, true) {
+  explicit CancelThenRestartTestJob(net::URLRequest* request)
+      : net::URLRequestTestJob(request, true) {
   }
  protected:
   virtual void StartAsync() {
@@ -1859,7 +1860,7 @@ class CancelThenRestartTestJob : public URLRequestTestJob {
 };
 
 // An Interceptor for use with interceptor tests
-class TestInterceptor : URLRequest::Interceptor {
+class TestInterceptor : net::URLRequest::Interceptor {
  public:
   TestInterceptor()
       : intercept_main_request_(false), restart_main_request_(false),
@@ -1872,14 +1873,14 @@ class TestInterceptor : URLRequest::Interceptor {
         did_simulate_error_main_(false),
         did_intercept_redirect_(false), did_cancel_redirect_(false),
         did_intercept_final_(false), did_cancel_final_(false) {
-    URLRequest::RegisterRequestInterceptor(this);
+    net::URLRequest::RegisterRequestInterceptor(this);
   }
 
   ~TestInterceptor() {
-    URLRequest::UnregisterRequestInterceptor(this);
+    net::URLRequest::UnregisterRequestInterceptor(this);
   }
 
-  virtual URLRequestJob* MaybeIntercept(URLRequest* request) {
+  virtual net::URLRequestJob* MaybeIntercept(net::URLRequest* request) {
     if (restart_main_request_) {
       restart_main_request_ = false;
       did_restart_main_ = true;
@@ -1899,20 +1900,20 @@ class TestInterceptor : URLRequest::Interceptor {
       simulate_main_network_error_ = false;
       did_simulate_error_main_ = true;
       // will error since the requeted url is not one of its canned urls
-      return new URLRequestTestJob(request, true);
+      return new net::URLRequestTestJob(request, true);
     }
     if (!intercept_main_request_)
       return NULL;
     intercept_main_request_ = false;
     did_intercept_main_ = true;
-    return new URLRequestTestJob(request,
-                                 main_headers_,
-                                 main_data_,
-                                 true);
+    return new net::URLRequestTestJob(request,
+                                      main_headers_,
+                                      main_data_,
+                                      true);
   }
 
-  virtual URLRequestJob* MaybeInterceptRedirect(URLRequest* request,
-                                                const GURL& location) {
+  virtual net::URLRequestJob* MaybeInterceptRedirect(net::URLRequest* request,
+                                                     const GURL& location) {
     if (cancel_redirect_request_) {
       cancel_redirect_request_ = false;
       did_cancel_redirect_ = true;
@@ -1922,13 +1923,13 @@ class TestInterceptor : URLRequest::Interceptor {
       return NULL;
     intercept_redirect_ = false;
     did_intercept_redirect_ = true;
-    return new URLRequestTestJob(request,
-                                 redirect_headers_,
-                                 redirect_data_,
-                                 true);
+    return new net::URLRequestTestJob(request,
+                                      redirect_headers_,
+                                      redirect_data_,
+                                      true);
   }
 
-  virtual URLRequestJob* MaybeInterceptResponse(URLRequest* request) {
+  virtual net::URLRequestJob* MaybeInterceptResponse(net::URLRequest* request) {
     if (cancel_final_request_) {
       cancel_final_request_ = false;
       did_cancel_final_ = true;
@@ -1938,10 +1939,10 @@ class TestInterceptor : URLRequest::Interceptor {
       return NULL;
     intercept_final_response_ = false;
     did_intercept_final_ = true;
-    return new URLRequestTestJob(request,
-                                 final_headers_,
-                                 final_data_,
-                                 true);
+    return new net::URLRequestTestJob(request,
+                                      final_headers_,
+                                      final_data_,
+                                      true);
   }
 
   // Whether to intercept the main request, and if so the response to return.
@@ -1985,11 +1986,11 @@ class TestInterceptor : URLRequest::Interceptor {
   // Static getters for canned response header and data strings
 
   static std::string ok_data() {
-    return URLRequestTestJob::test_data_1();
+    return net::URLRequestTestJob::test_data_1();
   }
 
   static std::string ok_headers() {
-    return URLRequestTestJob::test_headers();
+    return net::URLRequestTestJob::test_headers();
   }
 
   static std::string redirect_data() {
@@ -1997,7 +1998,7 @@ class TestInterceptor : URLRequest::Interceptor {
   }
 
   static std::string redirect_headers() {
-    return URLRequestTestJob::test_redirect_headers();
+    return net::URLRequestTestJob::test_redirect_headers();
   }
 
   static std::string error_data() {
@@ -2005,7 +2006,7 @@ class TestInterceptor : URLRequest::Interceptor {
   }
 
   static std::string error_headers() {
-    return URLRequestTestJob::test_error_headers();
+    return net::URLRequestTestJob::test_error_headers();
   }
 };
 
@@ -2019,9 +2020,9 @@ TEST_F(URLRequestTest, Intercept) {
 
   TestDelegate d;
   TestURLRequest req(GURL("http://test_intercept/foo"), &d);
-  URLRequest::UserData* user_data0 = new URLRequest::UserData();
-  URLRequest::UserData* user_data1 = new URLRequest::UserData();
-  URLRequest::UserData* user_data2 = new URLRequest::UserData();
+  net::URLRequest::UserData* user_data0 = new net::URLRequest::UserData();
+  net::URLRequest::UserData* user_data1 = new net::URLRequest::UserData();
+  net::URLRequest::UserData* user_data2 = new net::URLRequest::UserData();
   req.SetUserData(NULL, user_data0);
   req.SetUserData(&user_data1, user_data1);
   req.SetUserData(&user_data2, user_data2);
@@ -2192,7 +2193,7 @@ TEST_F(URLRequestTest, InterceptRespectsCancelMain) {
 
   // Check we see a canceled request
   EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+  EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
 }
 
 TEST_F(URLRequestTest, InterceptRespectsCancelRedirect) {
@@ -2224,7 +2225,7 @@ TEST_F(URLRequestTest, InterceptRespectsCancelRedirect) {
 
   // Check we see a canceled request
   EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+  EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
 }
 
 TEST_F(URLRequestTest, InterceptRespectsCancelFinal) {
@@ -2248,7 +2249,7 @@ TEST_F(URLRequestTest, InterceptRespectsCancelFinal) {
 
   // Check we see a canceled request
   EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+  EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
 }
 
 TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
@@ -2274,7 +2275,7 @@ TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
 
   // Check we see a canceled request
   EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+  EXPECT_EQ(net::URLRequestStatus::CANCELED, req.status().status());
 }
 
 class URLRequestTestFTP : public URLRequestTest {
@@ -2641,4 +2642,36 @@ TEST_F(URLRequestTestHTTP, OverrideAcceptCharset) {
   req.Start();
   MessageLoop::current()->Run();
   EXPECT_EQ(std::string("koi-8r"), d.data_received());
+}
+
+// Check that default User-Agent header is sent.
+TEST_F(URLRequestTestHTTP, DefaultUserAgent) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  TestURLRequest req(test_server_.GetURL("echoheader?User-Agent"), &d);
+  req.set_context(new TestURLRequestContext());
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(req.context()->GetUserAgent(req.url()), d.data_received());
+}
+
+// Check that if request overrides the User-Agent header,
+// the default is not appended.
+TEST_F(URLRequestTestHTTP, OverrideUserAgent) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  TestURLRequest
+      req(test_server_.GetURL("echoheaderoverride?User-Agent"), &d);
+  req.set_context(new TestURLRequestContext());
+  net::HttpRequestHeaders headers;
+  headers.SetHeader(net::HttpRequestHeaders::kUserAgent, "Lynx (textmode)");
+  req.SetExtraRequestHeaders(headers);
+  req.Start();
+  MessageLoop::current()->Run();
+  // If the net tests are being run with ChromeFrame then we need to allow for
+  // the 'chromeframe' suffix which is added to the user agent in outgoing HTTP
+  // requests.
+  EXPECT_TRUE(StartsWithASCII(d.data_received(), "Lynx (textmode)", true));
 }

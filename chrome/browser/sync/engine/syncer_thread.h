@@ -14,20 +14,21 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/condition_variable.h"
 #include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/thread.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
-#include "base/waitable_event.h"
-#if defined(OS_LINUX)
-#include "chrome/browser/sync/engine/idle_query_linux.h"
-#endif
+#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/common/deprecated/event_sys-inl.h"
+
+#if defined(OS_LINUX)
+#include "chrome/browser/sync/engine/idle_query_linux.h"
+#endif
 
 class EventListenerHookup;
 
@@ -151,20 +152,10 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   virtual void ThreadMain();
   void ThreadMainLoop();
 
-  virtual void SetConnected(bool connected) {
-    DCHECK(!thread_.IsRunning());
-    vault_.connected_ = connected;
-  }
+  virtual void SetConnected(bool connected);
 
-  virtual void SetSyncerPollingInterval(base::TimeDelta interval) {
-    // TODO(timsteele): Use TimeDelta internally.
-    syncer_polling_interval_ = static_cast<int>(interval.InSeconds());
-  }
-  virtual void SetSyncerShortPollInterval(base::TimeDelta interval) {
-    // TODO(timsteele): Use TimeDelta internally.
-    syncer_short_poll_interval_seconds_ =
-        static_cast<int>(interval.InSeconds());
-  }
+  virtual void SetSyncerPollingInterval(base::TimeDelta interval);
+  virtual void SetSyncerShortPollInterval(base::TimeDelta interval);
 
   // Needed to emulate the behavior of pthread_create, which synchronously
   // started the thread and set the value of thread_running_ to true.
@@ -223,10 +214,10 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
 
   // Gets signaled whenever a thread outside of the syncer thread changes a
   // protected field in the vault_.
-  ConditionVariable vault_field_changed_;
+  base::ConditionVariable vault_field_changed_;
 
   // Used to lock everything in |vault_|.
-  Lock lock_;
+  base::Lock lock_;
 
  private:
   // Threshold multipler for how long before user should be considered idle.
@@ -305,7 +296,7 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   void ExitPausedState();
 
   // For unit tests only.
-  virtual void DisableIdleDetection() { disable_idle_detection_ = true; }
+  virtual void DisableIdleDetection();
 
   // This sets all conditions for syncer thread termination but does not
   // actually join threads.  It is expected that Stop will be called at some

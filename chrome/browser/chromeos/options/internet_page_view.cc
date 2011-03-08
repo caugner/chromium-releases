@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,17 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/options/options_window_view.h"
 #include "chrome/browser/chromeos/status/network_menu.h"
-#include "chrome/browser/views/window.h"
+#include "chrome/browser/ui/views/window.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/controls/image_view.h"
@@ -179,28 +179,28 @@ void NetworkSection::AddNetwork(int id, const SkBitmap& icon,
 
     if (button_flags & FORGET_BUTTON) {
       views::NativeButton* button = new views::NativeButton(this,
-          l10n_util::GetString(IDS_OPTIONS_SETTINGS_FORGET));
+          UTF16ToWide(l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_FORGET)));
       button->set_tag(id + kButtonIdOffset * FORGET_BUTTON);
       layout_->AddView(button, 1, 2);
     }
 
     if (button_flags & DISCONNECT_BUTTON) {
-      views::NativeButton* button = new views::NativeButton(this,
-          l10n_util::GetString(IDS_OPTIONS_SETTINGS_DISCONNECT));
+      views::NativeButton* button = new views::NativeButton(this, UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_DISCONNECT)));
       button->set_tag(id + kButtonIdOffset * DISCONNECT_BUTTON);
       layout_->AddView(button, 1, 2);
     }
 
     if (button_flags & CONNECT_BUTTON) {
       views::NativeButton* button = new views::NativeButton(this,
-          l10n_util::GetString(IDS_OPTIONS_SETTINGS_CONNECT));
+          UTF16ToWide(l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONNECT)));
       button->set_tag(id + kButtonIdOffset * CONNECT_BUTTON);
       layout_->AddView(button, 1, 2);
     }
 
     if (button_flags & OPTIONS_BUTTON) {
       views::NativeButton* button = new views::NativeButton(this,
-          l10n_util::GetString(IDS_OPTIONS_SETTINGS_OPTIONS));
+          UTF16ToWide(l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OPTIONS)));
       button->set_tag(id + kButtonIdOffset * OPTIONS_BUTTON);
       layout_->AddView(button, 1, 2);
     }
@@ -254,8 +254,8 @@ void WiredSection::InitSection() {
         *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_DISCONNECTED));
   }
 
-  std::wstring name =
-      l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET);
+  std::wstring name = UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
 
   int s = IDS_STATUSBAR_NETWORK_DEVICE_DISABLED;
   if (cros->ethernet_connecting())
@@ -264,7 +264,7 @@ void WiredSection::InitSection() {
     s = IDS_STATUSBAR_NETWORK_DEVICE_CONNECTED;
   else if (cros->ethernet_enabled())
     s = IDS_STATUSBAR_NETWORK_DEVICE_DISCONNECTED;
-  std::wstring status = l10n_util::GetString(s);
+  std::wstring status = UTF16ToWide(l10n_util::GetStringUTF16(s));
 
   int flags = cros->ethernet_connected() ? OPTIONS_BUTTON : 0;
   bool bold = cros->ethernet_connected() ? true : false;
@@ -272,8 +272,8 @@ void WiredSection::InitSection() {
 }
 
 void WiredSection::ButtonClicked(int button, int connection_type, int id) {
-  CreateModalPopup(new NetworkConfigView(
-      CrosLibrary::Get()->GetNetworkLibrary()->ethernet_network()));
+//  CreateModalPopup(new NetworkConfigView(
+//      CrosLibrary::Get()->GetNetworkLibrary()->ethernet_network()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -322,7 +322,7 @@ void WirelessSection::InitSection() {
     std::wstring name = ASCIIToWide(wifi_networks_[i]->name());
 
     SkBitmap icon = NetworkMenu::IconForNetworkStrength(
-        wifi_networks_[i]->strength(), true);
+        wifi_networks_[i], true);
     if (wifi_networks_[i]->encrypted()) {
       icon = NetworkMenu::IconForDisplay(icon,
           *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_SECURE));
@@ -339,7 +339,7 @@ void WirelessSection::InitSection() {
     std::wstring name = ASCIIToWide(cellular_networks_[i]->name());
 
     SkBitmap icon = NetworkMenu::IconForNetworkStrength(
-        cellular_networks_[i]->strength(), true);
+        cellular_networks_[i], true);
     SkBitmap badge =
         NetworkMenu::BadgeForNetworkTechnology(cellular_networks_[i]);
     icon = NetworkMenu::IconForDisplay(icon, badge);
@@ -361,7 +361,7 @@ void WirelessSection::ButtonClicked(int button, int connection_type, int id) {
         CrosLibrary::Get()->GetNetworkLibrary()->DisconnectFromWirelessNetwork(
             cellular_networks_[id]);
       } else {
-        CreateModalPopup(new NetworkConfigView(cellular_networks_[id]));
+//        CreateModalPopup(new NetworkConfigView(cellular_networks_[id]));
       }
     }
   } else if (connection_type == TYPE_WIFI) {
@@ -369,10 +369,10 @@ void WirelessSection::ButtonClicked(int button, int connection_type, int id) {
       if (button == CONNECT_BUTTON) {
         // Connect to wifi here. Open password page if appropriate.
         if (wifi_networks_[id]->encrypted()) {
-          NetworkConfigView* view =
-              new NetworkConfigView(wifi_networks_[id], true);
-          CreateModalPopup(view);
-          view->SetLoginTextfieldFocus();
+//          NetworkConfigView* view =
+//              new NetworkConfigView(wifi_networks_[id], true);
+//          CreateModalPopup(view);
+//          view->SetLoginTextfieldFocus();
         } else {
           CrosLibrary::Get()->GetNetworkLibrary()->ConnectToWifiNetwork(
               wifi_networks_[id], std::string(), std::string(), std::string());
@@ -381,7 +381,7 @@ void WirelessSection::ButtonClicked(int button, int connection_type, int id) {
         CrosLibrary::Get()->GetNetworkLibrary()->DisconnectFromWirelessNetwork(
             wifi_networks_[id]);
       } else {
-        CreateModalPopup(new NetworkConfigView(wifi_networks_[id], false));
+//        CreateModalPopup(new NetworkConfigView(wifi_networks_[id], false));
       }
     }
   } else {
@@ -399,7 +399,7 @@ void WirelessSection::AddWirelessNetwork(int id, const SkBitmap& icon,
     s = IDS_STATUSBAR_NETWORK_DEVICE_CONNECTING;
   else if (connected)
     s = IDS_STATUSBAR_NETWORK_DEVICE_CONNECTED;
-  std::wstring status = l10n_util::GetString(s);
+  std::wstring status = UTF16ToWide(l10n_util::GetStringUTF16(s));
 
   int flags = 0;
   if (connected) {
@@ -534,7 +534,7 @@ void InternetPageContentView::DidChangeBounds(const gfx::Rect& previous,
 }
 
 void InternetPageContentView::InitControlLayout() {
-  GridLayout* layout = CreatePanelGridLayout(this);
+  GridLayout* layout = GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   int single_column_view_set_id = 0;

@@ -92,7 +92,7 @@ std::string TestFileRef::TestGetFileSystemType() {
   if (file_ref_ext.GetFileSystemType() != PP_FILESYSTEMTYPE_EXTERNAL)
     return "file_ref_ext expected to be external.";
 
-  return "";
+  PASS();
 }
 
 std::string TestFileRef::TestGetName() {
@@ -142,7 +142,7 @@ std::string TestFileRef::TestGetName() {
   if (name == "")
     return ReportMismatch("FileRef::GetName", name, "<a temp file>");
 
-  return "";
+  PASS();
 }
 
 std::string TestFileRef::TestGetPath() {
@@ -185,7 +185,7 @@ std::string TestFileRef::TestGetPath() {
   if (!file_ref_ext.GetPath().is_undefined())
     return "The path of an external FileRef should be void.";
 
-  return "";
+  PASS();
 }
 
 std::string TestFileRef::TestGetParent() {
@@ -240,12 +240,13 @@ std::string TestFileRef::TestGetParent() {
   if (!file_ref_ext.GetParent().is_null())
     return "The parent of an external FileRef should be null.";
 
-  return "";
+  PASS();
 }
 
 std::string TestFileRef::TestMakeDirectory() {
   TestCompletionCallback callback;
 
+  // Open.
   pp::FileSystem_Dev file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
   int32_t rv = file_system.Open(1024, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
@@ -253,6 +254,21 @@ std::string TestFileRef::TestMakeDirectory() {
   if (rv != PP_OK)
     return ReportError("FileSystem::Open", rv);
 
+  // Open aborted (see the DirectoryReader test for comments).
+  callback.reset_run_count();
+  rv = pp::FileSystem_Dev(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY)
+      .Open(1024, callback);
+  if (callback.run_count() > 0)
+    return "FileSystem::Open ran callback synchronously.";
+  if (rv == PP_ERROR_WOULDBLOCK) {
+    rv = callback.WaitForResult();
+    if (rv != PP_ERROR_ABORTED)
+      return "FileSystem::Open not aborted.";
+  } else if (rv != PP_OK) {
+    return ReportError("FileSystem::Open", rv);
+  }
+
+  // MakeDirectory.
   pp::FileRef_Dev dir_ref(file_system, "/test_dir_make_directory");
   rv = dir_ref.MakeDirectory(callback);
   if (rv == PP_ERROR_WOULDBLOCK)
@@ -260,6 +276,21 @@ std::string TestFileRef::TestMakeDirectory() {
   if (rv != PP_OK)
     return ReportError("FileSystem::MakeDirectory", rv);
 
+  // MakeDirectory aborted.
+  callback.reset_run_count();
+  rv = pp::FileRef_Dev(file_system, "/test_dir_make_abort")
+      .MakeDirectory(callback);
+  if (callback.run_count() > 0)
+    return "FileSystem::MakeDirectory ran callback synchronously.";
+  if (rv == PP_ERROR_WOULDBLOCK) {
+    rv = callback.WaitForResult();
+    if (rv != PP_ERROR_ABORTED)
+      return "FileSystem::MakeDirectory not aborted.";
+  } else if (rv != PP_OK) {
+    return ReportError("FileSystem::MakeDirectory", rv);
+  }
+
+  // MakeDirectoryIncludingAncestors.
   dir_ref = pp::FileRef_Dev(file_system, "/dir_make_dir_1/dir_make_dir_2");
   rv = dir_ref.MakeDirectoryIncludingAncestors(callback);
   if (rv == PP_ERROR_WOULDBLOCK)
@@ -267,15 +298,33 @@ std::string TestFileRef::TestMakeDirectory() {
   if (rv != PP_OK)
     return ReportError("FileSystem::MakeDirectoryIncludingAncestors", rv);
 
+  // MakeDirectoryIncludingAncestors aborted.
+  callback.reset_run_count();
+  rv = pp::FileRef_Dev(file_system, "/dir_make_abort_1/dir_make_abort_2")
+      .MakeDirectoryIncludingAncestors(callback);
+  if (callback.run_count() > 0) {
+    return "FileSystem::MakeDirectoryIncludingAncestors "
+           "ran callback synchronously.";
+  }
+  if (rv == PP_ERROR_WOULDBLOCK) {
+    rv = callback.WaitForResult();
+    if (rv != PP_ERROR_ABORTED)
+      return "FileSystem::MakeDirectoryIncludingAncestors not aborted.";
+  } else if (rv != PP_OK) {
+    return ReportError("FileSystem::MakeDirectoryIncludingAncestors", rv);
+  }
+
+  // MakeDirectory with nested path.
   dir_ref = pp::FileRef_Dev(file_system, "/dir_make_dir_3/dir_make_dir_4");
   rv = dir_ref.MakeDirectory(callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
-  if (rv == PP_OK)
-    return "Calling FileSystem::MakeDirectory() with a nested directory path " \
-        "should have failed.";
+  if (rv == PP_OK) {
+    return "Calling FileSystem::MakeDirectory() with a nested directory path "
+           "should have failed.";
+  }
 
-  return "";
+  PASS();
 }
 
 std::string TestFileRef::TestQueryAndTouchFile() {
@@ -304,6 +353,7 @@ std::string TestFileRef::TestQueryAndTouchFile() {
   if (rv != 4)
     return ReportError("FileIO::Write", rv);
 
+  // Touch.
   // last_access_time's granularity is 1 day
   // last_modified_time's granularity is 2 seconds
   const PP_Time last_access_time = 123 * 24 * 3600.0;
@@ -314,6 +364,21 @@ std::string TestFileRef::TestQueryAndTouchFile() {
   if (rv != PP_OK)
     return ReportError("FileSystem::Touch", rv);
 
+  // Touch aborted.
+  callback.reset_run_count();
+  rv = pp::FileRef_Dev(file_system, "/file_touch_abort")
+      .Touch(last_access_time, last_modified_time, callback);
+  if (callback.run_count() > 0)
+    return "FileSystem::Touch ran callback synchronously.";
+  if (rv == PP_ERROR_WOULDBLOCK) {
+    rv = callback.WaitForResult();
+    if (rv != PP_ERROR_ABORTED)
+      return "FileSystem::Touch not aborted.";
+  } else if (rv != PP_OK) {
+    return ReportError("FileSystem::Touch", rv);
+  }
+
+  // Query.
   PP_FileInfo_Dev info;
   rv = file_ref.Query(&info, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
@@ -328,7 +393,22 @@ std::string TestFileRef::TestQueryAndTouchFile() {
       (info.last_modified_time != last_modified_time))
     return "FileSystem::Query() has returned bad data.";
 
-  return "";
+  // Cancellation test.
+  // TODO(viettrungluu): this test causes a bunch of LOG(WARNING)s; investigate.
+  callback.reset_run_count();
+  // TODO(viettrungluu): check |info| for late writes.
+  rv = pp::FileRef_Dev(file_system, "/file_touch").Query(&info, callback);
+  if (callback.run_count() > 0)
+    return "FileSystem::Query ran callback synchronously.";
+  if (rv == PP_ERROR_WOULDBLOCK) {
+    rv = callback.WaitForResult();
+    if (rv != PP_ERROR_ABORTED)
+      return "FileSystem::Query not aborted.";
+  } else if (rv != PP_OK) {
+    return ReportError("FileSystem::Query", rv);
+  }
+
+  PASS();
 }
 
 std::string TestFileRef::TestDeleteFileAndDirectory() {
@@ -374,7 +454,9 @@ std::string TestFileRef::TestDeleteFileAndDirectory() {
   if (rv != PP_OK)
     return ReportError("FileSystem::MakeDirectoryIncludingAncestors", rv);
 
-  rv = nested_dir_ref.GetParent().Delete(callback);
+  // Hang on to a ref to the parent; otherwise the callback will be aborted.
+  pp::FileRef_Dev parent_dir_ref = nested_dir_ref.GetParent();
+  rv = parent_dir_ref.Delete(callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
   if (rv != PP_ERROR_FAILED)
@@ -387,7 +469,30 @@ std::string TestFileRef::TestDeleteFileAndDirectory() {
   if (rv != PP_ERROR_FILENOTFOUND)
     return ReportError("FileSystem::Delete", rv);
 
-  return "";
+  // Delete aborted.
+  {
+    pp::FileRef_Dev file_ref_abort(file_system, "/file_delete_abort");
+    pp::FileIO_Dev file_io_abort;
+    rv = file_io_abort.Open(file_ref_abort, PP_FILEOPENFLAG_CREATE, callback);
+    if (rv == PP_ERROR_WOULDBLOCK)
+      rv = callback.WaitForResult();
+    if (rv != PP_OK)
+      return ReportError("FileIO::Open", rv);
+
+    callback.reset_run_count();
+    rv = file_ref_abort.Delete(callback);
+  }
+  if (callback.run_count() > 0)
+    return "FileSystem::Delete ran callback synchronously.";
+  if (rv == PP_ERROR_WOULDBLOCK) {
+    rv = callback.WaitForResult();
+    if (rv != PP_ERROR_ABORTED)
+      return "FileSystem::Delete not aborted.";
+  } else if (rv != PP_OK) {
+    return ReportError("FileSystem::Delete", rv);
+  }
+
+  PASS();
 }
 
 std::string TestFileRef::TestRenameFileAndDirectory() {
@@ -442,5 +547,32 @@ std::string TestFileRef::TestRenameFileAndDirectory() {
   if (rv != PP_ERROR_FAILED)
     return ReportError("FileSystem::Rename", rv);
 
-  return "";
+  // Rename aborted.
+  // TODO(viettrungluu): Figure out what we want to do if the target file
+  // resource is destroyed before completion.
+  pp::FileRef_Dev target_file_ref_abort(file_system,
+                                        "/target_file_rename_abort");
+  {
+    pp::FileRef_Dev file_ref_abort(file_system, "/file_rename_abort");
+    pp::FileIO_Dev file_io_abort;
+    rv = file_io_abort.Open(file_ref_abort, PP_FILEOPENFLAG_CREATE, callback);
+    if (rv == PP_ERROR_WOULDBLOCK)
+      rv = callback.WaitForResult();
+    if (rv != PP_OK)
+      return ReportError("FileIO::Open", rv);
+
+    callback.reset_run_count();
+    rv = file_ref_abort.Rename(target_file_ref_abort, callback);
+  }
+  if (callback.run_count() > 0)
+    return "FileSystem::Rename ran callback synchronously.";
+  if (rv == PP_ERROR_WOULDBLOCK) {
+    rv = callback.WaitForResult();
+    if (rv != PP_ERROR_ABORTED)
+      return "FileSystem::Rename not aborted.";
+  } else if (rv != PP_OK) {
+    return ReportError("FileSystem::Rename", rv);
+  }
+
+  PASS();
 }

@@ -3,7 +3,8 @@
 # found in the LICENSE file.
 
 # This file is only included in full-chromium builds, and overrides the
-# feature_defines variable in third_party/WebKit/WebKit/chromium/features.gypi.
+# feature_defines variable in
+# third_party/WebKit/Source/WebKit/chromium/features.gypi.
 {
   'variables': {
     # WARNING: This list of strings completely replaces the list in
@@ -15,6 +16,7 @@
       'ENABLE_BLOB=1',
       'ENABLE_BLOB_SLICE=1',
       'ENABLE_CHANNEL_MESSAGING=1',
+      'ENABLE_CLIENT_BASED_GEOLOCATION=1',
       'ENABLE_DASHBOARD_SUPPORT=0',
       'ENABLE_DATABASE=1',
       'ENABLE_DATAGRID=0',
@@ -37,6 +39,7 @@
       'ENABLE_OPENTYPE_SANITIZER=1',
       'ENABLE_ORIENTATION_EVENTS=0',
       'ENABLE_PROGRESS_TAG=1',
+      'ENABLE_REQUEST_ANIMATION_FRAME=1',
       'ENABLE_RUBY=1',
       'ENABLE_SANDBOX=1',
       'ENABLE_SHARED_WORKERS=1',
@@ -76,6 +79,11 @@
           'ENABLE_ACCELERATED_2D_CANVAS=1',
         ],
         'use_accelerated_compositing': 1,
+      }],
+      ['OS=="mac"', {
+        'feature_defines': [
+          'ENABLE_WEB_AUDIO=1',
+        ],
       }],
     ],
     # TODO: If the need arises, create a mechanism that will intelligently

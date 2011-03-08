@@ -1,25 +1,25 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/clear_browsing_data.h"
+#include "chrome/browser/ui/views/clear_browsing_data.h"
 
-#include "app/l10n_util.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/ui/browser.h"
 #if defined(OS_WIN)
-#include "chrome/browser/views/clear_browsing_data_view.h"
+#include "chrome/browser/ui/views/clear_browsing_data_view.h"
 #endif
 #include "chrome/common/pref_names.h"
 #include "gfx/insets.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/url_request/url_request_context.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/background.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/label.h"
@@ -43,13 +43,9 @@ namespace browser {
 // Defined in browser_dialogs.h for creation of the view.
 void ShowClearBrowsingDataView(gfx::NativeWindow parent,
                                Profile* profile) {
-#if defined(OS_WIN)
-  views::Window::CreateChromeWindow(parent, gfx::Rect(),
-                                    new ClearDataView(profile))->Show();
-#else
+
   views::Window::CreateChromeWindow(parent, gfx::Rect(),
                                     new ClearBrowsingDataView(profile))->Show();
-#endif
 }
 
 }  // namespace browser
@@ -90,42 +86,48 @@ void ClearBrowsingDataView::Init() {
   throbber_->SetVisible(false);
 
   status_label_ = new views::Label(
-      l10n_util::GetString(IDS_CLEAR_DATA_DELETING));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CLEAR_DATA_DELETING)));
   status_label_->SetVisible(false);
 
   // Regular view controls we draw by ourself. First, we add the dialog label.
   delete_all_label_ = new views::Label(
-      l10n_util::GetString(IDS_CLEAR_BROWSING_DATA_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CLEAR_BROWSING_DATA_LABEL)));
   AddChildView(delete_all_label_);
 
   // Add all the check-boxes.
   del_history_checkbox_ =
-      AddCheckbox(l10n_util::GetString(IDS_DEL_BROWSING_HISTORY_CHKBOX),
+      AddCheckbox(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_DEL_BROWSING_HISTORY_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kDeleteBrowsingHistory));
 
   del_downloads_checkbox_ =
-      AddCheckbox(l10n_util::GetString(IDS_DEL_DOWNLOAD_HISTORY_CHKBOX),
+      AddCheckbox(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_DEL_DOWNLOAD_HISTORY_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kDeleteDownloadHistory));
 
   del_cache_checkbox_ =
-      AddCheckbox(l10n_util::GetString(IDS_DEL_CACHE_CHKBOX),
+      AddCheckbox(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_DEL_CACHE_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kDeleteCache));
 
   del_cookies_checkbox_ =
-      AddCheckbox(l10n_util::GetString(IDS_DEL_COOKIES_CHKBOX),
+      AddCheckbox(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_DEL_COOKIES_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kDeleteCookies));
 
   del_passwords_checkbox_ =
-      AddCheckbox(l10n_util::GetString(IDS_DEL_PASSWORDS_CHKBOX),
+      AddCheckbox(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_DEL_PASSWORDS_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kDeletePasswords));
 
   del_form_data_checkbox_ =
-      AddCheckbox(l10n_util::GetString(IDS_DEL_FORM_DATA_CHKBOX),
+      AddCheckbox(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_DEL_FORM_DATA_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kDeleteFormData));
 
   // Add a label which appears before the combo box for the time period.
-  time_period_label_ = new views::Label(
-      l10n_util::GetString(IDS_CLEAR_BROWSING_DATA_TIME_LABEL));
+  time_period_label_ = new views::Label(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_CLEAR_BROWSING_DATA_TIME_LABEL)));
   AddChildView(time_period_label_);
 
   // Add the combo box showing how far back in time we want to delete.
@@ -133,7 +135,8 @@ void ClearBrowsingDataView::Init() {
   time_period_combobox_->SetSelectedItem(profile_->GetPrefs()->GetInteger(
                                          prefs::kDeleteTimePeriod));
   time_period_combobox_->set_listener(this);
-  time_period_combobox_->SetAccessibleName(time_period_label_->GetText());
+  time_period_combobox_->SetAccessibleName(
+      WideToUTF16Hack(time_period_label_->GetText()));
   AddChildView(time_period_combobox_);
 
   // Create the throbber and related views. The throbber and status link are
@@ -251,8 +254,9 @@ std::wstring ClearBrowsingDataView::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
   DCHECK((button == MessageBoxFlags::DIALOGBUTTON_OK) ||
          (button == MessageBoxFlags::DIALOGBUTTON_CANCEL));
-  return l10n_util::GetString((button == MessageBoxFlags::DIALOGBUTTON_OK) ?
-      IDS_CLEAR_BROWSING_DATA_COMMIT : IDS_CANCEL);
+  return UTF16ToWide(l10n_util::GetStringUTF16(
+      (button == MessageBoxFlags::DIALOGBUTTON_OK) ?
+          IDS_CLEAR_BROWSING_DATA_COMMIT : IDS_CANCEL));
 }
 
 bool ClearBrowsingDataView::IsDialogButtonEnabled(
@@ -293,7 +297,7 @@ bool ClearBrowsingDataView::IsModal() const {
 }
 
 std::wstring ClearBrowsingDataView::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_CLEAR_BROWSING_DATA_TITLE);
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CLEAR_BROWSING_DATA_TITLE));
 }
 
 bool ClearBrowsingDataView::Accept() {
@@ -328,8 +332,8 @@ views::View* ClearBrowsingDataView::GetInitiallyFocusedView() {
 
 views::ClientView* ClearBrowsingDataView::CreateClientView(
     views::Window* window) {
-  views::Link* flash_link =
-      new views::Link(l10n_util::GetString(IDS_FLASH_STORAGE_SETTINGS));
+  views::Link* flash_link = new views::Link(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_FLASH_STORAGE_SETTINGS)));
   flash_link->SetController(this);
 
   views::View* settings_view = new views::View();

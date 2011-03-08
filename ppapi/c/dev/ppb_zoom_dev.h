@@ -1,14 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_DEV_PPB_ZOOM_DEV_H_
 #define PPAPI_C_DEV_PPB_ZOOM_DEV_H_
 
 #include "ppapi/c/pp_instance.h"
 
 // Zoom interface should only apply to those full-page "plugin-document".
-#define PPB_ZOOM_DEV_INTERFACE "PPB_Zoom(Dev);0.1"
+#define PPB_ZOOM_DEV_INTERFACE "PPB_Zoom(Dev);0.2"
 
 struct PPB_Zoom_Dev {
   // Informs the browser about the new zoom factor for the plugin (see
@@ -25,4 +25,5 @@ struct PPB_Zoom_Dev {
                             double maximium_factor);
 };
 
-#endif  // PPAPI_C_DEV_PPB_ZOOM_DEV_H_
+#endif  /* PPAPI_C_DEV_PPB_ZOOM_DEV_H_ */
+

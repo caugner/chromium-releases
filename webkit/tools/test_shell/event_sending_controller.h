@@ -10,7 +10,7 @@
   the test_shell to fire DOM events.
 
   The OSX reference file is in
-  WebKit/WebKitTools/DumpRenderTree/EventSendingController.m
+  WebKit/Tools/DumpRenderTree/EventSendingController.m
 */
 
 #ifndef WEBKIT_TOOLS_TEST_SHELL_EVENT_SENDING_CONTROLLER_H_
@@ -19,8 +19,8 @@
 #include "build/build_config.h"
 #include "gfx/point.h"
 #include "base/task.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/cpp_bound_class.h"
 
 class TestShell;

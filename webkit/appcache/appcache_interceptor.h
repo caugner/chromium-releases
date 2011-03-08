@@ -17,16 +17,16 @@ class AppCacheService;
 
 // An interceptor to hijack requests and potentially service them out of
 // the appcache.
-class AppCacheInterceptor : public URLRequest::Interceptor {
+class AppCacheInterceptor : public net::URLRequest::Interceptor {
  public:
   // Registers a singleton instance with the net library.
   // Should be called early in the IO thread prior to initiating requests.
   static void EnsureRegistered() {
-    CHECK(instance());
+    CHECK(GetInstance());
   }
 
   // Must be called to make a request eligible for retrieval from an appcache.
-  static void SetExtraRequestInfo(URLRequest* request,
+  static void SetExtraRequestInfo(net::URLRequest* request,
                                   AppCacheService* service,
                                   int process_id,
                                   int host_id,
@@ -34,12 +34,14 @@ class AppCacheInterceptor : public URLRequest::Interceptor {
 
   // May be called after response headers are complete to retrieve extra
   // info about the response.
-  static void GetExtraResponseInfo(URLRequest* request,
+  static void GetExtraResponseInfo(net::URLRequest* request,
                                    int64* cache_id,
                                    GURL* manifest_url);
 
+  static AppCacheInterceptor* GetInstance();
+
  protected:
-  // URLRequest::Interceptor overrides
+  // Overridde from net::URLRequest::Interceptor:
   virtual net::URLRequestJob* MaybeIntercept(net::URLRequest* request);
   virtual net::URLRequestJob* MaybeInterceptResponse(net::URLRequest* request);
   virtual net::URLRequestJob* MaybeInterceptRedirect(net::URLRequest* request,
@@ -47,10 +49,6 @@ class AppCacheInterceptor : public URLRequest::Interceptor {
 
  private:
   friend struct DefaultSingletonTraits<AppCacheInterceptor>;
-
-  static AppCacheInterceptor* instance()  {
-    return Singleton<AppCacheInterceptor>::get();
-  }
 
   AppCacheInterceptor();
   virtual ~AppCacheInterceptor();

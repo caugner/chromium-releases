@@ -2,13 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from autotest_lib.client.bin import site_chrome_test
+import os
+from autotest_lib.client.cros import chrome_test
 
-class desktopui_PyAutoFunctionalTests(site_chrome_test.ChromeTestBase):
+class desktopui_PyAutoFunctionalTests(chrome_test.ChromeTestBase):
     """Wrapper for running Chrome's PyAuto-based functional tests."""
     version = 1
 
     def run_once(self):
-        pyauto_script = '%s/test_src/chrome/test/functional/' \
-                        'pyauto_functional.py' % self.dep_dir
+        deps_dir = os.path.join(self.autodir, 'deps')
+        self.test_binary_dir = ''
+        pyauto_script = '%s/chrome_test/test_src/chrome/test/functional/' \
+                        'pyauto_functional.py' % deps_dir
         self.run_chrome_test(pyauto_script)

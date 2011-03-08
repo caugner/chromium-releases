@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -165,8 +165,11 @@ class PrivateKeyInfoCodec {
 
 // Encapsulates an RSA private key. Can be used to generate new keys, export
 // keys to other formats, or to extract a public key.
+// TODO(hclam): This class should be ref-counted so it can be reused easily.
 class RSAPrivateKey {
  public:
+  ~RSAPrivateKey();
+
   // Create a new random instance. Can return NULL if initialization fails.
   static RSAPrivateKey* Create(uint16 num_bits);
 
@@ -202,12 +205,11 @@ class RSAPrivateKey {
   static RSAPrivateKey* FindFromPublicKeyInfo(
       const std::vector<uint8>& input);
 
-  ~RSAPrivateKey();
-
 #if defined(USE_OPENSSL)
   EVP_PKEY* key() { return key_; }
 #elif defined(USE_NSS)
   SECKEYPrivateKeyStr* key() { return key_; }
+  SECKEYPublicKeyStr* public_key() { return public_key_; }
 #elif defined(OS_WIN)
   HCRYPTPROV provider() { return provider_; }
   HCRYPTKEY key() { return key_; }

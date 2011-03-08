@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <string>
 
-#include "app/resource_bundle.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/values.h"
@@ -15,6 +14,7 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 
 /**
  * TextfieldsUIHTMLSource implementation.
@@ -70,7 +70,7 @@ TextfieldsUI::TextfieldsUI(TabContents* contents) : DOMUI(contents) {
   // Set up the chrome://textfields/ source.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
-          &ChromeURLDataManager::AddDataSource,
-          make_scoped_refptr(html_source)));
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
+                        &ChromeURLDataManager::AddDataSource,
+                        make_scoped_refptr(html_source)));
 }

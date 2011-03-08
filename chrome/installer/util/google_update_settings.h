@@ -10,6 +10,11 @@
 
 #include "base/basictypes.h"
 
+namespace installer {
+class ChannelInfo;
+class Package;
+}
+
 // This class provides accessors to the Google Update 'ClientState' information
 // that recorded when the user downloads the chrome installer. It is
 // google_update.exe responsability to write the initial values.
@@ -33,7 +38,8 @@ class GoogleUpdateSettings {
 
   // Sets the machine-wide EULA consented flag required on OEM installs.
   // Returns false if the setting could not be recorded.
-  static bool SetEULAConsent(bool consented);
+  static bool SetEULAConsent(const installer::Package& package,
+                             bool consented);
 
   // Returns the last time chrome was run in days. It uses a recorded value
   // set by SetLastRunTime(). Returns -1 if the value was not found or if
@@ -84,12 +90,24 @@ class GoogleUpdateSettings {
   // on success, channel contains one of "", "unknown", "dev" or "beta".
   static bool GetChromeChannel(bool system_install, std::wstring* channel);
 
-  static void UpdateDiffInstallStatus(bool system_install,
-                                      bool incremental_install,
-                                      int install_return_code,
-                                      const std::wstring& product_guid);
+  // This method changes the Google Update "ap" value to move the installation
+  // on to or off of one of the recovery channels.
+  // - If incremental installer fails we append a magic string ("-full"), if
+  // it is not present already, so that Google Update server next time will send
+  // full installer to update Chrome on the local machine
+  // - If we are currently running full installer, we remove this magic
+  // string (if it is present) regardless of whether installer failed or not.
+  // There is no fall-back for full installer :)
+  // - If multi-install fails we append -multifail; otherwise, we remove it
+  // (i.e., success or single-install).
+  // |state_key| should be obtained via InstallerState::state_key().
+  static void UpdateInstallStatus(bool system_install,
+                                  bool incremental_install,
+                                  bool multi_install,
+                                  int install_return_code,
+                                  const std::wstring& product_guid);
 
-  // This method generates the new value for Google Update "ap" key for Chrome
+  // This method updates the value for Google Update "ap" key for Chrome
   // based on whether we are doing incremental install (or not) and whether
   // the install succeeded.
   // - If install worked, remove the magic string (if present).
@@ -101,9 +119,11 @@ class GoogleUpdateSettings {
   // diff_install: tells whether this is incremental install or not.
   // install_return_code: if 0, means installation was successful.
   // value: current value of Google Update "ap" key.
-  static std::wstring GetNewGoogleUpdateApKey(bool diff_install,
-                                              int install_return_code,
-                                              const std::wstring& value);
+  // Returns true if |value| is modified.
+  static bool UpdateGoogleUpdateApKey(bool diff_install,
+                                      bool multi_install,
+                                      int install_return_code,
+                                      installer::ChannelInfo* value);
 
   // For system-level installs, we need to be able to communicate the results
   // of the Toast Experiments back to Google Update. The problem is just that

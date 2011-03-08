@@ -12,8 +12,8 @@
 #include <gtk/gtk.h>
 #endif
 
-#include "app/keyboard_codes.h"
 #include "base/logging.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "views/accelerator.h"
 #include "views/focus/focus_search.h"
 #include "views/focus/view_storage.h"
@@ -63,6 +63,12 @@ void FocusManager::WidgetFocusManager::OnWidgetFocusEvent(
   }
 }
 
+// static
+FocusManager::WidgetFocusManager*
+FocusManager::WidgetFocusManager::GetInstance() {
+  return Singleton<WidgetFocusManager>::get();
+}
+
 // FocusManager -----------------------------------------------------
 
 FocusManager::FocusManager(Widget* widget)
@@ -71,13 +77,18 @@ FocusManager::FocusManager(Widget* widget)
       focus_change_reason_(kReasonDirectFocusChange) {
   DCHECK(widget_);
   stored_focused_view_storage_id_ =
-      ViewStorage::GetSharedInstance()->CreateStorageID();
+      ViewStorage::GetInstance()->CreateStorageID();
 }
 
 FocusManager::~FocusManager() {
   // If there are still registered FocusChange listeners, chances are they were
   // leaked so warn about them.
   DCHECK(focus_change_listeners_.empty());
+}
+
+// static
+FocusManager::WidgetFocusManager* FocusManager::GetWidgetFocusManager() {
+  return WidgetFocusManager::GetInstance();
 }
 
 bool FocusManager::OnKeyEvent(const KeyEvent& event) {
@@ -109,11 +120,11 @@ bool FocusManager::OnKeyEvent(const KeyEvent& event) {
 #endif
 
   // Intercept arrow key messages to switch between grouped views.
-  app::KeyboardCode key_code = event.GetKeyCode();
+  ui::KeyboardCode key_code = event.GetKeyCode();
   if (focused_view_ && focused_view_->GetGroup() != -1 &&
-      (key_code == app::VKEY_UP || key_code == app::VKEY_DOWN ||
-       key_code == app::VKEY_LEFT || key_code == app::VKEY_RIGHT)) {
-    bool next = (key_code == app::VKEY_RIGHT || key_code == app::VKEY_DOWN);
+      (key_code == ui::VKEY_UP || key_code == ui::VKEY_DOWN ||
+       key_code == ui::VKEY_LEFT || key_code == ui::VKEY_RIGHT)) {
+    bool next = (key_code == ui::VKEY_RIGHT || key_code == ui::VKEY_DOWN);
     std::vector<View*> views;
     focused_view_->GetParent()->GetViewsWithGroup(focused_view_->GetGroup(),
                                                   &views);
@@ -327,7 +338,7 @@ void FocusManager::ClearFocus() {
 }
 
 void FocusManager::StoreFocusedView() {
-  ViewStorage* view_storage = ViewStorage::GetSharedInstance();
+  ViewStorage* view_storage = ViewStorage::GetInstance();
   if (!view_storage) {
     // This should never happen but bug 981648 seems to indicate it could.
     NOTREACHED();
@@ -360,7 +371,7 @@ void FocusManager::StoreFocusedView() {
 }
 
 void FocusManager::RestoreFocusedView() {
-  ViewStorage* view_storage = ViewStorage::GetSharedInstance();
+  ViewStorage* view_storage = ViewStorage::GetInstance();
   if (!view_storage) {
     // This should never happen but bug 981648 seems to indicate it could.
     NOTREACHED();
@@ -394,7 +405,7 @@ void FocusManager::RestoreFocusedView() {
 }
 
 void FocusManager::ClearStoredFocusedView() {
-  ViewStorage* view_storage = ViewStorage::GetSharedInstance();
+  ViewStorage* view_storage = ViewStorage::GetInstance();
   if (!view_storage) {
     // This should never happen but bug 981648 seems to indicate it could.
     NOTREACHED();
@@ -498,7 +509,7 @@ AcceleratorTarget* FocusManager::GetCurrentTargetForAccelerator(
 
 // static
 bool FocusManager::IsTabTraversalKeyEvent(const KeyEvent& key_event) {
-  return key_event.GetKeyCode() == app::VKEY_TAB &&
+  return key_event.GetKeyCode() == ui::VKEY_TAB &&
          !key_event.IsControlDown();
 }
 

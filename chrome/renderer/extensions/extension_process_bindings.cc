@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,19 +11,18 @@
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
+#include "base/lazy_instance.h"
 #include "base/scoped_ptr.h"
-#include "base/singleton.h"
 #include "base/string_util.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/user_script_slave.h"
@@ -34,11 +33,11 @@
 #include "grit/renderer_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using bindings_utils::GetStringResource;
 using bindings_utils::ContextInfo;
@@ -78,21 +77,23 @@ struct SingletonData {
   ExtensionPermissionsList permissions_;
 };
 
+static base::LazyInstance<SingletonData> g_singleton_data(
+    base::LINKER_INITIALIZED);
+
 static std::set<std::string>* GetFunctionNameSet() {
-  return &Singleton<SingletonData>()->function_names_;
+  return &g_singleton_data.Get().function_names_;
 }
 
 static PageActionIdMap* GetPageActionMap() {
-  return &Singleton<SingletonData>()->page_action_ids_;
+  return &g_singleton_data.Get().page_action_ids_;
 }
 
 static PermissionsList* GetPermissionsList(const std::string& extension_id) {
-  return &Singleton<SingletonData>()->permissions_[extension_id];
+  return &g_singleton_data.Get().permissions_[extension_id];
 }
 
 static void GetActiveExtensionIDs(std::set<std::string>* extension_ids) {
-  ExtensionPermissionsList& permissions =
-      Singleton<SingletonData>()->permissions_;
+  ExtensionPermissionsList& permissions = g_singleton_data.Get().permissions_;
 
   for (ExtensionPermissionsList::iterator iter = permissions.begin();
        iter != permissions.end(); ++iter) {
@@ -192,7 +193,7 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
 class ExtensionImpl : public ExtensionBase {
  public:
   ExtensionImpl() : ExtensionBase(
-      kExtensionName, GetStringResource<IDR_EXTENSION_PROCESS_BINDINGS_JS>(),
+      kExtensionName, GetStringResource(IDR_EXTENSION_PROCESS_BINDINGS_JS),
       arraysize(kExtensionDeps), kExtensionDeps) {}
 
   static void SetFunctionNames(const std::vector<std::string>& names) {
@@ -211,10 +212,12 @@ class ExtensionImpl : public ExtensionBase {
       return std::string();  // this can happen as a tab is closing.
 
     GURL url = renderview->webview()->mainFrame()->url();
-    if (!ExtensionRendererInfo::ExtensionBindingsAllowed(url))
+    const ExtensionSet* extensions =
+        EventBindings::GetRenderThread()->GetExtensions();
+    if (!extensions->ExtensionBindingsAllowed(url))
       return std::string();
 
-    return ExtensionRendererInfo::GetIdByURL(url);
+    return extensions->GetIdByURL(url);
   }
 
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
@@ -251,7 +254,7 @@ class ExtensionImpl : public ExtensionBase {
  private:
   static v8::Handle<v8::Value> GetExtensionAPIDefinition(
       const v8::Arguments& args) {
-    return v8::String::New(GetStringResource<IDR_EXTENSION_API_JSON>());
+    return v8::String::New(GetStringResource(IDR_EXTENSION_API_JSON));
   }
 
   static v8::Handle<v8::Value> PopupViewFinder(
@@ -592,7 +595,7 @@ void ExtensionProcessBindings::HandleResponse(int request_id, bool success,
       request->second->context, "handleResponse", arraysize(argv), argv);
   // In debug, the js will validate the callback parameters and return a
   // string if a validation error has occured.
-#ifdef _DEBUG
+#ifndef NDEBUG
   if (!retval.IsEmpty() && !retval->IsUndefined()) {
     std::string error = *v8::String::AsciiValue(retval);
     DCHECK(false) << error;
@@ -675,4 +678,3 @@ v8::Handle<v8::Value>
   return v8::ThrowException(v8::Exception::Error(
       v8::String::New(error_msg.c_str())));
 }
-

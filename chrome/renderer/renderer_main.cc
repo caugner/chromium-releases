@@ -7,8 +7,6 @@
 #include <unistd.h>
 #endif  // OS_MACOSX
 
-#include "app/hi_res_timer_manager.h"
-#include "app/system_monitor.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -17,12 +15,14 @@
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
-#include "base/platform_thread.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
+#include "base/threading/platform_thread.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/gfx_resource_provider.h"
+#include "chrome/common/hi_res_timer_manager.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/net/net_resource_provider.h"
@@ -30,13 +30,15 @@
 #include "chrome/renderer/renderer_main_platform_delegate.h"
 #include "chrome/renderer/render_process_impl.h"
 #include "chrome/renderer/render_thread.h"
+#include "gfx/gfx_module.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_module.h"
+#include "ui/base/system_monitor/system_monitor.h"
 
 #if defined(OS_MACOSX)
 #include "base/eintr_wrapper.h"
 #include "chrome/app/breakpad_mac.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #endif  // OS_MACOSX
 
 #if defined(USE_LINUX_BREAKPAD)
@@ -78,7 +80,7 @@ void SIGTERMHandler(int signal) {
   RAW_LOG(INFO, "Wrote signal to shutdown pipe.");
 }
 
-class ShutdownDetector : public PlatformThread::Delegate {
+class ShutdownDetector : public base::PlatformThread::Delegate {
  public:
   explicit ShutdownDetector(int shutdown_fd) : shutdown_fd_(shutdown_fd) {
     CHECK(shutdown_fd_ != -1);
@@ -193,9 +195,9 @@ int RendererMain(const MainFunctionParams& parameters) {
     int shutdown_pipe_read_fd = pipefd[0];
     g_shutdown_pipe_write_fd = pipefd[1];
     const size_t kShutdownDetectorThreadStackSize = 4096;
-    if (!PlatformThread::CreateNonJoinable(
-        kShutdownDetectorThreadStackSize,
-        new ShutdownDetector(shutdown_pipe_read_fd))) {
+    if (!base::PlatformThread::CreateNonJoinable(
+            kShutdownDetectorThreadStackSize,
+            new ShutdownDetector(shutdown_pipe_read_fd))) {
       LOG(DFATAL) << "Failed to create shutdown detector task.";
     }
   }
@@ -213,8 +215,9 @@ int RendererMain(const MainFunctionParams& parameters) {
   InitCrashReporter();
 #endif
 
-  // Configure the network module so it has access to resources.
+  // Configure modules that need access to resources.
   net::NetModule::SetResourceProvider(chrome_common_net::NetResourceProvider);
+  gfx::GfxModule::SetResourceProvider(chrome::GfxResourceProvider);
 
   // This function allows pausing execution using the --renderer-startup-dialog
   // flag allowing us to attach a debugger.
@@ -238,9 +241,9 @@ int RendererMain(const MainFunctionParams& parameters) {
               MessageLoop::TYPE_UI : MessageLoop::TYPE_DEFAULT);
 #endif
 
-  PlatformThread::SetName("CrRendererMain");
+  base::PlatformThread::SetName("CrRendererMain");
 
-  SystemMonitor system_monitor;
+  ui::SystemMonitor system_monitor;
   HighResolutionTimerManager hi_res_timer_manager;
 
   platform.PlatformInitialize();
@@ -251,7 +254,7 @@ int RendererMain(const MainFunctionParams& parameters) {
   // Initialize histogram statistics gathering system.
   // Don't create StatisticsRecorder in the single process mode.
   scoped_ptr<base::StatisticsRecorder> statistics;
-  if (!base::StatisticsRecorder::WasStarted()) {
+  if (!base::StatisticsRecorder::IsActive()) {
     statistics.reset(new base::StatisticsRecorder());
   }
 
@@ -261,7 +264,7 @@ int RendererMain(const MainFunctionParams& parameters) {
   if (parsed_command_line.HasSwitch(switches::kForceFieldTestNameAndValue)) {
     std::string persistent = parsed_command_line.GetSwitchValueASCII(
         switches::kForceFieldTestNameAndValue);
-    bool ret = field_trial.StringAugmentsState(persistent);
+    bool ret = field_trial.CreateTrialsInChildProcess(persistent);
     DCHECK(ret);
   }
 
@@ -278,6 +281,8 @@ int RendererMain(const MainFunctionParams& parameters) {
     bool run_loop = true;
     if (!no_sandbox) {
       run_loop = platform.EnableSandbox();
+    } else {
+      LOG(ERROR) << "Running without renderer sandbox";
     }
 #if defined(OS_LINUX)
     RenderProcessImpl render_process;

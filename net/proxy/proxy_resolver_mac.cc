@@ -7,7 +7,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include "base/logging.h"
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -52,6 +52,12 @@ void ResultCallback(void* client, CFArrayRef proxies, CFErrorRef error) {
 }  // namespace
 
 namespace net {
+
+ProxyResolverMac::ProxyResolverMac()
+    : ProxyResolver(false /*expects_pac_bytes*/) {
+}
+
+ProxyResolverMac::~ProxyResolverMac() {}
 
 // Gets the proxy information for a query URL from a PAC. Implementation
 // inspired by http://developer.apple.com/samplecode/CFProxySupportTool/
@@ -148,7 +154,7 @@ int ProxyResolverMac::GetProxyForURL(const GURL& query_url,
     //                                     PAC file, I'm going home.
 
     CFStringRef proxy_type =
-        (CFStringRef)mac_util::GetValueFromDictionary(proxy_dictionary,
+        (CFStringRef)base::mac::GetValueFromDictionary(proxy_dictionary,
                                                       kCFProxyTypeKey,
                                                       CFStringGetTypeID());
     ProxyServer proxy_server = ProxyServer::FromDictionary(
@@ -168,6 +174,21 @@ int ProxyResolverMac::GetProxyForURL(const GURL& query_url,
     results->UseNamedProxy(proxy_uri_list);
   // Else do nothing (results is already guaranteed to be in the default state).
 
+  return OK;
+}
+
+void ProxyResolverMac::CancelRequest(RequestHandle request) {
+  NOTREACHED();
+}
+
+void ProxyResolverMac::CancelSetPacScript() {
+  NOTREACHED();
+}
+
+int ProxyResolverMac::SetPacScript(
+    const scoped_refptr<ProxyResolverScriptData>& script_data,
+    CompletionCallback* /*callback*/) {
+  script_data_ = script_data;
   return OK;
 }
 

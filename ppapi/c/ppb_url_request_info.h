@@ -1,12 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_PPB_URL_REQUEST_INFO_H_
 #define PPAPI_C_PPB_URL_REQUEST_INFO_H_
 
 #include "ppapi/c/pp_bool.h"
-#include "ppapi/c/pp_module.h"
+#include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_time.h"
@@ -32,12 +33,13 @@ typedef enum {
   // Boolean (default = PP_FALSE).
   PP_URLREQUESTPROPERTY_RECORDUPLOADPROGRESS
 } PP_URLRequestProperty;
+PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_URLRequestProperty, 4);
 
-#define PPB_URLREQUESTINFO_INTERFACE "PPB_URLRequestInfo;1"
+#define PPB_URLREQUESTINFO_INTERFACE "PPB_URLRequestInfo;0.2"
 
 struct PPB_URLRequestInfo {
   // Create a new URLRequestInfo object.  Returns 0 if the module is invalid.
-  PP_Resource (*Create)(PP_Module module);
+  PP_Resource (*Create)(PP_Instance instance);
 
   // Returns PP_TRUE if the given resource is an URLRequestInfo. Returns
   // PP_FALSE if the resource is invalid or some type other than an
@@ -82,4 +84,5 @@ struct PPB_URLRequestInfo {
                               PP_Time expected_last_modified_time);
 };
 
-#endif  // PPAPI_C_PPB_URL_REQUEST_INFO_H_
+#endif  /* PPAPI_C_PPB_URL_REQUEST_INFO_H_ */
+

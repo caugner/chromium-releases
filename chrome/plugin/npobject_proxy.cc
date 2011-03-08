@@ -7,9 +7,9 @@
 #include "chrome/common/plugin_messages.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/plugin/plugin_channel.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/plugins/plugin_instance.h"
+#include "webkit/plugins/npapi/plugin_instance.h"
 
 using WebKit::WebBindings;
 
@@ -44,6 +44,14 @@ NPObjectProxy* NPObjectProxy::GetProxy(NPObject* object) {
   }
 
   return proxy;
+}
+
+NPObject* NPObjectProxy::GetUnderlyingNPObject() {
+  return NULL;
+}
+
+IPC::Channel::Listener* NPObjectProxy::GetChannelListener() {
+  return static_cast<IPC::Channel::Listener*>(this);
 }
 
 NPObjectProxy::NPObjectProxy(
@@ -96,8 +104,9 @@ void NPObjectProxy::NPDeallocate(NPObject* npObj) {
   delete obj;
 }
 
-void NPObjectProxy::OnMessageReceived(const IPC::Message& msg) {
+bool NPObjectProxy::OnMessageReceived(const IPC::Message& msg) {
   NOTREACHED();
+  return false;
 }
 
 void NPObjectProxy::OnChannelError() {
@@ -452,8 +461,8 @@ bool NPObjectProxy::NPNEvaluate(NPP npp,
   bool popups_allowed = false;
 
   if (npp) {
-    NPAPI::PluginInstance* plugin_instance =
-        reinterpret_cast<NPAPI::PluginInstance*>(npp->ndata);
+    webkit::npapi::PluginInstance* plugin_instance =
+        reinterpret_cast<webkit::npapi::PluginInstance*>(npp->ndata);
     if (plugin_instance)
       popups_allowed = plugin_instance->popups_allowed();
   }

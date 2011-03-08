@@ -5,6 +5,7 @@
 #include "base/debug/stack_trace.h"
 
 #include <errno.h>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +28,6 @@
 #include <iostream>
 
 #include "base/basictypes.h"
-#include "base/compat_execinfo.h"
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/safe_strerror_posix.h"
@@ -56,9 +56,9 @@ const char kSymbolCharacters[] =
 #if !defined(USE_SYMBOLIZE)
 // Demangles C++ symbols in the given text. Example:
 //
-// "sconsbuild/Debug/base_unittests(_ZN10StackTraceC1Ev+0x20) [0x817778c]"
+// "out/Debug/base_unittests(_ZN10StackTraceC1Ev+0x20) [0x817778c]"
 // =>
-// "sconsbuild/Debug/base_unittests(StackTrace::StackTrace()+0x20) [0x817778c]"
+// "out/Debug/base_unittests(StackTrace::StackTrace()+0x20) [0x817778c]"
 void DemangleSymbols(std::string* text) {
 #if defined(__GLIBCXX__)
 

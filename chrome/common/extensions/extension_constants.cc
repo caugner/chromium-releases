@@ -52,6 +52,10 @@ const char* kPluginsPath = "path";
 const char* kPluginsPublic = "public";
 const char* kPublicKey = "key";
 const char* kRunAt = "run_at";
+const char* kSidebar = "sidebar";
+const char* kSidebarDefaultIcon = "default_icon";
+const char* kSidebarDefaultTitle = "default_title";
+const char* kSidebarDefaultUrl = "default_url";
 const char* kSignature = "signature";
 const char* kTheme = "theme";
 const char* kThemeColors = "colors";
@@ -60,6 +64,13 @@ const char* kThemeImages = "images";
 const char* kThemeTints = "tints";
 const char* kToolstripPath = "path";
 const char* kToolstrips = "toolstrips";
+const char* kTts = "tts";
+const char* kTtsGenderFemale = "female";
+const char* kTtsGenderMale = "male";
+const char* kTtsVoices = "voices";
+const char* kTtsVoicesGender = "gender";
+const char* kTtsVoicesLocale = "locale";
+const char* kTtsVoicesVoiceName = "voiceName";
 const char* kType = "type";
 const char* kUpdateURL = "update_url";
 const char* kVersion = "version";
@@ -98,6 +109,9 @@ const char* kDisabledByPolicy =
 const char* kDevToolsExperimental =
     "You must request the 'experimental' permission in order to use the"
     " DevTools API.";
+const char* kExperimentalFlagRequired =
+    "Loading extensions with 'experimental' permission requires"
+    " --enable-experimental-extension-apis command line flag.";
 const char* kHostedAppsCannotIncludeExtensionFeatures =
     "Hosted apps cannot use extension features.";
 const char* kInvalidAllFrames =
@@ -215,6 +229,14 @@ const char* kInvalidPluginsPublic =
     "Invalid value for 'plugins[*].public'.";
 const char* kInvalidRunAt =
     "Invalid value for 'content_scripts[*].run_at'.";
+const char* kInvalidSidebar =
+    "Invalid value for 'sidebar'.";
+const char* kInvalidSidebarDefaultIconPath =
+    "Invalid value for 'sidebar.default_icon'.";
+const char* kInvalidSidebarDefaultTitle =
+    "Invalid value for 'sidebar.default_title'.";
+const char* kInvalidSidebarDefaultUrl =
+    "Invalid value for 'sidebar.default_url'.";
 const char* kInvalidSignature =
     "Value 'signature' is missing or invalid.";
 const char* kInvalidTheme =
@@ -231,6 +253,16 @@ const char* kInvalidToolstrip =
     "Invalid value for 'toolstrips[*]'";
 const char* kInvalidToolstrips =
     "Invalid value for 'toolstrips'.";
+const char* kInvalidTts =
+    "Invalid value for 'tts'.";
+const char* kInvalidTtsVoices =
+    "Invalid value for 'tts.voices'.";
+const char* kInvalidTtsVoicesGender =
+    "Invalid value for 'tts.voices[*].gender'.";
+const char* kInvalidTtsVoicesLocale =
+    "Invalid value for 'tts.voices[*].locale'.";
+const char* kInvalidTtsVoicesVoiceName =
+    "Invalid value for 'tts.voices[*].voiceName'.";
 const char* kInvalidUpdateURL =
     "Invalid value for update url: '[*]'.";
 const char* kInvalidVersion =
@@ -268,6 +300,9 @@ const char* kOneUISurfaceOnly =
     "Only one of 'browser_action', 'page_action', and 'app' can be specified.";
 const char* kReservedMessageFound =
     "Reserved key * found in message catalog.";
+const char* kSidebarExperimental =
+    "You must request the 'experimental' permission in order to use the"
+    " Sidebar API.";
 const char* kThemesCannotContainExtensions =
     "A theme cannot contain extensions code.";
 #if defined(OS_CHROMEOS)
@@ -297,4 +332,8 @@ namespace extension_misc {
 const char* kBookmarkManagerId = "eemcgdkfndhakfknompkggombfjjjeno";
 const char* kWebStoreAppId = "ahfgeienlihckogmohjhadlkjgocpleb";
 const char* kAppsPromoHistogram = "Extensions.AppsPromo";
+#if defined(OS_CHROMEOS)
+const char* kAccessExtensionPath =
+    "/usr/share/chromeos-assets/accessibility/extensions";
+#endif
 }

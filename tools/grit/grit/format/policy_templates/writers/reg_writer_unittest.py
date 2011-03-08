@@ -1,5 +1,5 @@
-#!/usr/bin/python2.4
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+#!/usr/bin/python2.6
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,7 +20,7 @@ from grit.format.policy_templates.writers import writer_unittest_common
 class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
   '''Unit tests for RegWriter.'''
 
-  NEWLINE='\r\n'
+  NEWLINE = '\r\n'
 
   def CompareOutputs(self, output, expected_output):
     '''Compares the output of the reg_writer with its expected output.
@@ -42,8 +42,9 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '{'
         '  "policy_definitions": [],'
         '  "placeholders": [],'
-        '}', '<messages></messages>')
-    output = self.GetOutput(grd, 'fr', {'_chromium': '1',}, 'reg', 'en')
+        '  "messages": {}'
+        '}')
+    output = self.GetOutput(grd, 'fr', {'_chromium': '1', }, 'reg', 'en')
     expected_output = 'Windows Registry Editor Version 5.00'
     self.CompareOutputs(output, expected_output)
 
@@ -55,24 +56,21 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '    {'
         '      "name": "MainPolicy",'
         '      "type": "main",'
+        '      "caption": "",'
+        '      "desc": "",'
         '      "supported_on": ["chrome.win:8-"],'
-        '      "annotations": {'
-        '        "example_value": True'
-        '      }'
+        '      "example_value": True'
         '    },'
         '  ],'
         '  "placeholders": [],'
-        '}',
-        '<messages>'
-        '  <message name="IDS_POLICY_MAINPOLICY_CAPTION"></message>'
-        '  <message name="IDS_POLICY_MAINPOLICY_DESC"></message>'
-        '</messages>')
+        '  "messages": {},'
+        '}')
     output = self.GetOutput(grd, 'fr', {'_google_chrome' : '1'}, 'reg', 'en')
     expected_output = self.NEWLINE.join([
         'Windows Registry Editor Version 5.00',
         '',
         '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Google\\Chrome]',
-        '"MainPolicy"=dword:1'])
+        '"MainPolicy"=dword:00000001'])
     self.CompareOutputs(output, expected_output)
 
   def testStringPolicy(self):
@@ -83,18 +81,15 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '    {'
         '      "name": "StringPolicy",'
         '      "type": "string",'
+        '      "caption": "",'
+        '      "desc": "",'
         '      "supported_on": ["chrome.win:8-"],'
-        '      "annotations": {'
-        '        "example_value": "hello, world! \\\" \\\\"'
-        '      }'
+        '      "example_value": "hello, world! \\\" \\\\"'
         '    },'
         '  ],'
         '  "placeholders": [],'
-        '}',
-        '<messages>'
-        '  <message name="IDS_POLICY_STRINGPOLICY_CAPTION"></message>'
-        '  <message name="IDS_POLICY_STRINGPOLICY_DESC"></message>'
-        '</messages>')
+        '  "messages": {},'
+        '}')
     output = self.GetOutput(grd, 'fr', {'_chromium' : '1'}, 'reg', 'en')
     expected_output = self.NEWLINE.join([
         'Windows Registry Editor Version 5.00',
@@ -103,40 +98,89 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '"StringPolicy"="hello, world! \\\" \\\\"'])
     self.CompareOutputs(output, expected_output)
 
-  def testEnumPolicy(self):
-    # Tests a policy group with a single policy of type 'enum'.
+  def testIntPolicy(self):
+    # Tests a policy group with a single policy of type 'int'.
+    grd = self.PrepareTest(
+        '{'
+        '  "policy_definitions": ['
+        '    {'
+        '      "name": "IntPolicy",'
+        '      "type": "int",'
+        '      "caption": "",'
+        '      "desc": "",'
+        '      "supported_on": ["chrome.win:8-"],'
+        '      "example_value": 26'
+        '    },'
+        '  ],'
+        '  "placeholders": [],'
+        '  "messages": {},'
+        '}')
+    output = self.GetOutput(grd, 'fr', {'_chromium' : '1'}, 'reg', 'en')
+    expected_output = self.NEWLINE.join([
+        'Windows Registry Editor Version 5.00',
+        '',
+        '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Chromium]',
+        '"IntPolicy"=dword:0000001a'])
+    self.CompareOutputs(output, expected_output)
+
+  def testIntEnumPolicy(self):
+    # Tests a policy group with a single policy of type 'int-enum'.
     grd = self.PrepareTest(
         '{'
         '  "policy_definitions": ['
         '    {'
         '      "name": "EnumPolicy",'
-        '      "type": "enum",'
+        '      "type": "int-enum",'
+        '      "caption": "",'
+        '      "desc": "",'
         '      "items": ['
-        '        {"name": "ProxyServerDisabled", "value": 0},'
-        '        {"name": "ProxyServerAutoDetect", "value": 1},'
+        '        {"name": "ProxyServerDisabled", "value": 0, "caption": ""},'
+        '        {"name": "ProxyServerAutoDetect", "value": 1, "caption": ""},'
         '      ],'
         '      "supported_on": ["chrome.win:8-"],'
-        '      "annotations": {'
-        '        "example_value": 1'
-        '      }'
+        '      "example_value": 1'
         '    },'
         '  ],'
         '  "placeholders": [],'
-        '}',
-        '<messages>'
-        '  <message name="IDS_POLICY_ENUMPOLICY_CAPTION"></message>'
-        '  <message name="IDS_POLICY_ENUMPOLICY_DESC"></message>'
-        '  <message name="IDS_POLICY_ENUM_PROXYSERVERDISABLED_CAPTION">'
-        '  </message>'
-        '  <message name="IDS_POLICY_ENUM_PROXYSERVERAUTODETECT_CAPTION">'
-        '  </message>'
-        '</messages>')
+        '  "messages": {},'
+        '}')
     output = self.GetOutput(grd, 'fr', {'_google_chrome': '1'}, 'reg', 'en')
     expected_output = self.NEWLINE.join([
         'Windows Registry Editor Version 5.00',
         '',
         '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Google\\Chrome]',
-        '"EnumPolicy"=dword:1'])
+        '"EnumPolicy"=dword:00000001'])
+    self.CompareOutputs(output, expected_output)
+
+  def testStringEnumPolicy(self):
+    # Tests a policy group with a single policy of type 'string-enum'.
+    grd = self.PrepareTest(
+        '{'
+        '  "policy_definitions": ['
+        '    {'
+        '      "name": "EnumPolicy",'
+        '      "type": "string-enum",'
+        '      "caption": "",'
+        '      "desc": "",'
+        '      "items": ['
+        '        {"name": "ProxyServerDisabled", "value": "one",'
+        '         "caption": ""},'
+        '        {"name": "ProxyServerAutoDetect", "value": "two",'
+                '         "caption": ""},'
+        '      ],'
+        '      "supported_on": ["chrome.win:8-"],'
+        '      "example_value": "two"'
+        '    },'
+        '  ],'
+        '  "placeholders": [],'
+        '  "messages": {},'
+        '}')
+    output = self.GetOutput(grd, 'fr', {'_google_chrome': '1'}, 'reg', 'en')
+    expected_output = self.NEWLINE.join([
+        'Windows Registry Editor Version 5.00',
+        '',
+        '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Google\\Chrome]',
+        '"EnumPolicy"="two"'])
     self.CompareOutputs(output, expected_output)
 
   def testListPolicy(self):
@@ -147,19 +191,15 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '    {'
         '      "name": "ListPolicy",'
         '      "type": "list",'
+        '      "caption": "",'
+        '      "desc": "",'
         '      "supported_on": ["chrome.linux:8-"],'
-        '      "annotations": {'
-        '        "example_value": ["foo", "bar"]'
-        '      }'
+        '      "example_value": ["foo", "bar"]'
         '    },'
         '  ],'
         '  "placeholders": [],'
-        '}',
-        '<messages>'
-        '  <message name="IDS_POLICY_LISTPOLICY_DESC"></message>'
-        '  <message name="IDS_POLICY_LISTPOLICY_CAPTION"></message>'
-        '  <message name="IDS_POLICY_LISTPOLICY_LABEL"></message>'
-        '</messages>')
+        '  "messages": {},'
+        '}')
     output = self.GetOutput(grd, 'fr', {'_chromium' : '1'}, 'reg', 'en')
     expected_output = self.NEWLINE.join([
         'Windows Registry Editor Version 5.00',
@@ -177,18 +217,15 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '    {'
         '      "name": "NonWindowsPolicy",'
         '      "type": "list",'
+        '      "caption": "",'
+        '      "desc": "",'
         '      "supported_on": ["chrome.mac:8-"],'
-        '      "annotations": {'
-        '        "example_value": ["a"]'
-        '      }'
+        '      "example_value": ["a"]'
         '    },'
         '  ],'
         '  "placeholders": [],'
-        '}',
-        '<messages>'
-        '  <message name="IDS_POLICY_NONWINDOWSPOLICY_CAPTION"></message>'
-        '  <message name="IDS_POLICY_NONWINDOWSPOLICY_DESC"></message>'
-        '</messages>')
+        '  "messages": {},'
+        '}')
     output = self.GetOutput(grd, 'fr', {'_chromium' : '1'}, 'reg', 'en')
     expected_output = self.NEWLINE.join([
         'Windows Registry Editor Version 5.00'])
@@ -202,43 +239,38 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '    {'
         '      "name": "Group1",'
         '      "type": "group",'
+        '      "caption": "",'
+        '      "desc": "",'
         '      "policies": [{'
         '        "name": "Policy1",'
         '        "type": "list",'
+        '        "caption": "",'
+        '        "desc": "",'
         '        "supported_on": ["chrome.win:8-"],'
-        '        "annotations": {'
-        '          "example_value": ["a", "b"]'
-        '        }'
+        '        "example_value": ["a", "b"]'
         '      },{'
         '        "name": "Policy2",'
         '        "type": "string",'
+        '        "caption": "",'
+        '        "desc": "",'
         '        "supported_on": ["chrome.win:8-"],'
-        '        "annotations": {'
-        '          "example_value": "c"'
-        '        }'
+        '        "example_value": "c"'
         '      }],'
         '    },'
         '  ],'
         '  "placeholders": [],'
-        '}',
-        '<messages>'
-        '  <message name="IDS_POLICY_GROUP1_CAPTION"></message>'
-        '  <message name="IDS_POLICY_GROUP1_DESC"></message>'
-        '  <message name="IDS_POLICY_POLICY1_DESC"></message>'
-        '  <message name="IDS_POLICY_POLICY2_DESC"></message>'
-        '  <message name="IDS_POLICY_POLICY1_CAPTION"></message>'
-        '  <message name="IDS_POLICY_POLICY2_CAPTION"></message>'
-        '</messages>')
+        '  "messages": {},'
+        '}')
     output = self.GetOutput(grd, 'fr', {'_chromium' : '1'}, 'reg', 'en')
     expected_output = self.NEWLINE.join([
         'Windows Registry Editor Version 5.00',
         '',
+        '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Chromium]',
+        '"Policy2"="c"',
+        '',
         '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Chromium\\Policy1]',
         '"1"="a"',
-        '"2"="b"',
-        '',
-        '[HKEY_LOCAL_MACHINE\\Software\\Policies\\Chromium]',
-        '"Policy2"="c"'])
+        '"2"="b"'])
     self.CompareOutputs(output, expected_output)
 
 

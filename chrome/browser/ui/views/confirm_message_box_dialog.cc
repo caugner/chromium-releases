@@ -1,13 +1,14 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/confirm_message_box_dialog.h"
+#include "chrome/browser/ui/views/confirm_message_box_dialog.h"
 
-#include "app/l10n_util.h"
-#include "app/message_box_flags.h"
+#include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/message_box_flags.h"
 #include "views/standard_layout.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
@@ -53,10 +54,10 @@ ConfirmMessageBoxDialog::ConfirmMessageBoxDialog(
       preferred_size_(gfx::Size(views::Window::GetLocalizedContentsSize(
           IDS_CONFIRM_MESSAGE_BOX_DEFAULT_WIDTH_CHARS,
           IDS_CONFIRM_MESSAGE_BOX_DEFAULT_HEIGHT_LINES))),
-      confirm_label_(l10n_util::GetString(
-          IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL)),
-      reject_label_(l10n_util::GetString(
-          IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL)) {
+      confirm_label_(UTF16ToWide(l10n_util::GetStringUTF16(
+          IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL))),
+      reject_label_(UTF16ToWide(l10n_util::GetStringUTF16(
+          IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL))) {
   message_label_ = new views::Label(message_text);
   message_label_->SetMultiLine(true);
   message_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -64,8 +65,8 @@ ConfirmMessageBoxDialog::ConfirmMessageBoxDialog(
 }
 
 int ConfirmMessageBoxDialog::GetDialogButtons() const {
-  return MessageBoxFlags::DIALOGBUTTON_OK |
-         MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  return ui::MessageBoxFlags::DIALOGBUTTON_OK |
+         ui::MessageBoxFlags::DIALOGBUTTON_CANCEL;
 }
 
 std::wstring ConfirmMessageBoxDialog::GetWindowTitle() const {
@@ -73,11 +74,11 @@ std::wstring ConfirmMessageBoxDialog::GetWindowTitle() const {
 }
 
 std::wstring ConfirmMessageBoxDialog::GetDialogButtonLabel(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
+    ui::MessageBoxFlags::DialogButton button) const {
+  if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK) {
     return confirm_label_;
   }
-  if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL)
+  if (button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL)
     return reject_label_;
   return DialogDelegate::GetDialogButtonLabel(button);
 }

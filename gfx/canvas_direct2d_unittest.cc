@@ -16,7 +16,7 @@
 #include "gfx/canvas_skia.h"
 #include "gfx/codec/png_codec.h"
 #include "gfx/native_theme_win.h"
-#include "gfx/window_impl.h"
+#include "gfx/rect.h"
 #include "gfx/win_util.h"
 #include "grit/gfx_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,20 +24,26 @@
 
 namespace {
 
-class TestWindow : public gfx::WindowImpl {
+const char kVisibleModeFlag[] = "d2d-canvas-visible";
+const wchar_t kWindowClassName[] = L"GFXD2DTestWindowClass";
+
+class TestWindow {
  public:
   static const int kWindowSize = 500;
   static const int kWindowPosition = 10;
 
-  static const wchar_t* kVisibleModeFlag;
-
-  TestWindow() {
+  TestWindow() : hwnd_(NULL) {
     if (CommandLine::ForCurrentProcess()->HasSwitch(kVisibleModeFlag))
       Sleep(1000);
 
-    // Create the window.
-    Init(NULL,
-         gfx::Rect(kWindowPosition, kWindowPosition, kWindowSize, kWindowSize));
+    RegisterMyClass();
+
+    hwnd_ = CreateWindowEx(0, kWindowClassName, NULL,
+                           WS_OVERLAPPEDWINDOW,
+                           kWindowPosition, kWindowPosition,
+                           kWindowSize, kWindowSize,
+                           NULL, NULL, NULL, this);
+    DCHECK(hwnd_);
 
     // Initialize the RenderTarget for the window.
     rt_ = MakeHWNDRenderTarget();
@@ -49,12 +55,12 @@ class TestWindow : public gfx::WindowImpl {
     if (CommandLine::ForCurrentProcess()->HasSwitch(kVisibleModeFlag))
       Sleep(1000);
     DestroyWindow(hwnd());
+    UnregisterMyClass();
   }
 
-  ID2D1RenderTarget* rt() const { return rt_.get(); }
+  HWND hwnd() const { return hwnd_; }
 
-  BEGIN_MSG_MAP_EX(TestWindow)
-  END_MSG_MAP()
+  ID2D1RenderTarget* rt() const { return rt_.get(); }
 
  private:
   ID2D1RenderTarget* MakeHWNDRenderTarget() {
@@ -70,20 +76,41 @@ class TestWindow : public gfx::WindowImpl {
     return rt;
   }
 
+  void RegisterMyClass() {
+    WNDCLASSEX class_ex;
+    class_ex.cbSize = sizeof(WNDCLASSEX);
+    class_ex.style = CS_DBLCLKS;
+    class_ex.lpfnWndProc = &DefWindowProc;
+    class_ex.cbClsExtra = 0;
+    class_ex.cbWndExtra = 0;
+    class_ex.hInstance = NULL;
+    class_ex.hIcon = NULL;
+    class_ex.hCursor = LoadCursor(NULL, IDC_ARROW);
+    class_ex.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BACKGROUND);
+    class_ex.lpszMenuName = NULL;
+    class_ex.lpszClassName = kWindowClassName;
+    class_ex.hIconSm = class_ex.hIcon;
+    ATOM atom = RegisterClassEx(&class_ex);
+    DCHECK(atom);
+  }
+
+  void UnregisterMyClass() {
+    ::UnregisterClass(kWindowClassName, NULL);
+  }
+
+  HWND hwnd_;
+
   ScopedComPtr<ID2D1RenderTarget> rt_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindow);
 };
-
-// static
-const wchar_t* TestWindow::kVisibleModeFlag = L"d2d-canvas-visible";
 
 // Loads a png data blob from the data resources associated with this
 // executable, decodes it and returns a SkBitmap.
 SkBitmap LoadBitmapFromResources(int resource_id) {
   SkBitmap bitmap;
 
-  HINSTANCE resource_instance = _AtlBaseModule.GetResourceInstance();
+  HINSTANCE resource_instance = GetModuleHandle(NULL);
   void* data_ptr;
   size_t data_size;
   if (base::GetDataResourceFromModule(resource_instance, resource_id, &data_ptr,

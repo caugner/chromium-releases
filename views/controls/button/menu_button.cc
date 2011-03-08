@@ -4,12 +4,13 @@
 
 #include "views/controls/button/menu_button.h"
 
-#include "app/drag_drop_types.h"
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include "base/utf_string_conversions.h"
 #include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "grit/app_resources.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/button.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/event.h"
@@ -192,7 +193,7 @@ bool MenuButton::OnMousePressed(const MouseEvent& e) {
     // If we're draggable (GetDragOperations returns a non-zero value), then
     // don't pop on press, instead wait for release.
     if (e.IsOnlyLeftMouseButton() && HitTest(e.location()) &&
-        GetDragOperations(e.location()) == DragDropTypes::DRAG_NONE) {
+        GetDragOperations(e.location()) == ui::DragDropTypes::DRAG_NONE) {
       TimeDelta delta = Time::Now() - menu_closed_time_;
       int64 delta_in_milliseconds = delta.InMilliseconds();
       if (delta_in_milliseconds > kMinimumTimeBetweenButtonClicks) {
@@ -209,7 +210,7 @@ void MenuButton::OnMouseReleased(const MouseEvent& e,
   // !IsTriggerableEvent it could lead to a situation where we end up showing
   // the menu and context menu (this would happen if the right button is not
   // triggerable and there's a context menu).
-  if (GetDragOperations(e.location()) != DragDropTypes::DRAG_NONE &&
+  if (GetDragOperations(e.location()) != ui::DragDropTypes::DRAG_NONE &&
       state() != BS_DISABLED && !canceled && !InDrag() &&
       e.IsOnlyLeftMouseButton() && HitTest(e.location())) {
     Activate();
@@ -219,10 +220,10 @@ void MenuButton::OnMouseReleased(const MouseEvent& e,
 }
 
 bool MenuButton::OnKeyPressed(const KeyEvent& e) {
-  if (e.GetKeyCode() == app::VKEY_SPACE ||
-      e.GetKeyCode() == app::VKEY_RETURN ||
-      e.GetKeyCode() == app::VKEY_UP ||
-      e.GetKeyCode() == app::VKEY_DOWN) {
+  if (e.GetKeyCode() == ui::VKEY_SPACE ||
+      e.GetKeyCode() == ui::VKEY_RETURN ||
+      e.GetKeyCode() == ui::VKEY_UP ||
+      e.GetKeyCode() == ui::VKEY_DOWN) {
     bool result = Activate();
     if (GetFocusManager()->GetFocusedView() == NULL)
       RequestFocus();
@@ -255,8 +256,8 @@ void MenuButton::OnMouseExited(const MouseEvent& event) {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-std::wstring MenuButton::GetAccessibleDefaultAction() {
-  return l10n_util::GetString(IDS_APP_ACCACTION_PRESS);
+string16 MenuButton::GetAccessibleDefaultAction() {
+  return l10n_util::GetStringUTF16(IDS_APP_ACCACTION_PRESS);
 }
 
 AccessibilityTypes::Role MenuButton::GetAccessibleRole() {

@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "app/menus/menu_model.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "gfx/native_widget_types.h"
-#include "views/controls/menu/view_menu_delegate.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/models/simple_menu_model.h"
+#include "views/controls/menu/view_menu_delegate.h"
 
 namespace gfx {
 class Canvas;
@@ -49,7 +49,7 @@ namespace chromeos {
 // <icon> will show the strength of the wifi/cellular networks.
 // The label will be BOLD if the network is currently connected.
 class NetworkMenu : public views::ViewMenuDelegate,
-                    public menus::MenuModel {
+                    public ui::MenuModel {
  public:
   struct NetworkInfo {
     NetworkInfo() :
@@ -87,24 +87,24 @@ class NetworkMenu : public views::ViewMenuDelegate,
                           const std::string& ssid,
                           int remember) const;
 
-  // menus::MenuModel implementation.
+  // ui::MenuModel implementation.
   virtual bool HasIcons() const  { return true; }
   virtual int GetItemCount() const;
-  virtual menus::MenuModel::ItemType GetTypeAt(int index) const;
+  virtual ui::MenuModel::ItemType GetTypeAt(int index) const;
   virtual int GetCommandIdAt(int index) const { return index; }
   virtual string16 GetLabelAt(int index) const;
-  virtual bool IsLabelDynamicAt(int index) const { return true; }
+  virtual bool IsItemDynamicAt(int index) const { return true; }
   virtual const gfx::Font* GetLabelFontAt(int index) const;
   virtual bool GetAcceleratorAt(int index,
-      menus::Accelerator* accelerator) const { return false; }
+      ui::Accelerator* accelerator) const { return false; }
   virtual bool IsItemCheckedAt(int index) const;
   virtual int GetGroupIdAt(int index) const { return 0; }
   virtual bool GetIconAt(int index, SkBitmap* icon) const;
-  virtual menus::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const {
+  virtual ui::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const {
     return NULL;
   }
   virtual bool IsEnabledAt(int index) const;
-  virtual menus::MenuModel* GetSubmenuModelAt(int index) const { return NULL; }
+  virtual ui::MenuModel* GetSubmenuModelAt(int index) const { return NULL; }
   virtual void HighlightChangedTo(int index) {}
   virtual void ActivatedAt(int index);
   virtual void MenuWillShow() {}
@@ -114,13 +114,15 @@ class NetworkMenu : public views::ViewMenuDelegate,
   // Cancels the active menu.
   void CancelMenu();
 
-  // Returns the Icon for a network strength between 0 and 100.
+  // Returns the Icon for a network strength for a WifiNetwork |wifi|.
   // |black| is used to specify whether to return a black icon for display
   // on a light background or a white icon for display on a dark background.
-  static SkBitmap IconForNetworkStrength(int strength, bool black);
+  static SkBitmap IconForNetworkStrength(const WifiNetwork* wifi, bool black);
   // Returns the Icon for a network strength for CellularNetwork |cellular|.
-  // This returns different colored bars depending on cellular data left.
-  static SkBitmap IconForNetworkStrength(const CellularNetwork* cellular);
+  // |black| is used to specify whether to return a black icon for display
+  // on a light background or a white icon for display on a dark background.
+  static SkBitmap IconForNetworkStrength(const CellularNetwork* cellular,
+                                         bool black);
   // Returns the Icon for animating network connecting.
   // |animation_value| is the value from Animation.GetCurrentValue()
   // |black| is used to specify whether to return a black icon for display
@@ -162,9 +164,9 @@ class NetworkMenu : public views::ViewMenuDelegate,
 
   struct MenuItem {
     MenuItem()
-        : type(menus::MenuModel::TYPE_SEPARATOR),
+        : type(ui::MenuModel::TYPE_SEPARATOR),
           flags(0) {}
-    MenuItem(menus::MenuModel::ItemType type, string16 label, SkBitmap icon,
+    MenuItem(ui::MenuModel::ItemType type, string16 label, SkBitmap icon,
              const std::string& wireless_path, int flags)
         : type(type),
           label(label),
@@ -172,7 +174,7 @@ class NetworkMenu : public views::ViewMenuDelegate,
           wireless_path(wireless_path),
           flags(flags) {}
 
-    menus::MenuModel::ItemType type;
+    ui::MenuModel::ItemType type;
     string16 label;
     SkBitmap icon;
     std::string wireless_path;
@@ -191,26 +193,23 @@ class NetworkMenu : public views::ViewMenuDelegate,
 
   // Show a NetworkConfigView modal dialog instance.
   // TODO(stevenjb): deprecate this once all of the UI is embedded in the menu.
-  void ShowNetworkConfigView(NetworkConfigView* view, bool focus_login) const;
+  void ShowNetworkConfigView(NetworkConfigView* view) const;
 
-  // Wrappers for the ShowNetworkConfigView / ShowTabbedNetworkSettings.
-  void ShowWifi(const WifiNetwork* wifi, bool focus_login) const;
-  void ShowCellular(const CellularNetwork* cellular, bool focus_login) const;
   void ActivateCellular(const CellularNetwork* cellular) const;
-  void ShowEthernet(const EthernetNetwork* ethernet) const;
   void ShowOther() const;
 
   // Set to true if we are currently refreshing the menu.
   bool refreshing_menu_;
 
-  // The number of wifi strength images.
-  static const int kNumWifiImages;
+  // The number of bars images for representing network strength.
+  static const int kNumBarsImages;
 
   // Bars image resources.
   static const int kBarsImages[];
   static const int kBarsImagesBlack[];
-  static const int kBarsImagesLowData[];
-  static const int kBarsImagesVLowData[];
+  // TODO(chocobo): Add these back when we decide to do colored bars again.
+//  static const int kBarsImagesLowData[];
+//  static const int kBarsImagesVLowData[];
 
   // Our menu items.
   MenuItemVector menu_items_;

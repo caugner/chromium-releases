@@ -14,6 +14,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/tuple.h"
 #include "base/utf_string_conversions.h"
@@ -104,6 +105,7 @@ BrowserHelperObject::BrowserHelperObject()
       thread_id_(::GetCurrentThreadId()),
       full_tab_chrome_frame_(false),
       broker_client_queue_(this),
+      broker_rpc_(false),
       tab_events_funnel_(broker_client()) {
   TRACE_EVENT_BEGIN("ceee.bho", this, "");
 }
@@ -118,11 +120,34 @@ HRESULT BrowserHelperObject::FinalConstruct() {
     LOG(INFO) <<
         "Refused to instantiate the BHO when the visual component is hidden.";
     return E_FAIL;
-  } else {
-    // Only the first call to this function really does anything.
-    CookieAccountant::GetInstance()->PatchWininetFunctions();
-    return S_OK;
   }
+
+  const wchar_t* bho_list = NULL;
+  ::LoadString(_pModule->m_hInstResource, IDS_CEEE_NESTED_BHO_LIST,
+               reinterpret_cast<wchar_t*>(&bho_list), 0);
+  if (bho_list == NULL) {
+    LOG(ERROR) << "Failed to load string: " << GetLastError();
+  } else {
+    std::vector<std::wstring> guids;
+    base::SplitString(bho_list, ',', &guids);
+    for (size_t i = 0; i < guids.size(); ++i) {
+      CLSID clsid;
+      base::win::ScopedComPtr<IObjectWithSite> factory;
+      HRESULT hr = ::CLSIDFromString(guids[i].c_str(), &clsid);
+      if (SUCCEEDED(hr)) {
+        hr = factory.CreateInstance(clsid);
+        if (SUCCEEDED(hr)) {
+          nested_bho_.push_back(factory);
+        } else {
+          LOG(ERROR) << "Failed to load " << guids[i] << " " << com::LogWe(hr);
+        }
+      } else {
+        LOG(ERROR) << "Invalid CLSID " << guids[i] << " " << com::LogWe(hr);
+      }
+    }
+  }
+
+  return S_OK;
 }
 
 void BrowserHelperObject::FinalRelease() {
@@ -130,17 +155,27 @@ void BrowserHelperObject::FinalRelease() {
   // for unit testing.
   broker_rpc().Disconnect();
   web_browser_.Release();
+  nested_bho_.clear();
 }
 
-void BrowserHelperObject::ReportAddonLoadTime(const char* addon_name,
-                                              const CLSID& addon_id) {
-  int time = ie_util::GetAverageAddonLoadTimeMs(addon_id);
+void BrowserHelperObject::ReportAddonTimes(const char* name,
+                                           const CLSID& clsid) {
+  ReportSingleAddonTime(name, clsid, "LoadTime");
+  ReportSingleAddonTime(name, clsid, "NavTime");
+}
+
+void BrowserHelperObject::ReportSingleAddonTime(const char* name,
+                                                const CLSID& clsid,
+                                                const char* type) {
+  int time = ie_util::GetAverageAddonTimeMs(clsid, ASCIIToWide(type));
   if (time == ie_util::kInvalidTime)
     return;
   DCHECK(ie_util::GetIeVersion() >= ie_util::IEVERSION_IE8);
 
-  std::string counter_name = "ceee/AddonLoadTime.";
-  counter_name += addon_name;
+  std::string counter_name = "ceee/Addon";
+  counter_name += type;
+  counter_name += ".";
+  counter_name += name;
   counter_name += ".IE";
   switch (ie_util::GetIeVersion()) {
   case ie_util::IEVERSION_IE8:
@@ -153,11 +188,16 @@ void BrowserHelperObject::ReportAddonLoadTime(const char* addon_name,
     counter_name += 'x';
     break;
   }
+  VLOG(1) << counter_name << "=" << time;
   broker_rpc().SendUmaHistogramTimes(counter_name.c_str(), time);
 }
 
 STDMETHODIMP BrowserHelperObject::SetSite(IUnknown* site) {
-  typedef IObjectWithSiteImpl<BrowserHelperObject> SuperSite;
+  for (size_t i = 0; i < nested_bho_.size(); ++i) {
+    HRESULT hr = nested_bho_[i]->SetSite(site);
+    LOG_IF(ERROR, FAILED(hr)) << "Failed to set site of nested BHO" <<
+        com::LogWe(hr);
+  }
 
   // From experience, we know the site may be set multiple times.
   // Let's ignore second and subsequent set or unset.
@@ -173,9 +213,9 @@ STDMETHODIMP BrowserHelperObject::SetSite(IUnknown* site) {
 
     // TODO(vitalybuka@chromium.org): switch to sampling when we have enough
     // users.
-    ReportAddonLoadTime("BHO", CLSID_BrowserHelperObject);
-    ReportAddonLoadTime("ChromeFrameBHO", CLSID_ChromeFrameBHO);
-    ReportAddonLoadTime("Toolband", CLSID_ToolBand);
+    ReportAddonTimes("BHO", CLSID_BrowserHelperObject);
+    ReportAddonTimes("ChromeFrameBHO", CLSID_ChromeFrameBHO);
+    ReportAddonTimes("Toolband", CLSID_ToolBand);
 
     // We're being torn down.
     TearDown();
@@ -185,6 +225,7 @@ STDMETHODIMP BrowserHelperObject::SetSite(IUnknown* site) {
     FireOnUnmappedEvent();
   }
 
+  typedef IObjectWithSiteImpl<BrowserHelperObject> SuperSite;
   HRESULT hr = SuperSite::SetSite(site);
   if (FAILED(hr))
     return hr;
@@ -377,6 +418,9 @@ HRESULT BrowserHelperObject::Initialize(IUnknown* site) {
   if (FAILED(hr)) {
     return hr;
   }
+
+  // Do before HttpNegotiatePatch::Initialize.
+  CookieAccountant::GetInstance()->Initialize();
 
   // Patch IHttpNegotiate for user-agent and cookie functionality.
   HttpNegotiatePatch::Initialize();
@@ -874,7 +918,7 @@ HRESULT BrowserHelperObject::PostMessage(int port_id,
 
 HRESULT BrowserHelperObject::PostMessageImpl(int port_id,
                                              const std::string& message) {
-    return extension_port_manager_.PostMessage(port_id, message);
+  return extension_port_manager_.PostMessage(port_id, message);
 }
 
 HRESULT BrowserHelperObject::OnCfPrivateMessage(BSTR msg,
@@ -989,8 +1033,8 @@ STDMETHODIMP_(void) BrowserHelperObject::OnNavigateComplete2(
   HandleNavigateComplete(webbrowser, url_bstr);
 
   for (std::vector<Sink*>::iterator iter = sinks_.begin();
-    iter != sinks_.end(); ++iter) {
-      (*iter)->OnNavigateComplete(webbrowser, url_bstr);
+       iter != sinks_.end(); ++iter) {
+    (*iter)->OnNavigateComplete(webbrowser, url_bstr);
   }
 }
 
@@ -1188,10 +1232,10 @@ void BrowserHelperObject::HandleNavigateComplete(IWebBrowser2* webbrowser,
   if (FAILED(GetBrowserHandler(webbrowser, handler.Receive()))) {
     hr = AttachBrowserHandler(webbrowser, handler.Receive());
 
-    DCHECK(SUCCEEDED(hr))
+    DCHECK(SUCCEEDED(hr) || E_DOCUMENT_NOT_MSHTML == hr)
         << "Error when trying to attach a handler to the web browser " <<
             com::LogHr(hr);
-    LOG_IF(INFO, S_FALSE == hr) <<
+    LOG_IF(INFO, S_FALSE == hr || E_DOCUMENT_NOT_MSHTML == hr) <<
         "Decided not to attach a handler to a frame with " << url;
   }
 
@@ -1471,7 +1515,10 @@ HRESULT BrowserHelperObject::InsertCode(BSTR code, BSTR file, BOOL all_frames,
   } else if (web_browser_ != NULL) {
     ScopedFrameEventHandlerPtr handler;
     HRESULT hr = GetBrowserHandler(web_browser_, handler.Receive());
-    DCHECK(SUCCEEDED(hr) && handler != NULL) << com::LogHr(hr);
+    LOG_IF(ERROR, FAILED(hr) || handler == NULL) <<
+        "GetBrowserHandler fails in InsertCode: " << com::LogHr(hr);
+    if (FAILED(hr))
+      return hr;
 
     if (handler != NULL) {
       hr = handler->InsertCode(code, file, type);

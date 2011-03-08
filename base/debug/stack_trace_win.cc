@@ -10,9 +10,9 @@
 #include <iostream>
 
 #include "base/basictypes.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
 
 namespace base {
 namespace debug {
@@ -36,7 +36,7 @@ namespace {
 // just ignore it.
 class SymbolContext {
  public:
-  static SymbolContext* Get() {
+  static SymbolContext* GetInstance() {
     // We use a leaky singleton because code may call this during process
     // termination.
     return
@@ -59,7 +59,7 @@ class SymbolContext {
   void OutputTraceToStream(const void* const* trace,
                            int count,
                            std::ostream* os) {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
 
     for (size_t i = 0; (i < count) && os->good(); ++i) {
       const int kMaxNameLength = 256;
@@ -129,7 +129,7 @@ class SymbolContext {
   }
 
   DWORD init_error_;
-  Lock lock_;
+  base::Lock lock_;
   DISALLOW_COPY_AND_ASSIGN(SymbolContext);
 };
 
@@ -179,7 +179,7 @@ void StackTrace::PrintBacktrace() {
 }
 
 void StackTrace::OutputToStream(std::ostream* os) {
-  SymbolContext* context = SymbolContext::Get();
+  SymbolContext* context = SymbolContext::GetInstance();
   DWORD error = context->init_error();
   if (error != ERROR_SUCCESS) {
     (*os) << "Error initializing symbols (" << error

@@ -4,11 +4,14 @@
 
 #include "chrome/browser/dom_ui/downloads_dom_handler.h"
 
+#include <algorithm>
+#include <functional>
+
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -19,7 +22,6 @@
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
@@ -42,7 +44,7 @@ class DownloadItemSorter : public std::binary_function<DownloadItem*,
   }
 };
 
-} // namespace
+}  // namespace
 
 DownloadsDOMHandler::DownloadsDOMHandler(DownloadManager* dlm)
     : search_text_(),
@@ -52,7 +54,7 @@ DownloadsDOMHandler::DownloadsDOMHandler(DownloadManager* dlm)
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(new FileIconSource())));
 }

@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 
-#include "app/resource_bundle.h"
 #include "base/compiler_specific.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -15,6 +14,7 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "grit/theme_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace chromeos {
 
@@ -133,13 +133,6 @@ void UserImageScreen::OnOK(const SkBitmap& image) {
 void UserImageScreen::OnSkip() {
   if (camera_.get())
     camera_->Uninitialize();
-  UserManager* user_manager = UserManager::Get();
-  DCHECK(user_manager);
-
-  const UserManager::User& user = user_manager->logged_in_user();
-  DCHECK(!user.email().empty());
-
-  user_manager->SetDefaultUserImage(user.email());
   if (delegate())
     delegate()->GetObserver(this)->OnExit(ScreenObserver::USER_IMAGE_SKIPPED);
 }

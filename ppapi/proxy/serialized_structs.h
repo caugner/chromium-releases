@@ -8,7 +8,10 @@
 #include <string>
 #include <vector>
 
+#include "base/shared_memory.h"
+#include "build/build_config.h"
 #include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_resource.h"
@@ -24,6 +27,9 @@ class Dispatcher;
 // PP_FontDescript_Dev has to be redefined with a SerializedVar in place of
 // the PP_Var used for the face name.
 struct SerializedFontDescription {
+  SerializedFontDescription();
+  ~SerializedFontDescription();
+
   // Converts a PP_FontDescription_Dev to a SerializedFontDescription.
   //
   // If source_owns_ref is true, the reference owned by the
@@ -80,6 +86,10 @@ struct PPBFont_DrawTextAt_Params {
 };
 
 struct PPBFlash_DrawGlyphs_Params {
+  PPBFlash_DrawGlyphs_Params();
+  ~PPBFlash_DrawGlyphs_Params();
+
+  PP_Instance instance;
   PP_Resource pp_image_data;
   SerializedFontDescription font_desc;
   uint32_t color;
@@ -90,9 +100,16 @@ struct PPBFlash_DrawGlyphs_Params {
   std::vector<PP_Point> glyph_advances;
 };
 
+#if defined(OS_WIN)
+typedef HANDLE ImageHandle;
+#elif defined(OS_MACOSX)
+typedef base::SharedMemoryHandle ImageHandle;
+#else
+// On X Windows this is a SysV shared memory key.
+typedef int ImageHandle;
+#endif
+
 }  // namespace proxy
 }  // namespace pp
-
-
 
 #endif  // PPAPI_PROXY_SERIALIZED_STRUCTS_H_

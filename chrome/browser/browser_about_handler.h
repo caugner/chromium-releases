@@ -12,9 +12,9 @@
 #include <string>
 
 #include "base/process.h"
-#include "base/singleton.h"
 #include "base/string_util.h"
 
+template <typename T> struct DefaultSingletonTraits;
 class GURL;
 class Profile;
 
@@ -25,6 +25,10 @@ class Profile;
 //
 // This is used by BrowserURLHandler.
 bool WillHandleBrowserAboutURL(GURL* url, Profile* profile);
+
+// Register the data source for chrome://about URLs.
+// Safe to call multiple times.
+void InitializeAboutDataSource();
 
 // We have a few magic commands that don't cause navigations, but rather pop up
 // dialogs. This function handles those cases, and returns true if so. In this
@@ -38,7 +42,8 @@ typedef std::map<std::string, std::string> AboutTcmallocOutputsType;
 
 class AboutTcmallocOutputs {
  public:
-  AboutTcmallocOutputs() {}
+  // Returns the singleton instance.
+  static AboutTcmallocOutputs* GetInstance();
 
   AboutTcmallocOutputsType* outputs() { return &outputs_; }
 
@@ -55,6 +60,8 @@ class AboutTcmallocOutputs {
   }
 
  private:
+  AboutTcmallocOutputs() {}
+
   AboutTcmallocOutputsType outputs_;
 
   friend struct DefaultSingletonTraits<AboutTcmallocOutputs>;

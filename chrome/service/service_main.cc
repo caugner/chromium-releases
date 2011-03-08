@@ -6,6 +6,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/singleton.h"
+#include "base/threading/platform_thread.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/main_function_params.h"
@@ -17,7 +18,7 @@
 // Mainline routine for running as the service process.
 int ServiceProcessMain(const MainFunctionParams& parameters) {
   // If there is already a service process running, quit now.
-  if (!Singleton<ServiceProcessState>::get()->Initialize())
+  if (!ServiceProcessState::GetInstance()->Initialize())
     return 0;
 
   MessageLoopForUI main_message_loop;
@@ -25,7 +26,7 @@ int ServiceProcessMain(const MainFunctionParams& parameters) {
     base::debug::WaitForDebugger(60, true);
   }
 
-  PlatformThread::SetName("CrServiceMain");
+  base::PlatformThread::SetName("CrServiceMain");
 
 #if defined(OS_WIN)
   sandbox::BrokerServices* broker_services =

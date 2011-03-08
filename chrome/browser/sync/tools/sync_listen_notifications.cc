@@ -25,6 +25,7 @@
 #include "jingle/notifier/listener/send_update_task.h"
 #include "jingle/notifier/listener/subscribe_task.h"
 #include "jingle/notifier/listener/xml_element_util.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/ssl_config_service.h"
 #include "net/socket/client_socket_factory.h"
 #include "talk/base/cryptstring.h"
@@ -66,10 +67,12 @@ class XmppNotificationClient : public notifier::XmppConnection::Delegate {
   virtual ~XmppNotificationClient() {}
 
   // Connect with the given XMPP settings and run until disconnected.
-  void Run(const buzz::XmppClientSettings& xmpp_client_settings) {
+  void Run(const buzz::XmppClientSettings& xmpp_client_settings,
+           net::CertVerifier* cert_verifier) {
     DCHECK(!xmpp_connection_.get());
     xmpp_connection_.reset(
-        new notifier::XmppConnection(xmpp_client_settings, this, NULL));
+        new notifier::XmppConnection(xmpp_client_settings, cert_verifier,
+                                     this, NULL));
     MessageLoop::current()->Run();
     DCHECK(!xmpp_connection_.get());
   }
@@ -151,15 +154,8 @@ class ChromeInvalidationListener
   ChromeInvalidationListener() {}
 
   virtual void OnInvalidate(syncable::ModelType model_type) {
-    // TODO(akalin): This is a hack to make new sync data types work
-    // with server-issued notifications.  Remove this when it's not
-    // needed anymore.
-    if (model_type == syncable::UNSPECIFIED) {
-      LOG(INFO) << "OnInvalidate: UNKNOWN";
-    } else {
-      LOG(INFO) << "OnInvalidate: "
-                << syncable::ModelTypeToString(model_type);
-    }
+    LOG(INFO) << "OnInvalidate: "
+              << syncable::ModelTypeToString(model_type);
     // A real implementation would respond to the invalidation.
   }
 
@@ -189,7 +185,9 @@ class ServerNotifierDelegate
 
     // TODO(akalin): app_name should be per-client unique.
     const std::string kAppName = "cc_sync_listen_notifications";
-    chrome_invalidation_client_.Start(kAppName, server_notifier_state_,
+    const std::string kAppInfo = kAppName;
+    chrome_invalidation_client_.Start(kAppName, kAppInfo,
+                                      server_notifier_state_,
                                       &chrome_invalidation_listener_,
                                       this, base_task);
     chrome_invalidation_client_.RegisterTypes();
@@ -219,8 +217,12 @@ class ServerNotifierDelegate
 int main(int argc, char* argv[]) {
   base::AtExitManager exit_manager;
   CommandLine::Init(argc, argv);
-  logging::InitLogging(NULL, logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-                       logging::LOCK_LOG_FILE, logging::DELETE_OLD_LOG_FILE);
+  logging::InitLogging(
+      NULL,
+      logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
+      logging::LOCK_LOG_FILE,
+      logging::DELETE_OLD_LOG_FILE,
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
   logging::SetMinLogLevel(logging::LOG_INFO);
   // TODO(akalin): Make sure that all log messages are printed to the
   // console, even on Windows (SetMinLogLevel isn't enough).
@@ -295,6 +297,7 @@ int main(int argc, char* argv[]) {
   }
   xmpp_client_settings.set_server(addr);
 
+  net::CertVerifier cert_verifier;
   MessageLoopForIO message_loop;
 
   // Connect and listen.
@@ -310,7 +313,7 @@ int main(int argc, char* argv[]) {
   }
   XmppNotificationClient xmpp_notification_client(
       observers.begin(), observers.end());
-  xmpp_notification_client.Run(xmpp_client_settings);
+  xmpp_notification_client.Run(xmpp_client_settings, &cert_verifier);
 
   return 0;
 }

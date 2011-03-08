@@ -243,7 +243,16 @@ std::wstring GetShortPathName(const wchar_t* path) {
   std::wstring short_path;
   DWORD length = GetShortPathName(path, WriteInto(&short_path, MAX_PATH),
                                   MAX_PATH);
-  DLOG_IF(WARNING, length == 0) << __FUNCTION__ << " gle=" << GetLastError();
+  DWORD last_error = ::GetLastError();
+  DLOG_IF(WARNING, length == 0 && last_error != ERROR_PATH_NOT_FOUND)
+      << __FUNCTION__ << " gle=" << last_error;
+  if (length == 0) {
+    // GetShortPathName fails if the path is no longer present. Instead of
+    // returning an empty string, just return the original string. This will
+    // serve our purposes.
+    return path;
+  }
+
   short_path.resize(length);
   return short_path;
 }
@@ -370,13 +379,14 @@ bool RemoveFromMovesPendingReboot(const wchar_t* directory) {
 
   if (strings_to_keep.size() <= 1) {
     // We have only the trailing NULL string. Don't bother writing that.
-    return session_manager_key.DeleteValue(kPendingFileRenameOps);
+    return (session_manager_key.DeleteValue(kPendingFileRenameOps) ==
+        ERROR_SUCCESS);
   }
   std::vector<char> buffer;
   StringArrayToMultiSZBytes(strings_to_keep, &buffer);
   DCHECK(buffer.size() > 0);
   if (buffer.empty())
     return false;
-  return session_manager_key.WriteValue(kPendingFileRenameOps, &buffer[0],
-                                        buffer.size(), REG_MULTI_SZ);
+  return (session_manager_key.WriteValue(kPendingFileRenameOps, &buffer[0],
+      buffer.size(), REG_MULTI_SZ) == ERROR_SUCCESS);
 }

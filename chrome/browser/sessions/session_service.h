@@ -347,7 +347,7 @@ class SessionService : public BaseSessionService,
 
   // Schedules the specified command. This method takes ownership of the
   // command.
-  void ScheduleCommand(SessionCommand* command);
+  virtual void ScheduleCommand(SessionCommand* command);
 
   // Converts all pending tab/window closes to commands and schedules them.
   void CommitPendingCloses();
@@ -444,7 +444,7 @@ class SessionService : public BaseSessionService,
   // current/previous session.
   bool move_on_new_browser_;
 
-  // Used for reporting frequency of session alteriing operations.
+  // Used for reporting frequency of session altering operations.
   base::TimeTicks last_updated_tab_closed_time_;
   base::TimeTicks last_updated_nav_list_pruned_time_;
   base::TimeTicks last_updated_nav_entry_commit_time_;

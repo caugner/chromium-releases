@@ -15,7 +15,7 @@
 
 class Extension;
 class ExtensionPrefs;
-class ExtensionsService;
+class ExtensionService;
 class NotificationRegistrar;
 class PrefChangeRegistrar;
 class Profile;
@@ -30,7 +30,7 @@ class AppLauncherHandler
       public ExtensionInstallUI::Delegate,
       public NotificationObserver {
  public:
-  explicit AppLauncherHandler(ExtensionsService* extension_service);
+  explicit AppLauncherHandler(ExtensionService* extension_service);
   virtual ~AppLauncherHandler();
 
   // Populate a dictionary with the information from an extension.
@@ -71,6 +71,9 @@ class AppLauncherHandler
   // Callback for the "createAppShortcut" message.
   void HandleCreateAppShortcut(const ListValue* args);
 
+  // Callback for the 'reorderApps" message.
+  void HandleReorderApps(const ListValue* args);
+
  private:
   // Records a web store launch in the appropriate histograms. |promo_active|
   // specifies if the web store promotion was active.
@@ -96,7 +99,7 @@ class AppLauncherHandler
   void UninstallDefaultApps();
 
   // The apps are represented in the extensions model.
-  scoped_refptr<ExtensionsService> extensions_service_;
+  scoped_refptr<ExtensionService> extensions_service_;
 
   // We monitor changes to the extension system so that we can reload the apps
   // when necessary.

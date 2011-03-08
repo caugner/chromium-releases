@@ -2,23 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/menus/menu_model.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebContextMenuData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
+#include "ui/base/models/menu_model.h"
 #include "webkit/glue/context_menu.h"
 
-using menus::MenuModel;
+using ui::MenuModel;
 using WebKit::WebContextMenuData;
 
 // This test class helps us sidestep platform-specific issues with popping up a
@@ -92,7 +92,7 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
   // These two functions implement pure virtual methods of
   // RenderViewContextMenu.
   virtual bool GetAcceleratorForCommandId(int command_id,
-                                          menus::Accelerator* accelerator) {
+                                          ui::Accelerator* accelerator) {
     // None of our commands have accelerators, so always return false.
     return false;
   }
@@ -145,14 +145,14 @@ class ExtensionContextMenuBrowserTest : public ExtensionBrowserTest {
 
   // Shortcut to return the current ExtensionMenuManager.
   ExtensionMenuManager* menu_manager() {
-    return browser()->profile()->GetExtensionsService()->menu_manager();
+    return browser()->profile()->GetExtensionService()->menu_manager();
   }
 
   // Returns a pointer to the currently loaded extension with |name|, or null
   // if not found.
   const Extension* GetExtensionNamed(std::string name) {
     const ExtensionList* extensions =
-        browser()->profile()->GetExtensionsService()->extensions();
+        browser()->profile()->GetExtensionService()->extensions();
     ExtensionList::const_iterator i;
     for (i = extensions->begin(); i != extensions->end(); ++i) {
       if ((*i)->name() == name) {

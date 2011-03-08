@@ -8,8 +8,10 @@
 #include <X11/XF86keysym.h>
 
 #include "chrome/browser/chromeos/audio_handler.h"
+#include "chrome/browser/chromeos/brightness_bubble.h"
 #include "chrome/browser/chromeos/volume_bubble.h"
-#include "cros/chromeos_wm_ipc_enums.h"
+#include "chrome/browser/metrics/user_metrics.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 
 namespace chromeos {
 
@@ -20,13 +22,14 @@ const double kStepPercentage = 4.0;
 }  // namespace
 
 // static
-SystemKeyEventListener* SystemKeyEventListener::instance() {
+SystemKeyEventListener* SystemKeyEventListener::GetInstance() {
   return Singleton<SystemKeyEventListener>::get();
 }
 
 SystemKeyEventListener::SystemKeyEventListener()
-    : audio_handler_(AudioHandler::instance()) {
-  WmMessageListener::instance()->AddObserver(this);
+    : stopped_(false),
+      audio_handler_(AudioHandler::GetInstance()) {
+  WmMessageListener::GetInstance()->AddObserver(this);
 
   key_volume_mute_ = XKeysymToKeycode(GDK_DISPLAY(), XF86XK_AudioMute);
   key_volume_down_ = XKeysymToKeycode(GDK_DISPLAY(), XF86XK_AudioLowerVolume);
@@ -48,9 +51,18 @@ SystemKeyEventListener::SystemKeyEventListener()
 }
 
 SystemKeyEventListener::~SystemKeyEventListener() {
-  WmMessageListener::instance()->RemoveObserver(this);
-  gdk_window_remove_filter(NULL, GdkEventFilter, this);
+  Stop();
 }
+
+void SystemKeyEventListener::Stop() {
+  if (stopped_)
+    return;
+  WmMessageListener::GetInstance()->RemoveObserver(this);
+  gdk_window_remove_filter(NULL, GdkEventFilter, this);
+  audio_handler_->Disconnect();
+  stopped_ = true;
+}
+
 
 void SystemKeyEventListener::ProcessWmMessage(const WmIpc::Message& message,
                                               GdkWindow* window) {
@@ -88,14 +100,20 @@ GdkFilterReturn SystemKeyEventListener::GdkEventFilter(GdkXEvent* gxevent,
       if (!(xevent->xkey.state & (Mod1Mask | ShiftMask | ControlMask))) {
         if ((keycode == listener->key_f8_) ||
             (keycode == listener->key_volume_mute_)) {
+          if (keycode == listener->key_f8_)
+            UserMetrics::RecordAction(UserMetricsAction("Accel_VolumeMute_F8"));
           listener->OnVolumeMute();
           return GDK_FILTER_REMOVE;
         } else if ((keycode == listener->key_f9_) ||
                     keycode == listener->key_volume_down_) {
+          if (keycode == listener->key_f9_)
+            UserMetrics::RecordAction(UserMetricsAction("Accel_VolumeDown_F9"));
           listener->OnVolumeDown();
           return GDK_FILTER_REMOVE;
         } else if ((keycode == listener->key_f10_) ||
                    (keycode == listener->key_volume_up_)) {
+          if (keycode == listener->key_f10_)
+            UserMetrics::RecordAction(UserMetricsAction("Accel_VolumeUp_F10"));
           listener->OnVolumeUp();
           return GDK_FILTER_REMOVE;
         }
@@ -118,29 +136,31 @@ void SystemKeyEventListener::GrabKey(int32 key, uint32 mask) {
            True, GrabModeAsync, GrabModeAsync);
 }
 
-// TODO(davej): Move the ShowVolumeBubble() calls in to AudioHandler so that
-// this function returns faster without blocking on GetVolumePercent(), and
-// still guarantees that the volume displayed will be that after the adjustment.
+// TODO(davej): Move the ShowBubble() calls in to AudioHandler so that this
+// function returns faster without blocking on GetVolumePercent(), and still
+// guarantees that the volume displayed will be that after the adjustment.
 
-// TODO(davej): The IsMute() check can also be made non-blocking by changing
-// to an AdjustVolumeByPercentOrUnmute() function which can do the steps off
-// of this thread when ShowVolumeBubble() is moved in to AudioHandler.
+// TODO(davej): The IsMute() check can also be made non-blocking by changing to
+// an AdjustVolumeByPercentOrUnmute() function which can do the steps off of
+// this thread when ShowBubble() is moved in to AudioHandler.
 
 void SystemKeyEventListener::OnVolumeMute() {
   // Always muting (and not toggling) as per final decision on
   // http://crosbug.com/3751
   audio_handler_->SetMute(true);
-  VolumeBubble::instance()->ShowVolumeBubble(0);
+  VolumeBubble::GetInstance()->ShowBubble(0);
+  BrightnessBubble::GetInstance()->HideBubble();
 }
 
 void SystemKeyEventListener::OnVolumeDown() {
   if (audio_handler_->IsMute()) {
-    VolumeBubble::instance()->ShowVolumeBubble(0);
+    VolumeBubble::GetInstance()->ShowBubble(0);
   } else {
     audio_handler_->AdjustVolumeByPercent(-kStepPercentage);
-    VolumeBubble::instance()->ShowVolumeBubble(
+    VolumeBubble::GetInstance()->ShowBubble(
         audio_handler_->GetVolumePercent());
   }
+  BrightnessBubble::GetInstance()->HideBubble();
 }
 
 void SystemKeyEventListener::OnVolumeUp() {
@@ -148,8 +168,9 @@ void SystemKeyEventListener::OnVolumeUp() {
     audio_handler_->SetMute(false);
   else
     audio_handler_->AdjustVolumeByPercent(kStepPercentage);
-  VolumeBubble::instance()->ShowVolumeBubble(
+  VolumeBubble::GetInstance()->ShowBubble(
       audio_handler_->GetVolumePercent());
+  BrightnessBubble::GetInstance()->HideBubble();
 }
 
 }  // namespace chromeos

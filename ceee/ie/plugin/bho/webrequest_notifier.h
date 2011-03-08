@@ -145,6 +145,9 @@ class WebRequestNotifier {
     return webrequest_events_funnel_;
   }
 
+  // Connects to broker.
+  virtual bool ConnectBroker();
+
   // Gets called before calling InternetSetStatusCallback.
   // @param internet The handle for which the callback is set.
   // @param callback The real callback function.
@@ -443,9 +446,10 @@ class WebRequestNotifier {
 };
 
 // A singleton that keeps the WebRequestNotifier used by production code.
-class ProductionWebRequestNotifier
-    : public WebRequestNotifier,
-      public Singleton<ProductionWebRequestNotifier> {
+class ProductionWebRequestNotifier : public WebRequestNotifier {
+ public:
+  static ProductionWebRequestNotifier* GetInstance();
+
  private:
   ProductionWebRequestNotifier() {}
 

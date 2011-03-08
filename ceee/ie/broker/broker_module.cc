@@ -110,7 +110,8 @@ CeeeBrokerModule::CeeeBrokerModule()
       logfile_path,
       logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
       logging::LOCK_LOG_FILE,
-      logging::APPEND_TO_OLD_LOG_FILE);
+      logging::APPEND_TO_OLD_LOG_FILE,
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
   // Initialize ETW logging.
   logging::LogEventProvider::Initialize(kCeeeBrokerLogProviderName);
@@ -198,8 +199,7 @@ HRESULT CeeeBrokerModule::PostMessageLoop() {
 
 void CeeeBrokerModule::TearDown() {
   rpc_server_.Stop();
-  Singleton<ExecutorsManager,
-            ExecutorsManager::SingletonTraits>()->Terminate();
+  ExecutorsManager::GetInstance()->Terminate();
   WindowEventsFunnel::Terminate();
 
   // Upload data if necessary.

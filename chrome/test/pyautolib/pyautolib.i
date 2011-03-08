@@ -220,6 +220,7 @@ class PyUITestBase {
            "if it's not active already. Blocks until page has loaded.")
       NavigateToURL;
   void NavigateToURL(const char* url_string);
+  void NavigateToURL(const char* url_string, int window_index);
   void NavigateToURL(const char* url_string, int window_index, int tab_index);
 
   %feature("docstring", "Reload the active tab in the given window (or first "
@@ -302,6 +303,9 @@ class PyUITestBase {
   %feature("docstring", "Open a new browser window.") OpenNewBrowserWindow;
   bool OpenNewBrowserWindow(bool show);
 
+  %feature("docstring", "Close a browser window.") CloseBrowserWindow;
+  bool CloseBrowserWindow(int window_index);
+
   %feature("docstring", "Fetch the number of browser windows. Includes popups.")
       GetBrowserWindowCount;
   int GetBrowserWindowCount();
@@ -374,7 +378,7 @@ class PyUITestBase {
            "(window, tab, frame) and return the specified DOM value "
            "as a string. This is a wrapper around "
            "window.domAutomationController.send().") GetDOMValue;
-  std::wstring GetDOMValue(const std::wstring& expr, 
+  std::wstring GetDOMValue(const std::wstring& expr,
                            int window_index=0,
                            int tab_index=0,
                            const std::wstring& frame_xpath="");

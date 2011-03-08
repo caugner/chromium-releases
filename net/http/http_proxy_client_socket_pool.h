@@ -15,6 +15,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_response_info.h"
+#include "net/http/proxy_client_socket.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/client_socket_pool.h"
@@ -122,15 +123,6 @@ class HttpProxyConnectJob : public ConnectJob {
     STATE_NONE,
   };
 
-  // Begins the tcp connection and the optional Http proxy tunnel.  If the
-  // request is not immediately servicable (likely), the request will return
-  // ERR_IO_PENDING. An OK return from this function or the callback means
-  // that the connection is established; ERR_PROXY_AUTH_REQUESTED means
-  // that the tunnel needs authentication credentials, the socket will be
-  // returned in this case, and must be release back to the pool; or
-  // a standard net error code will be returned.
-  virtual int ConnectInternal();
-
   void OnIOComplete(int result);
 
   // Runs the state transition loop.
@@ -149,6 +141,15 @@ class HttpProxyConnectJob : public ConnectJob {
   int DoSpdyProxyCreateStream();
   int DoSpdyProxyCreateStreamComplete(int result);
 
+  // Begins the tcp connection and the optional Http proxy tunnel.  If the
+  // request is not immediately servicable (likely), the request will return
+  // ERR_IO_PENDING. An OK return from this function or the callback means
+  // that the connection is established; ERR_PROXY_AUTH_REQUESTED means
+  // that the tunnel needs authentication credentials, the socket will be
+  // returned in this case, and must be release back to the pool; or
+  // a standard net error code will be returned.
+  virtual int ConnectInternal();
+
   scoped_refptr<HttpProxySocketParams> params_;
   TCPClientSocketPool* const tcp_pool_;
   SSLClientSocketPool* const ssl_pool_;
@@ -157,7 +158,7 @@ class HttpProxyConnectJob : public ConnectJob {
   State next_state_;
   CompletionCallbackImpl<HttpProxyConnectJob> callback_;
   scoped_ptr<ClientSocketHandle> transport_socket_handle_;
-  scoped_ptr<ClientSocket> transport_socket_;
+  scoped_ptr<ProxyClientSocket> transport_socket_;
   bool using_spdy_;
 
   HttpResponseInfo error_response_info_;
@@ -204,9 +205,7 @@ class HttpProxyClientSocketPool : public ClientSocketPool {
 
   virtual void CloseIdleSockets();
 
-  virtual int IdleSocketCount() const {
-    return base_.idle_socket_count();
-  }
+  virtual int IdleSocketCount() const;
 
   virtual int IdleSocketCountInGroup(const std::string& group_name) const;
 
@@ -217,13 +216,9 @@ class HttpProxyClientSocketPool : public ClientSocketPool {
                                           const std::string& type,
                                           bool include_nested_pools) const;
 
-  virtual base::TimeDelta ConnectionTimeout() const {
-    return base_.ConnectionTimeout();
-  }
+  virtual base::TimeDelta ConnectionTimeout() const;
 
-  virtual ClientSocketPoolHistograms* histograms() const {
-    return base_.histograms();
-  };
+  virtual ClientSocketPoolHistograms* histograms() const;
 
  private:
   typedef ClientSocketPoolBase<HttpProxySocketParams> PoolBase;

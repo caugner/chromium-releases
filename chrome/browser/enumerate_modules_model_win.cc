@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,12 @@
 #include <Tlhelp32.h>
 #include <wintrust.h>
 
-#include "app/l10n_util.h"
-#include "app/win_util.h"
+#include "app/win/win_util.h"
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_version_info_win.h"
 #include "base/metrics/histogram.h"
-#include "base/scoped_handle.h"
 #include "base/sha2.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -23,11 +21,13 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "base/win/registry.h"
+#include "base/win/scoped_handle.h"
 #include "chrome/browser/net/service_providers_win.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 // The period of time (in milliseconds) to wait until checking to see if any
 // incompatible modules exist.
@@ -59,7 +59,7 @@ namespace {
 
 // Used to protect the LoadedModuleVector which is accessed
 // from both the UI thread and the FILE thread.
-Lock* lock = NULL;
+base::Lock* lock = NULL;
 
 // A struct to help de-duping modules before adding them to the enumerated
 // modules vector.
@@ -126,7 +126,8 @@ const ModuleEnumerator::BlacklistEntry ModuleEnumerator::kModuleBlacklist[] = {
       static_cast<RecommendedAction>(UPDATE | DISABLE) },
 
   // is3lsp.dll, "%commonprogramfiles%\\is3\\anti-spyware\\".
-  { "7ffbdce9", "bc5673f2", "", "", "", INVESTIGATING },
+  { "7ffbdce9", "bc5673f2", "", "", "",
+      static_cast<RecommendedAction>(UPDATE | DISABLE | SEE_LINK) },
 
   // jsi.dll, "%programfiles%\\profilecraze\\".
   { "f9555eea", "e3548061", "", "", "", kUninstallLink },
@@ -219,7 +220,7 @@ static void GenerateHash(const std::string& input, std::string* output) {
 // static
 void ModuleEnumerator::NormalizeModule(Module* module) {
   string16 path = module->location;
-  if (!win_util::ConvertToLongPath(path, &module->location))
+  if (!app::win::ConvertToLongPath(path, &module->location))
     module->location = path;
 
   module->location = l10n_util::ToLower(module->location);
@@ -266,7 +267,7 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
     // We have a name match against the blacklist (and possibly location match
     // also), so check version.
     scoped_ptr<Version> module_version(
-        Version::GetVersionFromString(module.version));
+        Version::GetVersionFromString(UTF16ToASCII(module.version)));
     scoped_ptr<Version> version_min(
         Version::GetVersionFromString(blacklisted.version_from));
     scoped_ptr<Version> version_max(
@@ -291,12 +292,13 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
       GenerateHash(WideToUTF8(module.digital_signer), &signer_hash);
       GenerateHash(WideToUTF8(module.description), &description_hash);
 
-      // If signatures match, we have a winner.
-      if (!desc_or_signer.empty() && signer_hash == desc_or_signer)
+      // If signatures match (or both are empty), then we have a winner.
+      if (signer_hash == desc_or_signer)
         return CONFIRMED_BAD;
 
-      // If description matches and location, then we also have a match.
-      if (!desc_or_signer.empty() && description_hash == desc_or_signer &&
+      // If descriptions match (or both are empty) and the locations match, then
+      // we also have a confirmed match.
+      if (description_hash == desc_or_signer &&
           !location_hash.empty() && location_hash == blacklisted.location) {
         return CONFIRMED_BAD;
       }
@@ -311,22 +313,31 @@ ModuleEnumerator::ModuleStatus ModuleEnumerator::Match(
 
 ModuleEnumerator::ModuleEnumerator(EnumerateModulesModel* observer)
     : observer_(observer),
+      limited_mode_(false),
       callback_thread_id_(BrowserThread::ID_COUNT) {
 }
 
 ModuleEnumerator::~ModuleEnumerator() {
 }
 
-void ModuleEnumerator::ScanNow(ModulesVector* list) {
-  CHECK(BrowserThread::GetCurrentThreadIdentifier(&callback_thread_id_));
-  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
+void ModuleEnumerator::ScanNow(ModulesVector* list, bool limited_mode) {
   enumerated_modules_ = list;
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(this, &ModuleEnumerator::ScanOnFileThread));
+
+  limited_mode_ = limited_mode;
+
+  if (!limited_mode_) {
+    CHECK(BrowserThread::GetCurrentThreadIdentifier(&callback_thread_id_));
+    DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+            NewRunnableMethod(this, &ModuleEnumerator::ScanImpl));
+  } else {
+    // Run it synchronously.
+    ScanImpl();
+  }
 }
 
-void ModuleEnumerator::ScanOnFileThread() {
+void ModuleEnumerator::ScanImpl() {
   base::TimeTicks start_time = base::TimeTicks::Now();
 
   enumerated_modules_->clear();
@@ -334,42 +345,49 @@ void ModuleEnumerator::ScanOnFileThread() {
   // Make sure the path mapping vector is setup so we can collapse paths.
   PreparePathMappings();
 
-  base::TimeTicks checkpoint = base::TimeTicks::Now();
-
   // Enumerating loaded modules must happen first since the other types of
   // modules check for duplication against the loaded modules.
+  base::TimeTicks checkpoint = base::TimeTicks::Now();
   EnumerateLoadedModules();
-  HISTOGRAM_TIMES("Conflicts.EnumerateLoadedModules",
-                  base::TimeTicks::Now() - checkpoint);
+  base::TimeTicks checkpoint2 = base::TimeTicks::Now();
+  UMA_HISTOGRAM_TIMES("Conflicts.EnumerateLoadedModules",
+                      checkpoint2 - checkpoint);
 
-  checkpoint = base::TimeTicks::Now();
+  checkpoint = checkpoint2;
   EnumerateShellExtensions();
-  HISTOGRAM_TIMES("Conflicts.EnumerateShellExtensions",
-                  base::TimeTicks::Now() - checkpoint);
+  checkpoint2 = base::TimeTicks::Now();
+  UMA_HISTOGRAM_TIMES("Conflicts.EnumerateShellExtensions",
+                      checkpoint2 - checkpoint);
 
-  checkpoint = base::TimeTicks::Now();
+  checkpoint = checkpoint2;
   EnumerateWinsockModules();
-  HISTOGRAM_TIMES("Conflicts.EnumerateWinsockModules",
-                  base::TimeTicks::Now() - checkpoint);
+  checkpoint2 = base::TimeTicks::Now();
+  UMA_HISTOGRAM_TIMES("Conflicts.EnumerateWinsockModules",
+                      checkpoint2 - checkpoint);
 
   MatchAgainstBlacklist();
 
   std::sort(enumerated_modules_->begin(),
             enumerated_modules_->end(), ModuleSort);
 
-  // Send a reply back on the UI thread.
-  BrowserThread::PostTask(
-      callback_thread_id_, FROM_HERE,
-      NewRunnableMethod(this, &ModuleEnumerator::ReportBack));
+  if (!limited_mode_) {
+    // Send a reply back on the UI thread.
+    BrowserThread::PostTask(
+        callback_thread_id_, FROM_HERE,
+        NewRunnableMethod(this, &ModuleEnumerator::ReportBack));
+  } else {
+    // We are on the main thread already.
+    ReportBack();
+  }
 
-  HISTOGRAM_TIMES("Conflicts.EnumerationTotalTime",
-                  base::TimeTicks::Now() - start_time);
+  UMA_HISTOGRAM_TIMES("Conflicts.EnumerationTotalTime",
+                      base::TimeTicks::Now() - start_time);
 }
 
 void ModuleEnumerator::EnumerateLoadedModules() {
   // Get all modules in the current process.
-  ScopedHandle snap(::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,
-                    ::GetCurrentProcessId()));
+  base::win::ScopedHandle snap(::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,
+                               ::GetCurrentProcessId()));
   if (!snap.Get())
     return;
 
@@ -405,12 +423,12 @@ void ModuleEnumerator::ReadShellExtensions(HKEY parent) {
     std::wstring key(std::wstring(L"CLSID\\") + registration.Name() +
         L"\\InProcServer32");
     base::win::RegKey clsid;
-    if (!clsid.Open(HKEY_CLASSES_ROOT, key.c_str(), KEY_READ)) {
+    if (clsid.Open(HKEY_CLASSES_ROOT, key.c_str(), KEY_READ) != ERROR_SUCCESS) {
       ++registration;
       continue;
     }
     string16 dll;
-    if (!clsid.ReadValue(L"", &dll)) {
+    if (clsid.ReadValue(L"", &dll) != ERROR_SUCCESS) {
       ++registration;
       continue;
     }
@@ -584,7 +602,8 @@ void ModuleEnumerator::MatchAgainstBlacklist() {
 }
 
 void ModuleEnumerator::ReportBack() {
-  DCHECK(BrowserThread::CurrentlyOn(callback_thread_id_));
+  if (!limited_mode_)
+    DCHECK(BrowserThread::CurrentlyOn(callback_thread_id_));
   observer_->DoneScanning();
 }
 
@@ -677,6 +696,11 @@ string16 ModuleEnumerator::GetSubjectNameFromDigitalSignature(
 
 //  ----------------------------------------------------------------------------
 
+// static
+EnumerateModulesModel* EnumerateModulesModel::GetInstance() {
+  return Singleton<EnumerateModulesModel>::get();
+}
+
 void EnumerateModulesModel::ScanNow() {
   if (scanning_)
     return;  // A scan is already in progress.
@@ -689,7 +713,7 @@ void EnumerateModulesModel::ScanNow() {
   // ScanNow does not block.
   if (!module_enumerator_)
     module_enumerator_ = new ModuleEnumerator(this);
-  module_enumerator_->ScanNow(&enumerated_modules_);
+  module_enumerator_->ScanNow(&enumerated_modules_, limited_mode_);
 }
 
 ListValue* EnumerateModulesModel::GetModuleList() {
@@ -722,8 +746,10 @@ ListValue* EnumerateModulesModel::GetModuleList() {
       }
       // Must be one of the above type.
       DCHECK(!type_string.empty());
-      type_string += ASCIIToWide(" -- ");
-      type_string += l10n_util::GetStringUTF16(IDS_CONFLICTS_NOT_LOADED_YET);
+      if (!limited_mode_) {
+        type_string += ASCIIToWide(" -- ");
+        type_string += l10n_util::GetStringUTF16(IDS_CONFLICTS_NOT_LOADED_YET);
+      }
     }
     data->SetString("type_description", type_string);
     data->SetInteger("status", module->status);
@@ -734,40 +760,43 @@ ListValue* EnumerateModulesModel::GetModuleList() {
     data->SetString("version", module->version);
     data->SetString("digital_signer", module->digital_signer);
 
-    // Figure out the possible resolution help string.
-    string16 actions;
-    string16 separator = ASCIIToWide(" ") + l10n_util::GetStringUTF16(
-        IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_SEPERATOR) +
-        ASCIIToWide(" ");
+    if (!limited_mode_) {
+      // Figure out the possible resolution help string.
+      string16 actions;
+      string16 separator = ASCIIToWide(" ") + l10n_util::GetStringUTF16(
+          IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_SEPERATOR) +
+          ASCIIToWide(" ");
 
-    if (module->recommended_action & ModuleEnumerator::NONE) {
-      actions = l10n_util::GetStringUTF16(
-          IDS_CONFLICTS_CHECK_INVESTIGATING);
+      if (module->recommended_action & ModuleEnumerator::NONE) {
+        actions = l10n_util::GetStringUTF16(
+            IDS_CONFLICTS_CHECK_INVESTIGATING);
+      }
+      if (module->recommended_action & ModuleEnumerator::UNINSTALL) {
+        if (!actions.empty())
+          actions += separator;
+        actions = l10n_util::GetStringUTF16(
+            IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_UNINSTALL);
+      }
+      if (module->recommended_action & ModuleEnumerator::UPDATE) {
+        if (!actions.empty())
+          actions += separator;
+        actions += l10n_util::GetStringUTF16(
+            IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_UPDATE);
+      }
+      if (module->recommended_action & ModuleEnumerator::DISABLE) {
+        if (!actions.empty())
+          actions += separator;
+        actions += l10n_util::GetStringUTF16(
+            IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_DISABLE);
+      }
+      string16 possible_resolution = actions.empty() ? ASCIIToWide("") :
+          l10n_util::GetStringUTF16(IDS_CONFLICTS_CHECK_POSSIBLE_ACTIONS) +
+          ASCIIToWide(" ") +
+          actions;
+      data->SetString("possibleResolution", possible_resolution);
+      data->SetString("help_url",
+                      ConstructHelpCenterUrl(*module).spec().c_str());
     }
-    if (module->recommended_action & ModuleEnumerator::UNINSTALL) {
-      if (!actions.empty())
-        actions += separator;
-      actions = l10n_util::GetStringUTF16(
-          IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_UNINSTALL);
-    }
-    if (module->recommended_action & ModuleEnumerator::UPDATE) {
-      if (!actions.empty())
-        actions += separator;
-      actions += l10n_util::GetStringUTF16(
-          IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_UPDATE);
-    }
-    if (module->recommended_action & ModuleEnumerator::DISABLE) {
-      if (!actions.empty())
-        actions += separator;
-      actions += l10n_util::GetStringUTF16(
-          IDS_CONFLICTS_CHECK_POSSIBLE_ACTION_DISABLE);
-    }
-    string16 possible_resolution = actions.empty() ? ASCIIToWide("") :
-        l10n_util::GetStringUTF16(IDS_CONFLICTS_CHECK_POSSIBLE_ACTIONS) +
-        ASCIIToWide(" ") +
-        actions;
-    data->SetString("possibleResolution", possible_resolution);
-    data->SetString("help_url", ConstructHelpCenterUrl(*module).spec().c_str());
 
     list->Append(data);
   }
@@ -778,6 +807,7 @@ ListValue* EnumerateModulesModel::GetModuleList() {
 
 EnumerateModulesModel::EnumerateModulesModel()
     : scanning_(false),
+      limited_mode_(false),
       confirmed_bad_modules_detected_(0),
       suspected_bad_modules_detected_(0) {
   const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
@@ -787,7 +817,7 @@ EnumerateModulesModel::EnumerateModulesModel()
         this, &EnumerateModulesModel::ScanNow);
   }
 
-  lock = new Lock();
+  lock = new base::Lock();
 }
 
 EnumerateModulesModel::~EnumerateModulesModel() {
@@ -809,15 +839,26 @@ void EnumerateModulesModel::DoneScanning() {
   scanning_ = false;
   lock->Release();
 
-  HISTOGRAM_COUNTS_100("Conflicts.SuspectedBadModules",
-                       suspected_bad_modules_detected_);
-  HISTOGRAM_COUNTS_100("Conflicts.ConfirmedBadModules",
-                       confirmed_bad_modules_detected_);
+  UMA_HISTOGRAM_COUNTS_100("Conflicts.SuspectedBadModules",
+                           suspected_bad_modules_detected_);
+  UMA_HISTOGRAM_COUNTS_100("Conflicts.ConfirmedBadModules",
+                           confirmed_bad_modules_detected_);
+
+  // Notifications are not available in limited mode.
+  if (limited_mode_)
+    return;
 
   NotificationService::current()->Notify(
       NotificationType::MODULE_LIST_ENUMERATED,
       Source<EnumerateModulesModel>(this),
       NotificationService::NoDetails());
+
+  // Command line flag must be enabled for the notification to get sent out.
+  // Otherwise we'd get the badge (while the feature is disabled) when we
+  // navigate to about:conflicts and find confirmed matches.
+  const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
+  if (!cmd_line.HasSwitch(switches::kConflictingModulesCheck))
+    return;
 
   if (suspected_bad_modules_detected_ || confirmed_bad_modules_detected_) {
     bool found_confirmed_bad_modules = confirmed_bad_modules_detected_  > 0;
@@ -840,8 +881,8 @@ GURL EnumerateModulesModel::ConstructHelpCenterUrl(
   GenerateHash(WideToUTF8(module.description), &description);
   GenerateHash(WideToUTF8(module.digital_signer), &signer);
 
-  string16 url = l10n_util::GetStringF(IDS_HELP_CENTER_VIEW_CONFLICTS,
-      ASCIIToWide(filename), ASCIIToWide(location),
-      ASCIIToWide(description), ASCIIToWide(signer));
-  return GURL(WideToUTF8(url));
+  string16 url = l10n_util::GetStringFUTF16(IDS_HELP_CENTER_VIEW_CONFLICTS,
+      ASCIIToUTF16(filename), ASCIIToUTF16(location),
+      ASCIIToUTF16(description), ASCIIToUTF16(signer));
+  return GURL(UTF16ToUTF8(url));
 }

@@ -83,7 +83,6 @@
                 'worker',
                 '../printing/printing.gyp:printing',
                 '../net/net.gyp:net_resources',
-                '../build/util/support/support.gyp:*',
                 '../third_party/cld/cld.gyp:cld',
                 '../views/views.gyp:views',
                 '../webkit/support/webkit_support.gyp:webkit_resources',
@@ -111,6 +110,7 @@
                 # but that causes errors in other targets when
                 # resulting .res files get referenced multiple times.
                 '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/chrome/autofill_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
@@ -270,7 +270,6 @@
                 'app/theme/omnibox_https_invalid.pdf',
                 'app/theme/omnibox_https_valid.pdf',
                 'app/theme/omnibox_https_warning.pdf',
-                'app/theme/omnibox_more.pdf',
                 'app/theme/omnibox_search.pdf',
                 'app/theme/omnibox_star.pdf',
                 'app/theme/otr_icon.pdf',
@@ -280,8 +279,7 @@
                 'app/theme/star_lit.pdf',
                 'app/theme/stop_Template.pdf',
                 'app/theme/tools_Template.pdf',
-                'app/theme/upgrade_dot.pdf',
-                'browser/cocoa/install.sh',
+                'browser/ui/cocoa/install.sh',
               ],
               'mac_bundle_resources!': [
                 'app/framework-Info.plist',
@@ -289,7 +287,6 @@
               'dependencies': [
                 # Bring in pdfsqueeze and run it on all pdfs
                 '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
-                '../build/util/support/support.gyp:*',
                 # On Mac, Flash gets put into the framework, so we need this
                 # dependency here. flash_player.gyp will copy the Flash bundle
                 # into PRODUCT_DIR.
@@ -327,6 +324,7 @@
                   'action_name': 'repack_chrome',
                   'variables': {
                     'pak_inputs': [
+                      '<(grit_out_dir)/autofill_resources.pak',
                       '<(grit_out_dir)/browser_resources.pak',
                       '<(grit_out_dir)/common_resources.pak',
                       '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
@@ -386,9 +384,10 @@
                   'action_name': 'repack_resources',
                   'variables': {
                     'pak_inputs': [
-                      '<(grit_out_dir)/bookmark_manager_resources.pak',
+                      '<(grit_out_dir)/component_extension_resources.pak',
                       '<(grit_out_dir)/net_internals_resources.pak',
                       '<(grit_out_dir)/shared_resources.pak',
+                      '<(grit_out_dir)/sync_internals_resources.pak',
                     ],
                   },
                   'inputs': [
@@ -470,7 +469,9 @@
                 },
                 {
                   'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Internet Plug-Ins',
-                  'files': [],
+                  'files': [
+                    '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.plugin',
+                  ],
                   'conditions': [
                     [ 'branding == "Chrome"', {
                       'files': [
@@ -514,8 +515,8 @@
                 }],  # mac_breakpad
                 ['mac_keystone==1', {
                   'mac_bundle_resources': [
-                    'browser/cocoa/keystone_promote_preflight.sh',
-                    'browser/cocoa/keystone_promote_postflight.sh',
+                    'browser/ui/cocoa/keystone_promote_preflight.sh',
+                    'browser/ui/cocoa/keystone_promote_postflight.sh',
                   ],
                   'postbuilds': [
                     {
@@ -583,6 +584,7 @@
             # but that causes errors in other targets when
             # resulting .res files get referenced multiple times.
             '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/autofill_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
 
             # TODO(sgk):  left-over from pre-gyp build, figure out
@@ -603,6 +605,13 @@
           'configurations': {
             'Common_Base': {
               'msvs_target_platform': 'x64',
+            },
+            'Debug_Base': {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkIncremental': '<(msvs_debug_link_nonincremental)',
+                },
+              },
             },
           },
         },  # target chrome_dll

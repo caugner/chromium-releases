@@ -6,7 +6,7 @@
 
 #include "chrome/browser/background_contents_service.h"
 #include "chrome/browser/browsing_instance.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_preferences_util.h"
@@ -56,6 +56,18 @@ BackgroundContents::~BackgroundContents() {
       Source<Profile>(profile),
       Details<BackgroundContents>(this));
   render_view_host_->Shutdown();  // deletes render_view_host
+}
+
+BackgroundContents* BackgroundContents::GetAsBackgroundContents() {
+  return this;
+}
+
+RenderViewHostDelegate::View* BackgroundContents::GetViewDelegate() {
+  return this;
+}
+
+const GURL& BackgroundContents::GetURL() const {
+  return url_;
 }
 
 ViewType::Type BackgroundContents::GetRenderViewType() const {
@@ -135,6 +147,14 @@ gfx::NativeWindow BackgroundContents::GetMessageBoxRootWindow() {
   return NULL;
 }
 
+TabContents* BackgroundContents::AsTabContents() {
+  return NULL;
+}
+
+ExtensionHost* BackgroundContents::AsExtensionHost() {
+  return NULL;
+}
+
 void BackgroundContents::UpdateInspectorSetting(const std::string& key,
                                          const std::string& value) {
   Profile* profile = render_view_host_->process()->profile();
@@ -152,6 +172,16 @@ void BackgroundContents::Close(RenderViewHost* render_view_host) {
       NotificationType::BACKGROUND_CONTENTS_CLOSED,
       Source<Profile>(profile),
       Details<BackgroundContents>(this));
+  delete this;
+}
+
+void BackgroundContents::RenderViewGone(RenderViewHost* rvh,
+                                        base::TerminationStatus status,
+                                        int error_code) {
+  // Our RenderView went away, so we should go away also, so killing the process
+  // via the TaskManager doesn't permanently leave a BackgroundContents hanging
+  // around the system, blocking future instances from being created
+  // (http://crbug.com/65189).
   delete this;
 }
 

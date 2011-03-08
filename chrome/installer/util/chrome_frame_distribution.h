@@ -10,9 +10,14 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/util_constants.h"
+
+namespace installer {
+class MasterPreferences;
+}
 
 class ChromeFrameDistribution : public BrowserDistribution {
  public:
@@ -44,22 +49,35 @@ class ChromeFrameDistribution : public BrowserDistribution {
 
   virtual std::wstring GetVersionKey();
 
-  virtual std::wstring GetEnvVersionKey();
-
   virtual bool CanSetAsDefault();
 
-  // This is the point at which the Google Chrome installer removes the Google
-  // Update ap value. We implement this simply to have the same behaviour re.
-  // the ap value.
-  virtual void UpdateDiffInstallStatus(bool system_install,
-      bool incremental_install, installer_util::InstallStatus install_status);
+  virtual void UpdateInstallStatus(bool system_install,
+      bool incremental_install, bool multi_install,
+      installer::InstallStatus install_status);
 
- private:
+  virtual std::vector<FilePath> GetKeyFiles();
+
+  virtual std::vector<FilePath> GetComDllList();
+
+  virtual void AppendUninstallCommandLineFlags(CommandLine* cmd_line);
+
+  virtual bool ShouldCreateUninstallEntry();
+
+  virtual bool SetChannelFlags(bool set, installer::ChannelInfo* channel_info);
+
+ protected:
   friend class BrowserDistribution;
 
   // Disallow construction from non-friends.
-  ChromeFrameDistribution() {}
+  explicit ChromeFrameDistribution(
+      const installer::MasterPreferences& prefs);
 
+  // Determines whether this Chrome Frame distribution is being used to work
+  // with CEEE bits as well.
+  bool ceee_;
+
+  // True when Chrome Frame is installed in ready mode (users have to opt in).
+  bool ready_mode_;
 };
 
 #endif  // CHROME_INSTALLER_UTIL_CHROME_FRAME_DISTRIBUTION_H_

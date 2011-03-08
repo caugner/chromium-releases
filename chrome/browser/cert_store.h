@@ -8,8 +8,8 @@
 
 #include <map>
 
-#include "base/lock.h"
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "net/base/x509_certificate.h"
@@ -27,7 +27,7 @@
 class CertStore : public NotificationObserver {
  public:
   // Returns the singleton instance of the CertStore.
-  static CertStore* GetSharedInstance();
+  static CertStore* GetInstance();
 
   // Stores the specified cert and returns the id associated with it.  The cert
   // is associated to the specified RenderProcessHost.
@@ -76,7 +76,7 @@ class CertStore : public NotificationObserver {
 
   // This lock protects: process_to_ids_, id_to_processes_, id_to_cert_ and
   //                     cert_to_id_.
-  Lock cert_lock_;
+  base::Lock cert_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(CertStore);
 };

@@ -8,9 +8,11 @@
 
 #include <vector>
 
+#include "base/atomicops.h"
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "net/base/net_log.h"
 
@@ -45,6 +47,13 @@ class CapturingNetLog : public NetLog {
   explicit CapturingNetLog(size_t max_num_entries);
   virtual ~CapturingNetLog();
 
+  // Returns the list of all entries in the log.
+  void GetEntries(EntryList* entry_list) const;
+
+  void Clear();
+
+  void SetLogLevel(NetLog::LogLevel log_level);
+
   // NetLog implementation:
   virtual void AddEntry(EventType type,
                         const base::TimeTicks& time,
@@ -52,17 +61,19 @@ class CapturingNetLog : public NetLog {
                         EventPhase phase,
                         EventParameters* extra_parameters);
   virtual uint32 NextID();
-  virtual LogLevel GetLogLevel() const { return LOG_ALL_BUT_BYTES; }
-
-  // Returns the list of all entries in the log.
-  const EntryList& entries() const { return entries_; }
-
-  void Clear();
+  virtual LogLevel GetLogLevel() const;
 
  private:
-  uint32 next_id_;
+  // Needs to be "mutable" so can use it in GetEntries().
+  mutable base::Lock lock_;
+
+  // Last assigned source ID.  Incremented to get the next one.
+  base::subtle::Atomic32 last_id_;
+
   size_t max_num_entries_;
   EntryList entries_;
+
+  NetLog::LogLevel log_level_;
 
   DISALLOW_COPY_AND_ASSIGN(CapturingNetLog);
 };
@@ -85,16 +96,13 @@ class CapturingBoundNetLog {
     return BoundNetLog(source_, capturing_net_log_.get());
   }
 
-  // Returns the list of all entries in the log.
-  const CapturingNetLog::EntryList& entries() const {
-    return capturing_net_log_->entries();
-  }
+  // Fills |entry_list| with all entries in the log.
+  void GetEntries(CapturingNetLog::EntryList* entry_list) const;
 
   void Clear();
 
-  // Sends all of captured messages to |net_log|, using the same source ID
-  // as |net_log|.
-  void AppendTo(const BoundNetLog& net_log) const;
+  // Sets the log level of the underlying CapturingNetLog.
+  void SetLogLevel(NetLog::LogLevel log_level);
 
  private:
   NetLog::Source source_;

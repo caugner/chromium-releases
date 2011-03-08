@@ -1,28 +1,28 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/extensions/event_bindings.h"
 
 #include "base/basictypes.h"
-#include "base/singleton.h"
+#include "base/lazy_instance.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using bindings_utils::CallFunctionInContext;
 using bindings_utils::ContextInfo;
@@ -61,15 +61,18 @@ struct SingletonData {
   std::map<std::string, EventListenerCounts> listener_counts_;
 };
 
+static base::LazyInstance<SingletonData> g_singleton_data(
+    base::LINKER_INITIALIZED);
+
 static EventListenerCounts& GetListenerCounts(const std::string& extension_id) {
-  return Singleton<SingletonData>()->listener_counts_[extension_id];
+  return g_singleton_data.Get().listener_counts_[extension_id];
 }
 
 class ExtensionImpl : public ExtensionBase {
  public:
   ExtensionImpl()
       : ExtensionBase(EventBindings::kName,
-                      GetStringResource<IDR_EVENT_BINDINGS_JS>(),
+                      GetStringResource(IDR_EVENT_BINDINGS_JS),
                       0, NULL) {
   }
   ~ExtensionImpl() {}
@@ -262,9 +265,10 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
   if (!ds)
     ds = frame->dataSource();
   GURL url = ds->request().url();
-  std::string extension_id = ExtensionRendererInfo::GetIdByURL(url);
+  const ExtensionSet* extensions = GetRenderThread()->GetExtensions();
+  std::string extension_id = extensions->GetIdByURL(url);
 
-  if (!ExtensionRendererInfo::ExtensionBindingsAllowed(url) &&
+  if (!extensions->ExtensionBindingsAllowed(url) &&
       !content_script) {
     // This context is a regular non-extension web page or an unprivileged
     // chrome app. Ignore it. We only care about content scripts and extension
@@ -367,7 +371,7 @@ void EventBindings::CallFunction(const std::string& extension_id,
     // string if a validation error has occured.
     // TODO(rafaelw): Consider only doing this check if function_name ==
     // "Event.dispatchJSON".
-#ifdef _DEBUG
+#ifndef NDEBUG
     if (!retval.IsEmpty() && !retval->IsUndefined()) {
       std::string error = *v8::String::AsciiValue(retval);
       DCHECK(false) << error;

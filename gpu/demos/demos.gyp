@@ -3,6 +3,9 @@
 # found in the LICENSE file.
 
 {
+  'includes': [
+    '../../ppapi/ppapi.gypi',
+  ],
   'variables': {
     'chromium_code': 1,
     'conditions': [
@@ -22,19 +25,14 @@
     {
       'target_name': 'gpu_demo_framework',
       'type': 'static_library',
-      'dependencies': [
-        '../../base/base.gyp:base',
+      'include_dirs': [
+        '../..',
       ],
       'sources': [
         'framework/demo.cc',
         'framework/demo.h',
         'framework/demo_factory.h',
       ],
-      'all_dependent_settings': {
-        'include_dirs': [
-          '../..',
-        ],
-      },
     },
     {
       'target_name': 'gpu_demo_framework_exe',
@@ -71,14 +69,14 @@
         'gpu_demo_framework',
         '../gpu.gyp:pgl',
       ],
+      'include_dirs': ['../..'],
       'sources': [
         'framework/plugin.cc',
         'framework/plugin.h',
       ],
       'direct_dependent_settings': {
-        'sources': [
-          'framework/main_pepper.cc',
-        ],
+        'include_dirs': ['../..'],
+        'sources': ['framework/main_pepper.cc'],
         'run_as': {
           'conditions': [
             ['OS=="mac"', {
@@ -127,12 +125,12 @@
       'type': 'static_library',
       'dependencies': [
         'gpu_demo_framework',
-        '../../ppapi/ppapi.gyp:ppapi_cpp',
-        '../../ppapi/ppapi.gyp:ppapi_cpp_objects'
+        '../../ppapi/ppapi.gyp:ppapi_cpp_objects',
+        '../../ppapi/ppapi.gyp:ppapi_gles2',
       ],
       'include_dirs': [
         '../..',
-        '../../ppapi',
+        '../../ppapi/lib/gl/include',
         '../../third_party/gles2_book/Common/Include',
       ],
       'sources': [
@@ -146,16 +144,16 @@
       ],
       'direct_dependent_settings': {
         'include_dirs': [
-          '../../third_party',
+          '../..',
+          '../../ppapi/lib/gl/include',
           '../../third_party/gles2_book/Common/Include',
-          '../../ppapi',
-          '../..'
         ],
         'run_as': {
           'conditions': [
             ['OS=="mac"', {
               'action': [
                 '<(PRODUCT_DIR)/Chromium.app/Contents/MacOS/Chromium',
+                '--enable-accelerated-layers',
                 '--register-pepper-plugins='
                   '<(PRODUCT_DIR)/$(PRODUCT_NAME).plugin;'
                   'pepper-application/x-gpu-demo',
@@ -164,6 +162,7 @@
              }, { # OS != "mac"
               'action': [
                 '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)chrome<(EXECUTABLE_SUFFIX)',
+                '--enable-accelerated-layers',
                 '--register-pepper-plugins=$(TargetPath);'
                   'pepper-application/x-gpu-demo',
                 'file://$(ProjectDir)pepper_gpu_demo.html',
@@ -361,6 +360,7 @@
           'variables': { 'chromium_code': 0, },
           'dependencies': [ 'gpu_demo_framework_ppapi', ],
           'sources': [
+            '<@(ppp_entrypoints_sources)',
             'gles2_book/example.h',
             'gles2_book/demo_hello_triangle.cc',
             '../../third_party/gles2_book/Chapter_2/Hello_Triangle/Hello_Triangle.c',
@@ -373,6 +373,7 @@
           'variables': { 'chromium_code': 0, },
           'dependencies': [ 'gpu_demo_framework_ppapi', ],
           'sources': [
+            '<@(ppp_entrypoints_sources)',
             'gles2_book/example.h',
             'gles2_book/demo_mip_map_2d.cc',
             '../../third_party/gles2_book/Chapter_9/MipMap2D/MipMap2D.c',
@@ -385,6 +386,7 @@
           'variables': { 'chromium_code': 0, },
           'dependencies': [ 'gpu_demo_framework_ppapi', ],
           'sources': [
+            '<@(ppp_entrypoints_sources)',
             'gles2_book/example.h',
             'gles2_book/demo_simple_texture_2d.cc',
             '../../third_party/gles2_book/Chapter_9/Simple_Texture2D/Simple_Texture2D.c',
@@ -397,6 +399,7 @@
           'variables': { 'chromium_code': 0, },
           'dependencies': [ 'gpu_demo_framework_ppapi', ],
           'sources': [
+            '<@(ppp_entrypoints_sources)',
             'gles2_book/example.h',
             'gles2_book/demo_simple_texture_cubemap.cc',
             '../../third_party/gles2_book/Chapter_9/Simple_TextureCubemap/Simple_TextureCubemap.c',
@@ -409,6 +412,7 @@
           'variables': { 'chromium_code': 0, },
           'dependencies': [ 'gpu_demo_framework_ppapi', ],
           'sources': [
+            '<@(ppp_entrypoints_sources)',
             'gles2_book/example.h',
             'gles2_book/demo_simple_vertex_shader.cc',
             '../../third_party/gles2_book/Chapter_8/Simple_VertexShader/Simple_VertexShader.c',
@@ -421,6 +425,7 @@
           'variables': { 'chromium_code': 0, },
           'dependencies': [ 'gpu_demo_framework_ppapi', ],
           'sources': [
+            '<@(ppp_entrypoints_sources)',
             'gles2_book/example.h',
             'gles2_book/demo_stencil_test.cc',
             '../../third_party/gles2_book/Chapter_11/Stencil_Test/Stencil_Test.c',
@@ -433,6 +438,7 @@
           'variables': { 'chromium_code': 0, },
           'dependencies': [ 'gpu_demo_framework_ppapi', ],
           'sources': [
+            '<@(ppp_entrypoints_sources)',
             'gles2_book/example.h',
             'gles2_book/demo_texture_wrap.cc',
             '../../third_party/gles2_book/Chapter_9/TextureWrap/TextureWrap.c',

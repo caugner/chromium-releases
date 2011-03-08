@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/cros/keyboard_library.h"
 
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "cros/chromeos_keyboard.h"
+#include "third_party/cros/chromeos_keyboard.h"
 
 namespace chromeos {
 
@@ -38,20 +38,6 @@ class KeyboardLibraryImpl : public KeyboardLibrary {
   bool RemapModifierKeys(const ModifierMap& modifier_map) {
     if (CrosLibrary::Get()->EnsureLoaded()) {
       return chromeos::RemapModifierKeys(modifier_map);
-    }
-    return false;
-  }
-
-  bool GetKeyboardLayoutPerWindow(bool* is_per_window) const {
-    if (CrosLibrary::Get()->EnsureLoaded()) {
-      return chromeos::GetKeyboardLayoutPerWindow(is_per_window);
-    }
-    return false;
-  }
-
-  bool SetKeyboardLayoutPerWindow(bool is_per_window) {
-    if (CrosLibrary::Get()->EnsureLoaded()) {
-      return chromeos::SetKeyboardLayoutPerWindow(is_per_window);
     }
     return false;
   }
@@ -106,14 +92,6 @@ class KeyboardLibraryStubImpl : public KeyboardLibrary {
   }
 
   bool RemapModifierKeys(const ModifierMap& modifier_map) {
-    return false;
-  }
-
-  bool GetKeyboardLayoutPerWindow(bool* is_per_window) const {
-    return false;
-  }
-
-  bool SetKeyboardLayoutPerWindow(bool is_per_window) {
     return false;
   }
 

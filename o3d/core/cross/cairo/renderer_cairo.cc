@@ -1,5 +1,5 @@
 /*
- * Copyright 2010, Google Inc.
+ * Copyright 2011, Google Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -72,49 +72,111 @@ void RendererCairo::Destroy() {
   display_ = NULL;
 }
 
+// Comparison predicate for STL sort.
+bool LayerZValueLessThan(const Layer* first, const Layer* second) {
+  return first->z() < second->z();
+}
+
 void RendererCairo::Paint() {
+  // TODO(tschmelcher): Don't keep creating and destroying the drawing context.
   cairo_t* current_drawing = cairo_create(main_surface_);
+
+  // Redirect drawing to an off-screen surface (holding only colour information,
+  // without an alpha channel).
+  cairo_push_group_with_content(current_drawing, CAIRO_CONTENT_COLOR);
+
+  // Set fill (and clip) rule.
+  cairo_set_fill_rule(current_drawing, CAIRO_FILL_RULE_EVEN_ODD);
+
+  // Sort layers by z value.
+  // TODO(tschmelcher): Only sort when changes are made.
+  layer_list_.sort(LayerZValueLessThan);
 
   // Paint the background.
   PaintBackground(current_drawing);
 
   // Core process of painting.
-  for (LayerRefList::iterator i = layer_list_.begin();
+  for (LayerList::iterator i = layer_list_.begin();
        i != layer_list_.end(); i++) {
-    // Put the state with no mask to the stack.
+    Layer* cur = *i;
+    if (!cur->ShouldPaint()) continue;
+
+    Pattern* pattern = cur->pattern();
+
+    // Save the current drawing state.
     cairo_save(current_drawing);
 
-    // Preparing and updating the Layer.
-    Layer* cur = *i;
-    Pattern* pattern = cur->pattern();
-    if (!pattern) {
-      // Skip layers with no pattern assigned.
-      continue;
-    }
+    // Clip the region outside the current Layer.
+    cairo_rectangle(current_drawing,
+                    cur->x(),
+                    cur->y(),
+                    cur->width(),
+                    cur->height());
+    cairo_clip(current_drawing);
 
-    // Masking areas for other scene.
-    LayerRefList::iterator start_mask_it = i;
+    // Clip the regions within other Layers that will obscure this one.
+    LayerList::iterator start_mask_it = i;
     start_mask_it++;
-    MaskArea(current_drawing, start_mask_it);
+    ClipArea(current_drawing, start_mask_it);
 
+    // Transform the pattern to fit into the Layer's region.
     cairo_translate(current_drawing, cur->x(), cur->y());
-
     cairo_scale(current_drawing, cur->scale_x(), cur->scale_y());
 
-    // Painting the image to the surface.
+    // Set source pattern.
     cairo_set_source(current_drawing, pattern->pattern());
 
-    cairo_paint_with_alpha(current_drawing, cur->alpha());
+    // Paint the pattern to the off-screen surface.
+    switch (cur->paint_operator()) {
+      case Layer::BLEND:
+        cairo_paint(current_drawing);
+        break;
 
-    // Restore to the state with no mask.
+      case Layer::BLEND_WITH_TRANSPARENCY:
+        cairo_paint_with_alpha(current_drawing, cur->alpha());
+        break;
+
+      case Layer::COPY:
+        // Set Cairo to copy the pattern's alpha content instead of blending.
+        cairo_set_operator(current_drawing, CAIRO_OPERATOR_SOURCE);
+        cairo_paint(current_drawing);
+        break;
+
+      case Layer::COPY_WITH_FADING:
+        // TODO(tschmelcher): This can also be done in a single operation with:
+        //
+        //   cairo_set_operator(current_drawing, CAIRO_OPERATOR_IN);
+        //   cairo_paint_with_alpha(current_drawing, cur->alpha());
+        //
+        // but surprisingly that is slightly slower for me. We should figure out
+        // why.
+        cairo_set_operator(current_drawing, CAIRO_OPERATOR_CLEAR);
+        cairo_paint(current_drawing);
+        cairo_set_operator(current_drawing, CAIRO_OPERATOR_OVER);
+        cairo_paint_with_alpha(current_drawing, cur->alpha());
+        break;
+
+      default:
+        DCHECK(false);
+    }
+
+    // Restore to a clean state.
     cairo_restore(current_drawing);
   }
+
+  // Finish off-screen drawing and make the off-screen surface the source for
+  // paints to the screen.
+  cairo_pop_group_to_source(current_drawing);
+
+  // Paint the off-screen surface to the screen.
+  cairo_paint(current_drawing);
+
   cairo_destroy(current_drawing);
 }
 
 void RendererCairo::PaintBackground(cairo_t* cr) {
   cairo_save(cr);
-  MaskArea(cr, layer_list_.begin());
+  ClipArea(cr, layer_list_.begin());
 
   cairo_rectangle(cr, 0, 0, display_width(), display_height());
   cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
@@ -122,25 +184,28 @@ void RendererCairo::PaintBackground(cairo_t* cr) {
   cairo_restore(cr);
 }
 
-void RendererCairo::MaskArea(cairo_t* cr,  LayerRefList::iterator it) {
-  cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
-
-  for (LayerRefList::iterator i = it; i != layer_list_.end(); i++) {
+void RendererCairo::ClipArea(cairo_t* cr,  LayerList::iterator it) {
+  for (LayerList::iterator i = it; i != layer_list_.end(); i++) {
     // Preparing and updating the Layer.
-    Layer* cur_mask = *i;
+    Layer* cur = *i;
+    if (!cur->ShouldClip()) continue;
 
     cairo_rectangle(cr, 0, 0, display_width(), display_height());
     cairo_rectangle(cr,
-                    cur_mask->x(),
-                    cur_mask->y(),
-                    cur_mask->width(),
-                    cur_mask->height());
+                    cur->x(),
+                    cur->y(),
+                    cur->width(),
+                    cur->height());
     cairo_clip(cr);
   }
 }
 
 void RendererCairo::AddLayer(Layer* image) {
-  layer_list_.push_front(Layer::Ref(image));
+  layer_list_.push_front(image);
+}
+
+void RendererCairo::RemoveLayer(Layer* image) {
+  layer_list_.remove(image);
 }
 
 void RendererCairo::InitCommon() {
@@ -211,12 +276,6 @@ void RendererCairo::PlatformSpecificFinishRendering() {
 // The platform specific part of Present.
 void RendererCairo::PlatformSpecificPresent() {
   // Don't need to do anything.
-}
-
-// TODO(fransiskusx): DO need to implement before shipped.
-// Removes the Layer from the array.
-void RendererCairo::RemoveLayer(Layer* image) {
-  NOTIMPLEMENTED();
 }
 
 // TODO(fransiskusx): DO need to implement before shipped.

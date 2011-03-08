@@ -1,16 +1,17 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/login/image_downloader.h"
 
+#include <vector>
+
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/net/url_fetcher.h"
 
 namespace chromeos {
@@ -39,7 +40,7 @@ ImageDownloader::ImageDownloader(ImageDecoder::Delegate* delegate,
 
 void ImageDownloader::OnURLFetchComplete(const URLFetcher* source,
                                          const GURL& url,
-                                         const URLRequestStatus& status,
+                                         const net::URLRequestStatus& status,
                                          int response_code,
                                          const ResponseCookies& cookies,
                                          const std::string& data) {
@@ -61,4 +62,3 @@ void ImageDownloader::OnURLFetchComplete(const URLFetcher* source,
 }
 
 }  // namespace chromeos
-

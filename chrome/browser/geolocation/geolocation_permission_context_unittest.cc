@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -168,12 +168,10 @@ TEST_F(GeolocationPermissionContextTests, SinglePermission) {
 TEST_F(GeolocationPermissionContextTests, QueuedPermission) {
   GURL requesting_frame_0("http://www.example.com/geolocation");
   GURL requesting_frame_1("http://www.example-2.com/geolocation");
-  EXPECT_EQ(
-      CONTENT_SETTING_ASK,
+  EXPECT_EQ(CONTENT_SETTING_ASK,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_0, requesting_frame_0));
-  EXPECT_EQ(
-      CONTENT_SETTING_ASK,
+  EXPECT_EQ(CONTENT_SETTING_ASK,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_1, requesting_frame_0));
 
@@ -219,12 +217,10 @@ TEST_F(GeolocationPermissionContextTests, QueuedPermission) {
   infobar_1->InfoBarClosed();
   EXPECT_EQ(0, contents()->infobar_delegate_count());
   // Ensure the persisted permissions are ok.
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_0, requesting_frame_0));
-  EXPECT_EQ(
-      CONTENT_SETTING_BLOCK,
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_1, requesting_frame_0));
 }
@@ -232,12 +228,10 @@ TEST_F(GeolocationPermissionContextTests, QueuedPermission) {
 TEST_F(GeolocationPermissionContextTests, CancelGeolocationPermissionRequest) {
   GURL requesting_frame_0("http://www.example.com/geolocation");
   GURL requesting_frame_1("http://www.example-2.com/geolocation");
-  EXPECT_EQ(
-      CONTENT_SETTING_ASK,
+  EXPECT_EQ(CONTENT_SETTING_ASK,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_0, requesting_frame_0));
-  EXPECT_EQ(
-      CONTENT_SETTING_ASK,
+  EXPECT_EQ(CONTENT_SETTING_ASK,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_1, requesting_frame_0));
 
@@ -280,37 +274,12 @@ TEST_F(GeolocationPermissionContextTests, CancelGeolocationPermissionRequest) {
   infobar_1->InfoBarClosed();
   EXPECT_EQ(0, contents()->infobar_delegate_count());
   // Ensure the persisted permissions are ok.
-  EXPECT_EQ(
-      CONTENT_SETTING_ASK,
+  EXPECT_EQ(CONTENT_SETTING_ASK,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_0, requesting_frame_0));
-  EXPECT_EQ(
-      CONTENT_SETTING_ALLOW,
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
       profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
           requesting_frame_1, requesting_frame_0));
-}
-
-TEST_F(GeolocationPermissionContextTests, StopUpdating) {
-  GURL requesting_frame("http://www.example.com/geolocation");
-  NavigateAndCommit(requesting_frame);
-  EXPECT_EQ(0, contents()->infobar_delegate_count());
-  geolocation_permission_context_->RequestGeolocationPermission(
-      process_id(), render_id(), bridge_id(), requesting_frame);
-  EXPECT_EQ(1, contents()->infobar_delegate_count());
-  ConfirmInfoBarDelegate* infobar_0 =
-      contents()->GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
-  ASSERT_TRUE(infobar_0);
-
-  geolocation_permission_context_->StopUpdatingRequested(
-      process_id(), render_id(), bridge_id());
-  EXPECT_EQ(infobar_0,
-            tab_contents_with_pending_infobar_->removed_infobar_delegate_);
-  infobar_0->InfoBarClosed();
-  EXPECT_EQ(0, contents()->infobar_delegate_count());
-  EXPECT_EQ(
-      CONTENT_SETTING_ASK,
-      profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
-          requesting_frame, requesting_frame));
 }
 
 TEST_F(GeolocationPermissionContextTests, InvalidURL) {
@@ -421,4 +390,34 @@ TEST_F(GeolocationPermissionContextTests, QueuedOriginMultipleTabs) {
   infobar_1->InfoBarClosed();
 
   extra_tabs_.reset();
+}
+
+TEST_F(GeolocationPermissionContextTests, TabDestroyed) {
+  GURL requesting_frame_0("http://www.example.com/geolocation");
+  GURL requesting_frame_1("http://www.example-2.com/geolocation");
+  EXPECT_EQ(
+      CONTENT_SETTING_ASK,
+      profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
+          requesting_frame_0, requesting_frame_0));
+  EXPECT_EQ(
+      CONTENT_SETTING_ASK,
+      profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
+          requesting_frame_1, requesting_frame_0));
+
+  NavigateAndCommit(requesting_frame_0);
+  EXPECT_EQ(0, contents()->infobar_delegate_count());
+  // Request permission for two frames.
+  geolocation_permission_context_->RequestGeolocationPermission(
+      process_id(), render_id(), bridge_id(), requesting_frame_0);
+  geolocation_permission_context_->RequestGeolocationPermission(
+      process_id(), render_id(), bridge_id() + 1, requesting_frame_1);
+  // Ensure only one infobar is created.
+  EXPECT_EQ(1, contents()->infobar_delegate_count());
+  ConfirmInfoBarDelegate* infobar_0 =
+      contents()->GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
+  ASSERT_TRUE(infobar_0);
+  string16 text_0 = infobar_0->GetMessageText();
+
+  // Delete the tab contents.
+  DeleteContents();
 }

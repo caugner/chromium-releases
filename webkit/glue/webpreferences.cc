@@ -6,12 +6,12 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRuntimeFeatures.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSettings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSettings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebRuntimeFeatures;
@@ -21,11 +21,11 @@ using WebKit::WebURL;
 using WebKit::WebView;
 
 WebPreferences::WebPreferences()
-    : standard_font_family(L"Times New Roman"),
-      fixed_font_family(L"Courier New"),
-      serif_font_family(L"Times New Roman"),
-      sans_serif_font_family(L"Arial"),
-      cursive_font_family(L"Script"),
+    : standard_font_family(ASCIIToUTF16("Times New Roman")),
+      fixed_font_family(ASCIIToUTF16("Courier New")),
+      serif_font_family(ASCIIToUTF16("Times New Roman")),
+      sans_serif_font_family(ASCIIToUTF16("Arial")),
+      cursive_font_family(ASCIIToUTF16("Script")),
       fantasy_font_family(),  // Not sure what to use on Windows.
       default_font_size(16),
       default_fixed_font_size(13),
@@ -60,12 +60,16 @@ WebPreferences::WebPreferences()
       frame_flattening_enabled(false),
       allow_universal_access_from_file_urls(false),
       allow_file_access_from_file_urls(false),
+      webaudio_enabled(false),
       experimental_webgl_enabled(false),
       show_composited_layer_borders(false),
       accelerated_compositing_enabled(false),
       accelerated_layers_enabled(false),
+      accelerated_video_enabled(false),
       accelerated_2d_canvas_enabled(false),
-      memory_info_enabled(false) {
+      accelerated_plugins_enabled(false),
+      memory_info_enabled(false),
+      interactive_form_validation_enabled(true) {
 }
 
 WebPreferences::~WebPreferences() {
@@ -73,12 +77,12 @@ WebPreferences::~WebPreferences() {
 
 void WebPreferences::Apply(WebView* web_view) const {
   WebSettings* settings = web_view->settings();
-  settings->setStandardFontFamily(WideToUTF16Hack(standard_font_family));
-  settings->setFixedFontFamily(WideToUTF16Hack(fixed_font_family));
-  settings->setSerifFontFamily(WideToUTF16Hack(serif_font_family));
-  settings->setSansSerifFontFamily(WideToUTF16Hack(sans_serif_font_family));
-  settings->setCursiveFontFamily(WideToUTF16Hack(cursive_font_family));
-  settings->setFantasyFontFamily(WideToUTF16Hack(fantasy_font_family));
+  settings->setStandardFontFamily(standard_font_family);
+  settings->setFixedFontFamily(fixed_font_family);
+  settings->setSerifFontFamily(serif_font_family);
+  settings->setSansSerifFontFamily(sans_serif_font_family);
+  settings->setCursiveFontFamily(cursive_font_family);
+  settings->setFantasyFontFamily(fantasy_font_family);
   settings->setDefaultFontSize(default_font_size);
   settings->setDefaultFixedFontSize(default_fixed_font_size);
   settings->setMinimumFontSize(minimum_font_size);
@@ -139,10 +143,13 @@ void WebPreferences::Apply(WebView* web_view) const {
   // but also because it cause a possible crash in Editor::hasBidiSelection().
   settings->setTextDirectionSubmenuInclusionBehaviorNeverIncluded();
 
+  // Enable the web audio API if requested on the command line.
+  settings->setWebAudioEnabled(webaudio_enabled);
+
   // Enable experimental WebGL support if requested on command line
   // and support is compiled in.
   bool enable_webgl =
-      WebRuntimeFeatures::isWebGLEnabled() || experimental_webgl_enabled;
+      WebRuntimeFeatures::isWebGLEnabled() && experimental_webgl_enabled;
   settings->setExperimentalWebGLEnabled(enable_webgl);
 
   // Display colored borders around composited render layers if requested
@@ -156,15 +163,17 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setAccelerated2dCanvasEnabled(accelerated_2d_canvas_enabled);
 
   // Enabling accelerated layers from the command line enabled accelerated
-  // 3D CSS, Video, Plugins, and Animations.
+  // 3D CSS, Video, and Animations.
   settings->setAcceleratedCompositingFor3DTransformsEnabled(
       accelerated_layers_enabled);
   settings->setAcceleratedCompositingForVideoEnabled(
-      accelerated_layers_enabled);
-  settings->setAcceleratedCompositingForPluginsEnabled(
-      accelerated_layers_enabled);
+      accelerated_video_enabled);
   settings->setAcceleratedCompositingForAnimationEnabled(
       accelerated_layers_enabled);
+
+  // Enabling accelerated plugins if specified from the command line.
+  settings->setAcceleratedCompositingForPluginsEnabled(
+      accelerated_plugins_enabled);
 
   // WebGL and accelerated 2D canvas are always gpu composited.
   settings->setAcceleratedCompositingForCanvasEnabled(
@@ -181,4 +190,7 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Tabs to link is not part of the settings. WebCore calls
   // ChromeClient::tabsToLinks which is part of the glue code.
   web_view->setTabsToLinks(tabs_to_links);
+
+  settings->setInteractiveFormValidationEnabled(
+      interactive_form_validation_enabled);
 }

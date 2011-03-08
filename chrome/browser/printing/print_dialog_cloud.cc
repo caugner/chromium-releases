@@ -5,7 +5,6 @@
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/printing/print_dialog_cloud_internal.h"
 
-#include "app/l10n_util.h"
 #include "base/base64.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
@@ -17,7 +16,7 @@
 #include "chrome/browser/dom_ui/dom_ui_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
@@ -28,6 +27,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webpreferences.h"
 
 #include "grit/generated_resources.h"
@@ -44,7 +44,7 @@
 // PrintDialogCloud::CreatePrintDialogForPdf is called from
 // resource_message_filter_gtk.cc once the renderer has informed the
 // renderer host that PDF generation into the renderer host provided
-// temp file has been completed.  That call is on the IO thread.
+// temp file has been completed.  That call is on the FILE thread.
 // That, in turn, hops over to the UI thread to create an instance of
 // PrintDialogCloud.
 
@@ -148,7 +148,7 @@ void CloudPrintDataSenderHelper::CallJavascriptFunction(
 // potentially expensive enough that stopping whatever is in progress
 // is worth it.
 void CloudPrintDataSender::CancelPrintDataFile() {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   // We don't own helper, it was passed in to us, so no need to
   // delete, just let it go.
   helper_ = NULL;
@@ -202,7 +202,7 @@ void CloudPrintDataSender::ReadPrintDataFile(const FilePath& path_to_pdf) {
 // needed. - 4/1/2010
 void CloudPrintDataSender::SendPrintDataFile() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   if (helper_ && print_data_.get()) {
     StringValue title(print_job_title_);
 
@@ -487,7 +487,7 @@ bool CloudPrintHtmlDialogDelegate::ShouldShowDialogTitle() const {
 // workflow through the printing code changes to allow for dynamically
 // changing page setup parameters while the dialog is active.
 void PrintDialogCloud::CreatePrintDialogForPdf(const FilePath& path_to_pdf) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,

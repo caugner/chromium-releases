@@ -8,14 +8,13 @@
 
 #include <set>
 
-#include "app/l10n_util.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
 #include "base/singleton.h"
 #include "base/string_number_conversions.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/app_launcher_handler.h"
@@ -31,7 +30,7 @@
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
@@ -46,6 +45,7 @@
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -55,73 +55,14 @@ const int kRecentBookmarks = 9;
 // The number of search URLs to show.
 const int kSearchURLs = 3;
 
+// The amount of time there must be no painting for us to consider painting
+// finished.  Observed times are in the ~1200ms range on Windows.
+const int kTimeoutMs = 2000;
+
 // Strings sent to the page via jstemplates used to set the direction of the
 // HTML document based on locale.
 const char kRTLHtmlTextDirection[] = "rtl";
 const char kDefaultHtmlTextDirection[] = "ltr";
-
-////////////////////////////////////////////////////////////////////////////////
-// PaintTimer
-
-// To measure end-to-end performance of the new tab page, we observe paint
-// messages and wait for the page to stop repainting.
-class PaintTimer : public RenderWidgetHost::PaintObserver {
- public:
-  PaintTimer() {
-    Start();
-  }
-
-  // Start the benchmarking and the timer.
-  void Start() {
-    start_ = base::TimeTicks::Now();
-    last_paint_ = start_;
-
-    timer_.Start(base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
-                 &PaintTimer::Timeout);
-  }
-
-  // A callback that is invoked whenever our RenderWidgetHost paints.
-  virtual void RenderWidgetHostWillPaint(RenderWidgetHost* rhw) {}
-
-  virtual void RenderWidgetHostDidPaint(RenderWidgetHost* rwh) {
-    last_paint_ = base::TimeTicks::Now();
-  }
-
-  // The timer callback.  If enough time has elapsed since the last paint
-  // message, we say we're done painting; otherwise, we keep waiting.
-  void Timeout() {
-    base::TimeTicks now = base::TimeTicks::Now();
-    if ((now - last_paint_) >= base::TimeDelta::FromMilliseconds(kTimeoutMs)) {
-      // Painting has quieted down.  Log this as the full time to run.
-      base::TimeDelta load_time = last_paint_ - start_;
-      int load_time_ms = static_cast<int>(load_time.InMilliseconds());
-      NotificationService::current()->Notify(
-          NotificationType::INITIAL_NEW_TAB_UI_LOAD,
-          NotificationService::AllSources(),
-          Details<int>(&load_time_ms));
-      UMA_HISTOGRAM_TIMES("NewTabUI load", load_time);
-    } else {
-      // Not enough quiet time has elapsed.
-      // Some more paints must've occurred since we set the timeout.
-      // Wait some more.
-      timer_.Start(base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
-                   &PaintTimer::Timeout);
-    }
-  }
-
- private:
-  // The amount of time there must be no painting for us to consider painting
-  // finished.  Observed times are in the ~1200ms range on Windows.
-  static const int kTimeoutMs = 2000;
-  // The time when we started benchmarking.
-  base::TimeTicks start_;
-  // The last time we got a paint notification.
-  base::TimeTicks last_paint_;
-  // Scoping so we can be sure our timeouts don't outlive us.
-  base::OneShotTimer<PaintTimer> timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(PaintTimer);
-};
 
 ///////////////////////////////////////////////////////////////////////////////
 // RecentlyClosedTabsHandler
@@ -217,7 +158,6 @@ void RecentlyClosedTabsHandler::TabRestoreServiceDestroyed(
     TabRestoreService* service) {
   tab_restore_service_ = NULL;
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // MetricsHandler
@@ -376,8 +316,8 @@ NewTabUI::NewTabUI(TabContents* contents)
     AddMessageHandler((new MetricsHandler())->Attach(this));
     if (GetProfile()->IsSyncAccessible())
       AddMessageHandler((new NewTabPageSyncHandler())->Attach(this));
-    ExtensionsService* service = GetProfile()->GetExtensionsService();
-    // We might not have an ExtensionsService (on ChromeOS when not logged in
+    ExtensionService* service = GetProfile()->GetExtensionService();
+    // We might not have an ExtensionService (on ChromeOS when not logged in
     // for example).
     if (service)
       AddMessageHandler((new AppLauncherHandler(service))->Attach(this));
@@ -395,7 +335,7 @@ NewTabUI::NewTabUI(TabContents* contents)
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(html_source)));
 
@@ -410,30 +350,74 @@ NewTabUI::NewTabUI(TabContents* contents)
 NewTabUI::~NewTabUI() {
 }
 
+// The timer callback.  If enough time has elapsed since the last paint
+// message, we say we're done painting; otherwise, we keep waiting.
+void NewTabUI::PaintTimeout() {
+  // The amount of time there must be no painting for us to consider painting
+  // finished.  Observed times are in the ~1200ms range on Windows.
+  base::TimeTicks now = base::TimeTicks::Now();
+  if ((now - last_paint_) >= base::TimeDelta::FromMilliseconds(kTimeoutMs)) {
+    // Painting has quieted down.  Log this as the full time to run.
+    base::TimeDelta load_time = last_paint_ - start_;
+    int load_time_ms = static_cast<int>(load_time.InMilliseconds());
+    NotificationService::current()->Notify(
+        NotificationType::INITIAL_NEW_TAB_UI_LOAD,
+        NotificationService::AllSources(),
+        Details<int>(&load_time_ms));
+    UMA_HISTOGRAM_TIMES("NewTabUI load", load_time);
+  } else {
+    // Not enough quiet time has elapsed.
+    // Some more paints must've occurred since we set the timeout.
+    // Wait some more.
+    timer_.Start(base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
+                 &NewTabUI::PaintTimeout);
+  }
+}
+
+void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
+  start_ = base::TimeTicks::Now();
+  last_paint_ = start_;
+  registrar_.Add(this, NotificationType::RENDER_WIDGET_HOST_DID_PAINT,
+      Source<RenderWidgetHost>(render_view_host));
+  timer_.Start(base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
+               &NewTabUI::PaintTimeout);
+
+}
 void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
-  render_view_host->set_paint_observer(new PaintTimer);
+  StartTimingPaint(render_view_host);
 }
 
 void NewTabUI::RenderViewReused(RenderViewHost* render_view_host) {
-  render_view_host->set_paint_observer(new PaintTimer);
+  StartTimingPaint(render_view_host);
 }
 
 void NewTabUI::Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-  if (NotificationType::BROWSER_THEME_CHANGED == type) {
-    InitializeCSSCaches();
-    ListValue args;
-    args.Append(Value::CreateStringValue(
-        GetProfile()->GetThemeProvider()->HasCustomImage(
-            IDR_THEME_NTP_ATTRIBUTION) ?
-        "true" : "false"));
-    CallJavascriptFunction(L"themeChanged", args);
-  } else if (NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED) {
-    if (GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar))
-      CallJavascriptFunction(L"bookmarkBarAttached");
-    else
-      CallJavascriptFunction(L"bookmarkBarDetached");
+  switch (type.value) {
+    case NotificationType::BROWSER_THEME_CHANGED: {
+      InitializeCSSCaches();
+      ListValue args;
+      args.Append(Value::CreateStringValue(
+          GetProfile()->GetThemeProvider()->HasCustomImage(
+              IDR_THEME_NTP_ATTRIBUTION) ?
+          "true" : "false"));
+      CallJavascriptFunction(L"themeChanged", args);
+      break;
+    }
+    case NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED: {
+      if (GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar))
+        CallJavascriptFunction(L"bookmarkBarAttached");
+      else
+        CallJavascriptFunction(L"bookmarkBarDetached");
+      break;
+    }
+    case NotificationType::RENDER_WIDGET_HOST_DID_PAINT: {
+      last_paint_ = base::TimeTicks::Now();
+      break;
+    }
+    default:
+      CHECK(false) << "Unexpected notification: " << type.value;
   }
 }
 
@@ -442,7 +426,7 @@ void NewTabUI::InitializeCSSCaches() {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(theme)));
 }

@@ -1,29 +1,27 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/options_window.h"
-
-#include "app/l10n_util.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/chromeos/options/internet_page_view.h"
 #include "chrome/browser/chromeos/options/system_page_view.h"
-#include "chrome/browser/gtk/options/advanced_page_gtk.h"
-#include "chrome/browser/gtk/options/content_page_gtk.h"
-#include "chrome/browser/gtk/options/general_page_gtk.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/views/accessible_view_helper.h"
-#include "chrome/browser/views/window.h"
-#include "chrome/browser/window_sizer.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/gtk/options/advanced_page_gtk.h"
+#include "chrome/browser/ui/gtk/options/content_page_gtk.h"
+#include "chrome/browser/ui/gtk/options/general_page_gtk.h"
+#include "chrome/browser/ui/options/options_window.h"
+#include "chrome/browser/ui/views/accessible_view_helper.h"
+#include "chrome/browser/ui/views/window.h"
+#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/tabbed_pane/native_tabbed_pane_gtk.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
@@ -214,8 +212,9 @@ void OptionsWindowView::ShowOptionsPage(OptionsPage page,
 // OptionsWindowView, views::DialogDelegate implementation:
 
 std::wstring OptionsWindowView::GetWindowTitle() const {
-  return l10n_util::GetStringF(IDS_OPTIONS_DIALOG_TITLE,
-                               l10n_util::GetString(IDS_PRODUCT_NAME));
+  return UTF16ToWide(
+      l10n_util::GetStringFUTF16(IDS_OPTIONS_DIALOG_TITLE,
+                                 l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
 }
 
 void OptionsWindowView::WindowClosing() {
@@ -301,30 +300,35 @@ void OptionsWindowView::Init() {
   system_page->set_background(views::Background::CreateSolidBackground(
       SK_ColorWHITE));
   tabs_->AddTabAtIndex(tab_index++,
-                       l10n_util::GetString(IDS_OPTIONS_SYSTEM_TAB_LABEL),
+                       UTF16ToWide(l10n_util::GetStringUTF16(
+                           IDS_OPTIONS_SYSTEM_TAB_LABEL)),
                        system_page, false);
 
   InternetPageView* internet_page = new InternetPageView(profile_);
   internet_page->set_background(views::Background::CreateSolidBackground(
       SK_ColorWHITE));
   tabs_->AddTabAtIndex(tab_index++,
-                       l10n_util::GetString(IDS_OPTIONS_INTERNET_TAB_LABEL),
+                       UTF16ToWide(l10n_util::GetStringUTF16(
+                           IDS_OPTIONS_INTERNET_TAB_LABEL)),
                        internet_page, false);
 
   tabs_->AddTabAtIndex(tab_index++,
-                       l10n_util::GetString(IDS_OPTIONS_GENERAL_TAB_LABEL),
+                       UTF16ToWide(l10n_util::GetStringUTF16(
+                           IDS_OPTIONS_GENERAL_TAB_LABEL)),
                        new GtkPreferencePageHost(
                            general_page_.get_page_widget()),
                        false);
 
   tabs_->AddTabAtIndex(tab_index++,
-                       l10n_util::GetString(IDS_OPTIONS_CONTENT_TAB_LABEL),
+                       UTF16ToWide(l10n_util::GetStringUTF16(
+                           IDS_OPTIONS_CONTENT_TAB_LABEL)),
                        new GtkPreferencePageHost(
                            content_page_.get_page_widget()),
                        false);
 
   tabs_->AddTabAtIndex(tab_index++,
-                       l10n_util::GetString(IDS_OPTIONS_ADVANCED_TAB_LABEL),
+                       UTF16ToWide(l10n_util::GetStringUTF16(
+                           IDS_OPTIONS_ADVANCED_TAB_LABEL)),
                        new GtkPreferencePageHost(
                            advanced_page_.get_page_widget()),
                        false);

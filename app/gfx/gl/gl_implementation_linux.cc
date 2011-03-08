@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "app/gfx/gl/gl_bindings.h"
-#include "app/gfx/gl/gl_context_stub.h"
 #include "app/gfx/gl/gl_implementation.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
@@ -48,7 +47,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
       base::NativeLibrary library = base::LoadNativeLibrary(
           module_path.Append("libosmesa.so"));
       if (!library) {
-        DVLOG(1) << "libosmesa.so not found";
+        VLOG(1) << "libosmesa.so not found";
         return false;
       }
 
@@ -57,7 +56,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
               base::GetFunctionPointerFromNativeLibrary(
                   library, "OSMesaGetProcAddress"));
       if (!get_proc_address) {
-        DLOG(ERROR) << "OSMesaGetProcAddress not found.";
+        LOG(ERROR) << "OSMesaGetProcAddress not found.";
         base::UnloadNativeLibrary(library);
         return false;
       }
@@ -74,7 +73,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
       base::NativeLibrary library = base::LoadNativeLibrary(
           FilePath("libGL.so.1"));
       if (!library) {
-        LOG(ERROR) << "libGL.so.1 not found.";
+        VLOG(1) << "libGL.so.1 not found.";
         return false;
       }
 
@@ -100,14 +99,14 @@ bool InitializeGLBindings(GLImplementation implementation) {
       base::NativeLibrary gles_library = base::LoadNativeLibrary(
           FilePath("libGLESv2.so"));
       if (!gles_library) {
-        DLOG(ERROR) << "libGLESv2.so not found";
+        VLOG(1) << "libGLESv2.so not found";
         return false;
       }
 
       base::NativeLibrary egl_library = base::LoadNativeLibrary(
           FilePath("libEGL.so"));
       if (!egl_library) {
-        DLOG(ERROR) << "libEGL.so not found";
+        VLOG(1) << "libEGL.so not found";
         base::UnloadNativeLibrary(gles_library);
         return false;
       }

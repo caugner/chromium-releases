@@ -13,13 +13,15 @@
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
 
+namespace pp {
+
 namespace {
 
-DeviceFuncs<PPB_ImageData> image_data_f(PPB_IMAGEDATA_INTERFACE);
+template <> const char* interface_name<PPB_ImageData>() {
+  return PPB_IMAGEDATA_INTERFACE;
+}
 
 }  // namespace
-
-namespace pp {
 
 ImageData::ImageData() : data_(NULL) {
   memset(&desc_, 0, sizeof(PP_ImageDataDesc));
@@ -35,39 +37,32 @@ ImageData::ImageData(PassRef, PP_Resource resource)
     : data_(NULL) {
   memset(&desc_, 0, sizeof(PP_ImageDataDesc));
 
-  if (!image_data_f)
+  if (!has_interface<PPB_ImageData>())
     return;
 
   PassRefAndInitData(resource);
 }
 
-ImageData::ImageData(PP_ImageDataFormat format,
+ImageData::ImageData(Instance* instance,
+                     PP_ImageDataFormat format,
                      const Size& size,
                      bool init_to_zero)
     : data_(NULL) {
   memset(&desc_, 0, sizeof(PP_ImageDataDesc));
 
-  if (!image_data_f)
+  if (!has_interface<PPB_ImageData>())
     return;
 
-  PassRefAndInitData(image_data_f->Create(Module::Get()->pp_module(),
-                                          format, &size.pp_size(),
-                                          BoolToPPBool(init_to_zero)));
-}
-
-ImageData::~ImageData() {
+  PassRefAndInitData(get_interface<PPB_ImageData>()->Create(
+      instance->pp_instance(), format, &size.pp_size(),
+      BoolToPPBool(init_to_zero)));
 }
 
 ImageData& ImageData::operator=(const ImageData& other) {
-  ImageData copy(other);
-  swap(copy);
+  Resource::operator=(other);
+  desc_ = other.desc_;
+  data_ = other.data_;
   return *this;
-}
-
-void ImageData::swap(ImageData& other) {
-  Resource::swap(other);
-  std::swap(desc_, other.desc_);
-  std::swap(data_, other.data_);
 }
 
 const uint32_t* ImageData::GetAddr32(const Point& coord) const {
@@ -84,15 +79,15 @@ uint32_t* ImageData::GetAddr32(const Point& coord) {
 
 // static
 PP_ImageDataFormat ImageData::GetNativeImageDataFormat() {
-  if (!image_data_f)
+  if (!has_interface<PPB_ImageData>())
     return PP_IMAGEDATAFORMAT_BGRA_PREMUL;  // Default to something on failure.
-  return image_data_f->GetNativeImageDataFormat();
+  return get_interface<PPB_ImageData>()->GetNativeImageDataFormat();
 }
 
 void ImageData::PassRefAndInitData(PP_Resource resource) {
   PassRefFromConstructor(resource);
-  if (!image_data_f->Describe(pp_resource(), &desc_) ||
-      !(data_ = image_data_f->Map(pp_resource())))
+  if (!get_interface<PPB_ImageData>()->Describe(pp_resource(), &desc_) ||
+      !(data_ = get_interface<PPB_ImageData>()->Map(pp_resource())))
     *this = ImageData();
 }
 

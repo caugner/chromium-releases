@@ -1,10 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/automation/automation_provider_observers.h"
 
 #include <deque>
+#include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
@@ -13,7 +15,7 @@
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/automation/automation_provider.h"
@@ -30,22 +32,26 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/login_prompt.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/notifications/balloon.h"
+#include "chrome/browser/notifications/balloon_host.h"
 #include "chrome/browser/notifications/balloon_collection.h"
+#include "chrome/browser/notifications/notification.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/printing/print_job.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
-#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/translate/page_translated_details.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/login/login_prompt.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
@@ -158,7 +164,7 @@ void NewTabUILoadObserver::Observe(NotificationType type,
   if (type == NotificationType::INITIAL_NEW_TAB_UI_LOAD) {
     Details<int> load_time(details);
     automation_->Send(
-        new AutomationMsg_InitialNewTabUILoadComplete(0, *load_time.ptr()));
+        new AutomationMsg_InitialNewTabUILoadComplete(*load_time.ptr()));
   } else {
     NOTREACHED();
   }
@@ -544,8 +550,6 @@ ExtensionUnloadNotificationObserver::ExtensionUnloadNotificationObserver()
     : did_receive_unload_notification_(false) {
   registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED_DISABLED,
-                 NotificationService::AllSources());
 }
 
 ExtensionUnloadNotificationObserver::~ExtensionUnloadNotificationObserver() {
@@ -554,8 +558,7 @@ ExtensionUnloadNotificationObserver::~ExtensionUnloadNotificationObserver() {
 void ExtensionUnloadNotificationObserver::Observe(
     NotificationType type, const NotificationSource& source,
     const NotificationDetails& details) {
-  if (type.value == NotificationType::EXTENSION_UNLOADED ||
-      type.value == NotificationType::EXTENSION_UNLOADED_DISABLED) {
+  if (type.value == NotificationType::EXTENSION_UNLOADED) {
     did_receive_unload_notification_ = true;
   } else {
     NOTREACHED();
@@ -693,7 +696,8 @@ BrowserCountChangeNotificationObserver::BrowserCountChangeNotificationObserver(
 }
 
 void BrowserCountChangeNotificationObserver::Observe(
-    NotificationType type, const NotificationSource& source,
+    NotificationType type,
+    const NotificationSource& source,
     const NotificationDetails& details) {
   DCHECK(type == NotificationType::BROWSER_OPENED ||
          type == NotificationType::BROWSER_CLOSED);
@@ -756,6 +760,7 @@ const struct CommandNotification command_notifications[] = {
   // load to finish, and title to change.
   {IDC_MANAGE_EXTENSIONS, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
   {IDC_OPTIONS, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
+  {IDC_PRINT, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
   {IDC_SHOW_DOWNLOADS, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
   {IDC_SHOW_HISTORY, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
 };
@@ -819,6 +824,7 @@ void ExecuteBrowserCommandObserver::Observe(
     AutomationMsg_WindowExecuteCommand::WriteReplyParams(reply_message_,
                                                          true);
     automation_->Send(reply_message_);
+    reply_message_ = NULL;
     delete this;
   } else {
     NOTREACHED();
@@ -1166,6 +1172,15 @@ AutomationProviderBookmarkModelObserver::
   model_->RemoveObserver(this);
 }
 
+void AutomationProviderBookmarkModelObserver::Loaded(BookmarkModel* model) {
+  ReplyAndDelete(true);
+}
+
+void AutomationProviderBookmarkModelObserver::BookmarkModelBeingDeleted(
+    BookmarkModel* model) {
+  ReplyAndDelete(false);
+}
+
 void AutomationProviderBookmarkModelObserver::ReplyAndDelete(bool success) {
   AutomationMsg_WaitForBookmarkModelToLoad::WriteReplyParams(
       reply_message_, success);
@@ -1377,7 +1392,8 @@ void PageSnapshotTaker::OnDomOperationCompleted(const std::string& json) {
     // Don't actually start the thumbnail generator, this leads to crashes on
     // Mac, crbug.com/62986. Instead, just hook the generator to the
     // RenderViewHost manually.
-    render_view_->set_painting_observer(generator);
+
+    generator->MonitorRenderer(render_view_, true);
     generator->AskForSnapshot(render_view_, false, callback,
                               entire_page_size_, entire_page_size_);
   }
@@ -1417,7 +1433,7 @@ NTPInfoObserver::NTPInfoObserver(
         : automation_(automation),
           reply_message_(reply_message),
           consumer_(consumer),
-          request_(NULL),
+          request_(0),
           ntp_info_(new DictionaryValue) {
   top_sites_ = automation_->profile()->GetTopSites();
   if (!top_sites_) {
@@ -1456,6 +1472,8 @@ NTPInfoObserver::NTPInfoObserver(
                    Source<Profile>(automation_->profile()));
   }
 }
+
+NTPInfoObserver::~NTPInfoObserver() {}
 
 void NTPInfoObserver::Observe(NotificationType type,
                               const NotificationSource& source,
@@ -1516,6 +1534,75 @@ void AutocompleteEditFocusedObserver::Observe(
   delete this;
 }
 
+namespace {
+
+// Returns whether the notification's host has a non-null process handle.
+bool IsNotificationProcessReady(Balloon* balloon) {
+  return balloon->view() &&
+         balloon->view()->GetHost() &&
+         balloon->view()->GetHost()->render_view_host() &&
+         balloon->view()->GetHost()->render_view_host()->process()->GetHandle();
+}
+
+// Returns whether all active notifications have an associated process ID.
+bool AreActiveNotificationProcessesReady() {
+  NotificationUIManager* manager = g_browser_process->notification_ui_manager();
+  const BalloonCollection::Balloons& balloons =
+      manager->balloon_collection()->GetActiveBalloons();
+  BalloonCollection::Balloons::const_iterator iter;
+  for (iter = balloons.begin(); iter != balloons.end(); ++iter) {
+    if (!IsNotificationProcessReady(*iter))
+      return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+GetActiveNotificationsObserver::GetActiveNotificationsObserver(
+    AutomationProvider* automation,
+    IPC::Message* reply_message)
+    : reply_(automation, reply_message) {
+  if (AreActiveNotificationProcessesReady()) {
+    SendMessage();
+  } else {
+    registrar_.Add(this, NotificationType::RENDERER_PROCESS_CREATED,
+                   NotificationService::AllSources());
+  }
+}
+
+void GetActiveNotificationsObserver::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  if (AreActiveNotificationProcessesReady())
+    SendMessage();
+}
+
+void GetActiveNotificationsObserver::SendMessage() {
+  NotificationUIManager* manager =
+      g_browser_process->notification_ui_manager();
+  const BalloonCollection::Balloons& balloons =
+      manager->balloon_collection()->GetActiveBalloons();
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  ListValue* list = new ListValue;
+  return_value->Set("notifications", list);
+  BalloonCollection::Balloons::const_iterator iter;
+  for (iter = balloons.begin(); iter != balloons.end(); ++iter) {
+    const Notification& notification = (*iter)->notification();
+    DictionaryValue* balloon = new DictionaryValue;
+    balloon->SetString("content_url", notification.content_url().spec());
+    balloon->SetString("origin_url", notification.origin_url().spec());
+    balloon->SetString("display_source", notification.display_source());
+    BalloonView* view = (*iter)->view();
+    balloon->SetInteger("pid", base::GetProcId(
+        view->GetHost()->render_view_host()->process()->GetHandle()));
+    list->Append(balloon);
+  }
+  reply_.SendSuccess(return_value.get());
+  delete this;
+}
+
 OnNotificationBalloonCountObserver::OnNotificationBalloonCountObserver(
     AutomationProvider* provider,
     IPC::Message* reply_message,
@@ -1534,4 +1621,21 @@ void OnNotificationBalloonCountObserver::OnBalloonCollectionChanged() {
     reply_.SendSuccess(NULL);
     delete this;
   }
+}
+
+RendererProcessClosedObserver::RendererProcessClosedObserver(
+    AutomationProvider* automation,
+    IPC::Message* reply_message)
+    : automation_(automation),
+      reply_message_(reply_message) {
+  registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSED,
+                 NotificationService::AllSources());
+}
+
+void RendererProcessClosedObserver::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  AutomationJSONReply(automation_, reply_message_).SendSuccess(NULL);
+  delete this;
 }

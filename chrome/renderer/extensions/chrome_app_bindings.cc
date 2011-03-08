@@ -6,11 +6,11 @@
 
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "v8/include/v8.h"
 
 using WebKit::WebFrame;
@@ -57,7 +57,8 @@ class ChromeAppExtensionWrapper : public v8::Extension {
         !(url.SchemeIs("http") || url.SchemeIs("https")))
       return v8::Boolean::New(false);
 
-    bool has_web_extent = (ExtensionRendererInfo::GetByURL(url) != NULL);
+    bool has_web_extent =
+        RenderThread::current()->GetExtensions()->GetByURL(url) != NULL;
     return v8::Boolean::New(has_web_extent);
   }
 

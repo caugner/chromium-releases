@@ -10,6 +10,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/auth.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -36,9 +37,11 @@ class SSLClientSocketPoolTest : public testing::Test {
  protected:
   SSLClientSocketPoolTest()
       : host_resolver_(new MockHostResolver),
+        cert_verifier_(new CertVerifier),
         http_auth_handler_factory_(HttpAuthHandlerFactory::CreateDefault(
             host_resolver_.get())),
         session_(new HttpNetworkSession(host_resolver_.get(),
+                                        cert_verifier_.get(),
                                         NULL /* dnsrr_resolver */,
                                         NULL /* dns_cert_checker */,
                                         NULL /* ssl_host_info_factory */,
@@ -96,7 +99,8 @@ class SSLClientSocketPoolTest : public testing::Test {
         kMaxSockets,
         kMaxSocketsPerGroup,
         ssl_histograms_.get(),
-        NULL,
+        NULL /* host_resolver */,
+        NULL /* cert_verifier */,
         NULL /* dnsrr_resolver */,
         NULL /* dns_cert_checker */,
         NULL /* ssl_host_info_factory */,
@@ -125,12 +129,18 @@ class SSLClientSocketPoolTest : public testing::Test {
   void AddAuthToCache() {
     const string16 kFoo(ASCIIToUTF16("foo"));
     const string16 kBar(ASCIIToUTF16("bar"));
-    session_->auth_cache()->Add(GURL("http://proxy:443/"), "MyRealm1", "Basic",
-                                "Basic realm=MyRealm1", kFoo, kBar, "/");
+    session_->auth_cache()->Add(GURL("http://proxy:443/"),
+                                "MyRealm1",
+                                HttpAuth::AUTH_SCHEME_BASIC,
+                                "Basic realm=MyRealm1",
+                                kFoo,
+                                kBar,
+                                "/");
   }
 
   MockClientSocketFactory socket_factory_;
   scoped_ptr<HostResolver> host_resolver_;
+  scoped_ptr<CertVerifier> cert_verifier_;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
   scoped_refptr<HttpNetworkSession> session_;
 

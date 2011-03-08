@@ -7,6 +7,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
+#include "base/values.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/backend_impl.h"
@@ -24,14 +25,93 @@ namespace {
 // Index for the file used to store the key, if any (files_[kKeyFileIndex]).
 const int kKeyFileIndex = 3;
 
+// NetLog parameters for the creation of an EntryImpl.  Contains an entry's name
+// and whether it was created or opened.
+class EntryCreationParameters : public net::NetLog::EventParameters {
+ public:
+  EntryCreationParameters(const std::string& key, bool created)
+      : key_(key), created_(created) {
+  }
+
+  Value* ToValue() const {
+    DictionaryValue* dict = new DictionaryValue();
+    dict->SetString("key", key_);
+    dict->SetBoolean("created", created_);
+    return dict;
+  }
+
+ private:
+  const std::string key_;
+  const bool created_;
+
+  DISALLOW_COPY_AND_ASSIGN(EntryCreationParameters);
+};
+
+// NetLog parameters for non-sparse reading and writing to an EntryImpl.
+class ReadWriteDataParams : public net::NetLog::EventParameters {
+ public:
+  // For reads, |truncate| must be false.
+  ReadWriteDataParams(int index, int offset, int buf_len, bool truncate)
+      : index_(index), offset_(offset), buf_len_(buf_len), truncate_(truncate) {
+  }
+
+  Value* ToValue() const {
+    DictionaryValue* dict = new DictionaryValue();
+    dict->SetInteger("index", index_);
+    dict->SetInteger("offset", offset_);
+    dict->SetInteger("buf_len", buf_len_);
+    if (truncate_)
+      dict->SetBoolean("truncate", truncate_);
+    return dict;
+  }
+
+ private:
+  const int index_;
+  const int offset_;
+  const int buf_len_;
+  const bool truncate_;
+
+  DISALLOW_COPY_AND_ASSIGN(ReadWriteDataParams);
+};
+
+// NetLog parameters logged when non-sparse reads and writes complete.
+class FileIOCompleteParameters : public net::NetLog::EventParameters {
+ public:
+  // |bytes_copied| is either the number of bytes copied or a network error
+  // code.  |bytes_copied| must not be ERR_IO_PENDING, as it's not a valid
+  // result for an operation.
+  explicit FileIOCompleteParameters(int bytes_copied)
+      : bytes_copied_(bytes_copied) {
+  }
+
+  Value* ToValue() const {
+    DCHECK_NE(bytes_copied_, net::ERR_IO_PENDING);
+    DictionaryValue* dict = new DictionaryValue();
+    if (bytes_copied_ < 0) {
+      dict->SetInteger("net_error", bytes_copied_);
+    } else {
+      dict->SetInteger("bytes_copied", bytes_copied_);
+    }
+    return dict;
+  }
+
+ private:
+  const int bytes_copied_;
+
+  DISALLOW_COPY_AND_ASSIGN(FileIOCompleteParameters);
+};
+
 // This class implements FileIOCallback to buffer the callback from a file IO
 // operation from the actual net class.
 class SyncCallback: public disk_cache::FileIOCallback {
  public:
+  // |end_event_type| is the event type to log on completion.  Logs nothing on
+  // discard, or when the NetLog is not set to log all events.
   SyncCallback(disk_cache::EntryImpl* entry, net::IOBuffer* buffer,
-               net::CompletionCallback* callback )
+               net::CompletionCallback* callback,
+               net::NetLog::EventType end_event_type)
       : entry_(entry), callback_(callback), buf_(buffer),
-        start_(TimeTicks::Now()) {
+        start_(TimeTicks::Now()), end_event_type_(end_event_type) {
     entry->AddRef();
     entry->IncrementIoCount();
   }
@@ -39,11 +119,13 @@ class SyncCallback: public disk_cache::FileIOCallback {
 
   virtual void OnFileIOComplete(int bytes_copied);
   void Discard();
+
  private:
   disk_cache::EntryImpl* entry_;
   net::CompletionCallback* callback_;
   scoped_refptr<net::IOBuffer> buf_;
   TimeTicks start_;
+  net::NetLog::EventType end_event_type_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncCallback);
 };
@@ -51,6 +133,11 @@ class SyncCallback: public disk_cache::FileIOCallback {
 void SyncCallback::OnFileIOComplete(int bytes_copied) {
   entry_->DecrementIoCount();
   if (callback_) {
+    if (entry_->net_log().IsLoggingAllEvents()) {
+      entry_->net_log().EndEvent(
+          end_event_type_,
+          make_scoped_refptr(new FileIOCompleteParameters(bytes_copied)));
+    }
     entry_->ReportIOTime(disk_cache::EntryImpl::kAsyncIO, start_);
     callback_->Run(bytes_copied);
   }
@@ -288,48 +375,333 @@ EntryImpl::EntryImpl(BackendImpl* backend, Addr address, bool read_only)
   }
 }
 
-// When an entry is deleted from the cache, we clean up all the data associated
-// with it for two reasons: to simplify the reuse of the block (we know that any
-// unused block is filled with zeros), and to simplify the handling of write /
-// read partial information from an entry (don't have to worry about returning
-// data related to a previous cache entry because the range was not fully
-// written before).
-EntryImpl::~EntryImpl() {
-  Log("~EntryImpl in");
-  backend_->OnEntryDestroyBegin(entry_.address());
+void EntryImpl::DoomImpl() {
+  if (doomed_)
+    return;
 
-  // Save the sparse info to disk before deleting this entry.
-  sparse_.reset();
+  SetPointerForInvalidEntry(backend_->GetCurrentEntryId());
+  backend_->InternalDoomEntry(this);
+}
 
-  if (doomed_) {
-    DeleteEntryData(true);
-  } else {
-    bool ret = true;
-    for (int index = 0; index < kNumStreams; index++) {
-      if (user_buffers_[index].get()) {
-        if (!(ret = Flush(index, 0)))
-          LOG(ERROR) << "Failed to save user data";
-      }
-      if (unreported_size_[index]) {
-        backend_->ModifyStorageSize(
-            entry_.Data()->data_size[index] - unreported_size_[index],
-            entry_.Data()->data_size[index]);
-      }
+int EntryImpl::ReadDataImpl(int index, int offset, net::IOBuffer* buf,
+                            int buf_len, CompletionCallback* callback) {
+  if (net_log_.IsLoggingAllEvents()) {
+    net_log_.BeginEvent(
+        net::NetLog::TYPE_DISK_CACHE_READ_DATA,
+        make_scoped_refptr(
+            new ReadWriteDataParams(index, offset, buf_len, false)));
+  }
+
+  int result = InternalReadData(index, offset, buf, buf_len, callback);
+
+  if (result != net::ERR_IO_PENDING && net_log_.IsLoggingAllEvents()) {
+    net_log_.EndEvent(
+        net::NetLog::TYPE_DISK_CACHE_READ_DATA,
+        make_scoped_refptr(new FileIOCompleteParameters(result)));
+  }
+  return result;
+}
+
+int EntryImpl::WriteDataImpl(int index, int offset, net::IOBuffer* buf,
+                             int buf_len, CompletionCallback* callback,
+                             bool truncate) {
+  if (net_log_.IsLoggingAllEvents()) {
+    net_log_.BeginEvent(
+        net::NetLog::TYPE_DISK_CACHE_WRITE_DATA,
+        make_scoped_refptr(
+            new ReadWriteDataParams(index, offset, buf_len, truncate)));
+  }
+
+  int result = InternalWriteData(index, offset, buf, buf_len, callback,
+                                 truncate);
+
+  if (result != net::ERR_IO_PENDING && net_log_.IsLoggingAllEvents()) {
+    net_log_.EndEvent(
+        net::NetLog::TYPE_DISK_CACHE_WRITE_DATA,
+        make_scoped_refptr(new FileIOCompleteParameters(result)));
+  }
+  return result;
+}
+
+int EntryImpl::ReadSparseDataImpl(int64 offset, net::IOBuffer* buf, int buf_len,
+                                  CompletionCallback* callback) {
+  DCHECK(node_.Data()->dirty || read_only_);
+  int result = InitSparseData();
+  if (net::OK != result)
+    return result;
+
+  TimeTicks start = TimeTicks::Now();
+  result = sparse_->StartIO(SparseControl::kReadOperation, offset, buf, buf_len,
+                            callback);
+  ReportIOTime(kSparseRead, start);
+  return result;
+}
+
+int EntryImpl::WriteSparseDataImpl(int64 offset, net::IOBuffer* buf,
+                                   int buf_len, CompletionCallback* callback) {
+  DCHECK(node_.Data()->dirty || read_only_);
+  int result = InitSparseData();
+  if (net::OK != result)
+    return result;
+
+  TimeTicks start = TimeTicks::Now();
+  result = sparse_->StartIO(SparseControl::kWriteOperation, offset, buf,
+                            buf_len, callback);
+  ReportIOTime(kSparseWrite, start);
+  return result;
+}
+
+int EntryImpl::GetAvailableRangeImpl(int64 offset, int len, int64* start) {
+  int result = InitSparseData();
+  if (net::OK != result)
+    return result;
+
+  return sparse_->GetAvailableRange(offset, len, start);
+}
+
+void EntryImpl::CancelSparseIOImpl() {
+  if (!sparse_.get())
+    return;
+
+  sparse_->CancelIO();
+}
+
+int EntryImpl::ReadyForSparseIOImpl(CompletionCallback* callback) {
+  DCHECK(sparse_.get());
+  return sparse_->ReadyToUse(callback);
+}
+
+uint32 EntryImpl::GetHash() {
+  return entry_.Data()->hash;
+}
+
+bool EntryImpl::CreateEntry(Addr node_address, const std::string& key,
+                            uint32 hash) {
+  Trace("Create entry In");
+  EntryStore* entry_store = entry_.Data();
+  RankingsNode* node = node_.Data();
+  memset(entry_store, 0, sizeof(EntryStore) * entry_.address().num_blocks());
+  memset(node, 0, sizeof(RankingsNode));
+  if (!node_.LazyInit(backend_->File(node_address), node_address))
+    return false;
+
+  entry_store->rankings_node = node_address.value();
+  node->contents = entry_.address().value();
+
+  entry_store->hash = hash;
+  entry_store->creation_time = Time::Now().ToInternalValue();
+  entry_store->key_len = static_cast<int32>(key.size());
+  if (entry_store->key_len > kMaxInternalKeyLength) {
+    Addr address(0);
+    if (!CreateBlock(entry_store->key_len + 1, &address))
+      return false;
+
+    entry_store->long_key = address.value();
+    File* key_file = GetBackingFile(address, kKeyFileIndex);
+    key_ = key;
+
+    size_t offset = 0;
+    if (address.is_block_file())
+      offset = address.start_block() * address.BlockSize() + kBlockHeaderSize;
+
+    if (!key_file || !key_file->Write(key.data(), key.size(), offset)) {
+      DeleteData(address, kKeyFileIndex);
+      return false;
     }
 
-    if (!ret) {
-      // There was a failure writing the actual data. Mark the entry as dirty.
-      int current_id = backend_->GetCurrentEntryId();
-      node_.Data()->dirty = current_id == 1 ? -1 : current_id - 1;
-      node_.Store();
-    } else if (node_.HasData() && node_.Data()->dirty) {
-      node_.Data()->dirty = 0;
-      node_.Store();
+    if (address.is_separate_file())
+      key_file->SetLength(key.size() + 1);
+  } else {
+    memcpy(entry_store->key, key.data(), key.size());
+    entry_store->key[key.size()] = '\0';
+  }
+  backend_->ModifyStorageSize(0, static_cast<int32>(key.size()));
+  CACHE_UMA(COUNTS, "KeySize", 0, static_cast<int32>(key.size()));
+  node->dirty = backend_->GetCurrentEntryId();
+  Log("Create Entry ");
+  return true;
+}
+
+bool EntryImpl::IsSameEntry(const std::string& key, uint32 hash) {
+  if (entry_.Data()->hash != hash ||
+      static_cast<size_t>(entry_.Data()->key_len) != key.size())
+    return false;
+
+  std::string my_key = GetKey();
+  return key.compare(my_key) ? false : true;
+}
+
+void EntryImpl::InternalDoom() {
+  net_log_.AddEvent(net::NetLog::TYPE_DISK_CACHE_DOOM, NULL);
+  DCHECK(node_.HasData());
+  if (!node_.Data()->dirty) {
+    node_.Data()->dirty = backend_->GetCurrentEntryId();
+    node_.Store();
+  }
+  doomed_ = true;
+}
+
+void EntryImpl::DeleteEntryData(bool everything) {
+  DCHECK(doomed_ || !everything);
+
+  if (GetEntryFlags() & PARENT_ENTRY) {
+    // We have some child entries that must go away.
+    SparseControl::DeleteChildren(this);
+  }
+
+  if (GetDataSize(0))
+    CACHE_UMA(COUNTS, "DeleteHeader", 0, GetDataSize(0));
+  if (GetDataSize(1))
+    CACHE_UMA(COUNTS, "DeleteData", 0, GetDataSize(1));
+  for (int index = 0; index < kNumStreams; index++) {
+    Addr address(entry_.Data()->data_addr[index]);
+    if (address.is_initialized()) {
+      backend_->ModifyStorageSize(entry_.Data()->data_size[index] -
+                                      unreported_size_[index], 0);
+      entry_.Data()->data_addr[index] = 0;
+      entry_.Data()->data_size[index] = 0;
+      entry_.Store();
+      DeleteData(address, index);
     }
   }
 
-  Trace("~EntryImpl out 0x%p", reinterpret_cast<void*>(this));
-  backend_->OnEntryDestroyEnd();
+  if (!everything)
+    return;
+
+  // Remove all traces of this entry.
+  backend_->RemoveEntry(this);
+
+  Addr address(entry_.Data()->long_key);
+  DeleteData(address, kKeyFileIndex);
+  backend_->ModifyStorageSize(entry_.Data()->key_len, 0);
+
+  memset(node_.buffer(), 0, node_.size());
+  memset(entry_.buffer(), 0, entry_.size());
+  node_.Store();
+  entry_.Store();
+
+  backend_->DeleteBlock(node_.address(), false);
+  backend_->DeleteBlock(entry_.address(), false);
+}
+
+CacheAddr EntryImpl::GetNextAddress() {
+  return entry_.Data()->next;
+}
+
+void EntryImpl::SetNextAddress(Addr address) {
+  DCHECK_NE(address.value(), entry_.address().value());
+  entry_.Data()->next = address.value();
+  bool success = entry_.Store();
+  DCHECK(success);
+}
+
+bool EntryImpl::LoadNodeAddress() {
+  Addr address(entry_.Data()->rankings_node);
+  if (!node_.LazyInit(backend_->File(address), address))
+    return false;
+  return node_.Load();
+}
+
+bool EntryImpl::Update() {
+  DCHECK(node_.HasData());
+
+  if (read_only_)
+    return true;
+
+  RankingsNode* rankings = node_.Data();
+  if (!rankings->dirty) {
+    rankings->dirty = backend_->GetCurrentEntryId();
+    if (!node_.Store())
+      return false;
+  }
+  return true;
+}
+
+bool EntryImpl::IsDirty(int32 current_id) {
+  DCHECK(node_.HasData());
+  // We are checking if the entry is valid or not. If there is a pointer here,
+  // we should not be checking the entry.
+  if (node_.Data()->dummy)
+    return true;
+
+  return node_.Data()->dirty && current_id != node_.Data()->dirty;
+}
+
+void EntryImpl::ClearDirtyFlag() {
+  node_.Data()->dirty = 0;
+}
+
+void EntryImpl::SetPointerForInvalidEntry(int32 new_id) {
+  node_.Data()->dirty = new_id;
+  node_.Data()->dummy = 0;
+  node_.Store();
+}
+
+bool EntryImpl::SanityCheck() {
+  if (!entry_.Data()->rankings_node || !entry_.Data()->key_len)
+    return false;
+
+  Addr rankings_addr(entry_.Data()->rankings_node);
+  if (!rankings_addr.is_initialized() || rankings_addr.is_separate_file() ||
+      rankings_addr.file_type() != RANKINGS)
+    return false;
+
+  Addr next_addr(entry_.Data()->next);
+  if (next_addr.is_initialized() &&
+      (next_addr.is_separate_file() || next_addr.file_type() != BLOCK_256))
+    return false;
+
+  return true;
+}
+
+void EntryImpl::IncrementIoCount() {
+  backend_->IncrementIoCount();
+}
+
+void EntryImpl::DecrementIoCount() {
+  backend_->DecrementIoCount();
+}
+
+void EntryImpl::SetTimes(base::Time last_used, base::Time last_modified) {
+  node_.Data()->last_used = last_used.ToInternalValue();
+  node_.Data()->last_modified = last_modified.ToInternalValue();
+  node_.set_modified();
+}
+
+void EntryImpl::ReportIOTime(Operation op, const base::TimeTicks& start) {
+  int group = backend_->GetSizeGroup();
+  switch (op) {
+    case kRead:
+      CACHE_UMA(AGE_MS, "ReadTime", group, start);
+      break;
+    case kWrite:
+      CACHE_UMA(AGE_MS, "WriteTime", group, start);
+      break;
+    case kSparseRead:
+      CACHE_UMA(AGE_MS, "SparseReadTime", 0, start);
+      break;
+    case kSparseWrite:
+      CACHE_UMA(AGE_MS, "SparseWriteTime", 0, start);
+      break;
+    case kAsyncIO:
+      CACHE_UMA(AGE_MS, "AsyncIOTime", group, start);
+      break;
+    default:
+      NOTREACHED();
+  }
+}
+
+void EntryImpl::BeginLogging(net::NetLog* net_log, bool created) {
+  DCHECK(!net_log_.net_log());
+  net_log_ = net::BoundNetLog::Make(
+      net_log, net::NetLog::SOURCE_DISK_CACHE_ENTRY);
+  net_log_.BeginEvent(
+      net::NetLog::TYPE_DISK_CACHE_ENTRY,
+      make_scoped_refptr(new EntryCreationParameters(GetKey(), created)));
+}
+
+const net::BoundNetLog& EntryImpl::net_log() const {
+  return net_log_;
 }
 
 void EntryImpl::Doom() {
@@ -471,18 +843,60 @@ int EntryImpl::ReadyForSparseIO(net::CompletionCallback* callback) {
   return net::ERR_IO_PENDING;
 }
 
-// ------------------------------------------------------------------------
+// When an entry is deleted from the cache, we clean up all the data associated
+// with it for two reasons: to simplify the reuse of the block (we know that any
+// unused block is filled with zeros), and to simplify the handling of write /
+// read partial information from an entry (don't have to worry about returning
+// data related to a previous cache entry because the range was not fully
+// written before).
+EntryImpl::~EntryImpl() {
+  Log("~EntryImpl in");
 
-void EntryImpl::DoomImpl() {
-  if (doomed_)
-    return;
+  // Save the sparse info to disk. This will generate IO for this entry and
+  // maybe for a child entry, so it is important to do it before deleting this
+  // entry.
+  sparse_.reset();
 
-  SetPointerForInvalidEntry(backend_->GetCurrentEntryId());
-  backend_->InternalDoomEntry(this);
+  // Remove this entry from the list of open entries.
+  backend_->OnEntryDestroyBegin(entry_.address());
+
+  if (doomed_) {
+    DeleteEntryData(true);
+  } else {
+    net_log_.AddEvent(net::NetLog::TYPE_DISK_CACHE_CLOSE, NULL);
+    bool ret = true;
+    for (int index = 0; index < kNumStreams; index++) {
+      if (user_buffers_[index].get()) {
+        if (!(ret = Flush(index, 0)))
+          LOG(ERROR) << "Failed to save user data";
+      }
+      if (unreported_size_[index]) {
+        backend_->ModifyStorageSize(
+            entry_.Data()->data_size[index] - unreported_size_[index],
+            entry_.Data()->data_size[index]);
+      }
+    }
+
+    if (!ret) {
+      // There was a failure writing the actual data. Mark the entry as dirty.
+      int current_id = backend_->GetCurrentEntryId();
+      node_.Data()->dirty = current_id == 1 ? -1 : current_id - 1;
+      node_.Store();
+    } else if (node_.HasData() && node_.Data()->dirty) {
+      node_.Data()->dirty = 0;
+      node_.Store();
+    }
+  }
+
+  Trace("~EntryImpl out 0x%p", reinterpret_cast<void*>(this));
+  net_log_.EndEvent(net::NetLog::TYPE_DISK_CACHE_ENTRY, NULL);
+  backend_->OnEntryDestroyEnd();
 }
 
-int EntryImpl::ReadDataImpl(int index, int offset, net::IOBuffer* buf,
-                            int buf_len, CompletionCallback* callback) {
+// ------------------------------------------------------------------------
+
+int EntryImpl::InternalReadData(int index, int offset, net::IOBuffer* buf,
+                                int buf_len, CompletionCallback* callback) {
   DCHECK(node_.Data()->dirty || read_only_);
   DVLOG(2) << "Read from " << index << " at " << offset << " : " << buf_len;
   if (index < 0 || index >= kNumStreams)
@@ -532,8 +946,10 @@ int EntryImpl::ReadDataImpl(int index, int offset, net::IOBuffer* buf,
   }
 
   SyncCallback* io_callback = NULL;
-  if (callback)
-    io_callback = new SyncCallback(this, buf, callback);
+  if (callback) {
+    io_callback = new SyncCallback(this, buf, callback,
+                                   net::NetLog::TYPE_DISK_CACHE_READ_DATA);
+  }
 
   bool completed;
   if (!file->Read(buf->data(), buf_len, file_offset, io_callback, &completed)) {
@@ -549,9 +965,9 @@ int EntryImpl::ReadDataImpl(int index, int offset, net::IOBuffer* buf,
   return (completed || !callback) ? buf_len : net::ERR_IO_PENDING;
 }
 
-int EntryImpl::WriteDataImpl(int index, int offset, net::IOBuffer* buf,
-                             int buf_len, CompletionCallback* callback,
-                             bool truncate) {
+int EntryImpl::InternalWriteData(int index, int offset, net::IOBuffer* buf,
+                                 int buf_len, CompletionCallback* callback,
+                                 bool truncate) {
   DCHECK(node_.Data()->dirty || read_only_);
   DVLOG(2) << "Write to " << index << " at " << offset << " : " << buf_len;
   if (index < 0 || index >= kNumStreams)
@@ -624,8 +1040,10 @@ int EntryImpl::WriteDataImpl(int index, int offset, net::IOBuffer* buf,
     return 0;
 
   SyncCallback* io_callback = NULL;
-  if (callback)
-    io_callback = new SyncCallback(this, buf, callback);
+  if (callback) {
+    io_callback = new SyncCallback(this, buf, callback,
+                                   net::NetLog::TYPE_DISK_CACHE_WRITE_DATA);
+  }
 
   bool completed;
   if (!file->Write(buf->data(), buf_len, file_offset, io_callback,
@@ -640,274 +1058,6 @@ int EntryImpl::WriteDataImpl(int index, int offset, net::IOBuffer* buf,
 
   ReportIOTime(kWrite, start);
   return (completed || !callback) ? buf_len : net::ERR_IO_PENDING;
-}
-
-int EntryImpl::ReadSparseDataImpl(int64 offset, net::IOBuffer* buf, int buf_len,
-                                  CompletionCallback* callback) {
-  DCHECK(node_.Data()->dirty || read_only_);
-  int result = InitSparseData();
-  if (net::OK != result)
-    return result;
-
-  TimeTicks start = TimeTicks::Now();
-  result = sparse_->StartIO(SparseControl::kReadOperation, offset, buf, buf_len,
-                            callback);
-  ReportIOTime(kSparseRead, start);
-  return result;
-}
-
-int EntryImpl::WriteSparseDataImpl(int64 offset, net::IOBuffer* buf,
-                                   int buf_len, CompletionCallback* callback) {
-  DCHECK(node_.Data()->dirty || read_only_);
-  int result = InitSparseData();
-  if (net::OK != result)
-    return result;
-
-  TimeTicks start = TimeTicks::Now();
-  result = sparse_->StartIO(SparseControl::kWriteOperation, offset, buf,
-                            buf_len, callback);
-  ReportIOTime(kSparseWrite, start);
-  return result;
-}
-
-int EntryImpl::GetAvailableRangeImpl(int64 offset, int len, int64* start) {
-  int result = InitSparseData();
-  if (net::OK != result)
-    return result;
-
-  return sparse_->GetAvailableRange(offset, len, start);
-}
-
-void EntryImpl::CancelSparseIOImpl() {
-  if (!sparse_.get())
-    return;
-
-  sparse_->CancelIO();
-}
-
-int EntryImpl::ReadyForSparseIOImpl(CompletionCallback* callback) {
-  DCHECK(sparse_.get());
-  return sparse_->ReadyToUse(callback);
-}
-
-// ------------------------------------------------------------------------
-
-uint32 EntryImpl::GetHash() {
-  return entry_.Data()->hash;
-}
-
-bool EntryImpl::CreateEntry(Addr node_address, const std::string& key,
-                            uint32 hash) {
-  Trace("Create entry In");
-  EntryStore* entry_store = entry_.Data();
-  RankingsNode* node = node_.Data();
-  memset(entry_store, 0, sizeof(EntryStore) * entry_.address().num_blocks());
-  memset(node, 0, sizeof(RankingsNode));
-  if (!node_.LazyInit(backend_->File(node_address), node_address))
-    return false;
-
-  entry_store->rankings_node = node_address.value();
-  node->contents = entry_.address().value();
-
-  entry_store->hash = hash;
-  entry_store->creation_time = Time::Now().ToInternalValue();
-  entry_store->key_len = static_cast<int32>(key.size());
-  if (entry_store->key_len > kMaxInternalKeyLength) {
-    Addr address(0);
-    if (!CreateBlock(entry_store->key_len + 1, &address))
-      return false;
-
-    entry_store->long_key = address.value();
-    File* key_file = GetBackingFile(address, kKeyFileIndex);
-    key_ = key;
-
-    size_t offset = 0;
-    if (address.is_block_file())
-      offset = address.start_block() * address.BlockSize() + kBlockHeaderSize;
-
-    if (!key_file || !key_file->Write(key.data(), key.size(), offset)) {
-      DeleteData(address, kKeyFileIndex);
-      return false;
-    }
-
-    if (address.is_separate_file())
-      key_file->SetLength(key.size() + 1);
-  } else {
-    memcpy(entry_store->key, key.data(), key.size());
-    entry_store->key[key.size()] = '\0';
-  }
-  backend_->ModifyStorageSize(0, static_cast<int32>(key.size()));
-  CACHE_UMA(COUNTS, "KeySize", 0, static_cast<int32>(key.size()));
-  node->dirty = backend_->GetCurrentEntryId();
-  Log("Create Entry ");
-  return true;
-}
-
-bool EntryImpl::IsSameEntry(const std::string& key, uint32 hash) {
-  if (entry_.Data()->hash != hash ||
-      static_cast<size_t>(entry_.Data()->key_len) != key.size())
-    return false;
-
-  std::string my_key = GetKey();
-  return key.compare(my_key) ? false : true;
-}
-
-void EntryImpl::InternalDoom() {
-  DCHECK(node_.HasData());
-  if (!node_.Data()->dirty) {
-    node_.Data()->dirty = backend_->GetCurrentEntryId();
-    node_.Store();
-  }
-  doomed_ = true;
-}
-
-void EntryImpl::DeleteEntryData(bool everything) {
-  DCHECK(doomed_ || !everything);
-
-  if (GetEntryFlags() & PARENT_ENTRY) {
-    // We have some child entries that must go away.
-    SparseControl::DeleteChildren(this);
-  }
-
-  if (GetDataSize(0))
-    CACHE_UMA(COUNTS, "DeleteHeader", 0, GetDataSize(0));
-  if (GetDataSize(1))
-    CACHE_UMA(COUNTS, "DeleteData", 0, GetDataSize(1));
-  for (int index = 0; index < kNumStreams; index++) {
-    Addr address(entry_.Data()->data_addr[index]);
-    if (address.is_initialized()) {
-      backend_->ModifyStorageSize(entry_.Data()->data_size[index] -
-                                      unreported_size_[index], 0);
-      entry_.Data()->data_addr[index] = 0;
-      entry_.Data()->data_size[index] = 0;
-      entry_.Store();
-      DeleteData(address, index);
-    }
-  }
-
-  if (!everything)
-    return;
-
-  // Remove all traces of this entry.
-  backend_->RemoveEntry(this);
-
-  Addr address(entry_.Data()->long_key);
-  DeleteData(address, kKeyFileIndex);
-  backend_->ModifyStorageSize(entry_.Data()->key_len, 0);
-
-  memset(node_.buffer(), 0, node_.size());
-  memset(entry_.buffer(), 0, entry_.size());
-  node_.Store();
-  entry_.Store();
-
-  backend_->DeleteBlock(node_.address(), false);
-  backend_->DeleteBlock(entry_.address(), false);
-}
-
-CacheAddr EntryImpl::GetNextAddress() {
-  return entry_.Data()->next;
-}
-
-void EntryImpl::SetNextAddress(Addr address) {
-  entry_.Data()->next = address.value();
-  bool success = entry_.Store();
-  DCHECK(success);
-}
-
-bool EntryImpl::LoadNodeAddress() {
-  Addr address(entry_.Data()->rankings_node);
-  if (!node_.LazyInit(backend_->File(address), address))
-    return false;
-  return node_.Load();
-}
-
-bool EntryImpl::Update() {
-  DCHECK(node_.HasData());
-
-  if (read_only_)
-    return true;
-
-  RankingsNode* rankings = node_.Data();
-  if (!rankings->dirty) {
-    rankings->dirty = backend_->GetCurrentEntryId();
-    if (!node_.Store())
-      return false;
-  }
-  return true;
-}
-
-bool EntryImpl::IsDirty(int32 current_id) {
-  DCHECK(node_.HasData());
-  // We are checking if the entry is valid or not. If there is a pointer here,
-  // we should not be checking the entry.
-  if (node_.Data()->dummy)
-    return true;
-
-  return node_.Data()->dirty && current_id != node_.Data()->dirty;
-}
-
-void EntryImpl::ClearDirtyFlag() {
-  node_.Data()->dirty = 0;
-}
-
-void EntryImpl::SetPointerForInvalidEntry(int32 new_id) {
-  node_.Data()->dirty = new_id;
-  node_.Data()->dummy = 0;
-  node_.Store();
-}
-
-bool EntryImpl::SanityCheck() {
-  if (!entry_.Data()->rankings_node || !entry_.Data()->key_len)
-    return false;
-
-  Addr rankings_addr(entry_.Data()->rankings_node);
-  if (!rankings_addr.is_initialized() || rankings_addr.is_separate_file() ||
-      rankings_addr.file_type() != RANKINGS)
-    return false;
-
-  Addr next_addr(entry_.Data()->next);
-  if (next_addr.is_initialized() &&
-      (next_addr.is_separate_file() || next_addr.file_type() != BLOCK_256))
-    return false;
-
-  return true;
-}
-
-void EntryImpl::IncrementIoCount() {
-  backend_->IncrementIoCount();
-}
-
-void EntryImpl::DecrementIoCount() {
-  backend_->DecrementIoCount();
-}
-
-void EntryImpl::SetTimes(base::Time last_used, base::Time last_modified) {
-  node_.Data()->last_used = last_used.ToInternalValue();
-  node_.Data()->last_modified = last_modified.ToInternalValue();
-  node_.set_modified();
-}
-
-void EntryImpl::ReportIOTime(Operation op, const base::TimeTicks& start) {
-  int group = backend_->GetSizeGroup();
-  switch (op) {
-    case kRead:
-      CACHE_UMA(AGE_MS, "ReadTime", group, start);
-      break;
-    case kWrite:
-      CACHE_UMA(AGE_MS, "WriteTime", group, start);
-      break;
-    case kSparseRead:
-      CACHE_UMA(AGE_MS, "SparseReadTime", 0, start);
-      break;
-    case kSparseWrite:
-      CACHE_UMA(AGE_MS, "SparseWriteTime", 0, start);
-      break;
-    case kAsyncIO:
-      CACHE_UMA(AGE_MS, "AsyncIOTime", group, start);
-      break;
-    default:
-      NOTREACHED();
-  }
 }
 
 // ------------------------------------------------------------------------

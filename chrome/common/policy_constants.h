@@ -27,9 +27,11 @@ extern const char kDefaultSearchProviderName[];
 extern const char kDefaultSearchProviderKeyword[];
 extern const char kDefaultSearchProviderSearchURL[];
 extern const char kDefaultSearchProviderSuggestURL[];
+extern const char kDefaultSearchProviderInstantURL[];
 extern const char kDefaultSearchProviderIconURL[];
 extern const char kDefaultSearchProviderEncodings[];
 extern const char kDisableSpdy[];
+extern const char kProxyMode[];
 extern const char kProxyServerMode[];
 extern const char kProxyServer[];
 extern const char kProxyPacUrl[];
@@ -59,6 +61,8 @@ extern const char kDefaultImagesSetting[];
 extern const char kDefaultJavaScriptSetting[];
 extern const char kDefaultPluginsSetting[];
 extern const char kDefaultPopupsSetting[];
+extern const char kDefaultNotificationSetting[];
+extern const char kDefaultGeolocationSetting[];
 extern const char kAuthSchemes[];
 extern const char kDisableAuthNegotiateCnameLookup[];
 extern const char kEnableAuthNegotiatePort[];
@@ -66,6 +70,7 @@ extern const char kAuthServerWhitelist[];
 extern const char kAuthNegotiateDelegateWhitelist[];
 extern const char kGSSAPILibraryName[];
 extern const char kDisable3DAPIs[];
+extern const char kPolicyRefreshRate[];
 
 // Chrome Frame specific policy constants
 extern const char kChromeFrameRendererSettings[];

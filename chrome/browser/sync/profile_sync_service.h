@@ -37,6 +37,7 @@ class NotificationSource;
 class NotificationType;
 class Profile;
 class ProfileSyncFactory;
+class TabContents;
 class TokenMigrator;
 
 // ProfileSyncService is the layer between browser subsystems like bookmarks,
@@ -182,6 +183,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void OnClearServerDataFailed();
   virtual void OnClearServerDataTimeout();
   virtual void OnClearServerDataSucceeded();
+  virtual void OnPassphraseRequired(bool for_decryption);
+  virtual void OnPassphraseAccepted();
 
   // Called when a user enters credentials through UI.
   virtual void OnUserSubmittedAuth(const std::string& username,
@@ -222,7 +225,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
     return wizard_.IsVisible();
   }
   virtual void ShowLoginDialog(gfx::NativeWindow parent_window);
+
+  // This method handles clicks on "sync error" UI, showing the appropriate
+  // dialog for the error condition (relogin / enter passphrase).
+  virtual void ShowErrorUI(gfx::NativeWindow parent_window);
+
   void ShowConfigure(gfx::NativeWindow parent_window);
+  void PromptForExistingPassphrase(gfx::NativeWindow parent_window);
+  void SigninForPassphraseMigration(gfx::NativeWindow parent_window);
 
   // Pretty-printed strings for a given StatusSummary.
   static std::string BuildSyncStatusSummaryText(
@@ -230,12 +240,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   // Returns true if the SyncBackendHost has told us it's ready to accept
   // changes.
+  // [REMARK] - it is safe to call this function only from the ui thread.
+  // because the variable is not thread safe and should only be accessed from
+  // single thread. If we want multiple threads to access this(and there is
+  // currently no need to do so) we need to protect this with a lock.
   // TODO(timsteele): What happens if the bookmark model is loaded, a change
   // takes place, and the backend isn't initialized yet?
   bool sync_initialized() const { return backend_initialized_; }
-  virtual bool unrecoverable_error_detected() const {
-    return unrecoverable_error_detected_;
-  }
+  virtual bool unrecoverable_error_detected() const;
   const std::string& unrecoverable_error_message() {
     return unrecoverable_error_message_;
   }
@@ -246,6 +258,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   bool UIShouldDepictAuthInProgress() const {
     return is_auth_in_progress_;
+  }
+
+  bool tried_creating_explicit_passphrase() const {
+    return tried_creating_explicit_passphrase_;
+  }
+
+  bool tried_setting_explicit_passphrase() const {
+    return tried_setting_explicit_passphrase_;
   }
 
   bool observed_passphrase_required() const {
@@ -352,7 +372,12 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // setting a passphrase as opposed to implicitly (from the users' perspective)
   // using their Google Account password.  An implicit SetPassphrase will *not*
   // *not* override an explicit passphrase set previously.
-  virtual void SetPassphrase(const std::string& passphrase, bool is_explicit);
+  // |is_creation| is true if the call is in response to the user setting
+  // up a new passphrase, and false if it's being set in response to a prompt
+  // for an existing passphrase.
+  virtual void SetPassphrase(const std::string& passphrase,
+                             bool is_explicit,
+                             bool is_creation);
 
   // Returns whether processing changes is allowed.  Check this before doing
   // any model-modifying operations.
@@ -405,6 +430,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Cache of the last name the client attempted to authenticate.
   std::string last_attempted_user_email_;
 
+  // Whether the user has tried creating an explicit passphrase on this
+  // machine.
+  bool tried_creating_explicit_passphrase_;
+
+  // Whether the user has tried setting an explicit passphrase on this
+  // machine.
+  bool tried_setting_explicit_passphrase_;
+
   // Whether we have seen a SYNC_PASSPHRASE_REQUIRED since initializing the
   // backend, telling us that it is safe to send a passphrase down ASAP.
   bool observed_passphrase_required_;
@@ -412,6 +445,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Was the last SYNC_PASSPHRASE_REQUIRED notification sent because it
   // was required for decryption?
   bool passphrase_required_for_decryption_;
+
+  // Is the user in a passphrase migration?
+  bool passphrase_migration_in_progress_;
 
  private:
   friend class ProfileSyncServiceTest;
@@ -431,6 +467,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   // Sets the last synced time to the current time.
   void UpdateLastSyncedTime();
+
+  void NotifyObservers();
 
   static const char* GetPrefNameForDataType(syncable::ModelType data_type);
 
@@ -515,7 +553,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   struct CachedPassphrase {
     std::string value;
     bool is_explicit;
-    CachedPassphrase() : is_explicit(false) {}
+    bool is_creation;
+    CachedPassphrase() : is_explicit(false), is_creation(false) {}
   };
   CachedPassphrase cached_passphrase_;
 

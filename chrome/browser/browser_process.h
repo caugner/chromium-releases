@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,13 +18,18 @@
 #include "ipc/ipc_message.h"
 
 class AutomationProviderList;
-class Clipboard;
+
+namespace safe_browsing {
+class ClientSideDetectionService;
+}
+
 class DevToolsManager;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GoogleURLTracker;
-class IntranetRedirectDetector;
 class IconManager;
+class IntranetRedirectDetector;
+class IOThread;
 class MetricsService;
 class NotificationUIManager;
 class PrefService;
@@ -44,7 +49,13 @@ class PrintJobManager;
 class PrintPreviewTabController;
 }
 
-class IOThread;
+namespace policy {
+class ConfigurationPolicyProviderKeeper;
+}
+
+namespace ui {
+class Clipboard;
+}
 
 // NOT THREAD SAFE, call only from the main thread.
 // These functions shouldn't return NULL unless otherwise noted.
@@ -67,7 +78,7 @@ class BrowserProcess {
   virtual PrefService* local_state() = 0;
   virtual DevToolsManager* devtools_manager() = 0;
   virtual SidebarManager* sidebar_manager() = 0;
-  virtual Clipboard* clipboard() = 0;
+  virtual ui::Clipboard* clipboard() = 0;
 
   // Returns the manager for desktop notifications.
   virtual NotificationUIManager* notification_ui_manager() = 0;
@@ -102,6 +113,9 @@ class BrowserProcess {
   // This method is only included for uniformity.
   virtual base::Thread* background_x11_thread() = 0;
 #endif
+
+  virtual policy::ConfigurationPolicyProviderKeeper*
+      configuration_policy_provider_keeper() = 0;
 
   virtual IconManager* icon_manager() = 0;
 
@@ -141,6 +155,11 @@ class BrowserProcess {
   // Returns the object that watches for changes in the closeable state of tab.
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher() = 0;
 
+  // Returns an object which handles communication with the SafeBrowsing
+  // client-side detection servers.
+  virtual safe_browsing::ClientSideDetectionService*
+      safe_browsing_detection_service() = 0;
+
   // Trigger an asynchronous check to see if we have the inspector's files on
   // disk.
   virtual void CheckForInspectorFiles() = 0;
@@ -168,9 +187,20 @@ class BrowserProcess {
   virtual void SetIPCLoggingEnabled(bool enable) = 0;
 #endif
 
+  const std::string& plugin_data_remover_mime_type() const {
+    return plugin_data_remover_mime_type_;
+  }
+
+  void set_plugin_data_remover_mime_type(const std::string& mime_type) {
+    plugin_data_remover_mime_type_ = mime_type;
+  }
+
  private:
   // User-data-dir based profiles.
   std::vector<std::wstring> user_data_dir_profiles_;
+
+  // Used for testing plugin data removal at shutdown.
+  std::string plugin_data_remover_mime_type_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);
 };

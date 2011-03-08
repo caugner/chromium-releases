@@ -18,6 +18,7 @@
 #include "base/string16.h"
 #include "base/time.h"
 #include "chrome/browser/history/snippet.h"
+#include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/ref_counted_util.h"
 #include "chrome/common/thumbnail_score.h"
@@ -523,6 +524,23 @@ struct KeywordSearchTermVisit {
   string16 term;
 };
 
+// KeywordSearchTermRow --------------------------------------------------------
+
+// Used for URLs that have a search term associated with them.
+struct KeywordSearchTermRow {
+  KeywordSearchTermRow();
+  ~KeywordSearchTermRow();
+
+  // ID of the keyword.
+  TemplateURLID keyword_id;
+
+  // ID of the url.
+  URLID url_id;
+
+  // The search term that was used.
+  string16 term;
+};
+
 // MostVisitedURL --------------------------------------------------------------
 
 // Holds the per-URL information of the most visited query.
@@ -610,6 +628,9 @@ struct MostVisitedURLWithRank {
 typedef std::vector<MostVisitedURLWithRank> MostVisitedURLWithRankList;
 
 struct TopSitesDelta {
+  TopSitesDelta();
+  ~TopSitesDelta();
+
   MostVisitedURLList deleted;
   MostVisitedURLWithRankList added;
   MostVisitedURLWithRankList moved;
@@ -619,6 +640,9 @@ typedef std::map<GURL, scoped_refptr<RefCountedBytes> > URLToThumbnailMap;
 
 // Used when migrating most visited thumbnails out of history and into topsites.
 struct ThumbnailMigration {
+  ThumbnailMigration();
+  ~ThumbnailMigration();
+
   MostVisitedURLList most_visited;
   URLToThumbnailMap url_to_thumbnail_map;
 };
@@ -629,6 +653,7 @@ class MostVisitedThumbnails
     : public base::RefCountedThreadSafe<MostVisitedThumbnails> {
  public:
   MostVisitedThumbnails();
+  virtual ~MostVisitedThumbnails();
 
   MostVisitedURLList most_visited;
   URLToImagesMap url_to_images_map;

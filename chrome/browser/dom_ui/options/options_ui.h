@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,12 +47,13 @@ class OptionsPageUIHandler : public DOMMessageHandler,
   virtual ~OptionsPageUIHandler();
 
   // Is this handler enabled?
-  virtual bool IsEnabled() { return true; }
+  virtual bool IsEnabled();
 
   // Collects localized strings for options page.
   virtual void GetLocalizedValues(DictionaryValue* localized_strings) = 0;
 
   // Initialize the page.  Called once the DOM is available for manipulation.
+  // This will be called only once.
   virtual void Initialize() {}
 
   // Uninitializes the page.  Called just before the object is destructed.
@@ -81,8 +82,8 @@ class OptionsUI : public DOMUI {
   virtual ~OptionsUI();
 
   static RefCountedMemory* GetFaviconResourceBytes();
-  void RenderViewCreated(RenderViewHost* render_view_host);
-  void DidBecomeActiveForReusedRenderView();
+  virtual void RenderViewCreated(RenderViewHost* render_view_host);
+  virtual void DidBecomeActiveForReusedRenderView();
 
   void InitializeHandlers();
 
@@ -90,6 +91,8 @@ class OptionsUI : public DOMUI {
   // Adds OptionsPageUiHandler to the handlers list if handler is enabled.
   void AddOptionsPageUIHandler(DictionaryValue* localized_strings,
                                OptionsPageUIHandler* handler);
+
+  bool initialized_handlers_;
 
   DISALLOW_COPY_AND_ASSIGN(OptionsUI);
 };

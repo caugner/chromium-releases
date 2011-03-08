@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/process_util.h"
 #include "base/ref_counted.h"
 #include "base/string16.h"
 #include "chrome/common/content_settings_types.h"
@@ -17,9 +18,10 @@
 #include "chrome/common/translate_errors.h"
 #include "chrome/common/view_types.h"
 #include "chrome/common/window_container_type.h"
+#include "ipc/ipc_channel.h"
 #include "net/base/load_states.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "webkit/glue/window_open_disposition.h"
 
 
@@ -33,7 +35,6 @@ class GURL;
 class ListValue;
 struct NativeWebKeyboardEvent;
 class NavigationEntry;
-class OSExchangeData;
 class Profile;
 struct RendererPreferences;
 class RenderProcessHost;
@@ -71,6 +72,7 @@ class Message;
 }
 
 namespace net {
+class CookieList;
 class CookieOptions;
 }
 
@@ -92,7 +94,7 @@ struct PasswordForm;
 //  exposing a more generic Send function on RenderViewHost and a response
 //  listener here to serve that need.
 //
-class RenderViewHostDelegate {
+class RenderViewHostDelegate : public IPC::Channel::Listener {
  public:
   // View ----------------------------------------------------------------------
   // Functions that can be routed directly to a view-specific class.
@@ -246,144 +248,6 @@ class RenderViewHostDelegate {
     virtual ~RendererManagement() {}
   };
 
-  // BrowserIntegration --------------------------------------------------------
-  // Functions that integrate with other browser services.
-
-  class BrowserIntegration {
-   public:
-    // Notification the user has made a gesture while focus was on the
-    // page. This is used to avoid uninitiated user downloads (aka carpet
-    // bombing), see DownloadRequestLimiter for details.
-    virtual void OnUserGesture() = 0;
-
-    // A find operation in the current page completed.
-    virtual void OnFindReply(int request_id,
-                             int number_of_matches,
-                             const gfx::Rect& selection_rect,
-                             int active_match_ordinal,
-                             bool final_update) = 0;
-
-    // Navigate to the history entry for the given offset from the current
-    // position within the NavigationController.  Makes no change if offset is
-    // not valid.
-    virtual void GoToEntryAtOffset(int offset) = 0;
-
-    // Notification when default plugin updates status of the missing plugin.
-    virtual void OnMissingPluginStatus(int status) = 0;
-
-    // Notification from the renderer that a plugin instance has crashed.
-    //
-    // BrowserIntegration isn't necessarily the best place for this, if you
-    // need to implement this function somewhere that doesn't need any other
-    // BrowserIntegration callbacks, feel free to move it elsewhere.
-    virtual void OnCrashedPlugin(const FilePath& plugin_path) = 0;
-
-    // Notification that a worker process has crashed.
-    virtual void OnCrashedWorker() = 0;
-
-    virtual void OnDisabledOutdatedPlugin(const string16& name,
-                                          const GURL& update_url) = 0;
-
-    // Notification that a user's request to install an application has
-    // completed.
-    virtual void OnDidGetApplicationInfo(
-        int32 page_id,
-        const WebApplicationInfo& app_info) = 0;
-
-    // Notification when an application programmatically requests installation.
-    virtual void OnInstallApplication(
-        const WebApplicationInfo& app_info) = 0;
-
-    // Notification that the contents of the page has been loaded.
-    virtual void OnPageContents(const GURL& url,
-                                int renderer_process_id,
-                                int32 page_id,
-                                const string16& contents,
-                                const std::string& language,
-                                bool page_translatable) = 0;
-
-    // Notification that the page has been translated.
-    virtual void OnPageTranslated(int32 page_id,
-                                  const std::string& original_lang,
-                                  const std::string& translated_lang,
-                                  TranslateErrors::Type error_type) = 0;
-
-    // Notification that the page has a suggest result.
-    virtual void OnSetSuggestions(
-        int32 page_id,
-        const std::vector<std::string>& result) = 0;
-
-    // Notification of whether the page supports instant-style interaction.
-    virtual void OnInstantSupportDetermined(int32 page_id, bool result) = 0;
-
-   protected:
-    virtual ~BrowserIntegration() {}
-  };
-
-  // Resource ------------------------------------------------------------------
-  // Notifications of resource loading events.
-
-  class Resource {
-   public:
-    // The RenderView is starting a provisional load.
-    virtual void DidStartProvisionalLoadForFrame(
-        RenderViewHost* render_view_host,
-        long long frame_id,
-        bool is_main_frame,
-        const GURL& url) = 0;
-
-    // Notification by the resource loading system (not the renderer) that it
-    // has started receiving a resource response. This is different than
-    // DidStartProvisionalLoadForFrame above because this is called for every
-    // resource (images, automatically loaded subframes, etc.) and provisional
-    // loads are only for user-initiated navigations.
-    virtual void DidStartReceivingResourceResponse(
-        const ResourceRequestDetails& details) = 0;
-
-    // Sent when a provisional load is redirected.
-    virtual void DidRedirectProvisionalLoad(int32 page_id,
-                                            const GURL& source_url,
-                                            const GURL& target_url) = 0;
-
-    // Notification by the resource loading system (not the renderer) that a
-    // resource was redirected. This is different than
-    // DidRedirectProvisionalLoad above because this is called for every
-    // resource (images, automatically loaded subframes, etc.) and provisional
-    // loads are only for user-initiated navigations.
-    virtual void DidRedirectResource(
-        const ResourceRedirectDetails& details) = 0;
-
-    // The RenderView loaded a resource from an in-memory cache.
-    // |security_info| contains the security info if this resource was
-    // originally loaded over a secure connection.
-    virtual void DidLoadResourceFromMemoryCache(
-        const GURL& url,
-        const std::string& frame_origin,
-        const std::string& main_frame_origin,
-        const std::string& security_info) = 0;
-
-    virtual void DidDisplayInsecureContent() = 0;
-    virtual void DidRunInsecureContent(const std::string& security_origin) = 0;
-
-    // The RenderView failed a provisional load with an error.
-    virtual void DidFailProvisionalLoadWithError(
-        RenderViewHost* render_view_host,
-        long long frame_id,
-        bool is_main_frame,
-        int error_code,
-        const GURL& url,
-        bool showing_repost_interstitial) = 0;
-
-    // Notification that a document has been loaded in a frame.
-    virtual void DocumentLoadedInFrame(long long frame_id) = 0;
-
-    // Notification that a frame finished loading.
-    virtual void DidFinishLoad(long long frame_id) = 0;
-
-   protected:
-    virtual ~Resource() {}
-  };
-
   // ContentSettings------------------------------------------------------------
   // Interface for content settings related events.
 
@@ -394,14 +258,23 @@ class RenderViewHostDelegate {
     virtual void OnContentBlocked(ContentSettingsType type,
                                   const std::string& resource_identifier) = 0;
 
-    // Called when a specific cookie in the current page was accessed.
+    // Called when cookies for the given URL were read either from within the
+    // current page or while loading it. |blocked_by_policy| should be true, if
+    // reading cookies was blocked due to the user's content settings. In that
+    // case, this function should invoke OnContentBlocked.
+    virtual void OnCookiesRead(
+        const GURL& url,
+        const net::CookieList& cookie_list,
+        bool blocked_by_policy) = 0;
+
+    // Called when a specific cookie in the current page was changed.
     // |blocked_by_policy| should be true, if the cookie was blocked due to the
     // user's content settings. In that case, this function should invoke
     // OnContentBlocked.
-    virtual void OnCookieAccessed(const GURL& url,
-                                  const std::string& cookie_line,
-                                  const net::CookieOptions& options,
-                                  bool blocked_by_policy) = 0;
+    virtual void OnCookieChanged(const GURL& url,
+                                 const std::string& cookie_line,
+                                 const net::CookieOptions& options,
+                                 bool blocked_by_policy) = 0;
 
     // Called when a specific indexed db factory in the current page was
     // accessed. If access was blocked due to the user's content settings,
@@ -517,70 +390,6 @@ class RenderViewHostDelegate {
     virtual ~FavIcon() {}
   };
 
-  // Autocomplete --------------------------------------------------------------
-  // Interface for Autocomplete-related functions.
-
-  class Autocomplete {
-   public:
-    // Forms fillable by Autocomplete have been detected in the page.
-    virtual void FormSubmitted(const webkit_glue::FormData& form) = 0;
-
-    // Called to retrieve a list of suggestions from the web database given
-    // the name of the field |field_name| and what the user has already typed
-    // in the field |user_text|.  Appeals to the database thread to perform the
-    // query. When the database thread is finished, the AutocompleteHistory
-    // manager retrieves the calling RenderViewHost and then passes the vector
-    // of suggestions to RenderViewHost::AutocompleteSuggestionsReturned.
-    virtual void GetAutocompleteSuggestions(const string16& field_name,
-                                            const string16& user_text) = 0;
-
-    // Called when the user has indicated that she wants to remove the specified
-    // Autocomplete suggestion from the database.
-    virtual void RemoveAutocompleteEntry(const string16& field_name,
-                                         const string16& value) = 0;
-
-   protected:
-    virtual ~Autocomplete() {}
-  };
-
-  // AutoFill ------------------------------------------------------------------
-  // Interface for AutoFill-related functions.
-
-  class AutoFill {
-   public:
-    // Called when the user submits a form.
-    virtual void FormSubmitted(const webkit_glue::FormData& form) = 0;
-
-    // Called when the frame has finished loading and there are forms in the
-    // frame.
-    virtual void FormsSeen(const std::vector<webkit_glue::FormData>& forms) = 0;
-
-    // Called to retrieve a list of AutoFill suggestions for the portion of the
-    // |form| containing |field|, given the current state of the |form|.
-    // Returns true to indicate that RenderViewHost::AutoFillSuggestionsReturned
-    // has been called.
-    virtual bool GetAutoFillSuggestions(
-        const webkit_glue::FormData& form,
-        const webkit_glue::FormField& field) = 0;
-
-    // Called to fill the |form| with AutoFill profile information that matches
-    // the |unique_id| key. If the portion of the form containing |field| has
-    // been autofilled already, only fills |field|.
-    // Returns true to indicate that RenderViewHost::AutoFillFormDataFilled
-    // has been called.
-    virtual bool FillAutoFillFormData(int query_id,
-                                      const webkit_glue::FormData& form,
-                                      const webkit_glue::FormField& field,
-                                      int unique_id) = 0;
-
-    // Called when the user selects the 'AutoFill Options...' suggestions in the
-    // AutoFill popup.
-    virtual void ShowAutoFillDialog() = 0;
-
-   protected:
-    virtual ~AutoFill() {}
-  };
-
   // BookmarkDrag --------------------------------------------------------------
   // Interface for forwarding bookmark drag and drop to extenstions.
 
@@ -656,14 +465,11 @@ class RenderViewHostDelegate {
   // there is no corresponding delegate.
   virtual View* GetViewDelegate();
   virtual RendererManagement* GetRendererManagementDelegate();
-  virtual BrowserIntegration* GetBrowserIntegrationDelegate();
-  virtual Resource* GetResourceDelegate();
   virtual ContentSettings* GetContentSettingsDelegate();
   virtual Save* GetSaveDelegate();
   virtual Printing* GetPrintingDelegate();
   virtual FavIcon* GetFavIconDelegate();
-  virtual Autocomplete* GetAutocompleteDelegate();
-  virtual AutoFill* GetAutoFillDelegate();
+
   virtual BookmarkDrag* GetBookmarkDragDelegate();
   virtual SSL* GetSSLDelegate();
   virtual FileSelect* GetFileSelectDelegate();
@@ -672,6 +478,10 @@ class RenderViewHostDelegate {
   // routing.
   virtual AutomationResourceRoutingDelegate*
       GetAutomationResourceRoutingDelegate();
+
+  // IPC::Channel::Listener implementation.
+  // This is used to give the delegate a chance to filter IPC messages.
+  virtual bool OnMessageReceived(const IPC::Message& message);
 
   // Gets the URL that is currently being displayed, if there is one.
   virtual const GURL& GetURL() const;
@@ -700,7 +510,9 @@ class RenderViewHostDelegate {
   virtual void RenderViewReady(RenderViewHost* render_view_host) {}
 
   // The RenderView died somehow (crashed or was killed by the user).
-  virtual void RenderViewGone(RenderViewHost* render_view_host) {}
+  virtual void RenderViewGone(RenderViewHost* render_view_host,
+                              base::TerminationStatus status,
+                              int error_code) {}
 
   // The RenderView is going to be deleted. This is called when each
   // RenderView is going to be destroyed
@@ -752,6 +564,11 @@ class RenderViewHostDelegate {
   // notion of the throbber stopping.
   virtual void DidStopLoading() {}
 
+  // The RenderView made progress loading a page's top frame.
+  // |progress| is a value between 0 (nothing loaded) to 1.0 (top frame
+  // entirely loaded).
+  virtual void DidChangeLoadProgress(double progress) {}
+
   // The RenderView's main frame document element is ready. This happens when
   // the document has finished parsing.
   virtual void DocumentAvailableInMainFrame(RenderViewHost* render_view_host) {}
@@ -798,14 +615,6 @@ class RenderViewHostDelegate {
                                    const std::string& json_arguments,
                                    IPC::Message* reply_msg) {}
 
-  // Password forms have been detected in the page.
-  virtual void PasswordFormsFound(
-      const std::vector<webkit_glue::PasswordForm>& forms) {}
-
-  // On initial layout, password forms are known to be visible on the page.
-  virtual void PasswordFormsVisible(
-      const std::vector<webkit_glue::PasswordForm>& visible_forms) {}
-
   // Notification that the page has an OpenSearch description document.
   virtual void PageHasOSDD(RenderViewHost* render_view_host,
                            int32 page_id, const GURL& doc_url,
@@ -823,6 +632,11 @@ class RenderViewHostDelegate {
   // Returns a WebPreferences object that will be used by the renderer
   // associated with the owning render view host.
   virtual WebPreferences GetWebkitPrefs();
+
+  // Notification the user has made a gesture while focus was on the
+  // page. This is used to avoid uninitiated user downloads (aka carpet
+  // bombing), see DownloadRequestLimiter for details.
+  virtual void OnUserGesture() {}
 
   // Notification from the renderer host that blocked UI event occurred.
   // This happens when there are tab-modal dialogs. In this case, the
@@ -854,15 +668,15 @@ class RenderViewHostDelegate {
   virtual void DidInsertCSS() {}
 
   // A different node in the page got focused.
-  virtual void FocusedNodeChanged() {}
+  virtual void FocusedNodeChanged(bool is_editable_node) {}
 
   // Updates the minimum and maximum zoom percentages.
   virtual void UpdateZoomLimits(int minimum_percent,
                                 int maximum_percent,
                                 bool remember) {}
 
-  // Update the content restrictions, i.e. disable print/copy.
-  virtual void UpdateContentRestrictions(int restrictions) {}
+  // Notification that a worker process has crashed.
+  void WorkerCrashed() {}
 
  protected:
   virtual ~RenderViewHostDelegate() {}

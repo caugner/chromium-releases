@@ -12,7 +12,6 @@
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/sync/engine/syncapi.h"
-#include "chrome/browser/sync/glue/autofill_change_processor2.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
@@ -63,9 +62,6 @@ class AutofillChangeProcessor : public ChangeProcessor,
   // node.
   static void WriteAutofillEntry(const AutofillEntry& entry,
                                  sync_api::WriteNode* node);
-  // As above, for autofill profiles.
-  static void WriteAutofillProfile(const AutoFillProfile& profile,
-                                   sync_api::WriteNode* node);
   // TODO(georgey) : add the same processing for CC info (already in protocol
   // buffers).
 
@@ -112,7 +108,7 @@ class AutofillChangeProcessor : public ChangeProcessor,
   void PostOptimisticRefreshTask();
 
   // Called to see if we need to upgrade to the new autofill2 profile.
-  bool HasNotMigratedYet();
+  bool HasNotMigratedYet(const sync_api::BaseTransaction* trans);
 
   // The two models should be associated according to this ModelAssociator.
   AutofillModelAssociator* model_associator_;

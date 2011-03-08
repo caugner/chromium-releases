@@ -1,7 +1,7 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_DEV_PPB_CURSOR_CONTROL_DEV_H_
 #define PPAPI_C_DEV_PPB_CURSOR_CONTROL_DEV_H_
 
@@ -11,7 +11,7 @@
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_resource.h"
 
-#define PPB_CURSOR_CONTROL_DEV_INTERFACE "PPB_CursorControl(Dev);0.2"
+#define PPB_CURSOR_CONTROL_DEV_INTERFACE "PPB_CursorControl(Dev);0.3"
 
 struct PPB_CursorControl_Dev {
   // Set a cursor.  If "type" is PP_CURSOR_TYPE_CUSTOM, then "custom_image"
@@ -53,4 +53,5 @@ struct PPB_CursorControl_Dev {
   PP_Bool (*CanLockCursor)(PP_Instance);
 };
 
-#endif  //  PPAPI_C_DEV_PPB_CURSOR_CONTROL_DEV_H_
+#endif  /* PPAPI_C_DEV_PPB_CURSOR_CONTROL_DEV_H_ */
+

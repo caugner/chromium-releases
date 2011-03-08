@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,9 @@
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/views/frame/browser_bubble_host.h"
-#include "chrome/browser/views/infobars/infobar_container.h"
-#include "chrome/browser/views/unhandled_keyboard_event_handler.h"
+#include "chrome/browser/ui/views/frame/browser_bubble_host.h"
+#include "chrome/browser/ui/views/infobars/infobar_container.h"
+#include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -26,22 +25,20 @@
 #include "views/widget/widget_win.h"
 
 class AutomationProvider;
+class Browser;
 class Profile;
 class TabContentsContainer;
 class RenderViewContextMenuViews;
-
-namespace app {
-class ViewProp;
-}
-
-namespace IPC {
 struct NavigationInfo;
+
+namespace ui {
+class ViewProp;
 }
 
 // This class serves as the container window for an external tab.
 // An external tab is a Chrome tab that is meant to displayed in an
 // external process. This class provides the FocusManger needed by the
-// TabContents as well as an implementation of TabContentsDelagate.
+// TabContents as well as an implementation of TabContentsDelegate.
 class ExternalTabContainer : public TabContentsDelegate,
                              public NotificationObserver,
                              public views::WidgetWin,
@@ -173,6 +170,8 @@ class ExternalTabContainer : public TabContentsDelegate,
                                  bool proceed,
                                  bool* proceed_to_fire_unload);
 
+  void ShowRepostFormWarningDialog(TabContents* tab_contents);
+
   // Overriden from TabContentsDelegate::AutomationResourceRoutingDelegate
   virtual void RegisterRenderViewHost(RenderViewHost* render_view_host);
   virtual void UnregisterRenderViewHost(RenderViewHost* render_view_host);
@@ -208,7 +207,7 @@ class ExternalTabContainer : public TabContentsDelegate,
   }
 
   // InfoBarContainer::Delegate overrides
-  virtual void InfoBarSizeChanged(bool is_animating);
+  virtual void InfoBarContainerSizeChanged(bool is_animating);
 
   virtual void TabContentsCreated(TabContents* new_contents);
 
@@ -223,7 +222,7 @@ class ExternalTabContainer : public TabContentsDelegate,
   virtual void OnDestroy();
   virtual void OnFinalMessage(HWND window);
 
-  bool InitNavigationInfo(IPC::NavigationInfo* nav_info,
+  bool InitNavigationInfo(NavigationInfo* nav_info,
                           NavigationType::Type nav_type,
                           int relative_offset);
   void Navigate(const GURL& url, const GURL& referrer);
@@ -337,7 +336,7 @@ class ExternalTabContainer : public TabContentsDelegate,
   // page without chrome frame.
   bool route_all_top_level_navigations_;
 
-  scoped_ptr<app::ViewProp> prop_;
+  scoped_ptr<ui::ViewProp> prop_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalTabContainer);
 };

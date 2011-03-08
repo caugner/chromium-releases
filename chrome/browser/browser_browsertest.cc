@@ -1,47 +1,48 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
-#include "app/l10n_util.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/app_modal_dialog.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/js_modal_dialog.h"
-#include "chrome/browser/native_app_modal_dialog.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/pinned_tab_codec.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/url_constants.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/page_transition_types.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
+#include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_WIN)
 #include "base/i18n/rtl.h"
+#include "chrome/browser/browser_process.h"
 #endif
 
 namespace {
@@ -64,14 +65,18 @@ std::wstring WindowCaptionFromPageTitle(std::wstring page_title) {
 #if defined(OS_MACOSX) || defined(OS_CHROMEOS)
   // On Mac or ChromeOS, we don't want to suffix the page title with
   // the application name.
-  if (page_title.empty())
-    return l10n_util::GetString(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED);
+  if (page_title.empty()) {
+    return UTF16ToWideHack(
+        l10n_util::GetStringUTF16(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED));
+  }
   return page_title;
 #else
   if (page_title.empty())
-    return l10n_util::GetString(IDS_PRODUCT_NAME);
+    return UTF16ToWideHack(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
 
-  return l10n_util::GetStringF(IDS_BROWSER_WINDOW_TITLE_FORMAT, page_title);
+  return UTF16ToWideHack(
+      l10n_util::GetStringFUTF16(IDS_BROWSER_WINDOW_TITLE_FORMAT,
+                                 WideToUTF16Hack(page_title)));
 #endif
 }
 
@@ -160,7 +165,7 @@ class BrowserTest : public ExtensionBrowserTest {
   // Returns the app extension aptly named "App Test".
   const Extension* GetExtension() {
     const ExtensionList* extensions =
-        browser()->profile()->GetExtensionsService()->extensions();
+        browser()->profile()->GetExtensionService()->extensions();
     for (size_t i = 0; i < extensions->size(); ++i) {
       if ((*extensions)[i]->name() == "App Test")
         return (*extensions)[i];
@@ -414,7 +419,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ConvertTabToAppShortcut) {
   // Normal tabs should accept load drops.
   EXPECT_TRUE(initial_tab->GetMutableRendererPrefs()->can_accept_load_drops);
 
-  // The tab in an aopp window should not.
+  // The tab in an app window should not.
   EXPECT_FALSE(app_tab->GetMutableRendererPrefs()->can_accept_load_drops);
 }
 
@@ -480,7 +485,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   model->AddObserver(&observer);
 
   // Uninstall the extension and make sure TabClosing is sent.
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   service->UninstallExtension(GetExtension()->id(), false);
   EXPECT_EQ(1, observer.closing_count());
 
@@ -489,6 +494,44 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   // There should only be one tab now.
   ASSERT_EQ(1, browser()->tab_count());
 }
+
+#if !defined(OS_MACOSX)
+// Open with --app-id=<id>, and see that an app window opens.
+IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
+  ASSERT_TRUE(test_server()->Start());
+
+  // Load an app.
+  host_resolver()->AddRule("www.example.com", "127.0.0.1");
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("app/")));
+  const Extension* extension_app = GetExtension();
+
+  CommandLine command_line(CommandLine::NO_PROGRAM);
+  command_line.AppendSwitchASCII(switches::kAppId, extension_app->id());
+
+  BrowserInit::LaunchWithProfile launch(FilePath(), command_line);
+  ASSERT_TRUE(launch.OpenApplicationWindow(browser()->profile()));
+
+  // Check that the new browser has an app name.
+  // The launch should have created a new browser.
+  ASSERT_EQ(2u, BrowserList::GetBrowserCount(browser()->profile()));
+
+  // Find the new browser.
+  Browser* new_browser = NULL;
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end() && !new_browser; ++i) {
+    if (*i != browser())
+      new_browser = *i;
+  }
+  ASSERT_TRUE(new_browser);
+  ASSERT_TRUE(new_browser != browser());
+
+  // The browser's app_name should include the app's ID.
+  ASSERT_NE(
+      new_browser->app_name_.find(extension_app->id()),
+      std::string::npos) << new_browser->app_name_;
+
+}
+#endif
 
 #if defined(OS_WIN)
 // http://crbug.com/46198. On XP/Vista, the failure rate is 5 ~ 6%.
@@ -501,32 +544,33 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageLanguageDetection) {
   ASSERT_TRUE(test_server()->Start());
 
   TabContents* current_tab = browser()->GetSelectedTabContents();
+  Source<TabContents> source(current_tab);
 
   // Navigate to a page in English.
-  ui_test_utils::WindowedNotificationObserverWithDetails<TabContents,
-                                                         std::string>
+  ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
       en_language_detected_signal(NotificationType::TAB_LANGUAGE_DETERMINED,
-                                  current_tab);
+                                  source);
   ui_test_utils::NavigateToURL(
       browser(), GURL(test_server()->GetURL("files/english_page.html")));
   EXPECT_TRUE(current_tab->language_state().original_language().empty());
   en_language_detected_signal.Wait();
   std::string lang;
-  EXPECT_TRUE(en_language_detected_signal.GetDetailsFor(current_tab, &lang));
+  EXPECT_TRUE(en_language_detected_signal.GetDetailsFor(
+        source.map_key(), &lang));
   EXPECT_EQ("en", lang);
   EXPECT_EQ("en", current_tab->language_state().original_language());
 
   // Now navigate to a page in French.
-  ui_test_utils::WindowedNotificationObserverWithDetails<TabContents,
-                                                         std::string>
+  ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
       fr_language_detected_signal(NotificationType::TAB_LANGUAGE_DETERMINED,
-                                  current_tab);
+                                  source);
   ui_test_utils::NavigateToURL(
       browser(), GURL(test_server()->GetURL("files/french_page.html")));
   EXPECT_TRUE(current_tab->language_state().original_language().empty());
   fr_language_detected_signal.Wait();
   lang.clear();
-  EXPECT_TRUE(fr_language_detected_signal.GetDetailsFor(current_tab, &lang));
+  EXPECT_TRUE(fr_language_detected_signal.GetDetailsFor(
+        source.map_key(), &lang));
   EXPECT_EQ("fr", lang);
   EXPECT_EQ("fr", current_tab->language_state().original_language());
 }
@@ -648,6 +692,11 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   ASSERT_TRUE(new_browser != browser());
 
   EXPECT_EQ(Browser::TYPE_APP, new_browser->type());
+
+  // The browser's app name should include the extension's id.
+  std::string app_name = new_browser->app_name_;
+  EXPECT_NE(app_name.find(extension_app->id()), std::string::npos)
+      << "Name " << app_name << " should contain id "<< extension_app->id();
 }
 #endif  // !defined(OS_MACOSX)
 

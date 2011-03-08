@@ -9,40 +9,39 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_TEST_WEBVIEW_DELEGATE_H_
 #define WEBKIT_TOOLS_TEST_SHELL_TEST_WEBVIEW_DELEGATE_H_
 
-#include "build/build_config.h"
-
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
-
 #include <map>
 #include <set>
 #include <string>
 
-#if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdkcursor.h>
-#endif
-
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/weak_ptr.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebContextMenuData.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrameClient.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
-#if defined(OS_MACOSX)
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenuInfo.h"
-#endif
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebViewClient.h"
+#include "build/build_config.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
 #include "webkit/glue/webcursor.h"
-#include "webkit/glue/plugins/webplugin_page_delegate.h"
+#include "webkit/plugins/npapi/webplugin_page_delegate.h"
+#include "webkit/tools/test_shell/mock_spellcheck.h"
+#include "webkit/tools/test_shell/test_navigation_controller.h"
+
+#if defined(OS_MACOSX)
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenuInfo.h"
+#endif
+
 #if defined(OS_WIN)
+#include <windows.h>
+
 #include "webkit/tools/test_shell/drag_delegate.h"
 #include "webkit/tools/test_shell/drop_delegate.h"
 #endif
-#include "webkit/tools/test_shell/mock_spellcheck.h"
-#include "webkit/tools/test_shell/test_navigation_controller.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include <gdk/gdkcursor.h>
+#endif
 
 struct WebPreferences;
 class GURL;
@@ -60,7 +59,7 @@ struct WebWindowFeatures;
 
 class TestWebViewDelegate : public WebKit::WebViewClient,
                             public WebKit::WebFrameClient,
-                            public webkit_glue::WebPluginPageDelegate,
+                            public webkit::npapi::WebPluginPageDelegate,
                             public base::SupportsWeakPtr<TestWebViewDelegate> {
  public:
   struct CapturedContextMenuEvent {
@@ -82,6 +81,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   // WebKit::WebViewClient
   virtual WebKit::WebView* createView(
       WebKit::WebFrame* creator,
+      const WebKit::WebURLRequest& request,
       const WebKit::WebWindowFeatures& features,
       const WebKit::WebString& frame_name);
   virtual WebKit::WebWidget* createPopupMenu(WebKit::WebPopupType popup_type);
@@ -141,7 +141,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void focusAccessibilityObject(
       const WebKit::WebAccessibilityObject& object);
   virtual WebKit::WebNotificationPresenter* notificationPresenter();
-  virtual WebKit::WebGeolocationService* geolocationService();
+  virtual WebKit::WebGeolocationClient* geolocationClient();
   virtual WebKit::WebDeviceOrientationClient* deviceOrientationClient();
   virtual WebKit::WebSpeechInputController* speechInputController(
       WebKit::WebSpeechInputListener*);
@@ -151,6 +151,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void didScrollRect(int dx, int dy,
                              const WebKit::WebRect& clip_rect);
   virtual void scheduleComposite();
+  virtual void scheduleAnimation();
   virtual void didFocus();
   virtual void didBlur();
   virtual void didChangeCursor(const WebKit::WebCursorInfo& cursor);
@@ -225,8 +226,18 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void didFailResourceLoad(
       WebKit::WebFrame*, unsigned identifier, const WebKit::WebURLError&);
   virtual void didDisplayInsecureContent(WebKit::WebFrame* frame);
+
+  // We have two didRunInsecureContent's with the same name. That's because
+  // we're in the process of adding an argument and one of them will be correct.
+  // Once the WebKit change is in, the first should be removed the the second
+  // should be tagged with OVERRIDE.
   virtual void didRunInsecureContent(
       WebKit::WebFrame* frame, const WebKit::WebSecurityOrigin& origin);
+  virtual void didRunInsecureContent(
+      WebKit::WebFrame* frame,
+      const WebKit::WebSecurityOrigin& origin,
+      const WebKit::WebURL& target_url);
+
   virtual bool allowScript(WebKit::WebFrame* frame, bool enabled_per_settings);
   virtual void openFileSystem(
       WebKit::WebFrame* frame,
@@ -235,8 +246,8 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       bool create,
       WebKit::WebFileSystemCallbacks* callbacks);
 
-  // webkit_glue::WebPluginPageDelegate
-  virtual webkit_glue::WebPluginDelegate* CreatePluginDelegate(
+  // webkit::npapi::WebPluginPageDelegate
+  virtual webkit::npapi::WebPluginDelegate* CreatePluginDelegate(
       const FilePath& url,
       const std::string& mime_type);
   virtual void CreatedPluginWindow(
@@ -244,7 +255,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual void WillDestroyPluginWindow(
       gfx::PluginWindowHandle handle);
   virtual void DidMovePlugin(
-      const webkit_glue::WebPluginGeometry& move);
+      const webkit::npapi::WebPluginGeometry& move);
   virtual void DidStartLoadingForPlugin() {}
   virtual void DidStopLoadingForPlugin() {}
   virtual void ShowModalHTMLDialogForPlugin(
@@ -323,8 +334,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
     edit_command_value_.clear();
   }
 
-  void SetGeolocationPermission(bool allowed);
-
   void ClearContextMenuData();
 
   const WebKit::WebContextMenuData* last_context_menu_data() const {
@@ -378,9 +387,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
   // Get a string suitable for dumping a frame to the console.
   std::wstring GetFrameDescription(WebKit::WebFrame* webframe);
-
-  // Returns a TestGeolocationService owned by this delegate.
-  TestGeolocationService* GetTestGeolocationService();
 
   // Causes navigation actions just printout the intended navigation instead
   // of taking you to the page. This is used for cases like mailto, where you
@@ -458,8 +464,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
   // The mock spellchecker used in TestWebViewDelegate::spellCheck().
   MockSpellCheck mock_spellcheck_;
-
-  scoped_ptr<TestGeolocationService> test_geolocation_service_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebViewDelegate);
 };

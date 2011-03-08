@@ -11,17 +11,20 @@
 
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/singleton.h"
-#include "base/thread.h"
+#include "media/base/message_loop_factory.h"
 
+template <typename T> struct DefaultSingletonTraits;
 class WtlVideoRenderer;
 
 namespace media {
 
 class PipelineImpl;
 
-class Movie : public Singleton<Movie> {
+class Movie {
  public:
+   // Returns the singleton instance.
+  static Movie* GetInstance();
+
   // Open a movie.
   bool Open(const wchar_t* url, WtlVideoRenderer* video_renderer);
 
@@ -80,7 +83,7 @@ class Movie : public Singleton<Movie> {
   virtual ~Movie();
 
   scoped_refptr<PipelineImpl> pipeline_;
-  scoped_ptr<base::Thread> thread_;
+  scoped_ptr<media::MessageLoopFactory> message_loop_factory_;
 
   bool enable_audio_;
   bool enable_draw_;

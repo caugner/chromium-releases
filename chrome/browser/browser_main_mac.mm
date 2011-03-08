@@ -7,12 +7,10 @@
 #import <Cocoa/Cocoa.h>
 
 #include "app/app_switches.h"
-#include "app/l10n_util_mac.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/file_path.h"
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "base/nss_util.h"
 #include "base/path_service.h"
 #include "base/scoped_nsobject.h"
@@ -20,14 +18,15 @@
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/browser_main_win.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
-#import "chrome/browser/cocoa/keystone_glue.h"
+#import "chrome/browser/ui/cocoa/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/main_function_params.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/result_codes.h"
 #include "net/socket/ssl_client_socket_mac_factory.h"
+#include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/base/resource/resource_bundle.h"
 
 void DidEndMainMessageLoop() {
   AppController* appController = [NSApp delegate];
@@ -71,7 +70,7 @@ class BrowserMainPartsMac : public BrowserMainPartsPosix {
   virtual void PreEarlyInitialization() {
     BrowserMainPartsPosix::PreEarlyInitialization();
 
-    if (mac_util::WasLaunchedAsHiddenLoginItem()) {
+    if (base::mac::WasLaunchedAsHiddenLoginItem()) {
       CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
       singleton_command_line->AppendSwitch(switches::kNoStartupWindow);
     }
@@ -114,7 +113,7 @@ class BrowserMainPartsMac : public BrowserMainPartsPosix {
     // Now load the nib (from the right bundle).
     scoped_nsobject<NSNib>
         nib([[NSNib alloc] initWithNibNamed:@"MainMenu"
-                                     bundle:mac_util::MainAppBundle()]);
+                                     bundle:base::mac::MainAppBundle()]);
     // TODO(viettrungluu): crbug.com/20504 - This currently leaks, so if you
     // change this, you'll probably need to change the Valgrind suppression.
     [nib instantiateNibWithOwner:NSApp topLevelObjects:nil];

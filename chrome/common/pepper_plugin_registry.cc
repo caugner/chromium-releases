@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,14 @@ const char* PepperPluginRegistry::kPDFPluginExtension = "pdf";
 const char* PepperPluginRegistry::kPDFPluginDescription =
     "Portable Document Format";
 
+const char* PepperPluginRegistry::kNaClPluginName = "Chrome NaCl";
+const char* PepperPluginRegistry::kNaClPluginMimeType =
+    "application/x-nacl";
+const char* PepperPluginRegistry::kNaClPluginExtension = "nexe";
+const char* PepperPluginRegistry::kNaClPluginDescription =
+    "Native Client Executable";
+
+
 PepperPluginInfo::PepperPluginInfo()
     : is_internal(false),
       is_out_of_process(false) {
@@ -30,8 +38,12 @@ PepperPluginInfo::~PepperPluginInfo() {}
 
 // static
 PepperPluginRegistry* PepperPluginRegistry::GetInstance() {
-  static PepperPluginRegistry registry;
-  return &registry;
+  static PepperPluginRegistry* registry = NULL;
+  // This object leaks.  It is a temporary hack to work around a crash.
+  // http://code.google.com/p/chromium/issues/detail?id=63234
+  if (!registry)
+    registry = new PepperPluginRegistry;
+  return registry;
 }
 
 // static
@@ -104,8 +116,10 @@ void PepperPluginRegistry::GetPluginInfoFromSwitch(
 #endif
     if (name_parts.size() > 1)
       plugin.name = name_parts[1];
-    if (name_parts.size() > 2)
+    if (name_parts.size() > 2) {
+      plugin.description = name_parts[2];
       plugin.type_descriptions = name_parts[2];
+    }
     for (size_t j = 1; j < parts.size(); ++j)
       plugin.mime_types.push_back(parts[j]);
 
@@ -134,6 +148,33 @@ void PepperPluginRegistry::GetExtraPlugins(
       plugins->push_back(pdf);
 
       skip_pdf_file_check = true;
+    }
+  }
+
+  // Verify that we enable nacl on the command line.  The name of the
+  // switch varies between the browser and renderer process.
+  bool enable_nacl =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableNaCl) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kInternalNaCl);
+
+  static bool skip_nacl_file_check = false;
+  if (enable_nacl && PathService::Get(chrome::FILE_NACL_PLUGIN, &path)) {
+    if (skip_nacl_file_check || file_util::PathExists(path)) {
+      PepperPluginInfo nacl;
+      nacl.path = path;
+      nacl.name = kNaClPluginName;
+      nacl.mime_types.push_back(kNaClPluginMimeType);
+
+      // TODO(bbudge) Remove this mime type after NaCl tree has been updated.
+      const char* kNaClPluginOldMimeType =
+          "application/x-ppapi-nacl-srpc";
+      nacl.mime_types.push_back(kNaClPluginOldMimeType);
+
+      nacl.file_extensions = kNaClPluginExtension;
+      nacl.type_descriptions = kNaClPluginDescription;
+      plugins->push_back(nacl);
+
+      skip_nacl_file_check = true;
     }
   }
 }
@@ -187,15 +228,42 @@ bool PepperPluginRegistry::RunOutOfProcessForPlugin(
   return false;
 }
 
-pepper::PluginModule* PepperPluginRegistry::GetModule(
-    const FilePath& path) const {
-  ModuleMap::const_iterator it = modules_.find(path);
-  if (it == modules_.end())
+webkit::ppapi::PluginModule* PepperPluginRegistry::GetModule(
+    const FilePath& path) {
+  NonOwningModuleMap::iterator it = live_modules_.find(path);
+  if (it == live_modules_.end())
     return NULL;
   return it->second;
 }
 
-PepperPluginRegistry::~PepperPluginRegistry() {}
+void PepperPluginRegistry::AddLiveModule(const FilePath& path,
+                                         webkit::ppapi::PluginModule* module) {
+  DCHECK(live_modules_.find(path) == live_modules_.end());
+  live_modules_[path] = module;
+}
+
+void PepperPluginRegistry::PluginModuleDestroyed(
+    webkit::ppapi::PluginModule* destroyed_module) {
+  // Modules aren't destroyed very often and there are normally at most a
+  // couple of them. So for now we just do a brute-force search.
+  for (NonOwningModuleMap::iterator i = live_modules_.begin();
+       i != live_modules_.end(); ++i) {
+    if (i->second == destroyed_module) {
+      live_modules_.erase(i);
+      return;
+    }
+  }
+  NOTREACHED();  // Should have always found the module above.
+}
+
+PepperPluginRegistry::~PepperPluginRegistry() {
+  // Explicitly clear all preloaded modules first. This will cause callbacks
+  // to erase these modules from the live_modules_ list, and we don't want
+  // that to happen implicitly out-of-order.
+  preloaded_modules_.clear();
+
+  DCHECK(live_modules_.empty());
+}
 
 PepperPluginRegistry::PepperPluginRegistry() {
   InternalPluginInfoList internal_plugin_info;
@@ -207,14 +275,15 @@ PepperPluginRegistry::PepperPluginRegistry() {
        it != internal_plugin_info.end();
        ++it) {
     const FilePath& path = it->path;
-    ModuleHandle module =
-        pepper::PluginModule::CreateInternalModule(it->entry_points);
-    if (!module) {
+    scoped_refptr<webkit::ppapi::PluginModule> module(
+        new webkit::ppapi::PluginModule(this));
+    if (!module->InitAsInternalPlugin(it->entry_points)) {
       DLOG(ERROR) << "Failed to load pepper module: " << path.value();
       continue;
     }
     module->set_name(it->name);
-    modules_[path] = module;
+    preloaded_modules_[path] = module;
+    AddLiveModule(path, module);
   }
 
   // Add the modules specified on the command line last so that they can
@@ -227,12 +296,16 @@ PepperPluginRegistry::PepperPluginRegistry() {
       continue;  // Only preload in-process plugins.
 
     const FilePath& path = plugins[i].path;
-    ModuleHandle module = pepper::PluginModule::CreateModule(path);
-    if (!module) {
+    scoped_refptr<webkit::ppapi::PluginModule> module(
+        new webkit::ppapi::PluginModule(this));
+    // Must call this before bailing out later since the PluginModule's
+    // destructor will call the corresponding Remove in the "continue" case.
+    AddLiveModule(path, module);
+    if (!module->InitAsLibrary(path)) {
       DLOG(ERROR) << "Failed to load pepper module: " << path.value();
       continue;
     }
     module->set_name(plugins[i].name);
-    modules_[path] = module;
+    preloaded_modules_[path] = module;
   }
 }

@@ -24,37 +24,35 @@
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
 
+class GpuThread;
+
 // Encapsulates an IPC channel between the GPU process and one renderer
 // process. On the renderer side there's a corresponding GpuChannelHost.
 class GpuChannel : public IPC::Channel::Listener,
                    public IPC::Message::Sender,
                    public base::RefCountedThreadSafe<GpuChannel> {
  public:
-  explicit GpuChannel(int renderer_id);
+  GpuChannel(GpuThread* gpu_thread, int renderer_id);
   virtual ~GpuChannel();
 
   bool Init();
 
+  // Get the GpuThread that owns this channel.
+  GpuThread* gpu_thread() const { return gpu_thread_; }
+
+  // Returns the name of the associated IPC channel.
   std::string GetChannelName();
+
+#if defined(OS_POSIX)
+  int GetRendererFileDescriptor();
+#endif  // defined(OS_POSIX)
 
   base::ProcessHandle renderer_handle() const {
     return renderer_process_.handle();
   }
 
-#if defined(OS_POSIX)
-  // When first created, the GpuChannel gets assigned the file descriptor
-  // for the renderer.
-  // After the first time we pass it through the IPC, we don't need it anymore,
-  // and we close it. At that time, we reset renderer_fd_ to -1.
-  int DisownRendererFd() {
-    int value = renderer_fd_;
-    renderer_fd_ = -1;
-    return value;
-  }
-#endif
-
   // IPC::Channel::Listener implementation:
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
   virtual void OnChannelConnected(int32 peer_pid);
   virtual void OnChannelError();
 
@@ -70,7 +68,7 @@ class GpuChannel : public IPC::Channel::Listener,
 #endif
 
  private:
-  void OnControlMessageReceived(const IPC::Message& msg);
+  bool OnControlMessageReceived(const IPC::Message& msg);
 
   int GenerateRouteID();
 
@@ -92,6 +90,11 @@ class GpuChannel : public IPC::Channel::Listener,
                             int32 decoder_host_id);
   void OnDestroyVideoDecoder(int32 decoder_id);
 
+  // The lifetime of objects of this class is managed by a GpuThread. The
+  // GpuThreadss destroy all the GpuChannels that they own when they
+  // are destroyed. So a raw pointer is safe.
+  GpuThread* gpu_thread_;
+
   scoped_ptr<IPC::SyncChannel> channel_;
 
   // Handle to the renderer process who is on the other side of the channel.
@@ -99,12 +102,6 @@ class GpuChannel : public IPC::Channel::Listener,
 
   // The id of the renderer who is on the other side of the channel.
   int renderer_id_;
-
-#if defined(OS_POSIX)
-  // FD for the renderer end of the pipe. It is stored until we send it over
-  // IPC after which it is cleared. It will be closed by the IPC mechanism.
-  int renderer_fd_;
-#endif
 
   // Used to implement message routing functionality to CommandBuffer objects
   MessageRouter router_;

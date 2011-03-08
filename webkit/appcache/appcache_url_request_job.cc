@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "webkit/appcache/appcache_url_request_job.h"
 
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -20,14 +21,15 @@
 namespace appcache {
 
 AppCacheURLRequestJob::AppCacheURLRequestJob(
-    URLRequest* request, AppCacheStorage* storage)
-    : URLRequestJob(request), storage_(storage),
+    net::URLRequest* request, AppCacheStorage* storage)
+    : net::URLRequestJob(request), storage_(storage),
       has_been_started_(false), has_been_killed_(false),
       delivery_type_(AWAITING_DELIVERY_ORDERS),
       cache_id_(kNoCacheId), is_fallback_(false),
       cache_entry_not_found_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(read_callback_(
-          this, &AppCacheURLRequestJob::OnReadComplete)) {
+          this, &AppCacheURLRequestJob::OnReadComplete)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   DCHECK(storage_);
 }
 
@@ -67,8 +69,10 @@ void AppCacheURLRequestJob::MaybeBeginDelivery() {
   if (has_been_started() && has_delivery_orders()) {
     // Start asynchronously so that all error reporting and data
     // callbacks happen as they would for network requests.
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &AppCacheURLRequestJob::BeginDelivery));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        method_factory_.NewRunnableMethod(
+            &AppCacheURLRequestJob::BeginDelivery));
   }
 }
 
@@ -90,8 +94,8 @@ void AppCacheURLRequestJob::BeginDelivery() {
     case ERROR_DELIVERY:
       request()->net_log().AddEvent(
           net::NetLog::TYPE_APPCACHE_DELIVERING_ERROR_RESPONSE, NULL);
-      NotifyStartError(
-          URLRequestStatus(URLRequestStatus::FAILED, net::ERR_FAILED));
+      NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                             net::ERR_FAILED));
       break;
 
     case APPCACHED_DELIVERY:
@@ -184,16 +188,16 @@ void AppCacheURLRequestJob::SetupRangeResponse() {
 void AppCacheURLRequestJob::OnReadComplete(int result) {
   DCHECK(is_delivering_appcache_response());
   if (result == 0)
-    NotifyDone(URLRequestStatus());
+    NotifyDone(net::URLRequestStatus());
   else if (result < 0)
-    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, result));
+    NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED, result));
   else
-    SetStatus(URLRequestStatus());  // Clear the IO_PENDING status
+    SetStatus(net::URLRequestStatus());  // Clear the IO_PENDING status
 
   NotifyReadComplete(result);
 }
 
-// URLRequestJob overrides ------------------------------------------------
+// net::URLRequestJob overrides ------------------------------------------------
 
 void AppCacheURLRequestJob::Start() {
   DCHECK(!has_been_started());
@@ -209,7 +213,8 @@ void AppCacheURLRequestJob::Kill() {
       storage_->CancelDelegateCallbacks(this);
       storage_ = NULL;
     }
-    URLRequestJob::Kill();
+    net::URLRequestJob::Kill();
+    method_factory_.RevokeAll();
   }
 }
 
@@ -251,6 +256,10 @@ int AppCacheURLRequestJob::GetResponseCode() const {
   return http_info()->headers->response_code();
 }
 
+bool AppCacheURLRequestJob::IsCachedContent() const {
+  return is_delivering_appcache_response();
+}
+
 bool AppCacheURLRequestJob::ReadRawData(net::IOBuffer* buf, int buf_size,
                                         int *bytes_read) {
   DCHECK(is_delivering_appcache_response());
@@ -258,7 +267,7 @@ bool AppCacheURLRequestJob::ReadRawData(net::IOBuffer* buf, int buf_size,
   DCHECK(bytes_read);
   DCHECK(!reader_->IsReadPending());
   reader_->ReadData(buf, buf_size, &read_callback_);
-  SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
+  SetStatus(net::URLRequestStatus(net::URLRequestStatus::IO_PENDING, 0));
   return false;
 }
 
@@ -278,4 +287,3 @@ void AppCacheURLRequestJob::SetExtraRequestHeaders(
 }
 
 }  // namespace appcache
-

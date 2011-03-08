@@ -4,13 +4,12 @@
 
 #include "chrome/browser/themes/browser_theme_provider.h"
 
-#include "app/resource_bundle.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/browser_theme_pack.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/notification_service.h"
@@ -18,9 +17,10 @@
 #include "chrome/common/pref_names.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
-#include "app/win_util.h"
+#include "ui/base/win/hwnd_util.h"
 #endif
 
 // Strings used in alignment properties.
@@ -255,7 +255,7 @@ bool BrowserThemeProvider::ShouldUseNativeFrame() const {
   if (HasCustomImage(IDR_THEME_FRAME))
     return false;
 #if defined(OS_WIN)
-  return win_util::ShouldUseVistaFrame();
+  return ui::ShouldUseVistaFrame();
 #else
   return false;
 #endif
@@ -304,7 +304,7 @@ void BrowserThemeProvider::SetTheme(const Extension* extension) {
 void BrowserThemeProvider::RemoveUnusedThemes() {
   if (!profile_)
     return;
-  ExtensionsService* service = profile_->GetExtensionsService();
+  ExtensionService* service = profile_->GetExtensionService();
   if (!service)
     return;
   std::string current_theme = GetThemeID();
@@ -324,6 +324,10 @@ void BrowserThemeProvider::UseDefaultTheme() {
   ClearAllThemeData();
   NotifyThemeChanged(NULL);
   UserMetrics::RecordAction(UserMetricsAction("Themes_Reset"), profile_);
+}
+
+void BrowserThemeProvider::SetNativeTheme() {
+  UseDefaultTheme();
 }
 
 bool BrowserThemeProvider::UsingDefaultTheme() {
@@ -554,7 +558,7 @@ void BrowserThemeProvider::LoadThemePrefs() {
     } else {
       // TODO(erg): We need to pop up a dialog informing the user that their
       // theme is being migrated.
-      ExtensionsService* service = profile_->GetExtensionsService();
+      ExtensionService* service = profile_->GetExtensionService();
       if (service) {
         const Extension* extension =
             service->GetExtensionById(current_id, false);

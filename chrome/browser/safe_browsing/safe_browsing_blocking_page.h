@@ -39,10 +39,14 @@
 class DictionaryValue;
 class MessageLoop;
 class SafeBrowsingBlockingPageFactory;
+class MalwareDetails;
 class TabContents;
 
 class SafeBrowsingBlockingPage : public InterstitialPage {
  public:
+  typedef std::vector<SafeBrowsingService::UnsafeResource> UnsafeResourceList;
+  typedef std::map<TabContents*, UnsafeResourceList> UnsafeResourceMap;
+
   virtual ~SafeBrowsingBlockingPage();
 
   // Shows a blocking page warning the user about phishing/malware for a
@@ -62,10 +66,9 @@ class SafeBrowsingBlockingPage : public InterstitialPage {
 
   // InterstitialPage method:
   virtual std::string GetHTMLContents();
+  virtual void SetReportingPreference(bool report);
   virtual void Proceed();
   virtual void DontProceed();
-
-  typedef std::vector<SafeBrowsingService::UnsafeResource> UnsafeResourceList;
 
  protected:
   friend class SafeBrowsingBlockingPageTest;
@@ -94,20 +97,29 @@ class SafeBrowsingBlockingPage : public InterstitialPage {
   // A helper method used by the Populate methods above used to populate common
   // fields.
   void PopulateStringDictionary(DictionaryValue* strings,
-                                const std::wstring& title,
-                                const std::wstring& headline,
-                                const std::wstring& description1,
-                                const std::wstring& description2,
-                                const std::wstring& description3);
+                                const string16& title,
+                                const string16& headline,
+                                const string16& description1,
+                                const string16& description2,
+                                const string16& description3);
 
   // Records a user action for this interstitial, using the form
   // SBInterstitial[Phishing|Malware|Multiple][Show|Proceed|DontProceed].
   void RecordUserAction(BlockingPageEvent event);
 
+  // Checks if we should even show the malware details option. For example, we
+  // don't show it in incognito mode.
+  bool CanShowMalwareDetailsOption();
+
+  // Called when the insterstitial is going away. If there is a
+  // pending malware details object, we look at the user's
+  // preferences, and if the option to send malware details is
+  // enabled, the report is scheduled to be sent on the |sb_service_|.
+  void FinishMalwareDetails();
+
   // A list of SafeBrowsingService::UnsafeResource for a tab that the user
   // should be warned about.  They are queued when displaying more than one
   // interstitial at a time.
-  typedef std::map<TabContents*, UnsafeResourceList> UnsafeResourceMap;
   static UnsafeResourceMap* GetUnsafeResourcesMap();
 
   // Notifies the SafeBrowsingService on the IO thread whether to proceed or not
@@ -135,6 +147,11 @@ class SafeBrowsingBlockingPage : public InterstitialPage {
 
   // The list of unsafe resources this page is warning about.
   UnsafeResourceList unsafe_resources_;
+
+  // A MalwareDetails object that we start generating when the
+  // blocking page is shown. The object will be sent when the warning
+  // is gone (if the user enables the feature).
+  scoped_refptr<MalwareDetails> malware_details_;
 
   // The factory used to instanciate SafeBrowsingBlockingPage objects.
   // Usefull for tests, so they can provide their own implementation of

@@ -12,7 +12,7 @@
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "cros/chromeos_input_method.h"
+#include "third_party/cros/chromeos_input_method.h"
 
 namespace chromeos {
 
@@ -26,14 +26,23 @@ class InputMethodLibrary {
    public:
     virtual ~Observer() = 0;
     // Called when the current input method is changed.
-    virtual void InputMethodChanged(InputMethodLibrary* obj) = 0;
-
-    // Called when input method properties (see chromeos_input_method.h
-    // for details) are changed.
-    virtual void ImePropertiesChanged(InputMethodLibrary* obj) = 0;
+    virtual void InputMethodChanged(
+        InputMethodLibrary* obj,
+        const InputMethodDescriptor& previous_input_method,
+        const InputMethodDescriptor& current_input_method,
+        size_t num_active_input_methods) = 0;
 
     // Called when the active input methods are changed.
-    virtual void ActiveInputMethodsChanged(InputMethodLibrary* obj) = 0;
+    virtual void ActiveInputMethodsChanged(
+        InputMethodLibrary* obj,
+        const InputMethodDescriptor& current_input_method,
+        size_t num_active_input_methods) = 0;
+
+    // Called when the preferences have to be updated.
+    virtual void PreferenceUpdateNeeded(
+        InputMethodLibrary* obj,
+        const InputMethodDescriptor& previous_input_method,
+        const InputMethodDescriptor& current_input_method) = 0;
   };
   virtual ~InputMethodLibrary() {}
 
@@ -75,9 +84,9 @@ class InputMethodLibrary {
   // |out_value|. Returns true if |out_value| is successfully updated.
   // When you would like to retrieve 'panel/custom_font', |section| should
   // be "panel", and |config_name| should be "custom_font".
-  virtual bool GetImeConfig(
-      const char* section, const char* config_name,
-      ImeConfigValue* out_value) = 0;
+  virtual bool GetImeConfig(const std::string& section,
+                            const std::string& config_name,
+                            ImeConfigValue* out_value) = 0;
 
   // Updates a configuration of ibus-daemon or IBus engines with |value|.
   // Returns true if the configuration (and all pending configurations, if any)
@@ -88,9 +97,14 @@ class InputMethodLibrary {
   // Notice: This function might call the Observer::ActiveInputMethodsChanged()
   // callback function immediately, before returning from the SetImeConfig
   // function. See also http://crosbug.com/5217.
-  virtual bool SetImeConfig(const char* section,
-                            const char* config_name,
+  virtual bool SetImeConfig(const std::string& section,
+                            const std::string& config_name,
                             const ImeConfigValue& value) = 0;
+
+  // Returns the keyboard overlay ID corresponding to |input_method_id|.
+  // Returns an empty string if there is no corresponding keyboard overlay ID.
+  virtual std::string GetKeyboardOverlayId(
+      const std::string& input_method_id) = 0;
 
   // Sets the IME state to enabled, and launches its processes if needed.
   virtual void StartInputMethodProcesses() = 0;

@@ -8,6 +8,7 @@
 
 #include "base/hash_tables.h"
 #include "chrome/plugin/plugin_channel_base.h"
+#include "ipc/ipc_channel_handle.h"
 
 class IsListeningFilter;
 class NPObjectBase;
@@ -17,18 +18,18 @@ class NPObjectBase;
 class PluginChannelHost : public PluginChannelBase {
  public:
   static PluginChannelHost* GetPluginChannelHost(
-      const std::string& channel_name, MessageLoop* ipc_message_loop);
+      const IPC::ChannelHandle& channel_handle, MessageLoop* ipc_message_loop);
 
   virtual bool Init(MessageLoop* ipc_message_loop, bool create_pipe_now);
 
-  int GenerateRouteID();
+  virtual int GenerateRouteID();
 
   void AddRoute(int route_id, IPC::Channel::Listener* listener,
                 NPObjectBase* npobject);
   void RemoveRoute(int route_id);
 
   // IPC::Channel::Listener override
-  void OnChannelError();
+  virtual void OnChannelError();
 
   static void SetListening(bool flag);
 
@@ -47,7 +48,7 @@ class PluginChannelHost : public PluginChannelBase {
 
   static PluginChannelBase* ClassFactory() { return new PluginChannelHost(); }
 
-  void OnControlMessageReceived(const IPC::Message& message);
+  virtual bool OnControlMessageReceived(const IPC::Message& message);
   void OnSetException(const std::string& message);
   void OnPluginShuttingDown(const IPC::Message& message);
 

@@ -1,34 +1,35 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/views/tabs/tab_strip.h"
 
-#include "app/animation_container.h"
-#include "app/drag_drop_types.h"
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include <algorithm>
+
 #include "base/compiler_specific.h"
 #include "base/stl_util-inl.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/view_ids.h"
-#include "chrome/browser/views/tabs/tab.h"
-#include "chrome/browser/views/tabs/tab_strip_controller.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/tabs/tab.h"
+#include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/path.h"
 #include "gfx/size.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/animation/animation_container.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/image_view.h"
 #include "views/widget/default_theme_provider.h"
 #include "views/window/non_client_view.h"
 #include "views/window/window.h"
 
 #if defined(OS_WIN)
-#include "app/win_util.h"
+#include "app/win/win_util.h"
 #include "views/widget/widget_win.h"
 #elif defined(OS_LINUX)
 #include "views/widget/widget_gtk.h"
@@ -119,7 +120,7 @@ TabStrip::TabStrip(TabStripController* controller)
       current_selected_width_(Tab::GetStandardSize().width()),
       available_width_for_tabs_(-1),
       in_tab_close_(false),
-      animation_container_(new AnimationContainer()) {
+      animation_container_(new ui::AnimationContainer()) {
   Init();
 }
 
@@ -147,7 +148,8 @@ void TabStrip::InitTabStripButtons() {
                                       views::ImageButton::ALIGN_BOTTOM);
   }
   LoadNewTabButtonImage();
-  newtab_button_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_NEWTAB));
+  newtab_button_->SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB));
   AddChildView(newtab_button_);
 }
 
@@ -168,7 +170,7 @@ int TabStrip::GetPreferredHeight() {
 
 void TabStrip::SetBackgroundOffset(const gfx::Point& offset) {
   for (int i = 0; i < tab_count(); ++i)
-    GetTabAtTabDataIndex(i)->SetBackgroundOffset(offset);
+    GetTabAtTabDataIndex(i)->set_background_offset(offset);
 }
 
 bool TabStrip::IsPositionInWindowCaption(const gfx::Point& point) {
@@ -347,7 +349,7 @@ void TabStrip::OnDragExited() {
 
 int TabStrip::OnPerformDrop(const DropTargetEvent& event) {
   if (!drop_info_.get())
-    return DragDropTypes::DRAG_NONE;
+    return ui::DragDropTypes::DRAG_NONE;
 
   const int drop_index = drop_info_->drop_index;
   const bool drop_before = drop_info_->drop_before;
@@ -358,7 +360,7 @@ int TabStrip::OnPerformDrop(const DropTargetEvent& event) {
   GURL url;
   std::wstring title;
   if (!event.GetData().GetURLAndTitle(&url, &title) || !url.is_valid())
-    return DragDropTypes::DRAG_NONE;
+    return ui::DragDropTypes::DRAG_NONE;
 
   controller()->PerformDrop(drop_before, drop_index, url);
 
@@ -496,7 +498,7 @@ void TabStrip::Init() {
 }
 
 void TabStrip::LoadNewTabButtonImage() {
-  ThemeProvider* tp = GetThemeProvider();
+  ui::ThemeProvider* tp = GetThemeProvider();
 
   // If we don't have a theme provider yet, it means we do not have a
   // root view, and are therefore in a test.
@@ -687,7 +689,7 @@ gfx::Rect TabStrip::GetDropBounds(int drop_index,
 
   // If the rect doesn't fit on the monitor, push the arrow to the bottom.
 #if defined(OS_WIN)
-  gfx::Rect monitor_bounds = win_util::GetMonitorBoundsForRect(drop_bounds);
+  gfx::Rect monitor_bounds = app::win::GetMonitorBoundsForRect(drop_bounds);
   *is_beneath = (monitor_bounds.IsEmpty() ||
                  !monitor_bounds.Contains(drop_bounds));
 #else
@@ -768,11 +770,11 @@ void TabStrip::SetDropIndex(int tab_data_index, bool drop_before) {
 
 int TabStrip::GetDropEffect(const views::DropTargetEvent& event) {
   const int source_ops = event.GetSourceOperations();
-  if (source_ops & DragDropTypes::DRAG_COPY)
-    return DragDropTypes::DRAG_COPY;
-  if (source_ops & DragDropTypes::DRAG_LINK)
-    return DragDropTypes::DRAG_LINK;
-  return DragDropTypes::DRAG_MOVE;
+  if (source_ops & ui::DragDropTypes::DRAG_COPY)
+    return ui::DragDropTypes::DRAG_COPY;
+  if (source_ops & ui::DragDropTypes::DRAG_LINK)
+    return ui::DragDropTypes::DRAG_LINK;
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 // static

@@ -111,16 +111,6 @@ int SBEntry::Size(Type type, int prefix_count) {
   return sizeof(Data) + prefix_count * PrefixSize(type);
 }
 
-SBEntry* SBEntry::Enlarge(int extra_prefixes) {
-  int new_prefix_count = prefix_count() + extra_prefixes;
-  SBEntry* rv = SBEntry::Create(type(), new_prefix_count);
-  memcpy(rv, this, Size());  // NOTE: Blows away rv.data_!
-  // We have to re-set |rv|'s prefix count since we just copied our own over it.
-  rv->set_prefix_count(new_prefix_count);
-  Destroy();
-  return rv;
-}
-
 int SBEntry::ChunkIdAtPrefix(int index) const {
   if (type() == SUB_PREFIX)
     return sub_prefixes_[index].add_chunk;
@@ -175,16 +165,43 @@ namespace safe_browsing_util {
 const char kMalwareList[] = "goog-malware-shavar";
 const char kPhishingList[] = "goog-phish-shavar";
 
+const char kBinUrlList[] = "goog-badbinurl-shavar";
+const char kBinHashList[] = "goog-badbinhash-shavar";
+
 int GetListId(const std::string& name) {
-  if (name == kMalwareList)
-    return MALWARE;
-  return (name == kPhishingList) ? PHISH : INVALID;
+  int id;
+  if (name == safe_browsing_util::kMalwareList) {
+    id = MALWARE;
+  } else if (name == safe_browsing_util::kPhishingList) {
+    id = PHISH;
+  } else if (name == safe_browsing_util::kBinUrlList) {
+    id = BINURL;
+  }  else if (name == safe_browsing_util::kBinHashList) {
+    id = BINHASH;
+  } else {
+    id = INVALID;
+  }
+  return id;
 }
 
-std::string GetListName(int list_id) {
-  if (list_id == MALWARE)
-    return kMalwareList;
-  return (list_id == PHISH) ? kPhishingList : std::string();
+bool GetListName(int list_id, std::string* list) {
+  switch (list_id) {
+    case MALWARE:
+      *list = safe_browsing_util::kMalwareList;
+      break;
+    case PHISH:
+      *list = safe_browsing_util::kPhishingList;
+      break;
+    case BINURL:
+      *list = safe_browsing_util::kBinUrlList;
+      break;
+    case BINHASH:
+      *list = safe_browsing_util::kBinHashList;
+      break;
+    default:
+      return false;
+  }
+  return true;
 }
 
 std::string Unescape(const std::string& url) {
@@ -424,6 +441,10 @@ bool IsPhishingList(const std::string& list_name) {
 
 bool IsMalwareList(const std::string& list_name) {
   return list_name.find("-malware-") != std::string::npos;
+}
+
+bool IsBadbinurlList(const std::string& list_name) {
+  return list_name.find("-badbinurl-") != std::string::npos;
 }
 
 static void DecodeWebSafe(std::string* decoded) {

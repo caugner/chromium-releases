@@ -5,12 +5,12 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/location_bar.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/ui_test_utils.h"
@@ -40,7 +40,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
     ResultCatcher catcher;
     int tab_id =
         ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
-    ExtensionBrowserEventRouter::GetInstance()->PageActionExecuted(
+    ExtensionService* service = browser()->profile()->GetExtensionService();
+    service->browser_event_router()->PageActionExecuted(
         browser()->profile(), extension->id(), "", tab_id, "", 0);
     EXPECT_TRUE(catcher.GetNextResult());
   }
@@ -77,7 +78,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionAddPopup) {
   // install a page action popup.
   {
     ResultCatcher catcher;
-    ExtensionBrowserEventRouter::GetInstance()->PageActionExecuted(
+    ExtensionService* service = browser()->profile()->GetExtensionService();
+    service->browser_event_router()->PageActionExecuted(
         browser()->profile(), extension->id(), "action", tab_id, "", 1);
     ASSERT_TRUE(catcher.GetNextResult());
   }
@@ -152,7 +154,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OldPageActions) {
     ResultCatcher catcher;
     int tab_id =
         ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
-    ExtensionBrowserEventRouter::GetInstance()->PageActionExecuted(
+    ExtensionService* service = browser()->profile()->GetExtensionService();
+    service->browser_event_router()->PageActionExecuted(
         browser()->profile(), extension->id(), "action", tab_id, "", 1);
     EXPECT_TRUE(catcher.GetNextResult());
   }

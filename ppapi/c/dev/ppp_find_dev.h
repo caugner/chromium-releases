@@ -1,14 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_DEV_PPP_FIND_DEV_H_
 #define PPAPI_C_DEV_PPP_FIND_DEV_H_
 
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
 
-#define PPP_FIND_DEV_INTERFACE "PPP_Find(Dev);0.2"
+#define PPP_FIND_DEV_INTERFACE "PPP_Find(Dev);0.3"
 
 struct PPP_Find_Dev {
   // Finds the given UTF-8 text starting at the current selection. The number of
@@ -31,4 +31,5 @@ struct PPP_Find_Dev {
   void (*StopFind)(PP_Instance instance);
 };
 
-#endif  // PPAPI_C_DEV_PPP_FIND_DEV_H_
+#endif  /* PPAPI_C_DEV_PPP_FIND_DEV_H_ */
+

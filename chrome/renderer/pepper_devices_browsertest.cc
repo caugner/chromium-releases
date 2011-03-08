@@ -15,17 +15,19 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPlugin.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
-#include "webkit/glue/plugins/plugin_instance.h"
-#include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/glue/plugins/webplugin_impl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "webkit/plugins/npapi/plugin_instance.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/npapi/webplugin_impl.h"
 
 class PepperDeviceTest;
 
 namespace {
 
+const FilePath::CharType kTestPluginFileName[] =
+    FILE_PATH_LITERAL("pepper-device-tester");
 const char kTestPluginMimeType[] = "chrome-test/pepper-device-test";
 
 // This maps the NPP instances to the test object so our C callbacks can easily
@@ -102,11 +104,6 @@ NPError API_CALL NP_Shutdown() {
 
 class PepperDeviceTest : public RenderViewTest {
  public:
-  PepperDeviceTest();
-  ~PepperDeviceTest();
-
-  const FilePath& plugin_path() const { return version_info_.path; }
-
   WebPluginDelegatePepper* pepper_plugin() const { return pepper_plugin_; }
 
   NPP npp() const { return pepper_plugin_->instance()->npp(); }
@@ -135,46 +132,37 @@ class PepperDeviceTest : public RenderViewTest {
   virtual void SetUp();
   virtual void TearDown();
 
-  NPAPI::PluginVersionInfo version_info_;
-
-  scoped_ptr<webkit_glue::WebPluginImpl> plugin_;
+  scoped_ptr<webkit::npapi::WebPluginImpl> plugin_;
   WebPluginDelegatePepper* pepper_plugin_;  // FIXME(brettw): check lifetime.
 };
-
-PepperDeviceTest::PepperDeviceTest() {
-  version_info_.path = FilePath(FILE_PATH_LITERAL("pepper-device-tester"));
-  version_info_.product_name = ASCIIToWide("Pepper device test plugin");
-  version_info_.file_description = ASCIIToWide("Pepper device test plugin");
-  version_info_.file_version = ASCIIToWide("1");
-  version_info_.mime_types = ASCIIToWide(kTestPluginMimeType);
-  NPAPI::PluginEntryPoints entry_points = {
-#if !defined(OS_POSIX) || defined(OS_MACOSX)
-      NP_GetEntryPoints,
-#endif
-      NP_Initialize,
-      NP_Shutdown
-  };
-  version_info_.entry_points = entry_points;
-}
-
-PepperDeviceTest::~PepperDeviceTest() {
-}
 
 void PepperDeviceTest::SetUp() {
   RenderViewTest::SetUp();
 
-  NPAPI::PluginList::Singleton()->RegisterInternalPlugin(version_info_);
+  webkit::npapi::PluginEntryPoints entry_points = {
+#if !defined(OS_POSIX) || defined(OS_MACOSX)
+    NP_GetEntryPoints,
+#endif
+    NP_Initialize,
+    NP_Shutdown
+  };
+  webkit::npapi::PluginList::Singleton()->RegisterInternalPlugin(
+      FilePath(kTestPluginFileName),
+      "Pepper device test plugin",
+      "Pepper device test plugin",
+      kTestPluginMimeType,
+      entry_points);
 
   // Create the WebKit plugin with no delegates (this seems to work
   // sufficiently for the test).
   WebKit::WebPluginParams params;
-  plugin_.reset(new webkit_glue::WebPluginImpl(
+  plugin_.reset(new webkit::npapi::WebPluginImpl(
       NULL, params, FilePath(), std::string(),
-      base::WeakPtr<webkit_glue::WebPluginPageDelegate>()));
+      base::WeakPtr<webkit::npapi::WebPluginPageDelegate>()));
 
   // Create a pepper plugin for the RenderView.
   pepper_plugin_ = WebPluginDelegatePepper::Create(
-      plugin_path(), kTestPluginMimeType, view_->AsWeakPtr());
+      FilePath(kTestPluginFileName), kTestPluginMimeType, view_->AsWeakPtr());
   ASSERT_TRUE(pepper_plugin_);
   ASSERT_TRUE(pepper_plugin_->Initialize(GURL(), std::vector<std::string>(),
                                          std::vector<std::string>(),
@@ -201,7 +189,8 @@ void PepperDeviceTest::TearDown() {
   if (pepper_plugin_)
     pepper_plugin_->PluginDestroyed();
 
-  NPAPI::PluginList::Singleton()->UnregisterInternalPlugin(version_info_.path);
+  webkit::npapi::PluginList::Singleton()->UnregisterInternalPlugin(
+      FilePath(kTestPluginFileName));
 
   RenderViewTest::TearDown();
 }

@@ -12,8 +12,9 @@
 #include <vector>
 
 #include "base/global_descriptors_posix.h"
-#include "base/lock.h"
 #include "base/process.h"
+#include "base/process_util.h"
+#include "base/synchronization/lock.h"
 
 template<typename Type>
 struct DefaultSingletonTraits;
@@ -26,6 +27,9 @@ static const char kZygoteMagic[] = "ZYGOTE_OK";
 // process.
 class ZygoteHost {
  public:
+  // Returns the singleton instance.
+  static ZygoteHost* GetInstance();
+
   void Init(const std::string& sandbox_cmd);
 
   // Tries to start a renderer process.  Returns its pid on success, otherwise
@@ -34,26 +38,27 @@ class ZygoteHost {
                      const base::GlobalDescriptors::Mapping& mapping);
   void EnsureProcessTerminated(pid_t process);
 
-  // Get the termination status (exit code) of the process and return true if
-  // the status indicates the process crashed. |child_exited| is set to true
-  // iff the child process has terminated. (|child_exited| may be NULL.)
-  bool DidProcessCrash(base::ProcessHandle handle, bool* child_exited);
+  // Get the termination status (and, optionally, the exit code) of
+  // the process. |exit_code| is set to the exit code of the child
+  // process. (|exit_code| may be NULL.)
+  base::TerminationStatus GetTerminationStatus(base::ProcessHandle handle,
+                                               int* exit_code);
 
   // These are the command codes used on the wire between the browser and the
   // zygote.
   enum {
-    kCmdFork = 0,             // Fork off a new renderer.
-    kCmdReap = 1,             // Reap a renderer child.
-    kCmdDidProcessCrash = 2,  // Check if child process crashed.
-    kCmdGetSandboxStatus = 3, // Read a bitmask of kSandbox*
+    kCmdFork = 0,                  // Fork off a new renderer.
+    kCmdReap = 1,                  // Reap a renderer child.
+    kCmdGetTerminationStatus = 2,  // Check what happend to a child process.
+    kCmdGetSandboxStatus = 3,      // Read a bitmask of kSandbox*
   };
 
   // These form a bitmask which describes the conditions of the sandbox that
   // the zygote finds itself in.
   enum {
-    kSandboxSUID = 1 << 0,  // SUID sandbox active
-    kSandboxPIDNS = 1 << 1,  // SUID sandbox is using the PID namespace
-    kSandboxNetNS = 1 << 2,  // SUID sandbox is using the network namespace
+    kSandboxSUID = 1 << 0,     // SUID sandbox active
+    kSandboxPIDNS = 1 << 1,    // SUID sandbox is using the PID namespace
+    kSandboxNetNS = 1 << 2,    // SUID sandbox is using the network namespace
     kSandboxSeccomp = 1 << 3,  // seccomp sandbox active.
   };
 
@@ -81,7 +86,7 @@ class ZygoteHost {
   // A lock protecting all communication with the zygote. This lock must be
   // acquired before sending a command and released after the result has been
   // received.
-  Lock control_lock_;
+  base::Lock control_lock_;
   pid_t pid_;
   bool init_;
   bool using_suid_sandbox_;

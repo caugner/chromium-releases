@@ -55,17 +55,18 @@ HttpCache::BackendFactory* HttpCache::DefaultBackend::InMemory(int max_bytes) {
   return new DefaultBackend(MEMORY_CACHE, FilePath(), max_bytes, NULL);
 }
 
-int HttpCache::DefaultBackend::CreateBackend(disk_cache::Backend** backend,
+int HttpCache::DefaultBackend::CreateBackend(NetLog* net_log,
+                                             disk_cache::Backend** backend,
                                              CompletionCallback* callback) {
   DCHECK_GE(max_bytes_, 0);
   return disk_cache::CreateCacheBackend(type_, path_, max_bytes_, true,
-                                        thread_, backend, callback);
+                                        thread_, net_log, backend, callback);
 }
 
 //-----------------------------------------------------------------------------
 
-HttpCache::ActiveEntry::ActiveEntry(disk_cache::Entry* e)
-    : disk_entry(e),
+HttpCache::ActiveEntry::ActiveEntry(disk_cache::Entry* entry)
+    : disk_entry(entry),
       writer(NULL),
       will_process_pending_queue(false),
       doomed(false) {
@@ -263,7 +264,7 @@ void HttpCache::MetadataWriter::OnIOComplete(int result) {
 
 class HttpCache::SSLHostInfoFactoryAdaptor : public SSLHostInfoFactory {
  public:
-  SSLHostInfoFactoryAdaptor(HttpCache* http_cache)
+  explicit SSLHostInfoFactoryAdaptor(HttpCache* http_cache)
       : http_cache_(http_cache) {
   }
 
@@ -279,6 +280,7 @@ class HttpCache::SSLHostInfoFactoryAdaptor : public SSLHostInfoFactory {
 //-----------------------------------------------------------------------------
 
 HttpCache::HttpCache(HostResolver* host_resolver,
+                     CertVerifier* cert_verifier,
                      DnsRRResolver* dnsrr_resolver,
                      DnsCertProvenanceChecker* dns_cert_checker_,
                      ProxyService* proxy_service,
@@ -287,38 +289,39 @@ HttpCache::HttpCache(HostResolver* host_resolver,
                      HttpNetworkDelegate* network_delegate,
                      NetLog* net_log,
                      BackendFactory* backend_factory)
-    : backend_factory_(backend_factory),
+    : net_log_(net_log),
+      backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
       ssl_host_info_factory_(new SSLHostInfoFactoryAdaptor(
             ALLOW_THIS_IN_INITIALIZER_LIST(this))),
       network_layer_(HttpNetworkLayer::CreateFactory(host_resolver,
-          dnsrr_resolver, dns_cert_checker_,
+          cert_verifier, dnsrr_resolver, dns_cert_checker_,
           ssl_host_info_factory_.get(),
           proxy_service, ssl_config_service,
           http_auth_handler_factory, network_delegate, net_log)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
-      enable_range_support_(true) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
 }
 
 HttpCache::HttpCache(HttpNetworkSession* session,
                      BackendFactory* backend_factory)
-    : backend_factory_(backend_factory),
+    : net_log_(session->net_log()),
+      backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
       network_layer_(HttpNetworkLayer::CreateFactory(session)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
-      enable_range_support_(true) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
 }
 
 HttpCache::HttpCache(HttpTransactionFactory* network_layer,
+                     NetLog* net_log,
                      BackendFactory* backend_factory)
-    : backend_factory_(backend_factory),
+    : net_log_(net_log),
+      backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
       network_layer_(network_layer),
-      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
-      enable_range_support_(true) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
 }
 
 HttpCache::~HttpCache() {
@@ -380,29 +383,6 @@ disk_cache::Backend* HttpCache::GetCurrentBackend() {
   return disk_cache_.get();
 }
 
-int HttpCache::CreateTransaction(scoped_ptr<HttpTransaction>* trans) {
-  // Do lazy initialization of disk cache if needed.
-  if (!disk_cache_.get())
-    CreateBackend(NULL, NULL);  // We don't care about the result.
-
-  trans->reset(new HttpCache::Transaction(this, enable_range_support_));
-  return OK;
-}
-
-HttpCache* HttpCache::GetCache() {
-  return this;
-}
-
-HttpNetworkSession* HttpCache::GetSession() {
-  net::HttpNetworkLayer* network =
-      static_cast<net::HttpNetworkLayer*>(network_layer_.get());
-  return network->GetSession();
-}
-
-void HttpCache::Suspend(bool suspend) {
-  network_layer_->Suspend(suspend);
-}
-
 // static
 bool HttpCache::ParseResponseInfo(const char* data, int len,
                                   HttpResponseInfo* response_info,
@@ -421,8 +401,7 @@ void HttpCache::WriteMetadata(const GURL& url,
   if (!disk_cache_.get())
     CreateBackend(NULL, NULL);  // We don't care about the result.
 
-  HttpCache::Transaction* trans =
-      new HttpCache::Transaction(this, enable_range_support_);
+  HttpCache::Transaction* trans = new HttpCache::Transaction(this);
   MetadataWriter* writer = new MetadataWriter(trans);
 
   // The writer will self destruct when done.
@@ -438,6 +417,29 @@ void HttpCache::CloseCurrentConnections() {
     if (session->spdy_session_pool())
       session->spdy_session_pool()->CloseCurrentSessions();
   }
+}
+
+int HttpCache::CreateTransaction(scoped_ptr<HttpTransaction>* trans) {
+  // Do lazy initialization of disk cache if needed.
+  if (!disk_cache_.get())
+    CreateBackend(NULL, NULL);  // We don't care about the result.
+
+  trans->reset(new HttpCache::Transaction(this));
+  return OK;
+}
+
+HttpCache* HttpCache::GetCache() {
+  return this;
+}
+
+HttpNetworkSession* HttpCache::GetSession() {
+  net::HttpNetworkLayer* network =
+      static_cast<net::HttpNetworkLayer*>(network_layer_.get());
+  return network->GetSession();
+}
+
+void HttpCache::Suspend(bool suspend) {
+  network_layer_->Suspend(suspend);
 }
 
 //-----------------------------------------------------------------------------
@@ -467,7 +469,8 @@ int HttpCache::CreateBackend(disk_cache::Backend** backend,
   BackendCallback* my_callback = new BackendCallback(this, pending_op);
   pending_op->callback = my_callback;
 
-  int rv = backend_factory_->CreateBackend(&pending_op->backend, my_callback);
+  int rv = backend_factory_->CreateBackend(net_log_, &pending_op->backend,
+                                           my_callback);
   if (rv != ERR_IO_PENDING) {
     pending_op->writer->ClearCallback();
     my_callback->Run(rv);

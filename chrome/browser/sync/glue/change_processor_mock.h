@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,19 @@
 #define CHROME_BROWSER_SYNC_GLUE_CHANGE_PROCESSOR_MOCK_H__
 #pragma once
 
-#include "chrome/browser/profile.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+class Profile;
+
 namespace browser_sync {
 
 class ChangeProcessorMock : public ChangeProcessor {
  public:
-  ChangeProcessorMock() : ChangeProcessor(NULL) {}
+  ChangeProcessorMock();
+  virtual ~ChangeProcessorMock();
   MOCK_METHOD3(ApplyChangesFromSyncModel,
                void(const sync_api::BaseTransaction* trans,
                     const sync_api::SyncManager::ChangeRecord* changes,

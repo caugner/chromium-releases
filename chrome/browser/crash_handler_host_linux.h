@@ -10,7 +10,8 @@
 
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
-#include "base/singleton.h"
+
+template <typename T> struct DefaultSingletonTraits;
 
 namespace base {
 class Thread;
@@ -78,7 +79,28 @@ class CrashHandlerHostLinux : public MessageLoopForIO::Watcher,
   DISALLOW_COPY_AND_ASSIGN(CrashHandlerHostLinux);
 };
 
+class GpuCrashHandlerHostLinux : public CrashHandlerHostLinux {
+ public:
+  // Returns the singleton instance.
+  static GpuCrashHandlerHostLinux* GetInstance();
+
+ private:
+  friend struct DefaultSingletonTraits<GpuCrashHandlerHostLinux>;
+  GpuCrashHandlerHostLinux();
+  virtual ~GpuCrashHandlerHostLinux();
+
+#if defined(USE_LINUX_BREAKPAD)
+  virtual void SetProcessType();
+#endif
+
+  DISALLOW_COPY_AND_ASSIGN(GpuCrashHandlerHostLinux);
+};
+
 class PluginCrashHandlerHostLinux : public CrashHandlerHostLinux {
+ public:
+  // Returns the singleton instance.
+  static PluginCrashHandlerHostLinux* GetInstance();
+
  private:
   friend struct DefaultSingletonTraits<PluginCrashHandlerHostLinux>;
   PluginCrashHandlerHostLinux();
@@ -92,6 +114,10 @@ class PluginCrashHandlerHostLinux : public CrashHandlerHostLinux {
 };
 
 class RendererCrashHandlerHostLinux : public CrashHandlerHostLinux {
+ public:
+  // Returns the singleton instance.
+  static RendererCrashHandlerHostLinux* GetInstance();
+
  private:
   friend struct DefaultSingletonTraits<RendererCrashHandlerHostLinux>;
   RendererCrashHandlerHostLinux();

@@ -6,10 +6,10 @@
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_SHELF_H_
 #pragma once
 
-#include "app/menus/simple_menu_model.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
+#include "ui/base/models/simple_menu_model.h"
 
 class BaseDownloadItemModel;
 class Browser;
@@ -44,11 +44,11 @@ class DownloadShelf {
 
 // Logic for the download shelf context menu. Platform specific subclasses are
 // responsible for creating and running the menu.
-class DownloadShelfContextMenu : public menus::SimpleMenuModel::Delegate {
+class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate {
  public:
   virtual ~DownloadShelfContextMenu();
 
-  virtual DownloadItem* download() const { return download_; }
+  virtual DownloadItem* download() const;
 
   enum ContextMenuCommands {
     SHOW_IN_FOLDER = 1,  // Open a file explorer window with the item selected.
@@ -62,18 +62,18 @@ class DownloadShelfContextMenu : public menus::SimpleMenuModel::Delegate {
  protected:
   explicit DownloadShelfContextMenu(BaseDownloadItemModel* download_model);
 
-  menus::SimpleMenuModel* GetInProgressMenuModel();
-  menus::SimpleMenuModel* GetFinishedMenuModel();
+  ui::SimpleMenuModel* GetInProgressMenuModel();
+  ui::SimpleMenuModel* GetFinishedMenuModel();
   // Information source.
   DownloadItem* download_;
 
-  // menus::SimpleMenuModel::Delegate implementation:
+  // ui::SimpleMenuModel::Delegate implementation:
   virtual bool IsCommandIdEnabled(int command_id) const;
   virtual bool IsCommandIdChecked(int command_id) const;
   virtual void ExecuteCommand(int command_id);
   virtual bool GetAcceleratorForCommandId(int command_id,
-                                          menus::Accelerator* accelerator);
-  virtual bool IsLabelForCommandIdDynamic(int command_id) const;
+                                          ui::Accelerator* accelerator);
+  virtual bool IsItemForCommandIdDynamic(int command_id) const;
   virtual string16 GetLabelForCommandId(int command_id) const;
 
   // A model to control the cancel behavior.
@@ -82,8 +82,8 @@ class DownloadShelfContextMenu : public menus::SimpleMenuModel::Delegate {
  private:
   // We show slightly different menus if the download is in progress vs. if the
   // download has finished.
-  scoped_ptr<menus::SimpleMenuModel> in_progress_download_menu_model_;
-  scoped_ptr<menus::SimpleMenuModel> finished_download_menu_model_;
+  scoped_ptr<ui::SimpleMenuModel> in_progress_download_menu_model_;
+  scoped_ptr<ui::SimpleMenuModel> finished_download_menu_model_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadShelfContextMenu);
 };

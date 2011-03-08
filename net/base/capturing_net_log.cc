@@ -18,27 +18,46 @@ CapturingNetLog::Entry::Entry(EventType type,
 CapturingNetLog::Entry::~Entry() {}
 
 CapturingNetLog::CapturingNetLog(size_t max_num_entries)
-    : next_id_(0), max_num_entries_(max_num_entries) {
+    : last_id_(-1),
+      max_num_entries_(max_num_entries),
+      log_level_(LOG_ALL_BUT_BYTES) {
 }
 
 CapturingNetLog::~CapturingNetLog() {}
+
+void CapturingNetLog::GetEntries(EntryList* entry_list) const {
+  base::AutoLock lock(lock_);
+  *entry_list = entries_;
+}
+
+void CapturingNetLog::Clear() {
+  base::AutoLock lock(lock_);
+  entries_.clear();
+}
+
+void CapturingNetLog::SetLogLevel(NetLog::LogLevel log_level) {
+  base::AutoLock lock(lock_);
+  log_level_ = log_level;
+}
 
 void CapturingNetLog::AddEntry(EventType type,
                                const base::TimeTicks& time,
                                const Source& source,
                                EventPhase phase,
                                EventParameters* extra_parameters) {
+  base::AutoLock lock(lock_);
   Entry entry(type, time, source, phase, extra_parameters);
   if (entries_.size() + 1 < max_num_entries_)
     entries_.push_back(entry);
 }
 
 uint32 CapturingNetLog::NextID() {
-  return next_id_++;
+  return base::subtle::NoBarrier_AtomicIncrement(&last_id_, 1);
 }
 
-void CapturingNetLog::Clear() {
-  entries_.clear();
+NetLog::LogLevel CapturingNetLog::GetLogLevel() const {
+  base::AutoLock lock(lock_);
+  return log_level_;
 }
 
 CapturingBoundNetLog::CapturingBoundNetLog(const NetLog::Source& source,
@@ -51,16 +70,17 @@ CapturingBoundNetLog::CapturingBoundNetLog(size_t max_num_entries)
 
 CapturingBoundNetLog::~CapturingBoundNetLog() {}
 
+void CapturingBoundNetLog::GetEntries(
+    CapturingNetLog::EntryList* entry_list) const {
+  capturing_net_log_->GetEntries(entry_list);
+}
+
 void CapturingBoundNetLog::Clear() {
   capturing_net_log_->Clear();
 }
 
-void CapturingBoundNetLog::AppendTo(const BoundNetLog& net_log) const {
-  for (size_t i = 0; i < entries().size(); ++i) {
-    const CapturingNetLog::Entry& entry = entries()[i];
-    net_log.AddEntryWithTime(entry.type, entry.time, entry.phase,
-                             entry.extra_parameters);
-  }
+void CapturingBoundNetLog::SetLogLevel(NetLog::LogLevel log_level) {
+  capturing_net_log_->SetLogLevel(log_level);
 }
 
 }  // namespace net

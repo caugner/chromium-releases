@@ -1,5 +1,4 @@
-
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,9 +50,11 @@ const char kAboutBlankURL[] = "about:blank";
 const char kAboutCacheURL[] = "about:cache";
 const char kAboutConflicts[] = "about:conflicts";
 const char kAboutCrashURL[] = "about:crash";
+const char kAboutKillURL[] = "about:kill";
 const char kAboutCreditsURL[] = "about:credits";
 const char kAboutDNSURL[] = "about:dns";
 const char kAboutFlagsURL[] = "about:flags";
+const char kAboutGpuURL[] = "about:gpu";
 const char kAboutGpuCrashURL[] = "about:gpucrash";
 const char kAboutGpuHangURL[] = "about:gpuhang";
 const char kAboutHangURL[] = "about:hang";
@@ -62,6 +63,8 @@ const char kAboutMemoryURL[] = "about:memory";
 const char kAboutNetInternalsURL[] = "about:net-internals";
 const char kAboutPluginsURL[] = "about:plugins";
 const char kAboutShorthangURL[] = "about:shorthang";
+const char kAboutSyncURL[] = "about:sync";
+const char kAboutSyncInternalsURL[] = "about:sync-internals";
 const char kAboutTermsURL[] = "about:terms";
 const char kAboutVaporwareURL[] = "about:vaporware";
 const char kAboutVersionURL[] = "about:version";
@@ -71,6 +74,7 @@ const char kAboutVersionURL[] = "about:version";
 const char kAboutBrowserCrash[] = "about:inducebrowsercrashforrealz";
 
 const char kChromeUIAboutAboutURL[] = "chrome://about/about";
+const char kChromeUIAboutCreditsURL[] = "chrome://about/credits";
 const char kChromeUIAboutURL[] = "chrome://settings/about";
 const char kChromeUIAppLauncherURL[] = "chrome://newtab/#mode=app-launcher";
 const char kChromeUIBookmarksURL[] = "chrome://bookmarks/";
@@ -93,6 +97,8 @@ const char kChromeUISettingsURL[] = "chrome://settings/";
 const char kChromeUITextfieldsURL[] = "chrome://textfields/";
 
 #if defined(OS_CHROMEOS)
+const char kChromeUIAboutOSCreditsURL[] = "chrome://about/os-credits";
+const char kChromeUIActivationMessage[] = "chrome://activationmessage/";
 const char kChromeUIFileBrowseURL[] = "chrome://filebrowse/";
 const char kChromeUIImageBurnerURL[] = "chrome://imageburner/";
 const char kChromeUIKeyboardOverlayURL[] = "chrome://keyboardoverlay/";
@@ -113,10 +119,12 @@ const char kChromeUIDownloadsHost[] = "downloads";
 const char kChromeUIExtensionsHost[] = "extensions";
 const char kChromeUIFavIconHost[] = "favicon";
 const char kChromeUIFlagsHost[] = "flags";
+const char kChromeUIGpuInternalsHost[] = "gpu-internals";
 const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIHistory2Host[] = "history2";
 const char kChromeUIInspectorHost[] = "inspector";
 const char kChromeUIKeyboardHost[] = "keyboard";
+const char kChromeUILoginHost[] = "login";
 const char kChromeUINetInternalsHost[] = "net-internals";
 const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUIPluginsHost[] = "plugins";
@@ -126,12 +134,14 @@ const char kChromeUIRemotingResourcesHost[] = "remotingresources";
 const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUIScreenshotPath[] = "screenshots";
 const char kChromeUISettingsHost[] = "settings";
+const char kChromeUISyncInternalsHost[] = "sync-internals";
 const char kChromeUISyncResourcesHost[] = "syncresources";
 const char kChromeUITextfieldsHost[] = "textfields";
 const char kChromeUIThemePath[] = "theme";
 const char kChromeUIThumbnailPath[] = "thumb";
 
 #if defined(OS_CHROMEOS)
+const char kChromeUIActivationMessageHost[] = "activationmessage";
 const char kChromeUIFileBrowseHost[] = "filebrowse";
 const char kChromeUIImageBurnerHost[] = "imageburner";
 const char kChromeUIKeyboardOverlayHost[] = "keyboardoverlay";
@@ -157,6 +167,11 @@ const char kCloudPrintSetupHost[] = "cloudprintsetup";
 
 const char kNetworkViewInternalsURL[] = "chrome://net-internals/";
 const char kNetworkViewCacheURL[] = "chrome://view-http-cache/";
+
+const char kSyncViewInternalsURL[] = "chrome://sync-internals/";
+
+// GPU sub pages
+const char kGpuInternalsURL[] = "chrome://gpu-internals/";
 
 // Option sub pages.
 const char kAdvancedOptionsSubPage[] =  "advanced";
@@ -196,12 +211,29 @@ const char kCrashReasonURL[] =
     "http://www.google.com/support/chrome/bin/answer.py?answer=95669";
 #endif
 
+// TODO: These are currently placeholders that point to the crash
+// docs.  See bug http://crosbug.com/10711
+const char kKillReasonURL[] =
+#if defined(OS_CHROMEOS)
+    "http://www.google.com/support/chromeos/bin/answer.py?answer=1047340";
+#else
+    "http://www.google.com/support/chrome/bin/answer.py?answer=95669";
+#endif
+
 const char kPrivacyLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
     "http://www.google.com/support/chromeos/bin/answer.py?answer=1047334";
 #else
     "http://www.google.com/support/chrome/bin/answer.py?answer=114836";
 #endif
+
+const char kChromiumProjectURL[] = "http://code.google.com/chromium/";
+
+const char kLearnMoreReportingURL[] =
+    "http://www.google.com/support/chrome/bin/answer.py?answer=96817";
+
+const char kOutdatedPluginLearnMoreURL[] =
+    "http://www.google.com/support/chrome/bin/answer.py?answer=1181003";
 
 void RegisterChromeSchemes() {
   // Don't need "chrome-internal" which was used in old versions of Chrome for

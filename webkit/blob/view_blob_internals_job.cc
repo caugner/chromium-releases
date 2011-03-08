@@ -4,6 +4,7 @@
 
 #include "webkit/blob/view_blob_internals_job.h"
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/format_macros.h"
 #include "base/i18n/number_formatting.h"
@@ -100,17 +101,19 @@ void AddHTMLButton(const std::string& title,
 namespace webkit_blob {
 
 ViewBlobInternalsJob::ViewBlobInternalsJob(
-    URLRequest* request, BlobStorageController* blob_storage_controller)
-    : URLRequestSimpleJob(request),
-      blob_storage_controller_(blob_storage_controller) {
+    net::URLRequest* request, BlobStorageController* blob_storage_controller)
+    : net::URLRequestSimpleJob(request),
+      blob_storage_controller_(blob_storage_controller),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 }
 
 ViewBlobInternalsJob::~ViewBlobInternalsJob() {
 }
 
 void ViewBlobInternalsJob::Start() {
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &ViewBlobInternalsJob::DoWorkAsync));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(&ViewBlobInternalsJob::DoWorkAsync));
 }
 
 bool ViewBlobInternalsJob::IsRedirectResponse(GURL* location,
@@ -124,6 +127,11 @@ bool ViewBlobInternalsJob::IsRedirectResponse(GURL* location,
     return true;
   }
   return false;
+}
+
+void ViewBlobInternalsJob::Kill() {
+  net::URLRequestSimpleJob::Kill();
+  method_factory_.RevokeAll();
 }
 
 void ViewBlobInternalsJob::DoWorkAsync() {
@@ -202,7 +210,7 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(const BlobData& blob_data,
 #endif
                  out);
         if (!item.expected_modification_time().is_null()) {
-          AddHTMLListItem(kModificationTime, WideToUTF8(
+          AddHTMLListItem(kModificationTime, UTF16ToUTF8(
               TimeFormatFriendlyDateAndTime(item.expected_modification_time())),
               out);
         }

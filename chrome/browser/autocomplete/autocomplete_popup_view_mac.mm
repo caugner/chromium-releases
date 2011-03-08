@@ -6,9 +6,6 @@
 
 #include "chrome/browser/autocomplete/autocomplete_popup_view_mac.h"
 
-#include "app/resource_bundle.h"
-#include "app/text_elider.h"
-#include "base/mac_util.h"
 #include "base/stl_util-inl.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -16,19 +13,21 @@
 #include "chrome/browser/autocomplete/autocomplete_edit_view_mac.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
-#include "chrome/browser/cocoa/event_utils.h"
-#include "chrome/browser/cocoa/image_utils.h"
-#import "chrome/browser/cocoa/location_bar/instant_opt_in_controller.h"
-#import "chrome/browser/cocoa/location_bar/instant_opt_in_view.h"
-#import "chrome/browser/cocoa/location_bar/omnibox_popup_view.h"
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/instant/promo_counter.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/cocoa/event_utils.h"
+#include "chrome/browser/ui/cocoa/image_utils.h"
+#import "chrome/browser/ui/cocoa/location_bar/instant_opt_in_controller.h"
+#import "chrome/browser/ui/cocoa/location_bar/instant_opt_in_view.h"
+#import "chrome/browser/ui/cocoa/location_bar/omnibox_popup_view.h"
 #include "gfx/rect.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/text/text_elider.h"
 
 namespace {
 
@@ -164,7 +163,7 @@ NSMutableAttributedString* AutocompletePopupViewMac::ElideString(
   }
 
   // If ElideText() decides to do nothing, nothing to be done.
-  const std::wstring elided(UTF16ToWideHack(ElideText(
+  const std::wstring elided(UTF16ToWideHack(ui::ElideText(
       WideToUTF16Hack(originalString), font, width, false)));
   if (0 == elided.compare(originalString)) {
     return aString;
@@ -450,7 +449,7 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
   // The popup's font is a slightly smaller version of the field's.
   NSFont* fieldFont = AutocompleteEditViewMac::GetFieldFont();
   const CGFloat resultFontSize = [fieldFont pointSize] + kEditFontAdjust;
-  gfx::Font resultFont(base::SysNSStringToWide([fieldFont fontName]),
+  gfx::Font resultFont(base::SysNSStringToUTF16([fieldFont fontName]),
                        static_cast<int>(resultFontSize));
 
   AutocompleteMatrix* matrix = GetAutocompleteMatrix();

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@ cr.define('options', function() {
   var syncEnabled = false;
   var syncSetupCompleted = false;
 
-  //
-  // PersonalOptions class
-  // Encapsulated handling of personal options page.
-  //
+  /**
+   * Encapsulated handling of personal options page.
+   * @constructor
+   */
   function PersonalOptions() {
     OptionsPage.call(this, 'personal', templateData.personalPage,
                      'personal-page');
@@ -27,15 +27,12 @@ cr.define('options', function() {
 
     // Initialize PersonalOptions page.
     initializePage: function() {
-      // Call base class implementation to starts preference initialization.
+      // Call base class implementation to start preference initialization.
       OptionsPage.prototype.initializePage.call(this);
 
       var self = this;
-      $('customize-sync').onclick = function(event) {
-        OptionsPage.showPageByName('sync');
-      };
       $('sync-action-link').onclick = function(event) {
-        chrome.send('showSyncLoginDialog');
+        chrome.send('showSyncActionDialog');
       };
       $('start-stop-sync').onclick = function(event) {
         if (self.syncSetupCompleted)
@@ -43,17 +40,19 @@ cr.define('options', function() {
         else
           chrome.send('showSyncLoginDialog');
       };
+      $('customize-sync').onclick = function(event) {
+        chrome.send('showCustomizeSyncDialog');
+      };
       $('privacy-dashboard-link').onclick = function(event) {
         chrome.send('openPrivacyDashboardTabAndActivate');
       };
       $('manage-passwords').onclick = function(event) {
-        PasswordsExceptions.load();
-        OptionsPage.showPageByName('passwordsExceptions');
+        OptionsPage.showPageByName('passwordManager');
         OptionsPage.showTab($('passwords-nav-tab'));
         chrome.send('coreOptionsUserMetricsAction',
-            ['Options_ShowPasswordsExceptions']);
+            ['Options_ShowPasswordManager']);
       };
-      $('autofill-options').onclick = function(event) {
+      $('autofill-settings').onclick = function(event) {
         OptionsPage.showPageByName('autoFillOptions');
         chrome.send('coreOptionsUserMetricsAction',
             ['Options_ShowAutoFillSettings']);
@@ -76,22 +75,18 @@ cr.define('options', function() {
       } else {
         chrome.send('loadAccountPicture');
       }
+
       // Disable the screen lock checkbox for the guest mode.
-      if (cr.commandLine.options['--bwsi']) {
-        var enableScreenLock = $('enable-screen-lock');
-        enableScreenLock.disabled = true;
-        // Mark that this is manually disabled. See also pref_ui.js.
-        enableScreenLock.manually_disabled = true;
-      }
+      if (cr.commandLine.options['--bwsi'])
+        $('enable-screen-lock').disabled = true;
     },
 
     showStopSyncingOverlay_: function(event) {
-      AlertOverlay.show(
-          localStrings.getString('stop_syncing_title'),
-          localStrings.getString('stop_syncing_explanation'),
-          localStrings.getString('stop_syncing_confirm_button_label'),
-          undefined,
-          function() { chrome.send('stopSyncing'); });
+      AlertOverlay.show(localStrings.getString('stop_syncing_title'),
+                        localStrings.getString('stop_syncing_explanation'),
+                        localStrings.getString('stop_syncing_confirm'),
+                        localStrings.getString('cancel'),
+                        function() { chrome.send('stopSyncing'); });
     },
 
     setElementVisible_: function(element, visible) {
@@ -101,17 +96,13 @@ cr.define('options', function() {
         element.classList.add('hidden');
     },
 
-    setElementClassSyncError_: function(element, visible) {
-      visible ? element.classList.add('sync-error') :
-                element.classList.remove('sync-error');
-    },
-
     setSyncEnabled_: function(enabled) {
       this.syncEnabled = enabled;
     },
 
     setSyncSetupCompleted_: function(completed) {
       this.syncSetupCompleted = completed;
+      this.setElementVisible_($('customize-sync'), completed);
     },
 
     setAccountPicture_: function(image) {
@@ -119,15 +110,12 @@ cr.define('options', function() {
     },
 
     setSyncStatus_: function(status) {
-      $('sync-status').textContent = status;
+      $('sync-status-text').textContent = status;
     },
 
     setSyncStatusErrorVisible_: function(visible) {
-      this.setElementClassSyncError_($('sync-status'), visible);
-    },
-
-    setSyncActionLinkErrorVisible_: function(visible) {
-      this.setElementClassSyncError_($('sync-action-link'), visible);
+      visible ? $('sync-status').classList.add('sync-error') :
+                $('sync-status').classList.remove('sync-error');
     },
 
     setSyncActionLinkEnabled_: function(enabled) {
@@ -154,18 +142,6 @@ cr.define('options', function() {
       $('start-stop-sync').textContent = label;
     },
 
-    setCustomizeButtonVisible_: function(visible) {
-      this.setElementVisible_($('customize-sync'), visible);
-    },
-
-    setCustomizeButtonEnabled_: function(enabled) {
-      $('customize-sync').disabled = !enabled;
-    },
-
-    setCustomizeButtonLabel_: function(label) {
-      $('customize-sync').textContent = label;
-    },
-
     setGtkThemeButtonEnabled_: function(enabled) {
       if (!cr.isChromeOS && navigator.platform.match(/linux|BSD/i)) {
         $('themes-GTK-button').disabled = !enabled;
@@ -179,6 +155,24 @@ cr.define('options', function() {
     hideSyncSection_: function() {
       this.setElementVisible_($('sync-section'), false);
     },
+
+    /**
+     * Toggles the visibility of the data type checkboxes based on whether they
+     * are enabled on not.
+     * @param {Object} dict A mapping from data type to a boolean indicating
+     *     whether it is enabled.
+     * @private
+     */
+    setRegisteredDataTypes_: function(dict) {
+      for (var type in dict) {
+        if (type.match(/Registered$/) && !dict[type]) {
+          node = $(type.replace(/([a-z]+)Registered$/i, '$1').toLowerCase()
+                   + '-check');
+          if (node)
+            node.parentNode.style.display = 'none';
+        }
+      }
+    },
   };
 
   // Forward public APIs to private implementations.
@@ -188,18 +182,15 @@ cr.define('options', function() {
     'setAccountPicture',
     'setSyncStatus',
     'setSyncStatusErrorVisible',
-    'setSyncActionLinkErrorVisible',
     'setSyncActionLinkEnabled',
     'setSyncActionLinkLabel',
     'setStartStopButtonVisible',
     'setStartStopButtonEnabled',
     'setStartStopButtonLabel',
-    'setCustomizeButtonVisible',
-    'setCustomizeButtonEnabled',
-    'setCustomizeButtonLabel',
     'setGtkThemeButtonEnabled',
     'setThemesResetButtonEnabled',
     'hideSyncSection',
+    'setRegisteredDataTypes',
   ].forEach(function(name) {
     PersonalOptions[name] = function(value) {
       PersonalOptions.getInstance()[name + '_'](value);

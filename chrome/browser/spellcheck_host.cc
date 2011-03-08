@@ -6,15 +6,14 @@
 
 #include <fcntl.h>
 
-#include "app/l10n_util.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_split.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellcheck_host_observer.h"
 #include "chrome/browser/spellchecker_platform_engine.h"
 #include "chrome/common/chrome_constants.h"
@@ -25,6 +24,7 @@
 #include "chrome/common/spellcheck_common.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/hunspell/google/bdict.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -255,7 +255,7 @@ void SpellCheckHost::WriteWordToCustomDictionary(const std::string& word) {
 
 void SpellCheckHost::OnURLFetchComplete(const URLFetcher* source,
                                         const GURL& url,
-                                        const URLRequestStatus& status,
+                                        const net::URLRequestStatus& status,
                                         int response_code,
                                         const ResponseCookies& cookies,
                                         const std::string& data) {

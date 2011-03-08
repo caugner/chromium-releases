@@ -1,44 +1,26 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/app_controller_mac.h"
 
-#include "app/l10n_util.h"
-#include "app/l10n_util_mac.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
-#import "base/worker_pool_mac.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/background_application_list_model.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/browser_thread.h"
-#import "chrome/browser/cocoa/about_window_controller.h"
-#import "chrome/browser/cocoa/bookmarks/bookmark_menu_bridge.h"
-#import "chrome/browser/cocoa/browser_window_cocoa.h"
-#import "chrome/browser/cocoa/browser_window_controller.h"
-#import "chrome/browser/cocoa/bug_report_window_controller.h"
-#import "chrome/browser/cocoa/clear_browsing_data_controller.h"
-#import "chrome/browser/cocoa/confirm_quit_panel_controller.h"
-#import "chrome/browser/cocoa/encoding_menu_controller_delegate_mac.h"
-#import "chrome/browser/cocoa/history_menu_bridge.h"
-#import "chrome/browser/cocoa/import_settings_dialog.h"
-#import "chrome/browser/cocoa/preferences_window_controller.h"
-#import "chrome/browser/cocoa/tab_strip_controller.h"
-#import "chrome/browser/cocoa/tab_window_controller.h"
-#include "chrome/browser/cocoa/task_manager_mac.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/options_window.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job_manager.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
@@ -48,15 +30,31 @@
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#import "chrome/browser/ui/cocoa/about_window_controller.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
+#import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/bug_report_window_controller.h"
+#import "chrome/browser/ui/cocoa/clear_browsing_data_controller.h"
+#import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
+#import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
+#import "chrome/browser/ui/cocoa/history_menu_bridge.h"
+#import "chrome/browser/ui/cocoa/importer/import_settings_dialog.h"
+#import "chrome/browser/ui/cocoa/options/preferences_window_controller.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
+#include "chrome/browser/ui/cocoa/task_manager_mac.h"
+#include "chrome/browser/ui/options/options_window.h"
 #include "chrome/common/app_mode_common_mac.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_mac.h"
 
 // 10.6 adds a public API for the Spotlight-backed search menu item in the Help
 // menu.  Provide the declaration so it can be called below when building with
@@ -155,6 +153,7 @@ void RecordLastRunAppBundlePath() {
 - (void)showPreferencesWindow:(id)sender
                          page:(OptionsPage)page
                       profile:(Profile*)profile;
+- (void)executeApplication:(id)sender;
 @end
 
 @implementation AppController
@@ -223,15 +222,6 @@ void RecordLastRunAppBundlePath() {
   if (parsed_command_line.HasSwitch(switches::kActivateOnLaunch)) {
     [NSApp activateIgnoringOtherApps:YES];
   }
-
-  // Temporary flag to revert to the old WorkerPool implementation.
-  // This will be removed once we either fix the Mac WorkerPool
-  // implementation, or completely switch to the shared (with Linux)
-  // implementation.
-  // http://crbug.com/44392
-  if (parsed_command_line.HasSwitch(switches::kDisableLinuxWorkerPool)) {
-    worker_pool_mac::SetUseLinuxWorkerPool(false);
-  }
 }
 
 // (NSApplicationDelegate protocol) This is the Apple-approved place to override
@@ -293,76 +283,92 @@ void RecordLastRunAppBundlePath() {
   // If the application is going to terminate as the result of a Cmd+Q
   // invocation, use the special sauce to prevent accidental quitting.
   // http://dev.chromium.org/developers/design-documents/confirm-to-quit-experiment
-  NSEvent* currentEvent = [app currentEvent];
-  if ([currentEvent type] == NSKeyDown) {
-    // Show the info panel that explains what the user must to do confirm quit.
-    [[ConfirmQuitPanelController sharedController] showWindow:self];
 
-    // How long the user must hold down Cmd+Q to confirm the quit.
-    const NSTimeInterval kTimeToConfirmQuit = 1.5;
-    // Leeway between the |targetDate| and the current time that will confirm a
-    // quit.
-    const NSTimeInterval kTimeDeltaFuzzFactor = 1.0;
-    // Duration of the window fade out animation.
-    const NSTimeInterval kWindowFadeAnimationDuration = 0.2;
+  // How long the user must hold down Cmd+Q to confirm the quit.
+  const NSTimeInterval kTimeToConfirmQuit = 1.5;
+  // Leeway between the |targetDate| and the current time that will confirm a
+  // quit.
+  const NSTimeInterval kTimeDeltaFuzzFactor = 1.0;
+  // Duration of the window fade out animation.
+  const NSTimeInterval kWindowFadeAnimationDuration = 0.2;
 
-    // Spin a nested run loop until the |targetDate| is reached or a KeyUp event
-    // is sent.
-    NSDate* targetDate =
-        [NSDate dateWithTimeIntervalSinceNow:kTimeToConfirmQuit];
-    BOOL willQuit = NO;
-    NSEvent* nextEvent = nil;
-    do {
-      // Dequeue events until a key up is received.
-      nextEvent = [app nextEventMatchingMask:NSKeyUpMask
-                                   untilDate:nil
-                                      inMode:NSEventTrackingRunLoopMode
-                                     dequeue:YES];
+  // This logic is only for keyboard-initiated quits.
+  if ([[app currentEvent] type] != NSKeyDown)
+    return NSTerminateNow;
 
-      // Wait for the time expiry to happen. Once past the hold threshold,
-      // commit to quitting and hide all the open windows.
-      if (!willQuit) {
-        NSDate* now = [NSDate date];
-        NSTimeInterval difference = [targetDate timeIntervalSinceDate:now];
-        if (difference < kTimeDeltaFuzzFactor) {
-          willQuit = YES;
+  // If this is the second of two such attempts to quit within a certain time
+  // interval, then just quit.
+  // Time of last quit attempt, if any.
+  static NSDate* lastQuitAttempt; // Initially nil, as it's static.
+  NSDate* timeNow = [NSDate date];
+  if (lastQuitAttempt &&
+      [timeNow timeIntervalSinceDate:lastQuitAttempt] < kTimeDeltaFuzzFactor) {
+    return NSTerminateNow;
+  } else {
+    [lastQuitAttempt release]; // Harmless if already nil.
+    lastQuitAttempt = [timeNow retain]; // Record this attempt for next time.
+  }
 
-          // At this point, the quit has been confirmed and windows should all
-          // fade out to convince the user to release the key combo to finalize
-          // the quit.
-          [NSAnimationContext beginGrouping];
-          [[NSAnimationContext currentContext] setDuration:
-              kWindowFadeAnimationDuration];
-          for (NSWindow* aWindow in [app windows]) {
-            // Windows that are set to animate and have a delegate do not
-            // expect to be animated by other things and could result in an
-            // invalid state. If a window is set up like so, just force the
-            // alpha value to 0. Otherwise, animate all pretty and stuff.
-            if (![[aWindow animationForKey:@"alphaValue"] delegate]) {
-              [[aWindow animator] setAlphaValue:0.0];
-            } else {
-              [aWindow setAlphaValue:0.0];
-            }
+  // Show the info panel that explains what the user must to do confirm quit.
+  [[ConfirmQuitPanelController sharedController] showWindow:self];
+
+  // Spin a nested run loop until the |targetDate| is reached or a KeyUp event
+  // is sent.
+  NSDate* targetDate =
+      [NSDate dateWithTimeIntervalSinceNow:kTimeToConfirmQuit];
+  BOOL willQuit = NO;
+  NSEvent* nextEvent = nil;
+  do {
+    // Dequeue events until a key up is received.
+    nextEvent = [app nextEventMatchingMask:NSKeyUpMask
+                                 untilDate:nil
+                                    inMode:NSEventTrackingRunLoopMode
+                                   dequeue:YES];
+
+    // Wait for the time expiry to happen. Once past the hold threshold,
+    // commit to quitting and hide all the open windows.
+    if (!willQuit) {
+      NSDate* now = [NSDate date];
+      NSTimeInterval difference = [targetDate timeIntervalSinceDate:now];
+      if (difference < kTimeDeltaFuzzFactor) {
+        willQuit = YES;
+
+        // At this point, the quit has been confirmed and windows should all
+        // fade out to convince the user to release the key combo to finalize
+        // the quit.
+        [NSAnimationContext beginGrouping];
+        [[NSAnimationContext currentContext] setDuration:
+            kWindowFadeAnimationDuration];
+        for (NSWindow* aWindow in [app windows]) {
+          // Windows that are set to animate and have a delegate do not
+          // expect to be animated by other things and could result in an
+          // invalid state. If a window is set up like so, just force the
+          // alpha value to 0. Otherwise, animate all pretty and stuff.
+          if (![[aWindow animationForKey:@"alphaValue"] delegate]) {
+            [[aWindow animator] setAlphaValue:0.0];
+          } else {
+            [aWindow setAlphaValue:0.0];
           }
-          [NSAnimationContext endGrouping];
         }
+        [NSAnimationContext endGrouping];
       }
-    } while (!nextEvent);
-
-    // The user has released the key combo. Discard any events (i.e. the
-    // repeated KeyDown Cmd+Q).
-    [app discardEventsMatchingMask:NSAnyEventMask beforeEvent:nextEvent];
-    if (willQuit) {
-      // The user held down the combination long enough that quitting should
-      // happen.
-      return NSTerminateNow;
-    } else {
-      // Slowly fade the confirm window out in case the user doesn't
-      // understand what they have to do to quit.
-      [[ConfirmQuitPanelController sharedController] dismissPanel];
-      return NSTerminateCancel;
     }
-  }  // if event type is KeyDown
+  } while (!nextEvent);
+
+  // The user has released the key combo. Discard any events (i.e. the
+  // repeated KeyDown Cmd+Q).
+  [app discardEventsMatchingMask:NSAnyEventMask beforeEvent:nextEvent];
+
+  if (willQuit) {
+    // The user held down the combination long enough that quitting should
+    // happen.
+    return NSTerminateNow;
+  } else {
+    // Slowly fade the confirm window out in case the user doesn't
+    // understand what they have to do to quit.
+    [[ConfirmQuitPanelController sharedController] dismissPanel];
+    return NSTerminateCancel;
+  }
 
   // Default case: terminate.
   return NSTerminateNow;
@@ -786,7 +792,7 @@ void RecordLastRunAppBundlePath() {
     enable = YES;
   } else if (action == @selector(orderFrontStandardAboutPanel:)) {
     enable = YES;
-  } else if (action == @selector(newWindowFromDock:)) {
+  } else if (action == @selector(commandFromDock:)) {
     enable = YES;
   }
   return enable;
@@ -842,15 +848,33 @@ void RecordLastRunAppBundlePath() {
       break;
     case IDC_CLEAR_BROWSING_DATA: {
       // There may not be a browser open, so use the default profile.
-      [ClearBrowsingDataController
-          showClearBrowsingDialogForProfile:defaultProfile];
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kDisableTabbedOptions)) {
+        [ClearBrowsingDataController
+            showClearBrowsingDialogForProfile:defaultProfile];
+      } else {
+        if (Browser* browser = ActivateBrowser(defaultProfile)) {
+          browser->OpenClearBrowsingDataDialog();
+        } else {
+          Browser::OpenClearBrowingDataDialogWindow(defaultProfile);
+        }
+      }
       break;
     }
     case IDC_IMPORT_SETTINGS: {
-      UserMetrics::RecordAction(UserMetricsAction("Import_ShowDlg"),
-                                defaultProfile);
-      [ImportSettingsDialogController
-          showImportSettingsDialogForProfile:defaultProfile];
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kDisableTabbedOptions)) {
+        UserMetrics::RecordAction(UserMetricsAction("Import_ShowDlg"),
+                                  defaultProfile);
+        [ImportSettingsDialogController
+            showImportSettingsDialogForProfile:defaultProfile];
+      } else {
+        if (Browser* browser = ActivateBrowser(defaultProfile)) {
+          browser->OpenImportSettingsDialog();
+        } else {
+          Browser::OpenImportSettingsDialogWindow(defaultProfile);
+        }
+      }
       break;
     }
     case IDC_SHOW_BOOKMARK_MANAGER:
@@ -912,17 +936,41 @@ void RecordLastRunAppBundlePath() {
       // TODO(akalin): Add a constant to denote starting sync from the
       // main menu and use that instead of START_FROM_WRENCH.
       sync_ui_util::OpenSyncMyBookmarksDialog(
-          defaultProfile, ProfileSyncService::START_FROM_WRENCH);
+          defaultProfile, ActivateBrowser(defaultProfile),
+          ProfileSyncService::START_FROM_WRENCH);
       break;
     case IDC_TASK_MANAGER:
       UserMetrics::RecordAction(UserMetricsAction("TaskManager"),
                                 defaultProfile);
-      TaskManagerMac::Show();
+      TaskManagerMac::Show(false);
       break;
     case IDC_OPTIONS:
       [self showPreferences:sender];
       break;
+    default:
+      // Background Applications use dynamic values that must be less than the
+      // smallest value among the predefined IDC_* labels.
+      if ([sender tag] < IDC_MinimumLabelValue)
+        [self executeApplication:sender];
+      break;
   }
+}
+
+// Run a (background) application in a new tab.
+- (void)executeApplication:(id)sender {
+  NSInteger tag = [sender tag];
+  Profile* profile = [self defaultProfile];
+  DCHECK(profile);
+  BackgroundApplicationListModel applications(profile);
+  DCHECK(tag >= 0 &&
+         tag < static_cast<int>(applications.size()));
+  Browser* browser = BrowserList::GetLastActive();
+  if (!browser) {
+    Browser::OpenEmptyWindow(profile);
+    browser = BrowserList::GetLastActive();
+  }
+  const Extension* extension = applications.GetExtension(tag);
+  browser->OpenApplicationTab(profile, extension, NULL);
 }
 
 // Same as |-commandDispatch:|, but executes commands using a disposition
@@ -964,7 +1012,7 @@ void RecordLastRunAppBundlePath() {
       static BOOL doneOnce = NO;
       if (!doneOnce) {
         doneOnce = YES;
-        if (mac_util::WasLaunchedAsHiddenLoginItem()) {
+        if (base::mac::WasLaunchedAsHiddenLoginItem()) {
           SessionService* sessionService =
               [self defaultProfile]->GetSessionService();
           if (sessionService &&
@@ -1089,7 +1137,7 @@ void RecordLastRunAppBundlePath() {
 // visible.
 - (IBAction)showPreferences:(id)sender {
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-  if (parsed_command_line.HasSwitch(switches::kEnableTabbedOptions)) {
+  if (!parsed_command_line.HasSwitch(switches::kDisableTabbedOptions)) {
     if (Browser* browser = ActivateBrowser([self defaultProfile])) {
       // Show options tab in the active browser window.
       browser->ShowOptionsTab(chrome::kDefaultOptionsSubPage);
@@ -1156,29 +1204,67 @@ void RecordLastRunAppBundlePath() {
 }
 
 // Explicitly bring to the foreground when creating new windows from the dock.
-- (void)newWindowFromDock:(id)sender {
+- (void)commandFromDock:(id)sender {
   [NSApp activateIgnoringOtherApps:YES];
   [self commandDispatch:sender];
 }
 
 - (NSMenu*)applicationDockMenu:(NSApplication*)sender {
   NSMenu* dockMenu = [[[NSMenu alloc] initWithTitle: @""] autorelease];
+  Profile* profile = [self defaultProfile];
+
   NSString* titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_WINDOW_MAC);
-  scoped_nsobject<NSMenuItem> item([[NSMenuItem alloc]
-                                       initWithTitle:titleStr
-                                       action:@selector(newWindowFromDock:)
-                                       keyEquivalent:@""]);
+  scoped_nsobject<NSMenuItem> item(
+      [[NSMenuItem alloc] initWithTitle:titleStr
+                                 action:@selector(commandFromDock:)
+                          keyEquivalent:@""]);
   [item setTarget:self];
   [item setTag:IDC_NEW_WINDOW];
   [dockMenu addItem:item];
 
   titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_INCOGNITO_WINDOW_MAC);
   item.reset([[NSMenuItem alloc] initWithTitle:titleStr
-                                 action:@selector(newWindowFromDock:)
+                                        action:@selector(commandFromDock:)
                                  keyEquivalent:@""]);
   [item setTarget:self];
   [item setTag:IDC_NEW_INCOGNITO_WINDOW];
   [dockMenu addItem:item];
+
+  // TODO(rickcam): Mock out BackgroundApplicationListModel, then add unit
+  // tests which use the mock in place of the profile-initialized model.
+
+  // Avoid breaking unit tests which have no profile.
+  if (profile) {
+    BackgroundApplicationListModel applications(profile);
+    if (applications.size()) {
+      int position = 0;
+      NSString* menuStr =
+          l10n_util::GetNSStringWithFixup(IDS_BACKGROUND_APPS_MAC);
+      scoped_nsobject<NSMenu> appMenu([[NSMenu alloc] initWithTitle:menuStr]);
+      for (ExtensionList::const_iterator cursor = applications.begin();
+           cursor != applications.end();
+           ++cursor, ++position) {
+        DCHECK(position == applications.GetPosition(*cursor));
+        NSString* itemStr =
+            base::SysUTF16ToNSString(UTF8ToUTF16((*cursor)->name()));
+        scoped_nsobject<NSMenuItem> appItem([[NSMenuItem alloc]
+            initWithTitle:itemStr
+                   action:@selector(commandFromDock:)
+            keyEquivalent:@""]);
+        [appItem setTarget:self];
+        [appItem setTag:position];
+        [appMenu addItem:appItem];
+      }
+      scoped_nsobject<NSMenuItem> appMenuItem([[NSMenuItem alloc]
+          initWithTitle:menuStr
+                 action:@selector(commandFromDock:)
+          keyEquivalent:@""]);
+      [appMenuItem setTarget:self];
+      [appMenuItem setTag:position];
+      [appMenuItem setSubmenu:appMenu];
+      [dockMenu addItem:appMenuItem];
+    }
+  }
 
   return dockMenu;
 }

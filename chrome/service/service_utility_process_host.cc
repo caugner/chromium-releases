@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,11 @@
 #include "ipc/ipc_switches.h"
 #include "printing/native_metafile.h"
 #include "printing/page_range.h"
+#include "ui/base/ui_base_switches.h"
+
+#if defined(OS_WIN)
+#include "base/win/scoped_handle.h"
+#endif
 
 ServiceUtilityProcessHost::ServiceUtilityProcessHost(
     Client* client, base::MessageLoopProxy* client_message_loop_proxy)
@@ -47,10 +52,10 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
     return false;
   }
 
-  if (!StartProcess(scratch_metafile_dir_->path()))
+  if (!StartProcess(false, scratch_metafile_dir_->path()))
     return false;
 
-  ScopedHandle pdf_file(
+  base::win::ScopedHandle pdf_file(
       ::CreateFile(pdf_path.value().c_str(),
                    GENERIC_READ,
                    FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -67,7 +72,7 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
   if (!pdf_file_in_utility_process)
     return false;
   waiting_for_reply_ = true;
-  return SendOnChannel(
+  return Send(
       new UtilityMsg_RenderPDFPagesToMetafile(pdf_file_in_utility_process,
                                               metafile_path_,
                                               render_area,
@@ -76,7 +81,17 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
 #endif  // !defined(OS_WIN)
 }
 
-bool ServiceUtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
+bool ServiceUtilityProcessHost::StartGetPrinterCapsAndDefaults(
+    const std::string& printer_name) {
+  FilePath exposed_path;
+  if (!StartProcess(true, exposed_path))
+    return false;
+  waiting_for_reply_ = true;
+  return Send(new UtilityMsg_GetPrinterCapsAndDefaults(printer_name));
+}
+
+bool ServiceUtilityProcessHost::StartProcess(bool no_sandbox,
+                                             const FilePath& exposed_dir) {
   // Name must be set or metrics_service will crash in any test which
   // launches a UtilityProcessHost.
   set_name(L"utility process");
@@ -95,11 +110,15 @@ bool ServiceUtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
   cmd_line.AppendSwitchASCII(switches::kProcessChannelID, channel_id());
   cmd_line.AppendSwitch(switches::kLang);
 
-  return Launch(&cmd_line, exposed_dir);
+  return Launch(&cmd_line, no_sandbox, exposed_dir);
 }
 
 FilePath ServiceUtilityProcessHost::GetUtilityProcessCmd() {
   return GetChildPath(true);
+}
+
+bool ServiceUtilityProcessHost::CanShutdown() {
+  return true;
 }
 
 void ServiceUtilityProcessHost::OnChildDied() {
@@ -114,7 +133,7 @@ void ServiceUtilityProcessHost::OnChildDied() {
   ServiceChildProcessHost::OnChildDied();
 }
 
-void ServiceUtilityProcessHost::OnMessageReceived(const IPC::Message& message) {
+bool ServiceUtilityProcessHost::OnMessageReceived(const IPC::Message& message) {
   bool msg_is_ok = false;
   IPC_BEGIN_MESSAGE_MAP_EX(ServiceUtilityProcessHost, message, msg_is_ok)
 #if defined(OS_WIN)  // This hack is Windows-specific.
@@ -124,6 +143,7 @@ void ServiceUtilityProcessHost::OnMessageReceived(const IPC::Message& message) {
                         OnRenderPDFPagesToMetafileSucceeded)
     IPC_MESSAGE_UNHANDLED(msg_is_ok__ = MessageForClient(message))
   IPC_END_MESSAGE_MAP_EX()
+  return true;
 }
 
 bool ServiceUtilityProcessHost::MessageForClient(const IPC::Message& message) {
@@ -158,12 +178,19 @@ void ServiceUtilityProcessHost::OnRenderPDFPagesToMetafileSucceeded(
   waiting_for_reply_ = false;
 }
 
-void ServiceUtilityProcessHost::Client::OnMessageReceived(
+bool ServiceUtilityProcessHost::Client::OnMessageReceived(
     const IPC::Message& message) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ServiceUtilityProcessHost, message)
     IPC_MESSAGE_HANDLER(UtilityHostMsg_RenderPDFPagesToMetafile_Failed,
                         Client::OnRenderPDFPagesToMetafileFailed)
+    IPC_MESSAGE_HANDLER(UtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded,
+                        Client::OnGetPrinterCapsAndDefaultsSucceeded)
+    IPC_MESSAGE_HANDLER(UtilityHostMsg_GetPrinterCapsAndDefaults_Failed,
+                        Client::OnGetPrinterCapsAndDefaultsFailed)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
+  return handled;
 }
 
 void ServiceUtilityProcessHost::Client::MetafileAvailable(
@@ -172,7 +199,8 @@ void ServiceUtilityProcessHost::Client::MetafileAvailable(
   // The metafile was created in a temp folder which needs to get deleted after
   // we have processed it.
   ScopedTempDir scratch_metafile_dir;
-  scratch_metafile_dir.Set(metafile_path.DirName());
+  if (!scratch_metafile_dir.Set(metafile_path.DirName()))
+    LOG(WARNING) << "Unable to set scratch metafile directory";
 #if defined(OS_WIN)
   printing::NativeMetafile metafile;
   if (!metafile.CreateFromFile(metafile_path)) {

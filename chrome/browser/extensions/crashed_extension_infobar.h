@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 
 class Extension;
-class ExtensionsService;
+class ExtensionService;
 class SkBitmap;
 
 // This infobar will be displayed when an extension process crashes. It allows
@@ -21,27 +21,29 @@ class CrashedExtensionInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   // |tab_contents| should point to the TabContents the infobar will be added
   // to. |extension| should be the crashed extension, and |extensions_service|
-  // the ExtensionsService which manages that extension.
+  // the ExtensionService which manages that extension.
   CrashedExtensionInfoBarDelegate(TabContents* tab_contents,
-                                  ExtensionsService* extensions_service,
+                                  ExtensionService* extensions_service,
                                   const Extension* extension);
 
   const std::string extension_id() { return extension_id_; }
 
-  // InfoBarDelegate
-  virtual CrashedExtensionInfoBarDelegate* AsCrashedExtensionInfoBarDelegate();
+ private:
+   virtual ~CrashedExtensionInfoBarDelegate();
 
   // ConfirmInfoBarDelegate
-  virtual string16 GetMessageText() const;
+  virtual bool ShouldExpire(
+      const NavigationController::LoadCommittedDetails& details) const;
   virtual void InfoBarClosed();
   virtual SkBitmap* GetIcon() const;
+  virtual CrashedExtensionInfoBarDelegate* AsCrashedExtensionInfoBarDelegate();
+  virtual string16 GetMessageText() const;
   virtual int GetButtons() const;
   virtual string16 GetButtonLabel(
       ConfirmInfoBarDelegate::InfoBarButton button) const;
   virtual bool Accept();
 
- private:
-  ExtensionsService* extensions_service_;
+  ExtensionService* extensions_service_;
 
   const std::string extension_id_;
   const std::string extension_name_;

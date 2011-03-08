@@ -287,7 +287,7 @@ HRESULT ToolBand::Initialize(IUnknown* site) {
 }
 
 HRESULT ToolBand::InitializeAndShowWindow(IUnknown* site) {
-  ScopedComPtr<IOleWindow> site_window;
+  base::win::ScopedComPtr<IOleWindow> site_window;
   HRESULT hr = site_window.QueryFrom(site);
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to get site window: " << com::LogHr(hr);
@@ -319,7 +319,7 @@ HRESULT ToolBand::Teardown() {
   if (IsWindow()) {
     // Teardown the ActiveX host window.
     CAxWindow host(m_hWnd);
-    ScopedComPtr<IObjectWithSite> host_with_site;
+    base::win::ScopedComPtr<IObjectWithSite> host_with_site;
     HRESULT hr = host.QueryHost(host_with_site.Receive());
     if (SUCCEEDED(hr))
       host_with_site->SetSite(NULL);
@@ -330,7 +330,6 @@ HRESULT ToolBand::Teardown() {
   if (chrome_frame_) {
     ChromeFrameEvents::DispEventUnadvise(chrome_frame_);
   }
-  chrome_frame_window_ = NULL;
 
   if (web_browser_ && listening_to_browser_events_) {
     HostingBrowserEvents::DispEventUnadvise(web_browser_,
@@ -349,8 +348,13 @@ LRESULT ToolBand::OnCreate(LPCREATESTRUCT lpCreateStruct) {
   // Grab a self-reference.
   GetUnknown()->AddRef();
 
+  if (NULL == chrome_frame_container_window_.Create(m_hWnd)) {
+    LOG(ERROR) << "Failed to create window. " << com::LogWe();
+    return -1;
+  }
+
   // Create a host window instance.
-  ScopedComPtr<IAxWinHostWindow> host;
+  base::win::ScopedComPtr<IAxWinHostWindow> host;
   HRESULT hr = CAxHostWindow::CreateInstance(host.Receive());
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to create ActiveX host window. " << com::LogHr(hr);
@@ -372,21 +376,12 @@ LRESULT ToolBand::OnCreate(LPCREATESTRUCT lpCreateStruct) {
   }
 
   // And attach it to our window.
-  hr = host->AttachControl(chrome_frame_, m_hWnd);
+  hr = host->AttachControl(chrome_frame_,
+                           chrome_frame_container_window_.m_hWnd);
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to attach Chrome Frame to the host. " <<
         com::LogHr(hr);
     return 1;
-  }
-
-  // Get the GCF window and hide it for now.
-  CComQIPtr<IOleWindow> ole_window(chrome_frame_);
-  DCHECK(ole_window != NULL);
-  if (SUCCEEDED(ole_window->GetWindow(&chrome_frame_window_.m_hWnd))) {
-    // We hide the chrome frame window until onload in order to avoid
-    // seeing the "Aw Snap" that sometimes otherwise occurs during Chrome
-    // initialization.
-    chrome_frame_window_.ShowWindow(SW_HIDE);
   }
 
   // Hook up the chrome frame event listener.
@@ -396,23 +391,6 @@ LRESULT ToolBand::OnCreate(LPCREATESTRUCT lpCreateStruct) {
   }
 
   return 0;
-}
-
-void ToolBand::OnPaint(CDCHandle dc) {
-  RECT rc = {};
-  if (GetUpdateRect(&rc, FALSE)) {
-    PAINTSTRUCT ps = {};
-    BeginPaint(&ps);
-
-    BOOL ret = GetClientRect(&rc);
-    DCHECK(ret);
-    CString text;
-    text.Format(L"Google CEEE. No Chrome Frame found. Instance: 0x%p. ID: %d!)",
-                this, band_id_);
-    ::DrawText(ps.hdc, text, -1, &rc, DT_SINGLELINE | DT_BOTTOM | DT_CENTER);
-
-    EndPaint(&ps);
-  }
 }
 
 void ToolBand::OnSize(UINT type, CSize size) {
@@ -564,7 +542,7 @@ STDMETHODIMP_(void) ToolBand::OnCfGetEnabledExtensionsComplete(
     current_height_ = 0;
 
     // Ask IE to reload all info for this toolband.
-    ScopedComPtr<IOleCommandTarget> cmd_target;
+    base::win::ScopedComPtr<IOleCommandTarget> cmd_target;
     HRESULT hr = GetSite(IID_IOleCommandTarget,
                          reinterpret_cast<void**>(cmd_target.Receive()));
     if (SUCCEEDED(hr)) {
@@ -584,9 +562,9 @@ STDMETHODIMP_(void) ToolBand::OnCfGetEnabledExtensionsComplete(
 }
 
 STDMETHODIMP_(void) ToolBand::OnCfOnload(IDispatch* event) {
-  if (chrome_frame_window_.IsWindow()) {
+  if (chrome_frame_container_window_.IsWindow()) {
     VLOG(1) << "Showing the Chrome Frame window.";
-    chrome_frame_window_.ShowWindow(SW_SHOW);
+    chrome_frame_container_window_.ShowWindow(SW_SHOW);
   }
 }
 
@@ -684,7 +662,7 @@ HRESULT ToolBand::EnsureBhoIsAvailable() {
     if (existing_bho.vt == VT_UNKNOWN && existing_bho.punkVal != NULL) {
       // This is a sanity / assumption check regarding what we should regard
       // as a valid BHO.
-      ScopedComPtr<IPersist> bho_iid_access;
+      base::win::ScopedComPtr<IPersist> bho_iid_access;
       HRESULT hr2 = bho_iid_access.QueryFrom(existing_bho.punkVal);
       DCHECK(SUCCEEDED(hr2) && bho_iid_access.get() != NULL);
       if (SUCCEEDED(hr2) && bho_iid_access.get() != NULL) {
@@ -704,7 +682,7 @@ HRESULT ToolBand::EnsureBhoIsAvailable() {
     return SUCCEEDED(hr) ? S_OK : hr;
   }
 
-  ScopedComPtr<IObjectWithSite> bho;
+  base::win::ScopedComPtr<IObjectWithSite> bho;
   hr = CreateBhoInstance(bho.Receive());
 
   if (FAILED(hr)) {
@@ -738,7 +716,7 @@ HRESULT ToolBand::CreateBhoInstance(IObjectWithSite** new_bho_instance) {
 
 HRESULT ToolBand::GetSessionId(int* session_id) {
   if (chrome_frame_) {
-    ScopedComPtr<IChromeFrameInternal> chrome_frame_internal_;
+    base::win::ScopedComPtr<IChromeFrameInternal> chrome_frame_internal_;
     chrome_frame_internal_.QueryFrom(chrome_frame_);
     if (chrome_frame_internal_) {
       return chrome_frame_internal_->getSessionId(session_id);
@@ -752,7 +730,7 @@ HRESULT ToolBand::SendSessionIdToBho(IUnknown* bho) {
   if (already_sent_id_to_bho_)
     return S_FALSE;
   // Now send the tool band's session ID to the BHO.
-  ScopedComPtr<ICeeeBho> ceee_bho;
+  base::win::ScopedComPtr<ICeeeBho> ceee_bho;
   HRESULT hr = ceee_bho.QueryFrom(bho);
   if (SUCCEEDED(hr)) {
     int session_id = 0;

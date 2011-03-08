@@ -96,6 +96,9 @@ class BrowserList {
   // 2. An update exe is present in the install folder.
   static bool CanRestartForUpdate();
 
+  // Called from Browser::Exit.
+  static void Exit();
+
   // Closes all browsers and exits.  This is equivalent to
   // CloseAllBrowsers(true) on platforms where the application exits when no
   // more windows are remaining.  On other platforms (the Mac), this will
@@ -107,7 +110,7 @@ class BrowserList {
   // message.
   static void CloseAllBrowsers();
 
-  // Begins shutdown of the application when the session is ending.
+  // Begins shutdown of the application when the desktop session is ending.
   static void SessionEnding();
 
   // Returns true if there is at least one Browser with the specified profile.
@@ -127,6 +130,8 @@ class BrowserList {
   // closes.
   static bool WillKeepAlive();
 
+  // Browsers are added to |browsers_| before they have constructed windows,
+  // so the |window()| member function may return NULL.
   static const_iterator begin() { return browsers_.begin(); }
   static const_iterator end() { return browsers_.end(); }
 
@@ -162,6 +167,12 @@ class BrowserList {
  private:
   // Helper method to remove a browser instance from a list of browsers
   static void RemoveBrowserFrom(Browser* browser, BrowserVector* browser_list);
+  static void MarkAsCleanShutdown();
+  static void NotifyAndTerminate();
+#if defined(OS_CHROMEOS)
+  static bool NeedBeforeUnloadFired();
+  static bool PendingDownloads();
+#endif
 
   static BrowserVector browsers_;
   static BrowserVector last_active_browsers_;
@@ -170,6 +181,11 @@ class BrowserList {
   // Counter of calls to StartKeepAlive(). If non-zero, the application will
   // continue running after the last browser has exited.
   static int keep_alive_count_;
+
+#if defined(OS_CHROMEOS)
+  // Have we already notified the window manager that we're signing out?
+  static bool notified_window_manager_about_signout_;
+#endif
 };
 
 class TabContents;

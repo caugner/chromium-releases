@@ -8,14 +8,7 @@
 
 #include <string>
 
-#import "base/chrome_application_mac.h"
-#import "chrome/browser/cocoa/focus_tracker.h"
-#import "chrome/browser/cocoa/browser_window_controller.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
-#include "chrome/browser/cocoa/sad_tab_controller.h"
-#import "chrome/browser/cocoa/web_drag_source.h"
-#import "chrome/browser/cocoa/web_drop_target.h"
-#import "chrome/browser/cocoa/view_id_util.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_factory.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
@@ -24,8 +17,16 @@
 #include "chrome/browser/tab_contents/render_view_context_menu_mac.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
+#import "chrome/browser/ui/cocoa/focus_tracker.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#include "chrome/browser/ui/cocoa/sad_tab_controller.h"
+#import "chrome/browser/ui/cocoa/web_drag_source.h"
+#import "chrome/browser/ui/cocoa/web_drop_target.h"
+#import "chrome/browser/ui/cocoa/view_id_util.h"
+#import "chrome/common/chrome_application_mac.h"
+#include "chrome/common/notification_details.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
@@ -174,7 +175,8 @@ void TabContentsViewMac::SetPageTitle(const std::wstring& title) {
   // Meaningless on the Mac; widgets don't have a "title" attribute
 }
 
-void TabContentsViewMac::OnTabCrashed() {
+void TabContentsViewMac::OnTabCrashed(base::TerminationStatus /* status */,
+                                      int /* error_code */) {
   if (!sad_tab_.get()) {
     TabContents* contents = tab_contents();
     DCHECK(contents);
@@ -320,6 +322,11 @@ void TabContentsViewMac::CloseTabAfterEventTracking() {
                     afterDelay:0.0];
 }
 
+void TabContentsViewMac::GetViewBounds(gfx::Rect* out) const {
+  // This method is noth currently used on mac.
+  NOTIMPLEMENTED();
+}
+
 void TabContentsViewMac::CloseTab() {
   tab_contents()->Close(tab_contents()->render_view_host());
 }
@@ -336,10 +343,6 @@ void TabContentsViewMac::Observe(NotificationType type,
       NOTREACHED() << "Got a notification we didn't register for.";
   }
 }
-
-@interface NSApplication(SPI)
-- (void)_cycleWindowsReversed:(BOOL)reversed;
-@end
 
 @implementation TabContentsViewCocoa
 

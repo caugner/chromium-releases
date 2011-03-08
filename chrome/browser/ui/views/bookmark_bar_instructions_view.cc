@@ -1,13 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/bookmark_bar_instructions_view.h"
+#include "chrome/browser/ui/views/bookmark_bar_instructions_view.h"
 
-#include "app/l10n_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/controls/label.h"
 
 using views::View;
@@ -22,12 +23,12 @@ BookmarkBarInstructionsView::BookmarkBarInstructionsView(Delegate* delegate)
       baseline_(-1),
       updated_colors_(false) {
   instructions_ = new views::Label(
-      l10n_util::GetString(IDS_BOOKMARKS_NO_ITEMS));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARKS_NO_ITEMS)));
   AddChildView(instructions_);
 
   if (browser_defaults::kShowImportOnBookmarkBar) {
     import_link_ = new views::Link(
-        l10n_util::GetString(IDS_BOOKMARK_BAR_IMPORT_LINK));
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_IMPORT_LINK)));
     // We don't want the link to alter tab navigation.
     import_link_->SetFocusable(false);
     import_link_->SetController(this);
@@ -96,7 +97,7 @@ void BookmarkBarInstructionsView::LinkActivated(views::Link* source,
 
 void BookmarkBarInstructionsView::UpdateColors() {
   // We don't always have a theme provider (ui tests, for example).
-  const ThemeProvider* theme_provider = GetThemeProvider();
+  const ui::ThemeProvider* theme_provider = GetThemeProvider();
   if (!theme_provider)
     return;
   updated_colors_ = true;

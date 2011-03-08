@@ -6,27 +6,24 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/cert_store.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_manager.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_cipher_suite_names.h"
 #include "net/base/x509_certificate.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_MACOSX)
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #endif
 
 PageInfoModel::PageInfoModel(Profile* profile,
@@ -59,7 +56,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
   int status_with_warnings_removed = ssl.cert_status() & ~cert_warnings;
 
   if (ssl.cert_id() &&
-      CertStore::GetSharedInstance()->RetrieveCert(ssl.cert_id(), &cert) &&
+      CertStore::GetInstance()->RetrieveCert(ssl.cert_id(), &cert) &&
       !net::IsCertStatusError(status_with_warnings_removed)) {
     // No error found so far, check cert_status warnings.
     int cert_status = ssl.cert_status();
@@ -277,7 +274,7 @@ PageInfoModel::~PageInfoModel() {
   // Release the NSImages.
   for (std::vector<gfx::NativeImage>::iterator it = icons_.begin();
        it != icons_.end(); ++it) {
-    mac_util::NSObjectRelease(*it);
+    base::mac::NSObjectRelease(*it);
   }
 #endif
 }
@@ -329,7 +326,7 @@ void PageInfoModel::OnGotVisitCountToHost(HistoryService::Handle handle,
         headline,
         l10n_util::GetStringFUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_VISITED_BEFORE_TODAY,
-            WideToUTF16(base::TimeFormatShortDate(first_visit))),
+            base::TimeFormatShortDate(first_visit)),
         SECTION_INFO_FIRST_VISIT));
   }
   observer_->ModelChanged();
@@ -355,7 +352,7 @@ gfx::NativeImage PageInfoModel::GetBitmapNamed(int resource_id) {
 #if defined(OS_MACOSX)
   // Unlike other platforms, the Mac ResourceBundle does not keep a shared image
   // cache. These are released in the dtor.
-  mac_util::NSObjectRetain(image);
+  base::mac::NSObjectRetain(image);
 #endif
   return image;
 }

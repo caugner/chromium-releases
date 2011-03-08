@@ -1,11 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/dom_ui/filebrowse_ui.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -15,7 +13,7 @@
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -29,7 +27,7 @@
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
@@ -48,6 +46,8 @@
 #include "grit/locale_settings.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_file_job.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -126,7 +126,7 @@ class FilebrowseHandler : public net::DirectoryLister::DirectoryListerDelegate,
 
   // DownloadItem::Observer interface
   virtual void OnDownloadUpdated(DownloadItem* download);
-  virtual void OnDownloadFileCompleted(DownloadItem* download) { }
+  virtual void OnDownloadFileCompleted(DownloadItem* download);
   virtual void OnDownloadOpened(DownloadItem* download) { }
 
   // DownloadManager::Observer interface
@@ -139,7 +139,7 @@ class FilebrowseHandler : public net::DirectoryLister::DirectoryListerDelegate,
 
   void OnURLFetchComplete(const URLFetcher* source,
                           const GURL& url,
-                          const URLRequestStatus& status,
+                          const net::URLRequestStatus& status,
                           int response_code,
                           const ResponseCookies& cookies,
                           const std::string& data);
@@ -195,6 +195,9 @@ class FilebrowseHandler : public net::DirectoryLister::DirectoryListerDelegate,
   void FireOnValidatedSavePathOnUIThread(bool valid, const FilePath& save_path);
 
  private:
+
+  // Retrieves downloads from the DownloadManager and updates the page.
+  void UpdateDownloadList();
 
   void OpenNewWindow(const ListValue* args, bool popup);
 
@@ -422,7 +425,7 @@ DOMMessageHandler* FilebrowseHandler::Attach(DOMUI* dom_ui) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(new DOMUIFavIconSource(dom_ui->GetProfile()))));
   profile_ = dom_ui->GetProfile();
@@ -542,7 +545,7 @@ void FilebrowseHandler::MountChanged(chromeos::MountLibrary* obj,
 
 void FilebrowseHandler::OnURLFetchComplete(const URLFetcher* source,
                                            const GURL& url,
-                                           const URLRequestStatus& status,
+                                           const net::URLRequestStatus& status,
                                            int response_code,
                                            const ResponseCookies& cookies,
                                            const std::string& data) {
@@ -622,7 +625,7 @@ void FilebrowseHandler::PlayMediaFile(const ListValue* args) {
 
   Browser* browser = Browser::GetBrowserForController(
       &tab_contents_->controller(), NULL);
-  MediaPlayer* mediaplayer = MediaPlayer::Get();
+  MediaPlayer* mediaplayer = MediaPlayer::GetInstance();
   mediaplayer->ForcePlayMediaURL(gurl, browser);
 #endif
 }
@@ -634,7 +637,7 @@ void FilebrowseHandler::EnqueueMediaFile(const ListValue* args) {
 
   Browser* browser = Browser::GetBrowserForController(
       &tab_contents_->controller(), NULL);
-  MediaPlayer* mediaplayer = MediaPlayer::Get();
+  MediaPlayer* mediaplayer = MediaPlayer::GetInstance();
   mediaplayer->EnqueueMediaURL(gurl, browser);
 #endif
 }
@@ -823,7 +826,7 @@ void FilebrowseHandler::GetChildrenForPath(FilePath& path, bool is_refresh) {
 
 #if defined(OS_CHROMEOS)
   // Don't allow listing files in inaccessible dirs.
-  if (URLRequestFileJob::AccessDisabled(path))
+  if (net::URLRequestFileJob::AccessDisabled(path))
     return;
 #endif  // OS_CHROMEOS
 
@@ -894,17 +897,23 @@ void FilebrowseHandler::OnListDone(int error) {
   info_value.SetString(kPropertyPath, currentpath_.value());
   dom_ui_->CallJavascriptFunction(L"browseFileResult",
                                   info_value, *(filelist_value_.get()));
-  SendCurrentDownloads();
 }
 
 void FilebrowseHandler::HandleGetMetadata(const ListValue* args) {
 }
 
 void FilebrowseHandler::HandleGetDownloads(const ListValue* args) {
-  ModelChanged();
+  UpdateDownloadList();
 }
 
 void FilebrowseHandler::ModelChanged() {
+  if (!currentpath_.empty())
+    GetChildrenForPath(currentpath_, true);
+  else
+    UpdateDownloadList();
+}
+
+void FilebrowseHandler::UpdateDownloadList() {
   ClearDownloadItems();
 
   std::vector<DownloadItem*> downloads;
@@ -971,7 +980,7 @@ void FilebrowseHandler::HandleDeleteFile(const ListValue* args) {
   FilePath currentpath(path);
 
   // Don't allow file deletion in inaccessible dirs.
-  if (URLRequestFileJob::AccessDisabled(currentpath))
+  if (net::URLRequestFileJob::AccessDisabled(currentpath))
     return;
 
   for (unsigned int x = 0; x < active_download_items_.size(); x++) {
@@ -1008,7 +1017,7 @@ void FilebrowseHandler::HandleCopyFile(const ListValue* value) {
       FilePath DestPath = FilePath(dest);
 
       // Don't allow file copy to inaccessible dirs.
-      if (URLRequestFileJob::AccessDisabled(DestPath))
+      if (net::URLRequestFileJob::AccessDisabled(DestPath))
         return;
 
       TaskProxy* task = new TaskProxy(AsWeakPtr(), SrcPath, DestPath);
@@ -1113,6 +1122,10 @@ void FilebrowseHandler::SendCurrentDownloads() {
   dom_ui_->CallJavascriptFunction(L"downloadsList", results_value);
 }
 
+void FilebrowseHandler::OnDownloadFileCompleted(DownloadItem* download) {
+  GetChildrenForPath(currentpath_, true);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // FileBrowseUI
@@ -1129,7 +1142,7 @@ FileBrowseUI::FileBrowseUI(TabContents* contents) : HtmlDialogUI(contents) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(html_source)));
 }

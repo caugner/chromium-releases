@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,17 +14,25 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/hash_tables.h"
+#include "base/scoped_vector.h"
 #include "base/singleton.h"
-#include "base/waitable_event_watcher.h"
+#include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event_watcher.h"
+#include "build/build_config.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_handle.h"
+#include "webkit/plugins/npapi/webplugininfo.h"
 
 #if defined(OS_WIN)
 #include "base/scoped_ptr.h"
 #include "base/win/registry.h"
+#endif
+
+#if defined(OS_LINUX)
+#include "chrome/browser/file_path_watcher/file_path_watcher.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -39,10 +47,12 @@ class Message;
 
 class MessageLoop;
 class Profile;
+class PluginDirWatcherDelegate;
 class ResourceDispatcherHost;
-class ResourceMessageFilter;
+
+namespace net {
 class URLRequestContext;
-struct WebPluginInfo;
+}  // namespace net
 
 // This must be created on the main thread but it's only called on the IO/file
 // thread.
@@ -50,6 +60,13 @@ class PluginService
     : public base::WaitableEventWatcher::Delegate,
       public NotificationObserver {
  public:
+  struct OverriddenPlugin {
+    int render_process_id;
+    int render_view_id;
+    GURL url;
+    webkit::npapi::WebPluginInfo plugin;
+  };
+
   // Initializes the global instance; should be called on startup from the main
   // thread.
   static void InitGlobalInstance(Profile* profile);
@@ -83,20 +100,27 @@ class PluginService
   // Opens a channel to a plugin process for the given mime type, starting
   // a new plugin process if necessary.  This must be called on the IO thread
   // or else a deadlock can occur.
-  void OpenChannelToPlugin(const GURL& url,
+  void OpenChannelToPlugin(int render_process_id,
+                           int render_view_id,
+                           const GURL& url,
                            const std::string& mime_type,
                            PluginProcessHost::Client* client);
 
   // Gets the first allowed plugin in the list of plugins that matches
   // the given url and mime type.  Must be called on the FILE thread.
-  bool GetFirstAllowedPluginInfo(const GURL& url,
+  bool GetFirstAllowedPluginInfo(int render_process_id,
+                                 int render_view_id,
+                                 const GURL& url,
                                  const std::string& mime_type,
-                                 WebPluginInfo* info,
+                                 webkit::npapi::WebPluginInfo* info,
                                  std::string* actual_mime_type);
 
   // Returns true if the given plugin is allowed to be used by a page with
   // the given URL.
   bool PrivatePluginAllowedForURL(const FilePath& plugin_path, const GURL& url);
+
+  // Safe to be called from any thread.
+  void OverridePluginForTab(OverriddenPlugin plugin);
 
   // The UI thread's message loop
   MessageLoop* main_message_loop() { return main_message_loop_; }
@@ -126,6 +150,8 @@ class PluginService
 
   // Helper so we can do the plugin lookup on the FILE thread.
   void GetAllowedPluginForOpenChannelToPlugin(
+      int render_process_id,
+      int render_view_id,
       const GURL& url,
       const std::string& mime_type,
       PluginProcessHost::Client* client);
@@ -135,6 +161,14 @@ class PluginService
   void FinishOpenChannelToPlugin(
       const FilePath& plugin_path,
       PluginProcessHost::Client* client);
+
+#if defined(OS_LINUX)
+  // Registers a new FilePathWatcher for a given path.
+  static void RegisterFilePathWatcher(
+      FilePathWatcher* watcher,
+      const FilePath& path,
+      FilePathWatcher::Delegate* delegate);
+#endif
 
   // mapping between plugin path and PluginProcessHost
   typedef base::hash_map<FilePath, PluginProcessHost*> PluginMap;
@@ -173,8 +207,16 @@ class PluginService
   base::WaitableEventWatcher hklm_watcher_;
 #endif
 
+#if defined(OS_LINUX)
+  ScopedVector<FilePathWatcher> file_watchers_;
+  scoped_refptr<PluginDirWatcherDelegate> file_watcher_delegate_;
+#endif
+
   // Set to true if chrome plugins are enabled. Defaults to true.
   static bool enable_chrome_plugins_;
+
+  std::vector<OverriddenPlugin> overridden_plugins_;
+  base::Lock overridden_plugins_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginService);
 };

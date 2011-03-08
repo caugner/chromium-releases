@@ -11,13 +11,16 @@
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
-#include "chrome/browser/cocoa/location_bar/autocomplete_text_field.h"
+#include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 
 class AutocompleteEditController;
 class AutocompletePopupViewMac;
-class Clipboard;
 class Profile;
 class ToolbarModel;
+
+namespace ui {
+class Clipboard;
+}
 
 // Implements AutocompleteEditView on an AutocompleteTextField.
 
@@ -74,11 +77,15 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
                                            bool save_original_selection);
   virtual bool OnInlineAutocompleteTextMaybeChanged(
       const std::wstring& display_text, size_t user_text_length);
+  virtual void OnStartingIME();
   virtual void OnRevertTemporaryText();
   virtual void OnBeforePossibleChange();
   virtual bool OnAfterPossibleChange();
   virtual gfx::NativeView GetNativeView() const;
   virtual CommandUpdater* GetCommandUpdater();
+  virtual void SetInstantSuggestion(const string16& input);
+  virtual int TextWidth() const;
+  virtual bool IsImeComposing() const;
 
   // Implement the AutocompleteTextFieldObserver interface.
   virtual NSRange SelectionRangeForProposedRange(NSRange proposed_range);
@@ -97,8 +104,6 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   virtual void OnSetFocus(bool control_down);
   virtual void OnKillFocus();
 
-  // Suggest text should be in the model, but for now, it's here.
-  void SetSuggestText(const string16& suggest_text);
   bool CommitSuggestText();
 
   // Helper for LocationBarViewMac.  Optionally selects all in |field_|.
@@ -106,7 +111,7 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
 
   // Helper to get appropriate contents from |clipboard|.  Returns
   // empty string if no appropriate data is found on |clipboard|.
-  static std::wstring GetClipboardText(Clipboard* clipboard);
+  static std::wstring GetClipboardText(ui::Clipboard* clipboard);
 
   // Helper to get the font to use in the field, exposed for the
   // popup.
@@ -126,6 +131,10 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   // Returns the field's currently selected range.  Only valid if the
   // field has focus.
   NSRange GetSelectedRange() const;
+
+  // Returns the field's currently marked range. Only valid if the field has
+  // focus.
+  NSRange GetMarkedRange() const;
 
   // Returns true if |field_| is first-responder in the window.  Used
   // in various DCHECKS to make sure code is running in appropriate
@@ -181,6 +190,7 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   // to model_.
   NSRange selection_before_change_;
   std::wstring text_before_change_;
+  NSRange marked_range_before_change_;
 
   // Length of the suggest text.  The suggest text always appears at the end of
   // the field.

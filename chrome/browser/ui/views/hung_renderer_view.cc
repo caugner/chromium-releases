@@ -1,11 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/hung_renderer_dialog.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
@@ -19,6 +17,8 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/grid_layout.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/image_view.h"
@@ -48,16 +48,16 @@ class HungPagesTableModel : public views::GroupTableModel {
 
   // Overridden from views::GroupTableModel:
   virtual int RowCount();
-  virtual std::wstring GetText(int row, int column_id);
+  virtual string16 GetText(int row, int column_id);
   virtual SkBitmap GetIcon(int row);
-  virtual void SetObserver(TableModelObserver* observer);
+  virtual void SetObserver(ui::TableModelObserver* observer);
   virtual void GetGroupRangeForItem(int item, views::GroupRange* range);
 
  private:
   typedef std::vector<TabContents*> TabContentsVector;
   TabContentsVector tab_contentses_;
 
-  TableModelObserver* observer_;
+  ui::TableModelObserver* observer_;
 
   DISALLOW_COPY_AND_ASSIGN(HungPagesTableModel);
 };
@@ -89,11 +89,11 @@ int HungPagesTableModel::RowCount() {
   return static_cast<int>(tab_contentses_.size());
 }
 
-std::wstring HungPagesTableModel::GetText(int row, int column_id) {
+string16 HungPagesTableModel::GetText(int row, int column_id) {
   DCHECK(row >= 0 && row < RowCount());
-  std::wstring title = UTF16ToWideHack(tab_contentses_[row]->GetTitle());
+  string16 title = tab_contentses_[row]->GetTitle();
   if (title.empty())
-    title = UTF16ToWideHack(TabContents::GetDefaultTitle());
+    title = TabContents::GetDefaultTitle();
   // TODO(xji): Consider adding a special case if the title text is a URL,
   // since those should always have LTR directionality. Please refer to
   // http://crbug.com/6726 for more information.
@@ -106,7 +106,7 @@ SkBitmap HungPagesTableModel::GetIcon(int row) {
   return tab_contentses_.at(row)->GetFavIcon();
 }
 
-void HungPagesTableModel::SetObserver(TableModelObserver* observer) {
+void HungPagesTableModel::SetObserver(ui::TableModelObserver* observer) {
   observer_ = observer;
 }
 
@@ -267,7 +267,8 @@ void HungRendererDialogView::EndForTabContents(TabContents* contents) {
 // HungRendererDialogView, views::DialogDelegate implementation:
 
 std::wstring HungRendererDialogView::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_BROWSER_HANGMONITOR_RENDERER_TITLE);
+  return UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_TITLE));
 }
 
 void HungRendererDialogView::WindowClosing() {
@@ -288,7 +289,8 @@ int HungRendererDialogView::GetDialogButtons() const {
 std::wstring HungRendererDialogView::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK)
-    return l10n_util::GetString(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT);
+    return UTF16ToWide(
+        l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT));
   return std::wstring();
 }
 
@@ -344,7 +346,7 @@ void HungRendererDialogView::Init() {
   frozen_icon_view_->SetImage(frozen_icon_);
 
   info_label_ = new views::Label(
-      l10n_util::GetString(IDS_BROWSER_HANGMONITOR_RENDERER));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER)));
   info_label_->SetMultiLine(true);
   info_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
@@ -362,7 +364,7 @@ void HungRendererDialogView::Init() {
   using views::GridLayout;
   using views::ColumnSet;
 
-  GridLayout* layout = CreatePanelGridLayout(this);
+  GridLayout* layout = GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   const int double_column_set_id = 0;
@@ -387,8 +389,8 @@ void HungRendererDialogView::Init() {
 }
 
 void HungRendererDialogView::CreateKillButtonView() {
-  kill_button_ = new views::NativeButton(
-      this, l10n_util::GetString(IDS_BROWSER_HANGMONITOR_RENDERER_END));
+  kill_button_ = new views::NativeButton(this, UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_END)));
 
   kill_button_container_ = new ButtonContainer;
 

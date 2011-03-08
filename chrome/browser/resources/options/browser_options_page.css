@@ -1,6 +1,25 @@
-#startupPages {
-  border: solid 1px #999999;
-  height: 100px;
+#startupPageManagement.settings-list > :last-child {
+  border-top: 1px solid #d9d9d9;
+  padding: 5px 10px;
+}
+
+#startupPagesList {
+  min-height: 64px;
+}
+
+#startupPagesList .title {
+  width: 40%;
+}
+
+#startupPagesList .url {
+  -webkit-box-flex: 1;
+  color: #666;
+}
+
+#startupPagesList .url input {
+  box-sizing: border-box;
+  margin: 0;
+  width: 100%;
 }
 
 #customHomePageGroup {
@@ -32,6 +51,7 @@
 #defaultSearchEngine {
   display: block;
   -webkit-box-flex: 1;
+  max-width: 200px;
 }
 
 #defaultSearchManageEnginesButton {

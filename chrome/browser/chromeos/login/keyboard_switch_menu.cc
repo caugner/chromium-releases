@@ -4,28 +4,30 @@
 
 #include "chrome/browser/chromeos/login/keyboard_switch_menu.h"
 
-#include "app/l10n_util.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/keyboard_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/chromeos/status/status_area_host.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/widget/widget_gtk.h"
 
 namespace chromeos {
 
 KeyboardSwitchMenu::KeyboardSwitchMenu()
     : InputMethodMenu(NULL /* pref_service */,
-                      false /* is_browser_mode */,
-                      false /* is_screen_locker_mode */,
-                      true /* is_out_of_box_experience_mode */) {
+                      StatusAreaHost::kLoginMode,
+                      true /* for_out_of_box_experience_dialog */) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // InputMethodMenu::InputMethodMenuHost implementation.
-void KeyboardSwitchMenu::UpdateUI(
-    const std::wstring& name, const std::wstring& tooltip) {
+void KeyboardSwitchMenu::UpdateUI(const std::string& input_method_id,
+                                  const std::wstring& name,
+                                  const std::wstring& tooltip,
+                                  size_t num_active_input_methods) {
   // Update all view hierarchies so that the new input method name is shown in
   // the menu button.
   views::Widget::NotifyLocaleChanged();
@@ -47,11 +49,11 @@ void KeyboardSwitchMenu::RunMenu(views::View* source, const gfx::Point& pt) {
   input_method_menu().RunMenuAt(new_pt, views::Menu2::ALIGN_TOPLEFT);
 }
 
-std::wstring KeyboardSwitchMenu::GetCurrentKeyboardName() const {
+string16 KeyboardSwitchMenu::GetCurrentKeyboardName() const {
   const int count = GetItemCount();
   for (int i = 0; i < count; ++i) {
     if (IsItemCheckedAt(i))
-      return UTF16ToWide(GetLabelAt(i));
+      return GetLabelAt(i);
   }
   VLOG(1) << "The input method menu is not ready yet.  Show a language name "
              "that matches the hardware keyboard layout";

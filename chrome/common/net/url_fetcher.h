@@ -1,8 +1,8 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// This file contains URLFetcher, a wrapper around URLRequest that handles
+// This file contains URLFetcher, a wrapper around net::URLRequest that handles
 // low-level details like thread safety, ref counting, and incremental buffer
 // reading.  This is useful for callers who simply want to get the data from a
 // URL and don't care about all the nitty-gritty details.
@@ -26,11 +26,11 @@ class GURL;
 typedef std::vector<std::string> ResponseCookies;
 class URLFetcher;
 class URLRequestContextGetter;
-class URLRequestStatus;
 
 namespace net {
 class HttpResponseHeaders;
-}
+class URLRequestStatus;
+}  // namespace net
 
 // To use this class, create an instance with the desired URL and a pointer to
 // the object to be notified when the URL has been loaded:
@@ -75,7 +75,7 @@ class URLFetcher {
     // URLFetcher instance is destroyed.
     virtual void OnURLFetchComplete(const URLFetcher* source,
                                     const GURL& url,
-                                    const URLRequestStatus& status,
+                                    const net::URLRequestStatus& status,
                                     int response_code,
                                     const ResponseCookies& cookies,
                                     const std::string& data) = 0;
@@ -139,11 +139,15 @@ class URLFetcher {
   // Returns the current load flags.
   int load_flags() const;
 
+  // The referrer URL for the request. Must be called before the request is
+  // started.
+  void set_referrer(const std::string& referrer);
+
   // Set extra headers on the request.  Must be called before the request
   // is started.
   void set_extra_request_headers(const std::string& extra_request_headers);
 
-  // Set the URLRequestContext on the request.  Must be called before the
+  // Set the net::URLRequestContext on the request.  Must be called before the
   // request is started.
   void set_request_context(
       URLRequestContextGetter* request_context_getter);

@@ -8,8 +8,8 @@
 #include "base/logging.h"
 #include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_view_host_factory.h"
@@ -17,6 +17,7 @@
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
@@ -291,12 +292,32 @@ bool RenderViewHostManager::ShouldSwapProcessesForNavigation(
     const NavigationEntry* new_entry) const {
   DCHECK(new_entry);
 
+  // Check for reasons to swap processes even if we are in a process model that
+  // doesn't usually swap (e.g., process-per-tab).
+
+  // For security, we should transition between processes when one is a DOM UI
+  // page and one isn't.  If there's no cur_entry, check the current RVH's
+  // site, which might already be committed to a DOM UI URL (such as the NTP).
+  const GURL& current_url = (cur_entry) ? cur_entry->url() :
+      render_view_host_->site_instance()->site();
+  Profile* profile = delegate_->GetControllerForRenderManager().profile();
+  if (DOMUIFactory::UseDOMUIForURL(profile, current_url)) {
+    // Force swap if it's not an acceptable URL for DOM UI.
+    if (!DOMUIFactory::IsURLAcceptableForDOMUI(profile, new_entry->url()))
+      return true;
+  } else {
+    // Force swap if it's a DOM UI URL.
+    if (DOMUIFactory::UseDOMUIForURL(profile, new_entry->url()))
+      return true;
+  }
+
   if (!cur_entry) {
     // Always choose a new process when navigating to extension URLs. The
     // process grouping logic will combine all of a given extension's pages
     // into the same process.
     if (new_entry->url().SchemeIs(chrome::kExtensionScheme))
       return true;
+
     return false;
   }
 
@@ -306,19 +327,6 @@ bool RenderViewHostManager::ShouldSwapProcessesForNavigation(
   // it as a new navigation). So require a view switch.
   if (cur_entry->IsViewSourceMode() != new_entry->IsViewSourceMode())
     return true;
-
-  // For security, we should transition between processes when one is a DOM UI
-  // page and one isn't.
-  Profile* profile = delegate_->GetControllerForRenderManager().profile();
-  if (DOMUIFactory::UseDOMUIForURL(profile, cur_entry->url())) {
-    // Force swap if it's not an acceptable URL for DOM UI.
-    if (!DOMUIFactory::IsURLAcceptableForDOMUI(profile, new_entry->url()))
-      return true;
-  } else {
-    // Force swap if it's a DOM UI URL.
-    if (DOMUIFactory::UseDOMUIForURL(profile, new_entry->url()))
-      return true;
-  }
 
   // Also, we must switch if one is an extension and the other is not the exact
   // same extension.
@@ -479,8 +487,8 @@ bool RenderViewHostManager::InitRenderView(RenderViewHost* render_view_host,
 
   // Tell the RenderView whether it will be used for an extension process.
   Profile* profile = delegate_->GetControllerForRenderManager().profile();
-  bool is_extension_process = profile->GetExtensionsService() &&
-      profile->GetExtensionsService()->ExtensionBindingsAllowed(entry.url());
+  bool is_extension_process = profile->GetExtensionService() &&
+      profile->GetExtensionService()->ExtensionBindingsAllowed(entry.url());
   render_view_host->set_is_extension_process(is_extension_process);
 
   return delegate_->CreateRenderViewForRenderManager(render_view_host);
@@ -676,4 +684,46 @@ void RenderViewHostManager::RenderViewDeleted(RenderViewHost* rvh) {
     NOTREACHED();
     pending_render_view_host_ = NULL;
   }
+}
+
+void RenderViewHostManager::SwapInRenderViewHost(RenderViewHost* rvh) {
+  dom_ui_.reset();
+
+  // Hide the current view and prepare to destroy it.
+  if (render_view_host_->view())
+    render_view_host_->view()->Hide();
+  RenderViewHost* old_render_view_host = render_view_host_;
+
+  // Swap in the new view and make it active.
+  render_view_host_ = rvh;
+  render_view_host_->set_delegate(render_view_delegate_);
+  delegate_->CreateViewAndSetSizeForRVH(render_view_host_);
+  render_view_host_->ActivateDeferredPluginHandles();
+  // If the view is gone, then this RenderViewHost died while it was hidden.
+  // We ignored the RenderViewGone call at the time, so we should send it now
+  // to make sure the sad tab shows up, etc.
+  if (render_view_host_->view()) {
+    // TODO(tburkard,cbentzel): Figure out why this hack is needed and/or
+    // if it can be removed.  On Windows, prerendering will not work without
+    // doing a Hide before the Show.
+    render_view_host_->view()->Hide();
+    render_view_host_->view()->Show();
+  }
+
+  delegate_->UpdateRenderViewSizeForRenderManager();
+
+  RenderViewHostSwitchedDetails details;
+  details.new_host = render_view_host_;
+  details.old_host = old_render_view_host;
+  NotificationService::current()->Notify(
+      NotificationType::RENDER_VIEW_HOST_CHANGED,
+      Source<NavigationController>(&delegate_->GetControllerForRenderManager()),
+      Details<RenderViewHostSwitchedDetails>(&details));
+
+  // This will cause the old RenderViewHost to delete itself.
+  old_render_view_host->Shutdown();
+
+  // Let the task manager know that we've swapped RenderViewHosts, since it
+  // might need to update its process groupings.
+  delegate_->NotifySwappedFromRenderManager();
 }

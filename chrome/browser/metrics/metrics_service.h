@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,12 @@ class HistogramSynchronizer;
 class MetricsLogBase;
 class PrefService;
 class TemplateURLModel;
+
+namespace webkit {
+namespace npapi {
 struct WebPluginInfo;
+}
+}
 
 // Forward declaration of the xmlNode to avoid having tons of gyp files
 // needing to depend on the libxml third party lib.
@@ -120,17 +125,12 @@ class MetricsService : public NotificationObserver,
   void StoreUnsentLogs();
 
 #if defined(OS_CHROMEOS)
-  // Returns the hardware class of the Chrome OS device (e.g.,
-  // hardware qualification ID), or "unknown" if the hardware class is
-  // not available.  The hardware class identifies the configured
-  // system components such us CPU, WiFi adapter, etc.  Note that this
-  // routine invokes an external utility to determine the hardware
-  // class.
-  static std::string GetHardwareClass();
-
   // Start the external metrics service, which collects metrics from Chrome OS
   // and passes them to UMA.
   void StartExternalMetrics();
+
+  // Records a Chrome OS crash.
+  void LogChromeOSCrash(const std::string &crash_type);
 #endif
 
   bool recording_active() const;
@@ -155,7 +155,7 @@ class MetricsService : public NotificationObserver,
   // Callback to let us know that the init task is done.
   void OnInitTaskComplete(
       const std::string& hardware_class,
-      const std::vector<WebPluginInfo>& plugins);
+      const std::vector<webkit::npapi::WebPluginInfo>& plugins);
 
   // When we start a new version of Chromium (different from our last run), we
   // need to discard the old crash stats so that we don't attribute crashes etc.
@@ -269,7 +269,7 @@ class MetricsService : public NotificationObserver,
   // completes (either successfully or with failure).
   virtual void OnURLFetchComplete(const URLFetcher* source,
                                   const GURL& url,
-                                  const URLRequestStatus& status,
+                                  const net::URLRequestStatus& status,
                                   int response_code,
                                   const ResponseCookies& cookies,
                                   const std::string& data);
@@ -418,7 +418,7 @@ class MetricsService : public NotificationObserver,
   std::string hardware_class_;
 
   // The list of plugins which was retrieved on the file thread.
-  std::vector<WebPluginInfo> plugins_;
+  std::vector<webkit::npapi::WebPluginInfo> plugins_;
 
   // The outstanding transmission appears as a URL Fetch operation.
   scoped_ptr<URLFetcher> current_fetch_;

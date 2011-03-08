@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@
 
 namespace net {
 class URLRequest;
+class URLRequestStatus;
 }  // namespace net
 
 class ResourceDispatcherHost;
-class URLRequestStatus;
 struct DownloadBuffer;
 
 // This class handles the "application/x-x509-user-cert" mime-type
@@ -30,34 +30,34 @@ class X509UserCertResourceHandler : public ResourceHandler {
                               net::URLRequest* request,
                               int render_process_host_id, int render_view_id);
 
-  bool OnUploadProgress(int request_id, uint64 position, uint64 size);
+  virtual bool OnUploadProgress(int request_id, uint64 position, uint64 size);
 
   // Not needed, as this event handler ought to be the final resource.
-  bool OnRequestRedirected(int request_id, const GURL& url,
-                           ResourceResponse* resp, bool* defer);
+  virtual bool OnRequestRedirected(int request_id, const GURL& url,
+                                   ResourceResponse* resp, bool* defer);
 
   // Check if this indeed an X509 cert.
-  bool OnResponseStarted(int request_id, ResourceResponse* resp);
+  virtual bool OnResponseStarted(int request_id, ResourceResponse* resp);
 
   // Pass-through implementation.
-  bool OnWillStart(int request_id, const GURL& url, bool* defer);
+  virtual bool OnWillStart(int request_id, const GURL& url, bool* defer);
 
   // Create a new buffer to store received data.
-  bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
-                  int min_size);
+  virtual bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
+                          int min_size);
 
   // A read was completed, maybe allocate a new buffer for further data.
-  bool OnReadCompleted(int request_id, int* bytes_read);
+  virtual bool OnReadCompleted(int request_id, int* bytes_read);
 
   // Done downloading the certificate.
-  bool OnResponseCompleted(int request_id,
-                           const URLRequestStatus& urs,
-                           const std::string& sec_info);
+  virtual bool OnResponseCompleted(int request_id,
+                                   const net::URLRequestStatus& urs,
+                                   const std::string& sec_info);
 
-  void OnRequestClosed();
+  virtual void OnRequestClosed();
 
  private:
-  ~X509UserCertResourceHandler();
+  virtual ~X509UserCertResourceHandler();
 
   void AssembleResource();
 

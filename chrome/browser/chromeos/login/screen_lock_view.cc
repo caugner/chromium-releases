@@ -4,10 +4,7 @@
 
 #include "chrome/browser/chromeos/login/screen_lock_view.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -16,10 +13,12 @@
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/login/textfield_with_margin.h"
 #include "chrome/browser/chromeos/views/copy_background.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/background.h"
 #include "views/border.h"
 #include "views/controls/image_view.h"
@@ -40,7 +39,7 @@ class PasswordField : public TextfieldWithMargin {
   PasswordField()
       : TextfieldWithMargin(views::Textfield::STYLE_PASSWORD) {
     set_text_to_display_when_empty(
-        l10n_util::GetStringUTF16(IDS_LOGIN_EMPTY_PASSWORD_TEXT));
+        l10n_util::GetStringUTF16(IDS_LOGIN_POD_EMPTY_PASSWORD_TEXT));
   }
 
   // views::View overrides.
@@ -65,6 +64,9 @@ ScreenLockView::ScreenLockView(ScreenLocker* screen_locker)
       main_(NULL),
       username_(NULL) {
   DCHECK(screen_locker_);
+}
+
+ScreenLockView::~ScreenLockView() {
 }
 
 gfx::Size ScreenLockView::GetPreferredSize() {
@@ -100,8 +102,12 @@ void ScreenLockView::Init() {
 
   // Password field.
   password_field_ = new PasswordField();
+
   password_field_->SetController(this);
   password_field_->set_background(new CopyBackground(main_));
+
+  // Setup ThrobberView's host view.
+  set_host_view(password_field_);
 
   // User icon.
   UserManager::User user = screen_locker_->user();
@@ -123,10 +129,10 @@ void ScreenLockView::Init() {
   column_set->AddPaddingColumn(0, kBorderSize);
 
   column_set = layout->AddColumnSet(1);
-  column_set->AddPaddingColumn(0, 5);
+  column_set->AddPaddingColumn(0, kBorderSize);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, 5);
+  column_set->AddPaddingColumn(0, kBorderSize);
 
   layout->AddPaddingRow(0, kBorderSize);
   layout->StartRow(0, 0);
@@ -138,7 +144,7 @@ void ScreenLockView::Init() {
 
   AddChildView(main_);
 
-  UsernameView* username = new UsernameView(text);
+  UsernameView* username = UsernameView::CreateShapedUsernameView(text, false);
   username_ = username;
   username->SetColor(login::kTextColor);
   username->SetFont(font);
@@ -160,11 +166,11 @@ gfx::Rect ScreenLockView::GetPasswordBoundsRelativeTo(const views::View* view) {
   return gfx::Rect(p, size());
 }
 
+
 void ScreenLockView::SetEnabled(bool enabled) {
   views::View::SetEnabled(enabled);
 
   if (!enabled) {
-    user_view_->StartThrobber();
     // TODO(oshima): Re-enabling does not move the focus to the view
     // that had a focus (issue http://crbug.com/43131).
     // Clear focus on the textfield so that re-enabling can set focus
@@ -173,8 +179,6 @@ void ScreenLockView::SetEnabled(bool enabled) {
     // associated Widget yet.
     if (password_field_->GetFocusManager())
       password_field_->GetFocusManager()->ClearFocus();
-  } else {
-    user_view_->StopThrobber();
   }
   password_field_->SetEnabled(enabled);
 }
@@ -183,11 +187,11 @@ void ScreenLockView::OnSignout() {
   screen_locker_->Signout();
 }
 
-bool ScreenLockView::HandleKeystroke(
+bool ScreenLockView::HandleKeyEvent(
     views::Textfield* sender,
-    const views::Textfield::Keystroke& keystroke) {
+    const views::KeyEvent& key_event) {
   screen_locker_->ClearErrors();
-  if (keystroke.GetKeyboardCode() == app::VKEY_RETURN) {
+  if (key_event.GetKeyCode() == ui::VKEY_RETURN) {
     screen_locker_->Authenticate(password_field_->text());
     return true;
   }
@@ -213,4 +217,5 @@ void ScreenLockView::ViewHierarchyChanged(bool is_add,
   if (is_add && this == child)
     WizardAccessibilityHelper::GetInstance()->MaybeEnableAccessibility(this);
 }
+
 }  // namespace chromeos

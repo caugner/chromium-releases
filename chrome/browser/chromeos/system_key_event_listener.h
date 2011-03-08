@@ -24,11 +24,13 @@ class AudioHandler;
 
 class SystemKeyEventListener : public WmMessageListener::Observer {
  public:
-  static SystemKeyEventListener* instance();
+  static SystemKeyEventListener* GetInstance();
 
   // WmMessageListener::Observer:
   virtual void ProcessWmMessage(const WmIpc::Message& message,
                                 GdkWindow* window);
+
+  void Stop();
 
  private:
   // Defines the delete on exit Singleton traits we like.  Best to have this
@@ -59,6 +61,8 @@ class SystemKeyEventListener : public WmMessageListener::Observer {
   int32 key_f8_;
   int32 key_f9_;
   int32 key_f10_;
+
+  bool stopped_;
 
   // AudioHandler is a Singleton class we are just caching a pointer to here,
   // and we do not own the pointer.

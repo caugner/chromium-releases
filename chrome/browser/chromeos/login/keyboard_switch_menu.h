@@ -23,8 +23,10 @@ class KeyboardSwitchMenu : public InputMethodMenu {
   virtual ~KeyboardSwitchMenu() {}
 
   // InputMethodMenu::InputMethodMenuHost implementation.
-  virtual void UpdateUI(
-      const std::wstring& name, const std::wstring& tooltip);
+  virtual void UpdateUI(const std::string& input_method_id,
+                        const std::wstring& name,
+                        const std::wstring& tooltip,
+                        size_t num_active_input_methods);
   virtual bool ShouldSupportConfigUI() { return false; }
   virtual void OpenConfigUI() {}
 
@@ -33,7 +35,7 @@ class KeyboardSwitchMenu : public InputMethodMenu {
   virtual void RunMenu(views::View* source, const gfx::Point& pt);
 
   // Returns current keyboard name to be placed on the keyboard menu-button.
-  std::wstring GetCurrentKeyboardName() const;
+  string16 GetCurrentKeyboardName() const;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(KeyboardSwitchMenu);

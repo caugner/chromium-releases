@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_UI_VIEWS_JS_MODAL_DIALOG_VIEWS_H_
 #pragma once
 
-#include "chrome/browser/js_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
 
 #include <string>
 
-#include "app/message_box_flags.h"
-#include "chrome/browser/native_app_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
+#include "ui/base/message_box_flags.h"
 #include "views/window/dialog_delegate.h"
 
 class MessageBoxView;
@@ -39,7 +39,7 @@ class JSModalDialogViews : public NativeAppModalDialog,
   virtual bool Cancel();
   virtual bool Accept();
   virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const;
+      ui::MessageBoxFlags::DialogButton button) const;
 
   // Overridden from views::WindowDelegate:
   virtual bool IsModal() const { return true; }

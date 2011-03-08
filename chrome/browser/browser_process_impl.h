@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,29 +15,36 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
-#include "base/non_thread_safe.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "ipc/ipc_message.h"
 
+class ChromeNetLog;
 class CommandLine;
 class DebuggerWrapper;
 class FilePath;
 class NotificationService;
+class PluginDataRemover;
 class TabCloseableStateWatcher;
 
 // Real implementation of BrowserProcess that creates and returns the services.
-class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
+class BrowserProcessImpl : public BrowserProcess,
+                           public base::NonThreadSafe,
+                           public NotificationObserver {
  public:
   explicit BrowserProcessImpl(const CommandLine& command_line);
   virtual ~BrowserProcessImpl();
 
   virtual void EndSession();
 
+  // BrowserProcess methods
   virtual ResourceDispatcherHost* resource_dispatcher_host();
   virtual MetricsService* metrics_service();
   virtual IOThread* io_thread();
@@ -52,8 +59,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   virtual PrefService* local_state();
   virtual DevToolsManager* devtools_manager();
   virtual SidebarManager* sidebar_manager();
-  virtual Clipboard* clipboard();
+  virtual ui::Clipboard* clipboard();
   virtual NotificationUIManager* notification_ui_manager();
+  virtual policy::ConfigurationPolicyProviderKeeper*
+      configuration_policy_provider_keeper();
   virtual IconManager* icon_manager();
   virtual ThumbnailGenerator* GetThumbnailGenerator();
   virtual AutomationProviderList* InitAutomationProviderList();
@@ -70,10 +79,17 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   virtual DownloadStatusUpdater* download_status_updater();
   virtual base::WaitableEvent* shutdown_event();
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher();
+  virtual safe_browsing::ClientSideDetectionService*
+      safe_browsing_detection_service();
   virtual void CheckForInspectorFiles();
 
+  // NotificationObserver methods
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
-  void StartAutoupdateTimer();
+  virtual void StartAutoupdateTimer();
 #endif
 
   virtual bool have_inspector_files() const;
@@ -92,6 +108,8 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   void CreateIOThread();
   static void CleanupOnIOThread();
+
+  void WaitForPluginDataRemoverToFinish();
 
   void CreateFileThread();
   void CreateDBThread();
@@ -112,6 +130,9 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   void CreateStatusTrayManager();
   void CreateTabCloseableStateWatcher();
   void CreatePrintPreviewTabController();
+  void CreateSafeBrowsingDetectionService();
+
+  bool IsSafeBrowsingDetectionServiceEnabled();
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
   void SetIPCLoggingEnabledForChildProcesses(bool enabled);
@@ -160,10 +181,14 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   bool created_sidebar_manager_;
   scoped_refptr<SidebarManager> sidebar_manager_;
 
+  bool created_configuration_policy_provider_keeper_;
+  scoped_ptr<policy::ConfigurationPolicyProviderKeeper>
+      configuration_policy_provider_keeper_;
+
   scoped_refptr<printing::PrintPreviewTabController>
       print_preview_tab_controller_;
 
-  scoped_ptr<Clipboard> clipboard_;
+  scoped_ptr<ui::Clipboard> clipboard_;
 
   // Manager for desktop notification UI.
   bool created_notification_ui_manager_;
@@ -177,6 +202,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   scoped_ptr<NotificationService> main_notification_service_;
 
   scoped_ptr<TabCloseableStateWatcher> tab_closeable_state_watcher_;
+
+  bool created_safe_browsing_detection_service_;
+  scoped_ptr<safe_browsing::ClientSideDetectionService>
+     safe_browsing_detection_service_;
 
   unsigned int module_ref_count_;
   bool did_start_;
@@ -210,6 +239,12 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   // Ensures that the observers of plugin/print disable/enable state
   // notifications are properly added and removed.
   PrefChangeRegistrar pref_change_registrar_;
+
+  // Lives here so can safely log events on shutdown.
+  scoped_ptr<ChromeNetLog> net_log_;
+
+  NotificationRegistrar notification_registrar_;
+  scoped_refptr<PluginDataRemover> plugin_data_remover_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;

@@ -5,10 +5,10 @@
 #include <list>
 #include <map>
 
-#include "base/lock.h"
 #include "base/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/engine/syncer_thread.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
@@ -42,11 +42,23 @@ ACTION_P(SignalEvent, event) {
 }
 
 SyncSessionSnapshot SessionSnapshotForTest(
-    int64 num_server_changes_remaining, int64 max_local_timestamp,
+    int64 num_server_changes_remaining,
     int64 unsynced_count) {
+  std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
+  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
+       i < syncable::MODEL_TYPE_COUNT;
+       ++i) {
+    syncable::ModelType type(syncable::ModelTypeFromInt(i));
+    sync_pb::DataTypeProgressMarker token;
+    token.set_data_type_id(
+        syncable::GetExtensionFieldNumberFromModelType(type));
+    token.set_token("foobar");
+    token.SerializeToString(&download_progress_markers[i]);
+  }
   return SyncSessionSnapshot(SyncerStatus(), ErrorCounters(),
-      num_server_changes_remaining, max_local_timestamp, false,
-      syncable::ModelTypeBitSet(), false, false, unsynced_count, 0, false);
+      num_server_changes_remaining, false,
+      syncable::ModelTypeBitSet(), download_progress_markers,
+      false, false, unsynced_count, 0, false);
 }
 
 class ListenerMock : public SyncEngineEventListener {
@@ -113,7 +125,7 @@ class SyncerThreadWithSyncerTest : public testing::Test,
   void WaitForDisconnect() {
     // Wait for the SyncerThread to detect loss of connection, up to a max of
     // 10 seconds to timeout the test.
-    AutoLock lock(syncer_thread()->lock_);
+    base::AutoLock lock(syncer_thread()->lock_);
     TimeTicks start = TimeTicks::Now();
     TimeDelta ten_seconds = TimeDelta::FromSeconds(10);
     while (syncer_thread()->vault_.connected_) {
@@ -127,7 +139,7 @@ class SyncerThreadWithSyncerTest : public testing::Test,
   bool Pause(ListenerMock* listener) {
     WaitableEvent event(false, false);
     {
-      AutoLock lock(syncer_thread()->lock_);
+      base::AutoLock lock(syncer_thread()->lock_);
       EXPECT_CALL(*listener, OnSyncEngineEvent(
           Field(&SyncEngineEvent::what_happened,
           SyncEngineEvent::SYNCER_THREAD_PAUSED))).
@@ -141,7 +153,7 @@ class SyncerThreadWithSyncerTest : public testing::Test,
   bool Resume(ListenerMock* listener) {
     WaitableEvent event(false, false);
     {
-      AutoLock lock(syncer_thread()->lock_);
+      base::AutoLock lock(syncer_thread()->lock_);
       EXPECT_CALL(*listener, OnSyncEngineEvent(
           Field(&SyncEngineEvent::what_happened,
           SyncEngineEvent::SYNCER_THREAD_RESUMED))).
@@ -318,7 +330,7 @@ TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
   scoped_refptr<SyncerThread> syncer_thread(new SyncerThread(context));
   syncer_thread->DisableIdleDetection();
   // Hold the lock to appease asserts in code.
-  AutoLock lock(syncer_thread->lock_);
+  base::AutoLock lock(syncer_thread->lock_);
 
   // Notifications disabled should result in a polling interval of
   // kDefaultShortPollInterval.
@@ -393,7 +405,7 @@ TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
   // non-zero.
   {
     // More server changes remaining to download.
-    context->set_last_snapshot(SessionSnapshotForTest(1, 0, 0));
+    context->set_last_snapshot(SessionSnapshotForTest(1, 0));
     bool continue_sync_cycle_param = false;
 
     WaitInterval interval = syncer_thread->CalculatePollingWaitTime(
@@ -441,7 +453,7 @@ TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
     ASSERT_TRUE(continue_sync_cycle_param);
 
     // Now simulate no more server changes remaining.
-    context->set_last_snapshot(SessionSnapshotForTest(1, 1, 0));
+    context->set_last_snapshot(SessionSnapshotForTest(0, 0));
     interval = syncer_thread->CalculatePollingWaitTime(
         0,
         &user_idle_milliseconds_param,
@@ -458,7 +470,7 @@ TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
   {
 
     // Now try with unsynced local items.
-    context->set_last_snapshot(SessionSnapshotForTest(0, 0, 1));
+    context->set_last_snapshot(SessionSnapshotForTest(0, 1));
     bool continue_sync_cycle_param = false;
 
     WaitInterval interval = syncer_thread->CalculatePollingWaitTime(
@@ -484,7 +496,7 @@ TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
     ASSERT_FALSE(interval.had_nudge_during_backoff);
     ASSERT_TRUE(continue_sync_cycle_param);
 
-    context->set_last_snapshot(SessionSnapshotForTest(0, 0, 0));
+    context->set_last_snapshot(SessionSnapshotForTest(0, 0));
     interval = syncer_thread->CalculatePollingWaitTime(
         4,
         &user_idle_milliseconds_param,
@@ -501,7 +513,7 @@ TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
   // Regression for exponential backoff reset when the syncer is nudged.
   {
 
-    context->set_last_snapshot(SessionSnapshotForTest(0, 0, 1));
+    context->set_last_snapshot(SessionSnapshotForTest(0, 1));
     bool continue_sync_cycle_param = false;
 
     // Expect move from default polling interval to exponential backoff due to
@@ -623,7 +635,7 @@ TEST_F(SyncerThreadTest, CalculatePollingWaitTime) {
     ASSERT_TRUE(continue_sync_cycle_param);
 
     // Setting unsynced_count = 0 returns us to the default polling interval.
-    context->set_last_snapshot(SessionSnapshotForTest(0, 0, 0));
+    context->set_last_snapshot(SessionSnapshotForTest(0, 0));
     interval = syncer_thread->CalculatePollingWaitTime(
         4,
         &user_idle_milliseconds_param,

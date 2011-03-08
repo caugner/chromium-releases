@@ -4,8 +4,8 @@
 
 #include "build/build_config.h"
 
+#include "base/lazy_instance.h"
 #include "base/ref_counted.h"
-#include "base/singleton.h"
 #include "base/weak_ptr.h"
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "chrome/renderer/ggl/ggl.h"
@@ -34,12 +34,6 @@ const int32 kCommandBufferSize = 1024 * 1024;
 // creation attributes.
 const int32 kTransferBufferSize = 1024 * 1024;
 
-// TODO(kbr) / TODO(apatrick): determine the best number of pending frames
-// in the general case. On Mac OS X it seems we really want this to be 1,
-// because otherwise the renderer process produces frames that do not
-// actually reach the screen.
-const int kMaxFramesPending = 1;
-
 // Singleton used to initialize and terminate the gles2 library.
 class GLES2Initializer {
  public:
@@ -54,6 +48,10 @@ class GLES2Initializer {
  private:
   DISALLOW_COPY_AND_ASSIGN(GLES2Initializer);
 };
+
+static base::LazyInstance<GLES2Initializer> g_gles2_initializer(
+    base::LINKER_INITIALIZED);
+
 }  // namespace anonymous
 
 // Manages a GL context.
@@ -137,9 +135,6 @@ class Context : public base::SupportsWeakPtr<Context> {
   int32 transfer_buffer_id_;
   gpu::gles2::GLES2Implementation* gles2_implementation_;
   gfx::Size size_;
-
-  int32 swap_buffer_tokens_[kMaxFramesPending];
-
   Error last_error_;
 
   DISALLOW_COPY_AND_ASSIGN(Context);
@@ -155,8 +150,6 @@ Context::Context(GpuChannelHost* channel, Context* parent)
       gles2_implementation_(NULL),
       last_error_(SUCCESS) {
   DCHECK(channel);
-  for (int i = 0; i < kMaxFramesPending; ++i)
-    swap_buffer_tokens_[i] = -1;
 }
 
 Context::~Context() {
@@ -174,7 +167,7 @@ bool Context::Initialize(gfx::NativeViewId view,
     return false;
 
   // Ensure the gles2 library is initialized first in a thread safe way.
-  Singleton<GLES2Initializer>::get();
+  g_gles2_initializer.Get();
 
   // Allocate a frame buffer ID with respect to the parent.
   if (parent_.get()) {
@@ -386,18 +379,7 @@ bool Context::SwapBuffers() {
   if (command_buffer_->GetLastState().error != gpu::error::kNoError)
     return false;
 
-  // Throttle until there are not too many frames pending.
-  if (swap_buffer_tokens_[0] != -1) {
-    gles2_helper_->WaitForToken(swap_buffer_tokens_[0]);
-  }
-
   gles2_implementation_->SwapBuffers();
-
-  // Insert a new token to throttle against for this frame.
-  for (int i = 0; i < kMaxFramesPending - 1; ++i)
-    swap_buffer_tokens_[i] = swap_buffer_tokens_[i + 1];
-  swap_buffer_tokens_[kMaxFramesPending - 1] = gles2_helper_->InsertToken();
-
   return true;
 }
 
@@ -430,7 +412,12 @@ void Context::SetError(Error error) {
 
 bool Context::IsCommandBufferContextLost() {
   gpu::CommandBuffer::State state = command_buffer_->GetLastState();
-  return state.error == gpu::error::kLostContext;
+  if (state.error == gpu::error::kLostContext) {
+    // Tell the host that the connection was lost right away.
+    channel_->SetStateLost();
+    return true;
+  }
+  return false;
 }
 
 // TODO(gman): Remove This

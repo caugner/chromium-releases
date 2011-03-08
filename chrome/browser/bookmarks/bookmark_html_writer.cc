@@ -4,7 +4,6 @@
 
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
 
-#include "app/l10n_util.h"
 #include "base/base64.h"
 #include "base/callback.h"
 #include "base/file_path.h"
@@ -18,13 +17,13 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/profile.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/notification_source.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 

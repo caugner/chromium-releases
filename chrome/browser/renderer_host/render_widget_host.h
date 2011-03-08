@@ -12,6 +12,7 @@
 
 #include "app/surface/transport_dib.h"
 #include "base/gtest_prod_util.h"
+#include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/timer.h"
@@ -22,9 +23,9 @@
 #include "gfx/rect.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebTextInputType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextInputType.h"
 
 namespace gfx {
 class Rect;
@@ -41,7 +42,6 @@ class BackingStore;
 class PaintObserver;
 class RenderProcessHost;
 class RenderWidgetHostView;
-class RenderWidgetHostPaintingObserver;
 class TransportDIB;
 class WebCursor;
 struct ViewHostMsg_UpdateRect_Params;
@@ -123,12 +123,13 @@ struct ViewHostMsg_UpdateRect_Params;
 class RenderWidgetHost : public IPC::Channel::Listener,
                          public IPC::Channel::Sender {
  public:
-  // An interface that gets called before and after a paint.
-  class PaintObserver {
-   public:
-    virtual ~PaintObserver() {}
-    virtual void RenderWidgetHostWillPaint(RenderWidgetHost* rhw) = 0;
-    virtual void RenderWidgetHostDidPaint(RenderWidgetHost* rwh) = 0;
+  // Used as the details object for a
+  // RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK notification.
+  struct PaintAtSizeAckDetails {
+    // The tag that was passed to the PaintAtSize() call that triggered this
+    // ack.
+    int tag;
+    gfx::Size size;
   };
 
   // routing_id can be MSG_ROUTING_NONE, in which case the next available
@@ -147,26 +148,11 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   int routing_id() const { return routing_id_; }
   bool renderer_accessible() { return renderer_accessible_; }
 
-  // Set the PaintObserver on this object. Takes ownership.
-  void set_paint_observer(PaintObserver* paint_observer) {
-    paint_observer_.reset(paint_observer);
-  }
-
   // Returns the property bag for this widget, where callers can add extra data
   // they may wish to associate with it. Returns a pointer rather than a
   // reference since the PropertyAccessors expect this.
   const PropertyBag* property_bag() const { return &property_bag_; }
   PropertyBag* property_bag() { return &property_bag_; }
-
-  // The painting observer that will be called for paint events. This
-  // pointer's ownership will remain with the caller and must remain valid
-  // until this class is destroyed or the observer is replaced.
-  RenderWidgetHostPaintingObserver* painting_observer() const {
-    return painting_observer_;
-  }
-  void set_painting_observer(RenderWidgetHostPaintingObserver* observer) {
-    painting_observer_ = observer;
-  }
 
   // Called when a renderer object already been created for this host, and we
   // just need to be attached to it. Used for window.open, <select> dropdown
@@ -177,13 +163,13 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   virtual void Shutdown();
 
   // Manual RTTI FTW. We are not hosting a web page.
-  virtual bool IsRenderView() const { return false; }
+  virtual bool IsRenderView() const;
 
   // IPC::Channel::Listener
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
   // Sends a message to the corresponding object in the renderer.
-  bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg);
 
   // Called to notify the RenderWidget that it has been hidden or restored from
   // having been hidden.
@@ -218,10 +204,10 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // web widget to match the |page_size| and then returns the bitmap
   // scaled so it matches the |desired_size|, so that the scaling
   // happens on the rendering thread.  When the bitmap is ready, the
-  // renderer sends a PaintAtSizeACK to this host, and the painting
-  // observer is notified.  Note that this bypasses most of the update
-  // logic that is normally invoked, and doesn't put the results into
-  // the backing store.
+  // renderer sends a PaintAtSizeACK to this host, and a
+  // RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK notification is issued.
+  // Note that this bypasses most of the update logic that is normally invoked,
+  // and doesn't put the results into the backing store.
   void PaintAtSize(TransportDIB::Handle dib_handle,
                    int tag,
                    const gfx::Size& page_size,
@@ -404,6 +390,11 @@ class RenderWidgetHost : public IPC::Channel::Listener,
     return ignore_input_events_;
   }
 
+  // Activate deferred plugin handles.
+  void ActivateDeferredPluginHandles();
+
+  const gfx::Size& last_scroll_offset() const { return last_scroll_offset_; }
+
  protected:
   // Internal implementation of the public Forward*Event() methods.
   void ForwardInputEvent(const WebKit::WebInputEvent& input_event,
@@ -412,7 +403,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Called when we receive a notification indicating that the renderer
   // process has gone. This will reset our state so that our state will be
   // consistent if a new renderer is created.
-  void RendererExited();
+  void RendererExited(base::TerminationStatus status, int exit_code);
 
   // Retrieves an id the renderer can use to refer to its view.
   // This is used for various IPC messages, including plugins.
@@ -425,9 +416,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
   // |*is_keyboard_shortcut| should be set to true.
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) {
-    return false;
-  }
+                                      bool* is_keyboard_shortcut);
 
   // Called when a keyboard event was not processed by the renderer. This is
   // overridden by RenderView to send upwards to its delegate.
@@ -472,7 +461,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   // IPC message handlers
   void OnMsgRenderViewReady();
-  void OnMsgRenderViewGone();
+  void OnMsgRenderViewGone(int status, int error_code);
   void OnMsgClose();
   void OnMsgRequestMove(const gfx::Rect& pos);
   void OnMsgPaintAtSizeAck(int tag, const gfx::Size& size);
@@ -493,7 +482,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                           WebKit::WebScreenInfo* results);
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
   void OnMsgGetRootWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
-  void OnMsgSetPluginImeEnabled(bool enabled, int plugin_id);
+  void OnMsgPluginFocusChanged(bool focused, int plugin_id);
+  void OnMsgStartPluginIme();
   void OnAllocateFakePluginWindowHandle(bool opaque,
                                         bool root,
                                         gfx::PluginWindowHandle* id);
@@ -551,10 +541,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   // Stores random bits of data for others to associate with this object.
   PropertyBag property_bag_;
-
-  // Observer that will be called for paint events. This may be NULL. The
-  // pointer is not owned by this class.
-  RenderWidgetHostPaintingObserver* painting_observer_;
 
   // The ID of the corresponding object in the Renderer Instance.
   int routing_id_;
@@ -635,9 +621,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // This timer runs to check if time_when_considered_hung_ has past.
   base::OneShotTimer<RenderWidgetHost> hung_renderer_timer_;
 
-  // Optional observer that listens for notifications of painting.
-  scoped_ptr<PaintObserver> paint_observer_;
-
   // Flag to detect recursive calls to GetBackingStore().
   bool in_get_backing_store_;
 
@@ -682,6 +665,11 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // switching back to the original tab, because the content may already be
   // changed.
   bool suppress_next_char_events_;
+
+  std::vector<gfx::PluginWindowHandle> deferred_plugin_handles_;
+
+  // The last scroll offset of the render widget.
+  gfx::Size last_scroll_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHost);
 };

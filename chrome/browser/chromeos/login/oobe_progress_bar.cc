@@ -4,12 +4,13 @@
 
 #include "chrome/browser/chromeos/login/oobe_progress_bar.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "gfx/canvas_skia.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace chromeos {
 
@@ -110,7 +111,7 @@ void OobeProgressBar::Paint(gfx::Canvas* canvas) {
                            next_x - ix, line_->height());
     }
 
-    std::wstring str = l10n_util::GetString(steps_[i]);
+    string16 str = l10n_util::GetStringUTF16(steps_[i]);
     canvas->DrawStringInt(str, font_, color,
         x + kTextPadding, y + dot->height() + kTextPadding,
         (next_x - x - 2 * kTextPadding),

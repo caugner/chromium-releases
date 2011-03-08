@@ -21,15 +21,15 @@
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_chromium_resources.h"
 #include "net/base/net_module.h"
 #include "net/url_request/url_request_file_job.h"
 #include "skia/ext/bitmap_platform_device.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/win/hwnd_util.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/plugins/plugin_list.h"
@@ -138,11 +138,6 @@ static base::StringPiece GetRawDataResource(HMODULE module, int resource_id) {
       : base::StringPiece();
 }
 
-// This is called indirectly by the network layer to access resources.
-base::StringPiece NetResourceProvider(int key) {
-  return GetRawDataResource(::GetModuleHandle(NULL), key);
-}
-
 }  // namespace
 
 // Initialize static member variable
@@ -150,6 +145,11 @@ HINSTANCE TestShell::instance_handle_;
 
 /////////////////////////////////////////////////////////////////////////////
 // static methods on TestShell
+
+const MINIDUMP_TYPE kFullDumpType = static_cast<MINIDUMP_TYPE>(
+    MiniDumpWithFullMemory |  // Full memory from process.
+    MiniDumpWithProcessThreadData |  // Get PEB and TEB.
+    MiniDumpWithHandleData);  // Get all handle information.
 
 void TestShell::InitializeTestShell(bool layout_test_mode,
                                     bool allow_external_pages) {
@@ -180,7 +180,14 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   if (parsed_command_line.HasSwitch(test_shell::kCrashDumps)) {
     std::wstring dir(
         parsed_command_line.GetSwitchValueNative(test_shell::kCrashDumps));
-    new google_breakpad::ExceptionHandler(dir, 0, &MinidumpCallback, 0, true);
+    if (parsed_command_line.HasSwitch(test_shell::kCrashDumpsFulldump)) {
+        new google_breakpad::ExceptionHandler(
+            dir, 0, &MinidumpCallback, 0, true,
+            kFullDumpType, 0, 0);
+    } else {
+        new google_breakpad::ExceptionHandler(
+            dir, 0, &MinidumpCallback, 0, true);
+    }
   }
 }
 
@@ -215,13 +222,13 @@ ATOM TestShell::RegisterWindowClass() {
   return RegisterClassEx(&wcex);
 }
 
-void TestShell::DumpAllBackForwardLists(std::wstring* result) {
+void TestShell::DumpAllBackForwardLists(string16* result) {
   result->clear();
   for (WindowList::iterator iter = TestShell::windowList()->begin();
      iter != TestShell::windowList()->end(); iter++) {
     HWND hwnd = *iter;
     TestShell* shell =
-        static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
+        static_cast<TestShell*>(ui::GetWindowUserData(hwnd));
     shell->DumpBackForwardList(result);
   }
 }
@@ -237,7 +244,7 @@ bool TestShell::RunFileTest(const TestParams& params) {
 
   HWND hwnd = *(TestShell::windowList()->begin());
   TestShell* shell =
-      static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
+      static_cast<TestShell*>(ui::GetWindowUserData(hwnd));
 
   // Clear focus between tests.
   shell->m_focusedWidgetHost = NULL;
@@ -254,7 +261,7 @@ bool TestShell::RunFileTest(const TestParams& params) {
   // ResetTestController may have closed the window we were holding on to.
   // Grab the first window again.
   hwnd = *(TestShell::windowList()->begin());
-  shell = static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
+  shell = static_cast<TestShell*>(ui::GetWindowUserData(hwnd));
   DCHECK(shell);
 
   // Whether DevTools should be open before loading the page.
@@ -327,8 +334,8 @@ std::string TestShell::RewriteLocalUrl(const std::string& url) {
 void TestShell::PlatformCleanUp() {
   // When the window is destroyed, tell the Edit field to forget about us,
   // otherwise we will crash.
-  win_util::SetWindowProc(m_editWnd, default_edit_wnd_proc_);
-  win_util::SetWindowUserData(m_editWnd, NULL);
+  ui::SetWindowProc(m_editWnd, default_edit_wnd_proc_);
+  ui::SetWindowUserData(m_editWnd, NULL);
 }
 
 void TestShell::EnableUIControl(UIControl control, bool is_enabled) {
@@ -356,7 +363,7 @@ bool TestShell::Initialize(const GURL& starting_url) {
                            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                            CW_USEDEFAULT, 0, CW_USEDEFAULT, 0,
                            NULL, NULL, instance_handle_, NULL);
-  win_util::SetWindowUserData(m_mainWnd, this);
+  ui::SetWindowUserData(m_mainWnd, this);
 
   HWND hwnd;
   int x = 0;
@@ -391,9 +398,8 @@ bool TestShell::Initialize(const GURL& starting_url) {
                            ES_AUTOVSCROLL | ES_AUTOHSCROLL,
                            x, 0, 0, 0, m_mainWnd, 0, instance_handle_, 0);
 
-  default_edit_wnd_proc_ =
-      win_util::SetWindowProc(m_editWnd, TestShell::EditWndProc);
-  win_util::SetWindowUserData(m_editWnd, this);
+  default_edit_wnd_proc_ = ui::SetWindowProc(m_editWnd, TestShell::EditWndProc);
+  ui::SetWindowUserData(m_editWnd, this);
 
   dev_tools_agent_.reset(new TestShellDevToolsAgent());
 
@@ -429,7 +435,7 @@ void TestShell::TestFinished() {
   if (dump_when_finished_) {
     HWND hwnd = *(TestShell::windowList()->begin());
     TestShell* shell =
-        static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
+        static_cast<TestShell*>(ui::GetWindowUserData(hwnd));
     TestShell::Dump(shell);
   }
 
@@ -566,7 +572,7 @@ void TestShell::LoadURLForFrame(const GURL& url,
 
 LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
                                     LPARAM lParam) {
-  TestShell* shell = static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
+  TestShell* shell = static_cast<TestShell*>(ui::GetWindowUserData(hwnd));
 
   switch (message) {
   case WM_COMMAND:
@@ -664,7 +670,7 @@ LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
 LRESULT CALLBACK TestShell::EditWndProc(HWND hwnd, UINT message,
                                         WPARAM wParam, LPARAM lParam) {
   TestShell* shell =
-      static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
+      static_cast<TestShell*>(ui::GetWindowUserData(hwnd));
 
   switch (message) {
     case WM_CHAR:
@@ -728,7 +734,7 @@ void TestShell::ShowStartupDebuggingDialog() {
 }
 
 // static
-base::StringPiece TestShell::NetResourceProvider(int key) {
+base::StringPiece TestShell::ResourceProvider(int key) {
   return GetRawDataResource(::GetModuleHandle(NULL), key);
 }
 
@@ -795,7 +801,7 @@ base::StringPiece GetDataResource(int resource_id) {
   case IDR_INPUT_SPEECH:
   case IDR_INPUT_SPEECH_RECORDING:
   case IDR_INPUT_SPEECH_WAITING:
-    return NetResourceProvider(resource_id);
+    return TestShell::ResourceProvider(resource_id);
 
   default:
     break;

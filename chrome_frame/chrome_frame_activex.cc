@@ -37,7 +37,7 @@ class TopLevelWindowMapping {
  public:
   typedef std::vector<HWND> WindowList;
 
-  static TopLevelWindowMapping* instance() {
+  static TopLevelWindowMapping* GetInstance() {
     return Singleton<TopLevelWindowMapping>::get();
   }
 
@@ -83,7 +83,7 @@ LRESULT CALLBACK TopWindowProc(int code, WPARAM wparam, LPARAM lparam) {
     case WM_MOVE:
     case WM_MOVING: {
       TopLevelWindowMapping::WindowList cf_instances =
-          TopLevelWindowMapping::instance()->GetInstances(message_hwnd);
+          TopLevelWindowMapping::GetInstance()->GetInstances(message_hwnd);
       TopLevelWindowMapping::WindowList::iterator
           iter(cf_instances.begin()), end(cf_instances.end());
       for (;iter != end; ++iter) {
@@ -182,14 +182,14 @@ HRESULT ChromeFrameActivex::GetDocumentWindow(IHTMLWindow2** window) {
   return hr;
 }
 
-void ChromeFrameActivex::OnLoad(int tab_handle, const GURL& gurl) {
+void ChromeFrameActivex::OnLoad(const GURL& gurl) {
   ScopedComPtr<IDispatch> event;
   std::string url = gurl.spec();
   if (SUCCEEDED(CreateDomEvent("event", url, "", event.Receive())))
     Fire_onload(event);
 
   FireEvent(onload_, url);
-  Base::OnLoad(tab_handle, gurl);
+  Base::OnLoad(gurl);
 }
 
 void ChromeFrameActivex::OnLoadFailed(int error_code, const std::string& url) {
@@ -201,8 +201,7 @@ void ChromeFrameActivex::OnLoadFailed(int error_code, const std::string& url) {
   Base::OnLoadFailed(error_code, url);
 }
 
-void ChromeFrameActivex::OnMessageFromChromeFrame(int tab_handle,
-                                                  const std::string& message,
+void ChromeFrameActivex::OnMessageFromChromeFrame(const std::string& message,
                                                   const std::string& origin,
                                                   const std::string& target) {
   DVLOG(1) << __FUNCTION__;
@@ -210,7 +209,7 @@ void ChromeFrameActivex::OnMessageFromChromeFrame(int tab_handle,
   if (target.compare("*") != 0) {
     bool drop = true;
 
-    if (is_privileged_) {
+    if (is_privileged()) {
       // Forward messages if the control is in privileged mode.
       ScopedComPtr<IDispatch> message_event;
       if (SUCCEEDED(CreateDomEvent("message", message, origin,
@@ -272,7 +271,7 @@ void ChromeFrameActivex::OnAutomationServerLaunchFailed(
   Base::OnAutomationServerLaunchFailed(reason, server_version);
 
   if (reason == AUTOMATION_VERSION_MISMATCH &&
-      ShouldShowVersionMismatchDialog(is_privileged_, m_spClientSite)) {
+      ShouldShowVersionMismatchDialog(is_privileged(), m_spClientSite)) {
     THREAD_SAFE_UMA_HISTOGRAM_COUNTS(
         "ChromeFrame.VersionMismatchDisplayed", 1);
     DisplayVersionMismatchWarning(m_hWnd, server_version);
@@ -427,7 +426,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
       handlers[i]->clear();
 
     // Drop privileged mode on uninitialization.
-    is_privileged_ = false;
+    set_is_privileged(false);
   } else {
     ScopedComPtr<IHTMLDocument2> document;
     GetContainingDocument(document.Receive());
@@ -448,13 +447,13 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
       service_hr = service->GetWantsPrivileged(&wants_privileged);
 
       if (SUCCEEDED(service_hr) && wants_privileged)
-        is_privileged_ = true;
+        set_is_privileged(true);
 
-      url_fetcher_->set_privileged_mode(is_privileged_);
+      url_fetcher_->set_privileged_mode(is_privileged());
     }
 
     std::wstring profile_name(GetHostProcessName(false));
-    if (is_privileged_) {
+    if (is_privileged()) {
 
       base::win::ScopedBstr automated_functions_arg;
       service_hr = service->GetExtensionApisToAutomate(
@@ -491,7 +490,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
     chrome_extra_arguments.append(
         ASCIIToWide(switches::kEnableExperimentalExtensionApis));
 
-    url_fetcher_->set_frame_busting(!is_privileged_);
+    url_fetcher_->set_frame_busting(!is_privileged());
     automation_client_->SetUrlFetcher(url_fetcher_.get());
     if (!InitializeAutomation(profile_name, chrome_extra_arguments,
                               IsIEInPrivate(), true, GURL(utf8_url),
@@ -646,7 +645,7 @@ HRESULT ChromeFrameActivex::InstallTopLevelHook(IOleClientSite* client_site) {
   HWND top_window = ::GetAncestor(parent_wnd, GA_ROOT);
   chrome_wndproc_hook_ = InstallLocalWindowHook(top_window);
   if (chrome_wndproc_hook_)
-    TopLevelWindowMapping::instance()->AddMapping(top_window, m_hWnd);
+    TopLevelWindowMapping::GetInstance()->AddMapping(top_window, m_hWnd);
 
   return chrome_wndproc_hook_ ? S_OK : E_FAIL;
 }
@@ -680,6 +679,14 @@ HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
   if (FAILED(hr)) {
     NOTREACHED() << "Failed to register ChromeFrame BHO. Error:"
                  << base::StringPrintf(" 0x%08X", hr);
+    return hr;
+  }
+
+  hr = UrlMkSetSessionOption(URLMON_OPTION_USERAGENT_REFRESH, NULL, 0, 0);
+  if (FAILED(hr)) {
+    DLOG(ERROR) << "Failed to refresh user agent string from registry. "
+                << "UrlMkSetSessionOption returned "
+                << base::StringPrintf("0x%08x", hr);
     return hr;
   }
 

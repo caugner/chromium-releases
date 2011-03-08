@@ -8,19 +8,23 @@
 
 #include <gtk/gtk.h>
 
-#include "app/active_window_watcher_x.h"
-#include "app/gtk_signal.h"
 #include "base/message_loop.h"
 #include "gfx/size.h"
+#include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/x/active_window_watcher_x.h"
 #include "views/focus/focus_manager.h"
 #include "views/widget/widget.h"
-
-class OSExchangeData;
-class OSExchangeDataProviderGtk;
 
 namespace gfx {
 class Rect;
 }
+
+namespace ui {
+class OSExchangeData;
+class OSExchangeDataProviderGtk;
+}
+using ui::OSExchangeData;
+using ui::OSExchangeDataProviderGtk;
 
 namespace views {
 
@@ -35,7 +39,7 @@ class WindowGtk;
 class WidgetGtk
     : public Widget,
       public FocusTraversable,
-      public ActiveWindowWatcherX::Observer {
+      public ui::ActiveWindowWatcherX::Observer {
  public:
   // Type of widget.
   enum Type {
@@ -154,7 +158,7 @@ class WidgetGtk
   // size of other kinds of widgets.
   void GetRequestedSize(gfx::Size* out) const;
 
-  // Overriden from ActiveWindowWatcherX::Observer.
+  // Overriden from ui::ActiveWindowWatcherX::Observer.
   virtual void ActiveWindowChanged(GdkWindow* active_window);
 
   // Overridden from Widget:
@@ -183,7 +187,7 @@ class WidgetGtk
   virtual void GenerateMousePressedForView(View* view,
                                            const gfx::Point& point);
   virtual TooltipManager* GetTooltipManager();
-  virtual bool GetAccelerator(int cmd_id, menus::Accelerator* accelerator);
+  virtual bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator);
   virtual Window* GetWindow();
   virtual const Window* GetWindow() const;
   virtual void SetNativeWindowProperty(const char* name, void* value);

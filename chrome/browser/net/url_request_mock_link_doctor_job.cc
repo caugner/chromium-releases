@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,20 +21,22 @@ FilePath GetMockFilePath() {
 
 }  // namespace
 
-/* static */
-URLRequestJob* URLRequestMockLinkDoctorJob::Factory(URLRequest* request,
-                                                    const std::string& scheme) {
+// static
+net::URLRequestJob* URLRequestMockLinkDoctorJob::Factory(
+    net::URLRequest* request,
+    const std::string& scheme) {
   return new URLRequestMockLinkDoctorJob(request);
 }
 
-/* static */
+// static
 void URLRequestMockLinkDoctorJob::AddUrlHandler() {
-  URLRequestFilter* filter = URLRequestFilter::GetInstance();
+  net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
   filter->AddHostnameHandler("http",
                              GURL(google_util::kLinkDoctorBaseURL).host(),
                              URLRequestMockLinkDoctorJob::Factory);
 }
 
-URLRequestMockLinkDoctorJob::URLRequestMockLinkDoctorJob(URLRequest* request)
+URLRequestMockLinkDoctorJob::URLRequestMockLinkDoctorJob(
+    net::URLRequest* request)
     : URLRequestMockHTTPJob(request, GetMockFilePath()) {
 }

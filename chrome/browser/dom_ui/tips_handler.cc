@@ -4,19 +4,19 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
 #include "base/callback.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_ui/tips_handler.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_resource/web_resource_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 DOMMessageHandler* TipsHandler::Attach(DOMUI* dom_ui) {
   dom_ui_ = dom_ui;

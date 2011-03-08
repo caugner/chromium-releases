@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "remoting/jingle_glue/jingle_client.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -57,7 +57,7 @@ TEST_F(JingleClientTest, OnStateChanged) {
 
   base::WaitableEvent state_changed_event(true, false);
   thread_.message_loop()->PostTask(FROM_HERE, NewRunnableFunction(
-      &JingleClientTest::ChangeState, client_.get(),
+      &JingleClientTest::ChangeState, client_,
       buzz::XmppEngine::STATE_OPENING, &state_changed_event));
   state_changed_event.Wait();
 
@@ -73,7 +73,7 @@ TEST_F(JingleClientTest, Close) {
   client_->Close();
   // Verify that the channel doesn't call callback anymore.
   thread_.message_loop()->PostTask(FROM_HERE, NewRunnableFunction(
-      &JingleClientTest::ChangeState, client_.get(),
+      &JingleClientTest::ChangeState, client_,
       buzz::XmppEngine::STATE_OPENING,
       static_cast<base::WaitableEvent*>(NULL)));
   thread_.Stop();

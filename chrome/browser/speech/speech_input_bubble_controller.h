@@ -115,7 +115,7 @@ class SpeechInputBubbleController
   // Only accessed in the IO thread.
   Delegate* delegate_;
 
-  // *** The following are accessed only in the UI thread.
+  //*** The following are accessed only in the UI thread.
 
   // The caller id for currently visible bubble (since only one bubble is
   // visible at any time).

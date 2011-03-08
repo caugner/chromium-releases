@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,11 @@
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/location_bar.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
@@ -109,7 +108,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, MAYBE_Basic) {
     match = result.match_at(1);
     ASSERT_TRUE(match.template_url);
     EXPECT_TRUE(match.template_url->IsExtensionKeyword());
-    EXPECT_EQ(L"keyword", match.template_url->keyword());
+    EXPECT_EQ(ASCIIToUTF16("keyword"), match.template_url->keyword());
   }
 
   // Test that our extension can send suggestions back to us.

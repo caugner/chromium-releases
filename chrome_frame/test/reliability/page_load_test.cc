@@ -36,6 +36,7 @@
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
@@ -45,14 +46,14 @@
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
-#include "chrome_frame/test/chrome_frame_test_utils.h"
-#include "chrome_frame/test/ie_event_sink.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
-#include "chrome/test/ui/ui_test.h"
 #include "chrome/test/reliability/page_load_test.h"
+#include "chrome/test/ui/ui_test.h"
+#include "chrome_frame/test/chrome_frame_test_utils.h"
+#include "chrome_frame/test/ie_event_sink.h"
 #include "chrome_frame/utils.h"
 #include "net/base/net_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -157,7 +158,8 @@ class PageLoadTest : public testing::Test {
     // Check file version info for chrome dll.
     scoped_ptr<FileVersionInfo> file_info;
 #if defined(OS_WIN)
-    file_info.reset(FileVersionInfo::CreateFileVersionInfo(kChromeDll));
+    file_info.reset(
+        FileVersionInfo::CreateFileVersionInfo(FilePath(kChromeDll)));
 #elif defined(OS_LINUX) || defined(OS_MACOSX)
     // TODO(fmeawad): the version retrieved here belongs to the test module and
     // not the chrome binary, need to be changed to chrome binary instead.
@@ -426,12 +428,9 @@ class PageLoadTest : public testing::Test {
   // that was saved by the app as it closed.  The caller takes ownership of the
   // returned PrefService object.
   PrefService* GetLocalState() {
-    FilePath local_state_path;
-    chrome::GetChromeFrameUserDataDirectory(&local_state_path);
-
-    PrefService* local_state = PrefService::CreateUserPrefService(
-        local_state_path);
-    return local_state;
+    FilePath path;
+    chrome::GetChromeFrameUserDataDirectory(&path);
+    return PrefServiceMockBuilder().WithUserFilePrefs(path).Create();
   }
 
   void GetStabilityMetrics(NavigationMetrics* metrics) {

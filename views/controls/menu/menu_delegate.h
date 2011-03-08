@@ -9,12 +9,14 @@
 #include <set>
 #include <string>
 
-#include "app/drag_drop_types.h"
-#include "app/os_exchange_data.h"
 #include "base/logging.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/dragdrop/os_exchange_data.h"
 #include "views/controls/menu/controller.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/event.h"
+
+using ui::OSExchangeData;
 
 namespace views {
 
@@ -25,7 +27,7 @@ class MenuButton;
 
 // Delegate for a menu. This class is used as part of MenuItemView, see it
 // for details.
-// TODO(sky): merge this with menus::MenuModel.
+// TODO(sky): merge this with ui::MenuModel.
 class MenuDelegate : Controller {
  public:
   // Used during drag and drop to indicate where the drop indicator should
@@ -149,24 +151,24 @@ class MenuDelegate : Controller {
   // is set based on the location of the mouse, reset to specify a different
   // position.
   //
-  // If a drop should not be allowed, returned DragDropTypes::DRAG_NONE.
+  // If a drop should not be allowed, returned ui::DragDropTypes::DRAG_NONE.
   virtual int GetDropOperation(MenuItemView* item,
                                const DropTargetEvent& event,
                                DropPosition* position) {
     NOTREACHED() << "If you override CanDrop, you need to override this too";
-    return DragDropTypes::DRAG_NONE;
+    return ui::DragDropTypes::DRAG_NONE;
   }
 
   // Invoked to perform the drop operation. This is ONLY invoked if
   // canDrop returned true for the parent menu item, and GetDropOperation
-  // returned an operation other than DragDropTypes::DRAG_NONE.
+  // returned an operation other than ui::DragDropTypes::DRAG_NONE.
   //
   // menu indicates the menu the drop occurred on.
   virtual int OnPerformDrop(MenuItemView* menu,
                             DropPosition position,
                             const DropTargetEvent& event) {
     NOTREACHED() << "If you override CanDrop, you need to override this too";
-    return DragDropTypes::DRAG_NONE;
+    return ui::DragDropTypes::DRAG_NONE;
   }
 
   // Invoked to determine if it is possible for the user to drag the specified

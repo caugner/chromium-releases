@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include "base/path_service.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
-#include "chrome/browser/guid.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/policy/proto/device_management_local.pb.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/guid.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
@@ -57,6 +57,32 @@ namespace policy {
 
 namespace em = enterprise_management;
 
+DeviceTokenFetcher::ObserverRegistrar::ObserverRegistrar() {}
+
+DeviceTokenFetcher::ObserverRegistrar::~ObserverRegistrar() {
+  RemoveAll();
+}
+
+void DeviceTokenFetcher::ObserverRegistrar::Init(
+    DeviceTokenFetcher* token_fetcher) {
+  RemoveAll();
+  token_fetcher_ = token_fetcher;
+}
+
+void DeviceTokenFetcher::ObserverRegistrar::AddObserver(
+    DeviceTokenFetcher::Observer* observer) {
+  observers_.push_back(observer);
+  token_fetcher_->AddObserver(observer);
+}
+
+void DeviceTokenFetcher::ObserverRegistrar::RemoveAll() {
+  for (std::vector<DeviceTokenFetcher::Observer*>::iterator it =
+           observers_.begin(); it != observers_.end(); ++it) {
+    token_fetcher_->RemoveObserver(*it);
+  }
+  observers_.clear();
+}
+
 DeviceTokenFetcher::DeviceTokenFetcher(
     DeviceManagementBackend* backend,
     Profile* profile,
@@ -87,6 +113,8 @@ DeviceTokenFetcher::DeviceTokenFetcher(
                  Source<Profile>(profile_));
 #endif
 }
+
+DeviceTokenFetcher::~DeviceTokenFetcher() {}
 
 void DeviceTokenFetcher::Observe(NotificationType type,
                                  const NotificationSource& source,
@@ -165,7 +193,11 @@ void DeviceTokenFetcher::OnError(DeviceManagementBackend::ErrorCode code) {
 }
 
 void DeviceTokenFetcher::Restart() {
-  DCHECK(!IsTokenPending());
+  // Complain if there's currently an asynchronous operation going on.
+  DCHECK(state_ == kStateNotStarted ||
+         state_ == kStateHasDeviceToken ||
+         state_ == kStateFailure ||
+         state_ == kStateNotManaged);
   device_token_.clear();
   device_token_load_complete_event_.Reset();
   MakeReadyToRequestDeviceToken();
@@ -183,11 +215,6 @@ void DeviceTokenFetcher::StartFetching() {
         NewRunnableMethod(this,
                           &DeviceTokenFetcher::AttemptTokenLoadFromDisk));
   }
-}
-
-void DeviceTokenFetcher::Shutdown() {
-  profile_ = NULL;
-  backend_ = NULL;
 }
 
 void DeviceTokenFetcher::AttemptTokenLoadFromDisk() {

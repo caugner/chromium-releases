@@ -4,10 +4,11 @@
 
 #include "chrome/browser/chromeos/options/settings_page_view.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "gfx/skia_utils_gtk.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/label.h"
 #include "views/fill_layout.h"
 #include "views/widget/widget_gtk.h"
@@ -66,7 +67,7 @@ void SettingsPageSection::InitControlLayout() {
 
   layout->StartRow(0, single_column_layout_id);
   views::Label* title_label = new views::Label(
-      l10n_util::GetString(title_msg_id_));
+      UTF16ToWide(l10n_util::GetStringUTF16(title_msg_id_)));
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   gfx::Font title_font =
       rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD);

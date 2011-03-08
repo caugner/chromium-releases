@@ -63,6 +63,7 @@ HttpStreamRequest::HttpStreamRequest(
       force_spdy_always_(HttpStreamFactory::force_spdy_always()),
       force_spdy_over_ssl_(HttpStreamFactory::force_spdy_over_ssl()),
       spdy_certificate_error_(OK),
+      alternate_protocol_(HttpAlternateProtocols::UNINITIALIZED),
       establishing_tunnel_(false),
       was_alternate_protocol_available_(false),
       was_npn_negotiated_(false),
@@ -147,6 +148,18 @@ LoadState HttpStreamRequest::GetLoadState() const {
   }
 }
 
+bool HttpStreamRequest::was_alternate_protocol_available() const {
+  return was_alternate_protocol_available_;
+}
+
+bool HttpStreamRequest::was_npn_negotiated() const {
+  return was_npn_negotiated_;
+}
+
+bool HttpStreamRequest::using_spdy() const {
+  return using_spdy_;
+}
+
 void HttpStreamRequest::GetSSLInfo() {
   DCHECK(using_ssl_);
   DCHECK(!establishing_tunnel_);
@@ -191,6 +204,12 @@ void HttpStreamRequest::OnNeedsProxyAuthCallback(
 void HttpStreamRequest::OnNeedsClientAuthCallback(
     SSLCertRequestInfo* cert_info) {
   delegate_->OnNeedsClientAuth(cert_info);
+}
+
+void HttpStreamRequest::OnHttpsProxyTunnelResponseCallback(
+    const HttpResponseInfo& response_info,
+    HttpStream* stream) {
+  delegate_->OnHttpsProxyTunnelResponse(response_info, stream);
 }
 
 void HttpStreamRequest::OnPreconnectsComplete(int result) {
@@ -240,7 +259,7 @@ int HttpStreamRequest::RunLoop(int result) {
         HttpProxyClientSocket* http_proxy_socket =
             static_cast<HttpProxyClientSocket*>(connection_->socket());
         const HttpResponseInfo* tunnel_auth_response =
-            http_proxy_socket->GetResponseInfo();
+            http_proxy_socket->GetConnectResponseInfo();
 
         next_state_ = STATE_WAITING_USER_ACTION;
         MessageLoop::current()->PostTask(
@@ -259,6 +278,23 @@ int HttpStreamRequest::RunLoop(int result) {
               &HttpStreamRequest::OnNeedsClientAuthCallback,
               connection_->ssl_error_response_info().cert_request_info));
       return ERR_IO_PENDING;
+
+    case ERR_HTTPS_PROXY_TUNNEL_RESPONSE:
+      {
+        DCHECK(connection_.get());
+        DCHECK(connection_->socket());
+        DCHECK(establishing_tunnel_);
+
+        ProxyClientSocket* proxy_socket =
+            static_cast<ProxyClientSocket*>(connection_->socket());
+        MessageLoop::current()->PostTask(
+            FROM_HERE,
+            method_factory_.NewRunnableMethod(
+                &HttpStreamRequest::OnHttpsProxyTunnelResponseCallback,
+                *proxy_socket->GetConnectResponseInfo(),
+                proxy_socket->CreateConnectResponseStream()));
+        return ERR_IO_PENDING;
+      }
 
     case OK:
       next_state_ = STATE_DONE;
@@ -415,6 +451,29 @@ int HttpStreamRequest::DoResolveProxyComplete(int result) {
   return OK;
 }
 
+bool HasSpdyExclusion(const HostPortPair& endpoint) {
+  std::list<HostPortPair>* exclusions =
+      HttpStreamFactory::forced_spdy_exclusions();
+  if (!exclusions)
+    return false;
+
+  std::list<HostPortPair>::const_iterator it;
+  for (it = exclusions->begin(); it != exclusions->end(); it++)
+    if (it->Equals(endpoint))
+      return true;
+  return false;
+}
+
+bool HttpStreamRequest::ShouldForceSpdySSL() {
+  bool rv = force_spdy_always_ && force_spdy_over_ssl_;
+  return rv && !HasSpdyExclusion(endpoint_);
+}
+
+bool HttpStreamRequest::ShouldForceSpdyWithoutSSL() {
+   bool rv = force_spdy_always_ && !force_spdy_over_ssl_;
+  return rv && !HasSpdyExclusion(endpoint_);
+}
+
 int HttpStreamRequest::DoInitConnection() {
   DCHECK(!connection_->is_initialized());
   DCHECK(proxy_info()->proxy_server().is_valid());
@@ -424,8 +483,7 @@ int HttpStreamRequest::DoInitConnection() {
       alternate_protocol_mode_ == kUsingAlternateProtocol &&
       alternate_protocol_ == HttpAlternateProtocols::NPN_SPDY_2;
   using_ssl_ = request_info().url.SchemeIs("https") ||
-      (force_spdy_always_ && force_spdy_over_ssl_) ||
-      want_spdy_over_npn;
+      ShouldForceSpdySSL() || want_spdy_over_npn;
   using_spdy_ = false;
 
   // If spdy has been turned off on-the-fly, then there may be SpdySessions
@@ -633,7 +691,7 @@ int HttpStreamRequest::DoInitConnectionComplete(int result) {
       if (ssl_socket->was_spdy_negotiated())
         SwitchToSpdyMode();
     }
-    if (force_spdy_over_ssl_ && force_spdy_always_)
+    if (ShouldForceSpdySSL())
       SwitchToSpdyMode();
   } else if (proxy_info()->is_https() && connection_->socket() &&
         result == OK) {
@@ -646,16 +704,18 @@ int HttpStreamRequest::DoInitConnectionComplete(int result) {
   }
 
   // We may be using spdy without SSL
-  if (!force_spdy_over_ssl_ && force_spdy_always_)
+  if (ShouldForceSpdyWithoutSSL())
     SwitchToSpdyMode();
 
-  if (result == ERR_PROXY_AUTH_REQUESTED) {
+  if (result == ERR_PROXY_AUTH_REQUESTED ||
+      result == ERR_HTTPS_PROXY_TUNNEL_RESPONSE) {
     DCHECK(!ssl_started);
     // Other state (i.e. |using_ssl_|) suggests that |connection_| will have an
     // SSL socket, but there was an error before that could happen.  This
     // puts the in progress HttpProxy socket into |connection_| in order to
-    // complete the auth.  The tunnel restart code is careful to remove it
-    // before returning control to the rest of this class.
+    // complete the auth (or read the response body).  The tunnel restart code
+    // is careful to remove it before returning control to the rest of this
+    // class.
     connection_.reset(connection_->release_pending_http_proxy_connection());
     return result;
   }
@@ -731,7 +791,8 @@ int HttpStreamRequest::DoCreateStream() {
   if (!using_spdy_) {
     bool using_proxy = (proxy_info()->is_http() || proxy_info()->is_https()) &&
         request_info().url.SchemeIs("http");
-    stream_.reset(new HttpBasicStream(connection_.release(), using_proxy));
+    stream_.reset(new HttpBasicStream(connection_.release(), NULL,
+                                      using_proxy));
     return OK;
   }
 
@@ -779,8 +840,8 @@ int HttpStreamRequest::DoCreateStream() {
   if (spdy_session->IsClosed())
     return ERR_CONNECTION_CLOSED;
 
-  bool useRelativeUrl = direct || request_info().url.SchemeIs("https");
-  stream_.reset(new SpdyHttpStream(spdy_session, useRelativeUrl));
+  bool use_relative_url = direct || request_info().url.SchemeIs("https");
+  stream_.reset(new SpdyHttpStream(spdy_session, use_relative_url));
   return OK;
 }
 
@@ -856,7 +917,7 @@ scoped_refptr<SSLSocketParams> HttpStreamRequest::GenerateSSLParams(
     // ERR_BAD_SSL_CLIENT_AUTH_CERT).
     // TODO(rch): This assumes that the HTTPS proxy will only request a
     // client certificate during the initial handshake.
-    // http://crbug.com/FIXME
+    // http://crbug.com/59292
     ssl_config()->false_start_enabled = false;
   }
 
@@ -878,7 +939,7 @@ scoped_refptr<SSLSocketParams> HttpStreamRequest::GenerateSSLParams(
       new SSLSocketParams(tcp_params, socks_params, http_proxy_params,
                           proxy_scheme, host_and_port,
                           *ssl_config(), load_flags,
-                          force_spdy_always_ && force_spdy_over_ssl_,
+                          ShouldForceSpdySSL(),
                           want_spdy_over_npn));
 
   return ssl_params;
@@ -948,7 +1009,7 @@ int HttpStreamRequest::ReconsiderProxyAfterError(int error) {
     return error;
   }
 
-  if (proxy_info()->is_https() && ssl_config_->send_client_cert) {
+  if (proxy_info()->is_https() && ssl_config()->send_client_cert) {
     session_->ssl_client_auth_cache()->Remove(
         proxy_info()->proxy_server().host_port_pair().ToString());
   }

@@ -18,7 +18,7 @@ namespace appcache {
 
 // A job subclass that implements a protocol to inspect the internal
 // state of appcache service.
-class ViewAppCacheInternalsJob : public URLRequestSimpleJob {
+class ViewAppCacheInternalsJob : public net::URLRequestSimpleJob {
  public:
   // Stores handle to appcache service for getting information.
   ViewAppCacheInternalsJob(net::URLRequest* request, AppCacheService* service);
@@ -30,7 +30,7 @@ class ViewAppCacheInternalsJob : public URLRequestSimpleJob {
                        std::string* charset,
                        std::string* data) const;
 
-  // Overridden method from URLRequestJob.
+  // Overridden method from net::URLRequestJob.
   virtual bool IsRedirectResponse(GURL* location, int* http_status_code);
 
  private:

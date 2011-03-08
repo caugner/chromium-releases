@@ -1,11 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_PPB_GRAPHICS_2D_H_
 #define PPAPI_C_PPB_GRAPHICS_2D_H_
 
 #include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
@@ -15,7 +16,7 @@ struct PP_Point;
 struct PP_Rect;
 struct PP_Size;
 
-#define PPB_GRAPHICS_2D_INTERFACE "PPB_Graphics2D;0.2"
+#define PPB_GRAPHICS_2D_INTERFACE "PPB_Graphics2D;0.3"
 
 /**
  * @file
@@ -28,10 +29,8 @@ struct PP_Size;
 /** {PENDING: describe PPB_Graphics2D. */
 struct PPB_Graphics2D {
   /**
-   * The returned graphics context will not be bound to any plugin instance on
-   * creation (call BindGraphics on the plugin instance to do that. The
-   * graphics context has a lifetime that can exceed that of the given plugin
-   * instance.
+   * The returned graphics context will not be bound to the plugin instance on
+   * creation (call BindGraphics on the plugin instance to do that).
    *
    * Set the is_always_opaque flag if you know that you will be painting only
    * opaque data to this context. This will disable blending when compositing
@@ -45,7 +44,7 @@ struct PPB_Graphics2D {
    *
    * If you aren't sure, it is always correct to specify that it it not opaque.
    */
-  PP_Resource (*Create)(PP_Module module,
+  PP_Resource (*Create)(PP_Instance instance,
                         const struct PP_Size* size,
                         PP_Bool is_always_opaque);
 
@@ -77,7 +76,7 @@ struct PPB_Graphics2D {
    * The src_rect is specified in the coordinate system of the image being
    * painted, not the context. For the common case of copying the entire image,
    * you may specify a NULL |src_rect| pointer. If you are frequently updating
-   * the entire image, consider using SwapImageData which will give slightly
+   * the entire image, consider using ReplaceContents which will give slightly
    * higher performance.
    *
    * The painted area of the source bitmap must fall entirely within the
@@ -123,9 +122,9 @@ struct PPB_Graphics2D {
    * THE NEW IMAGE WILL NOT BE PAINTED UNTIL YOU CALL FLUSH.
    *
    * After this call, you should take care to release your references to the
-   * image. If you paint to the image after a Swap, there is the possibility of
-   * significant painting artifacts because the page might use partially-
-   * rendered data when copying out of the backing store.
+   * image. If you paint to the image after ReplaceContents, there is the
+   * possibility of significant painting artifacts because the page might use
+   * partially-rendered data when copying out of the backing store.
    *
    * In the case of an animation, you will want to allocate a new image for the
    * next frame. It is best if you wait until the flush callback has executed
@@ -138,7 +137,7 @@ struct PPB_Graphics2D {
   void (*ReplaceContents)(PP_Resource graphics_2d, PP_Resource image_data);
 
   /**
-   * Flushes any enqueued paint, scroll, and swap commands for the backing
+   * Flushes any enqueued paint, scroll, and replace commands for the backing
    * store. This actually executes the updates, and causes a repaint of the
    * webpage, assuming this graphics context is bound to a plugin instance. This
    * can run in two modes:
@@ -210,8 +209,9 @@ struct PPB_Graphics2D {
    * Flush is already pending that has not issued its callback yet.  In the
    * failure case, nothing will be updated and no callback will be scheduled.
    */
-  // TODO(darin): We should ensure that the completion callback always runs, so
-  // that it is easier for consumers to manage memory referenced by a callback.
+  /* TODO(darin): We should ensure that the completion callback always runs, so
+   * that it is easier for consumers to manage memory referenced by a callback.
+   */
   int32_t (*Flush)(PP_Resource graphics_2d,
                    struct PP_CompletionCallback callback);
 
@@ -221,4 +221,5 @@ struct PPB_Graphics2D {
  * @}
  * End addtogroup PPB
  */
-#endif  // PPAPI_C_PPB_GRAPHICS_2D_H_
+#endif  /* PPAPI_C_PPB_GRAPHICS_2D_H_ */
+

@@ -30,6 +30,10 @@
 #define BASE_TUPLE_H__
 #pragma once
 
+#if defined(OS_CHROMEOS)
+// To troubleshoot crosbug.com/7327.
+#include "base/logging.h"
+#endif
 // Traits ----------------------------------------------------------------------
 //
 // A simple traits class for tuple arguments.
@@ -544,13 +548,6 @@ inline void DispatchToMethod(ObjT* obj, Method method, const A& arg) {
 
 template <class ObjT, class Method, class A>
 inline void DispatchToMethod(ObjT* obj, Method method, const Tuple1<A>& arg) {
-
-#if defined(OS_CHROMEOS) && defined(CHECK)
-  // To troubleshoot crosbug.com/7327.
-  CHECK(obj);
-  CHECK(&arg);
-  CHECK(method);
-#endif
   (obj->*method)(arg.a);
 }
 

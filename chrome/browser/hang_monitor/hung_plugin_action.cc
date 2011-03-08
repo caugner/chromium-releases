@@ -6,13 +6,12 @@
 
 #include "chrome/browser/hang_monitor/hung_plugin_action.h"
 
-#include "app/l10n_util.h"
-#include "app/win_util.h"
-#include "base/win_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/common/logging_chrome.h"
 #include "grit/generated_resources.h"
-#include "webkit/glue/plugins/webplugin_delegate_impl.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/win/hwnd_util.h"
+#include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 
 HungPluginAction::HungPluginAction() : current_hung_plugin_window_(NULL) {
 }
@@ -43,18 +42,18 @@ bool HungPluginAction::OnHungWindowDetected(HWND hung_window,
       NOTREACHED() << "Terminated a hung plugin process.";
       *action = HungWindowNotification::HUNG_WINDOW_TERMINATE_PROCESS;
     } else {
-      std::wstring plugin_name;
+      string16 plugin_name;
       GetPluginName(hung_window,
                     top_level_window_process_id,
                     &plugin_name);
       if (plugin_name.empty()) {
-        plugin_name = l10n_util::GetString(IDS_UNKNOWN_PLUGIN_NAME);
+        plugin_name = l10n_util::GetStringUTF16(IDS_UNKNOWN_PLUGIN_NAME);
       }
-      std::wstring msg = l10n_util::GetStringF(IDS_BROWSER_HANGMONITOR,
-                                               plugin_name);
-      std::wstring title = l10n_util::GetString(IDS_BROWSER_HANGMONITOR_TITLE);
-      // Before displaying the message box,invoke SendMessageCallback on the
-      // hung window. If the callback ever hits,the window is not hung anymore
+      string16 msg = l10n_util::GetStringFUTF16(IDS_BROWSER_HANGMONITOR,
+                                                plugin_name);
+      string16 title = l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_TITLE);
+      // Before displaying the message box, invoke SendMessageCallback on the
+      // hung window. If the callback ever hits, the window is not hung anymore
       // and we can dismiss the message box.
       SendMessageCallback(hung_window,
                           WM_NULL,
@@ -122,8 +121,8 @@ bool HungPluginAction::GetPluginName(HWND plugin_window,
       // we have gone too far.
       return false;
     }
-    if (WebPluginDelegateImpl::GetPluginNameFromWindow(window_to_check,
-                                                       plugin_name)) {
+    if (webkit::npapi::WebPluginDelegateImpl::GetPluginNameFromWindow(
+            window_to_check, plugin_name)) {
       return true;
     }
     window_to_check = GetParent(window_to_check);
@@ -133,7 +132,7 @@ bool HungPluginAction::GetPluginName(HWND plugin_window,
 
 // static
 BOOL CALLBACK HungPluginAction::DismissMessageBox(HWND window, LPARAM ignore) {
-  std::wstring class_name = win_util::GetClassNameW(window);
+  string16 class_name = ui::GetClassName(window);
   // #32770 is the dialog window class which is the window class of
   // the message box being displayed.
   if (class_name == L"#32770") {

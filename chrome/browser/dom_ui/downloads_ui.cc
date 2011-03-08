@@ -4,23 +4,23 @@
 
 #include "chrome/browser/dom_ui/downloads_ui.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/dom_ui/downloads_dom_handler.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
@@ -136,9 +136,9 @@ DownloadsUI::DownloadsUI(TabContents* contents) : DOMUI(contents) {
   // Set up the chrome://downloads/ source.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
-          &ChromeURLDataManager::AddDataSource,
-          make_scoped_refptr(html_source)));
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
+                        &ChromeURLDataManager::AddDataSource,
+                        make_scoped_refptr(html_source)));
 }
 
 // static

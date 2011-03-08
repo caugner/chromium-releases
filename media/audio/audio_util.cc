@@ -94,7 +94,7 @@ bool AdjustVolume(void* buf,
                   float volume) {
   DCHECK(buf);
   if (volume < 0.0f || volume > 1.0f)
-      return false;
+    return false;
   if (volume == 1.0f) {
     return true;
   } else if (volume == 0.0f) {
@@ -131,7 +131,7 @@ bool FoldChannels(void* buf,
                   float volume) {
   DCHECK(buf);
   if (volume < 0.0f || volume > 1.0f)
-      return false;
+    return false;
   if (channels > 2 && channels <= 8 && bytes_per_sample > 0) {
     int sample_count = buflen / (channels * bytes_per_sample);
     if (bytes_per_sample == 1) {
@@ -158,6 +158,71 @@ bool FoldChannels(void* buf,
     }
   }
   return false;
+}
+
+bool DeinterleaveAudioChannel(void* source,
+                              float* destination,
+                              int channels,
+                              int channel_index,
+                              int bytes_per_sample,
+                              size_t number_of_frames) {
+  switch (bytes_per_sample) {
+    case 1:
+    {
+      uint8* source8 = static_cast<uint8*>(source) + channel_index;
+      const float kScale = 1.0f / 128.0f;
+      for (unsigned i = 0; i < number_of_frames; ++i) {
+        destination[i] = kScale * static_cast<int>(*source8 + 128);
+        source8 += channels;
+      }
+      return true;
+    }
+
+    case 2:
+    {
+      int16* source16 = static_cast<int16*>(source) + channel_index;
+      const float kScale = 1.0f / 32768.0f;
+      for (unsigned i = 0; i < number_of_frames; ++i) {
+        destination[i] = kScale * *source16;
+        source16 += channels;
+      }
+      return true;
+    }
+
+    case 4:
+    {
+      int32* source32 = static_cast<int32*>(source) + channel_index;
+      const float kScale = 1.0f / (1L << 31);
+      for (unsigned i = 0; i < number_of_frames; ++i) {
+        destination[i] = kScale * *source32;
+        source32 += channels;
+      }
+      return true;
+    }
+
+    default:
+     break;
+  }
+  return false;
+}
+
+void InterleaveFloatToInt16(const std::vector<float*>& source,
+                            int16* destination,
+                            size_t number_of_frames) {
+  const float kScale = 32768.0f;
+  int channels = source.size();
+  for (int i = 0; i < channels; ++i) {
+    float* channel_data = source[i];
+    for (size_t j = 0; j < number_of_frames; ++j) {
+      float sample = kScale * channel_data[j];
+      if (sample < -32768.0)
+        sample = -32768.0;
+      else if (sample > 32767.0)
+        sample = 32767.0;
+
+      destination[j * channels + i] = static_cast<int16>(sample);
+    }
+  }
 }
 
 }  // namespace media

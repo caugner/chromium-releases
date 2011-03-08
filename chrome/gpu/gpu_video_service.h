@@ -14,13 +14,14 @@
 
 class GpuChannel;
 
-class GpuVideoService : public IPC::Channel::Listener,
-                        public Singleton<GpuVideoService> {
+class GpuVideoService : public IPC::Channel::Listener {
  public:
+  static GpuVideoService* GetInstance();
+
   // IPC::Channel::Listener.
   virtual void OnChannelConnected(int32 peer_pid);
   virtual void OnChannelError();
-  virtual void OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message);
 
   // TODO(hclam): Remove return value.
   bool CreateVideoDecoder(GpuChannel* channel,

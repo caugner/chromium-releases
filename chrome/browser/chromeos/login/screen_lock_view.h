@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SCREEN_LOCK_VIEW_H_
 #pragma once
 
+#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/user_view.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -27,13 +28,13 @@ class ScreenLockerTester;
 
 // ScreenLockView creates view components necessary to authenticate
 // a user to unlock the screen.
-class ScreenLockView : public views::View,
+class ScreenLockView : public ThrobberHostView,
                        public views::Textfield::Controller,
                        public NotificationObserver,
                        public UserView::Delegate {
  public:
   explicit ScreenLockView(ScreenLocker* screen_locker);
-  virtual ~ScreenLockView() {}
+  virtual ~ScreenLockView();
 
   void Init();
 
@@ -59,11 +60,12 @@ class ScreenLockView : public views::View,
   // views::Textfield::Controller implementation:
   virtual void ContentsChanged(views::Textfield* sender,
                                const string16& new_contents) {}
-  virtual bool HandleKeystroke(views::Textfield* sender,
-                               const views::Textfield::Keystroke& keystroke);
+  virtual bool HandleKeyEvent(views::Textfield* sender,
+                              const views::KeyEvent& keystroke);
 
   // UserView::Delegate implementation:
   virtual void OnSignout();
+  virtual bool IsUserSelected() const { return true; }
 
  protected:
   // views::View implementation:

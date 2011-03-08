@@ -1,30 +1,27 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/tab_contents/tab_contents_view_gtk.h"
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_gtk.h"
 
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/gtk/constrained_window_gtk.h"
-#include "chrome/browser/gtk/tab_contents_drag_source.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_factory.h"
-#if defined(TOUCH_UI)
-#include "chrome/browser/renderer_host/render_widget_host_view_views.h"
-#else
 #include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
-#endif
 #include "chrome/browser/tab_contents/interstitial_page.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/web_drag_dest_gtk.h"
-#include "chrome/browser/views/sad_tab_view.h"
-#include "chrome/browser/views/tab_contents/render_view_context_menu_views.h"
+#include "chrome/browser/ui/gtk/constrained_window_gtk.h"
+#include "chrome/browser/ui/gtk/tab_contents_drag_source.h"
+#include "chrome/browser/ui/views/sad_tab_view.h"
+#include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
 #include "gfx/canvas_skia_paint.h"
 #include "gfx/point.h"
 #include "gfx/rect.h"
@@ -110,7 +107,7 @@ TabContentsViewGtk::TabContentsViewGtk(TabContents* tab_contents)
       ignore_next_char_event_(false) {
   drag_source_.reset(new TabContentsDragSource(this));
   last_focused_view_storage_id_ =
-      views::ViewStorage::GetSharedInstance()->CreateStorageID();
+      views::ViewStorage::GetInstance()->CreateStorageID();
 }
 
 TabContentsViewGtk::~TabContentsViewGtk() {
@@ -118,7 +115,7 @@ TabContentsViewGtk::~TabContentsViewGtk() {
   //
   // It is possible the view went away before us, so we only do this if the
   // view is registered.
-  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
   if (view_storage->RetrieveView(last_focused_view_storage_id_) != NULL)
     view_storage->RemoveView(last_focused_view_storage_id_);
 
@@ -178,30 +175,6 @@ RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
     sad_tab_ = NULL;
   }
 
-#if defined(TOUCH_UI)
-  RenderWidgetHostViewViews* view =
-      new RenderWidgetHostViewViews(render_widget_host);
-  SetContentsView(view);
-  view->Show();
-  view->InitAsChild();
-
-  g_signal_connect(view->native_view(), "focus",
-                   G_CALLBACK(OnFocus), tab_contents());
-  g_signal_connect(view->native_view(), "leave-notify-event",
-                   G_CALLBACK(OnLeaveNotify2), tab_contents());
-  g_signal_connect(view->native_view(), "motion-notify-event",
-                   G_CALLBACK(CallMouseMove), this);
-  g_signal_connect(view->native_view(), "scroll-event",
-                   G_CALLBACK(OnMouseScroll), tab_contents());
-  gtk_widget_add_events(view->native_view(), GDK_LEAVE_NOTIFY_MASK |
-                        GDK_POINTER_MOTION_MASK);
-
-  // Renderer target DnD.
-  if (tab_contents()->ShouldAcceptDragAndDrop())
-    drag_dest_.reset(new WebDragDestGtk(tab_contents(), view->native_view()));
-
-  return view;
-#else
   RenderWidgetHostViewGtk* view =
       new RenderWidgetHostViewGtk(render_widget_host);
   view->InitAsChild();
@@ -222,7 +195,6 @@ RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
 
   gtk_fixed_put(GTK_FIXED(GetNativeView()), view->native_view(), 0, 0);
   return view;
-#endif
 }
 
 gfx::NativeView TabContentsViewGtk::GetNativeView() const {
@@ -267,7 +239,8 @@ void TabContentsViewGtk::SetPageTitle(const std::wstring& title) {
     gdk_window_set_title(content_view->window, WideToUTF8(title).c_str());
 }
 
-void TabContentsViewGtk::OnTabCrashed() {
+void TabContentsViewGtk::OnTabCrashed(base::TerminationStatus /* status */,
+                                      int /* error_code */) {
 }
 
 void TabContentsViewGtk::SizeContents(const gfx::Size& size) {
@@ -306,7 +279,7 @@ void TabContentsViewGtk::SetInitialFocus() {
 }
 
 void TabContentsViewGtk::StoreFocus() {
-  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
 
   if (view_storage->RetrieveView(last_focused_view_storage_id_) != NULL)
     view_storage->RemoveView(last_focused_view_storage_id_);
@@ -323,7 +296,7 @@ void TabContentsViewGtk::StoreFocus() {
 }
 
 void TabContentsViewGtk::RestoreFocus() {
-  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
   views::View* last_focused_view =
       view_storage->RetrieveView(last_focused_view_storage_id_);
   if (!last_focused_view) {
@@ -348,6 +321,10 @@ void TabContentsViewGtk::RestoreFocus() {
     }
     view_storage->RemoveView(last_focused_view_storage_id_);
   }
+}
+
+void TabContentsViewGtk::GetViewBounds(gfx::Rect* out) const {
+  GetBounds(out, true);
 }
 
 void TabContentsViewGtk::UpdateDragCursor(WebDragOperation operation) {
@@ -422,7 +399,12 @@ gboolean TabContentsViewGtk::OnPaint(GtkWidget* widget, GdkEventExpose* event) {
   if (tab_contents()->render_view_host() &&
       !tab_contents()->render_view_host()->IsRenderViewLive()) {
     if (sad_tab_ == NULL) {
-      sad_tab_ = new SadTabView(tab_contents());
+      base::TerminationStatus status =
+          tab_contents()->render_view_host()->render_view_termination_status();
+      SadTabView::Kind kind =
+          status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED ?
+          SadTabView::KILLED : SadTabView::CRASHED;
+      sad_tab_ = new SadTabView(tab_contents(), kind);
       SetContentsView(sad_tab_);
     }
     gfx::Rect bounds;
@@ -430,20 +412,6 @@ gboolean TabContentsViewGtk::OnPaint(GtkWidget* widget, GdkEventExpose* event) {
     sad_tab_->SetBounds(gfx::Rect(0, 0, bounds.width(), bounds.height()));
     gfx::CanvasSkiaPaint canvas(event);
     sad_tab_->ProcessPaint(&canvas);
-  } else {
-#if defined(TOUCH_UI)
-    // there's no native view, so just like sad tabs
-    // we need to pass on the message to paint the page
-    gfx::Rect bounds;
-    GetBounds(&bounds, true);
-    views::View *view = reinterpret_cast<RenderWidgetHostViewViews *>
-        (tab_contents()->render_view_host()->view());
-    if (view) {
-      view->SetBounds(gfx::Rect(0, 0, bounds.width(), bounds.height()));
-      gfx::CanvasSkiaPaint canvas(event);
-      view->ProcessPaint(&canvas);
-    }
-#endif
   }
   return false;  // False indicates other widgets should get the event as well.
 }

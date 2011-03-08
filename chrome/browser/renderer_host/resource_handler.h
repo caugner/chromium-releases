@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,11 @@
 
 namespace net {
 class IOBuffer;
-}
+class URLRequestStatus;
+}  // namespace net
 
 struct ResourceResponse;
 class GURL;
-class URLRequestStatus;
 
 // The resource dispatcher host uses this interface to push load events to the
 // renderer, allowing for differences in the types of IPC messages generated.
@@ -48,11 +48,11 @@ class ResourceHandler
   virtual bool OnResponseStarted(int request_id,
                                  ResourceResponse* response) = 0;
 
-  // Called before the URLRequest for |request_id| (whose url is |url|) is to be
-  // started. If the handler returns false, then the request is cancelled.
+  // Called before the net::URLRequest for |request_id| (whose url is |url|) is
+  // to be started. If the handler returns false, then the request is cancelled.
   // Otherwise if the return value is true, the ResourceHandler can delay the
   // request from starting by setting |*defer = true|. A deferred request will
-  // not have called URLRequest::Start(), and will not resume until someone
+  // not have called net::URLRequest::Start(), and will not resume until someone
   // calls ResourceDispatcherHost::StartDeferredRequest().
   virtual bool OnWillStart(int request_id, const GURL& url, bool* defer) = 0;
 
@@ -73,11 +73,11 @@ class ResourceHandler
   // The response is complete.  The final response status is given.
   // Returns false if the handler is deferring the call to a later time.
   virtual bool OnResponseCompleted(int request_id,
-                                   const URLRequestStatus& status,
+                                   const net::URLRequestStatus& status,
                                    const std::string& security_info) = 0;
 
   // Signals that the request is closed (i.e. finished successfully, cancelled).
-  // This is a signal that the associated URLRequest isn't valid anymore.
+  // This is a signal that the associated net::URLRequest isn't valid anymore.
   virtual void OnRequestClosed() = 0;
 
   // This notification is synthesized by the RedirectToFileResourceHandler

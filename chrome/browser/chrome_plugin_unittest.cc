@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 // Tests exercising the Chrome Plugin API.
@@ -9,7 +9,7 @@
 #include "base/string_util.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chrome_plugin_host.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/test/chrome_plugin/test_chrome_plugin.h"
@@ -28,7 +28,7 @@ const int kResponseBufferSize = 4096;
 
 class TestURLRequestContextGetter : public URLRequestContextGetter {
  public:
-  virtual URLRequestContext* GetURLRequestContext() {
+  virtual net::URLRequestContext* GetURLRequestContext() {
     if (!context_)
       context_ = new TestURLRequestContext();
     return context_;
@@ -39,10 +39,11 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
 
  private:
   ~TestURLRequestContextGetter() {}
-  scoped_refptr<URLRequestContext> context_;
+  scoped_refptr<net::URLRequestContext> context_;
 };
 
-class ChromePluginTest : public testing::Test, public URLRequest::Delegate {
+class ChromePluginTest : public testing::Test,
+                         public net::URLRequest::Delegate {
  public:
   ChromePluginTest()
       : io_thread_(BrowserThread::IO, &message_loop_),
@@ -62,17 +63,18 @@ class ChromePluginTest : public testing::Test, public URLRequest::Delegate {
   // is NULL, the request is expected to fail.
   void RunTest(const GURL& url, const TestResponsePayload* expected_payload);
 
-  // URLRequest::Delegate implementations
-  virtual void OnResponseStarted(URLRequest* request);
-  virtual void OnReadCompleted(URLRequest* request, int bytes_read);
+  // net::URLRequest::Delegate implementations
+  virtual void OnResponseStarted(net::URLRequest* request);
+  virtual void OnReadCompleted(net::URLRequest* request, int bytes_read);
 
-  // Helper called when the URLRequest is done.
+  // Helper called when the net::URLRequest is done.
   void OnURLRequestComplete();
 
   // testing::Test
   virtual void SetUp() {
     LoadPlugin();
-    URLRequest::RegisterProtocolFactory("test", &URLRequestTestJob::Factory);
+    net::URLRequest::RegisterProtocolFactory("test",
+                                             &net::URLRequestTestJob::Factory);
 
     // We need to setup a default request context in order to issue HTTP
     // requests.
@@ -81,7 +83,7 @@ class ChromePluginTest : public testing::Test, public URLRequest::Delegate {
   }
   virtual void TearDown() {
     UnloadPlugin();
-    URLRequest::RegisterProtocolFactory("test", NULL);
+    net::URLRequest::RegisterProtocolFactory("test", NULL);
 
     Profile::set_default_request_context(NULL);
 
@@ -96,9 +98,9 @@ class ChromePluginTest : public testing::Test, public URLRequest::Delegate {
   MessageLoopForIO message_loop_;
   BrowserThread io_thread_;
 
-  // Note: we use URLRequest (instead of URLFetcher) because this allows the
-  // request to be intercepted.
-  scoped_ptr<URLRequest> request_;
+  // Note: we use net::URLRequest (instead of URLFetcher) because this allows
+  // the request to be intercepted.
+  scoped_ptr<net::URLRequest> request_;
   scoped_refptr<net::IOBuffer> response_buffer_;
   std::string response_data_;
 
@@ -124,10 +126,10 @@ static void STDCALL CPT_Complete(CPRequest* request, bool success,
   EXPECT_TRUE(success);
   EXPECT_EQ(200, headers->response_code());
 
-  if (url == URLRequestTestJob::test_url_1()) {
-    EXPECT_EQ(URLRequestTestJob::test_data_1(), body);
-  } else if (url == URLRequestTestJob::test_url_2()) {
-    EXPECT_EQ(URLRequestTestJob::test_data_2(), body);
+  if (url == net::URLRequestTestJob::test_url_1()) {
+    EXPECT_EQ(net::URLRequestTestJob::test_data_1(), body);
+  } else if (url == net::URLRequestTestJob::test_url_2()) {
+    EXPECT_EQ(net::URLRequestTestJob::test_data_2(), body);
   } else if (url.spec().find("echo") != std::string::npos) {
     EXPECT_EQ(kChromeTestPluginPostData, body);
   }
@@ -166,14 +168,14 @@ void ChromePluginTest::RunTest(const GURL& url,
   expected_payload_ = expected_payload;
 
   response_data_.clear();
-  request_.reset(new URLRequest(url, this));
+  request_.reset(new net::URLRequest(url, this));
   request_->set_context(new TestURLRequestContext());
   request_->Start();
 
   MessageLoop::current()->Run();
 }
 
-void ChromePluginTest::OnResponseStarted(URLRequest* request) {
+void ChromePluginTest::OnResponseStarted(net::URLRequest* request) {
   DCHECK(request == request_);
 
   int bytes_read = 0;
@@ -182,7 +184,8 @@ void ChromePluginTest::OnResponseStarted(URLRequest* request) {
   OnReadCompleted(request_.get(), bytes_read);
 }
 
-void ChromePluginTest::OnReadCompleted(URLRequest* request, int bytes_read) {
+void ChromePluginTest::OnReadCompleted(net::URLRequest* request,
+                                       int bytes_read) {
   DCHECK(request == request_);
 
   do {
@@ -246,7 +249,7 @@ TEST_F(ChromePluginTest, UnregisterIntercept) {
 }
 
 static void ProcessAllPendingMessages() {
-  while (URLRequestTestJob::ProcessOnePendingMessage());
+  while (net::URLRequestTestJob::ProcessOnePendingMessage());
 }
 
 // Tests that the plugin can issue a GET request and receives the data when
@@ -254,10 +257,10 @@ static void ProcessAllPendingMessages() {
 TEST_F(ChromePluginTest, CanMakeGETRequestSync) {
   // test_url_1 has a synchronous response
   EXPECT_EQ(CPERR_SUCCESS, test_funcs_.test_make_request(
-      "GET", URLRequestTestJob::test_url_1()));
+      "GET", net::URLRequestTestJob::test_url_1()));
 
   // Note: we must add this task after we make the request, so that
-  // URLRequestTestJob's StartAsync task is added and run first.
+  // net::URLRequestTestJob's StartAsync task is added and run first.
   MessageLoop::current()->PostTask(FROM_HERE,
       NewRunnableFunction(&ProcessAllPendingMessages));
   MessageLoop::current()->Run();
@@ -268,10 +271,10 @@ TEST_F(ChromePluginTest, CanMakeGETRequestSync) {
 TEST_F(ChromePluginTest, CanMakeGETRequestAsync) {
   // test_url_2 has an asynchronous response
   EXPECT_EQ(CPERR_SUCCESS, test_funcs_.test_make_request(
-        "GET", URLRequestTestJob::test_url_2()));
+        "GET", net::URLRequestTestJob::test_url_2()));
 
   // Note: we must add this task after we make the request, so that
-  // URLRequestTestJob's StartAsync task is added and run first.
+  // net::URLRequestTestJob's StartAsync task is added and run first.
   MessageLoop::current()->PostTask(FROM_HERE,
       NewRunnableFunction(&ProcessAllPendingMessages));
   MessageLoop::current()->Run();
@@ -287,7 +290,7 @@ TEST_F(ChromePluginTest, CanMakePOSTRequest) {
   EXPECT_EQ(CPERR_SUCCESS, test_funcs_.test_make_request("POST", url));
 
   // Note: we must add this task after we make the request, so that
-  // URLRequestTestJob's StartAsync task is added and run first.
+  // net::URLRequestTestJob's StartAsync task is added and run first.
   MessageLoop::current()->PostTask(FROM_HERE,
       NewRunnableFunction(&ProcessAllPendingMessages));
   MessageLoop::current()->Run();

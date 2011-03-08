@@ -16,6 +16,7 @@
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
 
 struct PPB_URLLoader;
+struct PPB_URLLoaderTrusted;
 
 namespace pp {
 namespace proxy {
@@ -29,7 +30,8 @@ class PPB_URLLoader_Proxy : public InterfaceProxy {
   // they are also provided to PPP_Instance.OnMsgHandleDocumentLoad. This
   // function allows the proxy for DocumentLoad to create the correct plugin
   // proxied info for the given browser-supplied URLLoader resource ID.
-  static void TrackPluginResource(PP_Resource url_loader_resource);
+  static void TrackPluginResource(PP_Instance instance,
+                                  PP_Resource url_loader_resource);
 
   const PPB_URLLoader* ppb_url_loader_target() const {
     return reinterpret_cast<const PPB_URLLoader*>(target_interface());
@@ -38,7 +40,7 @@ class PPB_URLLoader_Proxy : public InterfaceProxy {
   // InterfaceProxy implementation.
   virtual const void* GetSourceInterface() const;
   virtual InterfaceID GetInterfaceId() const;
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
   // Data associated with callbacks for ReadResponseBody.
@@ -76,6 +78,26 @@ class PPB_URLLoader_Proxy : public InterfaceProxy {
 
   CompletionCallbackFactory<PPB_URLLoader_Proxy,
                             ProxyNonThreadSafeRefCount> callback_factory_;
+};
+
+class PPB_URLLoaderTrusted_Proxy : public InterfaceProxy {
+ public:
+  PPB_URLLoaderTrusted_Proxy(Dispatcher* dispatcher,
+                             const void* target_interface);
+  virtual ~PPB_URLLoaderTrusted_Proxy();
+
+  const PPB_URLLoaderTrusted* ppb_url_loader_trusted_target() const {
+    return reinterpret_cast<const PPB_URLLoaderTrusted*>(target_interface());
+  }
+
+  // InterfaceProxy implementation.
+  virtual const void* GetSourceInterface() const;
+  virtual InterfaceID GetInterfaceId() const;
+  virtual bool OnMessageReceived(const IPC::Message& msg);
+
+ private:
+  // Plugin->renderer message handlers.
+  void OnMsgGrantUniversalAccess(PP_Resource loader);
 };
 
 }  // namespace proxy

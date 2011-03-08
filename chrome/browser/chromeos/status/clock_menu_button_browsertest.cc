@@ -11,10 +11,8 @@
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "unicode/calendar.h"
@@ -51,7 +49,6 @@ IN_PROC_BROWSER_TEST_F(ClockMenuButtonTest, TimezoneTest) {
   CrosLibrary::Get()->GetSystemLibrary()->SetTimezone(timezone_second.get());
   std::wstring text_after = clock->text();
   EXPECT_NE(text_before, text_after);
-
 }
 
 }  // namespace chromeos

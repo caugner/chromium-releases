@@ -6,7 +6,7 @@
 #define WEBKIT_TOOLS_TEST_SHELL_FOREGROUND_HELPER_H_
 
 #include "base/logging.h"
-#include "gfx/window_impl.h"
+#include "ui/base/win/window_impl.h"
 
 // Helper class for moving a window to the foreground.
 // Windows XP and later will not allow a window which is in the background to
@@ -15,7 +15,7 @@
 // to be capable of moving to the foreground.
 //
 // This is probably leveraging a windows bug.
-class ForegroundHelper : public gfx::WindowImpl {
+class ForegroundHelper : public ui::WindowImpl {
  public:
   BEGIN_MSG_MAP_EX(ForegroundHelper)
     MESSAGE_HANDLER(WM_HOTKEY, OnHotKey)

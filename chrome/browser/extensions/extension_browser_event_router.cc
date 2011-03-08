@@ -10,13 +10,12 @@
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_page_actions_module_constants.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents_wrapper.h"
-#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
@@ -60,10 +59,6 @@ DictionaryValue* ExtensionBrowserEventRouter::TabEntry::DidNavigate(
   }
 
   return changed_properties;
-}
-
-ExtensionBrowserEventRouter* ExtensionBrowserEventRouter::GetInstance() {
-  return Singleton<ExtensionBrowserEventRouter>::get();
 }
 
 static void DispatchEvent(Profile* profile,
@@ -112,16 +107,14 @@ static void DispatchSimpleBrowserEvent(Profile* profile,
   DispatchEvent(profile, event_name, json_args);
 }
 
-void ExtensionBrowserEventRouter::Init(Profile* profile) {
+void ExtensionBrowserEventRouter::Init() {
   if (initialized_)
     return;
-  DCHECK(!profile->IsOffTheRecord());
-  profile_ = profile;
   BrowserList::AddObserver(this);
 #if defined(TOOLKIT_VIEWS)
   views::FocusManager::GetWidgetFocusManager()->AddFocusChangeListener(this);
 #elif defined(TOOLKIT_GTK)
-  ActiveWindowWatcherX::AddObserver(this);
+  ui::ActiveWindowWatcherX::AddObserver(this);
 #elif defined(OS_MACOSX)
   // Needed for when no suitable window can be passed to an extension as the
   // currently focused window.
@@ -149,12 +142,21 @@ void ExtensionBrowserEventRouter::Init(Profile* profile) {
   initialized_ = true;
 }
 
-ExtensionBrowserEventRouter::ExtensionBrowserEventRouter()
+ExtensionBrowserEventRouter::ExtensionBrowserEventRouter(Profile* profile)
     : initialized_(false),
       focused_window_id_(extension_misc::kUnknownWindowId),
-      profile_(NULL) { }
+      profile_(profile) {
+  DCHECK(!profile->IsOffTheRecord());
+}
 
-ExtensionBrowserEventRouter::~ExtensionBrowserEventRouter() {}
+ExtensionBrowserEventRouter::~ExtensionBrowserEventRouter() {
+  BrowserList::RemoveObserver(this);
+#if defined(TOOLKIT_VIEWS)
+  views::FocusManager::GetWidgetFocusManager()->RemoveFocusChangeListener(this);
+#elif defined(TOOLKIT_GTK)
+  ui::ActiveWindowWatcherX::RemoveObserver(this);
+#endif
+}
 
 void ExtensionBrowserEventRouter::OnBrowserAdded(const Browser* browser) {
   RegisterForBrowserNotifications(browser);
@@ -467,11 +469,13 @@ void ExtensionBrowserEventRouter::TabChangedAt(TabContentsWrapper* contents,
 }
 
 void ExtensionBrowserEventRouter::TabReplacedAt(
+    TabStripModel* tab_strip_model,
     TabContentsWrapper* old_contents,
     TabContentsWrapper* new_contents,
     int index) {
-  UnregisterForTabNotifications(old_contents->tab_contents());
-  RegisterForTabNotifications(new_contents->tab_contents());
+  TabClosingAt(tab_strip_model, old_contents, index);
+  TabInsertedAt(new_contents, index,
+                tab_strip_model->selected_index() == index);
 }
 
 void ExtensionBrowserEventRouter::TabPinnedStateChanged(

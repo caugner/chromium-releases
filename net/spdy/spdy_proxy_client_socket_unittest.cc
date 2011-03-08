@@ -84,8 +84,13 @@ class SpdyProxyClientSocketTest : public PlatformTest {
   void AddAuthToCache() {
     const string16 kFoo(ASCIIToUTF16("foo"));
     const string16 kBar(ASCIIToUTF16("bar"));
-    session_->auth_cache()->Add(GURL(kProxyUrl), "MyRealm1", "Basic",
-                                "Basic realm=MyRealm1", kFoo, kBar, "/");
+    session_->auth_cache()->Add(GURL(kProxyUrl),
+                                "MyRealm1",
+                                HttpAuth::AUTH_SCHEME_BASIC,
+                                "Basic realm=MyRealm1",
+                                kFoo,
+                                kBar,
+                                "/");
   }
 
   void Run(int steps) {
@@ -839,12 +844,14 @@ TEST_F(SpdyProxyClientSocketTest, ReadErrorResponseBody) {
 
   Initialize(reads, arraysize(reads), writes, arraysize(writes));
 
-  AssertConnectFails(ERR_TUNNEL_CONNECTION_FAILED);
+  AssertConnectFails(ERR_HTTPS_PROXY_TUNNEL_RESPONSE);
 
   Run(2);  // SpdySession consumes the next two reads and sends then to
            // sock_ to be buffered.
-  AssertSyncReadEquals(kMsg1, kLen1);
-  AssertSyncReadEquals(kMsg2, kLen2);
+  EXPECT_EQ(ERR_SOCKET_NOT_CONNECTED, sock_->Read(NULL, 1, NULL));
+  scoped_refptr<IOBuffer> buf(new IOBuffer(kLen1 + kLen2));
+  scoped_ptr<HttpStream> stream(sock_->CreateConnectResponseStream());
+  stream->ReadResponseBody(buf, kLen1 + kLen2, &read_callback_);
 }
 
 // ----------- Reads and Writes

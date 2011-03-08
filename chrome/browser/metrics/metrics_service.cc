@@ -1,8 +1,6 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-
 
 //------------------------------------------------------------------------------
 // Description of the life cycle of a instance of MetricsService.
@@ -163,29 +161,30 @@
 #include "base/md5.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
+#include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/guid.h"
 #include "chrome/browser/load_notification_details.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/guid.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/glue/plugins/webplugininfo.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/npapi/webplugininfo.h"
 #include "libxml/xmlwriter.h"
 
 // TODO(port): port browser_distribution.h.
@@ -336,8 +335,9 @@ class MetricsMemoryDetails : public MemoryDetails {
 
 class MetricsService::InitTaskComplete : public Task {
  public:
-  explicit InitTaskComplete(const std::string& hardware_class,
-                            const std::vector<WebPluginInfo>& plugins)
+  explicit InitTaskComplete(
+      const std::string& hardware_class,
+      const std::vector<webkit::npapi::WebPluginInfo>& plugins)
       : hardware_class_(hardware_class), plugins_(plugins) {}
 
   virtual void Run() {
@@ -347,7 +347,7 @@ class MetricsService::InitTaskComplete : public Task {
 
  private:
   std::string hardware_class_;
-  std::vector<WebPluginInfo> plugins_;
+  std::vector<webkit::npapi::WebPluginInfo> plugins_;
 };
 
 class MetricsService::InitTask : public Task {
@@ -356,12 +356,12 @@ class MetricsService::InitTask : public Task {
       : callback_loop_(callback_loop) {}
 
   virtual void Run() {
-    std::vector<WebPluginInfo> plugins;
-    NPAPI::PluginList::Singleton()->GetPlugins(false, &plugins);
+    std::vector<webkit::npapi::WebPluginInfo> plugins;
+    webkit::npapi::PluginList::Singleton()->GetPlugins(false, &plugins);
     std::string hardware_class;  // Empty string by default.
 #if defined(OS_CHROMEOS)
     chromeos::SystemLibrary* system_library =
-      chromeos::CrosLibrary::Get()->GetSystemLibrary();
+        chromeos::CrosLibrary::Get()->GetSystemLibrary();
     system_library->GetMachineStatistic("hardware_class", &hardware_class);
 #endif  // OS_CHROMEOS
     callback_loop_->PostTask(FROM_HERE, new InitTaskComplete(
@@ -400,6 +400,12 @@ void MetricsService::RegisterPrefs(PrefService* local_state) {
                                    0);
   local_state->RegisterIntegerPref(prefs::kStabilityDebuggerPresent, 0);
   local_state->RegisterIntegerPref(prefs::kStabilityDebuggerNotPresent, 0);
+#if defined(OS_CHROMEOS)
+  local_state->RegisterIntegerPref(prefs::kStabilityOtherUserCrashCount, 0);
+  local_state->RegisterIntegerPref(prefs::kStabilityKernelCrashCount, 0);
+  local_state->RegisterIntegerPref(prefs::kStabilitySystemUncleanShutdownCount,
+                                   0);
+#endif  // OS_CHROMEOS
 
   local_state->RegisterDictionaryPref(prefs::kProfileMetrics);
   local_state->RegisterIntegerPref(prefs::kNumBookmarksOnBookmarkBar, 0);
@@ -606,11 +612,13 @@ void MetricsService::Observe(NotificationType type,
       LogLoadStarted();
       break;
 
-    case NotificationType::RENDERER_PROCESS_CLOSED:
-      {
+    case NotificationType::RENDERER_PROCESS_CLOSED: {
         RenderProcessHost::RendererClosedDetails* process_details =
             Details<RenderProcessHost::RendererClosedDetails>(details).ptr();
-        if (process_details->did_crash) {
+        if (process_details->status ==
+            base::TERMINATION_STATUS_PROCESS_CRASHED ||
+            process_details->status ==
+            base::TERMINATION_STATUS_ABNORMAL_TERMINATION) {
           if (process_details->was_extension_renderer) {
             LogExtensionRendererCrash();
           } else {
@@ -799,7 +807,7 @@ void MetricsService::InitializeMetricsState() {
 
 void MetricsService::OnInitTaskComplete(
     const std::string& hardware_class,
-    const std::vector<WebPluginInfo>& plugins) {
+    const std::vector<webkit::npapi::WebPluginInfo>& plugins) {
   DCHECK(state_ == INIT_TASK_SCHEDULED);
   hardware_class_ = hardware_class;
   plugins_ = plugins;
@@ -863,9 +871,7 @@ void MetricsService::StopRecording(MetricsLogBase** log) {
   if (!current_log_)
     return;
 
-  MetricsLog* current_log = current_log_->AsMetricsLog();
-  DCHECK(current_log);
-  current_log->set_hardware_class(hardware_class_);  // Adds to ongoing logs.
+  current_log_->set_hardware_class(hardware_class_);  // Adds to ongoing logs.
 
   // TODO(jar): Integrate bounds on log recording more consistently, so that we
   // can stop recording logs that are too big much sooner.
@@ -882,13 +888,17 @@ void MetricsService::StopRecording(MetricsLogBase** log) {
   // end of all log transmissions (initial log handles this separately).
   // Don't bother if we're going to discard current_log_.
   if (log) {
+    // RecordIncrementalStabilityElements only exists on the derived
+    // MetricsLog class.
+    MetricsLog* current_log = current_log_->AsMetricsLog();
+    DCHECK(current_log);
     current_log->RecordIncrementalStabilityElements();
     RecordCurrentHistograms();
   }
 
   current_log_->CloseLog();
   if (log)
-    *log = current_log;
+    *log = current_log_;
   else
     delete current_log_;
   current_log_ = NULL;
@@ -1330,21 +1340,21 @@ void MetricsService::PrepareFetchWithPendingLog() {
   current_fetch_->set_upload_data(kMetricsType, compressed_log_);
 }
 
-static const char* StatusToString(const URLRequestStatus& status) {
+static const char* StatusToString(const net::URLRequestStatus& status) {
   switch (status.status()) {
-    case URLRequestStatus::SUCCESS:
+    case net::URLRequestStatus::SUCCESS:
       return "SUCCESS";
 
-    case URLRequestStatus::IO_PENDING:
+    case net::URLRequestStatus::IO_PENDING:
       return "IO_PENDING";
 
-    case URLRequestStatus::HANDLED_EXTERNALLY:
+    case net::URLRequestStatus::HANDLED_EXTERNALLY:
       return "HANDLED_EXTERNALLY";
 
-    case URLRequestStatus::CANCELED:
+    case net::URLRequestStatus::CANCELED:
       return "CANCELED";
 
-    case URLRequestStatus::FAILED:
+    case net::URLRequestStatus::FAILED:
       return "FAILED";
 
     default:
@@ -1355,7 +1365,7 @@ static const char* StatusToString(const URLRequestStatus& status) {
 
 void MetricsService::OnURLFetchComplete(const URLFetcher* source,
                                         const GURL& url,
-                                        const URLRequestStatus& status,
+                                        const net::URLRequestStatus& status,
                                         int response_code,
                                         const ResponseCookies& cookies,
                                         const std::string& data) {
@@ -1713,6 +1723,22 @@ void MetricsService::LogRendererHang() {
   IncrementPrefValue(prefs::kStabilityRendererHangCount);
 }
 
+#if defined(OS_CHROMEOS)
+void MetricsService::LogChromeOSCrash(const std::string &crash_type) {
+  if (crash_type == "user")
+    IncrementPrefValue(prefs::kStabilityOtherUserCrashCount);
+  else if (crash_type == "kernel")
+    IncrementPrefValue(prefs::kStabilityKernelCrashCount);
+  else if (crash_type == "uncleanshutdown")
+    IncrementPrefValue(prefs::kStabilitySystemUncleanShutdownCount);
+  else
+    NOTREACHED() << "Unexpected Chrome OS crash type " << crash_type;
+  // Wake up metrics logs sending if necessary now that new
+  // log data is available.
+  HandleIdleSinceLastTransmission(false);
+}
+#endif  // OS_CHROMEOS
+
 void MetricsService::LogChildProcessChange(
     NotificationType type,
     const NotificationSource& source,
@@ -1901,10 +1927,10 @@ void MetricsService::RecordCurrentState(PrefService* pref) {
 }
 
 static bool IsSingleThreaded() {
-  static PlatformThreadId thread_id = 0;
+  static base::PlatformThreadId thread_id = 0;
   if (!thread_id)
-    thread_id = PlatformThread::CurrentId();
-  return PlatformThread::CurrentId() == thread_id;
+    thread_id = base::PlatformThread::CurrentId();
+  return base::PlatformThread::CurrentId() == thread_id;
 }
 
 #if defined(OS_CHROMEOS)

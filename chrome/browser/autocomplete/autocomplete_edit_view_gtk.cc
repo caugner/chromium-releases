@@ -1,16 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
 
-#include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
+#include <gtk/gtk.h>
 
 #include <algorithm>
 
-#include "app/l10n_util.h"
-#include "app/multi_animation.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -19,15 +17,14 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/gtk/gtk_util.h"
-#include "chrome/browser/gtk/view_id_util.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/toolbar_model.h"
+#include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/view_id_util.h"
+#include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/notification_service.h"
 #include "gfx/color_utils.h"
 #include "gfx/font.h"
@@ -37,14 +34,20 @@
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "third_party/undoview/undo_view.h"
+#include "ui/base/animation/multi_animation.h"
+#include "ui/base/l10n/l10n_util.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
-#include "chrome/browser/views/location_bar/location_bar_view.h"
+#include "chrome/browser/autocomplete/autocomplete_edit_view_views.h"
+#include "chrome/browser/ui/gtk/accessible_widget_helper_gtk.h"
+#include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "views/controls/textfield/native_textfield_views.h"
 #else
 #include "chrome/browser/autocomplete/autocomplete_popup_view_gtk.h"
-#include "chrome/browser/gtk/gtk_theme_provider.h"
-#include "chrome/browser/gtk/location_bar_view_gtk.h"
+#include "chrome/browser/ui/gtk/gtk_theme_provider.h"
+#include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
+#include "views/controls/native/native_view_host.h"
 #endif
 
 namespace {
@@ -183,10 +186,14 @@ AutocompleteEditViewGtk::AutocompleteEditViewGtk(
       tab_was_pressed_(false),
       paste_clipboard_requested_(false),
       enter_was_inserted_(false),
-      enable_tab_to_search_(true),
       selection_suggested_(false),
       delete_was_pressed_(false),
       delete_at_end_pressed_(false),
+      handling_key_press_(false),
+      content_maybe_changed_by_key_press_(false),
+#if GTK_CHECK_VERSION(2, 20, 0)
+      preedit_size_before_change_(0),
+#endif
       going_to_focus_(NULL) {
   model_->SetPopupModel(popup_view_->GetModel());
 }
@@ -377,12 +384,12 @@ void AutocompleteEditViewGtk::Init() {
 
   AdjustVerticalAlignmentOfInstantView();
 
-  MultiAnimation::Parts parts;
-  parts.push_back(MultiAnimation::Part(
-      InstantController::kAutoCommitPauseTimeMS, Tween::ZERO));
-  parts.push_back(MultiAnimation::Part(
-      InstantController::kAutoCommitFadeInTimeMS, Tween::EASE_IN));
-  instant_animation_.reset(new MultiAnimation(parts));
+  ui::MultiAnimation::Parts parts;
+  parts.push_back(ui::MultiAnimation::Part(
+      InstantController::kAutoCommitPauseTimeMS, ui::Tween::ZERO));
+  parts.push_back(ui::MultiAnimation::Part(
+      InstantController::kAutoCommitFadeInTimeMS, ui::Tween::EASE_IN));
+  instant_animation_.reset(new ui::MultiAnimation(parts));
   instant_animation_->set_continuous(false);
 
 #if !defined(TOOLKIT_VIEWS)
@@ -414,32 +421,6 @@ void AutocompleteEditViewGtk::SetFocus() {
   gtk_widget_grab_focus(text_view_);
 }
 
-int AutocompleteEditViewGtk::TextWidth() {
-  int horizontal_border_size =
-      gtk_text_view_get_border_window_size(GTK_TEXT_VIEW(text_view_),
-                                           GTK_TEXT_WINDOW_LEFT) +
-      gtk_text_view_get_border_window_size(GTK_TEXT_VIEW(text_view_),
-                                           GTK_TEXT_WINDOW_RIGHT) +
-      gtk_text_view_get_left_margin(GTK_TEXT_VIEW(text_view_)) +
-      gtk_text_view_get_right_margin(GTK_TEXT_VIEW(text_view_));
-
-  GtkTextIter start, end;
-  GdkRectangle first_char_bounds, last_char_bounds;
-  gtk_text_buffer_get_start_iter(text_buffer_, &start);
-
-  // Use the real end iterator here to take the width of instant suggestion
-  // text into account, so that location bar can layout its children correctly.
-  gtk_text_buffer_get_end_iter(text_buffer_, &end);
-  gtk_text_view_get_iter_location(GTK_TEXT_VIEW(text_view_),
-                                  &start, &first_char_bounds);
-  gtk_text_view_get_iter_location(GTK_TEXT_VIEW(text_view_),
-                                  &end, &last_char_bounds);
-  return ((last_char_bounds.x > first_char_bounds.x) ?
-          (last_char_bounds.x + last_char_bounds.width - first_char_bounds.x) :
-          (first_char_bounds.x - last_char_bounds.x + last_char_bounds.width)) +
-      horizontal_border_size;
-}
-
 int AutocompleteEditViewGtk::WidthOfTextAfterCursor() {
   // Not used.
   return -1;
@@ -449,6 +430,14 @@ gfx::Font AutocompleteEditViewGtk::GetFont() {
   GtkRcStyle* rc_style = gtk_widget_get_modifier_style(text_view_);
   return gfx::Font((rc_style && rc_style->font_desc) ?
                    rc_style->font_desc : text_view_->style->font_desc);
+}
+
+AutocompleteEditModel* AutocompleteEditViewGtk::model() {
+  return model_.get();
+}
+
+const AutocompleteEditModel* AutocompleteEditViewGtk::model() const {
+  return model_.get();
 }
 
 void AutocompleteEditViewGtk::SaveStateToTab(TabContents* tab) {
@@ -617,10 +606,7 @@ void AutocompleteEditViewGtk::UpdatePopup() {
   // the text, or in the middle of composition.
   CharRange sel = GetSelection();
   bool no_inline_autocomplete =
-      std::max(sel.cp_max, sel.cp_min) < GetTextLength();
-#if GTK_CHECK_VERSION(2, 20, 0)
-  no_inline_autocomplete = no_inline_autocomplete || preedit_.size();
-#endif
+      std::max(sel.cp_max, sel.cp_min) < GetTextLength() || IsImeComposing();
   model_->StartAutocomplete(sel.cp_min != sel.cp_max, no_inline_autocomplete);
 }
 
@@ -665,22 +651,36 @@ void AutocompleteEditViewGtk::OnRevertTemporaryText() {
 }
 
 void AutocompleteEditViewGtk::OnBeforePossibleChange() {
-  // If this change is caused by a paste clipboard action and all text is
-  // selected, then call model_->on_paste_replacing_all() to prevent inline
-  // autocomplete.
+  // Record this paste, so we can do different behavior.
   if (paste_clipboard_requested_) {
     paste_clipboard_requested_ = false;
-    if (IsSelectAll())
-      model_->on_paste_replacing_all();
+    model_->on_paste();
   }
+
+  // This method will be called in HandleKeyPress() method just before
+  // handling a key press event. So we should prevent it from being called
+  // when handling the key press event.
+  if (handling_key_press_)
+    return;
 
   // Record our state.
   text_before_change_ = GetText();
   sel_before_change_ = GetSelection();
+#if GTK_CHECK_VERSION(2, 20, 0)
+  preedit_size_before_change_ = preedit_.size();
+#endif
 }
 
 // TODO(deanm): This is mostly stolen from Windows, and will need some work.
 bool AutocompleteEditViewGtk::OnAfterPossibleChange() {
+  // This method will be called in HandleKeyPress() method just after
+  // handling a key press event. So we should prevent it from being called
+  // when handling the key press event.
+  if (handling_key_press_) {
+    content_maybe_changed_by_key_press_ = true;
+    return false;
+  }
+
   // If the change is caused by an Enter key press event, and the event was not
   // handled by IME, then it's an unexpected change and shall be reverted here.
   // {Start|Finish}UpdatingHighlightedText() are called here to prevent the
@@ -694,13 +694,20 @@ bool AutocompleteEditViewGtk::OnAfterPossibleChange() {
 
   CharRange new_sel = GetSelection();
   int length = GetTextLength();
-  bool selection_differs = (new_sel.cp_min != sel_before_change_.cp_min) ||
-                           (new_sel.cp_max != sel_before_change_.cp_max);
+  bool selection_differs =
+      ((new_sel.cp_min != new_sel.cp_max) ||
+       (sel_before_change_.cp_min != sel_before_change_.cp_max)) &&
+      ((new_sel.cp_min != sel_before_change_.cp_min) ||
+       (new_sel.cp_max != sel_before_change_.cp_max));
   bool at_end_of_edit = (new_sel.cp_min == length && new_sel.cp_max == length);
 
   // See if the text or selection have changed since OnBeforePossibleChange().
   std::wstring new_text(GetText());
   text_changed_ = (new_text != text_before_change_);
+#if GTK_CHECK_VERSION(2, 20, 0)
+  text_changed_ =
+      text_changed_ || (preedit_.size() != preedit_size_before_change_);
+#endif
 
   if (text_changed_)
     AdjustTextJustification();
@@ -717,8 +724,10 @@ bool AutocompleteEditViewGtk::OnAfterPossibleChange() {
 
   delete_at_end_pressed_ = false;
 
+  bool allow_keyword_ui_change = at_end_of_edit && !IsImeComposing();
   bool something_changed = model_->OnAfterPossibleChange(new_text,
-      selection_differs, text_changed_, just_deleted_text, at_end_of_edit);
+      selection_differs, text_changed_, just_deleted_text,
+      allow_keyword_ui_change);
 
   // If only selection was changed, we don't need to call |controller_|'s
   // OnChanged() method, which is called in TextChanged().
@@ -745,6 +754,142 @@ CommandUpdater* AutocompleteEditViewGtk::GetCommandUpdater() {
   return command_updater_;
 }
 
+void AutocompleteEditViewGtk::SetInstantSuggestion(const string16& suggestion) {
+  std::string suggestion_utf8 = UTF16ToUTF8(suggestion);
+
+  gtk_label_set_text(GTK_LABEL(instant_view_), suggestion_utf8.c_str());
+
+  StopAnimation();
+
+  if (suggestion.empty()) {
+    gtk_widget_hide(instant_view_);
+    return;
+  }
+  if (InstantController::IsEnabled(model_->profile(),
+                                   InstantController::PREDICTIVE_TYPE)
+#if GTK_CHECK_VERSION(2, 20, 0)
+      && preedit_.empty()
+#endif
+      ) {
+    instant_animation_->set_delegate(this);
+    instant_animation_->Start();
+  }
+
+  gtk_widget_show(instant_view_);
+  AdjustVerticalAlignmentOfInstantView();
+  UpdateInstantViewColors();
+}
+
+int AutocompleteEditViewGtk::TextWidth() const {
+  int horizontal_border_size =
+      gtk_text_view_get_border_window_size(GTK_TEXT_VIEW(text_view_),
+                                           GTK_TEXT_WINDOW_LEFT) +
+      gtk_text_view_get_border_window_size(GTK_TEXT_VIEW(text_view_),
+                                           GTK_TEXT_WINDOW_RIGHT) +
+      gtk_text_view_get_left_margin(GTK_TEXT_VIEW(text_view_)) +
+      gtk_text_view_get_right_margin(GTK_TEXT_VIEW(text_view_));
+
+  GtkTextIter start, end;
+  GdkRectangle first_char_bounds, last_char_bounds;
+  gtk_text_buffer_get_start_iter(text_buffer_, &start);
+
+  // Use the real end iterator here to take the width of instant suggestion
+  // text into account, so that location bar can layout its children correctly.
+  gtk_text_buffer_get_end_iter(text_buffer_, &end);
+  gtk_text_view_get_iter_location(GTK_TEXT_VIEW(text_view_),
+                                  &start, &first_char_bounds);
+  gtk_text_view_get_iter_location(GTK_TEXT_VIEW(text_view_),
+                                  &end, &last_char_bounds);
+
+  gint first_char_start = first_char_bounds.x;
+  gint first_char_end = first_char_start + first_char_bounds.width;
+  gint last_char_start = last_char_bounds.x;
+  gint last_char_end = last_char_start + last_char_bounds.width;
+
+  // bounds width could be negative for RTL text.
+  if (first_char_start > first_char_end)
+    std::swap(first_char_start, first_char_end);
+  if (last_char_start > last_char_end)
+    std::swap(last_char_start, last_char_end);
+
+  gint text_width = first_char_start < last_char_start ?
+      last_char_end - first_char_start : first_char_end - last_char_start;
+
+  return text_width + horizontal_border_size;
+}
+
+bool AutocompleteEditViewGtk::IsImeComposing() const {
+#if GTK_CHECK_VERSION(2, 20, 0)
+  return !preedit_.empty();
+#else
+  return false;
+#endif
+}
+
+#if defined(TOOLKIT_VIEWS)
+views::View* AutocompleteEditViewGtk::AddToView(views::View* parent) {
+  views::NativeViewHost* host = new views::NativeViewHost;
+  parent->AddChildView(host);
+  host->set_focus_view(parent);
+  host->Attach(GetNativeView());
+  return host;
+}
+
+bool AutocompleteEditViewGtk::CommitInstantSuggestion(
+    const std::wstring& typed_text,
+    const std::wstring& suggestion) {
+  return CommitInstantSuggestion();
+}
+
+void AutocompleteEditViewGtk::EnableAccessibility() {
+  accessible_widget_helper_.reset(
+      new AccessibleWidgetHelper(text_view(), model_->profile()));
+  accessible_widget_helper_->SetWidgetName(
+      text_view(), l10n_util::GetStringUTF8(IDS_ACCNAME_LOCATION));
+}
+
+// static
+AutocompleteEditView* AutocompleteEditViewGtk::Create(
+    AutocompleteEditController* controller,
+    ToolbarModel* toolbar_model,
+    Profile* profile,
+    CommandUpdater* command_updater,
+    bool popup_window_mode,
+    const views::View* location_bar) {
+  if (views::NativeTextfieldViews::IsTextfieldViewsEnabled()) {
+    AutocompleteEditViewViews* autocomplete =
+        new AutocompleteEditViewViews(controller,
+                                      toolbar_model,
+                                      profile,
+                                      command_updater,
+                                      popup_window_mode,
+                                      location_bar);
+    autocomplete->Init();
+    return autocomplete;
+  }
+
+  AutocompleteEditViewGtk* autocomplete =
+      new AutocompleteEditViewGtk(controller,
+                                  toolbar_model,
+                                  profile,
+                                  command_updater,
+                                  popup_window_mode,
+                                  location_bar);
+  autocomplete->Init();
+
+  // Make all the children of the widget visible. NOTE: this won't display
+  // anything, it just toggles the visible flag.
+  gtk_widget_show_all(autocomplete->GetNativeView());
+  // Hide the widget. NativeViewHostGtk will make it visible again as
+  // necessary.
+  gtk_widget_hide(autocomplete->GetNativeView());
+
+  autocomplete->EnableAccessibility();
+
+  return autocomplete;
+}
+#endif
+
 void AutocompleteEditViewGtk::Observe(NotificationType type,
                                       const NotificationSource& source,
                                       const NotificationDetails& details) {
@@ -753,15 +898,17 @@ void AutocompleteEditViewGtk::Observe(NotificationType type,
   SetBaseColor();
 }
 
-void AutocompleteEditViewGtk::AnimationEnded(const Animation* animation) {
+void AutocompleteEditViewGtk::AnimationEnded(const ui::Animation* animation) {
   controller_->OnCommitSuggestedText(GetText());
 }
 
-void AutocompleteEditViewGtk::AnimationProgressed(const Animation* animation) {
+void AutocompleteEditViewGtk::AnimationProgressed(
+    const ui::Animation* animation) {
   UpdateInstantViewColors();
 }
 
-void AutocompleteEditViewGtk::AnimationCanceled(const Animation* animation) {
+void AutocompleteEditViewGtk::AnimationCanceled(
+    const ui::Animation* animation) {
   UpdateInstantViewColors();
 }
 
@@ -849,12 +996,17 @@ void AutocompleteEditViewGtk::SetBaseColor() {
 }
 
 void AutocompleteEditViewGtk::UpdateInstantViewColors() {
-#if !defined(TOOLKIT_VIEWS)
   SkColor selection_text, selection_bg;
   GdkColor faded_text, normal_bg;
 
-  if (theme_provider_->UseGtkTheme()) {
-    GtkStyle* style = gtk_rc_get_style(text_view_);
+#if defined(TOOLKIT_VIEWS)
+  bool use_gtk = false;
+#else
+  bool use_gtk = theme_provider_->UseGtkTheme();
+#endif
+
+  if (use_gtk) {
+    GtkStyle* style = gtk_rc_get_style(instant_view_);
 
     faded_text = gtk_util::AverageColors(
         style->text[GTK_STATE_NORMAL], style->base[GTK_STATE_NORMAL]);
@@ -864,12 +1016,23 @@ void AutocompleteEditViewGtk::UpdateInstantViewColors() {
     selection_bg = gfx::GdkColorToSkColor(style->base[GTK_STATE_SELECTED]);
   } else {
     gdk_color_parse(kTextBaseColor, &faded_text);
-    normal_bg = LocationBarViewGtk::kBackgroundColor;
 
+#if defined(TOOLKIT_VIEWS)
+    normal_bg = gfx::SkColorToGdkColor(
+        LocationBarView::GetColor(ToolbarModel::NONE,
+                                  LocationBarView::BACKGROUND));
+    selection_text = LocationBarView::GetColor(
+        ToolbarModel::NONE, LocationBarView::SELECTED_TEXT);
+
+    GtkStyle* style = gtk_rc_get_style(instant_view_);
+    selection_bg = gfx::GdkColorToSkColor(style->base[GTK_STATE_SELECTED]);
+#else
+    normal_bg = LocationBarViewGtk::kBackgroundColor;
     selection_text =
         theme_provider_->get_active_selection_fg_color();
     selection_bg =
         theme_provider_->get_active_selection_bg_color();
+#endif
   }
 
   double alpha = instant_animation_->is_animating() ?
@@ -893,9 +1056,6 @@ void AutocompleteEditViewGtk::UpdateInstantViewColors() {
     // is NORMAL, and the background is transparent.
     gtk_widget_modify_fg(instant_view_, GTK_STATE_NORMAL, &text);
   }
-#else  // defined(TOOLKIT_VIEWS)
-  // We don't worry about views because it doesn't use the instant view.
-#endif
 }
 
 void AutocompleteEditViewGtk::HandleBeginUserAction(GtkTextBuffer* sender) {
@@ -988,10 +1148,18 @@ gboolean AutocompleteEditViewGtk::HandleKeyPress(GtkWidget* widget,
   // Reset |text_changed_| before passing the key event on to the text view.
   text_changed_ = false;
 
+  OnBeforePossibleChange();
+  handling_key_press_ = true;
+  content_maybe_changed_by_key_press_ = false;
+
   // Call the default handler, so that IME can work as normal.
   // New line characters will be filtered out by our "insert-text"
   // signal handler attached to |text_buffer_| object.
   gboolean result = klass->key_press_event(widget, event);
+
+  handling_key_press_ = false;
+  if (content_maybe_changed_by_key_press_)
+    OnAfterPossibleChange();
 
   // Set |tab_was_pressed_| to false, to make sure Tab to search behavior can
   // only be triggered by pressing Tab key.
@@ -1173,39 +1341,45 @@ void AutocompleteEditViewGtk::HandleViewMoveCursor(
   GtkTextIter sel_start, sel_end;
   gboolean has_selection =
       gtk_text_buffer_get_selection_bounds(text_buffer_, &sel_start, &sel_end);
+  bool handled = false;
 
-  bool handled = true;
+  if (step == GTK_MOVEMENT_VISUAL_POSITIONS && !extend_selection &&
+      (count == 1 || count == -1)) {
+    gint cursor_pos;
+    g_object_get(G_OBJECT(text_buffer_), "cursor-position", &cursor_pos, NULL);
 
-  // We want the GtkEntry behavior when you move the cursor while you have a
-  // selection.  GtkTextView just drops the selection and moves the cursor, but
-  // instead we want to move the cursor to the appropiate end of the selection.
-  if (step == GTK_MOVEMENT_VISUAL_POSITIONS && !extend_selection) {
-    if ((count == 1 || count == -1) && has_selection) {
+    // We need to take the content direction into account when handling cursor
+    // movement, because the behavior of Left and Right key will be inverted if
+    // the direction is RTL. Although we should check the direction around the
+    // input caret, it's much simpler and good enough to check whole content's
+    // direction.
+    PangoDirection content_dir = GetContentDirection();
+    gint count_towards_end = content_dir == PANGO_DIRECTION_RTL ? -1 : 1;
+
+    // We want the GtkEntry behavior when you move the cursor while you have a
+    // selection.  GtkTextView just drops the selection and moves the cursor,
+    // but instead we want to move the cursor to the appropiate end of the
+    // selection.
+    if (has_selection) {
       // We have a selection and start / end are in ascending order.
-      // Cursor placement will remove the selection, so we need inform |model_|
-      // about this change by calling On{Before|After}PossibleChange() methods.
+      // Cursor placement will remove the selection, so we need inform
+      // |model_| about this change by
+      // calling On{Before|After}PossibleChange() methods.
       OnBeforePossibleChange();
-      gtk_text_buffer_place_cursor(text_buffer_,
-                                   count == 1 ? &sel_end : &sel_start);
+      gtk_text_buffer_place_cursor(
+          text_buffer_, count == count_towards_end ? &sel_end : &sel_start);
       OnAfterPossibleChange();
-    } else if (count == 1 && !has_selection) {
-      gint cursor_pos;
-      g_object_get(G_OBJECT(text_buffer_), "cursor-position", &cursor_pos,
-                   NULL);
-      if (cursor_pos == GetTextLength())
-        controller_->OnCommitSuggestedText(GetText());
-      else
-        handled = false;
-    } else {
-      handled = false;
+      handled = true;
+    } else if (count == count_towards_end && cursor_pos == GetTextLength()) {
+      handled = controller_->OnCommitSuggestedText(GetText());
     }
   } else if (step == GTK_MOVEMENT_PAGES) {  // Page up and down.
     // Multiply by count for the direction (if we move too much that's ok).
     model_->OnUpOrDownKeyPressed(model_->result().size() * count);
+    handled = true;
   } else if (step == GTK_MOVEMENT_DISPLAY_LINES) {  // Arrow up and down.
     model_->OnUpOrDownKeyPressed(count);
-  } else {
-    handled = false;
+    handled = true;
   }
 
   if (!handled) {
@@ -1465,21 +1639,13 @@ void AutocompleteEditViewGtk::HandleViewMoveFocus(GtkWidget* widget,
   bool handled = false;
 
   // Trigger Tab to search behavior only when Tab key is pressed.
-  if (model_->is_keyword_hint() && !model_->keyword().empty()) {
-    if (enable_tab_to_search_) {
-      model_->AcceptKeyword();
-      handled = true;
-    }
+  if (model_->is_keyword_hint()) {
+    handled = model_->AcceptKeyword();
+  } else if (GTK_WIDGET_VISIBLE(instant_view_)) {
+    controller_->OnCommitSuggestedText(GetText());
+    handled = true;
   } else {
-    // TODO(estade): this only works for linux/gtk; linux/views doesn't use
-    // |instant_view_| so its visibility is not an indicator of whether we
-    // have a suggestion.
-    if (GTK_WIDGET_VISIBLE(instant_view_)) {
-      controller_->OnCommitSuggestedText(GetText());
-      handled = true;
-    } else {
-      handled = controller_->AcceptCurrentInstantPreview();
-    }
+    handled = controller_->AcceptCurrentInstantPreview();
   }
 
   if (handled) {
@@ -1672,18 +1838,25 @@ AutocompleteEditViewGtk::CharRange AutocompleteEditViewGtk::GetSelection() {
   mark = gtk_text_buffer_get_insert(text_buffer_);
   gtk_text_buffer_get_iter_at_mark(text_buffer_, &insert, mark);
 
+  gint start_offset = gtk_text_iter_get_offset(&start);
+  gint end_offset = gtk_text_iter_get_offset(&insert);
+
 #if GTK_CHECK_VERSION(2, 20, 0)
   // Nothing should be selected when we are in the middle of composition.
-  DCHECK(preedit_.empty() || gtk_text_iter_equal(&start, &insert));
+  DCHECK(preedit_.empty() || start_offset == end_offset);
+  if (!preedit_.empty()) {
+    start_offset += preedit_.size();
+    end_offset += preedit_.size();
+  }
 #endif
 
-  return CharRange(gtk_text_iter_get_offset(&start),
-                   gtk_text_iter_get_offset(&insert));
+  return CharRange(start_offset, end_offset);
 }
 
 void AutocompleteEditViewGtk::ItersFromCharRange(const CharRange& range,
                                                  GtkTextIter* iter_min,
                                                  GtkTextIter* iter_max) {
+  DCHECK(!IsImeComposing());
   gtk_text_buffer_get_iter_at_offset(text_buffer_, iter_min, range.cp_min);
   gtk_text_buffer_get_iter_at_offset(text_buffer_, iter_max, range.cp_max);
 }
@@ -1707,8 +1880,10 @@ void AutocompleteEditViewGtk::EmphasizeURLComponents() {
   // a part of the text content inside GtkTextView. And it's ok to simply return
   // in this case, as this method will be called again when the preedit string
   // gets committed.
-  if (preedit_.size())
+  if (preedit_.size()) {
+    strikethrough_ = CharRange();
     return;
+  }
 #endif
   // See whether the contents are a URL with a non-empty host portion, which we
   // should emphasize.  To check for a URL, rather than using the type returned
@@ -1763,27 +1938,6 @@ void AutocompleteEditViewGtk::EmphasizeURLComponents() {
     } else {
       gtk_text_buffer_apply_tag(text_buffer_, secure_scheme_tag_, &start, &end);
     }
-  }
-}
-
-void AutocompleteEditViewGtk::SetInstantSuggestion(
-    const std::string& suggestion) {
-  gtk_label_set_text(GTK_LABEL(instant_view_), suggestion.c_str());
-
-  StopAnimation();
-
-  if (suggestion.empty()) {
-    gtk_widget_hide(instant_view_);
-  } else {
-    if (InstantController::IsEnabled(model_->profile(),
-                                     InstantController::PREDICTIVE_TYPE)) {
-      instant_animation_->set_delegate(this);
-      instant_animation_->Start();
-    }
-
-    gtk_widget_show(instant_view_);
-    AdjustVerticalAlignmentOfInstantView();
-    UpdateInstantViewColors();
   }
 }
 

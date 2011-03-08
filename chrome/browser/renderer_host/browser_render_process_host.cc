@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #endif
 
 #include "app/app_switches.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
@@ -24,34 +25,52 @@
 #include "base/platform_file.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
-#include "base/thread.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread.h"
+#include "base/threading/thread_restrictions.h"
+#include "chrome/browser/appcache/appcache_dispatcher_host.h"
 #include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/child_process_security_policy.h"
+#include "chrome/browser/device_orientation/message_filter.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_message_service.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
+#include "chrome/browser/file_system/file_system_dispatcher_host.h"
+#include "chrome/browser/geolocation/geolocation_dispatcher_host.h"
 #include "chrome/browser/gpu_process_host.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/in_process_webkit/dom_storage_message_filter.h"
+#include "chrome/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/mime_registry_message_filter.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugin_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
+#include "chrome/browser/renderer_host/blob_message_filter.h"
+#include "chrome/browser/renderer_host/database_message_filter.h"
+#include "chrome/browser/renderer_host/file_utilities_message_filter.h"
 #include "chrome/browser/renderer_host/pepper_file_message_filter.h"
+#include "chrome/browser/renderer_host/pepper_message_filter.h"
+#include "chrome/browser/renderer_host/render_message_filter.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_widget_helper.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
+#include "chrome/browser/renderer_host/socket_stream_dispatcher_host.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
+#include "chrome/browser/safe_browsing/client_side_detection_service.h"
+#include "chrome/browser/search_engines/search_provider_install_state_message_filter.h"
+#include "chrome/browser/speech/speech_input_dispatcher_host.h"
 #include "chrome/browser/speech/speech_input_manager.h"
 #include "chrome/browser/spellcheck_host.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/visitedlink_master.h"
+#include "chrome/browser/visitedlink/visitedlink_master.h"
+#include "chrome/browser/worker_host/worker_message_filter.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/child_process_info.h"
@@ -74,11 +93,13 @@
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media_switches.h"
+#include "ui/base/ui_base_switches.h"
 #include "webkit/fileapi/file_system_path_manager.h"
-#include "webkit/glue/plugins/plugin_switches.h"
+#include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
-#include "app/win_util.h"
+#include <objbase.h>
+#include "app/win/win_util.h"
 #endif
 
 using WebKit::WebCache;
@@ -207,6 +228,38 @@ class VisitedLinkUpdater {
   VisitedLinkCommon::Fingerprints pending_;
 };
 
+namespace {
+
+// Helper class that we pass to ResourceMessageFilter so that it can find the
+// right net::URLRequestContext for a request.
+class RendererURLRequestContextOverride
+    : public ResourceMessageFilter::URLRequestContextOverride {
+ public:
+  explicit RendererURLRequestContextOverride(Profile* profile)
+      : request_context_(profile->GetRequestContext()),
+        media_request_context_(profile->GetRequestContextForMedia()) {
+  }
+
+  virtual net::URLRequestContext* GetRequestContext(
+      const ViewHostMsg_Resource_Request& resource_request) {
+    URLRequestContextGetter* request_context = request_context_;
+    // If the request has resource type of ResourceType::MEDIA, we use a request
+    // context specific to media for handling it because these resources have
+    // specific needs for caching.
+    if (resource_request.resource_type == ResourceType::MEDIA)
+      request_context = media_request_context_;
+    return request_context->GetURLRequestContext();
+  }
+
+ private:
+  virtual ~RendererURLRequestContextOverride() {}
+
+  scoped_refptr<URLRequestContextGetter> request_context_;
+  scoped_refptr<URLRequestContextGetter> media_request_context_;
+};
+
+}  // namespace
+
 BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
     : RenderProcessHost(profile),
       visible_widgets_(0),
@@ -215,7 +268,8 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
             base::TimeDelta::FromSeconds(5),
             this, &BrowserRenderProcessHost::ClearTransportDIBCache)),
       accessibility_enabled_(false),
-      extension_process_(false) {
+      extension_process_(false),
+      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   widget_helper_ = new RenderWidgetHelper();
 
   registrar_.Add(this, NotificationType::USER_SCRIPTS_UPDATED,
@@ -241,9 +295,8 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
   // PLATFORM_FILE_DELETE_ON_CLOSE are not granted, because no existing API
   // requests them.
   ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
-      id(),
-      fileapi::FileSystemPathManager::GetFileSystemCommonRootDirectory(
-          profile->GetPath()),
+      id(), profile->GetPath().Append(
+          fileapi::FileSystemPathManager::kFileSystemDirectory),
       base::PLATFORM_FILE_OPEN |
       base::PLATFORM_FILE_CREATE |
       base::PLATFORM_FILE_OPEN_ALWAYS |
@@ -275,10 +328,6 @@ BrowserRenderProcessHost::~BrowserRenderProcessHost() {
     queued_messages_.pop();
   }
 
-  // Destroy the AudioRendererHost properly.
-  if (audio_renderer_host_.get())
-    audio_renderer_host_->Destroy();
-
   ClearTransportDIBCache();
 }
 
@@ -297,18 +346,6 @@ bool BrowserRenderProcessHost::Init(
 
   // run the IPC channel on the shared IO thread.
   base::Thread* io_thread = g_browser_process->io_thread();
-
-  // Construct the AudioRendererHost with the IO thread.
-  audio_renderer_host_ = new AudioRendererHost();
-
-  scoped_refptr<ResourceMessageFilter> resource_message_filter(
-      new ResourceMessageFilter(g_browser_process->resource_dispatcher_host(),
-                                id(),
-                                audio_renderer_host_.get(),
-                                PluginService::GetInstance(),
-                                g_browser_process->print_job_manager(),
-                                profile(),
-                                widget_helper_));
 
   CommandLine::StringType renderer_prefix;
 #if defined(OS_POSIX)
@@ -331,7 +368,6 @@ bool BrowserRenderProcessHost::Init(
       ChildProcessInfo::GenerateRandomChannelID(this);
   channel_.reset(
       new IPC::SyncChannel(channel_id, IPC::Channel::MODE_SERVER, this,
-                           resource_message_filter,
                            io_thread->message_loop(), true,
                            g_browser_process->shutdown_event()));
   // As a preventive mesure, we DCHECK if someone sends a synchronous message
@@ -339,9 +375,7 @@ bool BrowserRenderProcessHost::Init(
   // be doing.
   channel_->set_sync_messages_with_no_timeout_allowed(false);
 
-  scoped_refptr<PepperFileMessageFilter> pepper_file_message_filter(
-      new PepperFileMessageFilter(id(), profile()));
-  channel_->AddFilter(pepper_file_message_filter);
+  CreateMessageFilters();
 
   if (run_renderer_in_process()) {
     // Crank up a thread and run the initialization there.  With the way that
@@ -393,6 +427,60 @@ bool BrowserRenderProcessHost::Init(
   return true;
 }
 
+void BrowserRenderProcessHost::CreateMessageFilters() {
+  scoped_refptr<RenderMessageFilter> render_message_filter(
+      new RenderMessageFilter(id(),
+                              PluginService::GetInstance(),
+                              profile(),
+                              widget_helper_));
+  channel_->AddFilter(render_message_filter);
+
+  scoped_refptr<RendererURLRequestContextOverride> url_request_context_override(
+      new RendererURLRequestContextOverride(profile()));
+
+  ResourceMessageFilter* resource_message_filter = new ResourceMessageFilter(
+      id(), ChildProcessInfo::RENDER_PROCESS,
+      g_browser_process->resource_dispatcher_host());
+  resource_message_filter->set_url_request_context_override(
+      url_request_context_override);
+  channel_->AddFilter(resource_message_filter);
+
+  channel_->AddFilter(new AudioRendererHost());
+  channel_->AddFilter(
+      new AppCacheDispatcherHost(profile()->GetRequestContext(), id()));
+  channel_->AddFilter(new DOMStorageMessageFilter(id(), profile()));
+  channel_->AddFilter(new IndexedDBDispatcherHost(id(), profile()));
+  channel_->AddFilter(
+      GeolocationDispatcherHost::New(
+          id(), profile()->GetGeolocationPermissionContext()));
+  channel_->AddFilter(new PepperFileMessageFilter(id(), profile()));
+  channel_->AddFilter(new PepperMessageFilter(profile()));
+  channel_->AddFilter(new speech_input::SpeechInputDispatcherHost(id()));
+  channel_->AddFilter(
+      new SearchProviderInstallStateMessageFilter(id(), profile()));
+  channel_->AddFilter(new FileSystemDispatcherHost(profile()));
+  channel_->AddFilter(new device_orientation::MessageFilter());
+  channel_->AddFilter(
+      new BlobMessageFilter(id(), profile()->GetBlobStorageContext()));
+  channel_->AddFilter(new FileUtilitiesMessageFilter(id()));
+  channel_->AddFilter(new MimeRegistryMessageFilter());
+  channel_->AddFilter(new DatabaseMessageFilter(
+      profile()->GetDatabaseTracker(), profile()->GetHostContentSettingsMap()));
+
+  SocketStreamDispatcherHost* socket_stream_dispatcher_host =
+      new SocketStreamDispatcherHost();
+  socket_stream_dispatcher_host->set_url_request_context_override(
+      url_request_context_override);
+  channel_->AddFilter(socket_stream_dispatcher_host);
+
+  channel_->AddFilter(new WorkerMessageFilter(
+      id(),
+      profile()->GetRequestContext(),
+      g_browser_process->resource_dispatcher_host(),
+      NewCallbackWithReturnValue(
+          widget_helper_.get(), &RenderWidgetHelper::GetNextRoutingID)));
+}
+
 int BrowserRenderProcessHost::GetNextRoutingID() {
   return widget_helper_->GetNextRoutingID();
 }
@@ -418,8 +506,14 @@ bool BrowserRenderProcessHost::WaitForUpdateMsg(
   return widget_helper_->WaitForUpdateMsg(render_widget_id, max_delay, msg);
 }
 
-void BrowserRenderProcessHost::ReceivedBadMessage(uint32 msg_type) {
-  BadMessageTerminateProcess(msg_type, GetHandle());
+void BrowserRenderProcessHost::ReceivedBadMessage() {
+  if (run_renderer_in_process()) {
+    // In single process mode it is better if we don't suicide but just
+    // crash.
+    CHECK(false);
+  }
+  NOTREACHED();
+  base::KillProcess(GetHandle(), ResultCodes::KILLED_BAD_MESSAGE, false);
 }
 
 void BrowserRenderProcessHost::ViewCreated() {
@@ -541,106 +635,105 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
   // Propagate the following switches to the renderer command line (along
   // with any associated values) if present in the browser command line.
   static const char* const kSwitchNames[] = {
+    switches::kAllowOutdatedPlugins,
+    switches::kAllowScriptingGallery,
+    switches::kAppsGalleryURL,
+    // We propagate the Chrome Frame command line here as well in case the
+    // renderer is not run in the sandbox.
+    switches::kChromeFrame,
+    switches::kDebugPrint,
+    switches::kDisable3DAPIs,
+    switches::kDisableAcceleratedCompositing,
+    switches::kDisableApplicationCache,
+    switches::kDisableAudio,
+    switches::kDisableBreakpad,
+    switches::kDisableDatabases,
+    switches::kDisableDesktopNotifications,
+    switches::kDisableDeviceOrientation,
+    // We need to propagate this flag to determine whether to make the
+    // WebGLArray constructors on the DOMWindow visible. This
+    // information is needed very early during bringup. We prefer to
+    // use the WebPreferences to set this flag on a page-by-page basis.
+    switches::kDisableExperimentalWebGL,
+    switches::kDisableFileSystem,
+    switches::kDisableGeolocation,
+    switches::kDisableGLSLTranslator,
+    switches::kDisableLocalStorage,
+    switches::kDisableLogging,
+    switches::kDisableSeccompSandbox,
+    switches::kDisableSessionStorage,
+    switches::kDisableSharedWorkers,
+    switches::kDisableSpeechInput,
+    switches::kDisableWebSockets,
+    switches::kDomAutomationController,
+    switches::kDumpHistogramsOnExit,
+    switches::kEnableAcceleratedDecoding,
+    switches::kEnableBenchmarking,
+    switches::kEnableClickToPlay,
+    switches::kEnableCrxlessWebApps,
+    switches::kEnableDCHECK,
+    switches::kEnableExperimentalExtensionApis,
+    switches::kEnableInBrowserThumbnailing,
+    switches::kEnableIndexedDatabase,
+    switches::kEnableLogging,
+    switches::kEnableNaCl,
+    switches::kEnableOpenMax,
+    switches::kEnablePepperTesting,
+    switches::kEnablePrintPreview,
+    switches::kEnableRemoting,
+    switches::kEnableResourceContentSettings,
+#if defined(OS_MACOSX)
+    // Allow this to be set when invoking the browser and relayed along.
+    switches::kEnableSandboxLogging,
+#endif
+    switches::kEnableSearchProviderApiV2,
+    switches::kEnableSeccompSandbox,
+    switches::kEnableStatsTable,
+    switches::kEnableTouch,
+    switches::kEnableVideoFullscreen,
+    switches::kEnableVideoLogging,
+    switches::kEnableWatchdog,
+    switches::kEnableWebAudio,
+    switches::kExperimentalSpellcheckerFeatures,
+    switches::kFullMemoryCrashReport,
+#if !defined (GOOGLE_CHROME_BUILD)
+    // These are unsupported and not fully tested modes, so don't enable them
+    // for official Google Chrome builds.
+    switches::kInProcessPlugins,
+#endif  // GOOGLE_CHROME_BUILD
+    switches::kInProcessWebGL,
+    switches::kInternalNaCl,
+    switches::kInternalPepper,
+    switches::kJavaScriptFlags,
+    switches::kLoggingLevel,
+    switches::kMemoryProfiling,
+    switches::kMessageLoopHistogrammer,
+    switches::kNoJsRandomness,
+    switches::kNoReferrers,
+    switches::kNoSandbox,
+    switches::kPlaybackMode,
+    switches::kPpapiOutOfProcess,
+    switches::kRecordMode,
+    switches::kRegisterPepperPlugins,
+    switches::kRemoteShellPort,
     switches::kRendererAssertTest,
 #if !defined(OFFICIAL_BUILD)
     switches::kRendererCheckFalseTest,
 #endif  // !defined(OFFICIAL_BUILD)
     switches::kRendererCrashTest,
     switches::kRendererStartupDialog,
-    switches::kNoSandbox,
-    switches::kTestSandbox,
-#if defined(USE_SECCOMP_SANDBOX)
-    switches::kDisableSeccompSandbox,
-#else
-    switches::kEnableSeccompSandbox,
-#endif
-#if !defined (GOOGLE_CHROME_BUILD)
-    // These are unsupported and not fully tested modes, so don't enable them
-    // for official Google Chrome builds.
-    switches::kInProcessPlugins,
-#endif  // GOOGLE_CHROME_BUILD
-    switches::kAllowScriptingGallery,
-    switches::kDomAutomationController,
-    switches::kUserAgent,
-    switches::kNoReferrers,
-    switches::kJavaScriptFlags,
-    switches::kRecordMode,
-    switches::kPlaybackMode,
-    switches::kNoJsRandomness,
-    switches::kDisableBreakpad,
-    switches::kFullMemoryCrashReport,
-    switches::kV,
-    switches::kVModule,
-    switches::kEnableLogging,
-    switches::kDumpHistogramsOnExit,
-    switches::kDisableLogging,
-    switches::kLoggingLevel,
-    switches::kDebugPrint,
-    switches::kMemoryProfiling,
-    switches::kEnableWatchdog,
-    switches::kMessageLoopHistogrammer,
-    switches::kEnableDCHECK,
-    switches::kSilentDumpOnDCHECK,
-    switches::kUseLowFragHeapCrt,
-    switches::kEnableSearchProviderApiV2,
-    switches::kEnableStatsTable,
-    switches::kExperimentalSpellcheckerFeatures,
-    switches::kDisableAudio,
-    switches::kSimpleDataSource,
-    switches::kEnableBenchmarking,
-    switches::kInternalNaCl,
-    switches::kInternalPepper,
-    switches::kRegisterPepperPlugins,
-    switches::kDisableDatabases,
-    switches::kDisableDesktopNotifications,
-    switches::kDisableWebSockets,
-    switches::kDisableLocalStorage,
-    switches::kDisableSessionStorage,
-    switches::kDisableSharedWorkers,
-    switches::kDisableApplicationCache,
-    switches::kDisableDeviceOrientation,
-    switches::kEnableIndexedDatabase,
-    switches::kDisableSpeechInput,
-    switches::kDisableGeolocation,
     switches::kShowPaintRects,
-    switches::kEnableOpenMax,
-    switches::kVideoThreads,
-    switches::kEnableVideoFullscreen,
-    switches::kEnableVideoLogging,
-    switches::kEnableTouch,
-    // We propagate the Chrome Frame command line here as well in case the
-    // renderer is not run in the sandbox.
-    switches::kChromeFrame,
-    // We need to propagate this flag to determine whether to make the
-    // WebGLArray constructors on the DOMWindow visible. This
-    // information is needed very early during bringup. We prefer to
-    // use the WebPreferences to set this flag on a page-by-page basis.
-    switches::kDisableExperimentalWebGL,
-    switches::kDisableGLSLTranslator,
-    switches::kInProcessWebGL,
+    switches::kSilentDumpOnDCHECK,
+    switches::kSimpleDataSource,
+    switches::kTestSandbox,
     // This flag needs to be propagated to the renderer process for
     // --in-process-webgl.
     switches::kUseGL,
-    switches::kDisableAcceleratedCompositing,
-#if defined(OS_MACOSX)
-    // Allow this to be set when invoking the browser and relayed along.
-    switches::kEnableSandboxLogging,
-#endif
-    switches::kRemoteShellPort,
-    switches::kEnablePepperTesting,
-    switches::kBlockNonSandboxedPlugins,
-    switches::kDisableOutdatedPlugins,
-    switches::kEnableRemoting,
-    switches::kEnableClickToPlay,
-    switches::kEnableResourceContentSettings,
-    switches::kPrelaunchGpuProcess,
-    switches::kEnableAcceleratedDecoding,
-    switches::kDisableFileSystem,
-    switches::kPpapiOutOfProcess,
-    switches::kEnablePrintPreview,
-    switches::kEnableClientSidePhishingDetection,
-    switches::kEnableCrxlessWebApps,
-    switches::kDisable3DAPIs
+    switches::kUseLowFragHeapCrt,
+    switches::kUserAgent,
+    switches::kV,
+    switches::kVideoThreads,
+    switches::kVModule,
   };
   renderer_cmd->CopySwitchesFrom(browser_cmd, kSwitchNames,
                                  arraysize(kSwitchNames));
@@ -649,6 +742,12 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
   if (profile()->IsOffTheRecord() &&
       !browser_cmd.HasSwitch(switches::kDisableDatabases)) {
     renderer_cmd->AppendSwitch(switches::kDisableDatabases);
+  }
+
+  // Only enable client-side phishing detection in the renderer if it is enabled
+  // in the browser process.
+  if (g_browser_process->safe_browsing_detection_service()) {
+    renderer_cmd->AppendSwitch(switches::kEnableClientSidePhishingDetection);
   }
 }
 
@@ -689,16 +788,29 @@ void BrowserRenderProcessHost::InitUserScripts() {
 }
 
 void BrowserRenderProcessHost::InitExtensions() {
-  // TODO(aa): Should only bother sending these function names if this is an
-  // extension process.
+  // Valid extension function names, used to setup bindings in renderer.
   std::vector<std::string> function_names;
   ExtensionFunctionDispatcher::GetAllFunctionNames(&function_names);
   Send(new ViewMsg_Extension_SetFunctionNames(function_names));
+
+  // Scripting whitelist. This is modified by tests and must be communicated to
+  // renderers.
+  Send(new ViewMsg_Extension_SetScriptingWhitelist(
+      *Extension::GetScriptingWhitelist()));
+
+  // Loaded extensions.
+  ExtensionService* service = profile()->GetExtensionService();
+  if (service) {
+    for (size_t i = 0; i < service->extensions()->size(); ++i) {
+      Send(new ViewMsg_ExtensionLoaded(
+          ViewMsg_ExtensionLoaded_Params(service->extensions()->at(i))));
+    }
+  }
 }
 
 void BrowserRenderProcessHost::InitSpeechInput() {
   Send(new ViewMsg_SpeechInput_SetFeatureEnabled(
-          speech_input::SpeechInputManager::IsFeatureEnabled()));
+      speech_input::SpeechInputManager::IsFeatureEnabled()));
 }
 
 void BrowserRenderProcessHost::SendUserScriptsUpdate(
@@ -717,40 +829,6 @@ void BrowserRenderProcessHost::SendUserScriptsUpdate(
   if (base::SharedMemory::IsHandleValid(handle_for_process)) {
     Send(new ViewMsg_UserScripts_UpdatedScripts(handle_for_process));
   }
-}
-
-void BrowserRenderProcessHost::SendExtensionInfo() {
-  // Check if the process is still starting and we don't have a handle for it
-  // yet, in which case this will happen later when InitVisitedLinks is called.
-  if (!run_renderer_in_process() &&
-      (!child_process_.get() || child_process_->IsStarting())) {
-    return;
-  }
-
-  ExtensionsService* service = profile()->GetExtensionsService();
-  if (!service)
-    return;
-  ViewMsg_ExtensionsUpdated_Params params;
-  for (size_t i = 0; i < service->extensions()->size(); ++i) {
-    const Extension* extension = service->extensions()->at(i);
-    ViewMsg_ExtensionRendererInfo info;
-    info.id = extension->id();
-    info.web_extent = extension->web_extent();
-    info.name = extension->name();
-    info.location = extension->location();
-    info.allowed_to_execute_script_everywhere =
-        extension->CanExecuteScriptEverywhere();
-    info.host_permissions = extension->host_permissions();
-
-    // The icon in the page is 96px.  We'd rather not scale up, so use 128.
-    info.icon_url = extension->GetIconURL(Extension::EXTENSION_ICON_LARGE,
-                                          ExtensionIconSet::MATCH_EXACTLY);
-    if (info.icon_url.is_empty())
-      info.icon_url = GURL("chrome://theme/IDR_APP_DEFAULT_ICON");
-    params.extensions.push_back(info);
-  }
-
-  Send(new ViewMsg_ExtensionsUpdated(params));
 }
 
 bool BrowserRenderProcessHost::FastShutdownIfPossible() {
@@ -805,7 +883,7 @@ TransportDIB* BrowserRenderProcessHost::MapTransportDIB(
     TransportDIB::Id dib_id) {
 #if defined(OS_WIN)
   // On Windows we need to duplicate the handle from the remote process
-  HANDLE section = win_util::GetSectionFromProcess(
+  HANDLE section = app::win::GetSectionFromProcess(
       dib_id.handle, GetHandle(), false /* read write */);
   return TransportDIB::Map(section);
 #elif defined(OS_MACOSX)
@@ -872,17 +950,11 @@ bool BrowserRenderProcessHost::Send(IPC::Message* msg) {
   return channel_->Send(msg);
 }
 
-void BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
+bool BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
   // If we're about to be deleted, we can no longer trust that our profile is
   // valid, so we ignore incoming messages.
   if (deleting_soon_)
-    return;
-
-#if defined(OS_CHROMEOS)
-  // To troubleshoot crosbug.com/7327.
-  CHECK(this);
-  CHECK(&msg);
-#endif
+    return false;
 
   mark_child_process_activity_time();
   if (msg.routing_id() == MSG_ROUTING_CONTROL) {
@@ -909,9 +981,11 @@ void BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
     if (!msg_is_ok) {
       // The message had a handler, but its de-serialization failed.
       // We consider this a capital crime. Kill the renderer if we have one.
-      ReceivedBadMessage(msg.type());
+      LOG(ERROR) << "bad message " << msg.type() << " terminating renderer.";
+      UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_BRPH"));
+      ReceivedBadMessage();
     }
-    return;
+    return true;
   }
 
   // Dispatch incoming messages to the appropriate RenderView/WidgetHost.
@@ -924,27 +998,16 @@ void BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
       reply->set_reply_error();
       Send(reply);
     }
-    return;
+    return true;
   }
-  listener->OnMessageReceived(msg);
+  return listener->OnMessageReceived(msg);
 }
 
 void BrowserRenderProcessHost::OnChannelConnected(int32 peer_pid) {
 #if defined(IPC_MESSAGE_LOG_ENABLED)
-  Send(new ViewMsg_SetIPCLoggingEnabled(IPC::Logging::current()->Enabled()));
+  Send(new ViewMsg_SetIPCLoggingEnabled(
+      IPC::Logging::GetInstance()->Enabled()));
 #endif
-}
-
-// Static. This function can be called from any thread.
-void BrowserRenderProcessHost::BadMessageTerminateProcess(
-    uint32 msg_type, base::ProcessHandle process) {
-  LOG(ERROR) << "bad message " << msg_type << " terminating renderer.";
-  if (run_renderer_in_process()) {
-    // In single process mode it is better if we don't suicide but just crash.
-    CHECK(false);
-  }
-  NOTREACHED();
-  base::KillProcess(process, ResultCodes::KILLED_BAD_MESSAGE, false);
 }
 
 void BrowserRenderProcessHost::OnChannelError() {
@@ -956,16 +1019,26 @@ void BrowserRenderProcessHost::OnChannelError() {
   if (!channel_.get())
     return;
 
-  // NULL in single process mode or if fast termination happened.
-  bool did_crash =
-      child_process_.get() ? child_process_->DidProcessCrash() : false;
+  // child_process_ can be NULL in single process mode or if fast
+  // termination happened.
+  int exit_code = 0;
+  base::TerminationStatus status =
+      child_process_.get() ?
+      child_process_->GetChildTerminationStatus(&exit_code) :
+      base::TERMINATION_STATUS_NORMAL_TERMINATION;
 
-  if (did_crash) {
+  if (status == base::TERMINATION_STATUS_PROCESS_CRASHED ||
+      status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION) {
     UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildCrashes",
                              extension_process_ ? 2 : 1);
   }
 
-  RendererClosedDetails details(did_crash, extension_process_);
+  if (status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED) {
+    UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildKills",
+                             extension_process_ ? 2 : 1);
+  }
+
+  RendererClosedDetails details(status, exit_code, extension_process_);
   NotificationService::current()->Notify(
       NotificationType::RENDERER_PROCESS_CLOSED,
       Source<RenderProcessHost>(this),
@@ -978,7 +1051,9 @@ void BrowserRenderProcessHost::OnChannelError() {
   IDMap<IPC::Channel::Listener>::iterator iter(&listeners_);
   while (!iter.IsAtEnd()) {
     iter.GetCurrentValue()->OnMessageReceived(
-        ViewHostMsg_RenderViewGone(iter.GetCurrentKey()));
+        ViewHostMsg_RenderViewGone(iter.GetCurrentKey(),
+                                   static_cast<int>(status),
+                                   exit_code));
     iter.Advance();
   }
 
@@ -1031,9 +1106,15 @@ void BrowserRenderProcessHost::Observe(NotificationType type,
       }
       break;
     }
-    case NotificationType::EXTENSION_LOADED:
+    case NotificationType::EXTENSION_LOADED: {
+      Send(new ViewMsg_ExtensionLoaded(
+          ViewMsg_ExtensionLoaded_Params(
+              Details<const Extension>(details).ptr())));
+      break;
+    }
     case NotificationType::EXTENSION_UNLOADED: {
-      SendExtensionInfo();
+      Send(new ViewMsg_ExtensionUnloaded(
+          Details<UnloadedExtensionInfo>(details).ptr()->extension->id()));
       break;
     }
     case NotificationType::SPELLCHECK_HOST_REINITIALIZED: {
@@ -1076,7 +1157,6 @@ void BrowserRenderProcessHost::OnProcessLaunched() {
   InitVisitedLinks();
   InitUserScripts();
   InitExtensions();
-  SendExtensionInfo();
 
   // We don't want to initialize the spellchecker unless SpellCheckHost has been
   // created. In InitSpellChecker(), we know if GetSpellCheckHost() is NULL
@@ -1084,6 +1164,8 @@ void BrowserRenderProcessHost::OnProcessLaunched() {
   // it's been turned off or just not loaded yet.
   if (profile()->GetSpellCheckHost())
     InitSpellChecker();
+
+  InitClientSidePhishingDetection();
 
   if (max_page_id_ != -1)
     Send(new ViewMsg_SetNextPageID(max_page_id_ + 1));
@@ -1175,4 +1257,30 @@ void BrowserRenderProcessHost::InitSpellChecker() {
 
 void BrowserRenderProcessHost::EnableAutoSpellCorrect(bool enable) {
   Send(new ViewMsg_SpellChecker_EnableAutoSpellCorrect(enable));
+}
+
+void BrowserRenderProcessHost::InitClientSidePhishingDetection() {
+  if (g_browser_process->safe_browsing_detection_service()) {
+    // The BrowserRenderProcessHost object might get deleted before the
+    // safe browsing client-side detection service class is done with opening
+    // the model file.  To avoid crashing we use the callback factory which will
+    // cancel the callback if |this| is destroyed.
+    g_browser_process->safe_browsing_detection_service()->GetModelFile(
+        callback_factory_.NewCallback(
+            &BrowserRenderProcessHost::OpenPhishingModelDone));
+  }
+}
+
+void BrowserRenderProcessHost::OpenPhishingModelDone(
+    base::PlatformFile model_file) {
+  if (model_file != base::kInvalidPlatformFileValue) {
+    IPC::PlatformFileForTransit file;
+#if defined(OS_POSIX)
+    file = base::FileDescriptor(model_file, false);
+#elif defined(OS_WIN)
+    ::DuplicateHandle(::GetCurrentProcess(), model_file, GetHandle(), &file, 0,
+                      false, DUPLICATE_SAME_ACCESS);
+#endif
+    Send(new ViewMsg_SetPhishingModel(file));
+  }
 }

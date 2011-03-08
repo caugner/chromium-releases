@@ -23,6 +23,7 @@ namespace net {
 
 class CertVerifier;
 class ClientSocketHandle;
+class SingleRequestCertVerifier;
 
 // An SSL client socket implemented with Secure Transport.
 class SSLClientSocketMac : public SSLClientSocket {
@@ -35,7 +36,8 @@ class SSLClientSocketMac : public SSLClientSocket {
   // the SSL settings.
   SSLClientSocketMac(ClientSocketHandle* transport_socket,
                      const HostPortPair& host_and_port,
-                     const SSLConfig& ssl_config);
+                     const SSLConfig& ssl_config,
+                     CertVerifier* cert_verifier);
   ~SSLClientSocketMac();
 
   // SSLClientSocket methods:
@@ -137,7 +139,8 @@ class SSLClientSocketMac : public SSLClientSocket {
   State next_handshake_state_;
 
   scoped_refptr<X509Certificate> server_cert_;
-  scoped_ptr<CertVerifier> verifier_;
+  CertVerifier* const cert_verifier_;
+  scoped_ptr<SingleRequestCertVerifier> verifier_;
   CertVerifyResult server_cert_verify_result_;
 
   // The initial handshake has already completed, and the current handshake
@@ -145,6 +148,10 @@ class SSLClientSocketMac : public SSLClientSocket {
   bool renegotiating_;
   bool client_cert_requested_;
   SSLContextRef ssl_context_;
+
+  // During a renegotiation, the amount of application data read following
+  // the handshake's completion.
+  size_t bytes_read_after_renegotiation_;
 
   // These buffers hold data retrieved from/sent to the underlying transport
   // before it's fed to the SSL engine.

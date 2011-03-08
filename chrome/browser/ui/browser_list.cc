@@ -11,7 +11,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/common/notification_registrar.h"
@@ -24,6 +24,9 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/login_library.h"
+#include "chrome/browser/chromeos/wm_ipc.h"
 #endif
 
 namespace {
@@ -157,6 +160,10 @@ Browser* FindBrowserMatching(const T& begin,
 BrowserList::BrowserVector BrowserList::browsers_;
 ObserverList<BrowserList::Observer> BrowserList::observers_;
 
+#if defined(OS_CHROMEOS)
+bool BrowserList::notified_window_manager_about_signout_ = false;
+#endif
+
 // static
 void BrowserList::AddBrowser(Browser* browser) {
   DCHECK(browser);
@@ -178,6 +185,34 @@ void BrowserList::AddBrowser(Browser* browser) {
   FOR_EACH_OBSERVER(Observer, observers_, OnBrowserAdded(browser));
   DCHECK_EQ(original_count, observers_.size())
       << "observer list modified during notification";
+}
+
+// static
+void BrowserList::MarkAsCleanShutdown() {
+  for (const_iterator i = begin(); i != end(); ++i) {
+    (*i)->profile()->MarkAsCleanShutdown();
+  }
+}
+
+// static
+void BrowserList::NotifyAndTerminate() {
+#if defined(OS_CHROMEOS)
+  // Let the window manager know that we're going away before we start closing
+  // windows so it can display a graceful transition to a black screen.
+  chromeos::WmIpc::instance()->NotifyAboutSignout();
+  notified_window_manager_about_signout_ = true;
+#endif
+  NotificationService::current()->Notify(NotificationType::APP_TERMINATING,
+                                         NotificationService::AllSources(),
+                                         NotificationService::NoDetails());
+#if defined(OS_CHROMEOS)
+  if (chromeos::CrosLibrary::Get()->EnsureLoaded()) {
+    chromeos::CrosLibrary::Get()->GetLoginLibrary()->StopSession("");
+    return;
+  }
+  // If running the Chrome OS build, but we're not on the device, fall through
+#endif
+  AllBrowsersClosedAndAppExiting();
 }
 
 // static
@@ -216,6 +251,16 @@ void BrowserList::RemoveBrowser(Browser* browser) {
   if (browsers_.empty() &&
       (browser_shutdown::IsTryingToQuit() ||
        g_browser_process->IsShuttingDown())) {
+#if defined(OS_CHROMEOS)
+    // We might've already notified the window manager before closing any
+    // windows in NotifyAndTerminate() if we were able to take the
+    // no-beforeunload-handlers-or-downloads fast path; no need to do it again
+    // here.
+    if (!notified_window_manager_about_signout_) {
+      chromeos::WmIpc::instance()->NotifyAboutSignout();
+      notified_window_manager_about_signout_ = true;
+    }
+#endif
     // Last browser has just closed, and this is a user-initiated quit or there
     // is no module keeping the app alive, so send out our notification. No need
     // to call ProfileManager::ShutdownSessionServices() as part of the
@@ -238,6 +283,31 @@ void BrowserList::RemoveObserver(BrowserList::Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
+#if defined(OS_CHROMEOS)
+// static
+bool BrowserList::NeedBeforeUnloadFired() {
+  bool need_before_unload_fired = false;
+  for (const_iterator i = begin(); i != end(); ++i) {
+    need_before_unload_fired = need_before_unload_fired ||
+      (*i)->TabsNeedBeforeUnloadFired();
+  }
+  return need_before_unload_fired;
+}
+
+// static
+bool BrowserList::PendingDownloads() {
+  for (const_iterator i = begin(); i != end(); ++i) {
+    bool normal_downloads_are_present = false;
+    bool incognito_downloads_are_present = false;
+    (*i)->CheckDownloadsInProgress(&normal_downloads_are_present,
+                                   &incognito_downloads_are_present);
+    if (normal_downloads_are_present || incognito_downloads_are_present)
+      return true;
+  }
+  return false;
+}
+#endif
+
 // static
 void BrowserList::CloseAllBrowsers() {
   bool session_ending =
@@ -258,10 +328,7 @@ void BrowserList::CloseAllBrowsers() {
   // If there are no browsers, send the APP_TERMINATING action here. Otherwise,
   // it will be sent by RemoveBrowser() when the last browser has closed.
   if (force_exit || browsers_.empty()) {
-    NotificationService::current()->Notify(NotificationType::APP_TERMINATING,
-                                           NotificationService::AllSources(),
-                                           NotificationService::NoDetails());
-    AllBrowsersClosedAndAppExiting();
+    NotifyAndTerminate();
     return;
   }
 #if defined(OS_CHROMEOS)
@@ -270,14 +337,13 @@ void BrowserList::CloseAllBrowsers() {
 #endif
   for (BrowserList::const_iterator i = BrowserList::begin();
        i != BrowserList::end();) {
+    Browser* browser = *i;
+    browser->window()->Close();
     if (use_post) {
-      (*i)->window()->Close();
       ++i;
     } else {
       // This path is hit during logoff/power-down. In this case we won't get
       // a final message and so we force the browser to be deleted.
-      Browser* browser = *i;
-      browser->window()->Close();
       // Close doesn't immediately destroy the browser
       // (Browser::TabStripEmpty() uses invoke later) but when we're ending the
       // session we need to make sure the browser is destroyed now. So, invoke
@@ -296,7 +362,22 @@ void BrowserList::CloseAllBrowsers() {
 }
 
 // static
+void BrowserList::Exit() {
+#if defined(OS_CHROMEOS)
+  // Fast shutdown for ChromeOS when there's no unload processing to be done.
+  if (chromeos::CrosLibrary::Get()->EnsureLoaded()
+      && !NeedBeforeUnloadFired()
+      && !PendingDownloads()) {
+    NotifyAndTerminate();
+    return;
+  }
+#endif
+  CloseAllBrowsersAndExit();
+}
+
+// static
 void BrowserList::CloseAllBrowsersAndExit() {
+  MarkAsCleanShutdown();  // Don't notify users of crashes beyond this point.
   NotificationService::current()->Notify(
       NotificationType::APP_EXITING,
       NotificationService::AllSources(),
@@ -317,7 +398,9 @@ void BrowserList::CloseAllBrowsersAndExit() {
 void BrowserList::SessionEnding() {
   // EndSession is invoked once per frame. Only do something the first time.
   static bool already_ended = false;
-  if (already_ended)
+  // We may get called in the middle of shutdown, e.g. http://crbug.com/70852
+  // In this case, do nothing.
+  if (already_ended || !NotificationService::current())
     return;
   already_ended = true;
 

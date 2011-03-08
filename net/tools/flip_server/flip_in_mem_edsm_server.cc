@@ -6,6 +6,8 @@
 #include <netinet/tcp.h>  // For TCP_NODELAY
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -19,9 +21,9 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/simple_thread.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/simple_thread.h"
 #include "base/timer.h"
-#include "base/lock.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_protocol.h"
@@ -48,6 +50,7 @@ using std::pair;
 using std::string;
 using std::vector;
 using std::cout;
+using std::cerr;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -56,12 +59,12 @@ using std::cout;
 
 #define ACCEPTOR_CLIENT_IDENT acceptor_->listen_ip_ << ":" \
                                << acceptor_->listen_port_ << " "
-#define ACCEPTOR_SERVER_IDENT acceptor_->server_ip_ << ":" \
-                               << acceptor_->server_port_ << " "
 
 #define NEXT_PROTO_STRING "\x06spdy/2\x08http/1.1\x08http/1.0"
 
-#define SSL_CTX_DEFAULT_CIPHER_LIST "RC4:!aNULL:!eNULL"
+#define SSL_CTX_DEFAULT_CIPHER_LIST "!aNULL:!ADH:!eNull:!LOW:!EXP:RC4+RSA:MEDIUM:HIGH"
+
+#define PIDFILE "/var/run/flip-server.pid"
 
 // If true, then disables the nagle algorithm);
 bool FLAGS_disable_nagle = true;
@@ -86,6 +89,9 @@ bool FLAGS_need_to_encode_url = false;
 //  Note that this only works with kernels that support
 //  SO_REUSEPORT);
 bool FLAGS_reuseport = false;
+
+// Flag to force spdy, even if NPN is not negotiated.
+bool FLAGS_force_spdy = false;
 
 // The amount of time the server delays before sending back the
 //  reply);
@@ -214,7 +220,8 @@ void spdy_init_ssl(SSLState* state,
     LOG(FATAL) << "Unable to create SSL context";
   }
   // Disable SSLv2 support.
-  SSL_CTX_set_options(state->ssl_ctx, SSL_OP_NO_SSLv2);
+  SSL_CTX_set_options(state->ssl_ctx,
+                      SSL_OP_NO_SSLv2 | SSL_OP_CIPHER_SERVER_PREFERENCE);
   if (SSL_CTX_use_certificate_file(state->ssl_ctx,
                                    ssl_cert_name.c_str(),
                                    SSL_FILETYPE_PEM) <= 0) {
@@ -246,6 +253,17 @@ void spdy_init_ssl(SSLState* state,
   VLOG(1) << "SSL CTX: Setting Release Buffers mode.";
   SSL_CTX_set_mode(state->ssl_ctx, SSL_MODE_RELEASE_BUFFERS);
 #endif
+
+  // Proper methods to disable compression don't exist until 0.9.9+. For now
+  // we must manipulate the stack of compression methods directly.
+  if (g_proxy_config.ssl_disable_compression_) {
+    STACK_OF(SSL_COMP) *ssl_comp_methods = SSL_COMP_get_compression_methods();
+    int num_methods = sk_SSL_COMP_num(ssl_comp_methods);
+    int i;
+    for (i = 0; i < num_methods; i++) {
+      static_cast<void>(sk_SSL_COMP_delete(ssl_comp_methods, i));
+    }
+  }
 }
 
 SSL* spdy_new_ssl(SSL_CTX* ssl_ctx) {
@@ -260,9 +278,12 @@ SSL* spdy_new_ssl(SSL_CTX* ssl_ctx) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-const int kMSS = 1460;
-const int kInitialDataSendersThreshold = (2 * kMSS) - SpdyFrame::size();
-const int kNormalSegmentSize = (2 * kMSS) - SpdyFrame::size();
+const int kMSS = 1400;  // Linux default
+const int kSSLOverhead = 33;
+const int kSpdyOverhead = SpdyFrame::size();
+const int kInitialDataSendersThreshold = (2 * kMSS) - kSpdyOverhead;
+const int kSSLSegmentSize = (1 * kMSS) - kSSLOverhead;
+const int kSpdySegmentSize = kSSLSegmentSize - kSpdyOverhead;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -273,9 +294,22 @@ class DataFrame {
   bool delete_when_done;
   size_t index;
   DataFrame() : data(NULL), size(0), delete_when_done(false), index(0) {}
-  void MaybeDelete() {
+  virtual void MaybeDelete() {
     if (delete_when_done) {
       delete[] data;
+    }
+  }
+  virtual ~DataFrame() {
+    MaybeDelete();
+  }
+};
+
+class SpdyFrameDataFrame : public DataFrame {
+ public:
+  SpdyFrame* frame;
+  virtual void MaybeDelete() {
+    if (delete_when_done) {
+      delete frame;
     }
   }
 };
@@ -680,6 +714,9 @@ class SMInterface {
                                 SMInterface* sm_interface,
                                 EpollServer* epoll_server,
                                 int fd,
+                                string server_ip,
+                                string server_port,
+                                string remote_ip,
                                 bool use_ssl)  = 0;
   virtual size_t ProcessReadInput(const char* data, size_t len) = 0;
   virtual size_t ProcessWriteInput(const char* data, size_t len) = 0;
@@ -723,7 +760,7 @@ class SMConnectionInterface {
 class HttpSM;
 class SMConnection;
 
-typedef list<DataFrame> OutputList;
+typedef list<DataFrame*> OutputList;
 
 class SMConnectionPoolInterface {
  public:
@@ -778,7 +815,8 @@ class SMConnection:  public SMConnectionInterface,
         sm_interface_(NULL),
         log_prefix_(log_prefix),
         max_bytes_sent_per_dowrite_(4096),
-        ssl_(NULL)
+        ssl_(NULL),
+        last_read_time_(0)
         {}
 
   int fd_;
@@ -810,6 +848,10 @@ class SMConnection:  public SMConnectionInterface,
 
   SSL* ssl_;
  public:
+  time_t last_read_time_;
+  string server_ip_;
+  string server_port_;
+
   EpollServer* epoll_server() { return epoll_server_; }
   OutputList* output_list() { return &output_list_; }
   MemoryCache* memory_cache() { return memory_cache_; }
@@ -818,10 +860,10 @@ class SMConnection:  public SMConnectionInterface,
             << "Setting ready to send: EPOLLIN | EPOLLOUT";
     epoll_server_->SetFDReady(fd_, EPOLLIN | EPOLLOUT);
   }
-  void EnqueueDataFrame(const DataFrame& df) {
+  void EnqueueDataFrame(DataFrame* df) {
     output_list_.push_back(df);
     VLOG(2) << log_prefix_ << ACCEPTOR_CLIENT_IDENT << "EnqueueDataFrame: "
-            << "size = " << df.size << ": Setting FD ready.";
+            << "size = " << df->size << ": Setting FD ready.";
     ReadyToSend();
   }
   int fd() { return fd_; }
@@ -848,11 +890,16 @@ class SMConnection:  public SMConnectionInterface,
                         SMInterface* sm_interface,
                         EpollServer* epoll_server,
                         int fd,
+                        string server_ip,
+                        string server_port,
+                        string remote_ip,
                         bool use_ssl) {
     if (initialized_) {
       LOG(FATAL) << "Attempted to initialize already initialized server";
       return;
     }
+
+    client_ip_ = remote_ip;
 
     if (fd == -1) {
       // If fd == -1, then we are initializing a new connection that will
@@ -862,9 +909,11 @@ class SMConnection:  public SMConnectionInterface,
       //        0 == connection in progress
       //        1 == connection complete
       // TODO: is_numeric_host_address value needs to be detected
+      server_ip_ = server_ip;
+      server_port_ = server_port;
       int ret = net::CreateConnectedSocket(&fd_,
-                                           acceptor_->server_ip_,
-                                           acceptor_->server_port_,
+                                           server_ip,
+                                           server_port,
                                            true,
                                            acceptor_->disable_nagle_);
 
@@ -875,10 +924,12 @@ class SMConnection:  public SMConnectionInterface,
         DCHECK_NE(-1, fd_);
         connection_complete_ = true;
         VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
-                << "Connection complete to: " << ACCEPTOR_SERVER_IDENT;
+                << "Connection complete to: " << server_ip_ << ":"
+                << server_port_ << " ";
       }
       VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
-              << "Connecting to server: " << ACCEPTOR_SERVER_IDENT;
+              << "Connecting to server: " << server_ip_ << ":"
+                << server_port_ << " ";
     } else {
       // If fd != -1 then we are initializing a connection that has just been
       // accepted from the listen socket.
@@ -894,23 +945,12 @@ class SMConnection:  public SMConnectionInterface,
       }
 
       fd_ = fd;
-      struct sockaddr sock_addr;
-      socklen_t addr_size = sizeof(sock_addr);
-      addr_size = sizeof(sock_addr);
-      int res = getsockname(fd_, &sock_addr, &addr_size);
-      if (res < 0) {
-        LOG(ERROR) << "Could not get socket address for fd " << fd_
-                   << ": getsockname: " << strerror(errno);
-      } else {
-        struct sockaddr_in *sock_addr_in = (struct sockaddr_in *)&sock_addr;
-        char ip[16];
-        snprintf(ip, sizeof(ip), "%d.%d.%d.%d",
-                IPV4_PRINTABLE_FORMAT(sock_addr_in->sin_addr.s_addr));
-        client_ip_ = ip;
-      }
     }
 
     registered_in_epoll_server_ = false;
+    // Set the last read time here as the idle checker will start from
+    // now.
+    last_read_time_ = time(NULL);
     initialized_ = true;
 
     connection_pool_ = connection_pool;
@@ -932,24 +972,46 @@ class SMConnection:  public SMConnectionInterface,
     }
   }
 
-  int Send(const char* bytes, int len, int flags) {
+  int Send(const char* data, int len, int flags) {
     ssize_t bytes_written = 0;
     if (ssl_) {
-      bytes_written = SSL_write(ssl_, bytes, len);
-      if (bytes_written < 0) {
-        switch(SSL_get_error(ssl_, bytes_written)) {
-          case SSL_ERROR_WANT_READ:
-          case SSL_ERROR_WANT_WRITE:
-          case SSL_ERROR_WANT_ACCEPT:
-          case SSL_ERROR_WANT_CONNECT:
-            return -2;
-          default:
-            PrintSslError();
-            break;
+      // Write smallish chunks to SSL so that we don't have large
+      // multi-packet TLS records to receive before being able to handle
+      // the data.
+      while(len > 0) {
+        const int kMaxTLSRecordSize = 1460;
+        const char* ptr = &(data[bytes_written]);
+        int chunksize = std::min(len, kMaxTLSRecordSize);
+        int rv = SSL_write(ssl_, ptr, chunksize);
+        if (rv <= 0) {
+          switch(SSL_get_error(ssl_, rv)) {
+            case SSL_ERROR_WANT_READ:
+            case SSL_ERROR_WANT_WRITE:
+            case SSL_ERROR_WANT_ACCEPT:
+            case SSL_ERROR_WANT_CONNECT:
+              rv = -2;
+              break;
+            default:
+              PrintSslError();
+              break;
+          }
+          // If we wrote some data, return that count.  Otherwise
+          // return the stall error.
+          return bytes_written > 0 ? bytes_written : rv;
         }
+        bytes_written += rv;
+        len -= rv;
+        if (rv != chunksize)
+          break;  // If we couldn't write everything, we're implicitly stalled
+      }
+      if (!(flags & MSG_MORE)) {
+        int state = 0;
+        setsockopt( fd_, IPPROTO_TCP, TCP_CORK, &state, sizeof( state ) );
+        state = 1;
+        setsockopt( fd_, IPPROTO_TCP, TCP_CORK, &state, sizeof( state ) );
       }
     } else {
-      bytes_written = send(fd_, bytes, len, flags);
+      bytes_written = send(fd_, data, len, flags);
     }
     return bytes_written;
   }
@@ -976,7 +1038,7 @@ class SMConnection:  public SMConnectionInterface,
   }
 
   void Cleanup(const char* cleanup) {
-    VLOG(2) << log_prefix_ << ACCEPTOR_CLIENT_IDENT << "Cleanup";
+    VLOG(2) << log_prefix_ << ACCEPTOR_CLIENT_IDENT << "Cleanup: " << cleanup;
     if (!initialized_) {
       return;
     }
@@ -987,6 +1049,7 @@ class SMConnection:  public SMConnectionInterface,
     if (sm_interface_) {
       sm_interface_->ResetForNewConnection();
     }
+    last_read_time_ = 0;
   }
 
  private:
@@ -1014,7 +1077,8 @@ class SMConnection:  public SMConnectionInterface,
         if (sock_error == 0) {
           connection_complete_ = true;
           VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
-                  << "Connection complete to " << ACCEPTOR_SERVER_IDENT;
+                  << "Connection complete to " << server_ip_ << ":"
+                << server_port_ << " ";
         } else if (sock_error == EINPROGRESS) {
           return;
         } else {
@@ -1061,7 +1125,7 @@ class SMConnection:  public SMConnectionInterface,
               goto done;
             default:
               PrintSslError();
-              break;
+              goto error_or_close;
           }
         }
       } else {
@@ -1088,6 +1152,7 @@ class SMConnection:  public SMConnectionInterface,
       } else if (bytes_read > 0) {
         VLOG(2) << log_prefix_ << ACCEPTOR_CLIENT_IDENT << "read " << bytes_read
                  << " bytes";
+        last_read_time_ = time(NULL);
         if (!protocol_detected_) {
           if (acceptor_->flip_handler_type_ == FLIP_HANDLER_HTTP_SERVER) {
             // Http Server
@@ -1109,24 +1174,31 @@ class SMConnection:  public SMConnectionInterface,
             } else {
               VLOG(1) << "Session status: resumed";
             }
-            const unsigned char *npn_proto;
-            unsigned int npn_proto_len;
-            SSL_get0_next_proto_negotiated(ssl_, &npn_proto, &npn_proto_len);
-            if (npn_proto_len > 0) {
-              string npn_proto_str((const char *)npn_proto, npn_proto_len);
-              VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
-                      << "NPN protocol detected: " << npn_proto_str;
-            } else {
-              VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
-                      << "NPN protocol detected: none";
-              if (acceptor_->flip_handler_type_ == FLIP_HANDLER_SPDY_SERVER) {
+            bool spdy_negotiated = FLAGS_force_spdy;
+            if (!spdy_negotiated) {
+              const unsigned char *npn_proto;
+              unsigned int npn_proto_len;
+              SSL_get0_next_proto_negotiated(ssl_, &npn_proto, &npn_proto_len);
+              if (npn_proto_len > 0) {
+                string npn_proto_str((const char *)npn_proto, npn_proto_len);
                 VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
-                        << "NPN protocol: Could not negotiate SPDY protocol.";
-                goto error_or_close;
+                        << "NPN protocol detected: " << npn_proto_str;
+              } else {
+                VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
+                        << "NPN protocol detected: none";
+                if (acceptor_->flip_handler_type_ == FLIP_HANDLER_SPDY_SERVER) {
+                  VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
+                          << "NPN protocol: Could not negotiate SPDY protocol.";
+                  goto error_or_close;
+                }
+              }
+              if (npn_proto_len > 0 &&
+                  !strncmp(reinterpret_cast<const char*>(npn_proto),
+                           "spdy/2", npn_proto_len)) {
+                  spdy_negotiated = true;
               }
             }
-            if (npn_proto_len > 0 &&
-                 !strncmp((char *)npn_proto, "spdy/2", npn_proto_len)) {
+            if (spdy_negotiated) {
               if (!sm_spdy_interface_) {
                 sm_spdy_interface_ = NewSpdySM(this, NULL, epoll_server_,
                                                memory_cache_, acceptor_);
@@ -1137,6 +1209,10 @@ class SMConnection:  public SMConnectionInterface,
                         << "Reusing SPDY interface.";
               }
               sm_interface_ = sm_spdy_interface_;
+            } else if (acceptor_->spdy_only_) {
+              VLOG(1) << log_prefix_ << ACCEPTOR_CLIENT_IDENT
+                      << "SPDY proxy only, closing HTTPS connection.";
+              goto error_or_close;
             } else {
               if (!sm_streamer_interface_) {
                 sm_streamer_interface_ = NewStreamerSM(this, NULL,
@@ -1248,11 +1324,11 @@ class SMConnection:  public SMConnectionInterface,
       if (sm_interface_ && output_list_.size() < 2) {
         sm_interface_->GetOutput();
       }
-      DataFrame& data_frame = output_list_.front();
-      const char*  bytes = data_frame.data;
-      int size = data_frame.size;
-      bytes += data_frame.index;
-      size -= data_frame.index;
+      DataFrame* data_frame = output_list_.front();
+      const char*  bytes = data_frame->data;
+      int size = data_frame->size;
+      bytes += data_frame->index;
+      size -= data_frame->index;
       DCHECK_GE(size, 0);
       if (size <= 0) {
         // Empty data frame. Indicates end of data from client.
@@ -1260,8 +1336,8 @@ class SMConnection:  public SMConnectionInterface,
         int state = 0;
         VLOG(2) << log_prefix_ << "Empty data frame, uncorking socket.";
         setsockopt( fd_, IPPROTO_TCP, TCP_CORK, &state, sizeof( state ) );
-        data_frame.MaybeDelete();
         output_list_.pop_front();
+        delete data_frame;
         continue;
       }
 
@@ -1294,7 +1370,7 @@ class SMConnection:  public SMConnectionInterface,
       } else if (bytes_written > 0) {
         VLOG(2) << log_prefix_ << ACCEPTOR_CLIENT_IDENT << "Wrote: "
                 << bytes_written << " bytes";
-        data_frame.index += bytes_written;
+        data_frame->index += bytes_written;
         bytes_sent += bytes_written;
         continue;
       } else if (bytes_written == -2) {
@@ -1329,6 +1405,7 @@ class SMConnection:  public SMConnectionInterface,
       PrintSslError();
       SSL_free(ssl_);
       PrintSslError();
+      ssl_ = NULL;
     }
     if (registered_in_epoll_server_) {
       epoll_server_->UnregisterFD(fd_);
@@ -1343,6 +1420,12 @@ class SMConnection:  public SMConnectionInterface,
     initialized_ = false;
     protocol_detected_ = false;
     events_ = 0;
+    for (list<DataFrame*>::iterator i =
+         output_list_.begin();
+         i != output_list_.end();
+         ++i) {
+      delete *i;
+    }
     output_list_.clear();
   }
 
@@ -1513,7 +1596,7 @@ class OutputOrdering {
       first_ring.splice(first_ring.end(),
                         first_ring,
                         first_ring.begin());
-      mci.max_segment_size = kNormalSegmentSize;
+      mci.max_segment_size = kSpdySegmentSize;
       return &mci;
     }
     return NULL;
@@ -1582,11 +1665,15 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
                         SMInterface* sm_interface,
                         EpollServer* epoll_server,
                         int fd,
+                        string server_ip,
+                        string server_port,
+                        string remote_ip,
                         bool use_ssl) {
     VLOG(2) << ACCEPTOR_CLIENT_IDENT
             << "SpdySM: Initializing server connection.";
     connection_->InitSMConnection(connection_pool, sm_interface,
-                                  epoll_server, fd, use_ssl);
+                                  epoll_server, fd, server_ip, server_port,
+                                  remote_ip, use_ssl);
   }
 
  private:
@@ -1610,7 +1697,8 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
     return sm_http_interface;
   }
 
-  SMInterface* FindOrMakeNewSMConnectionInterface() {
+  SMInterface* FindOrMakeNewSMConnectionInterface(string server_ip,
+                                                  string server_port) {
     SMInterface *sm_http_interface;
     int32 server_idx;
     if (unused_server_interface_list.empty()) {
@@ -1630,19 +1718,22 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
 
     sm_http_interface->InitSMInterface(this, server_idx);
     sm_http_interface->InitSMConnection(NULL, sm_http_interface,
-                                        epoll_server_, -1, false);
+                                        epoll_server_, -1,
+                                        server_ip, server_port, "", false);
 
     return sm_http_interface;
   }
 
-   int SpdyHandleNewStream(const SpdyControlFrame* frame,
-                           string *http_data)
+  int SpdyHandleNewStream(const SpdyControlFrame* frame,
+                          string &http_data,
+                          bool *is_https_scheme)
   {
     bool parsed_headers = false;
     SpdyHeaderBlock headers;
     const SpdySynStreamControlFrame* syn_stream =
       reinterpret_cast<const SpdySynStreamControlFrame*>(frame);
 
+    *is_https_scheme = false;
     parsed_headers = spdy_framer_->ParseHeaderBlock(frame, &headers);
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: OnSyn("
             << syn_stream->stream_id() << ")";
@@ -1658,6 +1749,11 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
       VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: didn't find method or url "
               << "or method. Not creating stream";
       return 0;
+    }
+
+    SpdyHeaderBlock::iterator scheme = headers.find("scheme");
+    if (scheme->second.compare("https") == 0) {
+      *is_https_scheme = true;
     }
 
     string uri = UrlUtilities::GetUrlPath(url->second);
@@ -1676,21 +1772,21 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
                 filename);
     } else {
       SpdyHeaderBlock::iterator version = headers.find("version");
-      *http_data += method->second + " " + uri + " " + version->second + "\r\n";
+      http_data += method->second + " " + uri + " " + version->second + "\r\n";
       VLOG(1) << ACCEPTOR_CLIENT_IDENT << "Request: " << method->second << " "
               << uri << " " << version->second;
       for (SpdyHeaderBlock::iterator i = headers.begin();
            i != headers.end(); ++i) {
-        *http_data += i->first + ": " + i->second + "\r\n";
+        http_data += i->first + ": " + i->second + "\r\n";
         VLOG(2) << ACCEPTOR_CLIENT_IDENT << i->first.c_str() << ":"
                 << i->second.c_str();
       }
       if (g_proxy_config.forward_ip_header_enabled_) {
         // X-Client-Cluster-IP header
-        *http_data += g_proxy_config.forward_ip_header_ + ": " +
+        http_data += g_proxy_config.forward_ip_header_ + ": " +
                       connection_->client_ip() + "\r\n";
       }
-      *http_data += "\r\n";
+      http_data += "\r\n";
     }
 
     VLOG(3) << ACCEPTOR_CLIENT_IDENT << "SpdySM: HTTP Request:\n" << http_data;
@@ -1707,15 +1803,25 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
             reinterpret_cast<const SpdySynStreamControlFrame*>(frame);
 
           string http_data;
-          int ret = SpdyHandleNewStream(frame, &http_data);
+          bool is_https_scheme;
+          int ret = SpdyHandleNewStream(frame, http_data, &is_https_scheme);
           if (!ret) {
             LOG(ERROR) << "SpdySM: Could not convert spdy into http.";
             break;
           }
 
           if (acceptor_->flip_handler_type_ == FLIP_HANDLER_PROXY) {
+            string server_ip;
+            string server_port;
+            if (is_https_scheme) {
+              server_ip = acceptor_->https_server_ip_;
+              server_port = acceptor_->https_server_port_;
+            } else {
+              server_ip = acceptor_->http_server_ip_;
+              server_port = acceptor_->http_server_port_;
+            }
             SMInterface *sm_http_interface =
-              FindOrMakeNewSMConnectionInterface();
+              FindOrMakeNewSMConnectionInterface(server_ip, server_port);
             stream_to_smif_[syn_stream->stream_id()] = sm_http_interface;
             sm_http_interface->SetStreamID(syn_stream->stream_id());
             sm_http_interface->ProcessWriteInput(http_data.c_str(),
@@ -1802,8 +1908,7 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
   // some logic review and method renaming is probably in order.
   void Cleanup() {}
 
-  // Send a settings frame and possibly some NOOP packets to force
-  // opening of cwnd
+  // Send a settings frame
   int PostAcceptHook() {
     ssize_t bytes_written;
     spdy::SpdySettings settings;
@@ -1965,11 +2070,12 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
     SpdySynStreamControlFrame* fsrcf =
       spdy_framer_->CreateSynStream(stream_id, 0, 0, CONTROL_FLAG_NONE, true,
                                     &block);
-    DataFrame df;
-    df.size = fsrcf->length() + SpdyFrame::size();
-    size_t df_size = df.size;
-    df.data = fsrcf->data();
-    df.delete_when_done = true;
+    SpdyFrameDataFrame* df = new SpdyFrameDataFrame;
+    df->size = fsrcf->length() + SpdyFrame::size();
+    size_t df_size = df->size;
+    df->data = fsrcf->data();
+    df->frame = fsrcf;
+    df->delete_when_done = true;
     EnqueueDataFrame(df);
 
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending SynStreamheader "
@@ -1986,11 +2092,12 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
 
     SpdySynReplyControlFrame* fsrcf =
       spdy_framer_->CreateSynReply(stream_id, CONTROL_FLAG_NONE, true, &block);
-    DataFrame df;
-    df.size = fsrcf->length() + SpdyFrame::size();
-    size_t df_size = df.size;
-    df.data = fsrcf->data();
-    df.delete_when_done = true;
+    SpdyFrameDataFrame* df = new SpdyFrameDataFrame;
+    df->size = fsrcf->length() + SpdyFrame::size();
+    size_t df_size = df->size;
+    df->data = fsrcf->data();
+    df->frame = fsrcf;
+    df->delete_when_done = true;
     EnqueueDataFrame(df);
 
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending SynReplyheader "
@@ -2007,19 +2114,46 @@ class SpdySM : public SpdyFramerVisitorInterface, public SMInterface {
     // TODO(mbelshe):  We can't compress here - before going into the
     //                 priority queue.  Compression needs to be done
     //                 with late binding.
-    SpdyDataFrame* fdf = spdy_framer_->CreateDataFrame(stream_id, data, len,
-                                                       flags);
-    DataFrame df;
-    df.size = fdf->length() + SpdyFrame::size();
-    df.data = fdf->data();
-    df.delete_when_done = true;
-    EnqueueDataFrame(df);
+    if (len == 0) {
+      SpdyDataFrame* fdf = spdy_framer_->CreateDataFrame(stream_id, data, len,
+                                                         flags);
+      SpdyFrameDataFrame* df = new SpdyFrameDataFrame;
+      df->size = fdf->length() + SpdyFrame::size();
+      df->data = fdf->data();
+      df->delete_when_done = true;
+      EnqueueDataFrame(df);
+      return;
+    }
 
-    VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending data frame "
-            << stream_id << " [" << len << "] shrunk to " << fdf->length();
+    // Chop data frames into chunks so that one stream can't monopolize the
+    // output channel.
+    while(len > 0) {
+      int64 size = std::min(len, static_cast<int64>(kSpdySegmentSize));
+      SpdyDataFlags chunk_flags = flags;
+
+      // If we chunked this block, and the FIN flag was set, there is more
+      // data coming.  So, remove the flag.
+      if ((size < len) && (flags & DATA_FLAG_FIN))
+        chunk_flags = static_cast<SpdyDataFlags>(chunk_flags & ~DATA_FLAG_FIN);
+
+      SpdyDataFrame* fdf = spdy_framer_->CreateDataFrame(stream_id, data, size,
+                                                         chunk_flags);
+      SpdyFrameDataFrame* df = new SpdyFrameDataFrame;
+      df->size = fdf->length() + SpdyFrame::size();
+      df->data = fdf->data();
+      df->delete_when_done = true;
+      EnqueueDataFrame(df);
+
+      VLOG(2) << ACCEPTOR_CLIENT_IDENT << "SpdySM: Sending data frame "
+              << stream_id << " [" << size << "] shrunk to " << fdf->length()
+              << ", flags=" << flags;
+
+      data += size;
+      len -= size;
+    }
   }
 
-  void EnqueueDataFrame(const DataFrame& df) {
+  void EnqueueDataFrame(DataFrame* df) {
     connection_->EnqueueDataFrame(df);
   }
 
@@ -2151,7 +2285,8 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
         stream_id_ += 2;
       } else {
         VLOG(1) << ACCEPTOR_CLIENT_IDENT << "HttpSM: Received Response from "
-                << ACCEPTOR_SERVER_IDENT;
+                << connection_->server_ip_ << ":"
+                << connection_->server_port_ << " ";
         sm_spdy_interface_->SendSynReply(stream_id_, headers);
       }
     }
@@ -2175,9 +2310,9 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
     virtual void ProcessChunkExtensions(const char *input, size_t size) {}
     virtual void HeaderDone() {}
     virtual void MessageDone() {
+      if (acceptor_->flip_handler_type_ == FLIP_HANDLER_PROXY) {
         VLOG(2) << ACCEPTOR_CLIENT_IDENT << "HttpSM: MessageDone. Sending EOF: "
                 << "stream " << stream_id_;
-      if (acceptor_->flip_handler_type_ == FLIP_HANDLER_PROXY) {
         sm_spdy_interface_->SendEOF(stream_id_);
       } else {
         VLOG(2) << ACCEPTOR_CLIENT_IDENT << "HttpSM: MessageDone.";
@@ -2215,12 +2350,16 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
                         SMInterface* sm_interface,
                         EpollServer* epoll_server,
                         int fd,
+                        string server_ip,
+                        string server_port,
+                        string remote_ip,
                         bool use_ssl)
   {
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "HttpSM: Initializing server "
             << "connection.";
     connection_->InitSMConnection(connection_pool, sm_interface,
-                                  epoll_server, fd, use_ssl);
+                                  epoll_server, fd, server_ip, server_port,
+                                  remote_ip, use_ssl);
   }
 
   size_t ProcessReadInput(const char* data, size_t len) {
@@ -2234,10 +2373,10 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
             << len << ": stream " << stream_id_;
     char * dataPtr = new char[len];
     memcpy(dataPtr, data, len);
-    DataFrame data_frame;
-    data_frame.data = (const char *)dataPtr;
-    data_frame.size = len;
-    data_frame.delete_when_done = true;
+    DataFrame* data_frame = new DataFrame;
+    data_frame->data = (const char *)dataPtr;
+    data_frame->size = len;
+    data_frame->delete_when_done = true;
     connection_->EnqueueDataFrame(data_frame);
     return len;
   }
@@ -2259,7 +2398,7 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
   }
 
   void Reset() {
-    VLOG(1) << ACCEPTOR_CLIENT_IDENT << "HttpSM: Reset: stream %d "
+    VLOG(1) << ACCEPTOR_CLIENT_IDENT << "HttpSM: Reset: stream "
             << stream_id_;
     http_framer_->Reset();
   }
@@ -2268,8 +2407,11 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
   }
 
   void ResetForNewConnection() {
-    VLOG(1) << ACCEPTOR_CLIENT_IDENT << "HttpSM: Server connection closing "
-            << "to: " << ACCEPTOR_SERVER_IDENT;
+    if (acceptor_->flip_handler_type_ == FLIP_HANDLER_PROXY) {
+      VLOG(1) << ACCEPTOR_CLIENT_IDENT << "HttpSM: Server connection closing "
+        << "to: " << connection_->server_ip_ << ":"
+        << connection_->server_port_ << " ";
+    }
     seq_num_ = 0;
     output_ordering_.Reset();
     http_framer_->Reset();
@@ -2338,10 +2480,10 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
 
  private:
   void SendEOFImpl(uint32 stream_id) {
-    DataFrame df;
-    df.data = "0\r\n\r\n";
-    df.size = 5;
-    df.delete_when_done = false;
+    DataFrame* df = new DataFrame;
+    df->data = "0\r\n\r\n";
+    df->size = 5;
+    df->delete_when_done = false;
     EnqueueDataFrame(df);
     if (acceptor_->flip_handler_type_ == FLIP_HANDLER_HTTP_SERVER) {
       Reset();
@@ -2373,15 +2515,15 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
   size_t SendSynReplyImpl(uint32 stream_id, const BalsaHeaders& headers) {
     SimpleBuffer sb;
     headers.WriteHeaderAndEndingToBuffer(&sb);
-    DataFrame df;
-    df.size = sb.ReadableBytes();
-    char* buffer = new char[df.size];
-    df.data = buffer;
-    df.delete_when_done = true;
-    sb.Read(buffer, df.size);
+    DataFrame* df = new DataFrame;
+    df->size = sb.ReadableBytes();
+    char* buffer = new char[df->size];
+    df->data = buffer;
+    df->delete_when_done = true;
+    sb.Read(buffer, df->size);
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "Sending HTTP Reply header "
             << stream_id_;
-    size_t df_size = df.size;
+    size_t df_size = df->size;
     EnqueueDataFrame(df);
     return df_size;
   }
@@ -2389,15 +2531,15 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
   size_t SendSynStreamImpl(uint32 stream_id, const BalsaHeaders& headers) {
     SimpleBuffer sb;
     headers.WriteHeaderAndEndingToBuffer(&sb);
-    DataFrame df;
-    df.size = sb.ReadableBytes();
-    char* buffer = new char[df.size];
-    df.data = buffer;
-    df.delete_when_done = true;
-    sb.Read(buffer, df.size);
+    DataFrame* df = new DataFrame;
+    df->size = sb.ReadableBytes();
+    char* buffer = new char[df->size];
+    df->data = buffer;
+    df->delete_when_done = true;
+    sb.Read(buffer, df->size);
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "Sending HTTP Reply header "
             << stream_id_;
-    size_t df_size = df.size;
+    size_t df_size = df->size;
     EnqueueDataFrame(df);
     return df_size;
   }
@@ -2407,18 +2549,18 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
     char chunk_buf[128];
     snprintf(chunk_buf, sizeof(chunk_buf), "%x\r\n", (unsigned int)len);
     string chunk_description(chunk_buf);
-    DataFrame df;
-    df.size = chunk_description.size() + len + 2;
-    char* buffer = new char[df.size];
-    df.data = buffer;
-    df.delete_when_done = true;
+    DataFrame* df = new DataFrame;
+    df->size = chunk_description.size() + len + 2;
+    char* buffer = new char[df->size];
+    df->data = buffer;
+    df->delete_when_done = true;
     memcpy(buffer, chunk_description.data(), chunk_description.size());
     memcpy(buffer + chunk_description.size(), data, len);
     memcpy(buffer + chunk_description.size() + len, "\r\n", 2);
     EnqueueDataFrame(df);
   }
 
-  void EnqueueDataFrame(const DataFrame& df) {
+  void EnqueueDataFrame(DataFrame* df) {
     VLOG(2) << ACCEPTOR_CLIENT_IDENT << "HttpSM: Enqueue data frame: stream "
             << stream_id_;
     connection_->EnqueueDataFrame(df);
@@ -2450,6 +2592,7 @@ class HttpSM : public BalsaVisitorInterface, public SMInterface {
       mci->file_data->body.size() - mci->body_bytes_consumed;
     if (num_to_write > mci->max_segment_size)
       num_to_write = mci->max_segment_size;
+
     SendDataFrame(mci->stream_id,
                   mci->file_data->body.data() + mci->body_bytes_consumed,
                   num_to_write, 0, true);
@@ -2495,12 +2638,16 @@ class StreamerSM : public SMInterface {
                          SMInterface* sm_interface,
                          EpollServer* epoll_server,
                          int fd,
+                         string server_ip,
+                         string server_port,
+                         string remote_ip,
                          bool use_ssl)
    {
      VLOG(2) << ACCEPTOR_CLIENT_IDENT << "StreamerSM: Initializing server "
              << "connection.";
      connection_->InitSMConnection(connection_pool, sm_interface,
-                                   epoll_server, fd, use_ssl);
+                                   epoll_server, fd, server_ip,
+                                   server_port, remote_ip, use_ssl);
    }
 
    size_t ProcessReadInput(const char* data, size_t len) {
@@ -2510,10 +2657,10 @@ class StreamerSM : public SMInterface {
    size_t ProcessWriteInput(const char* data, size_t len) {
      char * dataPtr = new char[len];
      memcpy(dataPtr, data, len);
-     DataFrame df;
-     df.data = (const char *)dataPtr;
-     df.size = len;
-     df.delete_when_done = true;
+     DataFrame* df = new DataFrame;
+     df->data = (const char *)dataPtr;
+     df->size = len;
+     df->delete_when_done = true;
      connection_->EnqueueDataFrame(df);
      return len;
    }
@@ -2562,8 +2709,14 @@ class StreamerSM : public SMInterface {
                                             epoll_server_, acceptor_);
        sm_other_interface_->InitSMInterface(this, 0);
      }
+     // The Streamer interface is used to stream HTTPS connections, so we
+     // will always use the https_server_ip/port here.
      sm_other_interface_->InitSMConnection(NULL, sm_other_interface_,
-                                           epoll_server_, -1, false);
+                                           epoll_server_, -1,
+                                           acceptor_->https_server_ip_,
+                                           acceptor_->https_server_port_,
+                                           "",
+                                           false);
 
      return 1;
    }
@@ -2628,15 +2781,15 @@ class Notification {
    explicit Notification(bool value) : value_(value) {}
 
    void Notify() {
-     AutoLock al(lock_);
+     base::AutoLock al(lock_);
      value_ = true;
    }
    bool HasBeenNotified() {
-     AutoLock al(lock_);
+     base::AutoLock al(lock_);
      return value_;
    }
    bool value_;
-   Lock lock_;
+   base::Lock lock_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2652,6 +2805,7 @@ class SMAcceptorThread : public SimpleThread,
   vector<SMConnection*> unused_server_connections_;
   vector<SMConnection*> tmp_unused_server_connections_;
   vector<SMConnection*> allocated_server_connections_;
+  list<SMConnection*> active_server_connections_;
   Notification quitting_;
   MemoryCache* memory_cache_;
  public:
@@ -2685,6 +2839,7 @@ class SMAcceptorThread : public SimpleThread,
          ++i) {
       delete *i;
     }
+    delete ssl_state_;
   }
 
   SMConnection* NewConnection() {
@@ -2711,7 +2866,7 @@ class SMAcceptorThread : public SimpleThread,
     epoll_server_.RegisterFD(acceptor_->listen_fd_, this, EPOLLIN | EPOLLET);
   }
 
-  void HandleConnection(int server_fd) {
+  void HandleConnection(int server_fd, struct sockaddr_in *remote_addr) {
     int on = 1;
     int rc;
     if (acceptor_->disable_nagle_) {
@@ -2730,11 +2885,15 @@ class SMAcceptorThread : public SimpleThread,
       close(server_fd);
       return;
     }
+    string remote_ip = inet_ntoa(remote_addr->sin_addr);
     server_connection->InitSMConnection(this,
                                         NULL,
                                         &epoll_server_,
                                         server_fd,
+                                        "", "", remote_ip,
                                         use_ssl_);
+    if (server_connection->initialized())
+      active_server_connections_.push_back(server_connection);
   }
 
   void AcceptFromListenFD() {
@@ -2752,7 +2911,7 @@ class SMAcceptorThread : public SimpleThread,
           break;
         }
         VLOG(1) << ACCEPTOR_CLIENT_IDENT << " Accepted connection";
-        HandleConnection(fd);
+        HandleConnection(fd, (struct sockaddr_in *)&address);
       }
     } else {
       while (true) {
@@ -2768,7 +2927,7 @@ class SMAcceptorThread : public SimpleThread,
           break;
         }
         VLOG(1) << ACCEPTOR_CLIENT_IDENT << "Accepted connection";
-        HandleConnection(fd);
+        HandleConnection(fd, (struct sockaddr_in *)&address);
       }
     }
   }
@@ -2790,6 +2949,32 @@ class SMAcceptorThread : public SimpleThread,
     quitting_.Notify();
   }
 
+ // Iterates through a list of active connections expiring any that have been
+ // idle longer than the configured timeout.
+ void HandleConnectionIdleTimeout() {
+   int cur_time = time(NULL);
+   static time_t oldest_time = cur_time;
+   // Only iterate the list if we speculate that a connection is ready to be
+   // expired
+   if ((cur_time - oldest_time) < g_proxy_config.idle_timeout_s_)
+     return;
+   list<SMConnection*>::iterator iter = active_server_connections_.begin();
+   while (iter != active_server_connections_.end()) {
+     SMConnection *conn = *iter;
+     int elapsed_time = (cur_time - conn->last_read_time_);
+     if (elapsed_time > g_proxy_config.idle_timeout_s_) {
+       conn->Cleanup("Connection idle timeout reached.");
+       iter = active_server_connections_.erase(iter);
+       continue;
+     }
+     if (conn->last_read_time_ < oldest_time)
+       oldest_time = conn->last_read_time_;
+     iter++;
+   }
+   if ((cur_time - oldest_time) >= g_proxy_config.idle_timeout_s_)
+     oldest_time = cur_time;
+ }
+
   void Run() {
     while (!quitting_.HasBeenNotified()) {
       epoll_server_.set_timeout_in_us(10 * 1000);  // 10 ms
@@ -2798,6 +2983,7 @@ class SMAcceptorThread : public SimpleThread,
                                         tmp_unused_server_connections_.begin(),
                                         tmp_unused_server_connections_.end());
       tmp_unused_server_connections_.clear();
+      HandleConnectionIdleTimeout();
     }
   }
 
@@ -2878,29 +3064,122 @@ const char* BoolToStr(bool b) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static bool wantExit = false;
+static bool wantLogClose = false;
+void SignalHandler(int signum)
+{
+  switch(signum) {
+    case SIGTERM:
+    case SIGINT:
+      wantExit = true;
+      break;
+    case SIGHUP:
+      wantLogClose = true;
+      break;
+  }
+}
+
+static int OpenPidFile(const char *pidfile)
+{
+  int fd;
+  struct stat pid_stat;
+  int ret;
+
+  fd = open(pidfile, O_RDWR | O_CREAT, 0600);
+  if (fd == -1) {
+      cerr << "Could not open pid file '" << pidfile << "' for reading.\n";
+      exit(1);
+  }
+
+  ret = flock(fd, LOCK_EX | LOCK_NB);
+  if (ret == -1) {
+    if (errno == EWOULDBLOCK) {
+      cerr << "Flip server is already running.\n";
+    } else {
+      cerr << "Error getting lock on pid file: " << strerror(errno) << "\n";
+    }
+    exit(1);
+  }
+
+  if (fstat(fd, &pid_stat) == -1) {
+    cerr << "Could not stat pid file '" << pidfile << "': " << strerror(errno)
+         << "\n";
+  }
+  if (pid_stat.st_size != 0) {
+    if (ftruncate(fd, pid_stat.st_size) == -1) {
+      cerr << "Could not truncate pid file '" << pidfile << "': "
+           << strerror(errno) << "\n";
+    }
+  }
+
+  char pid_str[8];
+  snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+  int bytes = static_cast<int>(strlen(pid_str));
+  if (write(fd, pid_str, strlen(pid_str)) != bytes) {
+    cerr << "Could not write pid file: " << strerror(errno) << "\n";
+    close(fd);
+    exit(1);
+  }
+
+  return fd;
+}
+
 int main (int argc, char**argv)
 {
   unsigned int i = 0;
   bool wait_for_iface = false;
+  int pidfile_fd;
+
+  signal(SIGPIPE, SIG_IGN);
+  signal(SIGTERM, SignalHandler);
+  signal(SIGINT, SignalHandler);
+  signal(SIGHUP, SignalHandler);
 
   CommandLine::Init(argc, argv);
   CommandLine cl(argc, argv);
 
-  if (cl.HasSwitch("--help") || argc < 2) {
+  if (cl.HasSwitch("help") || argc < 2) {
     cout << argv[0] << " <options>\n";
-    cout << "\t--proxy<1..n>=\"<listen ip>,<listen port>,<ssl cert filename>,"
-         << "<ssl key filename>,<server ip>,<server port>\"\n";
-    cout << "\t--spdy-server=\"<listen ip>,<listen port>,<ssl cert filename>,"
-         << "<ssl key filename>\"\n";
-    cout << "\t--http-server=\"<listen ip>,<listen port>,<ssl cert filename>,"
-         << "<ssl key filename>\"\n";
+    cout << "  Proxy options:\n";
+    cout << "\t--proxy<1..n>=\"<listen ip>,<listen port>,"
+         << "<ssl cert filename>,\n"
+         << "\t               <ssl key filename>,<http server ip>,"
+         << "<http server port>,\n"
+         << "\t               [https server ip],[https server port],"
+         << "<spdy only 0|1>\"\n";
+    cout << "\t  * The https server ip and port may be left empty if they are"
+         << " the same as\n"
+         << "\t    the http server fields.\n";
+    cout << "\t  * spdy only prevents non-spdy https connections from being"
+         << " passed\n"
+         << "\t    through the proxy listen ip:port.\n";
     cout << "\t--forward-ip-header=<header name>\n";
-    cout << "\t--logdest=file|system|both\n";
+    cout << "\n  Server options:\n";
+    cout << "\t--spdy-server=\"<listen ip>,<listen port>,[ssl cert filename],"
+         << "\n\t               [ssl key filename]\"\n";
+    cout << "\t--http-server=\"<listen ip>,<listen port>,[ssl cert filename],"
+         << "\n\t               [ssl key filename]\"\n";
+    cout << "\t  * Leaving the ssl cert and key fields empty will disable ssl"
+         << " for the\n"
+         << "\t    http and spdy flip servers\n";
+    cout << "\n  Global options:\n";
+    cout << "\t--logdest=<file|system|both>\n";
     cout << "\t--logfile=<logfile>\n";
     cout << "\t--wait-for-iface\n";
+    cout << "\t  * The flip server will block until the listen ip has been"
+         << " raised.\n";
     cout << "\t--ssl-session-expiry=<seconds> (default is 300)\n";
+    cout << "\t--ssl-disable-compression\n";
+    cout << "\t--idle-timeout=<seconds> (default is 300)\n";
+    cout << "\t--pidfile=<filepath> (default /var/run/flip-server.pid)\n";
     cout << "\t--help\n";
     exit(0);
+  }
+
+  if (cl.HasSwitch("pidfile")) {
+    pidfile_fd = OpenPidFile(cl.GetSwitchValueASCII("pidfile").c_str());
+  } else {
+    pidfile_fd = OpenPidFile(PIDFILE);
   }
 
   g_proxy_config.server_think_time_in_s_ = FLAGS_server_think_time_in_s;
@@ -2946,26 +3225,47 @@ int main (int argc, char**argv)
 
   if (cl.HasSwitch("ssl-session-expiry")) {
     string session_expiry = cl.GetSwitchValueASCII("ssl-session-expiry");
-    g_proxy_config.ssl_session_expiry_ = atoi( session_expiry.c_str() );
+    g_proxy_config.ssl_session_expiry_ = atoi(session_expiry.c_str());
   }
+
+  if (cl.HasSwitch("ssl-disable-compression")) {
+    g_proxy_config.ssl_disable_compression_ = true;
+  }
+
+  if (cl.HasSwitch("idle-timeout")) {
+    g_proxy_config.idle_timeout_s_ =
+      atoi(cl.GetSwitchValueASCII("idle-timeout").c_str());
+  }
+
+  if (cl.HasSwitch("force_spdy"))
+    FLAGS_force_spdy = true;
 
   InitLogging(g_proxy_config.log_filename_.c_str(),
               g_proxy_config.log_destination_,
               logging::DONT_LOCK_LOG_FILE,
-              logging::APPEND_TO_OLD_LOG_FILE);
+              logging::APPEND_TO_OLD_LOG_FILE,
+              logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
   LOG(INFO) << "Flip SPDY proxy started with configuration:";
-  LOG(INFO) << "Logging destination : " << g_proxy_config.log_destination_;
-  LOG(INFO) << "Log file            : " << g_proxy_config.log_filename_;
-  LOG(INFO) << "Forward IP Header   : "
+  LOG(INFO) << "Logging destination     : " << g_proxy_config.log_destination_;
+  LOG(INFO) << "Log file                : " << g_proxy_config.log_filename_;
+  LOG(INFO) << "Forward IP Header       : "
             << (g_proxy_config.forward_ip_header_enabled_ ?
                 g_proxy_config.forward_ip_header_ : "(disabled)");
-  LOG(INFO) << "Wait for interfaces : " << (wait_for_iface?"true":"false");
-  LOG(INFO) << "Accept backlog size : " << FLAGS_accept_backlog_size;
-  LOG(INFO) << "Accepts per wake    : " << FLAGS_accepts_per_wake;
-  LOG(INFO) << "Disable nagle       : "
+  LOG(INFO) << "Wait for interfaces     : " << (wait_for_iface?"true":"false");
+  LOG(INFO) << "Accept backlog size     : " << FLAGS_accept_backlog_size;
+  LOG(INFO) << "Accepts per wake        : " << FLAGS_accepts_per_wake;
+  LOG(INFO) << "Disable nagle           : "
             << (FLAGS_disable_nagle?"true":"false");
-  LOG(INFO) << "Reuseport           : " << (FLAGS_reuseport?"true":"false");
+  LOG(INFO) << "Reuseport               : "
+            << (FLAGS_reuseport?"true":"false");
+  LOG(INFO) << "Force SPDY              : "
+            << (FLAGS_force_spdy?"true":"false");
+  LOG(INFO) << "SSL session expiry      : "
+            << g_proxy_config.ssl_session_expiry_;
+  LOG(INFO) << "SSL disable compression : "
+            << g_proxy_config.ssl_disable_compression_;
+  LOG(INFO) << "Connection idle timeout : " << g_proxy_config.idle_timeout_s_;
 
   // Proxy Acceptors
   while (true) {
@@ -2977,13 +3277,16 @@ int main (int argc, char**argv)
     }
     string value = cl.GetSwitchValueASCII(name.str());
     vector<std::string> valueArgs = split(value, ',');
-    CHECK_EQ((unsigned int)6, valueArgs.size());
+    CHECK_EQ((unsigned int)9, valueArgs.size());
+    int spdy_only = atoi(valueArgs[8].c_str());
     // If wait_for_iface is enabled, then this call will block
     // indefinitely until the interface is raised.
     g_proxy_config.AddAcceptor(FLIP_HANDLER_PROXY,
                                valueArgs[0], valueArgs[1],
                                valueArgs[2], valueArgs[3],
                                valueArgs[4], valueArgs[5],
+                               valueArgs[6], valueArgs[7],
+                               spdy_only,
                                FLAGS_accept_backlog_size,
                                FLAGS_disable_nagle,
                                FLAGS_accepts_per_wake,
@@ -3001,7 +3304,8 @@ int main (int argc, char**argv)
     g_proxy_config.AddAcceptor(FLIP_HANDLER_SPDY_SERVER,
                                valueArgs[0], valueArgs[1],
                                valueArgs[2], valueArgs[3],
-                               "", "",
+                               "", "", "", "",
+                               0,
                                FLAGS_accept_backlog_size,
                                FLAGS_disable_nagle,
                                FLAGS_accepts_per_wake,
@@ -3019,7 +3323,8 @@ int main (int argc, char**argv)
     g_proxy_config.AddAcceptor(FLIP_HANDLER_HTTP_SERVER,
                                valueArgs[0], valueArgs[1],
                                valueArgs[2], valueArgs[3],
-                               "", "",
+                               "", "", "", "",
+                               0,
                                FLAGS_accept_backlog_size,
                                FLAGS_disable_nagle,
                                FLAGS_accepts_per_wake,
@@ -3047,7 +3352,14 @@ int main (int argc, char**argv)
     sm_worker_threads_.back()->Start();
   }
 
-  while (true) {
+  while (!wantExit) {
+    // Close logfile when HUP signal is received. Logging system will
+    // automatically reopen on next log message.
+    if ( wantLogClose ) {
+      wantLogClose = false;
+      VLOG(1) << "HUP received, reopening log file.";
+      logging::CloseLogFile();
+    }
     if (GotQuitFromStdin()) {
       for (unsigned int i = 0; i < sm_worker_threads_.size(); ++i) {
         sm_worker_threads_[i]->Quit();
@@ -3055,10 +3367,12 @@ int main (int argc, char**argv)
       for (unsigned int i = 0; i < sm_worker_threads_.size(); ++i) {
         sm_worker_threads_[i]->Join();
       }
-      return 0;
+      break;
     }
     usleep(1000*10);  // 10 ms
   }
 
+  unlink(PIDFILE);
+  close(pidfile_fd);
   return 0;
 }

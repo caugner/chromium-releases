@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,13 @@
 
 #include <string>
 #include <vector>
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
-#include "app/x11_util.h"
+
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
+#include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/oobe_progress_bar.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
@@ -24,24 +23,28 @@
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
-#include "chrome/browser/profile_manager.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/dom_view.h"
-#include "cros/chromeos_wm_ipc_enums.h"
-#include "googleurl/src/gurl.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/views/dom_view.h"
+#include "chrome/browser/ui/views/window.h"
 #include "gfx/gtk_util.h"
+#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/x/x11_util.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/screen.h"
 #include "views/widget/widget_gtk.h"
+#include "views/window/window.h"
 
 // X Windows headers have "#define Status int". That interferes with
 // NetworkLibrary header which defines enum "Status".
-#include <X11/cursorfont.h>
-#include <X11/Xcursor/Xcursor.h>
+#include <X11/cursorfont.h>  // NOLINT
+#include <X11/Xcursor/Xcursor.h>  // NOLINT
 
 using views::WidgetGtk;
 
@@ -95,9 +98,9 @@ class TextButtonWithHandCursorOver : public views::TextButton {
 // This gets rid of the ugly X default cursor.
 static void ResetXCursor() {
   // TODO(sky): nuke this once new window manager is in place.
-  Display* display = x11_util::GetXDisplay();
+  Display* display = ui::GetXDisplay();
   Cursor cursor = XCreateFontCursor(display, XC_left_ptr);
-  XID root_window = x11_util::GetX11RootWindow();
+  XID root_window = ui::GetX11RootWindow();
   XSetWindowAttributes attr;
   attr.cursor = cursor;
   XChangeWindowAttributes(display, root_window, CWCursor, &attr);
@@ -179,7 +182,16 @@ views::Widget* BackgroundView::CreateWindowContainingView(
   GdkWindow* gdk_window = window->GetNativeView()->window;
   gdk_window_set_back_pixmap(gdk_window, NULL, false);
 
+  LoginUtils::Get()->SetBackgroundView(*view);
+
   return window;
+}
+
+void BackgroundView::CreateModalPopup(views::WindowDelegate* view) {
+  views::Window* window = browser::CreateViewsWindow(
+      GetNativeWindow(), gfx::Rect(), view);
+  window->SetIsAlwaysOnTop(true);
+  window->Show();
 }
 
 void BackgroundView::SetStatusAreaVisible(bool visible) {
@@ -315,12 +327,8 @@ void BackgroundView::OpenButtonOptions(const views::View* button_view) {
   }
 }
 
-bool BackgroundView::IsBrowserMode() const {
-  return false;
-}
-
-bool BackgroundView::IsScreenLockerMode() const {
-  return false;
+StatusAreaHost::ScreenMode BackgroundView::GetScreenMode() const {
+  return kLoginMode;
 }
 
 // Overridden from LoginHtmlDialog::Delegate:

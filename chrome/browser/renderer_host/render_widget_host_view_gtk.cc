@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 // If this gets included after the gtk headers, then a bunch of compiler
 // errors happen because of a "#define Status int" in Xlib.h, which interacts
-// badly with URLRequestStatus::Status.
+// badly with net::URLRequestStatus::Status.
 #include "chrome/common/render_messages.h"
 
 #include <cairo/cairo.h>
@@ -18,8 +18,6 @@
 #include <algorithm>
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/x11_util.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -27,20 +25,22 @@
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/renderer_host/backing_store_x.h"
 #include "chrome/browser/renderer_host/gtk_im_context_wrapper.h"
 #include "chrome/browser/renderer_host/gtk_key_bindings_handler.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
+#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "gfx/gtk_preserve_window.h"
-#include "third_party/WebKit/WebKit/chromium/public/gtk/WebInputEventFactory.h"
-#include "webkit/glue/plugins/webplugin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/x/x11_util.h"
 #include "webkit/glue/webaccessibility.h"
 #include "webkit/glue/webcursor_gtk_data.h"
+#include "webkit/plugins/npapi/webplugin.h"
 
 #if defined(OS_CHROMEOS)
 #include "views/widget/tooltip_window_gtk.h"
@@ -531,6 +531,10 @@ void RenderWidgetHostViewGtk::InitAsFullscreen(
   DoInitAsPopup(parent_host_view, GTK_WINDOW_TOPLEVEL, gfx::Rect(), true);
 }
 
+RenderWidgetHost* RenderWidgetHostViewGtk::GetRenderWidgetHost() const {
+  return host_;
+}
+
 void RenderWidgetHostViewGtk::DidBecomeSelected() {
   if (!is_hidden_)
     return;
@@ -583,7 +587,7 @@ gfx::NativeView RenderWidgetHostViewGtk::GetNativeView() {
 }
 
 void RenderWidgetHostViewGtk::MovePluginWindows(
-    const std::vector<webkit_glue::WebPluginGeometry>& moves) {
+    const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   for (size_t i = 0; i < moves.size(); ++i) {
     plugin_container_manager_.MovePluginContainer(moves[i]);
   }
@@ -681,7 +685,8 @@ void RenderWidgetHostViewGtk::DidUpdateBackingStore(
   }
 }
 
-void RenderWidgetHostViewGtk::RenderViewGone() {
+void RenderWidgetHostViewGtk::RenderViewGone(base::TerminationStatus status,
+                                             int error_code) {
   Destroy();
   plugin_container_manager_.set_host_widget(NULL);
 }
@@ -718,16 +723,17 @@ void RenderWidgetHostViewGtk::SetTooltipText(const std::wstring& tooltip_text) {
   // accidentally DOS the user with a mega tooltip (since GTK doesn't do
   // this itself).
   // I filed https://bugzilla.gnome.org/show_bug.cgi?id=604641 upstream.
-  const std::wstring& clamped_tooltip =
-      l10n_util::TruncateString(tooltip_text, kMaxTooltipLength);
+  const string16 clamped_tooltip =
+      l10n_util::TruncateString(WideToUTF16Hack(tooltip_text),
+                                kMaxTooltipLength);
 
   if (clamped_tooltip.empty()) {
     gtk_widget_set_has_tooltip(view_.get(), FALSE);
   } else {
     gtk_widget_set_tooltip_text(view_.get(),
-                                WideToUTF8(clamped_tooltip).c_str());
+                                UTF16ToUTF8(clamped_tooltip).c_str());
 #if defined(OS_CHROMEOS)
-    tooltip_window_->SetTooltipText(clamped_tooltip);
+    tooltip_window_->SetTooltipText(UTF16ToWideHack(clamped_tooltip));
 #endif  // defined(OS_CHROMEOS)
   }
 }
@@ -760,7 +766,7 @@ bool RenderWidgetHostViewGtk::IsPopup() {
 BackingStore* RenderWidgetHostViewGtk::AllocBackingStore(
     const gfx::Size& size) {
   return new BackingStoreX(host_, size,
-                           x11_util::GetVisualFromGtkWidget(view_.get()),
+                           ui::GetVisualFromGtkWidget(view_.get()),
                            gtk_widget_get_visual(view_.get())->depth);
 }
 
@@ -852,7 +858,7 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
         // In the common case, use XCopyArea. We don't draw more than once, so
         // we don't need to double buffer.
         backing_store->XShowRect(gfx::Point(0, 0),
-            paint_rect, x11_util::GetX11WindowFromGtkWidget(view_.get()));
+            paint_rect, ui::GetX11WindowFromGtkWidget(view_.get()));
       } else {
         // If the grey blend is showing, we make two drawing calls. Use double
         // buffering to prevent flicker. Use CairoShowRect because XShowRect
@@ -1091,19 +1097,26 @@ void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
   if (!event.skip_in_browser &&
       key_bindings_handler_->Match(event, &edit_commands)) {
     host_->ForwardEditCommandsForNextKeyEvent(edit_commands);
+    NativeWebKeyboardEvent copy_event(event);
+    copy_event.match_edit_command = true;
+    host_->ForwardKeyboardEvent(copy_event);
+    return;
   }
+
   host_->ForwardKeyboardEvent(event);
 }
 
-void RenderWidgetHostViewGtk::AnimationEnded(const Animation* animation) {
+void RenderWidgetHostViewGtk::AnimationEnded(const ui::Animation* animation) {
   gtk_widget_queue_draw(view_.get());
 }
 
-void RenderWidgetHostViewGtk::AnimationProgressed(const Animation* animation) {
+void RenderWidgetHostViewGtk::AnimationProgressed(
+    const ui::Animation* animation) {
   gtk_widget_queue_draw(view_.get());
 }
 
-void RenderWidgetHostViewGtk::AnimationCanceled(const Animation* animation) {
+void RenderWidgetHostViewGtk::AnimationCanceled(
+    const ui::Animation* animation) {
   gtk_widget_queue_draw(view_.get());
 }
 

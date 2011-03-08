@@ -40,6 +40,8 @@ class ProxyResolverV8 : public ProxyResolver {
 
   virtual ~ProxyResolverV8();
 
+  ProxyResolverJSBindings* js_bindings() const { return js_bindings_.get(); }
+
   // ProxyResolver implementation:
   virtual int GetProxyForURL(const GURL& url,
                              ProxyInfo* results,
@@ -47,13 +49,12 @@ class ProxyResolverV8 : public ProxyResolver {
                              RequestHandle* /*request*/,
                              const BoundNetLog& net_log);
   virtual void CancelRequest(RequestHandle request);
+  virtual void CancelSetPacScript();
   virtual void PurgeMemory();
   virtual void Shutdown();
   virtual int SetPacScript(
       const scoped_refptr<ProxyResolverScriptData>& script_data,
       CompletionCallback* /*callback*/);
-
-  ProxyResolverJSBindings* js_bindings() const { return js_bindings_.get(); }
 
  private:
   // Context holds the Javascript state for the most recently loaded PAC

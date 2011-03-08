@@ -6,13 +6,13 @@
 #define CHROME_BROWSER_BACKGROUND_MODE_MANAGER_H_
 #pragma once
 
-#include "app/menus/simple_menu_model.h"
 #include "base/gtest_prod_util.h"
 #include "chrome/browser/background_application_list_model.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
+#include "ui/base/models/simple_menu_model.h"
 
 class Browser;
 class CommandLine;
@@ -38,13 +38,11 @@ class StatusTray;
 // background.
 class BackgroundModeManager
     : public NotificationObserver,
-      public menus::SimpleMenuModel::Delegate,
+      public ui::SimpleMenuModel::Delegate,
       public BackgroundApplicationListModel::Observer {
  public:
   BackgroundModeManager(Profile* profile, CommandLine* command_line);
   virtual ~BackgroundModeManager();
-
-  static void RegisterUserPrefs(PrefService* prefs);
 
   static bool IsBackgroundModeEnabled(const CommandLine* command_line);
 
@@ -71,7 +69,7 @@ class BackgroundModeManager
   virtual bool IsCommandIdChecked(int command_id) const;
   virtual bool IsCommandIdEnabled(int command_id) const;
   virtual bool GetAcceleratorForCommandId(int command_id,
-                                          menus::Accelerator* accelerator);
+                                          ui::Accelerator* accelerator);
   virtual void ExecuteCommand(int command_id);
 
   // Open an application in a new tab, opening a new window if needed.
@@ -95,12 +93,6 @@ class BackgroundModeManager
   // launch-on-startup is disabled if appropriate.
   void OnBackgroundAppUninstalled();
 
-  // Returns true if chrome has set "launch on startup" property for itself
-  // earlier and is allowed to reset it later, reducing likelihood of
-  // overriding user choices.
-  bool IsLaunchOnStartupResetAllowed();
-  void SetLaunchOnStartupResetAllowed(bool allowed);
-
   // Called to make sure that our launch-on-startup mode is properly set.
   // (virtual so we can override for tests).
   virtual void EnableLaunchOnStartup(bool should_launch);
@@ -118,6 +110,10 @@ class BackgroundModeManager
   // longer need to do this (either because the user has chosen to exit chrome
   // manually, or all apps have been loaded).
   void EndKeepAliveForStartup();
+
+  // Return an appropriate name for a Preferences menu entry.  Preferences is
+  // sometimes called Options or Settings.
+  string16 GetPreferencesMenuLabel();
 
   // Create a status tray icon to allow the user to shutdown Chrome when running
   // in background mode. Virtual to enable testing.
@@ -155,7 +151,7 @@ class BackgroundModeManager
 
   // Reference to our status icon's context menu (if any) - owned by the
   // status_icon_
-  menus::SimpleMenuModel* context_menu_;
+  ui::SimpleMenuModel* context_menu_;
 
   // Set to the position of the first application entry in the status icon's
   // context menu.

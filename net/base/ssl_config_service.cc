@@ -20,7 +20,7 @@ SSLConfig::CertAndStatus::CertAndStatus() : cert_status(0) {}
 SSLConfig::CertAndStatus::~CertAndStatus() {}
 
 SSLConfig::SSLConfig()
-    : rev_checking_enabled(true),  ssl2_enabled(false), ssl3_enabled(true),
+    : rev_checking_enabled(true), ssl3_enabled(true),
       tls1_enabled(true), dnssec_enabled(false), snap_start_enabled(false),
       dns_cert_provenance_checking_enabled(false),
       mitm_proxies_allowed(false), false_start_enabled(true),
@@ -40,9 +40,6 @@ bool SSLConfig::IsAllowedBadCert(X509Certificate* cert) const {
 
 SSLConfigService::SSLConfigService()
     : observer_list_(ObserverList<Observer>::NOTIFY_EXISTING_ONLY) {
-}
-
-SSLConfigService::~SSLConfigService() {
 }
 
 // static
@@ -99,16 +96,6 @@ static bool g_snap_start_enabled = false;
 static bool g_dns_cert_provenance_checking = false;
 
 // static
-void SSLConfigService::SetSSLConfigFlags(SSLConfig* ssl_config) {
-  ssl_config->dnssec_enabled = g_dnssec_enabled;
-  ssl_config->false_start_enabled = g_false_start_enabled;
-  ssl_config->mitm_proxies_allowed = g_mitm_proxies_allowed;
-  ssl_config->snap_start_enabled = g_snap_start_enabled;
-  ssl_config->dns_cert_provenance_checking_enabled =
-      g_dns_cert_provenance_checking;
-}
-
-// static
 void SSLConfigService::EnableDNSSEC() {
   g_dnssec_enabled = true;
 }
@@ -129,16 +116,6 @@ bool SSLConfigService::snap_start_enabled() {
 }
 
 // static
-void SSLConfigService::DisableFalseStart() {
-  g_false_start_enabled = false;
-}
-
-// static
-bool SSLConfigService::false_start_enabled() {
-  return g_false_start_enabled;
-}
-
-// static
 void SSLConfigService::AllowMITMProxies() {
   g_mitm_proxies_allowed = true;
 }
@@ -146,6 +123,16 @@ void SSLConfigService::AllowMITMProxies() {
 // static
 bool SSLConfigService::mitm_proxies_allowed() {
   return g_mitm_proxies_allowed;
+}
+
+// static
+void SSLConfigService::DisableFalseStart() {
+  g_false_start_enabled = false;
+}
+
+// static
+bool SSLConfigService::false_start_enabled() {
+  return g_false_start_enabled;
 }
 
 // static
@@ -166,10 +153,22 @@ void SSLConfigService::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+SSLConfigService::~SSLConfigService() {
+}
+
+// static
+void SSLConfigService::SetSSLConfigFlags(SSLConfig* ssl_config) {
+  ssl_config->dnssec_enabled = g_dnssec_enabled;
+  ssl_config->false_start_enabled = g_false_start_enabled;
+  ssl_config->mitm_proxies_allowed = g_mitm_proxies_allowed;
+  ssl_config->snap_start_enabled = g_snap_start_enabled;
+  ssl_config->dns_cert_provenance_checking_enabled =
+      g_dns_cert_provenance_checking;
+}
+
 void SSLConfigService::ProcessConfigUpdate(const SSLConfig& orig_config,
                                            const SSLConfig& new_config) {
   if (orig_config.rev_checking_enabled != new_config.rev_checking_enabled ||
-      orig_config.ssl2_enabled != new_config.ssl2_enabled ||
       orig_config.ssl3_enabled != new_config.ssl3_enabled ||
       orig_config.tls1_enabled != new_config.tls1_enabled) {
     FOR_EACH_OBSERVER(Observer, observer_list_, OnSSLConfigChanged());

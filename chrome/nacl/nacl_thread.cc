@@ -4,9 +4,10 @@
 
 #include "chrome/nacl/nacl_thread.h"
 
+#include <vector>
+
 #include "base/atomicops.h"
 #include "base/scoped_ptr.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/nacl_messages.h"
 #include "native_client/src/shared/imc/nacl_imc.h"
 
@@ -47,8 +48,8 @@ int CreateMemoryObject(size_t size, bool executable) {
   return -1;
 }
 
-}
-#endif
+}  // namespace
+#endif  // defined(OS_MACOSX)
 
 // This is ugly.  We need an interface header file for the exported
 // sel_ldr interfaces.
@@ -75,10 +76,13 @@ NaClThread* NaClThread::current() {
   return static_cast<NaClThread*>(ChildThread::current());
 }
 
-void NaClThread::OnControlMessageReceived(const IPC::Message& msg) {
+bool NaClThread::OnControlMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(NaClThread, msg)
     IPC_MESSAGE_HANDLER(NaClProcessMsg_Start, OnStartSelLdr)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void NaClThread::OnStartSelLdr(std::vector<nacl::FileDescriptor> handles) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ class ChromeDnsCertProvenanceChecker :
       const std::vector<std::string>& der_certs) {
     const std::string report = BuildEncryptedReport(hostname, der_certs);
 
-    URLRequest* url_request(new URLRequest(upload_url_, &delegate_));
+    net::URLRequest* url_request(new net::URLRequest(upload_url_, &delegate_));
     url_request->set_context(url_req_context_);
     url_request->set_method("POST");
     url_request->AppendBytesToUpload(report.data(), report.size());
@@ -61,8 +61,8 @@ class ChromeDnsCertProvenanceChecker :
   }
 
  private:
-  void RequestComplete(URLRequest* request) {
-    std::set<URLRequest*>::iterator i = inflight_requests_.find(request);
+  void RequestComplete(net::URLRequest* request) {
+    std::set<net::URLRequest*>::iterator i = inflight_requests_.find(request);
     DCHECK(i != inflight_requests_.end());
     delete *i;
     inflight_requests_.erase(i);
@@ -71,15 +71,15 @@ class ChromeDnsCertProvenanceChecker :
   // URLRequestDelegate is the delegate for the upload. Since this is a
   // fire-and-forget operation, we don't care if there are any errors in the
   // upload.
-  class URLRequestDelegate : public URLRequest::Delegate {
+  class URLRequestDelegate : public net::URLRequest::Delegate {
    public:
     explicit URLRequestDelegate(ChromeDnsCertProvenanceChecker* checker)
         : checker_(checker) {
     }
 
     // Delegate implementation
-    void OnResponseStarted(URLRequest* request) {
-      const URLRequestStatus& status(request->status());
+    void OnResponseStarted(net::URLRequest* request) {
+      const net::URLRequestStatus& status(request->status());
       if (!status.is_success()) {
         LOG(WARNING) << "Certificate upload failed"
                      << " status:" << status.status()
@@ -91,7 +91,7 @@ class ChromeDnsCertProvenanceChecker :
       checker_->RequestComplete(request);
     }
 
-    void OnReadCompleted(URLRequest* request, int bytes_read) {
+    void OnReadCompleted(net::URLRequest* request, int bytes_read) {
       NOTREACHED();
     }
 
@@ -103,7 +103,7 @@ class ChromeDnsCertProvenanceChecker :
   ChromeURLRequestContext* const url_req_context_;
   const GURL upload_url_;
   URLRequestDelegate delegate_;
-  std::set<URLRequest*> inflight_requests_;
+  std::set<net::URLRequest*> inflight_requests_;
 };
 
 }  // namespace

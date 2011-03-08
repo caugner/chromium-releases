@@ -4,18 +4,17 @@
 
 #include "chrome/browser/tab_contents/navigation_entry.h"
 
-#include "app/resource_bundle.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/app_resources.h"
 #include "net/base/net_util.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/text/text_elider.h"
 
 // Use this to get a new unique ID for a NavigationEntry during construction.
 // The returned ID is guaranteed to be nonzero (which is the "no ID" indicator).
@@ -77,7 +76,7 @@ void NavigationEntry::set_site_instance(SiteInstance* site_instance) {
 }
 
 const string16& NavigationEntry::GetTitleForDisplay(
-    const NavigationController* navigation_controller) {
+    const std::string& languages) {
   // Most pages have real titles. Don't even bother caching anything if this is
   // the case.
   if (!title_.empty())
@@ -89,12 +88,6 @@ const string16& NavigationEntry::GetTitleForDisplay(
     return cached_display_title_;
 
   // Use the virtual URL first if any, and fall back on using the real URL.
-  std::string languages;
-  if (navigation_controller) {
-    languages = navigation_controller->profile()->GetPrefs()->
-        GetString(prefs::kAcceptLanguages);
-  }
-
   string16 title;
   std::wstring elided_title;
   if (!virtual_url_.is_empty()) {
@@ -102,7 +95,8 @@ const string16& NavigationEntry::GetTitleForDisplay(
   } else if (!url_.is_empty()) {
     title = net::FormatUrl(url_, languages);
   }
-  ElideString(UTF16ToWideHack(title), chrome::kMaxTitleChars, &elided_title);
+  ui::ElideString(UTF16ToWideHack(title), chrome::kMaxTitleChars,
+                  &elided_title);
   cached_display_title_ = WideToUTF16Hack(elided_title);
   return cached_display_title_;
 }

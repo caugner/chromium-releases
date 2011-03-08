@@ -65,10 +65,8 @@ string16 CertificateManagerModel::GetColumnText(
               cert.os_cert_handle(), ""));
       break;
     case COL_EXPIRES_ON:
-      if (!cert.valid_expiry().is_null()) {
-        rv = WideToUTF16Hack(
-            base::TimeFormatShortDateNumeric(cert.valid_expiry()));
-      }
+      if (!cert.valid_expiry().is_null())
+        rv = base::TimeFormatShortDateNumeric(cert.valid_expiry());
       break;
     default:
       NOTREACHED();
@@ -76,9 +74,10 @@ string16 CertificateManagerModel::GetColumnText(
   return rv;
 }
 
-int CertificateManagerModel::ImportFromPKCS12(const std::string& data,
+int CertificateManagerModel::ImportFromPKCS12(net::CryptoModule* module,
+                                              const std::string& data,
                                               const string16& password) {
-  int result = cert_db_.ImportFromPKCS12(data, password);
+  int result = cert_db_.ImportFromPKCS12(module, data, password);
   if (result == net::OK)
     Refresh();
   return result;

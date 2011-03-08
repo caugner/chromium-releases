@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/auto_reset.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/non_thread_safe.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/scoped_handle.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_message_utils.h"
 
@@ -30,7 +30,7 @@ bool GetLogonSessionOnlyDACL(SECURITY_DESCRIPTOR** security_descriptor) {
   HANDLE token = NULL;
   if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
     return false;
-  ScopedHandle token_scoped(token);
+  base::win::ScopedHandle token_scoped(token);
 
   // Get the size of the TokenGroups structure.
   DWORD size = 0;
@@ -97,8 +97,8 @@ Channel::ChannelImpl::State::~State() {
 
 //------------------------------------------------------------------------------
 
-Channel::ChannelImpl::ChannelImpl(const std::string& channel_id, Mode mode,
-                                  Listener* listener)
+Channel::ChannelImpl::ChannelImpl(const IPC::ChannelHandle &channel_handle,
+                                  Mode mode, Listener* listener)
     : ALLOW_THIS_IN_INITIALIZER_LIST(input_state_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(output_state_(this)),
       pipe_(INVALID_HANDLE_VALUE),
@@ -106,9 +106,25 @@ Channel::ChannelImpl::ChannelImpl(const std::string& channel_id, Mode mode,
       waiting_connect_(mode == MODE_SERVER),
       processing_incoming_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
-  if (!CreatePipe(channel_id, mode)) {
+  switch(mode) {
+    case MODE_NONE:
+      LOG(FATAL) << "Bad mode for " << channel_handle.name;
+      break;
+    case MODE_SERVER:
+    case MODE_CLIENT:
+      break;
+    case MODE_NAMED_SERVER:
+      mode = MODE_SERVER;
+      break;
+    case MODE_NAMED_CLIENT:
+      mode = MODE_CLIENT;
+      break;
+    // Intentionally no default case here so that the compiler
+    // will check that we handle all the cases in the enum.
+  }
+  if (!CreatePipe(channel_handle, mode)) {
     // The pipe may have been closed already.
-    LOG(WARNING) << "Unable to create pipe named \"" << channel_id <<
+    LOG(WARNING) << "Unable to create pipe named \"" << channel_handle.name <<
                     "\" in " << (mode == 0 ? "server" : "client") << " mode.";
   }
 }
@@ -152,7 +168,7 @@ bool Channel::ChannelImpl::Send(Message* message) {
            << " (" << output_queue_.size() << " in queue)";
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
-  Logging::current()->OnSendMessage(message, "");
+  Logging::GetInstance()->OnSendMessage(message, "");
 #endif
 
   output_queue_.push(message);
@@ -175,10 +191,10 @@ const std::wstring Channel::ChannelImpl::PipeName(
   return ss.str();
 }
 
-bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
+bool Channel::ChannelImpl::CreatePipe(const IPC::ChannelHandle &channel_handle,
                                       Mode mode) {
   DCHECK(pipe_ == INVALID_HANDLE_VALUE);
-  const std::wstring pipe_name = PipeName(channel_id);
+  const std::wstring pipe_name = PipeName(channel_handle.name);
   if (mode == MODE_SERVER) {
     SECURITY_ATTRIBUTES security_attributes = {0};
     security_attributes.bInheritHandle = FALSE;
@@ -235,7 +251,7 @@ bool Channel::ChannelImpl::Connect() {
   DLOG_IF(WARNING, thread_check_.get()) << "Connect called more than once";
 
   if (!thread_check_.get())
-    thread_check_.reset(new NonThreadSafe());
+    thread_check_.reset(new base::NonThreadSafe());
 
   if (pipe_ == INVALID_HANDLE_VALUE)
     return false;
@@ -469,9 +485,9 @@ void Channel::ChannelImpl::OnIOCompleted(MessageLoopForIO::IOContext* context,
 
 //------------------------------------------------------------------------------
 // Channel's methods simply call through to ChannelImpl.
-Channel::Channel(const std::string& channel_id, Mode mode,
+Channel::Channel(const IPC::ChannelHandle &channel_handle, Mode mode,
                  Listener* listener)
-    : channel_impl_(new ChannelImpl(channel_id, mode, listener)) {
+    : channel_impl_(new ChannelImpl(channel_handle, mode, listener)) {
 }
 
 Channel::~Channel() {

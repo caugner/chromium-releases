@@ -1,10 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #pragma once
+
+#include <vector>
 
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/content_settings_types.h"
@@ -168,6 +170,9 @@ class BrowserWindow {
   // Returns whether the bookmark bar is animating or not.
   virtual bool IsBookmarkBarAnimating() const = 0;
 
+  // Returns whether the tab strip is editable (for extensions).
+  virtual bool IsTabStripEditable() const = 0;
+
   // Returns whether the tool bar is visible or not.
   virtual bool IsToolbarVisible() const = 0;
 
@@ -203,6 +208,9 @@ class BrowserWindow {
   // Shows the Task manager.
   virtual void ShowTaskManager() = 0;
 
+  // Shows task information related to background pages.
+  virtual void ShowBackgroundPages() = 0;
+
   // Shows the Bookmark bubble. |url| is the URL being bookmarked,
   // |already_bookmarked| is true if the url is already bookmarked.
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) = 0;
@@ -212,9 +220,6 @@ class BrowserWindow {
 
   // Returns the DownloadShelf.
   virtual DownloadShelf* GetDownloadShelf() = 0;
-
-  // Shows the Report a Bug dialog box.
-  virtual void ShowReportBugDialog() = 0;
 
   // Shows the Clear Browsing Data dialog box.
   virtual void ShowClearBrowsingDataDialog() = 0;
@@ -331,11 +336,20 @@ class BrowserWindow {
   // placed at.
   virtual gfx::Rect GetInstantBounds() = 0;
 
+#if defined(OS_CHROMEOS)
+  // Shows the keyboard overlay dialog box.
+  virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) = 0;
+#endif
+
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);
 
   // Construct a FindBar implementation for the specified |browser|.
   static FindBar* CreateFindBar(Browser* browser_window);
+
+  // Grabs a snapshot of the current browser window and returns the bounds.
+  virtual gfx::Rect GrabWindowSnapshot(std::vector<unsigned char>*
+                                       png_representation) = 0;
 
  protected:
   friend class BrowserList;

@@ -7,8 +7,8 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBCallbacks.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBDatabase.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
 
 namespace WebKit {
 class WebFrame;
@@ -32,7 +32,7 @@ class RendererWebIDBDatabaseImpl : public WebKit::WebIDBDatabase {
       bool auto_increment,
       const WebKit::WebIDBTransaction& transaction,
       WebKit::WebExceptionCode& ec);
-  virtual void removeObjectStore(
+  virtual void deleteObjectStore(
       const WebKit::WebString& name,
       const WebKit::WebIDBTransaction& transaction,
       WebKit::WebExceptionCode& ec);

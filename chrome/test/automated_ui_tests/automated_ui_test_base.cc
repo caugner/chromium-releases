@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/test/test_timeouts.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/view_ids.h"
+#include "chrome/browser/ui/view_ids.h"
 #include "chrome/test/automated_ui_tests/automated_ui_test_base.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -212,7 +213,8 @@ bool AutomatedUITestBase::DragActiveTab(bool drag_right) {
     return false;
   }
 
-  if (!browser->WaitForTabToBecomeActive(new_tab_index, action_timeout_ms())) {
+  if (!browser->WaitForTabToBecomeActive(new_tab_index,
+                                         TestTimeouts::action_timeout_ms())) {
     LogWarningMessage("failed_to_reindex_tab");
     return false;
   }

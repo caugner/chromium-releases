@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,8 @@
 #include <richedit.h>
 #include <textserv.h>
 
-#include "app/clipboard/clipboard.h"
-#include "app/clipboard/scoped_clipboard_writer.h"
-#include "app/keyboard_codes.h"
-#include "app/l10n_util.h"
-#include "app/l10n_util_win.h"
-#include "app/os_exchange_data.h"
-#include "app/os_exchange_data_provider_win.h"
-#include "app/win_util.h"
-#include "app/win/drag_source.h"
-#include "app/win/drop_target.h"
 #include "app/win/iat_patch_function.h"
+#include "app/win/win_util.h"
 #include "base/auto_reset.h"
 #include "base/basictypes.h"
 #include "base/i18n/rtl.h"
@@ -38,11 +29,11 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/common/notification_service.h"
 #include "googleurl/src/url_util.h"
 #include "gfx/canvas.h"
@@ -50,6 +41,15 @@
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "skia/ext/skia_utils_win.h"
+#include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/base/dragdrop/drag_source.h"
+#include "ui/base/dragdrop/drop_target.h"
+#include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/base/dragdrop/os_exchange_data_provider_win.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_win.h"
 #include "views/drag_utils.h"
 #include "views/focus/focus_util_win.h"
 #include "views/widget/widget.h"
@@ -68,7 +68,7 @@ namespace {
 // URL. A drop of plain text from the same edit either copies or moves the
 // selected text, and a drop of plain text from a source other than the edit
 // does a paste and go.
-class EditDropTarget : public app::win::DropTarget {
+class EditDropTarget : public ui::DropTarget {
  public:
   explicit EditDropTarget(AutocompleteEditViewWin* edit);
 
@@ -119,7 +119,7 @@ DWORD CopyOrLinkDropEffect(DWORD effect) {
 }
 
 EditDropTarget::EditDropTarget(AutocompleteEditViewWin* edit)
-    : app::win::DropTarget(edit->m_hWnd),
+    : ui::DropTarget(edit->m_hWnd),
       edit_(edit),
       drag_has_url_(false),
       drag_has_string_(false) {
@@ -129,7 +129,7 @@ DWORD EditDropTarget::OnDragEnter(IDataObject* data_object,
                                   DWORD key_state,
                                   POINT cursor_position,
                                   DWORD effect) {
-  OSExchangeData os_data(new OSExchangeDataProviderWin(data_object));
+  ui::OSExchangeData os_data(new ui::OSExchangeDataProviderWin(data_object));
   drag_has_url_ = os_data.HasURL();
   drag_has_string_ = !drag_has_url_ && os_data.HasString();
   if (drag_has_url_) {
@@ -179,7 +179,7 @@ DWORD EditDropTarget::OnDrop(IDataObject* data_object,
                              DWORD key_state,
                              POINT cursor_position,
                              DWORD effect) {
-  OSExchangeData os_data(new OSExchangeDataProviderWin(data_object));
+  ui::OSExchangeData os_data(new ui::OSExchangeDataProviderWin(data_object));
 
   if (drag_has_url_) {
     GURL url;
@@ -498,10 +498,6 @@ AutocompleteEditViewWin::~AutocompleteEditViewWin() {
   g_paint_patcher.Pointer()->DerefPatch();
 }
 
-int AutocompleteEditViewWin::TextWidth() {
-  return WidthNeededToDisplay(GetText());
-}
-
 int AutocompleteEditViewWin::WidthOfTextAfterCursor() {
   CHARRANGE selection;
   GetSelection(selection);
@@ -711,14 +707,6 @@ void AutocompleteEditViewWin::UpdatePopup() {
     return;
   }
 
-  // Figure out whether the user is trying to compose something in an IME.
-  bool ime_composing = false;
-  HIMC context = ImmGetContext(m_hWnd);
-  if (context) {
-    ime_composing = !!ImmGetCompositionString(context, GCS_COMPSTR, NULL, 0);
-    ImmReleaseContext(m_hWnd, context);
-  }
-
   // Don't inline autocomplete when:
   //   * The user is deleting text
   //   * The caret/selection isn't at the end of the text
@@ -727,7 +715,7 @@ void AutocompleteEditViewWin::UpdatePopup() {
   CHARRANGE sel;
   GetSel(sel);
   model_->StartAutocomplete(sel.cpMax != sel.cpMin,
-                            (sel.cpMax < GetTextLength()) || ime_composing);
+                            (sel.cpMax < GetTextLength()) || IsImeComposing());
 }
 
 void AutocompleteEditViewWin::ClosePopup() {
@@ -855,6 +843,11 @@ void AutocompleteEditViewWin::OnBeforePossibleChange() {
 }
 
 bool AutocompleteEditViewWin::OnAfterPossibleChange() {
+  return OnAfterPossibleChangeInternal(false);
+}
+
+bool AutocompleteEditViewWin::OnAfterPossibleChangeInternal(
+    bool force_text_changed) {
   // Prevent the user from selecting the "phantom newline" at the end of the
   // edit.  If they try, we just silently move the end of the selection back to
   // the end of the real text.
@@ -868,14 +861,18 @@ bool AutocompleteEditViewWin::OnAfterPossibleChange() {
       new_sel.cpMax = length;
     SetSelectionRange(new_sel);
   }
-  const bool selection_differs = (new_sel.cpMin != sel_before_change_.cpMin) ||
-      (new_sel.cpMax != sel_before_change_.cpMax);
+  const bool selection_differs =
+      ((new_sel.cpMin != new_sel.cpMax) ||
+       (sel_before_change_.cpMin != sel_before_change_.cpMax)) &&
+      ((new_sel.cpMin != sel_before_change_.cpMin) ||
+       (new_sel.cpMax != sel_before_change_.cpMax));
   const bool at_end_of_edit =
       (new_sel.cpMin == length) && (new_sel.cpMax == length);
 
   // See if the text or selection have changed since OnBeforePossibleChange().
   const std::wstring new_text(GetText());
-  const bool text_differs = (new_text != text_before_change_);
+  const bool text_differs = (new_text != text_before_change_) ||
+      force_text_changed;
 
   // When the user has deleted text, we don't allow inline autocomplete.  Make
   // sure to not flag cases like selecting part of the text and then pasting
@@ -887,9 +884,10 @@ bool AutocompleteEditViewWin::OnAfterPossibleChange() {
       (new_sel.cpMin <= std::min(sel_before_change_.cpMin,
                                  sel_before_change_.cpMax));
 
-
+  const bool allow_keyword_ui_change = at_end_of_edit && !IsImeComposing();
   const bool something_changed = model_->OnAfterPossibleChange(new_text,
-      selection_differs, text_differs, just_deleted_text, at_end_of_edit);
+      selection_differs, text_differs, just_deleted_text,
+      allow_keyword_ui_change);
 
   if (selection_differs)
     controller_->OnSelectionBoundsChanged();
@@ -921,6 +919,40 @@ CommandUpdater* AutocompleteEditViewWin::GetCommandUpdater() {
   return command_updater_;
 }
 
+void AutocompleteEditViewWin::SetInstantSuggestion(const string16& suggestion) {
+  // On Windows, we shows the suggestion in LocationBarView.
+  NOTREACHED();
+}
+
+int AutocompleteEditViewWin::TextWidth() const {
+  return WidthNeededToDisplay(GetText());
+}
+
+bool AutocompleteEditViewWin::IsImeComposing() const {
+  bool ime_composing = false;
+  HIMC context = ImmGetContext(m_hWnd);
+  if (context) {
+    ime_composing = !!ImmGetCompositionString(context, GCS_COMPSTR, NULL, 0);
+    ImmReleaseContext(m_hWnd, context);
+  }
+  return ime_composing;
+}
+
+views::View* AutocompleteEditViewWin::AddToView(views::View* parent) {
+  views::NativeViewHost* host = new views::NativeViewHost;
+  parent->AddChildView(host);
+  host->set_focus_view(parent);
+  host->Attach(GetNativeView());
+  return host;
+}
+
+bool AutocompleteEditViewWin::CommitInstantSuggestion(
+    const std::wstring& typed_text,
+    const std::wstring& suggested_text) {
+  model_->FinalizeInstantQuery(typed_text, suggested_text);
+  return true;
+}
+
 void AutocompleteEditViewWin::PasteAndGo(const std::wstring& text) {
   if (CanPasteAndGo(text))
     model_->PasteAndGo();
@@ -928,11 +960,11 @@ void AutocompleteEditViewWin::PasteAndGo(const std::wstring& text) {
 
 bool AutocompleteEditViewWin::SkipDefaultKeyEventProcessing(
     const views::KeyEvent& e) {
-  app::KeyboardCode key = e.GetKeyCode();
+  ui::KeyboardCode key = e.GetKeyCode();
   // We don't process ALT + numpad digit as accelerators, they are used for
   // entering special characters.  We do translate alt-home.
-  if (e.IsAltDown() && (key != app::VKEY_HOME) &&
-      win_util::IsNumPadDigit(key, e.IsExtendedKey()))
+  if (e.IsAltDown() && (key != ui::VKEY_HOME) &&
+      app::win::IsNumPadDigit(key, e.IsExtendedKey()))
     return true;
 
   // Skip accelerators for key combinations omnibox wants to crack. This list
@@ -943,28 +975,28 @@ bool AutocompleteEditViewWin::SkipDefaultKeyEventProcessing(
   // accelerators (e.g., F5 for reload the page should work even when the
   // Omnibox gets focused).
   switch (key) {
-    case app::VKEY_ESCAPE: {
+    case ui::VKEY_ESCAPE: {
       ScopedFreeze freeze(this, GetTextObjectModel());
       return model_->OnEscapeKeyPressed();
     }
 
-    case app::VKEY_RETURN:
+    case ui::VKEY_RETURN:
       return true;
 
-    case app::VKEY_UP:
-    case app::VKEY_DOWN:
+    case ui::VKEY_UP:
+    case ui::VKEY_DOWN:
       return !e.IsAltDown();
 
-    case app::VKEY_DELETE:
-    case app::VKEY_INSERT:
+    case ui::VKEY_DELETE:
+    case ui::VKEY_INSERT:
       return !e.IsAltDown() && e.IsShiftDown() && !e.IsControlDown();
 
-    case app::VKEY_X:
-    case app::VKEY_V:
+    case ui::VKEY_X:
+    case ui::VKEY_V:
       return !e.IsAltDown() && e.IsControlDown();
 
-    case app::VKEY_BACK:
-    case app::VKEY_OEM_PLUS:
+    case ui::VKEY_BACK:
+    case ui::VKEY_OEM_PLUS:
       return true;
 
     default:
@@ -1007,11 +1039,11 @@ bool AutocompleteEditViewWin::IsCommandIdEnabled(int command_id) const {
 
 bool AutocompleteEditViewWin::GetAcceleratorForCommandId(
     int command_id,
-    menus::Accelerator* accelerator) {
+    ui::Accelerator* accelerator) {
   return parent_view_->GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
-bool AutocompleteEditViewWin::IsLabelForCommandIdDynamic(int command_id) const {
+bool AutocompleteEditViewWin::IsItemForCommandIdDynamic(int command_id) const {
   // No need to change the default IDS_PASTE_AND_GO label unless this is a
   // search.
   return command_id == IDS_PASTE_AND_GO;
@@ -1020,7 +1052,7 @@ bool AutocompleteEditViewWin::IsLabelForCommandIdDynamic(int command_id) const {
 std::wstring AutocompleteEditViewWin::GetLabelForCommandId(
     int command_id) const {
   DCHECK(command_id == IDS_PASTE_AND_GO);
-  return l10n_util::GetString(model_->is_paste_and_search() ?
+  return l10n_util::GetStringUTF16(model_->is_paste_and_search() ?
       IDS_PASTE_AND_SEARCH : IDS_PASTE_AND_GO);
 }
 
@@ -1240,7 +1272,7 @@ void AutocompleteEditViewWin::OnCopy() {
   // GetSel() doesn't preserve selection direction, so sel.cpMin will always be
   // the smaller value.
   model_->AdjustTextForCopy(sel.cpMin, IsSelectAll(), &text, &url, &write_url);
-  ScopedClipboardWriter scw(g_browser_process->clipboard());
+  ui::ScopedClipboardWriter scw(g_browser_process->clipboard());
   scw.WriteText(text);
   if (write_url) {
     scw.WriteBookmark(text, url.spec());
@@ -1289,68 +1321,11 @@ LRESULT AutocompleteEditViewWin::OnImeComposition(UINT message,
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
   LRESULT result = DefWindowProc(message, wparam, lparam);
-
-  // Some IMEs insert whitespace characters instead of input characters while
-  // they are composing text, and trimming these whitespace characters at the
-  // beginning of this control (in OnAfterPossibleChange()) prevents users from
-  // inputting text on these IMEs.
-  // To prevent this problem, we should not start auto-complete if the
-  // composition string starts with whitespace characters.
-  // (When we type a space key to insert a whitespace character, IMEs don't
-  // insert the whitespace character to their composition string but their
-  // result string. So, this code doesn't prevent us from updating autocomplete
-  // when we insert a whitespace character.)
-  if (lparam & GCS_COMPSTR) {
-    std::wstring text;
-    HIMC context = ImmGetContext(m_hWnd);
-    if (context) {
-      int size = ImmGetCompositionString(context, GCS_COMPSTR, NULL, 0);
-      if (size > 0) {
-        wchar_t* text_data = WriteInto(&text, size / sizeof(wchar_t) + 1);
-        if (text_data)
-          ImmGetCompositionString(context, GCS_COMPSTR, text_data, size);
-      }
-      ImmReleaseContext(m_hWnd, context);
-    }
-    if (!text.empty() && IsWhitespace(text[0]))
-      return result;
-  }
-
-  if (!OnAfterPossibleChange() && (lparam & GCS_RESULTSTR)) {
-    // The result string changed, but the text in the popup didn't actually
-    // change.  This means the user finalized the composition.  Rerun
-    // autocomplete so that we can now trigger inline autocomplete if
-    // applicable.
-    //
-    // Note that if we're in the midst of losing focus, UpdatePopup() won't
-    // actually rerun autocomplete, but will just set local state correctly.
-    UpdatePopup();
-  }
+  // Force an IME composition confirmation operation to trigger the text_changed
+  // code in OnAfterPossibleChange(), even if identical contents are confirmed,
+  // to make sure the model can update its internal states correctly.
+  OnAfterPossibleChangeInternal((lparam & GCS_RESULTSTR) != 0);
   return result;
-}
-
-LRESULT AutocompleteEditViewWin::OnImeNotify(UINT message,
-                                             WPARAM wparam,
-                                             LPARAM lparam) {
-  // NOTE: I'm not sure this is ever reached with |ignore_ime_messages_| set,
-  // but if it is, the safe thing to do is to only call DefWindowProc().
-  if (!ignore_ime_messages_ && (wparam == IMN_SETOPENSTATUS)) {
-    // A user has activated (or deactivated) IMEs (but not started a
-    // composition).
-    // Some IMEs get confused when we accept keywords while they are composing
-    // text. To prevent this situation, we accept keywords when an IME is
-    // activated.
-    HIMC imm_context = ImmGetContext(m_hWnd);
-    if (imm_context) {
-      if (ImmGetOpenStatus(imm_context) &&
-          model_->is_keyword_hint() && !model_->keyword().empty()) {
-        ScopedFreeze freeze(this, GetTextObjectModel());
-        model_->AcceptKeyword();
-      }
-      ImmReleaseContext(m_hWnd, imm_context);
-    }
-  }
-  return DefWindowProc(message, wparam, lparam);
 }
 
 void AutocompleteEditViewWin::OnKeyDown(TCHAR key,
@@ -1485,7 +1460,7 @@ void AutocompleteEditViewWin::OnLButtonDown(UINT keys, const CPoint& point) {
   // double_click_time_ from the current message's time even if the timer has
   // wrapped in between.
   const bool is_triple_click = tracking_double_click_ &&
-      win_util::IsDoubleClick(double_click_point_, point,
+      app::win::IsDoubleClick(double_click_point_, point,
                               GetCurrentMessage()->time - double_click_time_);
   tracking_double_click_ = false;
 
@@ -1585,7 +1560,7 @@ void AutocompleteEditViewWin::OnMouseMove(UINT keys, const CPoint& point) {
     return;
   }
 
-  if (tracking_click_[kLeft] && !win_util::IsDrag(click_point_[kLeft], point))
+  if (tracking_click_[kLeft] && !app::win::IsDrag(click_point_[kLeft], point))
     return;
 
   tracking_click_[kLeft] = false;
@@ -1718,10 +1693,8 @@ void AutocompleteEditViewWin::OnPaste() {
   // Replace the selection if we have something to paste.
   const std::wstring text(GetClipboardText());
   if (!text.empty()) {
-    // If this paste will be replacing all the text, record that, so we can do
-    // different behaviors in such a case.
-    if (IsSelectAll())
-      model_->on_paste_replacing_all();
+    // Record this paste, so we can do different behavior.
+    model_->on_paste();
     // Force a Paste operation to trigger the text_changed code in
     // OnAfterPossibleChange(), even if identical contents are pasted into the
     // text box.
@@ -1823,7 +1796,7 @@ void AutocompleteEditViewWin::HandleKeystroke(UINT message,
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
 
-  if (key == app::VKEY_HOME || key == app::VKEY_END) {
+  if (key == ui::VKEY_HOME || key == ui::VKEY_END) {
     // DefWindowProc() might reset the keyboard layout when it receives a
     // keydown event for VKEY_HOME or VKEY_END. When the window was created
     // with WS_EX_LAYOUTRTL and the current keyboard layout is not a RTL one,
@@ -2000,7 +1973,7 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
     }
 
     case VK_TAB: {
-      if (model_->is_keyword_hint() && !model_->keyword().empty()) {
+      if (model_->is_keyword_hint()) {
         // Accept the keyword.
         ScopedFreeze freeze(this, GetTextObjectModel());
         model_->AcceptKeyword();
@@ -2130,7 +2103,7 @@ LONG AutocompleteEditViewWin::ClipXCoordToVisibleText(
   if (end_position_x >= first_position_x) {
     right_bound = std::min(right_bound, end_position_x);  // LTR case.
   }
-  // For trailing characters that are 2 pixels wide of less (like "l" in some
+  // For trailing characters that are 2 pixels wide or less (like "l" in some
   // fonts), we have a problem:
   //   * Clicks on any pixel within the character will place the cursor before
   //     the character.
@@ -2348,11 +2321,11 @@ void AutocompleteEditViewWin::TextChanged() {
 
 std::wstring AutocompleteEditViewWin::GetClipboardText() const {
   // Try text format.
-  Clipboard* clipboard = g_browser_process->clipboard();
-  if (clipboard->IsFormatAvailable(Clipboard::GetPlainTextWFormatType(),
-                                   Clipboard::BUFFER_STANDARD)) {
+  ui::Clipboard* clipboard = g_browser_process->clipboard();
+  if (clipboard->IsFormatAvailable(ui::Clipboard::GetPlainTextWFormatType(),
+                                   ui::Clipboard::BUFFER_STANDARD)) {
     std::wstring text;
-    clipboard->ReadText(Clipboard::BUFFER_STANDARD, &text);
+    clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &text);
 
     // Note: Unlike in the find popup and textfield view, here we completely
     // remove whitespace strings containing newlines.  We assume users are
@@ -2370,8 +2343,8 @@ std::wstring AutocompleteEditViewWin::GetClipboardText() const {
   // and pastes from the URL bar to itself, the text will get fixed up and
   // cannonicalized, which is not what the user expects.  By pasting in this
   // order, we are sure to paste what the user copied.
-  if (clipboard->IsFormatAvailable(Clipboard::GetUrlWFormatType(),
-                                   Clipboard::BUFFER_STANDARD)) {
+  if (clipboard->IsFormatAvailable(ui::Clipboard::GetUrlWFormatType(),
+                                   ui::Clipboard::BUFFER_STANDARD)) {
     std::string url_str;
     clipboard->ReadBookmark(NULL, &url_str);
     // pass resulting url string through GURL to normalize
@@ -2403,10 +2376,10 @@ ITextDocument* AutocompleteEditViewWin::GetTextObjectModel() const {
 }
 
 void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
-  if (initiated_drag_ || !win_util::IsDrag(click_point_[kLeft], point))
+  if (initiated_drag_ || !app::win::IsDrag(click_point_[kLeft], point))
     return;
 
-  OSExchangeData data;
+  ui::OSExchangeData data;
 
   DWORD supported_modes = DROPEFFECT_COPY;
 
@@ -2455,11 +2428,12 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
 
   data.SetString(text_to_write);
 
-  scoped_refptr<app::win::DragSource> drag_source(new app::win::DragSource);
+  scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
   DWORD dropped_mode;
   AutoReset<bool> auto_reset_in_drag(&in_drag_, true);
-  if (DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source,
-                 supported_modes, &dropped_mode) == DRAGDROP_S_DROP) {
+  if (DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
+                 drag_source, supported_modes, &dropped_mode) ==
+          DRAGDROP_S_DROP) {
     if ((dropped_mode == DROPEFFECT_MOVE) && (start_text == GetText())) {
       ScopedFreeze freeze(this, GetTextObjectModel());
       OnBeforePossibleChange();
@@ -2532,7 +2506,7 @@ void AutocompleteEditViewWin::BuildContextMenu() {
   if (context_menu_contents_.get())
     return;
 
-  context_menu_contents_.reset(new menus::SimpleMenuModel(this));
+  context_menu_contents_.reset(new ui::SimpleMenuModel(this));
   // Set up context menu.
   if (popup_window_mode_) {
     context_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
@@ -2559,7 +2533,7 @@ void AutocompleteEditViewWin::SelectAllIfNecessary(MouseButton button,
                                                    const CPoint& point) {
   // When the user has clicked and released to give us focus, select all.
   if (tracking_click_[button] &&
-      !win_util::IsDrag(click_point_[button], point)) {
+      !app::win::IsDrag(click_point_[button], point)) {
     // Select all in the reverse direction so as not to scroll the caret
     // into view and shift the contents jarringly.
     SelectAll(true);
@@ -2578,7 +2552,7 @@ void AutocompleteEditViewWin::TrackMousePosition(MouseButton button,
   }
 }
 
-int AutocompleteEditViewWin::GetHorizontalMargin() {
+int AutocompleteEditViewWin::GetHorizontalMargin() const {
   RECT rect;
   GetRect(&rect);
   RECT client_rect;
@@ -2586,7 +2560,8 @@ int AutocompleteEditViewWin::GetHorizontalMargin() {
   return (rect.left - client_rect.left) + (client_rect.right - rect.right);
 }
 
-int AutocompleteEditViewWin::WidthNeededToDisplay(const std::wstring& text) {
+int AutocompleteEditViewWin::WidthNeededToDisplay(
+    const std::wstring& text) const {
   // Use font_.GetStringWidth() instead of
   // PosFromChar(location_entry_->GetTextLength()) because PosFromChar() is
   // apparently buggy. In both LTR UI and RTL UI with left-to-right layout,

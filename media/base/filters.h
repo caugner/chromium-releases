@@ -33,22 +33,20 @@
 #include "media/base/media_format.h"
 #include "media/base/video_frame.h"
 
-class MessageLoop;
-
 namespace media {
 
 class Buffer;
 class Decoder;
 class DemuxerStream;
+class Filter;
 class FilterHost;
-class MediaFilter;
 
 // Used for completing asynchronous methods.
 typedef Callback0::Type FilterCallback;
 
-class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
+class Filter : public base::RefCountedThreadSafe<Filter> {
  public:
-  MediaFilter();
+  Filter();
 
   // Return the major mime type for this filter.
   virtual const char* major_mime_type() const;
@@ -60,20 +58,6 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
   virtual void set_host(FilterHost* host);
 
   virtual FilterHost* host();
-
-  // Indicates whether this filter requires a message loop to operate.
-  virtual bool requires_message_loop() const;
-
-  // The name to associate with this filter's message loop.
-  virtual const char* message_loop_name() const;
-
-  // Sets the private member |message_loop_|, which is used by filters for
-  // processing asynchronous tasks and maintaining synchronized access to
-  // internal data members.  The message loop should be running and exceed the
-  // lifetime of the filter.
-  virtual void set_message_loop(MessageLoop* message_loop);
-
-  virtual MessageLoop* message_loop();
 
   // The pipeline has resumed playback.  Filters can continue requesting reads.
   // Filters may implement this method if they need to respond to this call.
@@ -110,20 +94,18 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
 
  protected:
   // Only allow scoped_refptr<> to delete filters.
-  friend class base::RefCountedThreadSafe<MediaFilter>;
-  virtual ~MediaFilter();
+  friend class base::RefCountedThreadSafe<Filter>;
+  virtual ~Filter();
 
   FilterHost* host() const { return host_; }
-  MessageLoop* message_loop() const { return message_loop_; }
 
  private:
   FilterHost* host_;
-  MessageLoop* message_loop_;
 
-  DISALLOW_COPY_AND_ASSIGN(MediaFilter);
+  DISALLOW_COPY_AND_ASSIGN(Filter);
 };
 
-class DataSource : public MediaFilter {
+class DataSource : public Filter {
  public:
   typedef Callback1<size_t>::Type ReadCallback;
   static const size_t kReadError = static_cast<size_t>(-1);
@@ -152,11 +134,8 @@ class DataSource : public MediaFilter {
 };
 
 
-class Demuxer : public MediaFilter {
+class Demuxer : public Filter {
  public:
-  virtual bool requires_message_loop() const;
-  virtual const char* message_loop_name() const;
-
   // Initialize a Demuxer with the given DataSource, executing the callback upon
   // completion.
   virtual void Initialize(DataSource* data_source,
@@ -201,19 +180,16 @@ class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
   // return NULL to indicate the interface is unknown.  The derived filter
   // should NOT AddRef() the interface.  The DemuxerStream::QueryInterface()
   // public template function will assign the interface to a scoped_refptr<>.
-  virtual void* QueryInterface(const char* interface_id) { return NULL; }
+  virtual void* QueryInterface(const char* interface_id);
 
   friend class base::RefCountedThreadSafe<DemuxerStream>;
   virtual ~DemuxerStream();
 };
 
 
-class VideoDecoder : public MediaFilter {
+class VideoDecoder : public Filter {
  public:
   virtual const char* major_mime_type() const;
-  virtual bool requires_message_loop() const;
-  virtual const char* message_loop_name() const;
-
 
   // Initialize a VideoDecoder with the given DemuxerStream, executing the
   // callback upon completion.
@@ -253,11 +229,9 @@ class VideoDecoder : public MediaFilter {
 };
 
 
-class AudioDecoder : public MediaFilter {
+class AudioDecoder : public Filter {
  public:
   virtual const char* major_mime_type() const;
-  virtual bool requires_message_loop() const;
-  virtual const char* message_loop_name() const;
 
   // Initialize a AudioDecoder with the given DemuxerStream, executing the
   // callback upon completion.
@@ -292,7 +266,7 @@ class AudioDecoder : public MediaFilter {
 };
 
 
-class VideoRenderer : public MediaFilter {
+class VideoRenderer : public Filter {
  public:
   virtual const char* major_mime_type() const;
 
@@ -306,7 +280,7 @@ class VideoRenderer : public MediaFilter {
 };
 
 
-class AudioRenderer : public MediaFilter {
+class AudioRenderer : public Filter {
  public:
   virtual const char* major_mime_type() const;
 

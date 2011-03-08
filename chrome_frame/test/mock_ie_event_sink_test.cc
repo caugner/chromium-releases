@@ -6,7 +6,7 @@
 
 #include <sstream>
 
-#include "base/scoped_variant_win.h"
+#include "base/win/scoped_variant.h"
 #include "base/utf_string_conversions.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
 
@@ -94,7 +94,7 @@ ExpectationSet MockIEEventSink::ExpectNavigationCardinality(
 
 void MockIEEventSink::ExpectNavigation(bool is_cf, const std::wstring& url) {
   InSequence expect_in_sequence_for_scope;
-  if (is_cf) {
+  if (is_cf || GetInstalledIEVersion() == IE_9) {
     ExpectNavigationCardinality(url, Exactly(1), testing::Between(1, 2));
   } else {
     ExpectNavigationCardinality(url, Exactly(1), Exactly(1));
@@ -160,7 +160,7 @@ void MockIEEventSink::ExpectDocumentReadystate(int ready_state) {
     EXPECT_TRUE(document != NULL);
     if (document) {
       DISPPARAMS params = { 0 };
-      ScopedVariant result;
+      base::win::ScopedVariant result;
       EXPECT_HRESULT_SUCCEEDED(document->Invoke(DISPID_READYSTATE, IID_NULL,
           LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &params,
           result.Receive(), NULL, NULL));
@@ -192,6 +192,11 @@ void MockIEEventSinkTest::LaunchIEAndNavigate(const std::wstring& url) {
 
 void MockIEEventSinkTest::LaunchIENavigateAndLoop(const std::wstring& url,
                                                   int timeout) {
+  hung_call_detector_ = HungCOMCallDetector::Setup(timeout);
+  EXPECT_TRUE(hung_call_detector_ != NULL);
+
+  IEEventSink::SetAbnormalShutdown(false);
+
   EXPECT_CALL(ie_mock_, OnQuit())
       .WillOnce(QUIT_LOOP(loop_));
   HRESULT hr = ie_mock_.event_sink()->LaunchIEAndNavigate(url, &ie_mock_);
@@ -201,6 +206,9 @@ void MockIEEventSinkTest::LaunchIENavigateAndLoop(const std::wstring& url,
 
   ASSERT_TRUE(ie_mock_.event_sink()->web_browser2() != NULL);
   loop_.RunFor(timeout);
+
+  IEEventSink::SetAbnormalShutdown(hung_call_detector_->is_hung());
+  hung_call_detector_->TearDown();
 }
 
 FilePath MockIEEventSinkTest::GetTestFilePath(
@@ -214,4 +222,3 @@ std::wstring MockIEEventSinkTest::GetTestUrl(
 }
 
 }  // namespace chrome_frame_test
-

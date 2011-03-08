@@ -4,15 +4,15 @@
 
 #include "views/controls/menu/native_menu_win.h"
 
-#include "app/keyboard_codes.h"
-#include "app/l10n_util.h"
-#include "app/l10n_util_win.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
-#include "base/win_util.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/win/hwnd_util.h"
 #include "views/accelerator.h"
 #include "views/controls/menu/menu_2.h"
 
@@ -52,11 +52,11 @@ struct NativeMenuWin::ItemData {
 // structure we have constructed in NativeMenuWin.
 class NativeMenuWin::MenuHostWindow {
  public:
-  MenuHostWindow() {
+  MenuHostWindow(NativeMenuWin* parent) : parent_(parent) {
     RegisterClass();
     hwnd_ = CreateWindowEx(l10n_util::GetExtendedStyles(), kWindowClassName,
                            L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
-    win_util::SetWindowUserData(hwnd_, this);
+    ui::SetWindowUserData(hwnd_, this);
   }
 
   ~MenuHostWindow() {
@@ -121,7 +121,7 @@ class NativeMenuWin::MenuHostWindow {
   // Called when the user selects a specific item.
   void OnMenuCommand(int position, HMENU menu) {
     NativeMenuWin* intergoat = GetNativeMenuWinFromHMENU(menu);
-    menus::MenuModel* model = intergoat->model_;
+    ui::MenuModel* model = intergoat->model_;
     model->ActivatedAt(position);
   }
 
@@ -265,6 +265,9 @@ class NativeMenuWin::MenuHostWindow {
         OnDrawItem(w_param, reinterpret_cast<DRAWITEMSTRUCT*>(l_param));
         *l_result = 0;
         return true;
+      case WM_EXITMENULOOP:
+        parent_->model_->MenuClosed();
+        return true;
       // TODO(beng): bring over owner draw from old menu system.
     }
     return false;
@@ -275,7 +278,7 @@ class NativeMenuWin::MenuHostWindow {
                                              WPARAM w_param,
                                              LPARAM l_param) {
     MenuHostWindow* host =
-        reinterpret_cast<MenuHostWindow*>(win_util::GetWindowUserData(window));
+        reinterpret_cast<MenuHostWindow*>(ui::GetWindowUserData(window));
     // host is null during initial construction.
     LRESULT l_result = 0;
     if (!host || !host->ProcessWindowMessage(window, message, w_param, l_param,
@@ -286,6 +289,7 @@ class NativeMenuWin::MenuHostWindow {
   }
 
   HWND hwnd_;
+  NativeMenuWin* parent_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuHostWindow);
 };
@@ -297,7 +301,7 @@ const wchar_t* NativeMenuWin::MenuHostWindow::kWindowClassName =
 ////////////////////////////////////////////////////////////////////////////////
 // NativeMenuWin, public:
 
-NativeMenuWin::NativeMenuWin(menus::MenuModel* model, HWND system_menu_for)
+NativeMenuWin::NativeMenuWin(ui::MenuModel* model, HWND system_menu_for)
     : model_(model),
       menu_(NULL),
       owner_draw_(l10n_util::NeedOverrideDefaultUIFont(NULL, NULL) &&
@@ -357,7 +361,7 @@ void NativeMenuWin::Rebuild() {
   for (int menu_index = first_item_index_;
         menu_index < first_item_index_ + model_->GetItemCount(); ++menu_index) {
     int model_index = menu_index - first_item_index_;
-    if (model_->GetTypeAt(model_index) == menus::MenuModel::TYPE_SEPARATOR)
+    if (model_->GetTypeAt(model_index) == ui::MenuModel::TYPE_SEPARATOR)
       AddSeparatorItemAt(menu_index, model_index);
     else
       AddMenuItemAt(menu_index, model_index);
@@ -372,7 +376,8 @@ void NativeMenuWin::UpdateStates() {
     int menu_index = model_index + first_item_index_;
     SetMenuItemState(menu_index, model_->IsEnabledAt(model_index),
                      model_->IsItemCheckedAt(model_index), false);
-    if (model_->IsLabelDynamicAt(model_index)) {
+    if (model_->IsItemDynamicAt(model_index)) {
+      // TODO(atwilson): Update the icon as well (http://crbug.com/66508).
       SetMenuItemLabel(menu_index, model_index,
                        model_->GetLabelAt(model_index));
     }
@@ -485,13 +490,13 @@ void NativeMenuWin::AddMenuItemAt(int menu_index, int model_index) {
 
   ItemData* item_data = new ItemData;
   item_data->label = std::wstring();
-  menus::MenuModel::ItemType type = model_->GetTypeAt(model_index);
-  if (type == menus::MenuModel::TYPE_SUBMENU) {
+  ui::MenuModel::ItemType type = model_->GetTypeAt(model_index);
+  if (type == ui::MenuModel::TYPE_SUBMENU) {
     item_data->submenu.reset(new Menu2(model_->GetSubmenuModelAt(model_index)));
     mii.fMask |= MIIM_SUBMENU;
     mii.hSubMenu = item_data->submenu->GetNativeMenu();
   } else {
-    if (type == menus::MenuModel::TYPE_RADIO)
+    if (type == ui::MenuModel::TYPE_RADIO)
       mii.fType |= MFT_RADIOCHECK;
     mii.wID = model_->GetCommandIdAt(model_index);
   }
@@ -550,10 +555,10 @@ void NativeMenuWin::UpdateMenuItemInfoForString(
     int model_index,
     const std::wstring& label) {
   std::wstring formatted = label;
-  menus::MenuModel::ItemType type = model_->GetTypeAt(model_index);
-  if (type != menus::MenuModel::TYPE_SUBMENU) {
+  ui::MenuModel::ItemType type = model_->GetTypeAt(model_index);
+  if (type != ui::MenuModel::TYPE_SUBMENU) {
     // Add accelerator details to the label if provided.
-    views::Accelerator accelerator(app::VKEY_UNKNOWN, false, false, false);
+    views::Accelerator accelerator(ui::VKEY_UNKNOWN, false, false, false);
     if (model_->GetAcceleratorAt(model_index, &accelerator)) {
       formatted += L"\t";
       formatted += accelerator.GetShortcutText();
@@ -605,13 +610,13 @@ void NativeMenuWin::CreateHostWindow() {
   // host window per menu hierarchy, no matter how many NativeMenuWin objects
   // exist wrapping submenus.
   if (!host_window_.get())
-    host_window_.reset(new MenuHostWindow());
+    host_window_.reset(new MenuHostWindow(this));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // SystemMenuModel:
 
-SystemMenuModel::SystemMenuModel(menus::SimpleMenuModel::Delegate* delegate)
+SystemMenuModel::SystemMenuModel(ui::SimpleMenuModel::Delegate* delegate)
     : SimpleMenuModel(delegate) {
 }
 

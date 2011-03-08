@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@ void AppCacheRequestHandler::GetExtraResponseInfo(
 }
 
 AppCacheURLRequestJob* AppCacheRequestHandler::MaybeLoadResource(
-    URLRequest* request) {
+    net::URLRequest* request) {
   if (!host_ || !IsSchemeAndMethodSupported(request) || cache_entry_not_found_)
     return NULL;
 
@@ -86,7 +86,7 @@ AppCacheURLRequestJob* AppCacheRequestHandler::MaybeLoadResource(
 }
 
 AppCacheURLRequestJob* AppCacheRequestHandler::MaybeLoadFallbackForRedirect(
-    URLRequest* request, const GURL& location) {
+    net::URLRequest* request, const GURL& location) {
   if (!host_ || !IsSchemeAndMethodSupported(request) || cache_entry_not_found_)
     return NULL;
   if (is_main_resource())
@@ -115,14 +115,14 @@ AppCacheURLRequestJob* AppCacheRequestHandler::MaybeLoadFallbackForRedirect(
 }
 
 AppCacheURLRequestJob* AppCacheRequestHandler::MaybeLoadFallbackForResponse(
-    URLRequest* request) {
+    net::URLRequest* request) {
   if (!host_ || !IsSchemeAndMethodSupported(request) || cache_entry_not_found_)
     return NULL;
   if (!found_fallback_entry_.has_response_id())
     return NULL;
 
-  if (request->status().status() == URLRequestStatus::CANCELED ||
-      request->status().status() == URLRequestStatus::HANDLED_EXTERNALLY) {
+  if (request->status().status() == net::URLRequestStatus::CANCELED ||
+      request->status().status() == net::URLRequestStatus::HANDLED_EXTERNALLY) {
     // 6.9.6, step 4: But not if the user canceled the download.
     return NULL;
   }
@@ -186,7 +186,7 @@ void AppCacheRequestHandler::DeliverNetworkResponse() {
 
 // Main-resource handling ----------------------------------------------
 
-void AppCacheRequestHandler::MaybeLoadMainResource(URLRequest* request) {
+void AppCacheRequestHandler::MaybeLoadMainResource(net::URLRequest* request) {
   DCHECK(!job_);
 
   // We may have to wait for our storage query to complete, but
@@ -244,7 +244,7 @@ void AppCacheRequestHandler::OnMainResponseFound(
 // Sub-resource handling ----------------------------------------------
 
 void AppCacheRequestHandler::MaybeLoadSubResource(
-    URLRequest* request) {
+    net::URLRequest* request) {
   DCHECK(!job_);
 
   if (host_->is_selection_pending()) {

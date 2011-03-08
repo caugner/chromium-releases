@@ -25,10 +25,11 @@ class VideoDecodeEngine;
 class FFmpegVideoDecoder : public VideoDecoder,
                            public VideoDecodeEngine::EventHandler {
  public:
-  explicit FFmpegVideoDecoder(VideoDecodeContext* decode_context);
+  FFmpegVideoDecoder(MessageLoop* message_loop,
+                     VideoDecodeContext* decode_context);
   virtual ~FFmpegVideoDecoder();
 
-  // MediaFilter implementation.
+  // Filter implementation.
   virtual void Stop(FilterCallback* callback);
   virtual void Seek(base::TimeDelta time, FilterCallback* callback);
   virtual void Pause(FilterCallback* callback);
@@ -37,7 +38,7 @@ class FFmpegVideoDecoder : public VideoDecoder,
   // Decoder implementation.
   virtual void Initialize(DemuxerStream* demuxer_stream,
                           FilterCallback* callback);
-  virtual const MediaFormat& media_format() { return media_format_; }
+  virtual const MediaFormat& media_format();
   virtual void ProduceVideoFrame(scoped_refptr<VideoFrame> video_frame);
   virtual bool ProvidesBuffer();
 
@@ -109,6 +110,7 @@ class FFmpegVideoDecoder : public VideoDecoder,
   // the provided engine.
   virtual void SetVideoDecodeEngineForTest(VideoDecodeEngine* engine);
 
+  MessageLoop* message_loop_;
   size_t width_;
   size_t height_;
   MediaFormat media_format_;

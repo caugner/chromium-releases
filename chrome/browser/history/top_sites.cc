@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <set>
 
-#include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/md5.h"
@@ -22,7 +21,7 @@
 #include "chrome/browser/history/top_sites_backend.h"
 #include "chrome/browser/history/top_sites_cache.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/chrome_switches.h"
@@ -34,6 +33,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace history {
 
@@ -153,14 +153,6 @@ TopSites::TopSites(Profile* profile)
       GetMutableDictionary(prefs::kNTPMostVisitedPinnedURLs);
 }
 
-// static
-bool TopSites::IsEnabled() {
-  std::string switch_value =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kEnableTopSites);
-  return switch_value.empty() || switch_value == "true";
-}
-
 void TopSites::Init(const FilePath& db_name) {
   backend_->Init(db_name);
   backend_->GetMostVisitedThumbnails(
@@ -220,12 +212,12 @@ void TopSites::GetMostVisitedURLs(CancelableRequestConsumer* consumer,
   // WARNING: this may be invoked on any thread.
   scoped_refptr<CancelableRequest<GetTopSitesCallback> > request(
       new CancelableRequest<GetTopSitesCallback>(callback));
-  // This ensures cancelation of requests when either the consumer or the
+  // This ensures cancellation of requests when either the consumer or the
   // provider is deleted. Deletion of requests is also guaranteed.
   AddRequest(request, consumer);
   MostVisitedURLList filtered_urls;
   {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
     if (!loaded_) {
       // A request came in before we finished loading. Put the request in
       // pending_callbacks_ and we'll notify it when we finish loading.
@@ -241,7 +233,7 @@ void TopSites::GetMostVisitedURLs(CancelableRequestConsumer* consumer,
 bool TopSites::GetPageThumbnail(const GURL& url,
                                 scoped_refptr<RefCountedBytes>* bytes) {
   // WARNING: this may be invoked on any thread.
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   return thread_safe_cache_->GetPageThumbnail(url, bytes);
 }
 
@@ -443,7 +435,7 @@ void TopSites::DiffMostVisited(const MostVisitedURLList& old_list,
 CancelableRequestProvider::Handle TopSites::StartQueryForMostVisited() {
   DCHECK(loaded_);
   if (!profile_)
-    return NULL;
+    return 0;
 
   HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   // |hs| may be null during unit tests.
@@ -454,7 +446,7 @@ CancelableRequestProvider::Handle TopSites::StartQueryForMostVisited() {
         &cancelable_consumer_,
         NewCallback(this, &TopSites::OnTopSitesAvailableFromHistory));
   }
-  return NULL;
+  return 0;
 }
 
 TopSites::~TopSites() {
@@ -808,7 +800,7 @@ void TopSites::MoveStateToLoaded() {
   MostVisitedURLList filtered_urls;
   PendingCallbackSet pending_callbacks;
   {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
 
     if (loaded_)
       return;  // Don't do anything if we're already loaded.
@@ -830,14 +822,14 @@ void TopSites::MoveStateToLoaded() {
 }
 
 void TopSites::ResetThreadSafeCache() {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   MostVisitedURLList cached;
   ApplyBlacklistAndPinnedURLs(cache_->top_sites(), &cached);
   thread_safe_cache_->SetTopSites(cached);
 }
 
 void TopSites::ResetThreadSafeImageCache() {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   thread_safe_cache_->SetThumbnails(cache_->images());
   thread_safe_cache_->RemoveUnreferencedThumbnails();
 }

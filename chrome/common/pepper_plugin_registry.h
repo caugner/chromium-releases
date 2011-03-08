@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,8 @@
 #include <vector>
 
 #include "base/file_path.h"
-#include "webkit/glue/plugins/pepper_plugin_module.h"
+#include "webkit/plugins/ppapi/plugin_delegate.h"
+#include "webkit/plugins/ppapi/plugin_module.h"
 
 struct PepperPluginInfo {
   PepperPluginInfo();
@@ -33,12 +34,24 @@ struct PepperPluginInfo {
 };
 
 // This class holds references to all of the known pepper plugin modules.
-class PepperPluginRegistry {
+//
+// It keeps two lists. One list of preloaded in-process modules, and one list
+// is a list of all live modules (some of which may be out-of-process and hence
+// not preloaded).
+class PepperPluginRegistry
+    : public webkit::ppapi::PluginDelegate::ModuleLifetime {
  public:
+  ~PepperPluginRegistry();
+
   static const char* kPDFPluginName;
   static const char* kPDFPluginMimeType;
   static const char* kPDFPluginExtension;
   static const char* kPDFPluginDescription;
+
+  static const char* kNaClPluginName;
+  static const char* kNaClPluginMimeType;
+  static const char* kNaClPluginExtension;
+  static const char* kNaClPluginDescription;
 
   static PepperPluginRegistry* GetInstance();
 
@@ -56,12 +69,20 @@ class PepperPluginRegistry {
   // out of process.
   bool RunOutOfProcessForPlugin(const FilePath& path) const;
 
-  // Returns a preloaded module for the given path. This only works for
-  // non-out-of-process plugins since we preload them so they will run in the
-  // sandbox. Returns NULL if the plugin hasn't been preloaded.
-  pepper::PluginModule* GetModule(const FilePath& path) const;
+  // Returns an existing loaded module for the given path. It will search for
+  // both preloaded in-process or currently active out-of-process plugins
+  // matching the given name. Returns NULL if the plugin hasn't been loaded.
+  webkit::ppapi::PluginModule* GetModule(const FilePath& path);
 
-  ~PepperPluginRegistry();
+  // Notifies the registry that a new non-preloaded module has been created.
+  // This is normally called for out-of-process plugins. Once this is called,
+  // the module is available to be returned by GetModule(). The module will
+  // automatically unregister itself by calling PluginModuleDestroyed().
+  void AddLiveModule(const FilePath& path, webkit::ppapi::PluginModule* module);
+
+  // ModuleLifetime implementation.
+  virtual void PluginModuleDestroyed(
+      webkit::ppapi::PluginModule* destroyed_module);
 
  private:
   static void GetPluginInfoFromSwitch(std::vector<PepperPluginInfo>* plugins);
@@ -69,16 +90,22 @@ class PepperPluginRegistry {
 
   struct InternalPluginInfo : public PepperPluginInfo {
     InternalPluginInfo();  // Sets |is_internal|.
-    pepper::PluginModule::EntryPoints entry_points;
+    webkit::ppapi::PluginModule::EntryPoints entry_points;
   };
   typedef std::vector<InternalPluginInfo> InternalPluginInfoList;
   static void GetInternalPluginInfo(InternalPluginInfoList* plugin_info);
 
   PepperPluginRegistry();
 
-  typedef scoped_refptr<pepper::PluginModule> ModuleHandle;
-  typedef std::map<FilePath, ModuleHandle> ModuleMap;
-  ModuleMap modules_;
+  typedef std::map<FilePath, scoped_refptr<webkit::ppapi::PluginModule> >
+      OwningModuleMap;
+  OwningModuleMap preloaded_modules_;
+
+  // A list of non-owning pointers to all currently-live plugin modules. This
+  // includes both preloaded ones in preloaded_modules_, and out-of-process
+  // modules whose lifetime is managed externally.
+  typedef std::map<FilePath, webkit::ppapi::PluginModule*> NonOwningModuleMap;
+  NonOwningModuleMap live_modules_;
 };
 
 #endif  // CHROME_COMMON_PEPPER_PLUGIN_REGISTRY_H_

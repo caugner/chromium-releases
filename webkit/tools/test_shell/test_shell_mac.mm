@@ -11,13 +11,11 @@
 
 #include "base/base_paths.h"
 #include "base/basictypes.h"
-#include "base/data_pack.h"
-#include "base/debug_on_start.h"
 #include "base/debug/debugger.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "base/memory_debug.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -29,11 +27,12 @@
 #include "net/base/mime_util.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/resource/data_pack.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/tools/test_shell/mac/test_shell_webview.h"
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
@@ -70,7 +69,7 @@ const int kTestWindowXLocation = -14000;
 const int kTestWindowYLocation = -14000;
 
 // Data pack resource. This is a pointer to the mmapped resources file.
-static base::DataPack* g_resource_data_pack = NULL;
+static ui::DataPack* g_resource_data_pack = NULL;
 
 // Define static member variables
 base::LazyInstance <std::map<gfx::NativeWindow, TestShell *> >
@@ -80,7 +79,7 @@ base::LazyInstance <std::map<gfx::NativeWindow, TestShell *> >
 FilePath GetResourcesFilePath() {
   FilePath path;
   // We need to know if we're bundled or not to know which path to use.
-  if (mac_util::AmIBundled()) {
+  if (base::mac::AmIBundled()) {
     PathService::Get(base::DIR_EXE, &path);
     path = path.Append(FilePath::kParentDirectory);
     return path.AppendASCII("Resources");
@@ -210,9 +209,9 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   // mmap the data pack which holds strings used by WebCore. This is only
   // a fatal error if we're bundled, which means we might be running layout
   // tests. This is a harmless failure for test_shell_tests.
-  g_resource_data_pack = new base::DataPack;
+  g_resource_data_pack = new ui::DataPack;
   NSString *resource_path =
-      [mac_util::MainAppBundle() pathForResource:@"test_shell"
+      [base::mac::MainAppBundle() pathForResource:@"test_shell"
                                           ofType:@"pak"];
   FilePath resources_pak_path([resource_path fileSystemRepresentation]);
   if (!g_resource_data_pack->Load(resources_pak_path)) {
@@ -223,11 +222,11 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
 
   // Load the Ahem font, which is used by layout tests.
   const char* ahem_path_c;
-  NSString* ahem_path = [[mac_util::MainAppBundle() resourcePath]
+  NSString* ahem_path = [[base::mac::MainAppBundle() resourcePath]
       stringByAppendingPathComponent:@"AHEM____.TTF"];
   ahem_path_c = [ahem_path fileSystemRepresentation];
   FSRef ahem_fsref;
-  if (!mac_util::FSRefFromPath(ahem_path_c, &ahem_fsref)) {
+  if (!base::mac::FSRefFromPath(ahem_path_c, &ahem_fsref)) {
     DLOG(FATAL) << "FSRefFromPath " << ahem_path_c;
   } else {
     // The last argument is an ATSFontContainerRef that can be passed to
@@ -247,12 +246,12 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   // test plugins.
   FilePath plugins_dir;
   PathService::Get(base::DIR_EXE, &plugins_dir);
-  if (mac_util::AmIBundled()) {
+  if (base::mac::AmIBundled()) {
     plugins_dir = plugins_dir.AppendASCII("../../../plugins");
   } else {
     plugins_dir = plugins_dir.AppendASCII("plugins");
   }
-  NPAPI::PluginList::Singleton()->AddExtraPluginDir(plugins_dir);
+  webkit::npapi::PluginList::Singleton()->AddExtraPluginDir(plugins_dir);
 }
 
 NSButton* MakeTestButton(NSRect* rect, NSString* title, NSView* parent) {
@@ -525,7 +524,7 @@ void TestShell::ResizeSubViews() {
   // handled by Cocoa for us
 }
 
-/* static */ void TestShell::DumpAllBackForwardLists(std::wstring* result) {
+/* static */ void TestShell::DumpAllBackForwardLists(string16* result) {
   result->clear();
   for (WindowList::iterator iter = TestShell::windowList()->begin();
        iter != TestShell::windowList()->end(); iter++) {
@@ -655,7 +654,7 @@ void TestShell::ShowStartupDebuggingDialog() {
   [alert runModal];
 }
 
-base::StringPiece TestShell::NetResourceProvider(int key) {
+base::StringPiece TestShell::ResourceProvider(int key) {
   base::StringPiece res;
   g_resource_data_pack->GetStringPiece(key, &res);
   return res;
@@ -722,7 +721,7 @@ base::StringPiece GetDataResource(int resource_id) {
   case IDR_INPUT_SPEECH:
   case IDR_INPUT_SPEECH_RECORDING:
   case IDR_INPUT_SPEECH_WAITING:
-    return TestShell::NetResourceProvider(resource_id);
+    return TestShell::ResourceProvider(resource_id);
 
   default:
     break;

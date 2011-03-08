@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #pragma once
 
 #include "chrome/browser/dom_ui/options/options_ui.h"
+#include "chrome/browser/plugin_data_remover_helper.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/notification_observer.h"
@@ -39,6 +40,8 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
 
   // Updates the page with the default settings (allow, ask, block, etc.)
   void UpdateSettingDefaultFromModel(ContentSettingsType type);
+  // Updates the state of the "Clear plugin LSO data on exit" checkbox.
+  void UpdateClearPluginLSOData();
 
   // Clobbers and rebuilds the specific content setting type exceptions table.
   void UpdateExceptionsViewFromModel(ContentSettingsType type);
@@ -65,10 +68,10 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
   // chosen.
   void SetContentFilter(const ListValue* args);
 
-  // Removes the given rows from the table. The first entry in |args| is the
-  // content type, and the rest of the arguments describe individual exceptions
+  // Removes the given row from the table. The first entry in |args| is the
+  // content type, and the rest of the arguments depend on the content type
   // to be removed.
-  void RemoveExceptions(const ListValue* args);
+  void RemoveException(const ListValue* args);
 
   // Changes the value of an exception. Called after the user is done editing an
   // exception.
@@ -77,9 +80,6 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
   // Called to decide whether a given pattern is valid, or if it should be
   // rejected. Called while the user is editing an exception pattern.
   void CheckExceptionPatternValidity(const ListValue* args);
-
-  // Show the about:plugins page in a new tab.
-  void OpenPluginsTab(const ListValue* args);
 
   // Sets the global 3rd party cookies pref.
   void SetAllowThirdPartyCookies(const ListValue* args);
@@ -96,10 +96,15 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
   // Gets the default setting in string form.
   std::string GetSettingDefaultFromModel(ContentSettingsType type);
 
+  // Returns true if the default setting for the given content settings type
+  // |type| is managed.
+  bool GetDefaultSettingManagedFromModel(ContentSettingsType type);
+
   // Member variables ---------------------------------------------------------
 
   NotificationRegistrar notification_registrar_;
   PrefChangeRegistrar pref_change_registrar_;
+  PluginDataRemoverHelper clear_plugin_lso_data_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingsHandler);
 };

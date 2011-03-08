@@ -9,12 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "app/text_elider.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
+#include "base/lazy_instance.h"
 #include "base/message_loop.h"
-#include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/i18n/time_formatting.h"
@@ -25,6 +24,7 @@
 #include "printing/printed_page.h"
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
+#include "ui/base/text/text_elider.h"
 
 namespace {
 
@@ -37,7 +37,8 @@ struct PrintDebugDumpPath {
   FilePath debug_dump_path;
 };
 
-Singleton<PrintDebugDumpPath> g_debug_dump_info;
+static base::LazyInstance<PrintDebugDumpPath> g_debug_dump_info(
+    base::LINKER_INITIALIZED);
 
 }  // namespace
 
@@ -77,7 +78,7 @@ void PrintedDocument::SetPage(int page_number,
                       page_rect,
                       has_visible_overlays));
   {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
     mutable_.pages_[page_number] = page;
     if (mutable_.shrink_factor == 0) {
       mutable_.shrink_factor = shrink;
@@ -90,7 +91,7 @@ void PrintedDocument::SetPage(int page_number,
 
 bool PrintedDocument::GetPage(int page_number,
                               scoped_refptr<PrintedPage>* page) {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   PrintedPages::const_iterator itr = mutable_.pages_.find(page_number);
   if (itr != mutable_.pages_.end()) {
     if (itr->second.get()) {
@@ -101,17 +102,8 @@ bool PrintedDocument::GetPage(int page_number,
   return false;
 }
 
-bool PrintedDocument::RenderPrintedPageNumber(
-    int page_number, gfx::NativeDrawingContext context) {
-  scoped_refptr<PrintedPage> page;
-  if (!GetPage(page_number, &page))
-    return false;
-  RenderPrintedPage(*page.get(), context);
-  return true;
-}
-
 bool PrintedDocument::IsComplete() const {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   if (!mutable_.page_count_)
     return false;
   PageNumber page(immutable_.settings_, mutable_.page_count_);
@@ -127,14 +119,14 @@ bool PrintedDocument::IsComplete() const {
 }
 
 void PrintedDocument::DisconnectSource() {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   mutable_.source_ = NULL;
 }
 
 uint32 PrintedDocument::MemoryUsage() const {
   std::vector< scoped_refptr<PrintedPage> > pages_copy;
   {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
     pages_copy.reserve(mutable_.pages_.size());
     PrintedPages::const_iterator end = mutable_.pages_.end();
     for (PrintedPages::const_iterator itr = mutable_.pages_.begin();
@@ -152,7 +144,7 @@ uint32 PrintedDocument::MemoryUsage() const {
 }
 
 void PrintedDocument::set_page_count(int max_page) {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   DCHECK_EQ(0, mutable_.page_count_);
   mutable_.page_count_ = max_page;
   if (immutable_.settings_.ranges.empty()) {
@@ -165,12 +157,12 @@ void PrintedDocument::set_page_count(int max_page) {
 }
 
 int PrintedDocument::page_count() const {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   return mutable_.page_count_;
 }
 
 int PrintedDocument::expected_page_count() const {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   return mutable_.expected_page_count_;
 }
 
@@ -192,7 +184,8 @@ void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
     // May happen if document name or url is empty.
     return;
   }
-  const gfx::Size string_size(font.GetStringWidth(output), font.GetHeight());
+  const gfx::Size string_size(font.GetStringWidth(WideToUTF16Hack(output)),
+                              font.GetHeight());
   gfx::Rect bounding;
   bounding.set_height(string_size.height());
   const gfx::Rect& overlay_area(
@@ -232,10 +225,10 @@ void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
 
   if (string_size.width() > bounding.width()) {
     if (line == PageOverlays::kUrl) {
-      output = UTF16ToWideHack(gfx::ElideUrl(url(), font, bounding.width(),
-                                             std::wstring()));
+      output = UTF16ToWideHack(ui::ElideUrl(url(), font, bounding.width(),
+                                            std::wstring()));
     } else {
-      output = UTF16ToWideHack(gfx::ElideText(WideToUTF16Hack(output),
+      output = UTF16ToWideHack(ui::ElideText(WideToUTF16Hack(output),
           font, bounding.width(), false));
     }
   }
@@ -244,7 +237,7 @@ void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
 }
 
 void PrintedDocument::DebugDump(const PrintedPage& page) {
-  if (!g_debug_dump_info->enabled)
+  if (!g_debug_dump_info.Get().enabled)
     return;
 
   string16 filename;
@@ -258,19 +251,19 @@ void PrintedDocument::DebugDump(const PrintedPage& page) {
   filename += ASCIIToUTF16("_.emf");
 #if defined(OS_WIN)
   page.native_metafile()->SaveTo(
-      g_debug_dump_info->debug_dump_path.Append(filename).ToWStringHack());
+      g_debug_dump_info.Get().debug_dump_path.Append(filename).ToWStringHack());
 #else  // OS_WIN
   NOTIMPLEMENTED();
 #endif  // OS_WIN
 }
 
 void PrintedDocument::set_debug_dump_path(const FilePath& debug_dump_path) {
-  g_debug_dump_info->enabled = !debug_dump_path.empty();
-  g_debug_dump_info->debug_dump_path = debug_dump_path;
+  g_debug_dump_info.Get().enabled = !debug_dump_path.empty();
+  g_debug_dump_info.Get().debug_dump_path = debug_dump_path;
 }
 
 const FilePath& PrintedDocument::debug_dump_path() {
-  return g_debug_dump_info->debug_dump_path;
+  return g_debug_dump_info.Get().debug_dump_path;
 }
 
 PrintedDocument::Mutable::Mutable(PrintedPagesSource* source)

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/importer/firefox_proxy_settings.h"
-#include "chrome/browser/io_thread.h"
 #include "chrome/common/chrome_switches.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/dnsrr_resolver.h"
 #include "net/base/host_resolver.h"
@@ -26,6 +27,7 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/proxy/proxy_config_service_fixed.h"
+#include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
@@ -36,10 +38,11 @@ namespace {
 // An instance of ExperimentURLRequestContext is created for each experiment
 // run by ConnectionTester. The class initializes network dependencies according
 // to the specified "experiment".
-class ExperimentURLRequestContext : public URLRequestContext {
+class ExperimentURLRequestContext : public net::URLRequestContext {
  public:
-  explicit ExperimentURLRequestContext(IOThread* io_thread)
-      : io_thread_(io_thread) {}
+  explicit ExperimentURLRequestContext(
+      net::URLRequestContext* proxy_request_context)
+      : proxy_request_context_(proxy_request_context) {}
 
   int Init(const ConnectionTester::Experiment& experiment) {
     int rv;
@@ -58,16 +61,18 @@ class ExperimentURLRequestContext : public URLRequestContext {
 
     // The rest of the dependencies are standard, and don't depend on the
     // experiment being run.
+    cert_verifier_ = new net::CertVerifier;
     dnsrr_resolver_ = new net::DnsRRResolver;
     ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
     ssl_config_service_ = new net::SSLConfigServiceDefaults;
     http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault(
         host_resolver_);
     http_transaction_factory_ = new net::HttpCache(
-        net::HttpNetworkLayer::CreateFactory(host_resolver_, dnsrr_resolver_,
-            NULL /* dns_cert_checker */,
+        net::HttpNetworkLayer::CreateFactory(host_resolver_, cert_verifier_,
+            dnsrr_resolver_, NULL /* dns_cert_checker */,
             NULL /* ssl_host_info_factory */, proxy_service_,
             ssl_config_service_, http_auth_handler_factory_, NULL, NULL),
+        NULL /* net_log */,
         net::HttpCache::DefaultBackend::InMemory(0));
     // In-memory cookie store.
     cookie_store_ = new net::CookieMonster(NULL, NULL);
@@ -81,6 +86,7 @@ class ExperimentURLRequestContext : public URLRequestContext {
     delete http_transaction_factory_;
     delete http_auth_handler_factory_;
     delete dnsrr_resolver_;
+    delete cert_verifier_;
     delete host_resolver_;
   }
 
@@ -126,10 +132,14 @@ class ExperimentURLRequestContext : public URLRequestContext {
   int CreateProxyConfigService(
       ConnectionTester::ProxySettingsExperiment experiment,
       scoped_ptr<net::ProxyConfigService>* config_service) {
+    scoped_ptr<base::ThreadRestrictions::ScopedAllowIO> allow_io;
     switch (experiment) {
       case ConnectionTester::PROXY_EXPERIMENT_USE_SYSTEM_SETTINGS:
         return CreateSystemProxyConfigService(config_service);
       case ConnectionTester::PROXY_EXPERIMENT_USE_FIREFOX_SETTINGS:
+        // http://crbug.com/67664: This call can lead to blocking IO on the IO
+        // thread.  This is a bug and should be fixed.
+        allow_io.reset(new base::ThreadRestrictions::ScopedAllowIO);
         return CreateFirefoxProxyConfigService(config_service);
       case ConnectionTester::PROXY_EXPERIMENT_USE_AUTO_DETECT:
         config_service->reset(new net::ProxyConfigServiceFixed(
@@ -167,7 +177,7 @@ class ExperimentURLRequestContext : public URLRequestContext {
     *proxy_service = net::ProxyService::CreateUsingV8ProxyResolver(
         config_service.release(),
         0u,
-        io_thread_->CreateAndRegisterProxyScriptFetcher(this),
+        new net::ProxyScriptFetcherImpl(proxy_request_context_),
         host_resolver(),
         NULL);
 
@@ -214,7 +224,7 @@ class ExperimentURLRequestContext : public URLRequestContext {
     return net::ERR_FAILED;
   }
 
-  IOThread* io_thread_;
+  const scoped_refptr<net::URLRequestContext> proxy_request_context_;
 };
 
 }  // namespace
@@ -223,7 +233,7 @@ class ExperimentURLRequestContext : public URLRequestContext {
 
 // TestRunner is a helper class for running an individual experiment. It can
 // be deleted any time after it is started, and this will abort the request.
-class ConnectionTester::TestRunner : public URLRequest::Delegate {
+class ConnectionTester::TestRunner : public net::URLRequest::Delegate {
  public:
   // |tester| must remain alive throughout the TestRunner's lifetime.
   // |tester| will be notified of completion.
@@ -233,9 +243,9 @@ class ConnectionTester::TestRunner : public URLRequest::Delegate {
   // it is done.
   void Run(const Experiment& experiment);
 
-  // URLRequest::Delegate implementation.
-  virtual void OnResponseStarted(URLRequest* request);
-  virtual void OnReadCompleted(URLRequest* request, int bytes_read);
+  // Overridden from net::URLRequest::Delegate:
+  virtual void OnResponseStarted(net::URLRequest* request);
+  virtual void OnReadCompleted(net::URLRequest* request, int bytes_read);
   // TODO(eroman): handle cases requiring authentication.
 
  private:
@@ -244,18 +254,18 @@ class ConnectionTester::TestRunner : public URLRequest::Delegate {
 
   // Starts reading the response's body (and keeps reading until an error or
   // end of stream).
-  void ReadBody(URLRequest* request);
+  void ReadBody(net::URLRequest* request);
 
   // Called when the request has completed (for both success and failure).
-  void OnResponseCompleted(URLRequest* request);
+  void OnResponseCompleted(net::URLRequest* request);
 
   ConnectionTester* tester_;
-  scoped_ptr<URLRequest> request_;
+  scoped_ptr<net::URLRequest> request_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRunner);
 };
 
-void ConnectionTester::TestRunner::OnResponseStarted(URLRequest* request) {
+void ConnectionTester::TestRunner::OnResponseStarted(net::URLRequest* request) {
   if (!request->status().is_success()) {
     OnResponseCompleted(request);
     return;
@@ -265,7 +275,7 @@ void ConnectionTester::TestRunner::OnResponseStarted(URLRequest* request) {
   ReadBody(request);
 }
 
-void ConnectionTester::TestRunner::OnReadCompleted(URLRequest* request,
+void ConnectionTester::TestRunner::OnReadCompleted(net::URLRequest* request,
                                                    int bytes_read) {
   if (bytes_read <= 0) {
     OnResponseCompleted(request);
@@ -276,7 +286,7 @@ void ConnectionTester::TestRunner::OnReadCompleted(URLRequest* request,
   ReadBody(request);
 }
 
-void ConnectionTester::TestRunner::ReadBody(URLRequest* request) {
+void ConnectionTester::TestRunner::ReadBody(net::URLRequest* request) {
   // Read the response body |kReadBufferSize| bytes at a time.
   scoped_refptr<net::IOBuffer> unused_buffer(
       new net::IOBuffer(kReadBufferSize));
@@ -289,7 +299,8 @@ void ConnectionTester::TestRunner::ReadBody(URLRequest* request) {
   }
 }
 
-void ConnectionTester::TestRunner::OnResponseCompleted(URLRequest* request) {
+void ConnectionTester::TestRunner::OnResponseCompleted(
+    net::URLRequest* request) {
   int result = net::OK;
   if (!request->status().is_success()) {
     DCHECK_NE(net::ERR_IO_PENDING, request->status().os_error());
@@ -299,9 +310,9 @@ void ConnectionTester::TestRunner::OnResponseCompleted(URLRequest* request) {
 }
 
 void ConnectionTester::TestRunner::Run(const Experiment& experiment) {
-  // Try to create a URLRequestContext for this experiment.
+  // Try to create a net::URLRequestContext for this experiment.
   scoped_refptr<ExperimentURLRequestContext> context(
-      new ExperimentURLRequestContext(tester_->io_thread_));
+      new ExperimentURLRequestContext(tester_->proxy_request_context_));
   int rv = context->Init(experiment);
   if (rv != net::OK) {
     // Complete the experiment with a failure.
@@ -310,17 +321,19 @@ void ConnectionTester::TestRunner::Run(const Experiment& experiment) {
   }
 
   // Fetch a request using the experimental context.
-  request_.reset(new URLRequest(experiment.url, this));
+  request_.reset(new net::URLRequest(experiment.url, this));
   request_->set_context(context);
   request_->Start();
 }
 
 // ConnectionTester ----------------------------------------------------------
 
-ConnectionTester::ConnectionTester(Delegate* delegate, IOThread* io_thread)
-    : delegate_(delegate), io_thread_(io_thread) {
+ConnectionTester::ConnectionTester(
+    Delegate* delegate,
+    net::URLRequestContext* proxy_request_context)
+    : delegate_(delegate), proxy_request_context_(proxy_request_context) {
   DCHECK(delegate);
-  DCHECK(io_thread);
+  DCHECK(proxy_request_context);
 }
 
 ConnectionTester::~ConnectionTester() {

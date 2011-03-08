@@ -1,7 +1,7 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_PPB_INSTANCE_H_
 #define PPAPI_C_PPB_INSTANCE_H_
 
@@ -10,7 +10,7 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
 
-#define PPB_INSTANCE_INTERFACE "PPB_Instance;0.2"
+#define PPB_INSTANCE_INTERFACE "PPB_Instance;0.4"
 
 /**
  * @file
@@ -88,4 +88,5 @@ struct PPB_Instance {
  * @}
  * End addtogroup PPB
  */
-#endif  // PPAPI_C_PPB_INSTANCE_H_
+#endif  /* PPAPI_C_PPB_INSTANCE_H_ */
+

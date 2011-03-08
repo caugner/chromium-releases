@@ -4,7 +4,6 @@
 
 #include "chrome/renderer/localized_error.h"
 
-#include "app/l10n_util.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/string16.h"
@@ -12,13 +11,14 @@
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebURLError;
@@ -30,7 +30,7 @@ static const char kRedirectLoopLearnMoreUrl[] =
 static const char kWeakDHKeyLearnMoreUrl[] =
     "http://sites.google.com/a/chromium.org/dev/err_ssl_weak_server_ephemeral_dh_key";
 static const char kESETLearnMoreUrl[] =
-    "http://sites.google.com/a/chromium.org/dev/err_eset_anti_virus_ssl_interception";
+    "http://kb.eset.com/esetkb/index?page=content&id=SOLN2588";
 
 enum NAV_SUGGESTIONS {
   SUGGEST_NONE     = 0,
@@ -114,6 +114,20 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_FILE_NOT_FOUND,
    SUGGEST_NONE,
   },
+  {net::ERR_CACHE_READ_FAILURE,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_CACHE_READ_FAILURE,
+   IDS_ERRORPAGES_SUMMARY_CACHE_READ_FAILURE,
+   IDS_ERRORPAGES_DETAILS_CACHE_READ_FAILURE,
+   SUGGEST_RELOAD,
+  },
+  {net::ERR_NETWORK_IO_SUSPENDED,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_NETWORK_IO_SUSPENDED,
+   IDS_ERRORPAGES_SUMMARY_NETWORK_IO_SUSPENDED,
+   IDS_ERRORPAGES_DETAILS_NETWORK_IO_SUSPENDED,
+   SUGGEST_RELOAD,
+  },
   {net::ERR_TOO_MANY_REDIRECTS,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
    IDS_ERRORPAGES_HEADING_TOO_MANY_REDIRECTS,
@@ -155,6 +169,13 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_SUMMARY_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
    IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_LEARNMORE,
+  },
+  {net::ERR_TEMPORARILY_THROTTLED,
+   IDS_ERRORPAGES_TITLE_ACCESS_DENIED,
+   IDS_ERRORPAGES_HEADING_ACCESS_DENIED,
+   IDS_ERRORPAGES_SUMMARY_TEMPORARILY_THROTTLED,
+   IDS_ERRORPAGES_DETAILS_TEMPORARILY_THROTTLED,
+   SUGGEST_NONE,
   },
 };
 
@@ -495,10 +516,11 @@ void LocalizedError::GetFormRepostStrings(const GURL& display_url,
   error_strings->Set("summary", summary);
 }
 
-void LocalizedError::GetAppErrorStrings(const WebURLError& error,
-                                        const GURL& display_url,
-                                        const ExtensionRendererInfo* app,
-                                        DictionaryValue* error_strings) {
+void LocalizedError::GetAppErrorStrings(
+    const WebURLError& error,
+    const GURL& display_url,
+    const Extension* app,
+    DictionaryValue* error_strings) {
   DCHECK(app);
 
   bool rtl = LocaleIsRTL();
@@ -513,7 +535,9 @@ void LocalizedError::GetAppErrorStrings(const WebURLError& error,
                                        failed_url.c_str()));
 
   error_strings->SetString("title", app->name());
-  error_strings->SetString("icon", app->icon_url().spec());
+  error_strings->SetString("icon",
+      app->GetIconURL(Extension::EXTENSION_ICON_LARGE,
+                      ExtensionIconSet::MATCH_SMALLER).spec());
   error_strings->SetString("name", app->name());
   error_strings->SetString("msg",
       l10n_util::GetStringUTF16(IDS_ERRORPAGES_APP_WARNING));

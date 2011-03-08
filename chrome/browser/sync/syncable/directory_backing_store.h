@@ -80,6 +80,8 @@ class DirectoryBackingStore {
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion70To71);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion71To72);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion72To73);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion73To74);
+  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MigrateVersion74To75);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, ModelTypeIds);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, Corruption);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, DeleteEntries);
@@ -92,15 +94,17 @@ class DirectoryBackingStore {
   int CreateTables();
 
   // Create 'share_info' or 'temp_share_info' depending on value of
-  // is_temporary.  If with_notification_state is true, creates the
-  // table with the notification_state column.  Returns an sqlite
+  // is_temporary. Returns an sqlite
   // return code, SQLITE_DONE on success.
-  int CreateShareInfoTable(bool is_temporary, bool with_notification_state);
+  int CreateShareInfoTable(bool is_temporary);
+
+  int CreateShareInfoTableVersion71(bool is_temporary);
   // Create 'metas' or 'temp_metas' depending on value of is_temporary.
   // Returns an sqlite return code, SQLITE_DONE on success.
   int CreateMetasTable(bool is_temporary);
   // Returns an sqlite return code, SQLITE_DONE on success.
   int CreateModelsTable();
+  int CreateV71ModelsTable();
 
   // We don't need to load any synced and applied deleted entries, we can
   // in fact just purge them forever on startup.
@@ -145,7 +149,7 @@ class DirectoryBackingStore {
   // the ModelType enum and the values we persist in the database to identify
   // a model.  We persist a default instance of the specifics protobuf as the
   // ID, rather than the enum value.
-  static ModelType ModelIdToModelTypeEnum(const string& model_id);
+  static ModelType ModelIdToModelTypeEnum(const void* data, int length);
   static string ModelTypeEnumToModelId(ModelType model_type);
 
   // Runs an integrity check on the current database.  If the
@@ -172,6 +176,8 @@ class DirectoryBackingStore {
   bool MigrateVersion70To71();
   bool MigrateVersion71To72();
   bool MigrateVersion72To73();
+  bool MigrateVersion73To74();
+  bool MigrateVersion74To75();
 
   // The handle to our sqlite on-disk store for initialization and loading, and
   // for saving changes periodically via SaveChanges, respectively.

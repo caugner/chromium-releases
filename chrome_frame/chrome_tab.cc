@@ -13,7 +13,6 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/path_service.h"
@@ -26,19 +25,19 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "grit/chrome_frame_resources.h"
 #include "chrome_frame/bho.h"
 #include "chrome_frame/chrome_active_document.h"
 #include "chrome_frame/chrome_frame_activex.h"
 #include "chrome_frame/chrome_frame_automation.h"
-#include "chrome_frame/exception_barrier.h"
 #include "chrome_frame/chrome_frame_reporting.h"
 #include "chrome_frame/chrome_launcher_utils.h"
 #include "chrome_frame/chrome_protocol.h"
-#include "chrome_frame/module_utils.h"
+#include "chrome_frame/dll_redirector.h"
+#include "chrome_frame/exception_barrier.h"
 #include "chrome_frame/resource.h"
 #include "chrome_frame/utils.h"
 #include "googleurl/src/url_util.h"
+#include "grit/chrome_frame_resources.h"
 
 using base::win::RegKey;
 
@@ -209,10 +208,14 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
     g_exit_manager = new base::AtExitManager();
     CommandLine::Init(0, NULL);
     InitializeCrashReporting();
-    logging::InitLogging(NULL, logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-                        logging::LOCK_LOG_FILE, logging::DELETE_OLD_LOG_FILE);
+    logging::InitLogging(
+        NULL,
+        logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
+        logging::LOCK_LOG_FILE,
+        logging::DELETE_OLD_LOG_FILE,
+        logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
-    DllRedirector* dll_redirector = Singleton<DllRedirector>::get();
+    DllRedirector* dll_redirector = DllRedirector::GetInstance();
     DCHECK(dll_redirector);
 
     if (!dll_redirector->RegisterAsFirstCFModule()) {
@@ -227,7 +230,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
     // Enable ETW logging.
     logging::LogEventProvider::Initialize(kChromeFrameProvider);
   } else if (reason == DLL_PROCESS_DETACH) {
-    DllRedirector* dll_redirector = Singleton<DllRedirector>::get();
+    DllRedirector* dll_redirector = DllRedirector::GetInstance();
     DCHECK(dll_redirector);
 
     dll_redirector->UnregisterAsFirstCFModule();
@@ -320,16 +323,16 @@ HRESULT SetupRunOnce() {
       }
 
       RegKey run_once;
-      if (run_once.Create(hive, kRunOnce, KEY_READ | KEY_WRITE)) {
+      LONG ret = run_once.Create(hive, kRunOnce, KEY_READ | KEY_WRITE);
+      if (ret == ERROR_SUCCESS) {
         CommandLine run_once_cmd(chrome_launcher::GetChromeExecutablePath());
         run_once_cmd.AppendSwitchASCII(switches::kAutomationClientChannelID,
                                        "0");
         run_once_cmd.AppendSwitch(switches::kChromeFrame);
-        if (run_once.WriteValue(L"A",
-                                run_once_cmd.command_line_string().c_str())) {
-          result = S_OK;
-        }
+        ret = run_once.WriteValue(L"A",
+                                  run_once_cmd.command_line_string().c_str());
       }
+      result = HRESULT_FROM_WIN32(ret);
     } else {
       result = S_FALSE;
     }
@@ -347,7 +350,7 @@ HRESULT SetupRunOnce() {
 // started at next boot.
 void SetupUserLevelHelper() {
   // Remove existing run-at-startup entry.
-  win_util::RemoveCommandFromAutoRun(HKEY_CURRENT_USER, kRunKeyName);
+  base::win::RemoveCommandFromAutoRun(HKEY_CURRENT_USER, kRunKeyName);
 
   // Build the chrome_frame_helper command line.
   FilePath module_path;
@@ -373,7 +376,7 @@ void SetupUserLevelHelper() {
 
   if (file_util::PathExists(helper_path)) {
     // Add new run-at-startup entry.
-    win_util::AddCommandToAutoRun(HKEY_CURRENT_USER, kRunKeyName,
+    base::win::AddCommandToAutoRun(HKEY_CURRENT_USER, kRunKeyName,
                                   helper_path.value());
 
     // Start new instance.
@@ -415,6 +418,58 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
   }
 
   return _AtlModule.DllGetClassObject(rclsid, riid, ppv);
+}
+
+const wchar_t kPostPlatformUAKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\"
+    L"User Agent\\Post Platform";
+const wchar_t kChromeFramePrefix[] = L"chromeframe/";
+
+// To delete the user agent, set value to NULL.
+// The is_system parameter indicates whether this is a per machine or a per
+// user installation.
+HRESULT SetChromeFrameUA(bool is_system, const wchar_t* value) {
+  HRESULT hr = E_FAIL;
+  HKEY parent_hive = is_system ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+
+  RegKey ua_key;
+  if (ua_key.Create(parent_hive, kPostPlatformUAKey,
+                    KEY_READ | KEY_WRITE) == ERROR_SUCCESS) {
+    // Make sure that we unregister ChromeFrame UA strings registered previously
+    wchar_t value_name[MAX_PATH + 1] = {};
+    wchar_t value_data[MAX_PATH + 1] = {};
+
+    DWORD value_index = 0;
+    while (value_index < ua_key.ValueCount()) {
+      DWORD name_size = arraysize(value_name);
+      DWORD value_size = arraysize(value_data);
+      DWORD type = 0;
+      LRESULT ret = ::RegEnumValue(ua_key.Handle(), value_index, value_name,
+                                   &name_size, NULL, &type,
+                                   reinterpret_cast<BYTE*>(value_data),
+                                   &value_size);
+      if (ret == ERROR_SUCCESS) {
+        if (StartsWith(value_name, kChromeFramePrefix, false)) {
+          ua_key.DeleteValue(value_name);
+        } else {
+          ++value_index;
+        }
+      } else {
+        break;
+      }
+    }
+
+    std::wstring chrome_frame_ua_value_name = kChromeFramePrefix;
+    chrome_frame_ua_value_name += GetCurrentModuleVersion();
+    if (value) {
+      ua_key.WriteValue(chrome_frame_ua_value_name.c_str(), value);
+    }
+    hr = S_OK;
+  } else {
+    DLOG(ERROR) << __FUNCTION__ << ": " << kPostPlatformUAKey;
+    hr = E_UNEXPECTED;
+  }
+  return hr;
 }
 
 enum RegistrationFlags {
@@ -481,7 +536,7 @@ STDAPI CustomRegistration(UINT reg_flags, BOOL reg, bool is_system) {
         // that during updates we don't have a time window with no running
         // helper. Uninstalls and updates will explicitly kill the helper from
         // within the installer. Unregister existing run-at-startup entry.
-        win_util::RemoveCommandFromAutoRun(HKEY_CURRENT_USER, kRunKeyName);
+        base::win::RemoveCommandFromAutoRun(HKEY_CURRENT_USER, kRunKeyName);
       }
     }
   }
@@ -500,6 +555,13 @@ STDAPI CustomRegistration(UINT reg_flags, BOOL reg, bool is_system) {
     hr = _AtlModule.UpdateRegistryAppId(reg);
   }
 
+  if (hr == S_OK) {
+    if (reg) {
+      hr = SetChromeFrameUA(is_system, L"1");
+    } else {
+      hr = SetChromeFrameUA(is_system, NULL);
+    }
+  }
   return hr;
 }
 
@@ -592,7 +654,7 @@ class SecurityDescBackup {
     RegKey backup_key(HKEY_LOCAL_MACHINE, backup_key_name_.c_str(),
                       KEY_READ | KEY_WRITE);
     if (backup_key.Valid()) {
-      return backup_key.WriteValue(NULL, str.GetString());
+      return backup_key.WriteValue(NULL, str.GetString()) == ERROR_SUCCESS;
     }
 
     return false;
@@ -634,15 +696,15 @@ class SecurityDescBackup {
 
     DWORD len = 0;
     DWORD reg_type = REG_NONE;
-    if (!backup_key.ReadValue(NULL, NULL, &len, &reg_type))
+    if (backup_key.ReadValue(NULL, NULL, &len, &reg_type) != ERROR_SUCCESS)
       return false;
 
     if (reg_type != REG_SZ)
       return false;
 
     size_t wchar_count = 1 + len / sizeof(wchar_t);
-    if (!backup_key.ReadValue(NULL, WriteInto(sddl, wchar_count), &len,
-                              &reg_type)) {
+    if (backup_key.ReadValue(NULL, WriteInto(sddl, wchar_count), &len,
+                             &reg_type) != ERROR_SUCCESS) {
       return false;
     }
 
@@ -698,16 +760,17 @@ static bool SetOrDeleteMimeHandlerKey(bool set, HKEY root_key) {
   if (!key.Valid())
     return false;
 
-  bool result;
+  LONG result1 = ERROR_SUCCESS;
+  LONG result2 = ERROR_SUCCESS;
   if (set) {
-    result = key.WriteValue(L"ChromeTab.ChromeActiveDocument", 1);
-    result = key.WriteValue(L"ChromeTab.ChromeActiveDocument.1", 1) && result;
+    result1 = key.WriteValue(L"ChromeTab.ChromeActiveDocument", 1);
+    result2 = key.WriteValue(L"ChromeTab.ChromeActiveDocument.1", 1);
   } else {
-    result = key.DeleteValue(L"ChromeTab.ChromeActiveDocument");
-    result = key.DeleteValue(L"ChromeTab.ChromeActiveDocument.1") && result;
+    result1 = key.DeleteValue(L"ChromeTab.ChromeActiveDocument");
+    result2 = key.DeleteValue(L"ChromeTab.ChromeActiveDocument.1");
   }
 
-  return result;
+  return (result2 == ERROR_SUCCESS) && (result2 == ERROR_SUCCESS);
 }
 
 bool RegisterSecuredMimeHandler(bool enable, bool is_system) {

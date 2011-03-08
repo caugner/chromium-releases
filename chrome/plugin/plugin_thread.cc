@@ -18,7 +18,7 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/process_util.h"
-#include "base/thread_local.h"
+#include "base/threading/thread_local.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
@@ -29,22 +29,22 @@
 #include "chrome/renderer/render_thread.h"
 #include "ipc/ipc_channel_handle.h"
 #include "net/base/net_errors.h"
-#include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/plugins/webplugin_delegate_impl.h"
+#include "webkit/plugins/npapi/plugin_lib.h"
+#include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "gfx/gtk_util.h"
 #endif
 
 #if defined(USE_X11)
-#include "app/x11_util.h"
+#include "ui/base/x/x11_util.h"
 #elif defined(OS_MACOSX)
-#include "app/l10n_util.h"
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
 #include "grit/chromium_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #endif
 
 static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls(
@@ -76,7 +76,7 @@ PluginThread::PluginThread()
     setenv("GDK_NATIVE_WINDOWS", "1", 1);
   }
 
-  x11_util::SetDefaultX11ErrorHandlers();
+  ui::SetDefaultX11ErrorHandlers();
 #endif
 
   PatchNPNFunctions();
@@ -86,8 +86,8 @@ PluginThread::PluginThread()
 
   ChromePluginLib::Create(plugin_path_, GetCPBrowserFuncsForPlugin());
 
-  scoped_refptr<NPAPI::PluginLib> plugin(
-      NPAPI::PluginLib::CreatePluginLib(plugin_path_));
+  scoped_refptr<webkit::npapi::PluginLib> plugin(
+      webkit::npapi::PluginLib::CreatePluginLib(plugin_path_));
   if (plugin.get()) {
     plugin->NP_Initialize();
 
@@ -100,7 +100,7 @@ PluginThread::PluginThread()
     base::mac::ScopedCFTypeRef<CFStringRef> process_name(
         CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%@ (%@)"),
                                  plugin_name.get(), app_name.get()));
-    mac_util::SetProcessName(process_name);
+    base::mac::SetProcessName(process_name);
 #endif
   }
 
@@ -115,7 +115,7 @@ PluginThread::~PluginThread() {
     preloaded_plugin_module_ = NULL;
   }
   PluginChannelBase::CleanupChannels();
-  NPAPI::PluginLib::UnloadAllPlugins();
+  webkit::npapi::PluginLib::UnloadAllPlugins();
   ChromePluginLib::UnloadAllPlugins();
 
   if (webkit_glue::ShouldForcefullyTerminatePluginProcess())
@@ -128,13 +128,16 @@ PluginThread* PluginThread::current() {
   return lazy_tls.Pointer()->Get();
 }
 
-void PluginThread::OnControlMessageReceived(const IPC::Message& msg) {
+bool PluginThread::OnControlMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PluginThread, msg)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_CreateChannel, OnCreateChannel)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_PluginMessage, OnPluginMessage)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_NotifyRenderersOfPendingShutdown,
                         OnNotifyRenderersOfPendingShutdown)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void PluginThread::OnCreateChannel(int renderer_id,
@@ -143,7 +146,7 @@ void PluginThread::OnCreateChannel(int renderer_id,
       renderer_id, ChildProcess::current()->io_message_loop()));
   IPC::ChannelHandle channel_handle;
   if (channel.get()) {
-    channel_handle.name = channel->channel_name();
+    channel_handle.name = channel->channel_handle().name;
 #if defined(OS_POSIX)
     // On POSIX, pass the renderer-side FD.
     channel_handle.socket = base::FileDescriptor(channel->renderer_fd(), false);

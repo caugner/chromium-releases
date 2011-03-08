@@ -4,11 +4,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import copy
 import email
+import logging
 import os
 import smtplib
+import types
 
 import pyauto_functional
+import pyauto
 import pyauto_utils
 
 
@@ -44,7 +48,7 @@ def RemoveDownloadedTestFile(test, file_name):
   pyauto_utils.RemovePath(downloaded_pkg + '.crdownload')
 
 
-def GoogleAccountsLogin(test, url, username, password):
+def GoogleAccountsLogin(test, username, password, tab_index=0, windex=0):
   """Log into Google Accounts.
 
   Attempts to login to Google by entering the username/password into the google
@@ -54,30 +58,40 @@ def GoogleAccountsLogin(test, url, username, password):
     test: derived from pyauto.PyUITest - base class for UI test cases.
     username: users login input.
     password: users login password input.
+    tab_index: The tab index, default is 0.
+    windex: The window index, default is 0.
   """
-  test.NavigateToURL('https://www.google.com/accounts/')
-  email_id = 'document.getElementById("Email").value = \"%s\"; ' \
+  test.NavigateToURL('https://www.google.com/accounts/', windex, tab_index)
+  email_id = 'document.getElementById("Email").value = "%s"; ' \
              'window.domAutomationController.send("done")' % username
-  password = 'document.getElementById("Passwd").value = \"%s\"; ' \
+  password = 'document.getElementById("Passwd").value = "%s"; ' \
              'window.domAutomationController.send("done")' % password
-  test.ExecuteJavascript(email_id);
-  test.ExecuteJavascript(password);
+  test.ExecuteJavascript(email_id, windex, tab_index);
+  test.ExecuteJavascript(password, windex, tab_index);
   test.ExecuteJavascript('document.getElementById("gaia_loginform").submit();'
-                         'window.domAutomationController.send("done")')
+                         'window.domAutomationController.send("done")',
+                         windex, tab_index)
 
 
-def VerifyGoogleAccountCredsFilled(test, username, password):
+def VerifyGoogleAccountCredsFilled(test, username, password, tab_index=0,
+                                   windex=0):
   """Verify stored/saved user and password values to the values in the field.
 
   Args:
     test: derived from pyauto.PyUITest - base class for UI test cases.
     username: user log in input.
     password: user log in password input.
+    tab_index: The tab index, default is 0.
+    windex: The window index, default is 0.
   """
-  email_value = test.GetDOMValue('document.getElementById("Email").value')
-  passwd_value = test.GetDOMValue('document.getElementById("Passwd").value')
+  email_value = test.GetDOMValue('document.getElementById("Email").value',
+                                 windex, tab_index)
+  passwd_value = test.GetDOMValue('document.getElementById("Passwd").value',
+                                  windex, tab_index)
   test.assertEqual(email_value, username)
-  test.assertEqual(passwd_value, password)
+  # Not using assertEqual because if it fails it would end up dumping the
+  # password (which is supposed to be private)
+  test.assertTrue(passwd_value == password)
 
 
 def ClearPasswords(test):
@@ -138,3 +152,82 @@ def SendMail(send_from, send_to, subject, text, smtp, file_to_send=None):
   smtp_obj.sendmail(send_from, send_to, msg.as_string())
   smtp_obj.close()
 
+
+def StripUnmatchedKeys(item_to_strip, reference_item):
+  """Returns a copy of 'item_to_strip' where unmatched key-value pairs in
+  every dictionary are removed.
+
+  This will examine each dictionary in 'item_to_strip' recursively, and will
+  remove keys that are not found in the corresponding dictionary in
+  'reference_item'. This is useful for testing equality of a subset of data.
+
+  Items may contain dictionaries, lists, or primitives, but only corresponding
+  dictionaries will be stripped. A corresponding entry is one which is found
+  in the same index in the corresponding parent array or at the same key in the
+  corresponding parent dictionary.
+
+  Arg:
+    item_to_strip: item to copy and remove all unmatched key-value pairs
+    reference_item: item that serves as a reference for which keys-value pairs
+                    to strip from 'item_to_strip'
+
+  Returns:
+    a copy of 'item_to_strip' where all key-value pairs that do not have a
+    matching key in 'reference_item' are removed
+
+  Example:
+    item_to_strip = {'tabs': 3,
+                     'time': 5908}
+    reference_item = {'tabs': 2}
+    StripUnmatchedKeys(item_to_strip, reference_item) will return {'tabs': 3}
+  """
+  def StripList(list1, list2):
+    return_list = copy.deepcopy(list2)
+    for i in range(min(len(list1), len(list2))):
+      return_list[i] = StripUnmatchedKeys(list1[i], list2[i])
+    return return_list
+
+  def StripDict(dict1, dict2):
+    return_dict = {}
+    for key in dict1:
+      if key in dict2:
+        return_dict[key] = StripUnmatchedKeys(dict1[key], dict2[key])
+    return return_dict
+
+  item_to_strip_type = type(item_to_strip)
+  if item_to_strip_type is type(reference_item):
+    if item_to_strip_type is types.ListType:
+      return StripList(item_to_strip, reference_item)
+    elif item_to_strip_type is types.DictType:
+      return StripDict(item_to_strip, reference_item)
+  return copy.deepcopy(item_to_strip)
+
+
+def StringContentCheck(test, content_string, have_list, nothave_list):
+  """Check for the presence or absence of strings within content.
+  Confirm all strings in have_list are found in content_strings.
+  Confirm all strings in nothave_list are not found in content_strings.
+
+  Args:
+    content_string: string to search for within content
+    have_list: list of strings found within content
+    nothave_list: list of strings not found within content
+  """
+  for s in have_list:
+    test.assertTrue(s in content_string, s)
+  for s in nothave_list:
+    test.assertTrue(s not in content_string)
+
+
+def CallFunctionWithNewTimeout(self, new_timeout, function):
+  """Sets the timeout to |new_timeout| and calls |function|.
+
+  This method resets the timeout before returning.
+  """
+  timeout_changer = pyauto.PyUITest.CmdExecutionTimeoutChanger(
+      self, new_timeout)
+  logging.info('Automation execution timeout has been changed to %d. '
+               'If the timeout is large the test might appear to hang.'
+               % new_timeout)
+  function()
+  del timeout_changer

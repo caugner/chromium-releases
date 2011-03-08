@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,23 +46,7 @@ typedef std::map<std::string, Value*> ValueMap;
 // creating instances of the subclasses.
 class Value {
  public:
-  virtual ~Value();
-
-  // Convenience methods for creating Value objects for various
-  // kinds of values without thinking about which class implements them.
-  // These can always be expected to return a valid Value*.
-  static Value* CreateNullValue();
-  static Value* CreateBooleanValue(bool in_value);
-  static Value* CreateIntegerValue(int in_value);
-  static Value* CreateRealValue(double in_value);
-  static Value* CreateStringValue(const std::string& in_value);
-  static Value* CreateStringValue(const string16& in_value);
-
-  // This one can return NULL if the input isn't valid.  If the return value
-  // is non-null, the new object has taken ownership of the buffer pointer.
-  static BinaryValue* CreateBinaryValue(char* buffer, size_t size);
-
-  typedef enum {
+  enum ValueType {
     TYPE_NULL = 0,
     TYPE_BOOLEAN,
     TYPE_INTEGER,
@@ -71,7 +55,23 @@ class Value {
     TYPE_BINARY,
     TYPE_DICTIONARY,
     TYPE_LIST
-  } ValueType;
+  };
+
+  virtual ~Value();
+
+  // Convenience methods for creating Value objects for various
+  // kinds of values without thinking about which class implements them.
+  // These can always be expected to return a valid Value*.
+  static Value* CreateNullValue();
+  static FundamentalValue* CreateBooleanValue(bool in_value);
+  static FundamentalValue* CreateIntegerValue(int in_value);
+  static FundamentalValue* CreateRealValue(double in_value);
+  static StringValue* CreateStringValue(const std::string& in_value);
+  static StringValue* CreateStringValue(const string16& in_value);
+
+  // This one can return NULL if the input isn't valid.  If the return value
+  // is non-null, the new object has taken ownership of the buffer pointer.
+  static BinaryValue* CreateBinaryValue(char* buffer, size_t size);
 
   // Returns the type of the value stored by the current Value object.
   // Each type will be implemented by only one subclass of Value, so it's
@@ -92,13 +92,21 @@ class Value {
   virtual bool GetAsReal(double* out_value) const;
   virtual bool GetAsString(std::string* out_value) const;
   virtual bool GetAsString(string16* out_value) const;
+  virtual bool GetAsList(ListValue** out_value);
 
   // This creates a deep copy of the entire Value tree, and returns a pointer
   // to the copy.  The caller gets ownership of the copy, of course.
+  //
+  // Subclasses return their own type directly in their overrides;
+  // this works because C++ supports covariant return types.
   virtual Value* DeepCopy() const;
 
   // Compares if two Value objects have equal contents.
   virtual bool Equals(const Value* other) const;
+
+  // Compares if two Value objects have equal contents. Can handle NULLs.
+  // NULLs are considered equal but different from Value::CreateNullValue().
+  static bool Equals(const Value* a, const Value* b);
 
  protected:
   // This isn't safe for end-users (they should use the Create*Value()
@@ -119,13 +127,13 @@ class FundamentalValue : public Value {
   explicit FundamentalValue(bool in_value);
   explicit FundamentalValue(int in_value);
   explicit FundamentalValue(double in_value);
-  ~FundamentalValue();
+  virtual ~FundamentalValue();
 
   // Subclassed methods
   virtual bool GetAsBoolean(bool* out_value) const;
   virtual bool GetAsInteger(int* out_value) const;
   virtual bool GetAsReal(double* out_value) const;
-  virtual Value* DeepCopy() const;
+  virtual FundamentalValue* DeepCopy() const;
   virtual bool Equals(const Value* other) const;
 
  private:
@@ -146,12 +154,12 @@ class StringValue : public Value {
   // Initializes a StringValue with a string16.
   explicit StringValue(const string16& in_value);
 
-  ~StringValue();
+  virtual ~StringValue();
 
   // Subclassed methods
-  bool GetAsString(std::string* out_value) const;
-  bool GetAsString(string16* out_value) const;
-  Value* DeepCopy() const;
+  virtual bool GetAsString(std::string* out_value) const;
+  virtual bool GetAsString(string16* out_value) const;
+  virtual StringValue* DeepCopy() const;
   virtual bool Equals(const Value* other) const;
 
  private:
@@ -162,6 +170,8 @@ class StringValue : public Value {
 
 class BinaryValue: public Value {
  public:
+  virtual ~BinaryValue();
+
   // Creates a Value to represent a binary buffer.  The new object takes
   // ownership of the pointer passed in, if successful.
   // Returns NULL if buffer is NULL.
@@ -173,15 +183,13 @@ class BinaryValue: public Value {
   // Returns NULL if buffer is NULL.
   static BinaryValue* CreateWithCopiedBuffer(const char* buffer, size_t size);
 
-  ~BinaryValue();
-
-  // Subclassed methods
-  Value* DeepCopy() const;
-  virtual bool Equals(const Value* other) const;
-
   size_t GetSize() const { return size_; }
   char* GetBuffer() { return buffer_; }
   const char* GetBuffer() const { return buffer_; }
+
+  // Overridden from Value:
+  virtual BinaryValue* DeepCopy() const;
+  virtual bool Equals(const Value* other) const;
 
  private:
   // Constructor is private so that only objects with valid buffer pointers
@@ -200,11 +208,7 @@ class BinaryValue: public Value {
 class DictionaryValue : public Value {
  public:
   DictionaryValue();
-  ~DictionaryValue();
-
-  // Subclassed methods
-  Value* DeepCopy() const;
-  virtual bool Equals(const Value* other) const;
+  virtual ~DictionaryValue();
 
   // Returns true if the current dictionary has a value for the given key.
   bool HasKey(const std::string& key) const;
@@ -303,16 +307,6 @@ class DictionaryValue : public Value {
   // replaced.
   void MergeDictionary(const DictionaryValue* dictionary);
 
-  // Builds a vector containing all of the paths that are different between
-  // the dictionary and a second specified dictionary. These are paths of
-  // values that are either in one dictionary or the other but not both, OR
-  // paths that are present in both dictionaries but differ in value.
-  // Path strings are in ascending lexicographical order in the generated
-  // vector. |different_paths| is cleared before added any paths.
-  void GetDifferingPaths(
-      const DictionaryValue* other,
-      std::vector<std::string>* different_paths) const;
-
   // This class provides an iterator for the keys in the dictionary.
   // It can't be used to modify the dictionary.
   //
@@ -338,18 +332,11 @@ class DictionaryValue : public Value {
   key_iterator begin_keys() const { return key_iterator(dictionary_.begin()); }
   key_iterator end_keys() const { return key_iterator(dictionary_.end()); }
 
- private:
-  // Does the actual heavy lifting for GetDifferingPaths.
-  // Returns true if a path is added to different_paths, otherwise false.
-  // The difference compuation is calculated recursively. The keys for
-  // dictionaries that are handled by recursive calls more shallow than
-  // the current one are concatenated and passed through to deeper calls in
-  // |path_prefix|.
-  bool GetDifferingPathsHelper(
-      const std::string& path_prefix,
-      const DictionaryValue* other,
-      std::vector<std::string>* different_paths) const;
+  // Overridden from Value:
+  virtual DictionaryValue* DeepCopy() const;
+  virtual bool Equals(const Value* other) const;
 
+ private:
   ValueMap dictionary_;
 
   DISALLOW_COPY_AND_ASSIGN(DictionaryValue);
@@ -358,12 +345,11 @@ class DictionaryValue : public Value {
 // This type of Value represents a list of other Value values.
 class ListValue : public Value {
  public:
+  typedef ValueVector::iterator iterator;
+  typedef ValueVector::const_iterator const_iterator;
+
   ListValue();
   ~ListValue();
-
-  // Subclassed methods
-  Value* DeepCopy() const;
-  virtual bool Equals(const Value* other) const;
 
   // Clears the contents of this ListValue
   void Clear();
@@ -426,14 +412,16 @@ class ListValue : public Value {
   }
 
   // Iteration
-  typedef ValueVector::iterator iterator;
-  typedef ValueVector::const_iterator const_iterator;
-
   ListValue::iterator begin() { return list_.begin(); }
   ListValue::iterator end() { return list_.end(); }
 
   ListValue::const_iterator begin() const { return list_.begin(); }
   ListValue::const_iterator end() const { return list_.end(); }
+
+  // Overridden from Value:
+  virtual bool GetAsList(ListValue** out_value);
+  virtual ListValue* DeepCopy() const;
+  virtual bool Equals(const Value* other) const;
 
  private:
   ValueVector list_;

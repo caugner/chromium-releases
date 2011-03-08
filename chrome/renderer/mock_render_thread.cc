@@ -27,6 +27,10 @@ MockRenderThread::MockRenderThread()
 MockRenderThread::~MockRenderThread() {
 }
 
+const ExtensionSet* MockRenderThread::GetExtensions() const {
+  return &extensions_;
+}
+
 // Called by the Widget. The routing_id must match the routing id assigned
 // to the Widget in reply to ViewHostMsg_CreateWidget message.
 void MockRenderThread::AddRoute(int32 routing_id,
@@ -81,7 +85,7 @@ void MockRenderThread::SendCloseMessage() {
   widget_->OnMessageReceived(msg);
 }
 
-void MockRenderThread::OnMessageReceived(const IPC::Message& msg) {
+bool MockRenderThread::OnMessageReceived(const IPC::Message& msg) {
   // Save the message in the sink.
   sink_.OnMessageReceived(msg);
 
@@ -104,9 +108,9 @@ void MockRenderThread::OnMessageReceived(const IPC::Message& msg) {
 #if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DuplicateSection, OnDuplicateSection)
 #endif
-#if defined(OS_MACOSX)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AllocatePDFTransport,
-                        OnAllocatePDFTransport)
+#if defined(OS_POSIX)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_AllocateSharedMemoryBuffer,
+                        OnAllocateSharedMemoryBuffer)
 #endif
 #if defined(OS_LINUX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AllocateTempFileForPrinting,
@@ -116,6 +120,7 @@ void MockRenderThread::OnMessageReceived(const IPC::Message& msg) {
 #endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
+  return handled;
 }
 
 // The Widget expects to be returned valid route_id.
@@ -143,13 +148,13 @@ void MockRenderThread::OnDuplicateSection(
 }
 #endif
 
-#if defined(OS_MACOSX)
-void MockRenderThread::OnAllocatePDFTransport(
+#if defined(OS_POSIX)
+void MockRenderThread::OnAllocateSharedMemoryBuffer(
     uint32 buffer_size, base::SharedMemoryHandle* handle) {
   base::SharedMemory shared_buf;
   if (!shared_buf.CreateAndMapAnonymous(buffer_size)) {
     *handle = base::SharedMemory::NULLHandle();
-    NOTREACHED() << "Cannot map PDF transport buffer";
+    NOTREACHED() << "Cannot map shared memory buffer";
     return;
   }
   shared_buf.GiveToProcess(base::GetCurrentProcessHandle(), handle);

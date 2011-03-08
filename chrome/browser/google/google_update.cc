@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,13 @@
 #include <atlbase.h>
 #include <atlcom.h>
 
+#include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
 #include "base/task.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -32,8 +33,13 @@ bool CanUpdateCurrentChrome(const std::wstring& chrome_exe_path) {
 #if !defined(GOOGLE_CHROME_BUILD)
   return false;
 #else
-  std::wstring user_exe_path = installer::GetChromeInstallPath(false);
-  std::wstring machine_exe_path = installer::GetChromeInstallPath(true);
+  // TODO(tommi): Check if using the default distribution is always the right
+  // thing to do.
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  std::wstring user_exe_path =
+      installer::GetChromeInstallPath(false, dist).value();
+  std::wstring machine_exe_path =
+      installer::GetChromeInstallPath(true, dist).value();
   std::transform(user_exe_path.begin(), user_exe_path.end(),
                  user_exe_path.begin(), tolower);
   std::transform(machine_exe_path.begin(), machine_exe_path.end(),
@@ -225,17 +231,17 @@ void GoogleUpdate::CheckForUpdate(bool install_if_newer, Window* window) {
 bool GoogleUpdate::InitiateGoogleUpdateCheck(bool install_if_newer,
                                              Window* window,
                                              MessageLoop* main_loop) {
-
-  std::wstring chrome_exe_path;
+  FilePath chrome_exe_path;
   if (!PathService::Get(base::DIR_EXE, &chrome_exe_path)) {
     NOTREACHED();
     return false;
   }
+  std::wstring chrome_exe = chrome_exe_path.value();
 
-  std::transform(chrome_exe_path.begin(), chrome_exe_path.end(),
-                 chrome_exe_path.begin(), tolower);
+  std::transform(chrome_exe.begin(), chrome_exe.end(),
+                 chrome_exe.begin(), tolower);
 
-  if (!CanUpdateCurrentChrome(chrome_exe_path)) {
+  if (!CanUpdateCurrentChrome(chrome_exe)) {
     main_loop->PostTask(FROM_HERE, NewRunnableMethod(this,
         &GoogleUpdate::ReportResults, UPGRADE_ERROR,
         CANNOT_UPGRADE_CHROME_IN_THIS_DIRECTORY));
@@ -254,7 +260,9 @@ bool GoogleUpdate::InitiateGoogleUpdateCheck(bool install_if_newer,
 
   ScopedComPtr<IGoogleUpdate> on_demand;
 
-  if (InstallUtil::IsPerUserInstall(chrome_exe_path.c_str())) {
+  bool system_level = false;
+
+  if (InstallUtil::IsPerUserInstall(chrome_exe.c_str())) {
     hr = on_demand.CreateInstance(CLSID_OnDemandUserAppsClass);
   } else {
     // The Update operation needs Admin privileges for writing
@@ -272,16 +280,19 @@ bool GoogleUpdate::InitiateGoogleUpdateCheck(bool install_if_newer,
           IID_IGoogleUpdate, foreground_hwnd,
           reinterpret_cast<void**>(on_demand.Receive()));
     }
+    system_level = true;
   }
 
   if (hr != S_OK)
     return ReportFailure(hr, GOOGLE_UPDATE_ONDEMAND_CLASS_NOT_FOUND, main_loop);
 
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  std::wstring app_guid = installer::GetAppGuidForUpdates(system_level);
+  DCHECK(!app_guid.empty());
+
   if (!install_if_newer)
-    hr = on_demand->CheckForUpdate(dist->GetAppGuid().c_str(), job_observer);
+    hr = on_demand->CheckForUpdate(app_guid.c_str(), job_observer);
   else
-    hr = on_demand->Update(dist->GetAppGuid().c_str(), job_observer);
+    hr = on_demand->Update(app_guid.c_str(), job_observer);
 
   if (hr != S_OK)
     return ReportFailure(hr, GOOGLE_UPDATE_ONDEMAND_CLASS_REPORTED_ERROR,

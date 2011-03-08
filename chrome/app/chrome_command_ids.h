@@ -5,25 +5,12 @@
 // This file lists all the command IDs understood by e.g. the browser.
 // It is used by Windows RC files, Mac NIB files, and other platforms too.
 
-#define IDC_View                        4000
-#define IDC_ViewHost                    4001
-#define IDC_Plugin                      4002
-#define IDC_PluginHost                  4003
-#define IDC_NPObject                    4004
-#define IDC_PluginProcess               4005
-#define IDC_PluginProcessHost           4006
-#define IDC_ViewAll                     4007
-#define IDC_ViewNone                    4008
-#define IDC_ViewHostAll                 4009
-#define IDC_ViewHostNone                4010
-#define IDC_PluginAll                   4011
-#define IDC_PluginNone                  4012
-#define IDC_NPObjectAll                 4013
-#define IDC_NPObjectNone                4014
-#define IDC_PluginHostAll               4015
-#define IDC_PluginHostNone              4016
-#define IDC_DevToolsAgent               4017
-#define IDC_DevToolsClient              4018
+// Values below IDC_MinimumLabelValue are reserved for dynamic menu items.
+#define IDC_MinimumLabelValue           4000
+
+#define IDC_Messages                    4000
+#define IDC_MessagesAll                 4007
+#define IDC_MessagesNone                4008
 
 // NOTE: Within each of the following sections, the IDs are ordered roughly by
 // how they appear in the GUI/menus (left to right, top to bottom, etc.).
@@ -173,6 +160,7 @@
 #define IDC_UPGRADE_DIALOG              40026
 #define IDC_VIEW_INCOMPATIBILITIES      40027
 #define IDC_VIEW_BACKGROUND_PAGES       40028
+#define IDC_SHOW_KEYBOARD_OVERLAY       40029
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -266,11 +254,21 @@
 #define IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY 50154
 // Frame items.
 #define IDC_CONTENT_CONTEXT_RELOADFRAME 50160
-#define IDC_CONTENT_CONTEXT_OPENFRAMENEWTAB 50161
-#define IDC_CONTENT_CONTEXT_OPENFRAMENEWWINDOW 50162
-#define IDC_CONTENT_CONTEXT_OPENFRAMEOFFTHERECORD 50163
-#define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50164
-#define IDC_CONTENT_CONTEXT_VIEWFRAMEINFO 50165
+#define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50161
+#define IDC_CONTENT_CONTEXT_VIEWFRAMEINFO 50162
 // Search items.
 #define IDC_CONTENT_CONTEXT_GOTOURL 50170
 #define IDC_CONTENT_CONTEXT_SEARCHWEBFOR 50171
+
+// Context menu items in the bookmark bar
+#define IDC_BOOKMARK_BAR_OPEN_ALL 51000
+#define IDC_BOOKMARK_BAR_OPEN_ALL_NEW_WINDOW 51001
+#define IDC_BOOKMARK_BAR_OPEN_ALL_INCOGNITO 51002
+#define IDC_BOOKMARK_BAR_OPEN_INCOGNITO 51003
+#define IDC_BOOKMARK_BAR_RENAME_FOLDER 51004
+#define IDC_BOOKMARK_BAR_EDIT 51005
+#define IDC_BOOKMARK_BAR_REMOVE 51006
+#define IDC_BOOKMARK_BAR_ADD_NEW_BOOKMARK 51007
+#define IDC_BOOKMARK_BAR_NEW_FOLDER 51008
+#define IDC_BOOKMARK_MANAGER 51009
+#define IDC_BOOKMARK_BAR_ALWAYS_SHOW 51010

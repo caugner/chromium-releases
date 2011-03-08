@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <vector>
+
 #include "base/version.h"
 #include "chrome/browser/gpu_blacklist.h"
 #include "chrome/common/gpu_info.h"
@@ -9,13 +11,10 @@
 
 TEST(GpuBlacklistTest, BlacklistLogic) {
   GPUInfo gpu_info;
-  gpu_info.SetGraphicsInfo(0x10de,  // Vendor ID
-                           0x0640,  // Device ID
-                           L"1.6.18",  // Driver Version
-                           0x0114,  // Pixel Shader Version
-                           0x0114,  // Vertex Shader Version
-                           0x0201,  // GL version,
-                           true);  // can_lose_context
+  gpu_info.SetVideoCardInfo(0x10de,  // Vendor ID
+                            0x0640);  // Device ID
+  gpu_info.SetDriverInfo("NVIDIA",  // Driver vendor
+                         "1.6.18");  // Driver Version
   gpu_info.SetProgress(GPUInfo::kComplete);
   scoped_ptr<Version> os_version(Version::GetVersionFromString("10.6.4"));
 
@@ -30,11 +29,15 @@ TEST(GpuBlacklistTest, BlacklistLogic) {
   const std::string empty_list_json =
       "{\n"
       "  \"name\": \"gpu blacklist\",\n"
-      "  \"version\": \"0.0\",\n"
+      "  \"version\": \"2.5\",\n"
       "  \"entries\": [\n"
       "  ]\n"
       "}";
   EXPECT_TRUE(blacklist.LoadGpuBlacklist(empty_list_json, false));
+  uint16 major, minor;
+  EXPECT_TRUE(blacklist.GetVersion(&major, &minor));
+  EXPECT_EQ(major, 2u);
+  EXPECT_EQ(minor, 5u);
   flags = blacklist.DetermineGpuFeatureFlags(
       GpuBlacklist::kOsMacosx, os_version.get(), gpu_info);
   EXPECT_EQ(flags.flags(), 0u);
@@ -46,6 +49,7 @@ TEST(GpuBlacklistTest, BlacklistLogic) {
       "  \"version\": \"0.1\",\n"
       "  \"entries\": [\n"
       "    {\n"
+      "      \"id\": \"5\",\n"
       "      \"os\": {\n"
       "        \"type\": \"macosx\",\n"
       "        \"version\": {\n"
@@ -80,6 +84,16 @@ TEST(GpuBlacklistTest, BlacklistLogic) {
   EXPECT_EQ(
       flags.flags(),
       static_cast<uint32>(GpuFeatureFlags::kGpuFeatureAcceleratedCompositing));
+  std::vector<uint32> entries;
+  blacklist.GetGpuFeatureFlagEntries(
+      GpuFeatureFlags::kGpuFeatureAcceleratedCompositing, entries);
+  EXPECT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0], 5u);
+  blacklist.GetGpuFeatureFlagEntries(
+      GpuFeatureFlags::kGpuFeatureAll, entries);
+  EXPECT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0], 5u);
+  EXPECT_EQ(blacklist.max_entry_id(), 5u);
 
   // Blacklist a vendor on all OS.
   const std::string vendor_json =
@@ -88,6 +102,7 @@ TEST(GpuBlacklistTest, BlacklistLogic) {
       "  \"version\": \"0.1\",\n"
       "  \"entries\": [\n"
       "    {\n"
+      "      \"id\": \"1\",\n"
       "      \"vendor_id\": \"0x10de\",\n"
       "      \"blacklist\": [\n"
       "        \"webgl\"\n"
@@ -116,6 +131,7 @@ TEST(GpuBlacklistTest, BlacklistLogic) {
       "  \"version\": \"0.1\",\n"
       "  \"entries\": [\n"
       "    {\n"
+      "      \"id\": \"1\",\n"
       "      \"os\": {\n"
       "        \"type\": \"linux\"\n"
       "      },\n"

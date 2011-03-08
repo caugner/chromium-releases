@@ -11,7 +11,7 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/child_thread.h"
 #include "grit/chromium_strings.h"
@@ -97,10 +97,10 @@ void ChildProcess::WaitForDebugger(const std::wstring& label) {
   // TODO(playmobil): In the long term, overriding this flag doesn't seem
   // right, either use our own flag or open a dialog we can use.
   // This is just to ease debugging in the interim.
-  LOG(WARNING) << label
-               << " ("
-               << getpid()
-               << ") paused waiting for debugger to attach @ pid";
+  LOG(ERROR) << label
+             << " ("
+             << getpid()
+             << ") paused waiting for debugger to attach @ pid";
   // Install a signal handler so that pause can be woken.
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));

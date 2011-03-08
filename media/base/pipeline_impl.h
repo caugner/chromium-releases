@@ -15,9 +15,10 @@
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
 #include "media/base/clock.h"
+#include "media/base/composite_filter.h"
 #include "media/base/filter_host.h"
 #include "media/base/pipeline.h"
 
@@ -69,7 +70,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   virtual void Init(PipelineCallback* ended_callback,
                     PipelineCallback* error_callback,
                     PipelineCallback* network_callback);
-  virtual bool Start(MediaFilterCollection* filter_collection,
+  virtual bool Start(FilterCollection* filter_collection,
                      const std::string& uri,
                      PipelineCallback* start_callback);
   virtual void Stop(PipelineCallback* stop_callback);
@@ -119,11 +120,11 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // is used by the constructor, and the Stop() method.
   void ResetState();
 
+  // Updates |state_|. All state transitions should use this call.
+  void set_state(State next_state);
+
   // Simple method used to make sure the pipeline is running normally.
   bool IsPipelineOk();
-
-  // Helper method to tell whether we are in the state of initializing.
-  bool IsPipelineInitializing();
 
   // Helper method to tell whether we are stopped or in error.
   bool IsPipelineStopped();
@@ -182,10 +183,13 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // or Stop().
   void OnFilterStateTransition();
 
+  // Callback executed by filters when completing teardown operations.
+  void OnTeardownStateTransition();
+
   // The following "task" methods correspond to the public methods, but these
   // methods are run as the result of posting a task to the PipelineInternal's
   // message loop.
-  void StartTask(MediaFilterCollection* filter_collection,
+  void StartTask(FilterCollection* filter_collection,
                  const std::string& url,
                  PipelineCallback* start_callback);
 
@@ -223,6 +227,9 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // Carries out advancing to the next filter during Play()/Pause()/Seek().
   void FilterStateTransitionTask();
 
+  // Carries out advancing to the next teardown operation.
+  void TeardownStateTransitionTask();
+
   // Carries out stopping filter threads, deleting filters, running
   // appropriate callbacks, and setting the appropriate pipeline state
   // depending on whether we performing Stop() or SetError().
@@ -234,11 +241,10 @@ class PipelineImpl : public Pipeline, public FilterHost {
 
   // PrepareFilter() creates the filter's thread and injects a FilterHost and
   // MessageLoop.
-  bool PrepareFilter(scoped_refptr<MediaFilter> filter);
+  bool PrepareFilter(scoped_refptr<Filter> filter);
 
   // The following initialize methods are used to select a specific type of
-  // MediaFilter object from MediaFilterCollection and initialize it
-  // asynchronously.
+  // Filter object from FilterCollection and initialize it asynchronously.
   void InitializeDataSource();
   void InitializeDemuxer(const scoped_refptr<DataSource>& data_source);
 
@@ -277,7 +283,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   MessageLoop* message_loop_;
 
   // Lock used to serialize access for the following data members.
-  mutable Lock lock_;
+  mutable base::Lock lock_;
 
   // Whether or not the pipeline is running.
   bool running_;
@@ -290,6 +296,9 @@ class PipelineImpl : public Pipeline, public FilterHost {
 
   // Whether or not the pipeline is perform a stop operation.
   bool tearing_down_;
+
+  // Whether or not an error triggered the teardown.
+  bool error_caused_teardown_;
 
   // Duration of the media in microseconds.  Set by filters.
   base::TimeDelta duration_;
@@ -354,12 +363,6 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // Member that tracks the current state.
   State state_;
 
-  // For kPausing, kSeeking and kStarting, we need to track how many filters
-  // have completed transitioning to the destination state.  When
-  // |remaining_transitions_| reaches 0 the pipeline can transition out
-  // of the current state.
-  size_t remaining_transitions_;
-
   // For kSeeking we need to remember where we're seeking between filter
   // replies.
   base::TimeDelta seek_timestamp_;
@@ -377,7 +380,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   base::TimeDelta max_buffered_time_;
 
   // Filter collection as passed in by Start().
-  scoped_ptr<MediaFilterCollection> filter_collection_;
+  scoped_ptr<FilterCollection> filter_collection_;
 
   // URL for the data source as passed in by Start().
   std::string url_;
@@ -389,30 +392,17 @@ class PipelineImpl : public Pipeline, public FilterHost {
   scoped_ptr<PipelineCallback> error_callback_;
   scoped_ptr<PipelineCallback> network_callback_;
 
-  // Vector of our filters and map maintaining the relationship between the
-  // FilterType and the filter itself.
-  typedef std::vector<scoped_refptr<MediaFilter> > FilterVector;
-  FilterVector filters_;
+  // Reference to the filter(s) that constitute the pipeline.
+  scoped_refptr<Filter> pipeline_filter_;
 
   // Renderer references used for setting the volume and determining
   // when playback has finished.
   scoped_refptr<AudioRenderer> audio_renderer_;
   scoped_refptr<VideoRenderer> video_renderer_;
 
-  // Vector of threads owned by the pipeline and being used by filters.
-  typedef std::vector<base::Thread*> FilterThreadVector;
-  FilterThreadVector filter_threads_;
-
   // Helper class that stores filter references during pipeline
   // initialization.
-  class PipelineInitState {
-   public:
-    scoped_refptr<DataSource> data_source_;
-    scoped_refptr<Demuxer> demuxer_;
-    scoped_refptr<AudioDecoder> audio_decoder_;
-    scoped_refptr<VideoDecoder> video_decoder_;
-  };
-
+  class PipelineInitState;
   scoped_ptr<PipelineInitState> pipeline_init_state_;
 
   FRIEND_TEST_ALL_PREFIXES(PipelineImplTest, GetBufferedTime);

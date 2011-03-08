@@ -4,19 +4,23 @@
 
 #include "chrome/browser/chromeos/login/user_view.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
+#include "chrome/browser/chromeos/login/rounded_view.h"
+#include "gfx/canvas.h"
 #include "gfx/canvas_skia.h"
+#include "gfx/gtk_util.h"
+#include "gfx/rect.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/background.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
-#include "views/controls/throbber.h"
 #include "views/painter.h"
 
 namespace {
@@ -72,12 +76,12 @@ class SignoutView : public views::View {
     const gfx::Font& font = rb.GetFont(ResourceBundle::SmallFont);
 
     active_user_label_ = new views::Label(
-        l10n_util::GetString(IDS_SCREEN_LOCK_ACTIVE_USER));
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_ACTIVE_USER)));
     active_user_label_->SetFont(font);
     active_user_label_->SetColor(kTextColor);
 
     signout_link_ = new views::Link(
-        l10n_util::GetString(IDS_SCREEN_LOCK_SIGN_OUT));
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_SIGN_OUT)));
     signout_link_->SetController(link_controller);
     signout_link_->SetFont(font);
     signout_link_->SetColor(kTextColor);
@@ -211,7 +215,8 @@ class RemoveButton : public views::TextButton {
 
 class PodImageView : public views::ImageView {
  public:
-  PodImageView() { }
+  explicit PodImageView(const UserView::Delegate* delegate)
+      : delegate_(delegate) { }
 
   void SetImage(const SkBitmap& image, const SkBitmap& image_hot) {
     image_ = image;
@@ -229,7 +234,15 @@ class PodImageView : public views::ImageView {
     views::ImageView::SetImage(image_);
   }
 
+  gfx::NativeCursor GetCursorForPoint(
+      views::Event::EventType event_type,
+      const gfx::Point& p) {
+    return (delegate_->IsUserSelected()) ? NULL : gfx::GetCursor(GDK_HAND2);
+  }
+
  private:
+  const UserView::Delegate* delegate_;
+
   SkBitmap image_;
   SkBitmap image_hot_;
 
@@ -239,12 +252,16 @@ class PodImageView : public views::ImageView {
 UserView::UserView(Delegate* delegate, bool is_login, bool need_background)
     : delegate_(delegate),
       signout_view_(NULL),
-      image_view_(new PodImageView()),
-      throbber_(CreateDefaultSmoothedThrobber()),
+      image_view_(NULL),
       remove_button_(NULL) {
   DCHECK(delegate);
   if (!is_login)
     signout_view_ = new SignoutView(this);
+
+  if (need_background)
+    image_view_ = new RoundedView<PodImageView>(delegate);
+  else
+    image_view_ = new PodImageView(delegate);
 
   Init(need_background);
 }
@@ -254,20 +271,11 @@ void UserView::Init(bool need_background) {
     image_view_->set_background(
         views::Background::CreateSolidBackground(kBackgroundColor));
   }
-  if (throbber_) {
-    int w = throbber_->GetPreferredSize().width();
-    int h = throbber_->GetPreferredSize().height();
-    throbber_->SetBounds(kUserImageSize / 2 - w / 2,
-        kUserImageSize / 2 - h / 2 , w, h);
-    // Throbber should be actually hidden while stopped so tooltip manager
-    // doesn't find it.
-    throbber_->SetVisible(false);
-    image_view_->AddChildView(throbber_);
-  }
 
   // UserView's layout never changes, so let's layout once here.
   image_view_->SetBounds(0, 0, kUserImageSize, kUserImageSize);
   AddChildView(image_view_);
+
   if (signout_view_) {
     signout_view_->SetBounds(0, kUserImageSize, kUserImageSize,
                              signout_view_->GetPreferredSize().height());
@@ -278,7 +286,7 @@ void UserView::Init(bool need_background) {
   remove_button_ = new RemoveButton(
       this,
       *rb.GetBitmapNamed(IDR_CLOSE_BAR_H),
-      l10n_util::GetString(IDS_LOGIN_REMOVE),
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LOGIN_REMOVE)),
       gfx::Point(kUserImageSize - kRemoveButtonPadding, kRemoveButtonPadding));
   remove_button_->SetVisible(false);
   AddChildView(remove_button_);
@@ -296,16 +304,6 @@ void UserView::SetImage(const SkBitmap& image, const SkBitmap& image_hot) {
 void UserView::SetTooltipText(const std::wstring& text) {
   DCHECK(image_view_);
   image_view_->SetTooltipText(text);
-}
-
-void UserView::StartThrobber() {
-  throbber_->SetVisible(true);
-  throbber_->Start();
-}
-
-void UserView::StopThrobber() {
-  throbber_->Stop();
-  throbber_->SetVisible(false);
 }
 
 gfx::Size UserView::GetPreferredSize() {
@@ -338,7 +336,8 @@ void UserView::ButtonPressed(views::Button* sender, const views::Event& event) {
 }
 
 void UserView::OnLocaleChanged() {
-  remove_button_->SetText(l10n_util::GetString(IDS_LOGIN_REMOVE));
+  remove_button_->SetText(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LOGIN_REMOVE)));
 }
 
 }  // namespace chromeos

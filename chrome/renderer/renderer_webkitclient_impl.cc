@@ -12,6 +12,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/database_util.h"
 #include "chrome/common/file_system/webfilesystem_impl.h"
+#include "chrome/common/file_utilities_messages.h"
+#include "chrome/common/mime_registry_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/webblobregistry_impl.h"
 #include "chrome/common/webmessageportchannel_impl.h"
@@ -19,6 +21,7 @@
 #include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
+#include "chrome/renderer/renderer_webaudiodevice_impl.h"
 #include "chrome/renderer/renderer_webidbfactory_impl.h"
 #include "chrome/renderer/renderer_webstoragenamespace_impl.h"
 #include "chrome/renderer/visitedlink_slave.h"
@@ -26,44 +29,46 @@
 #include "chrome/renderer/websharedworkerrepository_impl.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBlobRegistry.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBFactory.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBKey.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBKeyPath.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSerializedScriptValue.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebStorageEventDispatcher.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBlobRegistry.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
 #include "webkit/glue/simple_webmimeregistry_impl.h"
 #include "webkit/glue/webclipboard_impl.h"
 #include "webkit/glue/webfileutilities_impl.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 
 #if defined(OS_WIN)
-#include "third_party/WebKit/WebKit/chromium/public/win/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/win/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_MACOSX)
 #include "chrome/common/font_descriptor_mac.h"
 #include "chrome/common/font_loader_mac.h"
-#include "third_party/WebKit/WebKit/chromium/public/mac/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_LINUX)
 #include <string>
 #include <map>
 
-#include "base/lock.h"
+#include "base/synchronization/lock.h"
 #include "chrome/renderer/renderer_sandbox_support_linux.h"
-#include "third_party/WebKit/WebKit/chromium/public/linux/WebSandboxSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
 
+using WebKit::WebAudioDevice;
 using WebKit::WebBlobRegistry;
 using WebKit::WebFileSystem;
 using WebKit::WebFrame;
@@ -119,7 +124,7 @@ class RendererWebKitClientImpl::SandboxSupport
   // unicode code points. It needs this information frequently so we cache it
   // here. The key in this map is an array of 16-bit UTF16 values from WebKit.
   // The value is a string containing the correct font family.
-  Lock unicode_font_families_mutex_;
+  base::Lock unicode_font_families_mutex_;
   std::map<std::string, std::string> unicode_font_families_;
 #endif
 };
@@ -324,8 +329,9 @@ WebString RendererWebKitClientImpl::MimeRegistry::mimeTypeForExtension(
   // The sandbox restricts our access to the registry, so we need to proxy
   // these calls over to the browser process.
   std::string mime_type;
-  RenderThread::current()->Send(new ViewHostMsg_GetMimeTypeFromExtension(
-      webkit_glue::WebStringToFilePathString(file_extension), &mime_type));
+  RenderThread::current()->Send(
+      new MimeRegistryMsg_GetMimeTypeFromExtension(
+          webkit_glue::WebStringToFilePathString(file_extension), &mime_type));
   return ASCIIToUTF16(mime_type);
 
 }
@@ -338,7 +344,7 @@ WebString RendererWebKitClientImpl::MimeRegistry::mimeTypeFromFile(
   // The sandbox restricts our access to the registry, so we need to proxy
   // these calls over to the browser process.
   std::string mime_type;
-  RenderThread::current()->Send(new ViewHostMsg_GetMimeTypeFromFile(
+  RenderThread::current()->Send(new MimeRegistryMsg_GetMimeTypeFromFile(
       FilePath(webkit_glue::WebStringToFilePathString(file_path)),
       &mime_type));
   return ASCIIToUTF16(mime_type);
@@ -354,8 +360,8 @@ WebString RendererWebKitClientImpl::MimeRegistry::preferredExtensionForMIMEType(
   // these calls over to the browser process.
   FilePath::StringType file_extension;
   RenderThread::current()->Send(
-      new ViewHostMsg_GetPreferredExtensionForMimeType(UTF16ToASCII(mime_type),
-          &file_extension));
+      new MimeRegistryMsg_GetPreferredExtensionForMimeType(
+          UTF16ToASCII(mime_type), &file_extension));
   return webkit_glue::FilePathStringToWebString(file_extension);
 }
 
@@ -363,7 +369,7 @@ WebString RendererWebKitClientImpl::MimeRegistry::preferredExtensionForMIMEType(
 
 bool RendererWebKitClientImpl::FileUtilities::getFileSize(const WebString& path,
                                                        long long& result) {
-  if (SendSyncMessageFromAnyThread(new ViewHostMsg_GetFileSize(
+  if (SendSyncMessageFromAnyThread(new FileUtilitiesMsg_GetFileSize(
           webkit_glue::WebStringToFilePath(path),
           reinterpret_cast<int64*>(&result)))) {
     return result >= 0;
@@ -384,7 +390,7 @@ bool RendererWebKitClientImpl::FileUtilities::getFileModificationTime(
     const WebString& path,
     double& result) {
   base::Time time;
-  if (SendSyncMessageFromAnyThread(new ViewHostMsg_GetFileModificationTime(
+  if (SendSyncMessageFromAnyThread(new FileUtilitiesMsg_GetFileModificationTime(
           webkit_glue::WebStringToFilePath(path), &time))) {
     result = time.ToDoubleT();
     return !time.is_null();
@@ -398,7 +404,7 @@ base::PlatformFile RendererWebKitClientImpl::FileUtilities::openFile(
     const WebString& path,
     int mode) {
   IPC::PlatformFileForTransit handle = IPC::InvalidPlatformFileForTransit();
-  SendSyncMessageFromAnyThread(new ViewHostMsg_OpenFile(
+  SendSyncMessageFromAnyThread(new FileUtilitiesMsg_OpenFile(
       webkit_glue::WebStringToFilePath(path), mode, &handle));
   return IPC::PlatformFileForTransitToPlatformFile(handle);
 }
@@ -417,7 +423,7 @@ bool RendererWebKitClientImpl::SandboxSupport::ensureFontLoaded(HFONT font) {
 
 WebString RendererWebKitClientImpl::SandboxSupport::getFontFamilyForCharacters(
     const WebKit::WebUChar* characters, size_t num_characters) {
-  AutoLock lock(unicode_font_families_mutex_);
+  base::AutoLock lock(unicode_font_families_mutex_);
   const std::string key(reinterpret_cast<const char*>(characters),
                         num_characters * sizeof(characters[0]));
   const std::map<std::string, std::string>::const_iterator iter =
@@ -501,11 +507,11 @@ RendererWebKitClientImpl::sharedWorkerRepository() {
 
 WebKit::WebGraphicsContext3D*
 RendererWebKitClientImpl::createGraphicsContext3D() {
-  // The WebGraphicsContext3D::createDefault code path is used for
+  // The WebGraphicsContext3DInProcessImpl code path is used for
   // layout tests (though not through this code) as well as for
   // debugging and bringing up new ports.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
-    return WebKit::WebGraphicsContext3D::createDefault();
+    return new webkit::gpu::WebGraphicsContext3DInProcessImpl();
   } else {
 #if defined(ENABLE_GPU)
     return new WebGraphicsContext3DCommandBufferImpl();
@@ -513,6 +519,18 @@ RendererWebKitClientImpl::createGraphicsContext3D() {
     return NULL;
 #endif
   }
+}
+
+WebAudioDevice*
+RendererWebKitClientImpl::createAudioDevice(
+    size_t buffer_size,
+    unsigned channels,
+    double sample_rate,
+    WebAudioDevice::RenderCallback* callback) {
+  return new RendererWebAudioDeviceImpl(buffer_size,
+                                        channels,
+                                        sample_rate,
+                                        callback);
 }
 
 //------------------------------------------------------------------------------

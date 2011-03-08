@@ -12,12 +12,12 @@
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
-#include "third_party/WebKit/WebKit/chromium/public/gtk/WebInputEventFactory.h"
-#include "third_party/WebKit/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenu.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/test_shell_x11.h"
 
@@ -327,7 +327,8 @@ WebWidgetHost::WebWidgetHost()
     : view_(NULL),
       webwidget_(NULL),
       scroll_dx_(0),
-      scroll_dy_(0) {
+      scroll_dy_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
   set_painting(false);
 }
 
@@ -363,6 +364,8 @@ void WebWidgetHost::Paint() {
       return;
     }
   }
+
+  webwidget_->animate();
 
   // This may result in more invalidation
   webwidget_->layout();

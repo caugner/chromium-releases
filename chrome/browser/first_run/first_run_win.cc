@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,31 +11,28 @@
 #include <set>
 #include <sstream>
 
-#include "app/app_switches.h"
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/environment.h"
 #include "base/file_util.h"
-#include "base/object_watcher.h"
 #include "base/path_service.h"
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/object_watcher.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/process_singleton.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/views/first_run_search_engine_view.h"
+#include "chrome/browser/ui/views/first_run_search_engine_view.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/worker_thread_ticker.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
@@ -58,20 +55,16 @@
 #include "views/widget/root_view.h"
 #include "views/widget/widget_win.h"
 #include "views/window/window.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/ui_base_switches.h"
 
 namespace {
 
 bool GetNewerChromeFile(FilePath* path) {
   if (!PathService::Get(base::DIR_EXE, path))
     return false;
-  *path = path->Append(installer_util::kChromeNewExe);
-  return true;
-}
-
-bool GetBackupChromeFile(std::wstring* path) {
-  if (!PathService::Get(base::DIR_EXE, path))
-    return false;
-  file_util::AppendToPath(path, installer_util::kChromeOldExe);
+  *path = path->Append(installer::kChromeNewExe);
   return true;
 }
 
@@ -89,7 +82,7 @@ bool InvokeGoogleUpdateForRename() {
       DWORD exit_code;
       ::GetExitCodeProcess(handle, &exit_code);
       ::CloseHandle(handle);
-      if (exit_code == installer_util::RENAME_SUCCESSFUL)
+      if (exit_code == installer::RENAME_SUCCESSFUL)
         return true;
     }
   }
@@ -101,8 +94,8 @@ bool LaunchSetupWithParam(const std::string& param, const std::wstring& value,
   FilePath exe_path;
   if (!PathService::Get(base::DIR_MODULE, &exe_path))
     return false;
-  exe_path = exe_path.Append(installer_util::kInstallerDir);
-  exe_path = exe_path.Append(installer_util::kSetupExe);
+  exe_path = exe_path.Append(installer::kInstallerDir);
+  exe_path = exe_path.Append(installer::kSetupExe);
   base::ProcessHandle ph;
   CommandLine cl(exe_path);
   cl.AppendSwitchNative(param, value);
@@ -156,7 +149,7 @@ class FirstRunDelayedTasks : public NotificationObserver {
                        const NotificationDetails& details) {
     // After processing the notification we always delete ourselves.
     if (type.value == NotificationType::EXTENSIONS_READY)
-      DoExtensionWork(Source<Profile>(source).ptr()->GetExtensionsService());
+      DoExtensionWork(Source<Profile>(source).ptr()->GetExtensionService());
     delete this;
     return;
   }
@@ -168,7 +161,7 @@ class FirstRunDelayedTasks : public NotificationObserver {
   // The extension work is to basically trigger an extension update check.
   // If the extension specified in the master pref is older than the live
   // extension it will get updated which is the same as get it installed.
-  void DoExtensionWork(ExtensionsService* service) {
+  void DoExtensionWork(ExtensionService* service) {
     if (!service)
       return;
     service->updater()->CheckNow();
@@ -186,8 +179,8 @@ bool FirstRun::LaunchSetupWithParam(const std::string& param,
   FilePath exe_path;
   if (!PathService::Get(base::DIR_MODULE, &exe_path))
     return false;
-  exe_path = exe_path.Append(installer_util::kInstallerDir);
-  exe_path = exe_path.Append(installer_util::kSetupExe);
+  exe_path = exe_path.Append(installer::kInstallerDir);
+  exe_path = exe_path.Append(installer::kSetupExe);
   base::ProcessHandle ph;
   CommandLine cl(exe_path);
   cl.AppendSwitchNative(param, value);
@@ -225,30 +218,32 @@ void FirstRun::DoDelayedInstallExtensions() {
 CommandLine* Upgrade::new_command_line_ = NULL;
 
 bool FirstRun::CreateChromeDesktopShortcut() {
-  std::wstring chrome_exe;
+  FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe))
     return false;
   BrowserDistribution *dist = BrowserDistribution::GetDistribution();
   if (!dist)
     return false;
-  return ShellUtil::CreateChromeDesktopShortcut(chrome_exe,
+  return ShellUtil::CreateChromeDesktopShortcut(dist, chrome_exe.value(),
       dist->GetAppDescription(), ShellUtil::CURRENT_USER,
       false, true);  // create if doesn't exist.
 }
 
 bool FirstRun::CreateChromeQuickLaunchShortcut() {
-  std::wstring chrome_exe;
+  FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe))
     return false;
-  return ShellUtil::CreateChromeQuickLaunchShortcut(chrome_exe,
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  return ShellUtil::CreateChromeQuickLaunchShortcut(dist, chrome_exe.value(),
       ShellUtil::CURRENT_USER,  // create only for current user.
       true);  // create if doesn't exist.
 }
 
 bool Upgrade::IsBrowserAlreadyRunning() {
   static HANDLE handle = NULL;
-  std::wstring exe;
-  PathService::Get(base::FILE_EXE, &exe);
+  FilePath exe_path;
+  PathService::Get(base::FILE_EXE, &exe_path);
+  std::wstring exe = exe_path.value();
   std::replace(exe.begin(), exe.end(), '\\', '!');
   std::transform(exe.begin(), exe.end(), exe.begin(), tolower);
   exe = L"Global\\" + exe;
@@ -261,8 +256,7 @@ bool Upgrade::IsBrowserAlreadyRunning() {
 
 bool Upgrade::RelaunchChromeBrowser(const CommandLine& command_line) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  env->UnSetVar(WideToUTF8(
-      BrowserDistribution::GetDistribution()->GetEnvVersionKey()).c_str());
+  env->UnSetVar(chrome::kChromeVersionEnvVar);
   return base::LaunchApp(command_line.command_line_string(),
                          false, false, NULL);
 }
@@ -273,24 +267,27 @@ bool Upgrade::SwapNewChromeExeIfPresent() {
     return false;
   if (!file_util::PathExists(new_chrome_exe))
     return false;
-  std::wstring curr_chrome_exe;
-  if (!PathService::Get(base::FILE_EXE, &curr_chrome_exe))
+  FilePath cur_chrome_exe;
+  if (!PathService::Get(base::FILE_EXE, &cur_chrome_exe))
     return false;
 
   // First try to rename exe by launching rename command ourselves.
-  bool user_install = InstallUtil::IsPerUserInstall(curr_chrome_exe.c_str());
+  bool user_install =
+      InstallUtil::IsPerUserInstall(cur_chrome_exe.value().c_str());
   HKEY reg_root = user_install ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
   BrowserDistribution *dist = BrowserDistribution::GetDistribution();
   base::win::RegKey key;
   std::wstring rename_cmd;
-  if (key.Open(reg_root, dist->GetVersionKey().c_str(), KEY_READ) &&
-      key.ReadValue(google_update::kRegRenameCmdField, &rename_cmd)) {
+  if ((key.Open(reg_root, dist->GetVersionKey().c_str(),
+                KEY_READ) == ERROR_SUCCESS) &&
+      (key.ReadValue(google_update::kRegRenameCmdField,
+                     &rename_cmd) == ERROR_SUCCESS)) {
     base::ProcessHandle handle;
     if (base::LaunchApp(rename_cmd, true, true, &handle)) {
       DWORD exit_code;
       ::GetExitCodeProcess(handle, &exit_code);
       ::CloseHandle(handle);
-      if (exit_code == installer_util::RENAME_SUCCESSFUL)
+      if (exit_code == installer::RENAME_SUCCESSFUL)
         return true;
     }
   }
@@ -325,7 +322,7 @@ namespace {
 // process has ended and what was the result of the operation as reported by
 // the process exit code. This class executes in the context of the main chrome
 // process.
-class ImportProcessRunner : public base::ObjectWatcher::Delegate {
+class ImportProcessRunner : public base::win::ObjectWatcher::Delegate {
  public:
   // The constructor takes the importer process to watch and then it does a
   // message loop blocking wait until the process ends. This object now owns
@@ -354,7 +351,7 @@ class ImportProcessRunner : public base::ObjectWatcher::Delegate {
   }
 
  private:
-  base::ObjectWatcher watcher_;
+  base::win::ObjectWatcher watcher_;
   base::ProcessHandle import_process_;
   DWORD exit_code_;
 };
@@ -645,7 +642,7 @@ class TryChromeDialog : public views::ButtonListener,
     root_view->set_background(
         views::Background::CreateSolidBackground(0xfc, 0xfc, 0xfc));
 
-    views::GridLayout* layout = CreatePanelGridLayout(root_view);
+    views::GridLayout* layout = views::GridLayout::CreatePanel(root_view);
     if (!layout) {
       NOTREACHED();
       return Upgrade::TD_DIALOG_ERROR;
@@ -696,16 +693,17 @@ class TryChromeDialog : public views::ButtonListener,
     // The heading has two flavors of text, the alt one features extensions but
     // we only use it in the US until some international issues are fixed.
     const std::string app_locale = g_browser_process->GetApplicationLocale();
-    std::wstring heading;
+    int heading_id;
     switch (version_) {
-      case 0: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING); break;
-      case 1: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING2); break;
-      case 2: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING3); break;
-      case 3: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING4); break;
+      case 0: heading_id = IDS_TRY_TOAST_HEADING; break;
+      case 1: heading_id = IDS_TRY_TOAST_HEADING2; break;
+      case 2: heading_id = IDS_TRY_TOAST_HEADING3; break;
+      case 3: heading_id = IDS_TRY_TOAST_HEADING4; break;
       default:
         NOTREACHED() << "Cannot determine which headline to show.";
         return Upgrade::TD_DIALOG_ERROR;
     }
+    string16 heading = l10n_util::GetStringUTF16(heading_id);
     views::Label* label = new views::Label(heading);
     label->SetFont(rb.GetFont(ResourceBundle::MediumBoldFont));
     label->SetMultiLine(true);
@@ -724,23 +722,22 @@ class TryChromeDialog : public views::ButtonListener,
     layout->AddView(close_button);
 
     // Second row views.
-    const std::wstring try_it(l10n_util::GetString(IDS_TRY_TOAST_TRY_OPT));
+    const string16 try_it(l10n_util::GetStringUTF16(IDS_TRY_TOAST_TRY_OPT));
     layout->StartRowWithPadding(0, 1, 0, 10);
     try_chrome_ = new views::RadioButton(try_it, 1);
     layout->AddView(try_chrome_);
     try_chrome_->SetChecked(true);
 
     // Third row views.
-    const std::wstring
-        kill_it(l10n_util::GetString(IDS_UNINSTALL_CHROME));
+    const string16 kill_it(l10n_util::GetStringUTF16(IDS_UNINSTALL_CHROME));
     layout->StartRow(0, 2);
     kill_chrome_ = new views::RadioButton(kill_it, 1);
     layout->AddView(kill_chrome_);
 
     // Fourth row views.
-    const std::wstring ok_it(l10n_util::GetString(IDS_OK));
-    const std::wstring cancel_it(l10n_util::GetString(IDS_TRY_TOAST_CANCEL));
-    const std::wstring why_this(l10n_util::GetString(IDS_TRY_TOAST_WHY));
+    const string16 ok_it(l10n_util::GetStringUTF16(IDS_OK));
+    const string16 cancel_it(l10n_util::GetStringUTF16(IDS_TRY_TOAST_CANCEL));
+    const string16 why_this(l10n_util::GetStringUTF16(IDS_TRY_TOAST_WHY));
     layout->StartRowWithPadding(0, 3, 0, 10);
     views::Button* accept_button = new views::NativeButton(this, ok_it);
     accept_button->set_tag(BT_OK_BUTTON);

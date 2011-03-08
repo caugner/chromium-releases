@@ -26,7 +26,7 @@ typedef CGLError (*CGLTexImageIOSurface2DProcPtr)(CGLContextObj ctx,
 
 class IOSurfaceSupportImpl : public IOSurfaceSupport {
  public:
-  static IOSurfaceSupportImpl* Initialize();
+  static IOSurfaceSupportImpl* GetInstance();
 
   bool InitializedSuccessfully() {
     return initialized_successfully_;
@@ -80,10 +80,8 @@ class IOSurfaceSupportImpl : public IOSurfaceSupport {
   DISALLOW_COPY_AND_ASSIGN(IOSurfaceSupportImpl);
 };
 
-static Singleton<IOSurfaceSupportImpl> sole_instance_;
-
-IOSurfaceSupportImpl* IOSurfaceSupportImpl::Initialize() {
-  IOSurfaceSupportImpl* impl = sole_instance_.get();
+IOSurfaceSupportImpl* IOSurfaceSupportImpl::GetInstance() {
+  IOSurfaceSupportImpl* impl = Singleton<IOSurfaceSupportImpl>::get();
   if (impl->InitializedSuccessfully())
     return impl;
   return NULL;
@@ -261,7 +259,7 @@ IOSurfaceSupportImpl::~IOSurfaceSupportImpl() {
 }
 
 IOSurfaceSupport* IOSurfaceSupport::Initialize() {
-  return IOSurfaceSupportImpl::Initialize();
+  return IOSurfaceSupportImpl::GetInstance();
 }
 
 IOSurfaceSupport::IOSurfaceSupport() {

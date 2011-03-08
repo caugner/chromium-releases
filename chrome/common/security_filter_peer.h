@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#ifndef CHROME_COMMON_SECURITY_FILTER_PEER_H__
-#define CHROME_COMMON_SECURITY_FILTER_PEER_H__
+#ifndef CHROME_COMMON_SECURITY_FILTER_PEER_H_
+#define CHROME_COMMON_SECURITY_FILTER_PEER_H_
 #pragma once
 
 #include "webkit/glue/resource_loader_bridge.h"
@@ -41,7 +40,7 @@ class SecurityFilterPeer : public webkit_glue::ResourceLoaderBridge::Peer {
       bool content_filtered);
   virtual void OnDownloadedData(int len) {}
   virtual void OnReceivedData(const char* data, int len);
-  virtual void OnCompletedRequest(const URLRequestStatus& status,
+  virtual void OnCompletedRequest(const net::URLRequestStatus& status,
                                   const std::string& security_info,
                                   const base::Time& completion_time);
 
@@ -70,7 +69,7 @@ class BufferedPeer : public SecurityFilterPeer {
       const webkit_glue::ResourceResponseInfo& info,
       bool content_filtered);
   virtual void OnReceivedData(const char* data, int len);
-  virtual void OnCompletedRequest(const URLRequestStatus& status,
+  virtual void OnCompletedRequest(const net::URLRequestStatus& status,
                                   const std::string& security_info,
                                   const base::Time& completion_time);
 
@@ -110,10 +109,10 @@ class ReplaceContentPeer : public SecurityFilterPeer {
   virtual void OnReceivedResponse(
       const webkit_glue::ResourceResponseInfo& info,
       bool content_filtered);
-  void OnReceivedData(const char* data, int len);
-  void OnCompletedRequest(const URLRequestStatus& status,
-                          const std::string& security_info,
-                          const base::Time& completion_time);
+  virtual void OnReceivedData(const char* data, int len);
+  virtual void OnCompletedRequest(const net::URLRequestStatus& status,
+                                  const std::string& security_info,
+                                  const base::Time& completion_time);
 
  private:
   webkit_glue::ResourceResponseInfo response_info_;
@@ -123,4 +122,4 @@ class ReplaceContentPeer : public SecurityFilterPeer {
   DISALLOW_COPY_AND_ASSIGN(ReplaceContentPeer);
 };
 
-#endif  // CHROME_COMMON_SECURITY_FILTER_PEER_H__
+#endif  // CHROME_COMMON_SECURITY_FILTER_PEER_H_

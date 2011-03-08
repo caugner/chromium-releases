@@ -2,21 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H__
-#define CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H__
+#ifndef CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H_
+#define CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H_
 #pragma once
 
 #include <string>
 #include <vector>
 
-#include "app/message_box_flags.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/threading/platform_thread.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "base/thread.h"
-#include "base/waitable_event.h"
+#include "base/threading/thread.h"
+#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
@@ -26,15 +26,13 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
+#include "ui/base/message_box_flags.h"
 
 class BrowserProxy;
 class ExtensionProxy;
 class TabProxy;
 class WindowProxy;
-
-namespace IPC {
 struct ExternalTabSettings;
-}
 
 // This is an interface that AutomationProxy-related objects can use to
 // access the message-sending abilities of the Proxy.
@@ -73,7 +71,7 @@ class AutomationProxy : public IPC::Channel::Listener,
                          bool use_named_interface);
 
   // IPC callback
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
   virtual void OnChannelError();
 
   // Close the automation IPC channel.
@@ -125,11 +123,11 @@ class AutomationProxy : public IPC::Channel::Listener,
   // Returns whether an app modal dialog window is showing right now (i.e., a
   // javascript alert), and what buttons it contains.
   bool GetShowingAppModalDialog(bool* showing_app_modal_dialog,
-      MessageBoxFlags::DialogButton* button) WARN_UNUSED_RESULT;
+      ui::MessageBoxFlags::DialogButton* button) WARN_UNUSED_RESULT;
 
   // Simulates a click on a dialog button. Synchronous.
   bool ClickAppModalDialogButton(
-      MessageBoxFlags::DialogButton button) WARN_UNUSED_RESULT;
+      ui::MessageBoxFlags::DialogButton button) WARN_UNUSED_RESULT;
 
   // Block the thread until a modal dialog is displayed. Returns true on
   // success.
@@ -235,7 +233,7 @@ class AutomationProxy : public IPC::Channel::Listener,
   // returns a TabProxy representing the tab as well as a window handle
   // that can be reparented in another process.
   scoped_refptr<TabProxy> CreateExternalTab(
-      const IPC::ExternalTabSettings& settings,
+      const ExternalTabSettings& settings,
       gfx::NativeWindow* external_tab_container,
       gfx::NativeWindow* tab);
 
@@ -304,9 +302,9 @@ class AutomationProxy : public IPC::Channel::Listener,
   // Delay to let the browser execute the command.
   base::TimeDelta command_execution_timeout_;
 
-  PlatformThreadId listener_thread_id_;
+  base::PlatformThreadId listener_thread_id_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationProxy);
 };
 
-#endif  // CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H__
+#endif  // CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H_

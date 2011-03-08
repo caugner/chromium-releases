@@ -37,7 +37,8 @@ void LoadClipToContext(cairo_t* context, const SkRegion& clip) {
 
 }  // namespace
 
-SkDevice* BitmapPlatformDeviceFactory::newDevice(SkBitmap::Config config,
+SkDevice* BitmapPlatformDeviceFactory::newDevice(SkCanvas* ignored,
+                                                 SkBitmap::Config config,
                                                  int width, int height,
                                                  bool isOpaque,
                                                  bool isForLayer) {
@@ -142,12 +143,23 @@ BitmapPlatformDevice::BitmapPlatformDevice(
 BitmapPlatformDevice::~BitmapPlatformDevice() {
 }
 
+SkDeviceFactory* BitmapPlatformDevice::getDeviceFactory() {
+  return SkNEW(BitmapPlatformDeviceFactory);
+}
+
+bool BitmapPlatformDevice::IsVectorial() {
+  return false;
+}
+
 cairo_t* BitmapPlatformDevice::beginPlatformPaint() {
   data_->LoadConfig();
   cairo_t* cairo = data_->bitmap_context();
-  // Tell Cairo that we've (probably) modified its pixel buffer without
-  // its knowledge.
-  cairo_surface_mark_dirty(cairo_get_target(cairo));
+  cairo_surface_t* surface = cairo_get_target(cairo);
+  // Tell cairo to flush anything it has pending.
+  cairo_surface_flush(surface);
+  // Tell Cairo that we (probably) modified (actually, will modify) its pixel
+  // buffer directly.
+  cairo_surface_mark_dirty(surface);
   return cairo;
 }
 

@@ -8,12 +8,13 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/util_constants.h"
 #include "courgette/courgette.h"
 #include "third_party/bspatch/mbspatch.h"
 
-int setup_util::ApplyDiffPatch(const FilePath& src,
+int installer::ApplyDiffPatch(const FilePath& src,
                                const FilePath& patch,
                                const FilePath& dest) {
   VLOG(1) << "Applying patch " << patch.value() << " to file " << src.value()
@@ -33,28 +34,30 @@ int setup_util::ApplyDiffPatch(const FilePath& src,
                           dest.value().c_str());
 }
 
-installer::Version* setup_util::GetVersionFromDir(
-    const FilePath& chrome_path) {
+Version* installer::GetMaxVersionFromArchiveDir(const FilePath& chrome_path) {
   VLOG(1) << "Looking for Chrome version folder under " << chrome_path.value();
-  FilePath root_path = chrome_path.Append(L"*");
+  Version* version = NULL;
+  file_util::FileEnumerator version_enum(chrome_path, false,
+      file_util::FileEnumerator::DIRECTORIES);
+  // TODO(tommi): The version directory really should match the version of
+  // setup.exe.  To begin with, we should at least DCHECK that that's true.
 
-  WIN32_FIND_DATA find_data;
-  HANDLE file_handle = FindFirstFile(root_path.value().c_str(), &find_data);
-  BOOL ret = TRUE;
-  installer::Version *version = NULL;
-  // Here we are assuming that the installer we have is really valid so there
-  // can not be two version directories. We exit as soon as we find a valid
-  // version directory.
-  while (ret) {
-    if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-      VLOG(1) << "directory found: " << find_data.cFileName;
-      version = installer::Version::GetVersionFromString(find_data.cFileName);
-      if (version)
-        break;
+  scoped_ptr<Version> max_version(Version::GetVersionFromString("0.0.0.0"));
+  bool version_found = false;
+
+  while (!version_enum.Next().empty()) {
+    file_util::FileEnumerator::FindInfo find_data = {0};
+    version_enum.GetFindInfo(&find_data);
+    VLOG(1) << "directory found: " << find_data.cFileName;
+
+    scoped_ptr<Version> found_version(
+        Version::GetVersionFromString(WideToASCII(find_data.cFileName)));
+    if (found_version.get() != NULL &&
+        found_version->CompareTo(*max_version.get()) > 0) {
+      max_version.reset(found_version.release());
+      version_found = true;
     }
-    ret = FindNextFile(file_handle, &find_data);
   }
-  FindClose(file_handle);
 
-  return version;
+  return (version_found ? max_version.release() : NULL);
 }

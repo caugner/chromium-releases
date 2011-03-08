@@ -46,10 +46,22 @@ void DecoderRowBased::Reset() {
   frame_ = NULL;
   decompressor_->Reset();
   state_ = kUninitialized;
+  updated_rects_.clear();
 }
 
 bool DecoderRowBased::IsReadyForData() {
-  return state_ == kReady || state_ == kProcessing || state_ == kDone;
+  switch (state_) {
+    case kUninitialized:
+    case kError:
+      return false;
+    case kReady:
+    case kProcessing:
+    case kPartitionDone:
+    case kDone:
+      return true;
+  }
+  NOTREACHED();
+  return false;
 }
 
 void DecoderRowBased::Initialize(scoped_refptr<media::VideoFrame> frame) {
@@ -66,8 +78,7 @@ void DecoderRowBased::Initialize(scoped_refptr<media::VideoFrame> frame) {
   state_ = kReady;
 }
 
-Decoder::DecodeResult DecoderRowBased::DecodePacket(
-    const VideoPacket* packet) {
+Decoder::DecodeResult DecoderRowBased::DecodePacket(const VideoPacket* packet) {
   UpdateStateForPacket(packet);
 
   if (state_ == kError) {
@@ -120,14 +131,18 @@ Decoder::DecodeResult DecoderRowBased::DecodePacket(
     }
   }
 
-  if (state_ == kDone) {
+  if (state_ == kPartitionDone || state_ == kDone) {
     if (row_y_ < clip_.height()) {
       state_ = kError;
       LOG(WARNING) << "Received LAST_PACKET, but didn't get enough data.";
       return DECODE_ERROR;
     }
 
+    updated_rects_.push_back(clip_);
     decompressor_->Reset();
+  }
+
+  if (state_ == kDone) {
     return DECODE_DONE;
   } else {
     return DECODE_IN_PROGRESS;
@@ -140,7 +155,7 @@ void DecoderRowBased::UpdateStateForPacket(const VideoPacket* packet) {
   }
 
   if (packet->flags() & VideoPacket::FIRST_PACKET) {
-    if (state_ != kReady && state_ != kDone) {
+    if (state_ != kReady && state_ != kDone && state_ != kPartitionDone) {
       state_ = kError;
       LOG(WARNING) << "Received unexpected FIRST_PACKET.";
       return;
@@ -166,6 +181,15 @@ void DecoderRowBased::UpdateStateForPacket(const VideoPacket* packet) {
       LOG(WARNING) << "Received unexpected LAST_PACKET.";
       return;
     }
+    state_ = kPartitionDone;
+  }
+
+  if (packet->flags() & VideoPacket::LAST_PARTITION) {
+    if (state_ != kPartitionDone) {
+      state_ = kError;
+      LOG(WARNING) << "Received unexpected LAST_PARTITION.";
+      return;
+    }
     state_ = kDone;
   }
 
@@ -173,7 +197,8 @@ void DecoderRowBased::UpdateStateForPacket(const VideoPacket* packet) {
 }
 
 void DecoderRowBased::GetUpdatedRects(UpdatedRects* rects) {
-  rects->push_back(clip_);
+  rects->swap(updated_rects_);
+  updated_rects_.clear();
 }
 
 VideoPacketFormat::Encoding DecoderRowBased::Encoding() {

@@ -57,6 +57,10 @@ namespace extension_manifest_keys {
   extern const char* kPluginsPublic;
   extern const char* kPublicKey;
   extern const char* kRunAt;
+  extern const char* kSidebar;
+  extern const char* kSidebarDefaultIcon;
+  extern const char* kSidebarDefaultTitle;
+  extern const char* kSidebarDefaultUrl;
   extern const char* kSignature;
   extern const char* kTheme;
   extern const char* kThemeColors;
@@ -65,6 +69,13 @@ namespace extension_manifest_keys {
   extern const char* kThemeTints;
   extern const char* kToolstripPath;
   extern const char* kToolstrips;
+  extern const char* kTts;
+  extern const char* kTtsGenderFemale;
+  extern const char* kTtsGenderMale;
+  extern const char* kTtsVoices;
+  extern const char* kTtsVoicesGender;
+  extern const char* kTtsVoicesLocale;
+  extern const char* kTtsVoicesVoiceName;
   extern const char* kType;
   extern const char* kUpdateURL;
   extern const char* kVersion;
@@ -92,6 +103,8 @@ namespace extension_manifest_errors {
   extern const char* kCannotScriptGallery;
   extern const char* kChromeVersionTooLow;
   extern const char* kDevToolsExperimental;
+  extern const char* kDisabledByPolicy;
+  extern const char* kExperimentalFlagRequired;
   extern const char* kHostedAppsCannotIncludeExtensionFeatures;
   extern const char* kInvalidAllFrames;
   extern const char* kInvalidBackground;
@@ -105,7 +118,6 @@ namespace extension_manifest_errors {
   extern const char* kInvalidCssList;
   extern const char* kInvalidDefaultLocale;
   extern const char* kInvalidDescription;
-  extern const char* kDisabledByPolicy;
   extern const char* kInvalidDevToolsPage;
   extern const char* kInvalidGlob;
   extern const char* kInvalidGlobList;
@@ -152,6 +164,10 @@ namespace extension_manifest_errors {
   extern const char* kInvalidPluginsPath;
   extern const char* kInvalidPluginsPublic;
   extern const char* kInvalidRunAt;
+  extern const char* kInvalidSidebar;
+  extern const char* kInvalidSidebarDefaultIconPath;
+  extern const char* kInvalidSidebarDefaultTitle;
+  extern const char* kInvalidSidebarDefaultUrl;
   extern const char* kInvalidSignature;
   extern const char* kInvalidTheme;
   extern const char* kInvalidThemeColors;
@@ -160,6 +176,11 @@ namespace extension_manifest_errors {
   extern const char* kInvalidThemeTints;
   extern const char* kInvalidToolstrip;
   extern const char* kInvalidToolstrips;
+  extern const char* kInvalidTts;
+  extern const char* kInvalidTtsVoices;
+  extern const char* kInvalidTtsVoicesGender;
+  extern const char* kInvalidTtsVoicesLocale;
+  extern const char* kInvalidTtsVoicesVoiceName;
   extern const char* kInvalidUpdateURL;
   extern const char* kInvalidVersion;
   extern const char* kInvalidWebURL;
@@ -178,6 +199,7 @@ namespace extension_manifest_errors {
   extern const char* kMultipleOverrides;
   extern const char* kOneUISurfaceOnly;
   extern const char* kReservedMessageFound;
+  extern const char* kSidebarExperimental;
   extern const char* kThemesCannotContainExtensions;
   extern const char* kWebContentMustBeEnabled;
 #if defined(OS_CHROMEOS)
@@ -246,6 +268,12 @@ namespace extension_misc {
     PROMO_SEEN,
     PROMO_BUCKET_BOUNDARY
   };
+
+#if defined(OS_CHROMEOS)
+  // The directory path on a ChromeOS device where accessibility extensions are
+  // stored.
+  extern const char* kAccessExtensionPath;
+#endif
 }  // extension_misc
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,8 @@
 #ifndef BINDSTATUS_SERVER_MIMETYPEAVAILABLE
 #define BINDSTATUS_SERVER_MIMETYPEAVAILABLE 54
 #endif
+
+bool ProtocolSinkWrap::ignore_xua_ = false;
 
 static const char kTextHtmlMimeType[] = "text/html";
 const wchar_t kUrlMonDllName[] = L"urlmon.dll";
@@ -83,7 +85,7 @@ END_VTABLE_PATCHES()
 
 // Static map initialization
 ProtData::ProtocolDataMap ProtData::datamap_;
-Lock ProtData::datamap_lock_;
+base::Lock ProtData::datamap_lock_;
 
 ProtocolSinkWrap::ProtocolSinkWrap() {
   DVLOG(1) << __FUNCTION__ << base::StringPrintf(" 0x%08X", this);
@@ -166,6 +168,10 @@ bool ShouldWrapSink(IInternetProtocolSink* sink, const wchar_t* url) {
   // |url| is already normalized (i.e. no leading spaces, capital letters in
   // protocol etc) and non-null (we check in Hook_Start).
   DCHECK(url != NULL);
+
+  if (ProtocolSinkWrap::ignore_xua())
+    return false;  // No need to intercept, we're ignoring X-UA-Compatible tags
+
   if ((url != StrStrW(url, L"http://")) && (url != StrStrW(url, L"https://")))
     return false;
 
@@ -232,9 +238,8 @@ bool IsAdditionallySupportedContentType(const wchar_t* status_text) {
       return true;
   }
 
-  Singleton<PolicySettings> policy;
-  if (policy->GetRendererForContentType(status_text) ==
-      PolicySettings::RENDER_IN_CHROME_FRAME) {
+  if (PolicySettings::GetInstance()->GetRendererForContentType(
+      status_text) == PolicySettings::RENDER_IN_CHROME_FRAME) {
     return true;
   }
 
@@ -326,7 +331,7 @@ ProtData::ProtData(IInternetProtocol* protocol,
   DVLOG(1) << __FUNCTION__ << " " << this;
 
   // Add to map.
-  AutoLock lock(datamap_lock_);
+  base::AutoLock lock(datamap_lock_);
   DCHECK(datamap_.end() == datamap_.find(protocol_));
   datamap_[protocol] = this;
 }
@@ -566,7 +571,7 @@ void ProtData::SaveReferrer(IInternetProtocolSink* delegate) {
 scoped_refptr<ProtData> ProtData::DataFromProtocol(
     IInternetProtocol* protocol) {
   scoped_refptr<ProtData> instance;
-  AutoLock lock(datamap_lock_);
+  base::AutoLock lock(datamap_lock_);
   ProtocolDataMap::iterator it = datamap_.find(protocol);
   if (datamap_.end() != it)
     instance = it->second;
@@ -576,7 +581,7 @@ scoped_refptr<ProtData> ProtData::DataFromProtocol(
 void ProtData::Invalidate() {
   if (protocol_) {
     // Remove from map.
-    AutoLock lock(datamap_lock_);
+    base::AutoLock lock(datamap_lock_);
     DCHECK(datamap_.end() != datamap_.find(protocol_));
     datamap_.erase(protocol_);
     protocol_ = NULL;
@@ -810,6 +815,9 @@ STDMETHODIMP Hook_LockRequest(InternetProtocol_LockRequest_Fn orig_req,
     return S_OK;
   }
 
+  // We are just pass through at this point, avoid false positive crash
+  // reports.
+  ExceptionBarrierReportOnlyModule barrier;
   return orig_req(protocol, options);
 }
 
@@ -823,6 +831,9 @@ STDMETHODIMP Hook_UnlockRequest(InternetProtocol_UnlockRequest_Fn orig_req,
     return S_OK;
   }
 
+  // We are just pass through at this point, avoid false positive crash
+  // reports.
+  ExceptionBarrierReportOnlyModule barrier;
   return orig_req(protocol);
 }
 

@@ -5,15 +5,15 @@
 #include "webkit/tools/test_shell/webwidget_host.h"
 
 #include "base/logging.h"
-#include "base/win_util.h"
 #include "gfx/rect.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenu.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/WebKit/chromium/public/win/WebInputEventFactory.h"
-#include "third_party/WebKit/WebKit/chromium/public/win/WebScreenInfoFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/win/WebScreenInfoFactory.h"
+#include "ui/base/win/hwnd_util.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
 using WebKit::WebInputEvent;
@@ -52,7 +52,7 @@ WebWidgetHost* WebWidgetHost::Create(HWND parent_view,
                                kWindowClassName, kWindowClassName, WS_POPUP,
                                0, 0, 0, 0,
                                parent_view, NULL, GetModuleHandle(NULL), NULL);
-  win_util::SetWindowUserData(host->view_, host);
+  ui::SetWindowUserData(host->view_, host);
 
   host->webwidget_ = WebPopupMenu::create(client);
 
@@ -60,7 +60,7 @@ WebWidgetHost* WebWidgetHost::Create(HWND parent_view,
 }
 
 static WebWidgetHost* FromWindow(HWND view) {
-  return reinterpret_cast<WebWidgetHost*>(win_util::GetWindowUserData(view));
+  return reinterpret_cast<WebWidgetHost*>(ui::GetWindowUserData(view));
 }
 
 /*static*/
@@ -200,12 +200,13 @@ WebWidgetHost::WebWidgetHost()
       webwidget_(NULL),
       track_mouse_leave_(false),
       scroll_dx_(0),
-      scroll_dy_(0) {
+      scroll_dy_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
   set_painting(false);
 }
 
 WebWidgetHost::~WebWidgetHost() {
-  win_util::SetWindowUserData(view_, 0);
+  ui::SetWindowUserData(view_, 0);
 
   TrackMouseLeave(false);
 
@@ -241,6 +242,8 @@ void WebWidgetHost::Paint() {
     canvas_.reset(new skia::PlatformCanvas(
         paint_rect_.width(), paint_rect_.height(), true));
   }
+
+  webwidget_->animate();
 
   // This may result in more invalidation
   webwidget_->layout();

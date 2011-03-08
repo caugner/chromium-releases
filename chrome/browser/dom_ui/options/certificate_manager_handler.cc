@@ -1,24 +1,27 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/dom_ui/options/certificate_manager_handler.h"
 
-#include "app/l10n_util.h"
-#include "app/l10n_util_collator.h"
 #include "base/file_util.h"  // for FileAccessProvider
 #include "base/safe_strerror_posix.h"
+#include "base/scoped_vector.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"  // for FileAccessProvider
 #include "chrome/browser/certificate_manager_model.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/gtk/certificate_dialogs.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/ui/crypto_module_password_dialog.h"
+#include "chrome/browser/ui/gtk/certificate_dialogs.h"
 #include "grit/generated_resources.h"
+#include "net/base/crypto_module.h"
 #include "net/base/x509_certificate.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_collator.h"
 
 namespace {
 
@@ -457,9 +460,9 @@ void CertificateManagerHandler::GetCATrust(const ListValue* args) {
 void CertificateManagerHandler::EditCATrust(const ListValue* args) {
   net::X509Certificate* cert = CallbackArgsToCert(args);
   bool fail = !cert;
-  bool trust_ssl;
-  bool trust_email;
-  bool trust_obj_sign;
+  bool trust_ssl = false;
+  bool trust_email = false;
+  bool trust_obj_sign = false;
   fail |= !CallbackArgsToBool(args, 1, &trust_ssl);
   fail |= !CallbackArgsToBool(args, 2, &trust_email);
   fail |= !CallbackArgsToBool(args, 3, &trust_obj_sign);
@@ -527,16 +530,31 @@ void CertificateManagerHandler::ExportPersonalPasswordSelected(
     ImportExportCleanup();
     return;
   }
+
+  // Currently, we don't support exporting more than one at a time.  If we do,
+  // this would need some cleanup to handle unlocking multiple slots.
+  DCHECK_EQ(selected_cert_list_.size(), 1U);
+
+  // TODO(mattm): do something smarter about non-extractable keys
+  browser::UnlockCertSlotIfNecessary(
+      selected_cert_list_[0].get(),
+      browser::kCryptoModulePasswordCertExport,
+      "",  // unused.
+      NewCallback(this,
+                  &CertificateManagerHandler::ExportPersonalSlotsUnlocked));
+}
+
+void CertificateManagerHandler::ExportPersonalSlotsUnlocked() {
   std::string output;
   int num_exported = certificate_manager_model_->cert_db().ExportToPKCS12(
       selected_cert_list_,
       password_,
       &output);
   if (!num_exported) {
+    dom_ui_->CallJavascriptFunction(L"CertificateRestoreOverlay.dismiss");
     ShowError(
         l10n_util::GetStringUTF8(IDS_CERT_MANAGER_PKCS12_EXPORT_ERROR_TITLE),
         l10n_util::GetStringUTF8(IDS_CERT_MANAGER_UNKNOWN_ERROR));
-    dom_ui_->CallJavascriptFunction(L"CertificateRestoreOverlay.dismiss");
     ImportExportCleanup();
     return;
   }
@@ -605,7 +623,23 @@ void CertificateManagerHandler::ImportPersonalFileRead(
                                   UTF8ToUTF16(safe_strerror(read_errno))));
     return;
   }
-  int result = certificate_manager_model_->ImportFromPKCS12(data, password_);
+
+  file_data_ = data;
+
+  // TODO(mattm): allow user to choose a slot to import to.
+  module_ = certificate_manager_model_->cert_db().GetDefaultModule();
+
+  browser::UnlockSlotIfNecessary(
+      module_.get(),
+      browser::kCryptoModulePasswordCertImport,
+      "",  // unused.
+      NewCallback(this,
+                  &CertificateManagerHandler::ImportPersonalSlotUnlocked));
+}
+
+void CertificateManagerHandler::ImportPersonalSlotUnlocked() {
+  int result = certificate_manager_model_->ImportFromPKCS12(
+      module_, file_data_, password_);
   ImportExportCleanup();
   dom_ui_->CallJavascriptFunction(L"CertificateRestoreOverlay.dismiss");
   switch (result) {
@@ -634,8 +668,10 @@ void CertificateManagerHandler::CancelImportExportProcess(
 void CertificateManagerHandler::ImportExportCleanup() {
   file_path_.clear();
   password_.clear();
+  file_data_.clear();
   selected_cert_list_.clear();
   select_file_dialog_ = NULL;
+  module_ = NULL;
 }
 
 void CertificateManagerHandler::ImportServer(const ListValue* args) {
@@ -743,9 +779,9 @@ void CertificateManagerHandler::ImportCAFileRead(int read_errno,
 
 void CertificateManagerHandler::ImportCATrustSelected(const ListValue* args) {
   bool fail = false;
-  bool trust_ssl;
-  bool trust_email;
-  bool trust_obj_sign;
+  bool trust_ssl = false;
+  bool trust_email = false;
+  bool trust_obj_sign = false;
   fail |= !CallbackArgsToBool(args, 0, &trust_ssl);
   fail |= !CallbackArgsToBool(args, 1, &trust_email);
   fail |= !CallbackArgsToBool(args, 2, &trust_obj_sign);
@@ -858,14 +894,14 @@ void CertificateManagerHandler::PopulateTree(const std::string& tab_name,
 
 void CertificateManagerHandler::ShowError(const std::string& title,
                                           const std::string& error) const {
-  std::vector<const Value*> args;
+  ScopedVector<const Value> args;
   args.push_back(Value::CreateStringValue(title));
   args.push_back(Value::CreateStringValue(error));
-  args.push_back(Value::CreateNullValue());  // okTitle
-  args.push_back(Value::CreateStringValue(""));  // cancelTitle
+  args.push_back(Value::CreateStringValue(l10n_util::GetStringUTF8(IDS_OK)));
+  args.push_back(Value::CreateNullValue());  // cancelTitle
   args.push_back(Value::CreateNullValue());  // okCallback
   args.push_back(Value::CreateNullValue());  // cancelCallback
-  dom_ui_->CallJavascriptFunction(L"AlertOverlay.show", args);
+  dom_ui_->CallJavascriptFunction(L"AlertOverlay.show", args.get());
 }
 
 void CertificateManagerHandler::ShowImportErrors(

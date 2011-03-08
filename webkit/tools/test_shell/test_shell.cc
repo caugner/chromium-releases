@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,9 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/debug_on_start.h"
+#include "base/debug/debug_on_start_win.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#if defined(OS_MACOSX)
-#include "base/mac_util.h"
-#endif
 #include "base/md5.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_table.h"
@@ -32,24 +29,25 @@
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputControllerMock.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClientMock.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechInputControllerMock.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/glue/plugins/webplugininfo.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/npapi/webplugininfo.h"
 #include "webkit/tools/test_shell/accessibility_controller.h"
 #include "webkit/tools/test_shell/notification_presenter.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
@@ -84,10 +82,10 @@ const int kSVGTestWindowWidth = 480;
 const int kSVGTestWindowHeight = 360;
 
 // URLRequestTestShellFileJob is used to serve the inspector
-class URLRequestTestShellFileJob : public URLRequestFileJob {
+class URLRequestTestShellFileJob : public net::URLRequestFileJob {
  public:
-  static URLRequestJob* InspectorFactory(URLRequest* request,
-                                         const std::string& scheme) {
+  static net::URLRequestJob* InspectorFactory(net::URLRequest* request,
+                                              const std::string& scheme) {
     FilePath path;
     PathService::Get(base::DIR_EXE, &path);
     path = path.AppendASCII("resources");
@@ -97,8 +95,8 @@ class URLRequestTestShellFileJob : public URLRequestFileJob {
   }
 
  private:
-  URLRequestTestShellFileJob(URLRequest* request, const FilePath& path)
-      : URLRequestFileJob(request, path) {
+  URLRequestTestShellFileJob(net::URLRequest* request, const FilePath& path)
+      : net::URLRequestFileJob(request, path) {
   }
   virtual ~URLRequestTestShellFileJob() { }
 
@@ -149,7 +147,7 @@ TestShell::TestShell()
     navigation_controller_.reset(new TestNavigationController(this));
     notification_presenter_.reset(new TestNotificationPresenter(this));
 
-    URLRequestFilter* filter = URLRequestFilter::GetInstance();
+    net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
     filter->AddHostnameHandler("test-shell-resource", "inspector",
                                &URLRequestTestShellFileJob::InspectorFactory);
     url_util::AddStandardScheme("test-shell-resource");
@@ -260,26 +258,26 @@ void TestShell::Dump(TestShell* shell) {
       if (should_dump_as_text) {
         bool recursive = shell->layout_test_controller_->
             ShouldDumpChildFramesAsText();
-        std::string data_utf8 = WideToUTF8(
+        std::string data_utf8 = UTF16ToUTF8(
             webkit_glue::DumpFramesAsText(frame, recursive));
         if (fwrite(data_utf8.c_str(), 1, data_utf8.size(), stdout) !=
             data_utf8.size()) {
           LOG(FATAL) << "Short write to stdout, disk full?";
         }
       } else {
-        printf("%s", WideToUTF8(
+        printf("%s", UTF16ToUTF8(
             webkit_glue::DumpRenderer(frame)).c_str());
 
         bool recursive = shell->layout_test_controller_->
             ShouldDumpChildFrameScrollPositions();
-        printf("%s", WideToUTF8(
+        printf("%s", UTF16ToUTF8(
             webkit_glue::DumpFrameScrollPosition(frame, recursive)).c_str());
       }
 
       if (shell->layout_test_controller_->ShouldDumpBackForwardList()) {
-        std::wstring bfDump;
+        string16 bfDump;
         DumpAllBackForwardLists(&bfDump);
-        printf("%s", WideToUTF8(bfDump).c_str());
+        printf("%s", UTF16ToUTF8(bfDump).c_str());
       }
     }
 
@@ -419,10 +417,12 @@ void TestShell::InitLogging(bool suppress_error_dialogs,
     FilePath log_filename;
     PathService::Get(base::DIR_EXE, &log_filename);
     log_filename = log_filename.AppendASCII("test_shell.log");
-    logging::InitLogging(log_filename.value().c_str(),
-                         destination,
-                         logging::LOCK_LOG_FILE,
-                         logging::DELETE_OLD_LOG_FILE);
+    logging::InitLogging(
+        log_filename.value().c_str(),
+        destination,
+        logging::LOCK_LOG_FILE,
+        logging::DELETE_OLD_LOG_FILE,
+        logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
     // we want process and thread IDs because we may have multiple processes
     logging::SetLogItems(true, true, false, true);
@@ -465,13 +465,13 @@ void TestShell::ResetWebPreferences() {
         *web_prefs_ = WebPreferences();
 
 #if defined(OS_MACOSX)
-        web_prefs_->serif_font_family = L"Times";
-        web_prefs_->cursive_font_family = L"Apple Chancery";
-        web_prefs_->fantasy_font_family = L"Papyrus";
+        web_prefs_->serif_font_family = ASCIIToUTF16("Times");
+        web_prefs_->cursive_font_family = ASCIIToUTF16("Apple Chancery");
+        web_prefs_->fantasy_font_family = ASCIIToUTF16("Papyrus");
 #else
         // NOTE: case matters here, this must be 'times new roman', else
         // some layout tests fail.
-        web_prefs_->serif_font_family = L"times new roman";
+        web_prefs_->serif_font_family = ASCIIToUTF16("times new roman");
 
         // These two fonts are picked from the intersection of
         // Win XP font list and Vista font list :
@@ -483,12 +483,12 @@ void TestShell::ResetWebPreferences() {
         // They (especially Impact for fantasy) are not typical cursive
         // and fantasy fonts, but it should not matter for layout tests
         // as long as they're available.
-        web_prefs_->cursive_font_family = L"Comic Sans MS";
-        web_prefs_->fantasy_font_family = L"Impact";
+        web_prefs_->cursive_font_family = ASCIIToUTF16("Comic Sans MS");
+        web_prefs_->fantasy_font_family = ASCIIToUTF16("Impact");
 #endif
         web_prefs_->standard_font_family = web_prefs_->serif_font_family;
-        web_prefs_->fixed_font_family = L"Courier";
-        web_prefs_->sans_serif_font_family = L"Helvetica";
+        web_prefs_->fixed_font_family = ASCIIToUTF16("Courier");
+        web_prefs_->sans_serif_font_family = ASCIIToUTF16("Helvetica");
 
         web_prefs_->default_encoding = "ISO-8859-1";
         web_prefs_->default_font_size = 16;
@@ -555,15 +555,15 @@ void TestShell::BindJSObjectsToWindow(WebFrame* frame) {
   // Only bind the test classes if we're running tests.
   if (layout_test_mode_) {
     accessibility_controller_->BindToJavascript(
-        frame, L"accessibilityController");
-    layout_test_controller_->BindToJavascript(frame, L"layoutTestController");
-    event_sending_controller_->BindToJavascript(frame, L"eventSender");
-    plain_text_controller_->BindToJavascript(frame, L"plainText");
-    text_input_controller_->BindToJavascript(frame, L"textInputController");
+        frame, "accessibilityController");
+    layout_test_controller_->BindToJavascript(frame, "layoutTestController");
+    event_sending_controller_->BindToJavascript(frame, "eventSender");
+    plain_text_controller_->BindToJavascript(frame, "plainText");
+    text_input_controller_->BindToJavascript(frame, "textInputController");
   }
 }
 
-void TestShell::DumpBackForwardEntry(int index, std::wstring* result) {
+void TestShell::DumpBackForwardEntry(int index, string16* result) {
   int current_index = navigation_controller_->GetLastCommittedEntryIndex();
 
   std::string content_state =
@@ -577,13 +577,15 @@ void TestShell::DumpBackForwardEntry(int index, std::wstring* result) {
       webkit_glue::DumpHistoryState(content_state, 8, index == current_index));
 }
 
-void TestShell::DumpBackForwardList(std::wstring* result) {
-  result->append(L"\n============== Back Forward List ==============\n");
+void TestShell::DumpBackForwardList(string16* result) {
+  result->append(ASCIIToUTF16(
+                     "\n============== Back Forward List ==============\n"));
 
   for (int i = 0; i < navigation_controller_->GetEntryCount(); ++i)
     DumpBackForwardEntry(i, result);
 
-  result->append(L"===============================================\n");
+  result->append(ASCIIToUTF16(
+                     "===============================================\n"));
 }
 
 void TestShell::CallJSGC() {
@@ -647,6 +649,8 @@ void TestShell::ResetTestController() {
   event_sending_controller_->Reset();
   notification_presenter_->Reset();
   delegate_->Reset();
+  if (geolocation_client_mock_.get())
+    geolocation_client_mock_->resetMock();
 }
 
 void TestShell::LoadFile(const FilePath& file) {
@@ -717,7 +721,7 @@ void TestShell::DumpDocumentText() {
       return;
 
   const std::string data =
-      WideToUTF8(webkit_glue::DumpDocumentText(webView()->mainFrame()));
+      UTF16ToUTF8(webkit_glue::DumpDocumentText(webView()->mainFrame()));
   file_util::WriteFile(file_path, data.c_str(), data.length());
 }
 
@@ -727,11 +731,11 @@ void TestShell::DumpRenderTree() {
     return;
 
   const std::string data =
-      WideToUTF8(webkit_glue::DumpRenderer(webView()->mainFrame()));
+      UTF16ToUTF8(webkit_glue::DumpRenderer(webView()->mainFrame()));
   file_util::WriteFile(file_path, data.c_str(), data.length());
 }
 
-std::wstring TestShell::GetDocumentText() {
+string16 TestShell::GetDocumentText() {
   return webkit_glue::DumpDocumentText(webView()->mainFrame());
 }
 
@@ -784,6 +788,14 @@ TestShell::CreateSpeechInputControllerMock(
 WebKit::WebSpeechInputControllerMock*
 TestShell::speech_input_controller_mock() {
   return speech_input_controller_mock_.get();
+}
+
+WebKit::WebGeolocationClientMock* TestShell::geolocation_client_mock() {
+  if (!geolocation_client_mock_.get()) {
+    geolocation_client_mock_.reset(
+        WebKit::WebGeolocationClientMock::create());
+  }
+  return geolocation_client_mock_.get();
 }
 
 //-----------------------------------------------------------------------------
@@ -863,6 +875,11 @@ bool IsSingleProcess() {
   return true;
 }
 
+bool LaunchSelLdr(const char* alleged_url, int socket_count, void* imc_handles,
+                  void* nacl_process_handle, int* nacl_process_id) {
+  return false;
+}
+
 #if defined(OS_LINUX)
 int MatchFontWithFallback(const std::string& face, bool bold,
                           bool italic, int charset) {
@@ -875,20 +892,21 @@ bool GetFontTable(int fd, uint32_t table, uint8_t* output,
 }
 #endif
 
-void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
+void GetPlugins(bool refresh,
+                std::vector<webkit::npapi::WebPluginInfo>* plugins) {
+  webkit::npapi::PluginList::Singleton()->GetPlugins(refresh, plugins);
   // Don't load the forked TestNetscapePlugIn in the chromium code, use
   // the copy in webkit.org's repository instead.
   const FilePath::StringType kPluginBlackList[] = {
     FILE_PATH_LITERAL("npapi_layout_test_plugin.dll"),
-    FILE_PATH_LITERAL("TestNetscapePlugIn.plugin"),
+    FILE_PATH_LITERAL("WebKitTestNetscapePlugIn.plugin"),
     FILE_PATH_LITERAL("libnpapi_layout_test_plugin.so"),
   };
   for (int i = plugins->size() - 1; i >= 0; --i) {
-    WebPluginInfo plugin_info = plugins->at(i);
+    webkit::npapi::WebPluginInfo plugin_info = plugins->at(i);
     for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
       if (plugin_info.path.BaseName() == FilePath(kPluginBlackList[j])) {
-        NPAPI::PluginList::Singleton()->DisablePlugin(plugin_info.path);
+        webkit::npapi::PluginList::Singleton()->DisablePlugin(plugin_info.path);
         plugins->erase(plugins->begin() + i);
       }
     }

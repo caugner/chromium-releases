@@ -35,12 +35,12 @@
 #include "native_client/src/shared/imc/nacl_imc.h"
 #include "native_client/src/trusted/plugin/nacl_entry_points.h"
 #include "skia/ext/platform_canvas.h"
-#include "webkit/glue/plugins/plugin_instance.h"
-#include "webkit/glue/plugins/plugin_lib.h"
+#include "webkit/plugins/npapi/plugin_instance.h"
+#include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_MACOSX)
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #elif defined(OS_WIN)
 #include "app/win/iat_patch_function.h"
 #endif
@@ -51,6 +51,7 @@
 
 namespace {
 
+// TODO(abarth): Remove this function in favor of webkit_glue::LaunchSelLdr.
 #if !defined(DISABLE_NACL)
 bool LaunchNaClProcessMultiFD(const char* alleged_url,
                               int socket_count,
@@ -181,7 +182,7 @@ RenderProcessImpl::RenderProcessImpl()
 #endif
 
 #if defined(OS_MACOSX)
-  FilePath bundle_path = mac_util::MainAppBundlePath();
+  FilePath bundle_path = base::mac::MainAppBundlePath();
 
   initialized_media_library_ =
      media::InitializeMediaLibrary(bundle_path.Append("Libraries"));

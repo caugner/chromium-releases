@@ -8,13 +8,12 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "base/win_util.h"
 #include "ceee/common/window_utils.h"
 #include "ceee/common/windows_constants.h"
 #include "ceee/ie/common/ceee_module_util.h"
 
 WindowMessageSource::MessageSourceMap WindowMessageSource::message_source_map_;
-Lock WindowMessageSource::lock_;
+base::Lock WindowMessageSource::lock_;
 
 WindowMessageSource::WindowMessageSource()
     : create_thread_id_(::GetCurrentThreadId()),
@@ -197,7 +196,7 @@ bool WindowMessageSource::AddEntryToMap(DWORD thread_id,
                                         WindowMessageSource* source) {
   DCHECK(source != NULL);
 
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   MessageSourceMap::const_iterator iter = message_source_map_.find(thread_id);
   if (iter != message_source_map_.end())
     return false;
@@ -209,13 +208,13 @@ bool WindowMessageSource::AddEntryToMap(DWORD thread_id,
 
 // static
 WindowMessageSource* WindowMessageSource::GetEntryFromMap(DWORD thread_id) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   MessageSourceMap::const_iterator iter = message_source_map_.find(thread_id);
   return iter == message_source_map_.end() ? NULL : iter->second;
 }
 
 // static
 void WindowMessageSource::RemoveEntryFromMap(DWORD thread_id) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   message_source_map_.erase(thread_id);
 }

@@ -1,12 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <cmath>
-
 #include "chrome/renderer/pepper_plugin_delegate_impl.h"
 
-#include "app/l10n_util.h"
+#include <cmath>
+
 #include "app/surface/transport_dib.h"
 #include "base/callback.h"
 #include "base/file_path.h"
@@ -18,12 +17,15 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/common/child_thread.h"
 #include "chrome/common/file_system/file_system_dispatcher.h"
+#include "chrome/common/pepper_file_messages.h"
+#include "chrome/common/pepper_plugin_registry.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/renderer/audio_message_filter.h"
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "chrome/renderer/ggl/ggl.h"
 #include "chrome/renderer/gpu_channel_host.h"
+#include "chrome/renderer/pepper_platform_context_3d_impl.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/webgraphicscontext3d_command_buffer_impl.h"
@@ -32,19 +34,27 @@
 #include "grit/locale_settings.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ppapi/c/dev/pp_video_dev.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileChooserCompletion.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileChooserParams.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPluginContainer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/proxy/host_dispatcher.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileChooserCompletion.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileChooserParams.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
-#include "webkit/glue/plugins/pepper_file_io.h"
-#include "webkit/glue/plugins/pepper_plugin_instance.h"
-#include "webkit/glue/plugins/pepper_plugin_module.h"
-#include "webkit/glue/plugins/webplugin.h"
+#include "webkit/plugins/npapi/webplugin.h"
+#include "webkit/plugins/ppapi/ppb_file_io_impl.h"
+#include "webkit/plugins/ppapi/plugin_module.h"
+#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
+#include "webkit/plugins/ppapi/ppb_flash_impl.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_thread.h"
+#endif
+
+#if defined(OS_POSIX)
+#include "ipc/ipc_channel_posix.h"
 #endif
 
 using WebKit::WebView;
@@ -54,14 +64,27 @@ namespace {
 const int32 kDefaultCommandBufferSize = 1024 * 1024;
 
 // Implements the Image2D using a TransportDIB.
-class PlatformImage2DImpl : public pepper::PluginDelegate::PlatformImage2D {
+class PlatformImage2DImpl
+    : public webkit::ppapi::PluginDelegate::PlatformImage2D {
  public:
   // This constructor will take ownership of the dib pointer.
+  // On Mac, we assume that the dib is cached by the browser, so on destruction
+  // we'll tell the browser to free it.
   PlatformImage2DImpl(int width, int height, TransportDIB* dib)
       : width_(width),
         height_(height),
         dib_(dib) {
   }
+
+#if defined(OS_MACOSX)
+  // On Mac, we have to tell the browser to free the transport DIB.
+  virtual ~PlatformImage2DImpl() {
+    if (dib_.get()) {
+      RenderThread::current()->Send(
+          new ViewHostMsg_FreeTransportDIB(dib_->id()));
+    }
+  }
+#endif
 
   virtual skia::PlatformCanvas* Map() {
     return dib_->GetPlatformCanvas(width_, height_);
@@ -90,39 +113,9 @@ class PlatformImage2DImpl : public pepper::PluginDelegate::PlatformImage2D {
   DISALLOW_COPY_AND_ASSIGN(PlatformImage2DImpl);
 };
 
-#ifdef ENABLE_GPU
-
-class PlatformContext3DImpl : public pepper::PluginDelegate::PlatformContext3D {
- public:
-  explicit PlatformContext3DImpl(WebKit::WebView* web_view)
-      : web_view_(web_view),
-        context_(NULL) {
-  }
-
-  virtual ~PlatformContext3DImpl() {
-    if (context_) {
-      ggl::DestroyContext(context_);
-      context_ = NULL;
-    }
-  }
-
-  virtual bool Init();
-  virtual bool SwapBuffers();
-  virtual unsigned GetError();
-  virtual void SetSwapBuffersCallback(Callback0::Type* callback);
-  void ResizeBackingTexture(const gfx::Size& size);
-  virtual unsigned GetBackingTextureId();
-  virtual gpu::gles2::GLES2Implementation* GetGLES2Implementation();
-
- private:
-  WebKit::WebView* web_view_;
-  ggl::Context* context_;
-};
-
-#endif  // ENABLE_GPU
 
 class PlatformAudioImpl
-    : public pepper::PluginDelegate::PlatformAudio,
+    : public webkit::ppapi::PluginDelegate::PlatformAudio,
       public AudioMessageFilter::Delegate,
       public base::RefCountedThreadSafe<PlatformAudioImpl> {
  public:
@@ -141,7 +134,7 @@ class PlatformAudioImpl
   // Initialize this audio context. StreamCreated() will be called when the
   // stream is created.
   bool Initialize(uint32_t sample_rate, uint32_t sample_count,
-       pepper::PluginDelegate::PlatformAudio::Client* client);
+       webkit::ppapi::PluginDelegate::PlatformAudio::Client* client);
 
   virtual bool StartPlayback() {
     return filter_ && filter_->Send(
@@ -173,7 +166,7 @@ class PlatformAudioImpl
   virtual void OnVolume(double volume) { }
 
   // The client to notify when the stream is created.
-  pepper::PluginDelegate::PlatformAudio::Client* client_;
+  webkit::ppapi::PluginDelegate::PlatformAudio::Client* client_;
   // MessageFilter used to send/receive IPC.
   scoped_refptr<AudioMessageFilter> filter_;
   // Our ID on the MessageFilter.
@@ -184,92 +177,9 @@ class PlatformAudioImpl
   DISALLOW_COPY_AND_ASSIGN(PlatformAudioImpl);
 };
 
-#ifdef ENABLE_GPU
-
-bool PlatformContext3DImpl::Init() {
-  // Ignore initializing more than once.
-  if (context_)
-    return true;
-
-  WebGraphicsContext3DCommandBufferImpl* context =
-      static_cast<WebGraphicsContext3DCommandBufferImpl*>(
-          web_view_->graphicsContext3D());
-  if (!context)
-    return false;
-
-  ggl::Context* parent_context = context->context();
-  if (!parent_context)
-    return false;
-
-  RenderThread* render_thread = RenderThread::current();
-  if (!render_thread)
-    return false;
-
-  GpuChannelHost* host = render_thread->GetGpuChannel();
-  if (!host)
-    return false;
-
-  DCHECK(host->state() == GpuChannelHost::kConnected);
-
-  // TODO(apatrick): Let Pepper plugins configure their back buffer surface.
-  static const int32 attribs[] = {
-    ggl::GGL_ALPHA_SIZE, 8,
-    ggl::GGL_DEPTH_SIZE, 24,
-    ggl::GGL_STENCIL_SIZE, 8,
-    ggl::GGL_SAMPLES, 0,
-    ggl::GGL_SAMPLE_BUFFERS, 0,
-    ggl::GGL_NONE,
-  };
-
-  // TODO(apatrick): Decide which extensions to expose to Pepper plugins.
-  // Currently they get only core GLES2.
-  context_ = ggl::CreateOffscreenContext(host,
-                                         parent_context,
-                                         gfx::Size(1, 1),
-                                         "",
-                                         attribs);
-  if (!context_)
-    return false;
-
-  return true;
-}
-
-bool PlatformContext3DImpl::SwapBuffers() {
-  DCHECK(context_);
-  return ggl::SwapBuffers(context_);
-}
-
-unsigned PlatformContext3DImpl::GetError() {
-  DCHECK(context_);
-  return ggl::GetError(context_);
-}
-
-void PlatformContext3DImpl::ResizeBackingTexture(const gfx::Size& size) {
-  DCHECK(context_);
-  ggl::ResizeOffscreenContext(context_, size);
-}
-
-void PlatformContext3DImpl::SetSwapBuffersCallback(Callback0::Type* callback) {
-  DCHECK(context_);
-  ggl::SetSwapBuffersCallback(context_, callback);
-}
-
-unsigned PlatformContext3DImpl::GetBackingTextureId() {
-  DCHECK(context_);
-  return ggl::GetParentTextureId(context_);
-}
-
-gpu::gles2::GLES2Implementation*
-    PlatformContext3DImpl::GetGLES2Implementation() {
-  DCHECK(context_);
-  return ggl::GetImplementation(context_);
-}
-
-#endif  // ENABLE_GPU
-
 bool PlatformAudioImpl::Initialize(
     uint32_t sample_rate, uint32_t sample_count,
-    pepper::PluginDelegate::PlatformAudio::Client* client) {
+    webkit::ppapi::PluginDelegate::PlatformAudio::Client* client) {
 
   DCHECK(client);
   // Make sure we don't call init more than once.
@@ -329,7 +239,7 @@ void PlatformAudioImpl::ShutDown() {
 
 // Implements the VideoDecoder.
 class PlatformVideoDecoderImpl
-    : public pepper::PluginDelegate::PlatformVideoDecoder {
+    : public webkit::ppapi::PluginDelegate::PlatformVideoDecoder {
  public:
   PlatformVideoDecoderImpl()
       : input_buffer_size_(0),
@@ -413,6 +323,55 @@ class PlatformVideoDecoderImpl
   DISALLOW_COPY_AND_ASSIGN(PlatformVideoDecoderImpl);
 };
 
+class DispatcherWrapper
+    : public webkit::ppapi::PluginDelegate::OutOfProcessProxy {
+ public:
+  DispatcherWrapper() {}
+  virtual ~DispatcherWrapper() {}
+
+  bool Init(base::ProcessHandle plugin_process_handle,
+            IPC::ChannelHandle channel_handle,
+            PP_Module pp_module,
+            pp::proxy::Dispatcher::GetInterfaceFunc local_get_interface);
+
+  // OutOfProcessProxy implementation.
+  virtual const void* GetProxiedInterface(const char* name) {
+    return dispatcher_->GetProxiedInterface(name);
+  }
+  virtual void AddInstance(PP_Instance instance) {
+    pp::proxy::HostDispatcher::SetForInstance(instance, dispatcher_.get());
+  }
+  virtual void RemoveInstance(PP_Instance instance) {
+    pp::proxy::HostDispatcher::RemoveForInstance(instance);
+  }
+
+ private:
+  scoped_ptr<pp::proxy::HostDispatcher> dispatcher_;
+};
+
+bool DispatcherWrapper::Init(
+    base::ProcessHandle plugin_process_handle,
+    IPC::ChannelHandle channel_handle,
+    PP_Module pp_module,
+    pp::proxy::Dispatcher::GetInterfaceFunc local_get_interface) {
+  dispatcher_.reset(new pp::proxy::HostDispatcher(
+      plugin_process_handle, pp_module, local_get_interface));
+
+  if (!dispatcher_->InitWithChannel(
+          ChildProcess::current()->io_message_loop(), channel_handle,
+          true, ChildProcess::current()->GetShutDownEvent())) {
+    dispatcher_.reset();
+    return false;
+  }
+
+  if (!dispatcher_->InitializeModule()) {
+    // TODO(brettw) does the module get unloaded in this case?
+    dispatcher_.reset();
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 PepperPluginDelegateImpl::PepperPluginDelegateImpl(RenderView* render_view)
@@ -423,25 +382,49 @@ PepperPluginDelegateImpl::PepperPluginDelegateImpl(RenderView* render_view)
 PepperPluginDelegateImpl::~PepperPluginDelegateImpl() {
 }
 
-scoped_refptr<pepper::PluginModule>
-PepperPluginDelegateImpl::CreateOutOfProcessPepperPlugin(
-    const FilePath& path) {
+scoped_refptr<webkit::ppapi::PluginModule>
+PepperPluginDelegateImpl::CreatePepperPlugin(const FilePath& path) {
+  // See if a module has already been loaded for this plugin.
+  scoped_refptr<webkit::ppapi::PluginModule> module =
+      PepperPluginRegistry::GetInstance()->GetModule(path);
+  if (module)
+    return module;
+
+  // In-process plugins will have always been created up-front to avoid the
+  // sandbox restrictions.
+  if (!PepperPluginRegistry::GetInstance()->RunOutOfProcessForPlugin(path))
+    return module;  // Return the NULL module.
+
+  // Out of process: have the browser start the plugin process for us.
+  base::ProcessHandle plugin_process_handle = base::kNullProcessHandle;
   IPC::ChannelHandle channel_handle;
   render_view_->Send(new ViewHostMsg_OpenChannelToPepperPlugin(
-      path, &channel_handle));
-  if (channel_handle.name.empty())
-    return scoped_refptr<pepper::PluginModule>();  // Couldn't be initialized.
-  return pepper::PluginModule::CreateOutOfProcessModule(
-      ChildProcess::current()->io_message_loop(),
-      channel_handle,
-      ChildProcess::current()->GetShutDownEvent());
+      path, &plugin_process_handle, &channel_handle));
+  if (channel_handle.name.empty()) {
+    // Couldn't be initialized.
+    return scoped_refptr<webkit::ppapi::PluginModule>();
+  }
+
+  // Create a new HostDispatcher for the proxying, and hook it to a new
+  // PluginModule. Note that AddLiveModule must be called before any early
+  // returns since the module's destructor will remove itself.
+  module = new webkit::ppapi::PluginModule(PepperPluginRegistry::GetInstance());
+  PepperPluginRegistry::GetInstance()->AddLiveModule(path, module);
+  scoped_ptr<DispatcherWrapper> dispatcher(new DispatcherWrapper);
+  if (!dispatcher->Init(
+          plugin_process_handle, channel_handle,
+          module->pp_module(),
+          webkit::ppapi::PluginModule::GetLocalGetInterfaceFunc()))
+    return scoped_refptr<webkit::ppapi::PluginModule>();
+  module->InitAsProxied(dispatcher.release());
+  return module;
 }
 
 void PepperPluginDelegateImpl::ViewInitiatedPaint() {
   // Notify all of our instances that we started painting. This is used for
   // internal bookkeeping only, so we know that the set can not change under
   // us.
-  for (std::set<pepper::PluginInstance*>::iterator i =
+  for (std::set<webkit::ppapi::PluginInstance*>::iterator i =
            active_instances_.begin();
        i != active_instances_.end(); ++i)
     (*i)->ViewInitiatedPaint();
@@ -452,8 +435,8 @@ void PepperPluginDelegateImpl::ViewFlushedPaint() {
   // we it may ask to close itself as a result. This will, in turn, modify our
   // set, possibly invalidating the iterator. So we iterate on a copy that
   // won't change out from under us.
-  std::set<pepper::PluginInstance*> plugins = active_instances_;
-  for (std::set<pepper::PluginInstance*>::iterator i = plugins.begin();
+  std::set<webkit::ppapi::PluginInstance*> plugins = active_instances_;
+  for (std::set<webkit::ppapi::PluginInstance*>::iterator i = plugins.begin();
        i != plugins.end(); ++i) {
     // The copy above makes sure our iterator is never invalid if some plugins
     // are destroyed. But some plugin may decide to close all of its views in
@@ -476,24 +459,25 @@ void PepperPluginDelegateImpl::ViewFlushedPaint() {
   }
 }
 
-bool PepperPluginDelegateImpl::GetBitmapForOptimizedPluginPaint(
+webkit::ppapi::PluginInstance*
+PepperPluginDelegateImpl::GetBitmapForOptimizedPluginPaint(
     const gfx::Rect& paint_bounds,
     TransportDIB** dib,
     gfx::Rect* location,
     gfx::Rect* clip) {
-  for (std::set<pepper::PluginInstance*>::iterator i =
+  for (std::set<webkit::ppapi::PluginInstance*>::iterator i =
            active_instances_.begin();
        i != active_instances_.end(); ++i) {
-    pepper::PluginInstance* instance = *i;
+    webkit::ppapi::PluginInstance* instance = *i;
     if (instance->GetBitmapForOptimizedPluginPaint(
             paint_bounds, dib, location, clip))
-      return true;
+      return *i;
   }
-  return false;
+  return NULL;
 }
 
 void PepperPluginDelegateImpl::InstanceCreated(
-    pepper::PluginInstance* instance) {
+    webkit::ppapi::PluginInstance* instance) {
   active_instances_.insert(instance);
 
   // Set the initial focus.
@@ -501,11 +485,11 @@ void PepperPluginDelegateImpl::InstanceCreated(
 }
 
 void PepperPluginDelegateImpl::InstanceDeleted(
-    pepper::PluginInstance* instance) {
+    webkit::ppapi::PluginInstance* instance) {
   active_instances_.erase(instance);
 }
 
-pepper::PluginDelegate::PlatformImage2D*
+webkit::ppapi::PluginDelegate::PlatformImage2D*
 PepperPluginDelegateImpl::CreateImage2D(int width, int height) {
   uint32 buffer_size = width * height * 4;
 
@@ -515,15 +499,12 @@ PepperPluginDelegateImpl::CreateImage2D(int width, int height) {
   // work in the sandbox.  Do this by sending a message to the browser
   // requesting a TransportDIB (see also
   // chrome/renderer/webplugin_delegate_proxy.cc, method
-  // WebPluginDelegateProxy::CreateBitmap() for similar code).  Note that the
-  // TransportDIB is _not_ cached in the browser; this is because this memory
-  // gets flushed by the renderer into another TransportDIB that represents the
-  // page, which is then in turn flushed to the screen by the browser process.
-  // When |transport_dib_| goes out of scope in the dtor, all of its shared
-  // memory gets reclaimed.
+  // WebPluginDelegateProxy::CreateBitmap() for similar code). The TransportDIB
+  // is cached in the browser, and is freed (in typical cases) by the
+  // PlatformImage2DImpl's destructor.
   TransportDIB::Handle dib_handle;
   IPC::Message* msg = new ViewHostMsg_AllocTransportDIB(buffer_size,
-                                                        false,
+                                                        true,
                                                         &dib_handle);
   if (!RenderThread::current()->Send(msg))
     return NULL;
@@ -541,16 +522,31 @@ PepperPluginDelegateImpl::CreateImage2D(int width, int height) {
   return new PlatformImage2DImpl(width, height, dib);
 }
 
-pepper::PluginDelegate::PlatformContext3D*
+webkit::ppapi::PluginDelegate::PlatformContext3D*
     PepperPluginDelegateImpl::CreateContext3D() {
 #ifdef ENABLE_GPU
-  return new PlatformContext3DImpl(render_view_->webview());
+  // If accelerated compositing of plugins is disabled, fail to create a 3D
+  // context, because it won't be visible. This allows graceful fallback in the
+  // modules.
+  if (!render_view_->webkit_preferences().accelerated_plugins_enabled)
+    return NULL;
+  WebGraphicsContext3DCommandBufferImpl* context =
+      static_cast<WebGraphicsContext3DCommandBufferImpl*>(
+          render_view_->webview()->graphicsContext3D());
+  if (!context)
+    return NULL;
+
+  ggl::Context* parent_context = context->context();
+  if (!parent_context)
+    return NULL;
+
+  return new PlatformContext3DImpl(parent_context);
 #else
   return NULL;
 #endif
 }
 
-pepper::PluginDelegate::PlatformVideoDecoder*
+webkit::ppapi::PluginDelegate::PlatformVideoDecoder*
 PepperPluginDelegateImpl::CreateVideoDecoder(
     const PP_VideoDecoderConfig_Dev& decoder_config) {
   scoped_ptr<PlatformVideoDecoderImpl> decoder(new PlatformVideoDecoderImpl());
@@ -573,9 +569,10 @@ void PepperPluginDelegateImpl::SelectedFindResultChanged(int identifier,
       identifier, index + 1, WebKit::WebRect());
 }
 
-pepper::PluginDelegate::PlatformAudio* PepperPluginDelegateImpl::CreateAudio(
+webkit::ppapi::PluginDelegate::PlatformAudio*
+PepperPluginDelegateImpl::CreateAudio(
     uint32_t sample_rate, uint32_t sample_count,
-    pepper::PluginDelegate::PlatformAudio::Client* client) {
+    webkit::ppapi::PluginDelegate::PlatformAudio::Client* client) {
   scoped_refptr<PlatformAudioImpl> audio(
       new PlatformAudioImpl(render_view_->audio_message_filter()));
   if (audio->Initialize(sample_rate, sample_count, client)) {
@@ -617,7 +614,7 @@ void PepperPluginDelegateImpl::OnAsyncFileOpened(
 }
 
 void PepperPluginDelegateImpl::OnSetFocus(bool has_focus) {
-  for (std::set<pepper::PluginInstance*>::iterator i =
+  for (std::set<webkit::ppapi::PluginInstance*>::iterator i =
          active_instances_.begin();
        i != active_instances_.end(); ++i)
     (*i)->SetContentAreaFocus(has_focus);
@@ -712,7 +709,7 @@ base::PlatformFileError PepperPluginDelegateImpl::OpenModuleLocalFile(
   }
   IPC::PlatformFileForTransit transit_file;
   base::PlatformFileError error;
-  IPC::Message* msg = new ViewHostMsg_PepperOpenFile(
+  IPC::Message* msg = new PepperFileMsg_OpenFile(
       full_path, flags, &error, &transit_file);
   if (!render_view_->Send(msg)) {
     *file = base::kInvalidPlatformFileValue;
@@ -732,7 +729,7 @@ base::PlatformFileError PepperPluginDelegateImpl::RenameModuleLocalFile(
     return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
   }
   base::PlatformFileError error;
-  IPC::Message* msg = new ViewHostMsg_PepperRenameFile(
+  IPC::Message* msg = new PepperFileMsg_RenameFile(
       full_path_from, full_path_to, &error);
   if (!render_view_->Send(msg)) {
     return base::PLATFORM_FILE_ERROR_FAILED;
@@ -749,7 +746,7 @@ base::PlatformFileError PepperPluginDelegateImpl::DeleteModuleLocalFileOrDir(
     return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
   }
   base::PlatformFileError error;
-  IPC::Message* msg = new ViewHostMsg_PepperDeleteFileOrDir(
+  IPC::Message* msg = new PepperFileMsg_DeleteFileOrDir(
       full_path, recursive, &error);
   if (!render_view_->Send(msg)) {
     return base::PLATFORM_FILE_ERROR_FAILED;
@@ -765,7 +762,7 @@ base::PlatformFileError PepperPluginDelegateImpl::CreateModuleLocalDir(
     return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
   }
   base::PlatformFileError error;
-  IPC::Message* msg = new ViewHostMsg_PepperCreateDir(full_path, &error);
+  IPC::Message* msg = new PepperFileMsg_CreateDir(full_path, &error);
   if (!render_view_->Send(msg)) {
     return base::PLATFORM_FILE_ERROR_FAILED;
   }
@@ -781,23 +778,24 @@ base::PlatformFileError PepperPluginDelegateImpl::QueryModuleLocalFile(
     return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
   }
   base::PlatformFileError error;
-  IPC::Message* msg = new ViewHostMsg_PepperQueryFile(full_path, info, &error);
+  IPC::Message* msg = new PepperFileMsg_QueryFile(full_path, info, &error);
   if (!render_view_->Send(msg)) {
     return base::PLATFORM_FILE_ERROR_FAILED;
   }
   return error;
 }
+
 base::PlatformFileError PepperPluginDelegateImpl::GetModuleLocalDirContents(
       const std::string& module_name,
       const FilePath& path,
-      PepperDirContents* contents) {
+      webkit::ppapi::DirContents* contents) {
   FilePath full_path = GetModuleLocalFilePath(module_name, path);
   if (full_path.empty()) {
     return base::PLATFORM_FILE_ERROR_ACCESS_DENIED;
   }
   base::PlatformFileError error;
   IPC::Message* msg =
-      new ViewHostMsg_PepperGetDirContents(full_path, contents, &error);
+      new PepperFileMsg_GetDirContents(full_path, contents, &error);
   if (!render_view_->Send(msg)) {
     return base::PLATFORM_FILE_ERROR_FAILED;
   }
@@ -809,9 +807,53 @@ PepperPluginDelegateImpl::GetFileThreadMessageLoopProxy() {
   return RenderThread::current()->GetFileThreadMessageLoopProxy();
 }
 
-pepper::FullscreenContainer*
+int32_t PepperPluginDelegateImpl::ConnectTcp(
+    webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
+    const char* host,
+    uint16_t port) {
+  int request_id = pending_connect_tcps_.Add(
+      new scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>(connector));
+  IPC::Message* msg =
+      new ViewHostMsg_PepperConnectTcp(render_view_->routing_id(),
+                                       request_id,
+                                       std::string(host),
+                                       port);
+  if (!render_view_->Send(msg))
+    return PP_ERROR_FAILED;
+
+  return PP_ERROR_WOULDBLOCK;
+}
+
+int32_t PepperPluginDelegateImpl::ConnectTcpAddress(
+    webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
+    const struct PP_Flash_NetAddress* addr) {
+  int request_id = pending_connect_tcps_.Add(
+      new scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>(connector));
+  IPC::Message* msg =
+      new ViewHostMsg_PepperConnectTcpAddress(render_view_->routing_id(),
+                                              request_id,
+                                              *addr);
+  if (!render_view_->Send(msg))
+    return PP_ERROR_FAILED;
+
+  return PP_ERROR_WOULDBLOCK;
+}
+
+void PepperPluginDelegateImpl::OnConnectTcpACK(
+    int request_id,
+    base::PlatformFile socket,
+    const PP_Flash_NetAddress& local_addr,
+    const PP_Flash_NetAddress& remote_addr) {
+  scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl> connector =
+      *pending_connect_tcps_.Lookup(request_id);
+  pending_connect_tcps_.Remove(request_id);
+
+  connector->CompleteConnectTcp(socket, local_addr, remote_addr);
+}
+
+webkit::ppapi::FullscreenContainer*
 PepperPluginDelegateImpl::CreateFullscreenContainer(
-    pepper::PluginInstance* instance) {
+    webkit::ppapi::PluginInstance* instance) {
   return render_view_->CreatePepperFullscreenContainer(instance);
 }
 
@@ -848,4 +890,9 @@ void PepperPluginDelegateImpl::DidStopLoading() {
 void PepperPluginDelegateImpl::SetContentRestriction(int restrictions) {
   render_view_->Send(new ViewHostMsg_UpdateContentRestrictions(
       render_view_->routing_id(), restrictions));
+}
+
+void PepperPluginDelegateImpl::HasUnsupportedFeature() {
+  render_view_->Send(new ViewHostMsg_PDFHasUnsupportedFeature(
+      render_view_->routing_id()));
 }

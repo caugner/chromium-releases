@@ -1,31 +1,30 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/process_singleton.h"
 
-#include "app/l10n_util.h"
-#include "app/win_util.h"
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_handle.h"
-#include "base/win_util.h"
+#include "base/utf_string_conversions.h"
+#include "base/win/scoped_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extensions_startup.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/result_codes.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/win/hwnd_util.h"
 
 namespace {
 
@@ -53,9 +52,9 @@ ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
     // access. As documented, it's clearer to NOT request ownership on creation
     // since it isn't guaranteed we will get it. It is better to create it
     // without ownership and explicitly get the ownership afterward.
-    std::wstring mutex_name(L"Local\\ProcessSingletonStartup!");
-    mutex_name += BrowserDistribution::GetDistribution()->GetAppGuid();
-    ScopedHandle only_me(CreateMutex(NULL, FALSE, mutex_name.c_str()));
+    std::wstring mutex_name(L"Local\\ChromeProcessSingletonStartup!");
+    base::win::ScopedHandle only_me(
+        CreateMutex(NULL, FALSE, mutex_name.c_str()));
     DCHECK(only_me.Get() != NULL) << "GetLastError = " << GetLastError();
 
     // This is how we acquire the mutex (as opposed to the initial ownership).
@@ -91,10 +90,10 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
   // Found another window, send our command line to it
   // format is "START\0<<<current directory>>>\0<<<commandline>>>".
   std::wstring to_send(L"START\0", 6);  // want the NULL in the string.
-  std::wstring cur_dir;
+  FilePath cur_dir;
   if (!PathService::Get(base::DIR_CURRENT, &cur_dir))
     return PROCESS_NONE;
-  to_send.append(cur_dir);
+  to_send.append(cur_dir.value());
   to_send.append(L"\0", 1);  // Null separator.
   to_send.append(GetCommandLineW());
   to_send.append(L"\0", 1);  // Null separator.
@@ -145,8 +144,10 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
 
   // If there is a visible browser window, ask the user before killing it.
   if (visible_window) {
-    std::wstring text = l10n_util::GetString(IDS_BROWSER_HUNGBROWSER_MESSAGE);
-    std::wstring caption = l10n_util::GetString(IDS_PRODUCT_NAME);
+    std::wstring text =
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_BROWSER_HUNGBROWSER_MESSAGE));
+    std::wstring caption =
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
     if (!platform_util::SimpleYesNoBox(NULL, caption, text)) {
       // The user denied. Quit silently.
       return PROCESS_NOTIFIED;
@@ -194,7 +195,7 @@ bool ProcessSingleton::Create() {
                          0, 0, 0, 0, 0, HWND_MESSAGE, 0, hinst, 0);
   DCHECK(window_);
 
-  win_util::SetWindowUserData(window_, this);
+  ui::SetWindowUserData(window_, this);
   return true;
 }
 
@@ -285,8 +286,8 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
     // in the process that is running with the target profile, otherwise the
     // uninstall will fail to unload and remove all components.
     if (parsed_command_line.HasSwitch(switches::kUninstallExtension)) {
-      extensions_startup::HandleUninstallExtension(parsed_command_line,
-                                                   profile);
+      ExtensionsStartupUtil ext_startup_util;
+      ext_startup_util.UninstallExtension(parsed_command_line, profile);
       return TRUE;
     }
 

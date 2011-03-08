@@ -8,11 +8,11 @@
 
 #include "base/id_map.h"
 #include "base/nullable_string16.h"
-#include "ipc/ipc_message.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebExceptionCode.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBCallbacks.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBDatabase.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
+#include "ipc/ipc_channel.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebExceptionCode.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
 
 class IndexedDBKey;
 class SerializedScriptValue;
@@ -24,18 +24,16 @@ class WebIDBTransaction;
 }
 
 // Handle the indexed db related communication for this entire renderer.
-class IndexedDBDispatcher {
+class IndexedDBDispatcher : public IPC::Channel::Listener {
  public:
   IndexedDBDispatcher();
   ~IndexedDBDispatcher();
 
-  // Called to possibly handle the incoming IPC message. Returns true if
-  // handled.
+  // IPC::Channel::Listener implementation.
   bool OnMessageReceived(const IPC::Message& msg);
 
   void RequestIDBFactoryOpen(
       const string16& name,
-      const string16& description,
       WebKit::WebIDBCallbacks* callbacks,
       const string16& origin,
       WebKit::WebFrame* web_frame,
@@ -53,7 +51,7 @@ class IndexedDBDispatcher {
       int32 idb_cursor_id,
       WebKit::WebExceptionCode* ec);
 
-  void RequestIDBCursorRemove(
+  void RequestIDBCursorDelete(
       WebKit::WebIDBCallbacks* callbacks_ptr,
       int32 idb_cursor_id,
       WebKit::WebExceptionCode* ec);
@@ -106,7 +104,7 @@ class IndexedDBDispatcher {
                                 const WebKit::WebIDBTransaction& transaction,
                                 WebKit::WebExceptionCode* ec);
 
-  void RequestIDBObjectStoreRemove(
+  void RequestIDBObjectStoreDelete(
       const IndexedDBKey& key,
       WebKit::WebIDBCallbacks* callbacks,
       int32 idb_object_store_id,

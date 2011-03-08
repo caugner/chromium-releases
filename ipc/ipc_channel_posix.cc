@@ -17,13 +17,15 @@
 
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/global_descriptors_posix.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/synchronization/lock.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"
 #include "ipc/file_descriptor_set_posix.h"
@@ -33,15 +35,18 @@
 namespace IPC {
 
 // IPC channels on Windows use named pipes (CreateNamedPipe()) with
-// channel ids as the pipe names.  Channels on POSIX use anonymous
-// Unix domain sockets created via socketpair() as pipes.  These don't
-// quite line up.
+// channel ids as the pipe names.  Channels on POSIX use sockets as
+// pipes  These don't quite line up.
 //
-// When creating a child subprocess, the parent side of the fork
-// arranges it such that the initial control channel ends up on the
+// When creating a child subprocess we use a socket pair and the parent side of
+// the fork arranges it such that the initial control channel ends up on the
 // magic file descriptor kPrimaryIPCChannel in the child.  Future
 // connections (file descriptors) can then be passed via that
 // connection via sendmsg().
+//
+// A POSIX IPC channel can also be set up as a server for a bound UNIX domain
+// socket, and will handle multiple connect and disconnect sequences.  Currently
+// it is limited to one connection at a time.
 
 //------------------------------------------------------------------------------
 namespace {
@@ -75,9 +80,18 @@ namespace {
 
 class PipeMap {
  public:
+  static PipeMap* GetInstance() {
+    return Singleton<PipeMap>::get();
+  }
+
+  ~PipeMap() {
+    // Shouldn't have left over pipes.
+    DCHECK(map_.size() == 0);
+  }
+
   // Lookup a given channel id. Return -1 if not found.
   int Lookup(const std::string& channel_id) {
-    AutoLock locked(lock_);
+    base::AutoLock locked(lock_);
 
     ChannelToFDMap::const_iterator i = map_.find(channel_id);
     if (i == map_.end())
@@ -88,12 +102,12 @@ class PipeMap {
   // Remove the mapping for the given channel id. No error is signaled if the
   // channel_id doesn't exist
   void RemoveAndClose(const std::string& channel_id) {
-    AutoLock locked(lock_);
+    base::AutoLock locked(lock_);
 
     ChannelToFDMap::iterator i = map_.find(channel_id);
     if (i != map_.end()) {
       if (HANDLE_EINTR(close(i->second)) < 0)
-        PLOG(ERROR) << "close";
+        PLOG(ERROR) << "close " << channel_id;
       map_.erase(i);
     }
   }
@@ -101,7 +115,7 @@ class PipeMap {
   // Insert a mapping from @channel_id to @fd. It's a fatal error to insert a
   // mapping if one already exists for the given channel_id
   void Insert(const std::string& channel_id, int fd) {
-    AutoLock locked(lock_);
+    base::AutoLock locked(lock_);
     DCHECK(fd != -1);
 
     ChannelToFDMap::const_iterator i = map_.find(channel_id);
@@ -112,32 +126,22 @@ class PipeMap {
   }
 
  private:
-  Lock lock_;
+  base::Lock lock_;
   typedef std::map<std::string, int> ChannelToFDMap;
   ChannelToFDMap map_;
+
+  friend struct DefaultSingletonTraits<PipeMap>;
 };
 
-// Used to map a channel name to the equivalent FD # in the current process.
-// Returns -1 if the channel is unknown.
-int ChannelNameToFD(const std::string& channel_id) {
-  // See the large block comment above PipeMap for the reasoning here.
-  const int fd = Singleton<PipeMap>()->Lookup(channel_id);
-
-  if (fd != -1) {
-    int dup_fd = dup(fd);
-    if (dup_fd < 0)
-      PLOG(FATAL) << "dup(" << fd << ")";
-    return dup_fd;
-  }
-
-  return fd;
-}
-
 //------------------------------------------------------------------------------
-const size_t kMaxPipeNameLength = sizeof(((sockaddr_un*)0)->sun_path);
+// Verify that kMaxPipeNameLength is a decent size.
+COMPILE_ASSERT(sizeof(((sockaddr_un*)0)->sun_path) >= kMaxPipeNameLength,
+               BAD_SUN_PATH_LENGTH);
 
-// Creates a Fifo with the specified name ready to listen on.
-bool CreateServerFifo(const std::string& pipe_name, int* server_listen_fd) {
+// Creates a unix domain socket bound to the specified name that is listening
+// for connections.
+bool CreateServerUnixDomainSocket(const std::string& pipe_name,
+                                  int* server_listen_fd) {
   DCHECK(server_listen_fd);
   DCHECK_GT(pipe_name.length(), 0u);
   DCHECK_LT(pipe_name.length(), kMaxPipeNameLength);
@@ -154,35 +158,55 @@ bool CreateServerFifo(const std::string& pipe_name, int* server_listen_fd) {
 
   // Make socket non-blocking
   if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1) {
+    PLOG(ERROR) << "fcntl(O_NONBLOCK) " << pipe_name;
     if (HANDLE_EINTR(close(fd)) < 0)
-      PLOG(ERROR) << "close";
+      PLOG(ERROR) << "close " << pipe_name;
     return false;
   }
 
   // Delete any old FS instances.
   unlink(pipe_name.c_str());
 
-  // Create unix_addr structure
+  // Make sure the path we need exists.
+  FilePath path(pipe_name);
+  FilePath dir_path = path.DirName();
+  if (!file_util::CreateDirectory(dir_path)) {
+    return false;
+  }
+
+  // Create unix_addr structure.
   struct sockaddr_un unix_addr;
   memset(&unix_addr, 0, sizeof(unix_addr));
   unix_addr.sun_family = AF_UNIX;
-  snprintf(unix_addr.sun_path, kMaxPipeNameLength, "%s", pipe_name.c_str());
-  size_t unix_addr_len = offsetof(struct sockaddr_un, sun_path) +
-      strlen(unix_addr.sun_path) + 1;
+  int path_len = snprintf(unix_addr.sun_path, IPC::kMaxPipeNameLength,
+                          "%s", pipe_name.c_str());
+  DCHECK_EQ(static_cast<int>(pipe_name.length()), path_len);
+  size_t unix_addr_len = offsetof(struct sockaddr_un,
+                                       sun_path) + path_len + 1;
 
   // Bind the socket.
   if (bind(fd, reinterpret_cast<const sockaddr*>(&unix_addr),
            unix_addr_len) != 0) {
+    PLOG(ERROR) << "bind " << pipe_name;
     if (HANDLE_EINTR(close(fd)) < 0)
-      PLOG(ERROR) << "close";
+      PLOG(ERROR) << "close " << pipe_name;
+    return false;
+  }
+
+  // Adjust the socket permissions.
+  if (chmod(pipe_name.c_str(), 0600)) {
+    PLOG(ERROR) << "fchmod " << pipe_name;
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close " << pipe_name;
     return false;
   }
 
   // Start listening on the socket.
   const int listen_queue_length = 1;
   if (listen(fd, listen_queue_length) != 0) {
+    PLOG(ERROR) << "listen " << pipe_name;
     if (HANDLE_EINTR(close(fd)) < 0)
-      PLOG(ERROR) << "close";
+      PLOG(ERROR) << "close " << pipe_name;
     return false;
   }
 
@@ -190,16 +214,17 @@ bool CreateServerFifo(const std::string& pipe_name, int* server_listen_fd) {
   return true;
 }
 
-// Accept a connection on a fifo.
-bool ServerAcceptFifoConnection(int server_listen_fd, int* server_socket) {
+// Accept a connection on a socket we are listening to.
+bool ServerAcceptConnection(int server_listen_fd, int* server_socket) {
   DCHECK(server_socket);
 
   int accept_fd = HANDLE_EINTR(accept(server_listen_fd, NULL, 0));
   if (accept_fd < 0)
     return false;
   if (fcntl(accept_fd, F_SETFL, O_NONBLOCK) == -1) {
+    PLOG(ERROR) << "fcntl(O_NONBLOCK) " << accept_fd;
     if (HANDLE_EINTR(close(accept_fd)) < 0)
-      PLOG(ERROR) << "close";
+      PLOG(ERROR) << "close " << accept_fd;
     return false;
   }
 
@@ -207,38 +232,46 @@ bool ServerAcceptFifoConnection(int server_listen_fd, int* server_socket) {
   return true;
 }
 
-bool ClientConnectToFifo(const std::string &pipe_name, int* client_socket) {
+bool CreateClientUnixDomainSocket(const std::string& pipe_name,
+                                  int* client_socket) {
   DCHECK(client_socket);
+  DCHECK_GT(pipe_name.length(), 0u);
   DCHECK_LT(pipe_name.length(), kMaxPipeNameLength);
+
+  if (pipe_name.length() == 0 || pipe_name.length() >= kMaxPipeNameLength) {
+    return false;
+  }
 
   // Create socket.
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (fd < 0) {
-    LOG(ERROR) << "fd is invalid";
+    PLOG(ERROR) << "socket " << pipe_name;
     return false;
   }
 
   // Make socket non-blocking
   if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1) {
-    LOG(ERROR) << "fcntl failed";
+    PLOG(ERROR) << "fcntl(O_NONBLOCK) " << pipe_name;
     if (HANDLE_EINTR(close(fd)) < 0)
-      PLOG(ERROR) << "close";
+      PLOG(ERROR) << "close " << pipe_name;
     return false;
   }
 
   // Create server side of socket.
-  struct sockaddr_un  server_unix_addr;
+  struct sockaddr_un server_unix_addr;
   memset(&server_unix_addr, 0, sizeof(server_unix_addr));
   server_unix_addr.sun_family = AF_UNIX;
-  snprintf(server_unix_addr.sun_path, kMaxPipeNameLength, "%s",
-           pipe_name.c_str());
-  size_t server_unix_addr_len = offsetof(struct sockaddr_un, sun_path) +
-      strlen(server_unix_addr.sun_path) + 1;
+  int path_len = snprintf(server_unix_addr.sun_path, IPC::kMaxPipeNameLength,
+                          "%s", pipe_name.c_str());
+  DCHECK_EQ(static_cast<int>(pipe_name.length()), path_len);
+  size_t server_unix_addr_len = offsetof(struct sockaddr_un,
+                                         sun_path) + path_len + 1;
 
   if (HANDLE_EINTR(connect(fd, reinterpret_cast<sockaddr*>(&server_unix_addr),
                            server_unix_addr_len)) != 0) {
+    PLOG(ERROR) << "connect " << pipe_name;
     if (HANDLE_EINTR(close(fd)) < 0)
-      PLOG(ERROR) << "close";
+      PLOG(ERROR) << "close " << pipe_name;
     return false;
   }
 
@@ -262,40 +295,47 @@ bool SocketWriteErrorIsRecoverable() {
   return errno == EAGAIN || errno == EMSGSIZE;
 #else
   return errno == EAGAIN;
-#endif
+#endif  // OS_MACOSX
 }
 
 }  // namespace
 //------------------------------------------------------------------------------
 
-Channel::ChannelImpl::ChannelImpl(const std::string& channel_id, Mode mode,
-                                  Listener* listener)
+Channel::ChannelImpl::ChannelImpl(const IPC::ChannelHandle& channel_handle,
+                                  Mode mode, Listener* listener)
     : mode_(mode),
       is_blocked_on_write_(false),
+      waiting_connect_(true),
       message_send_bytes_written_(0),
-      uses_fifo_(
-          CommandLine::ForCurrentProcess()->HasSwitch(switches::kIPCUseFIFO) ||
-          mode == MODE_NAMED_SERVER || mode == MODE_NAMED_CLIENT),
       server_listen_pipe_(-1),
       pipe_(-1),
       client_pipe_(-1),
-#if !defined(OS_MACOSX)
+#if defined(IPC_USES_READWRITE)
       fd_pipe_(-1),
       remote_fd_pipe_(-1),
-#endif
+#endif  // IPC_USES_READWRITE
+      pipe_name_(channel_handle.name),
       listener_(listener),
-      waiting_connect_(true),
+      must_unlink_(false),
       factory_(this) {
-  if (mode_ == MODE_NAMED_SERVER)
+  // Check to see if we want to implement using domain sockets.
+  bool uses_domain_socket = false;
+  bool listening_socket = false;
+  if (mode_ == MODE_NAMED_SERVER) {
+    uses_domain_socket = true;
+    listening_socket = true;
     mode_ = MODE_SERVER;
-  if (mode_ == MODE_NAMED_CLIENT)
+  } else if (mode_ == MODE_NAMED_CLIENT) {
+    uses_domain_socket = true;
     mode_ = MODE_CLIENT;
-
-  if (!CreatePipe(channel_id, mode_)) {
+  }
+  if (!CreatePipe(channel_handle, uses_domain_socket, listening_socket)) {
     // The pipe may have been closed already.
-    PLOG(WARNING) << "Unable to create pipe named \"" << channel_id
-                  << "\" in " << (mode_ == MODE_SERVER ? "server" : "client")
-                  << " mode";
+    const char *modestr = (mode_ == MODE_SERVER
+                           || mode_ == MODE_NAMED_SERVER) ? "server" : "client";
+    // The pipe may have been closed already.
+    LOG(WARNING) << "Unable to create pipe named \"" << channel_handle.name
+                 << "\" in " << modestr << " mode";
   }
 }
 
@@ -303,22 +343,6 @@ Channel::ChannelImpl::~ChannelImpl() {
   Close();
 }
 
-// static
-void AddChannelSocket(const std::string& name, int socket) {
-  Singleton<PipeMap>()->Insert(name, socket);
-}
-
-// static
-void RemoveAndCloseChannelSocket(const std::string& name) {
-  Singleton<PipeMap>()->RemoveAndClose(name);
-}
-
-// static
-bool ChannelSocketExists(const std::string& name) {
-  return Singleton<PipeMap>()->Lookup(name) != -1;
-}
-
-// static
 bool SocketPair(int* fd1, int* fd2) {
   int pipe_fds[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, pipe_fds) != 0) {
@@ -343,42 +367,58 @@ bool SocketPair(int* fd1, int* fd2) {
   return true;
 }
 
-bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
-                                      Mode mode) {
+bool Channel::ChannelImpl::CreatePipe(const IPC::ChannelHandle& channel_handle,
+                                      bool uses_domain_sockets,
+                                      bool listening_socket) {
   DCHECK(server_listen_pipe_ == -1 && pipe_ == -1);
 
-  if (uses_fifo_) {
-    // This only happens in unit tests; see the comment above PipeMap.
-    // TODO(playmobil): We shouldn't need to create fifos on disk.
-    // TODO(playmobil): If we do, they should be in the user data directory.
-    // TODO(playmobil): Cleanup any stale fifos.
-    pipe_name_ = channel_id;
-    if (mode == MODE_SERVER) {
-      if (!CreateServerFifo(pipe_name_, &server_listen_pipe_)) {
+  // Four possible cases:
+  // 1) It's a channel wrapping a pipe that is given to us.
+  // 2) It's for a named channel, so we create it.
+  // 3) It's for a client that we implement ourself. This is used
+  //    in unittesting.
+  // 4) It's the initial IPC channel:
+  //   4a) Client side: Pull the pipe out of the GlobalDescriptors set.
+  //   4b) Server side: create the pipe.
+
+  if (channel_handle.socket.fd != -1) {
+    // Case 1 from comment above.
+    pipe_ = channel_handle.socket.fd;
+#if defined(IPC_USES_READWRITE)
+    // Test the socket passed into us to make sure it is nonblocking.
+    // We don't want to call read/write on a blocking socket.
+    int value = fcntl(pipe_, F_GETFL);
+    if (value == -1) {
+      PLOG(ERROR) << "fcntl(F_GETFL) " << pipe_name_;
+      return false;
+    }
+    if (!(value & O_NONBLOCK)) {
+      LOG(ERROR) << "Socket " << pipe_name_ << " must be O_NONBLOCK";
+      return false;
+    }
+#endif   // IPC_USES_READWRITE
+  } else if (uses_domain_sockets) {
+    // Case 2 from comment above.
+    must_unlink_ = true;
+    if (mode_ == MODE_SERVER) {
+      if (!CreateServerUnixDomainSocket(pipe_name_, &pipe_)) {
         return false;
       }
-    } else {
-      if (!ClientConnectToFifo(pipe_name_, &pipe_)) {
+    } else if (mode_ == MODE_CLIENT) {
+      if (!CreateClientUnixDomainSocket(pipe_name_, &pipe_)) {
         return false;
       }
-      waiting_connect_ = false;
     }
   } else {
-    // This is the normal (non-unit-test) case, where we're using sockets.
-    // Three possible cases:
-    // 1) It's for a channel we already have a pipe for; reuse it.
-    // 2) It's the initial IPC channel:
-    //   2a) Server side: create the pipe.
-    //   2b) Client side: Pull the pipe out of the GlobalDescriptors set.
-    pipe_name_ = channel_id;
-    pipe_ = ChannelNameToFD(pipe_name_);
-    if (pipe_ < 0) {
-      // Initial IPC channel.
-      if (mode == MODE_SERVER) {
-        if (!SocketPair(&pipe_, &client_pipe_))
-          return false;
-        AddChannelSocket(pipe_name_, client_pipe_);
+    pipe_ = PipeMap::GetInstance()->Lookup(pipe_name_);
+    if (mode_ == MODE_CLIENT) {
+      if (pipe_ != -1) {
+        // Case 3 from comment above.
+        // We only allow one connection.
+        pipe_ = HANDLE_EINTR(dup(pipe_));
+        PipeMap::GetInstance()->RemoveAndClose(pipe_name_);
       } else {
+        // Case 4a from comment above.
         // Guard against inappropriate reuse of the initial IPC channel.  If
         // an IPC channel closes and someone attempts to reuse it by name, the
         // initial channel must not be recycled here.  http://crbug.com/26754.
@@ -390,50 +430,53 @@ bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
         }
         used_initial_channel = true;
 
-        pipe_ = Singleton<base::GlobalDescriptors>()->Get(kPrimaryIPCChannel);
+        pipe_ = base::GlobalDescriptors::GetInstance()->Get(kPrimaryIPCChannel);
       }
-    } else {
-      waiting_connect_ = mode == MODE_SERVER;
-    }
-  }
-
-  // Create the Hello message to be sent when Connect is called
-  scoped_ptr<Message> msg(new Message(MSG_ROUTING_NONE,
-                                      HELLO_MESSAGE_TYPE,
-                                      IPC::Message::PRIORITY_NORMAL));
-  #if !defined(OS_MACOSX)
-  if (!uses_fifo_) {
-    // On Linux, the seccomp sandbox makes it very expensive to call
-    // recvmsg() and sendmsg(). Often, we are perfectly OK with resorting to
-    // read() and write(), which are cheap.
-    //
-    // As we cannot anticipate, when the sender will provide us with file
-    // handles, we have to make the decision about whether we call read() or
-    // recvmsg() before we actually make the call. The easiest option is to
-    // create a dedicated socketpair() for exchanging file handles.
-    if (mode == MODE_SERVER) {
-      fd_pipe_ = -1;
-    } else if (remote_fd_pipe_ == -1) {
-      if (!SocketPair(&fd_pipe_, &remote_fd_pipe_)) {
+    } else if (mode_ == MODE_SERVER) {
+      // Case 4b from comment above.
+      if (pipe_ != -1) {
+        LOG(ERROR) << "Server already exists for " << pipe_name_;
         return false;
       }
+      if (!SocketPair(&pipe_, &client_pipe_))
+        return false;
+      PipeMap::GetInstance()->Insert(pipe_name_, client_pipe_);
+    } else {
+      LOG(FATAL) << "Unknown mode " << mode_;
+      return false;
     }
   }
-  #endif
-  if (!msg->WriteInt(base::GetCurrentProcId())) {
-    Close();
-    return false;
+
+  if (mode_ == MODE_SERVER) {
+    if (listening_socket) {
+      server_listen_pipe_ = pipe_;
+      pipe_ = -1;
+    }
   }
 
-  output_queue_.push(msg.release());
+#if defined(IPC_USES_READWRITE)
+  // Create a dedicated socketpair() for exchanging file descriptors.
+  // See comments for IPC_USES_READWRITE for details.
+  if (mode_ == MODE_CLIENT) {
+    if (!SocketPair(&fd_pipe_, &remote_fd_pipe_)) {
+      return false;
+    }
+  }
+#endif  // IPC_USES_READWRITE
+
   return true;
 }
 
 bool Channel::ChannelImpl::Connect() {
-  if (mode_ == MODE_SERVER && uses_fifo_) {
-    if (server_listen_pipe_ == -1) {
-      return false;
-    }
+  if (server_listen_pipe_ == -1 && pipe_ == -1) {
+    NOTREACHED() << "Must call create on a channel before calling connect";
+    return false;
+  }
+
+  bool did_connect = true;
+  if (server_listen_pipe_ != -1) {
+    // Watch the pipe for connections, and turn any connections into
+    // active sockets.
     MessageLoopForIO::current()->WatchFileDescriptor(
         server_listen_pipe_,
         true,
@@ -441,21 +484,9 @@ bool Channel::ChannelImpl::Connect() {
         &server_listen_connection_watcher_,
         this);
   } else {
-    if (pipe_ == -1) {
-      return false;
-    }
-    MessageLoopForIO::current()->WatchFileDescriptor(
-        pipe_,
-        true,
-        MessageLoopForIO::WATCH_READ,
-        &read_watcher_,
-        this);
-    waiting_connect_ = mode_ == MODE_SERVER;
+    did_connect = AcceptConnection();
   }
-
-  if (!waiting_connect_)
-    return ProcessOutgoingMessages();
-  return true;
+  return did_connect;
 }
 
 bool Channel::ChannelImpl::ProcessIncomingMessages() {
@@ -477,13 +508,13 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
       // Read from pipe.
       // recvmsg() returns 0 if the connection has closed or EAGAIN if no data
       // is waiting on the pipe.
-#if !defined(OS_MACOSX)
+#if defined(IPC_USES_READWRITE)
       if (fd_pipe_ >= 0) {
         bytes_read = HANDLE_EINTR(read(pipe_, input_buf_,
                                        Channel::kReadBufferSize));
         msg.msg_controllen = 0;
       } else
-#endif
+#endif  // IPC_USES_READWRITE
       {
         msg.msg_controllen = sizeof(input_cmsg_buf_);
         bytes_read = HANDLE_EINTR(recvmsg(pipe_, &msg, MSG_DONTWAIT));
@@ -497,7 +528,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
           // treat this as a special case to prevent spurious error messages
           // to the console.
           return false;
-#endif  // defined(OS_MACOSX)
+#endif  // OS_MACOSX
         } else if (errno == ECONNRESET || errno == EPIPE) {
           return false;
         } else {
@@ -512,7 +543,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
     DCHECK(bytes_read);
 
     if (client_pipe_ != -1) {
-      Singleton<PipeMap>()->RemoveAndClose(pipe_name_);
+      PipeMap::GetInstance()->RemoveAndClose(pipe_name_);
       client_pipe_ = -1;
     }
 
@@ -552,7 +583,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
                        << " fd:" << pipe_;
             for (unsigned i = 0; i < num_wire_fds; ++i)
               if (HANDLE_EINTR(close(wire_fds[i])) < 0)
-                PLOG(ERROR) << "close" << i;
+                PLOG(ERROR) << "close " << i;
             return false;
           }
           break;
@@ -603,63 +634,61 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
       if (message_tail) {
         int len = static_cast<int>(message_tail - p);
         Message m(p, len);
-
-        if (m.header()->num_fds) {
+        const uint16 header_fds = m.header()->num_fds;
+        if (header_fds) {
           // the message has file descriptors
           const char* error = NULL;
-          if (m.header()->num_fds > num_fds - fds_i) {
+          if (header_fds > num_fds - fds_i) {
             // the message has been completely received, but we didn't get
             // enough file descriptors.
-#if !defined(OS_MACOSX)
-            if (!uses_fifo_) {
-              char dummy;
-              struct iovec fd_pipe_iov = { &dummy, 1 };
-              msg.msg_iov = &fd_pipe_iov;
-              msg.msg_controllen = sizeof(input_cmsg_buf_);
-              ssize_t n = HANDLE_EINTR(recvmsg(fd_pipe_, &msg, MSG_DONTWAIT));
-              if (n == 1 && msg.msg_controllen > 0) {
-                for (struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg;
-                     cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-                  if (cmsg->cmsg_level == SOL_SOCKET &&
-                      cmsg->cmsg_type == SCM_RIGHTS) {
-                    const unsigned payload_len = cmsg->cmsg_len - CMSG_LEN(0);
-                    DCHECK(payload_len % sizeof(int) == 0);
-                    wire_fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
-                    num_wire_fds = payload_len / 4;
+#if defined(IPC_USES_READWRITE)
+            char dummy;
+            struct iovec fd_pipe_iov = { &dummy, 1 };
+            msg.msg_iov = &fd_pipe_iov;
+            msg.msg_controllen = sizeof(input_cmsg_buf_);
+            ssize_t n = HANDLE_EINTR(recvmsg(fd_pipe_, &msg, MSG_DONTWAIT));
+            if (n == 1 && msg.msg_controllen > 0) {
+              for (struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg;
+                   cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+                if (cmsg->cmsg_level == SOL_SOCKET &&
+                    cmsg->cmsg_type == SCM_RIGHTS) {
+                  const unsigned payload_len = cmsg->cmsg_len - CMSG_LEN(0);
+                  DCHECK(payload_len % sizeof(int) == 0);
+                  wire_fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
+                  num_wire_fds = payload_len / 4;
 
-                    if (msg.msg_flags & MSG_CTRUNC) {
-                      LOG(ERROR) << "SCM_RIGHTS message was truncated"
-                                 << " cmsg_len:" << cmsg->cmsg_len
-                                 << " fd:" << pipe_;
-                      for (unsigned i = 0; i < num_wire_fds; ++i)
-                        if (HANDLE_EINTR(close(wire_fds[i])) < 0)
-                          PLOG(ERROR) << "close" << i;
-                      return false;
-                    }
-                    break;
+                  if (msg.msg_flags & MSG_CTRUNC) {
+                    LOG(ERROR) << "SCM_RIGHTS message was truncated"
+                               << " cmsg_len:" << cmsg->cmsg_len
+                               << " fd:" << pipe_;
+                    for (unsigned i = 0; i < num_wire_fds; ++i)
+                      if (HANDLE_EINTR(close(wire_fds[i])) < 0)
+                        PLOG(ERROR) << "close " << i;
+                    return false;
                   }
-                }
-                if (input_overflow_fds_.empty()) {
-                  fds = wire_fds;
-                  num_fds = num_wire_fds;
-                } else {
-                  if (num_wire_fds > 0) {
-                    const size_t prev_size = input_overflow_fds_.size();
-                    input_overflow_fds_.resize(prev_size + num_wire_fds);
-                    memcpy(&input_overflow_fds_[prev_size], wire_fds,
-                           num_wire_fds * sizeof(int));
-                  }
-                  fds = &input_overflow_fds_[0];
-                  num_fds = input_overflow_fds_.size();
+                  break;
                 }
               }
+              if (input_overflow_fds_.empty()) {
+                fds = wire_fds;
+                num_fds = num_wire_fds;
+              } else {
+                if (num_wire_fds > 0) {
+                  const size_t prev_size = input_overflow_fds_.size();
+                  input_overflow_fds_.resize(prev_size + num_wire_fds);
+                  memcpy(&input_overflow_fds_[prev_size], wire_fds,
+                         num_wire_fds * sizeof(int));
+                }
+                fds = &input_overflow_fds_[0];
+                num_fds = input_overflow_fds_.size();
+              }
             }
-            if (m.header()->num_fds > num_fds - fds_i)
-#endif
+            if (header_fds > num_fds - fds_i)
+#endif  // IPC_USES_READWRITE
               error = "Message needs unreceived descriptors";
           }
 
-          if (m.header()->num_fds >
+          if (header_fds >
               FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE) {
             // There are too many descriptors in this message
             error = "Message requires an excessive number of descriptors";
@@ -669,41 +698,40 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
             LOG(WARNING) << error
                          << " channel:" << this
                          << " message-type:" << m.type()
-                         << " header()->num_fds:" << m.header()->num_fds
+                         << " header()->num_fds:" << header_fds
                          << " num_fds:" << num_fds
                          << " fds_i:" << fds_i;
 #if defined(CHROMIUM_SELINUX)
             LOG(WARNING) << "In the case of SELinux this can be caused when "
                             "using a --user-data-dir to which the default "
                             "policy doesn't give the renderer access to. ";
-#endif
+#endif  // CHROMIUM_SELINUX
             // close the existing file descriptors so that we don't leak them
             for (unsigned i = fds_i; i < num_fds; ++i)
               if (HANDLE_EINTR(close(fds[i])) < 0)
-                PLOG(ERROR) << "close" << i;
+                PLOG(ERROR) << "close " << i;
             input_overflow_fds_.clear();
             // abort the connection
             return false;
           }
 
           m.file_descriptor_set()->SetDescriptors(
-              &fds[fds_i], m.header()->num_fds);
-          fds_i += m.header()->num_fds;
+              &fds[fds_i], header_fds);
+          fds_i += header_fds;
         }
         DVLOG(2) << "received message on channel @" << this
-                 << " with type " << m.type();
-        if (m.routing_id() == MSG_ROUTING_NONE &&
-            m.type() == HELLO_MESSAGE_TYPE) {
+                 << " with type " << m.type() << " on fd " << pipe_;
+        if (IsHelloMessage(&m)) {
           // The Hello message contains only the process id.
           void *iter = NULL;
           int pid;
           if (!m.ReadInt(&iter, &pid)) {
             NOTREACHED();
           }
-#if !defined(OS_MACOSX)
-          if (mode_ == MODE_SERVER && !uses_fifo_) {
-            // On non-Mac, the Hello message from the client to the server
-            // also contains the fd_pipe_, which  will be used for all
+#if defined(IPC_USES_READWRITE)
+          if (mode_ == MODE_SERVER) {
+            // With IPC_USES_READWRITE, the Hello message from the client to the
+            // server also contains the fd_pipe_, which  will be used for all
             // subsequent file descriptor passing.
             DCHECK_EQ(m.file_descriptor_set()->size(), 1U);
             base::FileDescriptor descriptor;
@@ -713,7 +741,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
             fd_pipe_ = descriptor.fd;
             CHECK(descriptor.auto_close);
           }
-#endif
+#endif  // IPC_USES_READWRITE
           listener_->OnChannelConnected(pid);
         } else {
           listener_->OnMessageReceived(m);
@@ -741,51 +769,21 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
 
     bytes_read = 0;  // Get more data.
   }
-
-  return true;
 }
 
 bool Channel::ChannelImpl::ProcessOutgoingMessages() {
   DCHECK(!waiting_connect_);  // Why are we trying to send messages if there's
                               // no connection?
-  is_blocked_on_write_ = false;
-
-  if (output_queue_.empty()) {
+  if (output_queue_.empty())
     return true;
-  }
 
-  if (pipe_ == -1) {
+  if (pipe_ == -1)
     return false;
-  }
 
   // Write out all the messages we can till the write blocks or there are no
   // more outgoing messages.
   while (!output_queue_.empty()) {
     Message* msg = output_queue_.front();
-
-#if !defined(OS_MACOSX)
-    scoped_ptr<Message> hello;
-    if (remote_fd_pipe_ != -1 &&
-        msg->routing_id() == MSG_ROUTING_NONE &&
-        msg->type() == HELLO_MESSAGE_TYPE) {
-      hello.reset(new Message(MSG_ROUTING_NONE,
-                              HELLO_MESSAGE_TYPE,
-                              IPC::Message::PRIORITY_NORMAL));
-      void* iter = NULL;
-      int pid;
-      if (!msg->ReadInt(&iter, &pid) ||
-          !hello->WriteInt(pid)) {
-        NOTREACHED();
-      }
-      DCHECK_EQ(hello->size(), msg->size());
-      if (!hello->WriteFileDescriptor(base::FileDescriptor(remote_fd_pipe_,
-                                                           false))) {
-        NOTREACHED();
-      }
-      msg = hello.get();
-      DCHECK_EQ(msg->file_descriptor_set()->size(), 1U);
-    }
-#endif
 
     size_t amt_to_write = msg->size() - message_send_bytes_written_;
     DCHECK(amt_to_write != 0);
@@ -833,10 +831,8 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
       // num_fds < MAX_DESCRIPTORS_PER_MESSAGE so no danger of overflow.
       msg->header()->num_fds = static_cast<uint16>(num_fds);
 
-#if !defined(OS_MACOSX)
-      if (!uses_fifo_ &&
-          (msg->routing_id() != MSG_ROUTING_NONE ||
-           msg->type() != HELLO_MESSAGE_TYPE)) {
+#if defined(IPC_USES_READWRITE)
+      if (!IsHelloMessage(msg)) {
         // Only the Hello message sends the file descriptor with the message.
         // Subsequently, we can send file descriptors on the dedicated
         // fd_pipe_ which makes Seccomp sandbox operation more efficient.
@@ -850,21 +846,19 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
           msg->file_descriptor_set()->CommitAll();
         }
       }
-#endif
+#endif  // IPC_USES_READWRITE
     }
 
     if (bytes_written == 1) {
       fd_written = pipe_;
-#if !defined(OS_MACOSX)
-      if (mode_ != MODE_SERVER && !uses_fifo_ &&
-          msg->routing_id() == MSG_ROUTING_NONE &&
-          msg->type() == HELLO_MESSAGE_TYPE) {
+#if defined(IPC_USES_READWRITE)
+      if (mode_ != MODE_SERVER && IsHelloMessage(msg)) {
         DCHECK_EQ(msg->file_descriptor_set()->size(), 1U);
       }
-      if (!uses_fifo_ && !msgh.msg_controllen) {
+      if (!msgh.msg_controllen) {
         bytes_written = HANDLE_EINTR(write(pipe_, out_bytes, amt_to_write));
       } else
-#endif
+#endif  // IPC_USES_READWRITE
       {
         bytes_written = HANDLE_EINTR(sendmsg(pipe_, &msgh, MSG_DONTWAIT));
       }
@@ -911,7 +905,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
 
       // Message sent OK!
       DVLOG(2) << "sent message @" << msg << " on channel @" << this
-               << " with type " << msg->type();
+               << " with type " << msg->type() << " on fd " << pipe_;
       delete output_queue_.front();
       output_queue_.pop();
     }
@@ -925,15 +919,12 @@ bool Channel::ChannelImpl::Send(Message* message) {
            << " (" << output_queue_.size() << " in queue)";
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
-  Logging::current()->OnSendMessage(message, "");
-#endif
+  Logging::GetInstance()->OnSendMessage(message, "");
+#endif  // IPC_MESSAGE_LOG_ENABLED
 
   output_queue_.push(message);
-  if (!waiting_connect_) {
-    if (!is_blocked_on_write_) {
-      if (!ProcessOutgoingMessages())
-        return false;
-    }
+  if (!is_blocked_on_write_ && !waiting_connect_) {
+    return ProcessOutgoingMessages();
   }
 
   return true;
@@ -943,43 +934,88 @@ int Channel::ChannelImpl::GetClientFileDescriptor() const {
   return client_pipe_;
 }
 
-// Called by libevent when we can read from th pipe without blocking.
-void Channel::ChannelImpl::OnFileCanReadWithoutBlocking(int fd) {
-  bool send_server_hello_msg = false;
-  if (waiting_connect_ && mode_ == MODE_SERVER) {
-    if (uses_fifo_) {
-      if (!ServerAcceptFifoConnection(server_listen_pipe_, &pipe_)) {
-        Close();
-      }
+bool Channel::ChannelImpl::AcceptsConnections() const {
+  return server_listen_pipe_ != -1;
+}
 
-      // No need to watch the listening socket any longer since only one client
-      // can connect.  So unregister with libevent.
-      server_listen_connection_watcher_.StopWatchingFileDescriptor();
+bool Channel::ChannelImpl::HasAcceptedConnection() const {
+  return AcceptsConnections() && pipe_ != -1;
+}
 
-      // Start watching our end of the socket.
-      MessageLoopForIO::current()->WatchFileDescriptor(
-          pipe_,
-          true,
-          MessageLoopForIO::WATCH_READ,
-          &read_watcher_,
-          this);
+void Channel::ChannelImpl::ResetToAcceptingConnectionState() {
+  // Unregister libevent for the unix domain socket and close it.
+  read_watcher_.StopWatchingFileDescriptor();
+  write_watcher_.StopWatchingFileDescriptor();
+  if (pipe_ != -1) {
+    if (HANDLE_EINTR(close(pipe_)) < 0)
+      PLOG(ERROR) << "close pipe_ " << pipe_name_;
+    pipe_ = -1;
+  }
+#if defined(IPC_USES_READWRITE)
+  if (fd_pipe_ != -1) {
+    if (HANDLE_EINTR(close(fd_pipe_)) < 0)
+      PLOG(ERROR) << "close fd_pipe_ " << pipe_name_;
+    fd_pipe_ = -1;
+  }
+  if (remote_fd_pipe_ != -1) {
+    if (HANDLE_EINTR(close(remote_fd_pipe_)) < 0)
+      PLOG(ERROR) << "close remote_fd_pipe_ " << pipe_name_;
+    remote_fd_pipe_ = -1;
+  }
+#endif  // IPC_USES_READWRITE
 
-      waiting_connect_ = false;
-    } else {
-      // In the case of a socketpair() the server starts listening on its end
-      // of the pipe in Connect().
-      waiting_connect_ = false;
-    }
-    send_server_hello_msg = true;
+  while (!output_queue_.empty()) {
+    Message* m = output_queue_.front();
+    output_queue_.pop();
+    delete m;
   }
 
-  if (!waiting_connect_ && fd == pipe_) {
-    if (!ProcessIncomingMessages()) {
+  // Close any outstanding, received file descriptors.
+  for (std::vector<int>::iterator
+       i = input_overflow_fds_.begin(); i != input_overflow_fds_.end(); ++i) {
+    if (HANDLE_EINTR(close(*i)) < 0)
+      PLOG(ERROR) << "close";
+  }
+  input_overflow_fds_.clear();
+}
+
+// Called by libevent when we can read from the pipe without blocking.
+void Channel::ChannelImpl::OnFileCanReadWithoutBlocking(int fd) {
+  bool send_server_hello_msg = false;
+  if (fd == server_listen_pipe_) {
+    int new_pipe = 0;
+    if (!ServerAcceptConnection(server_listen_pipe_, &new_pipe)) {
       Close();
-      listener_->OnChannelError();
-      // The OnChannelError() call may delete this, so we need to exit now.
+      listener_->OnChannelListenError();
+    }
+
+    if (pipe_ != -1) {
+      // We already have a connection. We only handle one at a time.
+      // close our new descriptor.
+      if (HANDLE_EINTR(shutdown(new_pipe, SHUT_RDWR)) < 0)
+        PLOG(ERROR) << "shutdown " << pipe_name_;
+      if (HANDLE_EINTR(close(new_pipe)) < 0)
+        PLOG(ERROR) << "close " << pipe_name_;
+      listener_->OnChannelDenied();
       return;
     }
+    pipe_ = new_pipe;
+
+    if (!AcceptConnection()) {
+      NOTREACHED() << "AcceptConnection should not fail on server";
+    }
+    send_server_hello_msg = true;
+    waiting_connect_ = false;
+  } else if (fd == pipe_) {
+    if (waiting_connect_ && mode_ == MODE_SERVER) {
+      send_server_hello_msg = true;
+      waiting_connect_ = false;
+    }
+    if (!ProcessIncomingMessages()) {
+      ClosePipeOnError();
+    }
+  } else {
+    NOTREACHED() << "Unknown pipe " << fd;
   }
 
   // If we're a server and handshaking, then we want to make sure that we
@@ -993,75 +1029,102 @@ void Channel::ChannelImpl::OnFileCanReadWithoutBlocking(int fd) {
 
 // Called by libevent when we can write to the pipe without blocking.
 void Channel::ChannelImpl::OnFileCanWriteWithoutBlocking(int fd) {
+  DCHECK(fd == pipe_);
+  is_blocked_on_write_ = false;
   if (!ProcessOutgoingMessages()) {
-    Close();
-    listener_->OnChannelError();
+    ClosePipeOnError();
   }
+}
+
+bool Channel::ChannelImpl::AcceptConnection() {
+  MessageLoopForIO::current()->WatchFileDescriptor(pipe_,
+                                                   true,
+                                                   MessageLoopForIO::WATCH_READ,
+                                                   &read_watcher_,
+                                                   this);
+  QueueHelloMessage();
+
+  if (mode_ == MODE_CLIENT) {
+    // If we are a client we want to send a hello message out immediately.
+    // In server mode we will send a hello message when we receive one from a
+    // client.
+    waiting_connect_ = false;
+    return ProcessOutgoingMessages();
+  } else {
+    waiting_connect_ = true;
+    return true;
+  }
+}
+
+void Channel::ChannelImpl::ClosePipeOnError() {
+  if (HasAcceptedConnection()) {
+    ResetToAcceptingConnectionState();
+    listener_->OnChannelError();
+  } else {
+    Close();
+    if (AcceptsConnections()) {
+      listener_->OnChannelListenError();
+    } else {
+      listener_->OnChannelError();
+    }
+  }
+}
+
+void Channel::ChannelImpl::QueueHelloMessage() {
+  // Create the Hello message
+  scoped_ptr<Message> msg(new Message(MSG_ROUTING_NONE,
+                                      HELLO_MESSAGE_TYPE,
+                                      IPC::Message::PRIORITY_NORMAL));
+
+  if (!msg->WriteInt(base::GetCurrentProcId())) {
+    NOTREACHED() << "Unable to pickle hello message proc id";
+  }
+#if defined(IPC_USES_READWRITE)
+  scoped_ptr<Message> hello;
+  if (remote_fd_pipe_ != -1) {
+    if (!msg->WriteFileDescriptor(base::FileDescriptor(remote_fd_pipe_,
+                                                       false))) {
+      NOTREACHED() << "Unable to pickle hello message file descriptors";
+    }
+    DCHECK_EQ(msg->file_descriptor_set()->size(), 1U);
+  }
+#endif  // IPC_USES_READWRITE
+  output_queue_.push(msg.release());
+}
+
+bool Channel::ChannelImpl::IsHelloMessage(const Message* m) const {
+  return m->routing_id() == MSG_ROUTING_NONE && m->type() == HELLO_MESSAGE_TYPE;
 }
 
 void Channel::ChannelImpl::Close() {
   // Close can be called multiple time, so we need to make sure we're
   // idempotent.
 
-  // Unregister libevent for the listening socket and close it.
-  server_listen_connection_watcher_.StopWatchingFileDescriptor();
+  ResetToAcceptingConnectionState();
 
+  if (must_unlink_) {
+    unlink(pipe_name_.c_str());
+    must_unlink_ = false;
+  }
   if (server_listen_pipe_ != -1) {
     if (HANDLE_EINTR(close(server_listen_pipe_)) < 0)
-      PLOG(ERROR) << "close";
+      PLOG(ERROR) << "close " << server_listen_pipe_;
     server_listen_pipe_ = -1;
+    // Unregister libevent for the listening socket and close it.
+    server_listen_connection_watcher_.StopWatchingFileDescriptor();
   }
 
-  // Unregister libevent for the FIFO and close it.
-  read_watcher_.StopWatchingFileDescriptor();
-  write_watcher_.StopWatchingFileDescriptor();
-  if (pipe_ != -1) {
-    if (HANDLE_EINTR(close(pipe_)) < 0)
-      PLOG(ERROR) << "close";
-    pipe_ = -1;
-  }
   if (client_pipe_ != -1) {
-    Singleton<PipeMap>()->RemoveAndClose(pipe_name_);
+    PipeMap::GetInstance()->RemoveAndClose(pipe_name_);
     client_pipe_ = -1;
   }
-#if !defined(OS_MACOSX)
-  if (fd_pipe_ != -1) {
-    if (HANDLE_EINTR(close(fd_pipe_)) < 0)
-      PLOG(ERROR) << "close";
-    fd_pipe_ = -1;
-  }
-  if (remote_fd_pipe_ != -1) {
-    if (HANDLE_EINTR(close(remote_fd_pipe_)) < 0)
-      PLOG(ERROR) << "close";
-    remote_fd_pipe_ = -1;
-  }
-#endif
-
-  if (uses_fifo_) {
-    // Unlink the FIFO
-    unlink(pipe_name_.c_str());
-  }
-
-  while (!output_queue_.empty()) {
-    Message* m = output_queue_.front();
-    output_queue_.pop();
-    delete m;
-  }
-
-  // Close any outstanding, received file descriptors
-  for (std::vector<int>::iterator
-       i = input_overflow_fds_.begin(); i != input_overflow_fds_.end(); ++i) {
-    if (HANDLE_EINTR(close(*i)) < 0)
-      PLOG(ERROR) << "close";
-  }
-  input_overflow_fds_.clear();
 }
 
 //------------------------------------------------------------------------------
 // Channel's methods simply call through to ChannelImpl.
-Channel::Channel(const std::string& channel_id, Mode mode,
+Channel::Channel(const IPC::ChannelHandle& channel_handle, Mode mode,
                  Listener* listener)
-    : channel_impl_(new ChannelImpl(channel_id, mode, listener)) {
+    : channel_impl_(new ChannelImpl(channel_handle, mode, listener)) {
 }
 
 Channel::~Channel() {
@@ -1086,6 +1149,18 @@ bool Channel::Send(Message* message) {
 
 int Channel::GetClientFileDescriptor() const {
   return channel_impl_->GetClientFileDescriptor();
+}
+
+bool Channel::AcceptsConnections() const {
+  return channel_impl_->AcceptsConnections();
+}
+
+bool Channel::HasAcceptedConnection() const {
+  return channel_impl_->HasAcceptedConnection();
+}
+
+void Channel::ResetToAcceptingConnectionState() {
+  channel_impl_->ResetToAcceptingConnectionState();
 }
 
 }  // namespace IPC

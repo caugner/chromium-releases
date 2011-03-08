@@ -14,15 +14,23 @@ namespace proxy {
 namespace {
 
 PP_Bool IsFullscreen(PP_Instance instance) {
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_FALSE;
+
   PP_Bool result = PP_FALSE;
-  PluginDispatcher::Get()->Send(new PpapiHostMsg_PPBFullscreen_IsFullscreen(
+  dispatcher->Send(new PpapiHostMsg_PPBFullscreen_IsFullscreen(
       INTERFACE_ID_PPB_FULLSCREEN, instance, &result));
   return result;
 }
 
 PP_Bool SetFullscreen(PP_Instance instance, PP_Bool fullscreen) {
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_FALSE;
+
   PP_Bool result = PP_FALSE;
-  PluginDispatcher::Get()->Send(new PpapiHostMsg_PPBFullscreen_SetFullscreen(
+  dispatcher->Send(new PpapiHostMsg_PPBFullscreen_SetFullscreen(
       INTERFACE_ID_PPB_FULLSCREEN, instance, fullscreen, &result));
   return result;
 }
@@ -50,14 +58,17 @@ InterfaceID PPB_Fullscreen_Proxy::GetInterfaceId() const {
   return INTERFACE_ID_PPB_FULLSCREEN;
 }
 
-void PPB_Fullscreen_Proxy::OnMessageReceived(const IPC::Message& msg) {
+bool PPB_Fullscreen_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Fullscreen_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFullscreen_IsFullscreen,
                         OnMsgIsFullscreen)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFullscreen_SetFullscreen,
                         OnMsgSetFullscreen)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   // TODO(brettw): handle bad messages!
+  return handled;
 }
 
 void PPB_Fullscreen_Proxy::OnMsgIsFullscreen(PP_Instance instance,

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "app/l10n_util.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
@@ -17,7 +16,7 @@
 #include "base/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/task.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_item.h"
@@ -32,7 +31,7 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
@@ -50,7 +49,8 @@
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_context.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPageSerializerClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializerClient.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using base::Time;
 using WebKit::WebPageSerializerClient;
@@ -687,8 +687,9 @@ void SavePackage::Finish() {
                         save_ids));
 
   download_->OnAllDataSaved(all_save_items_count_);
+  download_->MarkAsComplete();
   // Notify download observers that we are complete (the call
-  // to OnAllDataSaved() set the state to complete but did not notify).
+  // to OnReadyToFinish() set the state to complete but did not notify).
   download_->UpdateObservers();
 
   NotificationService::current()->Notify(

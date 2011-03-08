@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/notification_service.h"
@@ -85,8 +85,8 @@ class TestingTemplateURLModel : public TemplateURLModel {
       : TemplateURLModel(profile) {
   }
 
-  std::wstring GetAndClearSearchTerm() {
-    std::wstring search_term;
+  string16 GetAndClearSearchTerm() {
+    string16 search_term;
     search_term.swap(search_term_);
     return search_term;
   }
@@ -94,12 +94,12 @@ class TestingTemplateURLModel : public TemplateURLModel {
  protected:
   virtual void SetKeywordSearchTermsForURL(const TemplateURL* t_url,
                                            const GURL& url,
-                                           const std::wstring& term) {
+                                           const string16& term) {
     search_term_ = term;
   }
 
  private:
-  std::wstring search_term_;
+  string16 search_term_;
 
   DISALLOW_COPY_AND_ASSIGN(TestingTemplateURLModel);
 };
@@ -167,9 +167,8 @@ void TemplateURLModelTestUtil::OnTemplateURLModelChanged() {
   changed_count_++;
 }
 
-void TemplateURLModelTestUtil::VerifyObserverCount(int expected_changed_count) {
-  ASSERT_EQ(expected_changed_count, changed_count_);
-  changed_count_ = 0;
+int TemplateURLModelTestUtil::GetObserverCount() {
+  return changed_count_;
 }
 
 void TemplateURLModelTestUtil::ResetObserverCount() {
@@ -188,7 +187,8 @@ void TemplateURLModelTestUtil::VerifyLoad() {
   ASSERT_FALSE(model()->loaded());
   model()->Load();
   BlockTillServiceProcessesRequests();
-  VerifyObserverCount(1);
+  EXPECT_EQ(1, GetObserverCount());
+  ResetObserverCount();
 }
 
 void TemplateURLModelTestUtil::ChangeModelToLoadState() {
@@ -210,7 +210,7 @@ void TemplateURLModelTestUtil::ResetModel(bool verify_load) {
     VerifyLoad();
 }
 
-std::wstring TemplateURLModelTestUtil::GetAndClearSearchTerm() {
+string16 TemplateURLModelTestUtil::GetAndClearSearchTerm() {
   return
       static_cast<TestingTemplateURLModel*>(model())->GetAndClearSearchTerm();
 }

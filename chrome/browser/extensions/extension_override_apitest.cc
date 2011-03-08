@@ -5,9 +5,9 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
@@ -72,7 +72,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideNewtab) {
   // Verify behavior, then unload the first and verify behavior, etc.
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideNewtabIncognito) {
+#if defined(OS_MACOSX)
+// Hangy: http://crbug.com/70511
+#define MAYBE_OverrideNewtabIncognito DISABLED_OverrideNewtabIncognito
+#else
+#define MAYBE_OverrideNewtabIncognito OverrideNewtabIncognito
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, MAYBE_OverrideNewtabIncognito) {
   ASSERT_TRUE(RunExtensionTest("override/newtab")) << message_;
 
   // Navigate an incognito tab to the new tab page.  We should get the actual
@@ -115,7 +121,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, ShouldNotCreateDuplicateEntries) {
   for (size_t i = 0; i < 3; ++i) {
     ExtensionDOMUI::RegisterChromeURLOverrides(
         browser()->profile(),
-        browser()->profile()->GetExtensionsService()->extensions()->back()->
+        browser()->profile()->GetExtensionService()->extensions()->back()->
             GetChromeURLOverrides());
   }
 
@@ -161,7 +167,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideKeyboard) {
 
   // Unload the failing version.  We should be back to passing now.
   const ExtensionList *extensions =
-      browser()->profile()->GetExtensionsService()->extensions();
+      browser()->profile()->GetExtensionService()->extensions();
   UnloadExtension((*extensions->rbegin())->id());
   {
     ResultCatcher catcher;

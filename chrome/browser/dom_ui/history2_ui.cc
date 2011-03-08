@@ -4,8 +4,9 @@
 
 #include "chrome/browser/dom_ui/history2_ui.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include <algorithm>
+#include <set>
+
 #include "base/callback.h"
 #include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
@@ -14,7 +15,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -22,22 +23,23 @@
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "net/base/escape.h"
-
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "net/base/escape.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 // Maximum number of search results to return in a given search. We should
 // eventually remove this.
@@ -107,6 +109,10 @@ void HistoryUIHTMLSource2::StartDataRequest(const std::string& path,
   SendResponse(request_id, html_bytes);
 }
 
+std::string HistoryUIHTMLSource2::GetMimeType(const std::string&) const {
+  return "text/html";
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // HistoryHandler
@@ -126,7 +132,7 @@ DOMMessageHandler* BrowsingHistoryHandler2::Attach(DOMUI* dom_ui) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(new DOMUIFavIconSource(dom_ui->GetProfile()))));
 
@@ -269,20 +275,19 @@ void BrowsingHistoryHandler2::QueryComplete(
       string16 date_str = TimeFormat::RelativeDate(page.visit_time(),
                                                    &midnight_today);
       if (date_str.empty()) {
-        date_str =
-            WideToUTF16Hack(base::TimeFormatFriendlyDate(page.visit_time()));
+        date_str = base::TimeFormatFriendlyDate(page.visit_time());
       } else {
         date_str = l10n_util::GetStringFUTF16(
             IDS_HISTORY_DATE_WITH_RELATIVE_TIME,
             date_str,
-            WideToUTF16Hack(base::TimeFormatFriendlyDate(page.visit_time())));
+            base::TimeFormatFriendlyDate(page.visit_time()));
       }
       page_value->SetString("dateRelativeDay", date_str);
       page_value->SetString("dateTimeOfDay",
-          WideToUTF16Hack(base::TimeFormatTimeOfDay(page.visit_time())));
+          base::TimeFormatTimeOfDay(page.visit_time()));
     } else {
       page_value->SetString("dateShort",
-          WideToUTF16Hack(base::TimeFormatShortDate(page.visit_time())));
+          base::TimeFormatShortDate(page.visit_time()));
       page_value->SetString("snippet", page.snippet().text());
     }
     page_value->SetBoolean("starred",
@@ -398,7 +403,7 @@ HistoryUI2::HistoryUI2(TabContents* contents) : DOMUI(contents) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(html_source)));
 }

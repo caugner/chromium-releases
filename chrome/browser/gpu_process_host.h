@@ -9,27 +9,23 @@
 #include <queue>
 
 #include "base/basictypes.h"
-#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
+#include "base/threading/non_thread_safe.h"
 #include "chrome/browser/browser_child_process_host.h"
+#include "chrome/common/gpu_feature_flags.h"
 #include "gfx/native_widget_types.h"
 
-struct GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params;
-struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 class GpuBlacklist;
 class GPUInfo;
-class ResourceMessageFilter;
-
-namespace gfx {
-class Size;
-}
+class RenderMessageFilter;
 
 namespace IPC {
 struct ChannelHandle;
 class Message;
 }
 
-class GpuProcessHost : public BrowserChildProcessHost, public NonThreadSafe {
+class GpuProcessHost : public BrowserChildProcessHost,
+                       public base::NonThreadSafe {
  public:
   // Getter for the singleton. This will return NULL on failure.
   static GpuProcessHost* Get();
@@ -37,33 +33,30 @@ class GpuProcessHost : public BrowserChildProcessHost, public NonThreadSafe {
   virtual bool Send(IPC::Message* msg);
 
   // IPC::Channel::Listener implementation.
-  virtual void OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message);
 
   // Tells the GPU process to create a new channel for communication with a
   // renderer. Will asynchronously send message to object with given routing id
   // on completion.
-  void EstablishGpuChannel(int renderer_id,
-                           ResourceMessageFilter* filter);
+  void EstablishGpuChannel(int renderer_id, RenderMessageFilter* filter);
 
   // Sends a reply message later when the next GpuHostMsg_SynchronizeReply comes
   // in.
-  void Synchronize(IPC::Message* reply,
-                   ResourceMessageFilter* filter);
+  void Synchronize(IPC::Message* reply, RenderMessageFilter* filter);
 
  private:
   // Used to queue pending channel requests.
   struct ChannelRequest {
-    explicit ChannelRequest(ResourceMessageFilter* filter);
+    explicit ChannelRequest(RenderMessageFilter* filter);
     ~ChannelRequest();
 
     // Used to send the reply message back to the renderer.
-    scoped_refptr<ResourceMessageFilter> filter;
+    scoped_refptr<RenderMessageFilter> filter;
   };
 
   // Used to queue pending synchronization requests.
   struct SynchronizationRequest {
-    SynchronizationRequest(IPC::Message* reply,
-                           ResourceMessageFilter* filter);
+    SynchronizationRequest(IPC::Message* reply, RenderMessageFilter* filter);
     ~SynchronizationRequest();
 
     // The delayed reply message which needs to be sent to the
@@ -71,7 +64,7 @@ class GpuProcessHost : public BrowserChildProcessHost, public NonThreadSafe {
     IPC::Message* reply;
 
     // Used to send the reply message back to the renderer.
-    scoped_refptr<ResourceMessageFilter> filter;
+    scoped_refptr<RenderMessageFilter> filter;
   };
 
   GpuProcessHost();
@@ -80,43 +73,29 @@ class GpuProcessHost : public BrowserChildProcessHost, public NonThreadSafe {
   bool EnsureInitialized();
   bool Init();
 
-  void OnControlMessageReceived(const IPC::Message& message);
+  bool OnControlMessageReceived(const IPC::Message& message);
 
   // Message handlers.
   void OnChannelEstablished(const IPC::ChannelHandle& channel_handle,
                             const GPUInfo& gpu_info);
   void OnSynchronizeReply();
-#if defined(OS_LINUX)
-  void OnGetViewXID(gfx::NativeViewId id, IPC::Message* reply_msg);
-  void OnReleaseXID(unsigned long xid);
-  void OnResizeXID(unsigned long xid, gfx::Size size, IPC::Message* reply_msg);
-#elif defined(OS_MACOSX)
-  void OnAcceleratedSurfaceSetIOSurface(
-      const GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params& params);
-  void OnAcceleratedSurfaceBuffersSwapped(
-      const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
-#elif defined(OS_WIN)
-  void OnGetCompositorHostWindow(int renderer_id,
-                                    int render_view_id,
-                                    IPC::Message* reply_message);
-#endif
 
   // Sends the response for establish channel request to the renderer.
   void SendEstablishChannelReply(const IPC::ChannelHandle& channel,
                                  const GPUInfo& gpu_info,
-                                 ResourceMessageFilter* filter);
+                                 RenderMessageFilter* filter);
   // Sends the response for synchronization request to the renderer.
   void SendSynchronizationReply(IPC::Message* reply,
-                                ResourceMessageFilter* filter);
+                                RenderMessageFilter* filter);
 
-  // ResourceDispatcherHost::Receiver implementation:
-  virtual URLRequestContext* GetRequestContext(
-      uint32 request_id,
-      const ViewHostMsg_Resource_Request& request_data);
+  // Sends outstanding replies to renderer processes. This is only called
+  // in error situations like the GPU process crashing -- but is necessary
+  // to prevent the renderer process from hanging.
+  void SendOutstandingReplies();
 
   virtual bool CanShutdown();
   virtual void OnChildDied();
-  virtual void OnProcessCrashed();
+  virtual void OnProcessCrashed(int exit_code);
 
   bool CanLaunchGpuProcess() const;
   bool LaunchGpuProcess();
@@ -126,9 +105,9 @@ class GpuProcessHost : public BrowserChildProcessHost, public NonThreadSafe {
   bool initialized_;
   bool initialized_successfully_;
 
-  bool blacklist_result_recorded_;
-
+  bool gpu_feature_flags_set_;
   scoped_ptr<GpuBlacklist> gpu_blacklist_;
+  GpuFeatureFlags gpu_feature_flags_;
 
   // These are the channel requests that we have already sent to
   // the GPU process, but haven't heard back about yet.

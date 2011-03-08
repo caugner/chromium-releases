@@ -10,7 +10,7 @@
 #include "base/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "base/timer.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 
 namespace history {
 class TopSites;
@@ -25,6 +25,8 @@ class BookmarkModel;
 class BrowserThemeProvider;
 class CommandLine;
 class DesktopNotificationService;
+class ExtensionPrefStore;
+class ExtensionPrefs;
 class FaviconService;
 class FindBarState;
 class GeolocationContentSettingsMap;
@@ -109,11 +111,11 @@ class TestingProfile : public Profile {
   // ownership of |theme_provider|.
   void UseThemeProvider(BrowserThemeProvider* theme_provider);
 
-  // Creates an ExtensionsService initialized with the testing profile and
+  // Creates an ExtensionService initialized with the testing profile and
   // returns it. The profile keeps its own copy of a scoped_refptr to the
-  // ExtensionsService to make sure that is still alive to be notified when the
+  // ExtensionService to make sure that is still alive to be notified when the
   // profile is destroyed.
-  scoped_refptr<ExtensionsService> CreateExtensionsService(
+  scoped_refptr<ExtensionService> CreateExtensionService(
       const CommandLine* command_line,
       const FilePath& install_directory);
 
@@ -140,7 +142,7 @@ class TestingProfile : public Profile {
   virtual ChromeAppCacheService* GetAppCacheService() { return NULL; }
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker();
   virtual VisitedLinkMaster* GetVisitedLinkMaster() { return NULL; }
-  virtual ExtensionsService* GetExtensionsService();
+  virtual ExtensionService* GetExtensionService();
   virtual UserScriptMaster* GetUserScriptMaster() { return NULL; }
   virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() {
     return NULL;
@@ -198,7 +200,9 @@ class TestingProfile : public Profile {
   }
   virtual DownloadManager* GetDownloadManager() { return NULL; }
   virtual PersonalDataManager* GetPersonalDataManager() { return NULL; }
-  virtual BrowserFileSystemContext* GetFileSystemContext() { return NULL; }
+  virtual fileapi::SandboxedFileSystemContext* GetFileSystemContext() {
+    return NULL;
+  }
   virtual BrowserSignin* GetBrowserSignin() { return NULL; }
   virtual bool HasCreatedDownloadManager() const { return false; }
   virtual void InitThemes();
@@ -292,6 +296,10 @@ class TestingProfile : public Profile {
       GetChromeOSProxyConfigServiceImpl() {
     return NULL;
   }
+  virtual void SetupChromeOSEnterpriseExtensionObserver() {
+  }
+  virtual void ChangeApplicationLocale(const std::string&, bool) {
+  }
 #endif  // defined(OS_CHROMEOS)
 
   virtual PrefProxyConfigTracker* GetProxyConfigTracker();
@@ -311,6 +319,7 @@ class TestingProfile : public Profile {
   virtual ExtensionInfoMap* GetExtensionInfoMap() { return NULL; }
   virtual PromoCounter* GetInstantPromoCounter() { return NULL; }
   virtual policy::ProfilePolicyContext* GetPolicyContext() { return NULL; }
+  virtual PrerenderManager* GetPrerenderManager() { return NULL; }
 
  protected:
   base::Time start_time_;
@@ -326,7 +335,7 @@ class TestingProfile : public Profile {
   // from the destructor.
   void DestroyWebDataService();
 
-  // Creates a TestingPrefService and associates it with the TestingProfile
+  // Creates a TestingPrefService and associates it with the TestingProfile.
   void CreateTestingPrefService();
 
   // The favicon service. Only created if CreateFaviconService is invoked.
@@ -402,9 +411,16 @@ class TestingProfile : public Profile {
   FilePath last_selected_directory_;
   scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
 
-  // For properly notifying the ExtensionsService when the profile
+  // Extension pref store, created for use by |extension_prefs_|.
+  scoped_ptr<ExtensionPrefStore> extension_pref_store_;
+
+  // The Extension Preferences. Only created if CreateExtensionService is
+  // invoked.
+  scoped_ptr<ExtensionPrefs> extension_prefs_;
+
+  // For properly notifying the ExtensionService when the profile
   // is disposed.
-  scoped_refptr<ExtensionsService> extensions_service_;
+  scoped_refptr<ExtensionService> extensions_service_;
 
   // The proxy prefs tracker.
   scoped_refptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;

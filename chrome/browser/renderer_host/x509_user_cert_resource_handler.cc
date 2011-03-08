@@ -1,12 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/x509_user_cert_resource_handler.h"
 
 #include "base/string_util.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_types.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
@@ -22,7 +20,7 @@
 #include "net/url_request/url_request_status.h"
 
 X509UserCertResourceHandler::X509UserCertResourceHandler(
-    ResourceDispatcherHost* host, URLRequest* request,
+    ResourceDispatcherHost* host, net::URLRequest* request,
     int render_process_host_id, int render_view_id)
     : host_(host),
       request_(request),
@@ -95,9 +93,9 @@ bool X509UserCertResourceHandler::OnReadCompleted(int request_id,
 
 bool X509UserCertResourceHandler::OnResponseCompleted(
     int request_id,
-    const URLRequestStatus& urs,
+    const net::URLRequestStatus& urs,
     const std::string& sec_info) {
-  if (urs.status() != URLRequestStatus::SUCCESS)
+  if (urs.status() != net::URLRequestStatus::SUCCESS)
     return false;
 
   // TODO(gauravsh): Verify that 'request_id' was actually a keygen form post

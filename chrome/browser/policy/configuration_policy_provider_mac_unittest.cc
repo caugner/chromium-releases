@@ -227,11 +227,17 @@ INSTANTIATE_TEST_CASE_P(
             kPolicyDefaultSearchProviderSuggestURL,
             key::kDefaultSearchProviderSuggestURL),
         PolicyTestParams::ForStringPolicy(
+            kPolicyDefaultSearchProviderInstantURL,
+            key::kDefaultSearchProviderInstantURL),
+        PolicyTestParams::ForStringPolicy(
             kPolicyDefaultSearchProviderIconURL,
             key::kDefaultSearchProviderIconURL),
         PolicyTestParams::ForStringPolicy(
             kPolicyDefaultSearchProviderEncodings,
             key::kDefaultSearchProviderEncodings),
+        PolicyTestParams::ForStringPolicy(
+            kPolicyProxyMode,
+            key::kProxyMode),
         PolicyTestParams::ForIntegerPolicy(
             kPolicyProxyServerMode,
             key::kProxyServerMode),
@@ -288,6 +294,9 @@ INSTANTIATE_TEST_CASE_P(
             key::kShowHomeButton),
         PolicyTestParams::ForBooleanPolicy(
             kPolicyPrintingEnabled,
-            key::kPrintingEnabled)));
+            key::kPrintingEnabled),
+        PolicyTestParams::ForIntegerPolicy(
+            kPolicyPolicyRefreshRate,
+            key::kPolicyRefreshRate)));
 
 }  // namespace policy

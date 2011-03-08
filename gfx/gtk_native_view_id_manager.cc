@@ -41,12 +41,17 @@ GtkNativeViewManager::GtkNativeViewManager() {
 GtkNativeViewManager::~GtkNativeViewManager() {
 }
 
+// static
+GtkNativeViewManager* GtkNativeViewManager::GetInstance() {
+  return Singleton<GtkNativeViewManager>::get();
+}
+
 gfx::NativeViewId GtkNativeViewManager::GetIdForWidget(gfx::NativeView widget) {
   // This is just for unit tests:
   if (!widget)
     return 0;
 
-  AutoLock locked(lock_);
+  base::AutoLock locked(lock_);
 
   std::map<gfx::NativeView, gfx::NativeViewId>::const_iterator i =
     native_view_to_id_.find(widget);
@@ -78,7 +83,7 @@ gfx::NativeViewId GtkNativeViewManager::GetIdForWidget(gfx::NativeView widget) {
 }
 
 bool GtkNativeViewManager::GetXIDForId(XID* output, gfx::NativeViewId id) {
-  AutoLock locked(lock_);
+  base::AutoLock locked(lock_);
 
   std::map<gfx::NativeViewId, NativeViewInfo>::const_iterator i =
     id_to_info_.find(id);
@@ -92,7 +97,7 @@ bool GtkNativeViewManager::GetXIDForId(XID* output, gfx::NativeViewId id) {
 
 bool GtkNativeViewManager::GetPermanentXIDForId(XID* output,
                                                 gfx::NativeViewId id) {
-  AutoLock locked(lock_);
+  base::AutoLock locked(lock_);
 
   std::map<gfx::NativeViewId, NativeViewInfo>::iterator i =
       id_to_info_.find(id);
@@ -125,7 +130,7 @@ bool GtkNativeViewManager::GetPermanentXIDForId(XID* output,
 }
 
 void GtkNativeViewManager::ReleasePermanentXID(XID xid) {
-  AutoLock locked(lock_);
+  base::AutoLock locked(lock_);
 
   std::map<XID, PermanentXIDInfo>::iterator i =
     perm_xid_to_info_.find(xid);
@@ -165,7 +170,7 @@ gfx::NativeViewId GtkNativeViewManager::GetWidgetId(gfx::NativeView widget) {
 }
 
 void GtkNativeViewManager::OnRealize(gfx::NativeView widget) {
-  AutoLock locked(lock_);
+  base::AutoLock locked(lock_);
 
   const gfx::NativeViewId id = GetWidgetId(widget);
   std::map<gfx::NativeViewId, NativeViewInfo>::iterator i =
@@ -178,8 +183,8 @@ void GtkNativeViewManager::OnRealize(gfx::NativeView widget) {
 }
 
 void GtkNativeViewManager::OnUnrealize(gfx::NativeView widget) {
-  AutoLock unrealize_locked(unrealize_lock_);
-  AutoLock locked(lock_);
+  base::AutoLock unrealize_locked(unrealize_lock_);
+  base::AutoLock locked(lock_);
 
   const gfx::NativeViewId id = GetWidgetId(widget);
   std::map<gfx::NativeViewId, NativeViewInfo>::iterator i =
@@ -189,7 +194,7 @@ void GtkNativeViewManager::OnUnrealize(gfx::NativeView widget) {
 }
 
 void GtkNativeViewManager::OnDestroy(gfx::NativeView widget) {
-  AutoLock locked(lock_);
+  base::AutoLock locked(lock_);
 
   std::map<gfx::NativeView, gfx::NativeViewId>::iterator i =
     native_view_to_id_.find(widget);

@@ -67,6 +67,7 @@ be available for now. -->
 
     <output filename="chromium_strings_am.pak" type="data_package" lang="am" />
     <output filename="chromium_strings_ar.pak" type="data_package" lang="ar" />
+    <output filename="chromium_strings_ast.pak" type="data_package" lang="ast" />
     <output filename="chromium_strings_bg.pak" type="data_package" lang="bg" />
     <output filename="chromium_strings_bn.pak" type="data_package" lang="bn" />
     <output filename="chromium_strings_ca.pak" type="data_package" lang="ca" />
@@ -79,10 +80,12 @@ be available for now. -->
     <output filename="chromium_strings_es.pak" type="data_package" lang="es" />
     <output filename="chromium_strings_es-419.pak" type="data_package" lang="es-419" />
     <output filename="chromium_strings_et.pak" type="data_package" lang="et" />
+    <output filename="chromium_strings_eu.pak" type="data_package" lang="eu" />
     <output filename="chromium_strings_fa.pak" type="data_package" lang="fa" />
     <output filename="chromium_strings_fi.pak" type="data_package" lang="fi" />
     <output filename="chromium_strings_fil.pak" type="data_package" lang="fil" />
     <output filename="chromium_strings_fr.pak" type="data_package" lang="fr" />
+    <output filename="chromium_strings_gl.pak" type="data_package" lang="gl" />
     <output filename="chromium_strings_gu.pak" type="data_package" lang="gu" />
     <output filename="chromium_strings_he.pak" type="data_package" lang="he" />
     <output filename="chromium_strings_hi.pak" type="data_package" lang="hi" />
@@ -114,13 +117,32 @@ be available for now. -->
     <output filename="chromium_strings_te.pak" type="data_package" lang="te" />
     <output filename="chromium_strings_th.pak" type="data_package" lang="th" />
     <output filename="chromium_strings_tr.pak" type="data_package" lang="tr" />
+    <output filename="chromium_strings_ug.pak" type="data_package" lang="ug" />
     <output filename="chromium_strings_uk.pak" type="data_package" lang="uk" />
     <output filename="chromium_strings_vi.pak" type="data_package" lang="vi" />
     <output filename="chromium_strings_zh-CN.pak" type="data_package" lang="zh-CN" />
     <output filename="chromium_strings_zh-TW.pak" type="data_package" lang="zh-TW" />
   </outputs>
   <translations>
-    <!-- No translations available. -->
+    <file path="../third_party/launchpad_translations/chromium_strings_ast.xtb" lang="ast" />
+    <file path="../third_party/launchpad_translations/chromium_strings_ca.xtb" lang="ca" />
+    <file path="../third_party/launchpad_translations/chromium_strings_cs.xtb" lang="cs" />
+    <file path="../third_party/launchpad_translations/chromium_strings_da.xtb" lang="da" />
+    <file path="../third_party/launchpad_translations/chromium_strings_de.xtb" lang="de" />
+    <file path="../third_party/launchpad_translations/chromium_strings_es.xtb" lang="es" />
+    <file path="../third_party/launchpad_translations/chromium_strings_eu.xtb" lang="eu" />
+    <file path="../third_party/launchpad_translations/chromium_strings_fi.xtb" lang="fi" />
+    <file path="../third_party/launchpad_translations/chromium_strings_fr.xtb" lang="fr" />
+    <file path="../third_party/launchpad_translations/chromium_strings_gl.xtb" lang="gl" />
+    <file path="../third_party/launchpad_translations/chromium_strings_he.xtb" lang="he" />
+    <file path="../third_party/launchpad_translations/chromium_strings_id.xtb" lang="id" />
+    <file path="../third_party/launchpad_translations/chromium_strings_lt.xtb" lang="lt" />
+    <file path="../third_party/launchpad_translations/chromium_strings_nl.xtb" lang="nl" />
+    <file path="../third_party/launchpad_translations/chromium_strings_no.xtb" lang="no" />
+    <file path="../third_party/launchpad_translations/chromium_strings_pt-BR.xtb" lang="pt-BR" />
+    <file path="../third_party/launchpad_translations/chromium_strings_ru.xtb" lang="ru" />
+    <file path="../third_party/launchpad_translations/chromium_strings_sl.xtb" lang="sl" />
+    <file path="../third_party/launchpad_translations/chromium_strings_zh-CN.xtb" lang="zh-CN" />
   </translations>
   <release seq="1" allow_pseudo="false">
     <messages fallback_to_english="true">
@@ -190,11 +212,16 @@ be available for now. -->
         The Chromium Authors
       </message>
       <message name="IDS_ABOUT_VERSION_COPYRIGHT" desc="Copyright information on the about pages">
-        Copyright © 2006-2010 The Chromium Authors. All Rights Reserved.
+        Copyright © 2006-2011 The Chromium Authors. All Rights Reserved.
       </message>
       <message name="IDS_ABOUT_VERSION_LICENSE" desc="The label below the copyright message, containing the URLs.">
         Chromium is made possible by the <ph name="BEGIN_LINK_CHROMIUM">BEGIN_LINK_CHR</ph>Chromium<ph name="END_LINK_CHROMIUM">END_LINK_CHR</ph> open source project and other <ph name="BEGIN_LINK_OSS">BEGIN_LINK_OSS</ph>open source software<ph name="END_LINK_OSS">END_LINK_OSS</ph>.
       </message>
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_ABOUT_CROS_VERSION_LICENSE" desc="Additional text displayed beneath the Chromium open source URLs for Chromium OS.">
+          Chromium OS is made possible by additional <ph name="BEGIN_LINK_CROS_OSS">BEGIN_LINK_CROS_OSS</ph>open source software<ph name="END_LINK_CROS_OSS">END_LINK_CROS_OSS</ph>.
+        </message>
+      </if>
       <message name="IDS_ABOUT_TERMS_OF_SERVICE" desc="The terms of service label in the About box.">
         Not used in Chromium. Placeholder to keep resource maps in synch.
       </message>
@@ -243,23 +270,11 @@ be available for now. -->
       <message name="IDS_FIRSTRUN_DLG_TITLE" desc="Dialog title for first-run dialog">
         Welcome to Chromium
       </message>
-      <message name="IDS_FIRSTRUN_DLG_TEXT" desc="Explains what the first-run dialog does">
-        Chromium is ready to complete your installation.
-      </message>
-      <message name="IDS_FIRSTRUN_DLG_DETAIL" desc="Text for detailed explanation of actions">
-        Chromium will do these tasks:
-      </message>
       <message name="IDS_FIRSTRUN_DLG_OK" desc="Text for OK button on first-run dialog">
         Start Chromium
       </message>
-      <message name="IDS_FIRSTRUN_DLG_ACTION2" desc="Second action item on first-run dialog">
-        Add Chromium shortcuts to your desktop, quick launch bar, and Start menu
-      </message>
       <message name="IDS_FR_CUSTOMIZE_DEFAULT_BROWSER" desc="Default browser checkbox label">
         Make Chromium the default browser
-      </message>
-      <message name="IDS_FR_CUSTOMIZE_SHORTCUTS" desc="Create shortcuts preface text">
-        Create Chromium shortcuts in these locations:
       </message>
       <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
                desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
@@ -298,14 +313,12 @@ be available for now. -->
           Please sign out of Chromium OS and sign in again for this change to take effect.
         </message>
       </if>
+      <!--TODO(kmadhusu): Remove "IDS_OPTIONS_RESET_MESSAGE" after platform-specific dialogs are removed.-->
       <message name="IDS_OPTIONS_RESET_MESSAGE" desc="The message shown when the user presses the 'Reset Chrome options' button">
         When you reset Chromium options any changes you've made will be reverted to the default settings. Do you want to reset Chromium options?
       </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
         Chromium cannot read and write to its data directory:\n\n<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph>
-      </message>
-      <message name="IDS_OPTIONS_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging">
-        Help make Chromium better by automatically sending usage statistics and crash reports to Google
       </message>
       <message name="IDS_EULA_CHECKBOX_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging">
 	<!--We use /n here to separate lines manually because NativeCheckboxGtk currently does not support multi-line. -->
@@ -329,9 +342,6 @@ be available for now. -->
       </message>
       <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Info bar message to save a password">
         Do you want Chromium to save your password?
-      </message>
-      <message name="IDS_IMPORT_PROGRESS_STATUS_CANCEL_CONFIRM" desc="Import cancellation confirmation">
-        If you cancel now, not all items will be imported. You can import again later from the Chromium menu.
       </message>
       <message name="IDS_FR_BUBBLE_QUESTION" desc="Main text for the bubble">
         Chromium uses your default search engine, which is currently set to <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>. Do you want to keep your default search engine?
@@ -396,9 +406,22 @@ be available for now. -->
       <message name="IDS_INSTALL_DIR_IN_USE" desc="Error during install if Chromium version is missing from registry but the installation directory exists and can not be deleted.">
         Chromium installation directory seems to be in use. Please reboot your computer and try again.
       </message>
+      <message name="IDS_INSTALL_NON_MULTI_INSTALLATION_EXISTS" desc="Error during install if a single-install Chromium or Chromium Frame is present, thereby preventing the installation of a multi-install Chromium or Chromium Frame.">
+        A conflicting installation of Chromium or Chromium Frame was found on the system. Please uninstall it and try again.
+      </message>
+      <message name="IDS_INSTALL_MULTI_INSTALLATION_EXISTS" desc="Error during install if a multi-install Chromium or Chromium Frame is present, thereby preventing the installation of a single-install Chromium or Chromium Frame.">
+        A conflicting installation of Chromium or Chromium Frame was found on the system. Please uninstall it and try again.
+      </message>
+      <message name="IDS_INSTALL_CONFLICTING_CHANNEL_EXISTS" desc="Error during install if a version of Chromium on a different update channel exists when installing Chromium Frame.">
+        A conflicting installation of Chromium was found on the system. Please uninstall it and try again.
+      </message>
       <!-- Options Dialog -->
+      <!--TODO(kmadhusu): Remove "IDS_OPTIONS_DISABLE_SERVICES" after platform-specific dialogs are removed.-->
       <message name="IDS_OPTIONS_DISABLE_SERVICES" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
         Chromium may use web services to improve your browsing experience. You may optionally disable these services.
+      </message>
+      <message name="IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
+        Chromium may use web services to improve your browsing experience.
       </message>
       <message name="IDS_IMPORT_BOOKMARKS" desc="Explanatory text for the importing progress dialog when importing a bookmarks.html file from the bookmark manager">
         Chromium is now importing Favorites/Bookmarks.
@@ -489,12 +512,6 @@ be available for now. -->
         </message>
         <message name="IDS_SHORT_UTILITY_APP_NAME" desc="The utility application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Utility, not Google Chrome Utility.">
           Chromium Utility
-        </message>
-        <message name="IDS_PROFILEIMPORTER_APP_NAME" desc="The profile importer application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Profile Importer.">
-          Chromium Profile Importer
-        </message>
-        <message name="IDS_SHORT_PROFILEIMPORTER_APP_NAME" desc="The profile importer application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Profile Importer, not Google Chrome Profile Importer.">
-          Chromium Profile Importer
         </message>
       </if>
     </messages>

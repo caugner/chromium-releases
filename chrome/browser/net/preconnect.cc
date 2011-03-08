@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "net/http/http_network_session.h"
@@ -56,7 +56,7 @@ void Preconnect::Connect(const GURL& url, int count) {
   UMA_HISTOGRAM_ENUMERATION("Net.PreconnectMotivation", motivation_,
                             UrlInfo::MAX_MOTIVATED);
 
-  URLRequestContext* context = getter->GetURLRequestContext();
+  net::URLRequestContext* context = getter->GetURLRequestContext();
   net::HttpTransactionFactory* factory = context->http_transaction_factory();
   net::HttpNetworkSession* session = factory->GetSession();
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,13 @@
 #include <string>
 #include <vector>
 
-#include "app/l10n_util.h"
-#include "app/message_box_flags.h"
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/lazy_instance.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -31,7 +28,9 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/database_messages.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/file_system/file_system_dispatcher.h"
 #include "chrome/common/file_system/webfilesystem_callback_dispatcher.h"
 #include "chrome/common/json_value_serializer.h"
@@ -58,12 +57,13 @@
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
+#include "chrome/renderer/extensions/extension_resource_request_policy.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/external_host_bindings.h"
 #include "chrome/renderer/external_popup_menu.h"
-#include "chrome/renderer/geolocation_dispatcher_old.h"
+#include "chrome/renderer/geolocation_dispatcher.h"
 #include "chrome/renderer/ggl/ggl.h"
+#include "chrome/renderer/load_progress_tracker.h"
 #include "chrome/renderer/localized_error.h"
 #include "chrome/renderer/media/audio_renderer_impl.h"
 #include "chrome/renderer/media/ipc_video_decoder.h"
@@ -76,6 +76,7 @@
 #include "chrome/renderer/print_web_view_helper.h"
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
+#include "chrome/renderer/render_view_observer.h"
 #include "chrome/renderer/render_view_visitor.h"
 #include "chrome/renderer/render_widget_fullscreen.h"
 #include "chrome/renderer/render_widget_fullscreen_pepper.h"
@@ -101,59 +102,66 @@
 #include "gfx/skbitmap_operations.h"
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
+#include "media/base/filter_collection.h"
 #include "media/base/media_switches.h"
+#include "media/base/message_loop_factory_impl.h"
 #include "net/base/data_url.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_util.h"
+#include "ppapi/c/private/ppb_flash.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/image_operations.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityCache.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDevToolsAgent.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileChooserParams.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystemCallbacks.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFindOptions.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFormControlElement.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFormElement.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebImage.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputElement.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebNode.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebNodeList.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPageSerializer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPlugin.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPluginContainer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPluginDocument.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRange.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSearchableFormData.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSettings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebStorageNamespace.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebWindowFeatures.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityCache.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileChooserParams.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFormControlElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFormElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebImage.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNodeList.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRange.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSearchableFormData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSettings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
 #include "third_party/cld/encodings/compact_lang_det/win/cld_unicodetext.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/message_box_flags.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "v8/include/v8.h"
+#include "v8/include/v8-testing.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/alt_error_page_resource_fetcher.h"
 #include "webkit/glue/context_menu.h"
@@ -163,23 +171,21 @@
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/image_decoder.h"
 #include "webkit/glue/image_resource_fetcher.h"
-#include "webkit/glue/media/buffered_data_source.h"
-#include "webkit/glue/media/simple_data_source.h"
 #include "webkit/glue/media/video_renderer_impl.h"
 #include "webkit/glue/password_form_dom_manager.h"
-#include "webkit/glue/plugins/default_plugin_shared.h"
-#include "webkit/glue/plugins/pepper_webplugin_impl.h"
-#include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/glue/plugins/webplugin_delegate.h"
-#include "webkit/glue/plugins/webplugin_delegate_impl.h"
-#include "webkit/glue/plugins/webplugin_impl.h"
-#include "webkit/glue/plugins/webview_plugin.h"
 #include "webkit/glue/resource_fetcher.h"
 #include "webkit/glue/site_isolation_metrics.h"
 #include "webkit/glue/webaccessibility.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webmediaplayer_impl.h"
+#include "webkit/plugins/npapi/default_plugin_shared.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/npapi/webplugin_delegate.h"
+#include "webkit/plugins/npapi/webplugin_delegate_impl.h"
+#include "webkit/plugins/npapi/webplugin_impl.h"
+#include "webkit/plugins/npapi/webview_plugin.h"
+#include "webkit/plugins/ppapi/ppapi_webplugin_impl.h"
 
 #if defined(OS_WIN)
 // TODO(port): these files are currently Windows only because they concern:
@@ -187,7 +193,7 @@
 #include "gfx/native_theme_win.h"
 #elif defined(USE_X11)
 #include "gfx/native_theme_linux.h"
-#include "third_party/WebKit/WebKit/chromium/public/linux/WebRenderTheme.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebRenderTheme.h"
 #elif defined(OS_MACOSX)
 #include "skia/ext/skia_utils_mac.h"
 #endif
@@ -276,6 +282,7 @@ using webkit_glue::WebAccessibility;
 //-----------------------------------------------------------------------------
 
 typedef std::map<WebKit::WebView*, RenderView*> ViewMap;
+static base::LazyInstance<ViewMap> g_view_map(base::LINKER_INITIALIZED);
 
 // define to write the time necessary for thumbnail/DOM text retrieval,
 // respectively, into the system debug log
@@ -381,15 +388,17 @@ static bool IsWhitelistedForContentSettings(WebFrame* frame) {
 // we would enter an extension app's extent from a non-app.  We avoid swapping
 // processes to exit an app for now, since we do not yet restore context (such
 // as window.opener) if the window navigates back.
-static bool CrossesIntoExtensionExtent(WebFrame* frame, const GURL& new_url) {
+static bool CrossesIntoExtensionExtent(const ExtensionSet* extensions,
+                                       WebFrame* frame,
+                                       const GURL& new_url) {
   // If the URL is still empty, this is a window.open navigation. Check the
   // opener's URL.
   GURL old_url(frame->url());
   if (old_url.is_empty() && frame->opener())
     old_url = frame->opener()->url();
 
-  return !ExtensionRendererInfo::InSameExtent(old_url, new_url) &&
-         !ExtensionRendererInfo::GetByURL(old_url);
+  return !extensions->InSameExtent(old_url, new_url) &&
+         !extensions->GetByURL(old_url);
 }
 
 // Returns the ISO 639_1 language code of the specified |text|, or 'unknown'
@@ -468,6 +477,39 @@ static bool WebAccessibilityNotificationToViewHostMsg(
   return true;
 }
 
+// Conversion for the incoming value.  The map isn't perfect; v8 has Uint32,
+// and int64 which don't fit as Value::TYPE_INTEGER, so we let them fall into
+// being TYPE_REALs.  Dates are converted to a string (which can then be parsed
+// into a base::Time), as are regexps.  Arrays are converted into lists,
+// recursively.  We don't deal with binary objects or functions - they become
+// null values.
+static Value* ConvertV8Value(const v8::Handle<v8::Value>& v8value) {
+  if (v8value->IsBoolean()) {
+    return Value::CreateBooleanValue(v8value->BooleanValue());
+  } else if (v8value->IsInt32()) {
+    return Value::CreateIntegerValue(v8value->Int32Value());
+  } else if (v8value->IsNumber()) {
+    return Value::CreateRealValue(v8value->NumberValue());
+  } else if (v8value->IsString()) {
+    return Value::CreateStringValue(*v8::String::Utf8Value(v8value));
+  } else if (v8value->IsDate()) {
+    v8::Date* date = v8::Date::Cast(*v8value);
+    return Value::CreateRealValue(date->NumberValue() / 1000.0);
+  } else if (v8value->IsRegExp()) {
+    return Value::CreateStringValue(
+        *v8::String::Utf8Value(v8value->ToString()));
+  } else if (v8value->IsArray()) {
+    v8::Array* array = v8::Array::Cast(*v8value);
+    uint32_t length = array->Length();
+    scoped_ptr<ListValue> list(new ListValue);
+    for (uint32_t i = 0 ; i < length ; ++i) {
+      list->Set(i, ConvertV8Value(array->Get(i)));
+    }
+    return list.release();
+  }
+  return Value::CreateNullValue();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 int32 RenderView::next_page_id_ = 1;
@@ -483,10 +525,16 @@ struct RenderView::PendingFileChooser {
 };
 
 RenderView::RenderView(RenderThreadBase* render_thread,
-                       const WebPreferences& webkit_preferences,
-                       int64 session_storage_namespace_id)
+                       gfx::NativeViewId parent_hwnd,
+                       int32 opener_id,
+                       const RendererPreferences& renderer_prefs,
+                       const WebPreferences& webkit_prefs,
+                       SharedRenderViewCounter* counter,
+                       int32 routing_id,
+                       int64 session_storage_namespace_id,
+                       const string16& frame_name)
     : RenderWidget(render_thread, WebKit::WebPopupTypeNone),
-      webkit_preferences_(webkit_preferences),
+      webkit_preferences_(webkit_prefs),
       send_content_state_immediately_(false),
       enabled_bindings_(0),
       send_preferred_size_changes_(false),
@@ -511,30 +559,23 @@ RenderView::RenderView(RenderThreadBase* render_thread,
       browser_window_id_(-1),
       ALLOW_THIS_IN_INITIALIZER_LIST(pepper_delegate_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(page_info_method_factory_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(autofill_method_factory_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(accessibility_method_factory_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(translate_helper_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(cookie_jar_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          notification_provider_(new NotificationProvider(this))),
+      devtools_client_(NULL),
+      geolocation_dispatcher_(NULL),
+      speech_input_dispatcher_(NULL),
+      device_orientation_dispatcher_(NULL),
       accessibility_ack_pending_(false),
       pending_app_icon_requests_(0),
-      session_storage_namespace_id_(session_storage_namespace_id),
-      decrement_shared_popup_at_destruction_(false) {
+      session_storage_namespace_id_(session_storage_namespace_id) {
 #if defined(OS_MACOSX)
   // On Mac, the select popups are rendered by the browser.
   // Note that we don't do this in RenderMain otherwise this would not be called
   // in single-process mode.
   WebKit::WebView::setUseExternalPopupMenus(true);
 #endif
-  password_autocomplete_manager_.reset(new PasswordAutocompleteManager(this));
-  autofill_helper_.reset(new AutoFillHelper(this));
-  page_click_tracker_.reset(new PageClickTracker(this));
-  // Note that the order of insertion of the listeners is important.
-  // The password_autocomplete_manager_ takes the first shot at processing the
-  // notification and can stop the propagation.
-  page_click_tracker_->AddListener(password_autocomplete_manager_.get());
-  page_click_tracker_->AddListener(autofill_helper_.get());
+
   ClearBlockedContentSettings();
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableClientSidePhishingDetection)) {
@@ -545,6 +586,66 @@ RenderView::RenderView(RenderThreadBase* render_thread,
       phishing_delegate_->SetPhishingScorer(thread->phishing_scorer());
     }
   }
+
+  routing_id_ = routing_id;
+  if (opener_id != MSG_ROUTING_NONE)
+    opener_id_ = opener_id;
+
+  if (counter) {
+    shared_popup_counter_ = counter;
+    shared_popup_counter_->data++;
+    decrement_shared_popup_at_destruction_ = true;
+  } else {
+    shared_popup_counter_ = new SharedRenderViewCounter(0);
+    decrement_shared_popup_at_destruction_ = false;
+  }
+
+  notification_provider_ = new NotificationProvider(this);
+
+  devtools_agent_ = new DevToolsAgent(this);
+  PasswordAutocompleteManager* password_autocomplete_manager =
+      new PasswordAutocompleteManager(this);
+  AutoFillHelper* autofill_helper = new AutoFillHelper(
+      this, password_autocomplete_manager);
+
+  webwidget_ = WebView::create(this, devtools_agent_, autofill_helper);
+  g_view_map.Get().insert(std::make_pair(webview(), this));
+  webkit_preferences_.Apply(webview());
+  webview()->initializeMainFrame(this);
+  if (!frame_name.empty())
+    webview()->mainFrame()->setName(frame_name);
+
+  OnSetRendererPrefs(renderer_prefs);
+
+  render_thread_->AddRoute(routing_id_, this);
+  // Take a reference on behalf of the RenderThread.  This will be balanced
+  // when we receive ViewMsg_Close.
+  AddRef();
+
+  // If this is a popup, we must wait for the CreatingNew_ACK message before
+  // completing initialization.  Otherwise, we can finish it now.
+  if (opener_id == MSG_ROUTING_NONE) {
+    did_show_ = true;
+    CompleteInit(parent_hwnd);
+  }
+
+  host_window_ = parent_hwnd;
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kDomAutomationController))
+    enabled_bindings_ |= BindingsPolicy::DOM_AUTOMATION;
+  if (command_line.HasSwitch(switches::kEnableAccessibility))
+    WebAccessibilityCache::enableAccessibility();
+
+  audio_message_filter_ = new AudioMessageFilter(routing_id_);
+  render_thread_->AddFilter(audio_message_filter_);
+
+  PageClickTracker* page_click_tracker = new PageClickTracker(this);
+  // Note that the order of insertion of the listeners is important.
+  // The password_autocomplete_manager takes the first shot at processing the
+  // notification and can stop the propagation.
+  page_click_tracker->AddListener(password_autocomplete_manager);
+  page_click_tracker->AddListener(autofill_helper);
 }
 
 RenderView::~RenderView() {
@@ -582,15 +683,18 @@ RenderView::~RenderView() {
 
 #ifndef NDEBUG
   // Make sure we are no longer referenced by the ViewMap.
-  ViewMap* views = Singleton<ViewMap>::get();
+  ViewMap* views = g_view_map.Pointer();
   for (ViewMap::iterator it = views->begin(); it != views->end(); ++it)
     DCHECK_NE(this, it->second) << "Failed to call Close?";
 #endif
+
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, set_render_view(NULL));
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, OnDestruct());
 }
 
 /*static*/
 void RenderView::ForEach(RenderViewVisitor* visitor) {
-  ViewMap* views = Singleton<ViewMap>::get();
+  ViewMap* views = g_view_map.Pointer();
   for (ViewMap::iterator it = views->begin(); it != views->end(); ++it) {
     if (!visitor->Visit(it->second))
       return;
@@ -599,7 +703,7 @@ void RenderView::ForEach(RenderViewVisitor* visitor) {
 
 /*static*/
 RenderView* RenderView::FromWebView(WebView* webview) {
-  ViewMap* views = Singleton<ViewMap>::get();
+  ViewMap* views = g_view_map.Pointer();
   ViewMap::iterator it = views->find(webview);
   return it == views->end() ? NULL : it->second;
 }
@@ -616,15 +720,16 @@ RenderView* RenderView::Create(
     int64 session_storage_namespace_id,
     const string16& frame_name) {
   DCHECK(routing_id != MSG_ROUTING_NONE);
-  scoped_refptr<RenderView> view(new RenderView(render_thread, webkit_prefs,
-                                                session_storage_namespace_id));
-  view->Init(parent_hwnd,
-             opener_id,
-             renderer_prefs,
-             counter,
-             routing_id,
-             frame_name);  // adds reference
-  return view;
+  return new RenderView(
+      render_thread,
+      parent_hwnd,
+      opener_id,
+      renderer_prefs,
+      webkit_prefs,
+      counter,
+      routing_id,
+      session_storage_namespace_id,
+      frame_name);  // adds reference
 }
 
 // static
@@ -634,6 +739,15 @@ void RenderView::SetNextPageID(int32 next_page_id) {
   DCHECK_EQ(next_page_id_, 1);
   DCHECK(next_page_id >= next_page_id_);
   next_page_id_ = next_page_id;
+}
+
+void RenderView::AddObserver(RenderViewObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void RenderView::RemoveObserver(RenderViewObserver* observer) {
+  observer->set_render_view(NULL);
+  observers_.RemoveObserver(observer);
 }
 
 bool RenderView::RendererAccessibilityNotification::ShouldIncludeChildren() {
@@ -696,6 +810,15 @@ bool RenderView::InstallWebApplicationUsingDefinitionFile(WebFrame* frame,
       pending_app_info_->manifest_url, webview()->mainFrame(),
       NewCallback(this, &RenderView::DidDownloadApplicationDefinition)));
   return true;
+}
+
+void RenderView::SetReportLoadProgressEnabled(bool enabled) {
+  if (!enabled) {
+    load_progress_tracker_.reset(NULL);
+    return;
+  }
+  if (load_progress_tracker_ == NULL)
+    load_progress_tracker_.reset(new LoadProgressTracker(this));
 }
 
 void RenderView::DidDownloadApplicationDefinition(
@@ -793,21 +916,21 @@ void RenderView::PluginCrashed(const FilePath& plugin_path) {
 
 WebPlugin* RenderView::CreatePluginNoCheck(WebFrame* frame,
                                            const WebPluginParams& params) {
-  WebPluginInfo info;
+  webkit::npapi::WebPluginInfo info;
   bool found;
   ContentSetting setting;
   std::string mime_type;
   Send(new ViewHostMsg_GetPluginInfo(
-      params.url, frame->top()->url(), params.mimeType.utf8(), &found,
-      &info, &setting, &mime_type));
-  if (!found || !info.enabled)
+      routing_id_, params.url, frame->top()->url(), params.mimeType.utf8(),
+      &found, &info, &setting, &mime_type));
+  if (!found || !webkit::npapi::IsPluginEnabled(info))
     return NULL;
-  scoped_refptr<pepper::PluginModule> pepper_module(
-      PepperPluginRegistry::GetInstance()->GetModule(info.path));
+
+  scoped_refptr<webkit::ppapi::PluginModule> pepper_module(
+      pepper_delegate_.CreatePepperPlugin(info.path));
   if (pepper_module)
     return CreatePepperPlugin(frame, params, info.path, pepper_module.get());
-  else
-    return CreateNPAPIPlugin(frame, params, info.path, mime_type);
+  return CreateNPAPIPlugin(frame, params, info.path, mime_type);
 }
 
 void RenderView::RegisterPluginDelegate(WebPluginDelegateProxy* delegate) {
@@ -830,92 +953,26 @@ void RenderView::UnregisterPluginDelegate(WebPluginDelegateProxy* delegate) {
   plugin_delegates_.erase(delegate);
 }
 
-void RenderView::Init(gfx::NativeViewId parent_hwnd,
-                      int32 opener_id,
-                      const RendererPreferences& renderer_prefs,
-                      SharedRenderViewCounter* counter,
-                      int32 routing_id,
-                      const string16& frame_name) {
-  DCHECK(!webview());
-
-  if (opener_id != MSG_ROUTING_NONE)
-    opener_id_ = opener_id;
-
-  if (counter) {
-    shared_popup_counter_ = counter;
-    shared_popup_counter_->data++;
-    decrement_shared_popup_at_destruction_ = true;
-  } else {
-    shared_popup_counter_ = new SharedRenderViewCounter(0);
-    decrement_shared_popup_at_destruction_ = false;
-  }
-
-  devtools_agent_.reset(new DevToolsAgent(routing_id, this));
-
-  webwidget_ = WebView::create(this, devtools_agent_.get());
-  Singleton<ViewMap>::get()->insert(std::make_pair(webview(), this));
-  webkit_preferences_.Apply(webview());
-  webview()->initializeMainFrame(this);
-  if (!frame_name.empty())
-    webview()->mainFrame()->setName(frame_name);
-
-  OnSetRendererPrefs(renderer_prefs);
-
-  routing_id_ = routing_id;
-  render_thread_->AddRoute(routing_id_, this);
-  // Take a reference on behalf of the RenderThread.  This will be balanced
-  // when we receive ViewMsg_Close.
-  AddRef();
-
-  // If this is a popup, we must wait for the CreatingNew_ACK message before
-  // completing initialization.  Otherwise, we can finish it now.
-  if (opener_id == MSG_ROUTING_NONE) {
-    did_show_ = true;
-    CompleteInit(parent_hwnd);
-  }
-
-  host_window_ = parent_hwnd;
-
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kDomAutomationController))
-    enabled_bindings_ |= BindingsPolicy::DOM_AUTOMATION;
-  if (command_line.HasSwitch(switches::kEnableAccessibility))
-    WebAccessibilityCache::enableAccessibility();
-
-  audio_message_filter_ = new AudioMessageFilter(routing_id_);
-  render_thread_->AddFilter(audio_message_filter_);
-}
-
-void RenderView::OnMessageReceived(const IPC::Message& message) {
+bool RenderView::OnMessageReceived(const IPC::Message& message) {
   WebFrame* main_frame = webview() ? webview()->mainFrame() : NULL;
   if (main_frame)
     child_process_logging::SetActiveURL(main_frame->url());
 
-  // If this is developer tools renderer intercept tools messages first.
-  if (devtools_client_.get() && devtools_client_->OnMessageReceived(message))
-    return;
-  if (devtools_agent_.get() && devtools_agent_->OnMessageReceived(message))
-    return;
-  if (notification_provider_->OnMessageReceived(message))
-    return;
-  if (geolocation_dispatcher_.get() &&
-      geolocation_dispatcher_->OnMessageReceived(message)) {
-    return;
-  }
-  if (speech_input_dispatcher_.get() &&
-      speech_input_dispatcher_->OnMessageReceived(message)) {
-    return;
-  }
-  if (device_orientation_dispatcher_.get() &&
-      device_orientation_dispatcher_->OnMessageReceived(message)) {
-    return;
-  }
+  ObserverListBase<RenderViewObserver>::Iterator it(observers_);
+  RenderViewObserver* observer;
+  while ((observer = it.GetNext()) != NULL)
+    if (observer->OnMessageReceived(message))
+      return true;
 
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderView, message)
     IPC_MESSAGE_HANDLER(ViewMsg_CaptureThumbnail, OnCaptureThumbnail)
     IPC_MESSAGE_HANDLER(ViewMsg_CaptureSnapshot, OnCaptureSnapshot)
     IPC_MESSAGE_HANDLER(ViewMsg_PrintPages, OnPrintPages)
     IPC_MESSAGE_HANDLER(ViewMsg_PrintingDone, OnPrintingDone)
+    IPC_MESSAGE_HANDLER(ViewMsg_PrintPreview, OnPrintPreview)
+    IPC_MESSAGE_HANDLER(ViewMsg_PrintNodeUnderContextMenu,
+                        OnPrintNodeUnderContextMenu)
     IPC_MESSAGE_HANDLER(ViewMsg_Navigate, OnNavigate)
     IPC_MESSAGE_HANDLER(ViewMsg_Stop, OnStop)
     IPC_MESSAGE_HANDLER(ViewMsg_ReloadFrame, OnReloadFrame)
@@ -954,7 +1011,6 @@ void RenderView::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_CSSInsertRequest, OnCSSInsertRequest)
     IPC_MESSAGE_HANDLER(ViewMsg_AddMessageToConsole, OnAddMessageToConsole)
     IPC_MESSAGE_HANDLER(ViewMsg_ReservePageIDRange, OnReservePageIDRange)
-    IPC_MESSAGE_HANDLER(ViewMsg_FillPasswordForm, OnFillPasswordForm)
     IPC_MESSAGE_HANDLER(ViewMsg_DragTargetDragEnter, OnDragTargetDragEnter)
     IPC_MESSAGE_HANDLER(ViewMsg_DragTargetDragOver, OnDragTargetDragOver)
     IPC_MESSAGE_HANDLER(ViewMsg_DragTargetDragLeave, OnDragTargetDragLeave)
@@ -972,7 +1028,8 @@ void RenderView::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_UpdateWebPreferences, OnUpdateWebPreferences)
     IPC_MESSAGE_HANDLER(ViewMsg_SetAltErrorPageURL, OnSetAltErrorPageURL)
     IPC_MESSAGE_HANDLER(ViewMsg_InstallMissingPlugin, OnInstallMissingPlugin)
-    IPC_MESSAGE_HANDLER(ViewMsg_LoadBlockedPlugins, OnLoadBlockedPlugins)
+    IPC_MESSAGE_HANDLER(ViewMsg_DisplayPrerenderedPage,
+                        OnDisplayPrerenderedPage)
     IPC_MESSAGE_HANDLER(ViewMsg_RunFileChooserResponse, OnFileChooserResponse)
     IPC_MESSAGE_HANDLER(ViewMsg_EnableViewSourceMode, OnEnableViewSourceMode)
     IPC_MESSAGE_HANDLER(ViewMsg_GetAllSavableResourceLinksForCurrentPage,
@@ -988,10 +1045,6 @@ void RenderView::OnMessageReceived(const IPC::Message& message) {
                         OnHandleMessageFromExternalHost)
     IPC_MESSAGE_HANDLER(ViewMsg_DisassociateFromPopupCount,
                         OnDisassociateFromPopupCount)
-    IPC_MESSAGE_HANDLER(ViewMsg_AutoFillSuggestionsReturned,
-                        OnAutoFillSuggestionsReturned)
-    IPC_MESSAGE_HANDLER(ViewMsg_AutoFillFormDataFilled,
-                        OnAutoFillFormDataFilled)
     IPC_MESSAGE_HANDLER(ViewMsg_AllowScriptToClose,
                         OnAllowScriptToClose)
     IPC_MESSAGE_HANDLER(ViewMsg_MoveOrResizeStarted, OnMoveOrResizeStarted)
@@ -1020,8 +1073,8 @@ void RenderView::OnMessageReceived(const IPC::Message& message) {
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewMsg_SetWindowVisibility, OnSetWindowVisibility)
     IPC_MESSAGE_HANDLER(ViewMsg_WindowFrameChanged, OnWindowFrameChanged)
-    IPC_MESSAGE_HANDLER(ViewMsg_PluginImeCompositionConfirmed,
-                        OnPluginImeCompositionConfirmed)
+    IPC_MESSAGE_HANDLER(ViewMsg_PluginImeCompositionCompleted,
+                        OnPluginImeCompositionCompleted)
 #endif
     IPC_MESSAGE_HANDLER(ViewMsg_SetEditCommandsForNextKeyEvent,
                         OnSetEditCommandsForNextKeyEvent)
@@ -1038,14 +1091,20 @@ void RenderView::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityNotifications_ACK,
                         OnAccessibilityNotificationsAck)
     IPC_MESSAGE_HANDLER(ViewMsg_AsyncOpenFile_ACK, OnAsyncFileOpened)
+#if defined(ENABLE_FLAPPER_HACKS)
+    IPC_MESSAGE_HANDLER(ViewMsg_PepperConnectTcpACK, OnConnectTcpACK)
+#endif
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewMsg_SelectPopupMenuItem, OnSelectPopupMenuItem)
 #endif
-    IPC_MESSAGE_HANDLER(ViewMsg_PrintPreview, OnPrintPreview)
+    IPC_MESSAGE_HANDLER(ViewMsg_JavaScriptStressTestControl,
+                        OnJavaScriptStressTestControl)
+    IPC_MESSAGE_HANDLER(ViewMsg_ContextMenuClosed, OnContextMenuClosed)
 
     // Have the super handle all other messages.
-    IPC_MESSAGE_UNHANDLED(RenderWidget::OnMessageReceived(message))
+    IPC_MESSAGE_UNHANDLED(handled = RenderWidget::OnMessageReceived(message))
   IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void RenderView::OnCaptureThumbnail() {
@@ -1090,15 +1149,7 @@ void RenderView::OnCaptureSnapshot() {
 }
 
 void RenderView::OnPrintPages() {
-  DCHECK(webview());
-  if (webview()) {
-    // If the user has selected text in the currently focused frame we print
-    // only that frame (this makes print selection work for multiple frames).
-    if (webview()->focusedFrame()->hasSelection())
-      Print(webview()->focusedFrame(), false, false);
-    else
-      Print(webview()->mainFrame(), false, false);
-  }
+  OnPrint(false);
 }
 
 void RenderView::OnPrintingDone(int document_cookie, bool success) {
@@ -1111,15 +1162,19 @@ void RenderView::OnPrintingDone(int document_cookie, bool success) {
 }
 
 void RenderView::OnPrintPreview() {
-  DCHECK(webview());
-  if (webview()) {
-    // If the user has selected text in the currently focused frame we print
-    // only that frame (this makes print selection work for multiple frames).
-    if (webview()->focusedFrame()->hasSelection())
-      Print(webview()->focusedFrame(), false, true);
-    else
-      Print(webview()->focusedFrame(), false, true);
+  OnPrint(true);
+}
+
+void RenderView::OnPrintNodeUnderContextMenu() {
+  if (context_menu_node_.isNull()) {
+    NOTREACHED();
+    return;
   }
+
+  // Make a copy of the node, since we will do a sync call to the browser and
+  // during that time OnContextMenuClosed might reset context_menu_node_.
+  WebNode context_menu_node(context_menu_node_);
+  GetPrintWebViewHelper()->PrintNode(&context_menu_node, false, false);
 }
 
 void RenderView::CapturePageInfo(int load_id, bool preliminary_capture) {
@@ -1175,7 +1230,13 @@ void RenderView::CapturePageInfo(int load_id, bool preliminary_capture) {
         TranslateHelper::IsPageTranslatable(&document)));
   }
 
-  OnCaptureThumbnail();
+  // Generate the thumbnail here if the in-browser thumbnailing isn't
+  // enabled. TODO(satorux): Remove this and related code once
+  // crbug.com/65936 is complete.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableInBrowserThumbnailing)) {
+    OnCaptureThumbnail();
+  }
 
   if (phishing_delegate_.get())
     phishing_delegate_->FinishedLoad(&contents);
@@ -1307,12 +1368,6 @@ void RenderView::OnNavigate(const ViewMsg_Navigate_Params& params) {
   history_list_offset_ = params.current_history_list_offset;
   history_list_length_ = params.current_history_list_length;
 
-  if (devtools_agent_.get())
-    devtools_agent_->OnNavigate();
-
-  if (notification_provider_.get())
-    notification_provider_->OnNavigate();
-
   child_process_logging::SetActiveURL(params.url);
 
   AboutHandler::MaybeHandle(params.url);
@@ -1393,8 +1448,14 @@ void RenderView::OnNavigate(const ViewMsg_Navigate_Params& params) {
       }
     }
 
-    if (navigation_state)
-      navigation_state->set_load_type(NavigationState::NORMAL_LOAD);
+    if (navigation_state) {
+      if (params.navigation_type != ViewMsg_Navigate_Params::PRERENDER) {
+        navigation_state->set_load_type(NavigationState::NORMAL_LOAD);
+      } else {
+        navigation_state->set_load_type(NavigationState::PRERENDER_LOAD);
+        navigation_state->set_is_prerendering(true);
+      }
+    }
     main_frame->loadRequest(request);
   }
 
@@ -1433,8 +1494,8 @@ void RenderView::OnExecuteEditCommand(const std::string& name,
 }
 
 void RenderView::OnSetupDevToolsClient() {
-  DCHECK(!devtools_client_.get());
-  devtools_client_.reset(new DevToolsClient(this));
+  DCHECK(!devtools_client_);
+  devtools_client_ = new DevToolsClient(this);
 }
 
 void RenderView::OnUpdateTargetURLAck() {
@@ -1829,14 +1890,14 @@ void RenderView::LoadNavigationErrorPage(WebFrame* frame,
                                          bool replace) {
   GURL failed_url = error.unreachableURL;
   std::string alt_html;
-  ExtensionRendererInfo* extension = NULL;
+  const Extension* extension = NULL;
   if (html.empty()) {
     // Use a local error page.
     int resource_id;
     DictionaryValue error_strings;
 
     if (failed_url.is_valid() && !failed_url.SchemeIs(chrome::kExtensionScheme))
-      extension = ExtensionRendererInfo::GetByURL(failed_url);
+      extension = render_thread_->GetExtensions()->GetByURL(failed_url);
     if (extension) {
       LocalizedError::GetAppErrorStrings(error, failed_url, extension,
                                          &error_strings);
@@ -1873,7 +1934,7 @@ void RenderView::BindDOMAutomationController(WebFrame* frame) {
   dom_automation_controller_->set_message_sender(this);
   dom_automation_controller_->set_routing_id(routing_id_);
   dom_automation_controller_->BindToJavascript(frame,
-                                               L"domAutomationController");
+                                               "domAutomationController");
 }
 
 bool RenderView::RunJavaScriptMessage(int type,
@@ -1909,21 +1970,6 @@ void RenderView::AddGURLSearchProvider(
   if (!osd_url.is_empty())
     Send(new ViewHostMsg_PageHasOSDD(routing_id_, page_id_, osd_url,
                                      provider_type));
-}
-
-void RenderView::OnAutoFillSuggestionsReturned(
-    int query_id,
-    const std::vector<string16>& values,
-    const std::vector<string16>& labels,
-    const std::vector<string16>& icons,
-    const std::vector<int>& unique_ids) {
-  autofill_helper_->SuggestionsReceived(
-      query_id, values, labels, icons, unique_ids);
-}
-
-void RenderView::OnAutoFillFormDataFilled(int query_id,
-                                          const webkit_glue::FormData& form) {
-  autofill_helper_->FormDataFilled(query_id, form);
 }
 
 void RenderView::OnAllowScriptToClose(bool script_can_close) {
@@ -1968,14 +2014,15 @@ void RenderView::OnMissingPluginStatus(
 #if defined(OS_WIN)
   if (!first_default_plugin_) {
     // Show the InfoBar for the first available plugin.
-    if (status == default_plugin::MISSING_PLUGIN_AVAILABLE) {
+    if (status == webkit::npapi::default_plugin::MISSING_PLUGIN_AVAILABLE) {
       first_default_plugin_ = delegate->AsWeakPtr();
       Send(new ViewHostMsg_MissingPluginStatus(routing_id_, status));
     }
   } else {
     // Closes the InfoBar if user clicks on the plugin (instead of the InfoBar)
     // to start the download/install.
-    if (status == default_plugin::MISSING_PLUGIN_USER_STARTED_DOWNLOAD) {
+    if (status ==
+        webkit::npapi::default_plugin::MISSING_PLUGIN_USER_STARTED_DOWNLOAD) {
       Send(new ViewHostMsg_MissingPluginStatus(routing_id_, status));
     }
   }
@@ -1991,6 +2038,7 @@ void RenderView::OnMissingPluginStatus(
 
 WebView* RenderView::createView(
     WebFrame* creator,
+    const WebURLRequest& request,
     const WebWindowFeatures& features,
     const WebString& frame_name) {
   // Check to make sure we aren't overloading on popups.
@@ -2007,6 +2055,11 @@ WebView* RenderView::createView(
   params.window_container_type = WindowFeaturesToContainerType(features);
   params.session_storage_namespace_id = session_storage_namespace_id_;
   params.frame_name = frame_name;
+  params.opener_frame_id = creator->identifier();
+  params.opener_url = creator->url();
+  params.opener_security_origin = creator->securityOrigin().toString().utf8();
+  if (!request.isNull())
+    params.target_url = request.url();
 
   int32 routing_id = MSG_ROUTING_NONE;
   int64 cloned_session_storage_namespace_id;
@@ -2077,12 +2130,13 @@ WebWidget* RenderView::createFullscreenWindow(WebKit::WebPopupType popup_type) {
   return widget->webwidget();
 }
 
-pepper::FullscreenContainer* RenderView::CreatePepperFullscreenContainer(
-    pepper::PluginInstance* plugin) {
+webkit::ppapi::FullscreenContainer*
+RenderView::CreatePepperFullscreenContainer(
+    webkit::ppapi::PluginInstance* plugin) {
   RenderWidgetFullscreenPepper* widget =
       RenderWidgetFullscreenPepper::Create(routing_id_, render_thread_, plugin);
   widget->show(WebKit::WebNavigationPolicyIgnore);
-  return widget->container();
+  return widget;
 }
 
 WebStorageNamespace* RenderView::createSessionStorageNamespace(unsigned quota) {
@@ -2113,7 +2167,7 @@ void RenderView::printPage(WebFrame* frame) {
 }
 
 WebKit::WebNotificationPresenter* RenderView::notificationPresenter() {
-  return notification_provider_.get();
+  return notification_provider_;
 }
 
 void RenderView::didStartLoading() {
@@ -2152,11 +2206,19 @@ void RenderView::didStopLoading() {
 
   Send(new ViewHostMsg_DidStopLoading(routing_id_));
 
+  if (load_progress_tracker_ != NULL)
+    load_progress_tracker_->DidStopLoading();
+
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       page_info_method_factory_.NewRunnableMethod(
           &RenderView::CapturePageInfo, page_id_, false),
       send_content_state_immediately_ ? 0 : kDelayForCaptureMs);
+}
+
+void RenderView::didChangeLoadProgress(WebFrame* frame, double load_progress) {
+  if (load_progress_tracker_ != NULL)
+    load_progress_tracker_->DidChangeLoadProgress(frame, load_progress);
 }
 
 bool RenderView::isSmartInsertDeleteEnabled() {
@@ -2176,7 +2238,7 @@ bool RenderView::isSelectTrailingWhitespaceEnabled() {
 }
 
 void RenderView::didChangeSelection(bool is_empty_selection) {
-#if defined(USE_X11) || defined(OS_MACOSX)
+#if defined(OS_POSIX)
   if (!handling_input_event_)
       return;
   // TODO(estade): investigate incremental updates to the selection so that we
@@ -2198,7 +2260,7 @@ void RenderView::didChangeSelection(bool is_empty_selection) {
     Send(new ViewHostMsg_SelectionChanged(routing_id_,
          last_selection_));
   }
-#endif
+#endif  // defined(OS_POSIX)
 }
 
 void RenderView::didExecuteCommand(const WebString& command_name) {
@@ -2208,29 +2270,6 @@ void RenderView::didExecuteCommand(const WebString& command_name) {
       StartsWithASCII(name, "Delete", true))
     return;
   UserMetricsRecordAction(name);
-}
-
-void RenderView::textFieldDidEndEditing(
-    const WebKit::WebInputElement& element) {
-  password_autocomplete_manager_->TextFieldDidEndEditing(element);
-}
-
-void RenderView::textFieldDidChange(const WebKit::WebInputElement& element) {
-  // We post a task for doing the AutoFill as the caret position is not set
-  // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
-  // it is needed to trigger autofill.
-  autofill_method_factory_.RevokeAll();
-  MessageLoop::current()->PostTask(
-        FROM_HERE,
-        autofill_method_factory_.NewRunnableMethod(
-            &RenderView::TextFieldDidChangeImpl, element));
-}
-
-void RenderView::TextFieldDidChangeImpl(
-    const WebKit::WebInputElement& element) {
-  if (password_autocomplete_manager_->TextDidChangeInTextField(element))
-    return;
-  autofill_helper_->TextDidChangeInTextField(element);
 }
 
 void RenderView::SendPendingAccessibilityNotifications() {
@@ -2258,13 +2297,6 @@ void RenderView::SendPendingAccessibilityNotifications() {
   pending_accessibility_notifications_.clear();
   Send(new ViewHostMsg_AccessibilityNotifications(routing_id_, notifications));
   accessibility_ack_pending_ = true;
-}
-
-void RenderView::textFieldDidReceiveKeyDown(
-    const WebKit::WebInputElement& element,
-    const WebKit::WebKeyboardEvent& event) {
-  password_autocomplete_manager_->TextFieldHandlingKeyDown(element, event);
-  autofill_helper_->KeyDownInTextField(element, event);
 }
 
 bool RenderView::handleCurrentKeyboardEvent() {
@@ -2359,7 +2391,7 @@ bool RenderView::runFileChooser(
 
 void RenderView::runModalAlertDialog(
     WebFrame* frame, const WebString& message) {
-  RunJavaScriptMessage(MessageBoxFlags::kIsJavascriptAlert,
+  RunJavaScriptMessage(ui::MessageBoxFlags::kIsJavascriptAlert,
                        UTF16ToWideHack(message),
                        std::wstring(),
                        frame->url(),
@@ -2368,7 +2400,7 @@ void RenderView::runModalAlertDialog(
 
 bool RenderView::runModalConfirmDialog(
     WebFrame* frame, const WebString& message) {
-  return RunJavaScriptMessage(MessageBoxFlags::kIsJavascriptConfirm,
+  return RunJavaScriptMessage(ui::MessageBoxFlags::kIsJavascriptConfirm,
                               UTF16ToWideHack(message),
                               std::wstring(),
                               frame->url(),
@@ -2379,7 +2411,7 @@ bool RenderView::runModalPromptDialog(
     WebFrame* frame, const WebString& message, const WebString& default_value,
     WebString* actual_value) {
   std::wstring result;
-  bool ok = RunJavaScriptMessage(MessageBoxFlags::kIsJavascriptPrompt,
+  bool ok = RunJavaScriptMessage(ui::MessageBoxFlags::kIsJavascriptPrompt,
                                  UTF16ToWideHack(message),
                                  UTF16ToWideHack(default_value),
                                  frame->url(),
@@ -2422,6 +2454,7 @@ void RenderView::showContextMenu(
   //                 data encoded images.  We should have a way to save them.
   if (params.src_url.spec().size() > chrome::kMaxURLChars)
     params.src_url = GURL();
+  context_menu_node_ = data.node;
   Send(new ViewHostMsg_ContextMenu(routing_id_, params));
 }
 
@@ -2558,38 +2591,6 @@ void RenderView::didUpdateInspectorSetting(const WebString& key,
                                               value.utf8()));
 }
 
-void RenderView::removeAutofillSuggestions(const WebString& name,
-                                           const WebString& value) {
-  autofill_helper_->RemoveAutocompleteSuggestion(name, value);
-}
-
-void RenderView::didAcceptAutoFillSuggestion(const WebKit::WebNode& node,
-                                             const WebKit::WebString& value,
-                                             const WebKit::WebString& label,
-                                             int unique_id,
-                                             unsigned index) {
-  autofill_helper_->DidAcceptAutoFillSuggestion(node, value, unique_id, index);
-}
-
-void RenderView::didSelectAutoFillSuggestion(const WebKit::WebNode& node,
-                                             const WebKit::WebString& value,
-                                             const WebKit::WebString& label,
-                                             int unique_id) {
-  autofill_helper_->DidSelectAutoFillSuggestion(node, unique_id);
-}
-
-void RenderView::didClearAutoFillSelection(const WebKit::WebNode& node) {
-  autofill_helper_->DidClearAutoFillSelection(node);
-}
-
-void RenderView::didAcceptAutocompleteSuggestion(
-    const WebKit::WebInputElement& user_element) {
-  bool result = password_autocomplete_manager_->FillPassword(user_element);
-  // Since this user name was selected from a suggestion list, we should always
-  // have password for it.
-  DCHECK(result);
-}
-
 // WebKit::WebWidgetClient ----------------------------------------------------
 
 void RenderView::didFocus() {
@@ -2627,7 +2628,7 @@ void RenderView::show(WebNavigationPolicy policy) {
 
   // Extensions and apps always allowed to create unrequested popups. The second
   // check is necessary to include content scripts.
-  if (ExtensionRendererInfo::GetByURL(creator_url_) ||
+  if (render_thread_->GetExtensions()->GetByURL(creator_url_) ||
       bindings_utils::GetInfoForCurrentContext()) {
     opened_by_user_gesture_ = true;
   }
@@ -2686,10 +2687,11 @@ WebPlugin* RenderView::createPlugin(WebFrame* frame,
   bool found = false;
   ContentSetting plugin_setting = CONTENT_SETTING_DEFAULT;
   CommandLine* cmd = CommandLine::ForCurrentProcess();
-  WebPluginInfo info;
+  webkit::npapi::WebPluginInfo info;
   GURL url(params.url);
   std::string actual_mime_type;
-  Send(new ViewHostMsg_GetPluginInfo(url,
+  Send(new ViewHostMsg_GetPluginInfo(routing_id_,
+                                     url,
                                      frame->top()->url(),
                                      params.mimeType.utf8(),
                                      &found,
@@ -2701,66 +2703,68 @@ WebPlugin* RenderView::createPlugin(WebFrame* frame,
     return NULL;
   DCHECK(plugin_setting != CONTENT_SETTING_DEFAULT);
 
-  scoped_ptr<PluginGroup> group(PluginGroup::CopyOrCreatePluginGroup(info));
-  group->AddPlugin(info, 0);
+  const webkit::npapi::PluginGroup* group =
+      webkit::npapi::PluginList::Singleton()->GetPluginGroup(info);
+  DCHECK(group != NULL);
 
-  if (!info.enabled) {
-    if (cmd->HasSwitch(switches::kDisableOutdatedPlugins) &&
-        group->IsVulnerable()) {
-      Send(new ViewHostMsg_DisabledOutdatedPlugin(routing_id_,
-                                                  group->GetGroupName(),
-                                                  GURL(group->GetUpdateURL())));
-      return CreateOutdatedPluginPlaceholder(frame, params, group.get());
-    }
-    return NULL;
+  if (group->IsVulnerable() &&
+      !cmd->HasSwitch(switches::kAllowOutdatedPlugins)) {
+    Send(new ViewHostMsg_BlockedOutdatedPlugin(routing_id_,
+                                               group->GetGroupName(),
+                                               GURL(group->GetUpdateURL())));
+    return CreatePluginPlaceholder(frame,
+                                   params,
+                                   *group,
+                                   IDR_BLOCKED_PLUGIN_HTML,
+                                   IDS_PLUGIN_OUTDATED,
+                                   false);
   }
+
+  if (!webkit::npapi::IsPluginEnabled(info))
+    return NULL;
 
   ContentSetting host_setting =
       current_content_settings_.settings[CONTENT_SETTINGS_TYPE_PLUGINS];
-  if (info.path.value() == kDefaultPluginLibraryName ||
+  if (info.path.value() == webkit::npapi::kDefaultPluginLibraryName ||
       plugin_setting == CONTENT_SETTING_ALLOW ||
       host_setting == CONTENT_SETTING_ALLOW) {
-    scoped_refptr<pepper::PluginModule> pepper_module;
-    if (PepperPluginRegistry::GetInstance()->RunOutOfProcessForPlugin(
-            info.path)) {
-      pepper_module =
-          pepper_delegate_.CreateOutOfProcessPepperPlugin(info.path);
-    } else {
-      pepper_module =
-          PepperPluginRegistry::GetInstance()->GetModule(info.path);
+    // Delay loading plugins if prerendering.
+    WebDataSource* ds = frame->dataSource();
+    NavigationState* navigation_state = NavigationState::FromDataSource(ds);
+    if (navigation_state->is_prerendering()) {
+      return CreatePluginPlaceholder(frame,
+                                     params,
+                                     *group,
+                                     IDR_CLICK_TO_PLAY_PLUGIN_HTML,
+                                     IDS_PLUGIN_LOAD,
+                                     true);
     }
-    if (pepper_module) {
-      return CreatePepperPlugin(frame,
-                                params,
-                                info.path,
-                                pepper_module.get());
-    }
+
+    scoped_refptr<webkit::ppapi::PluginModule> pepper_module(
+        pepper_delegate_.CreatePepperPlugin(info.path));
+    if (pepper_module)
+      return CreatePepperPlugin(frame, params, info.path, pepper_module.get());
     return CreateNPAPIPlugin(frame, params, info.path, actual_mime_type);
   }
   std::string resource;
   if (cmd->HasSwitch(switches::kEnableResourceContentSettings))
     resource = group->identifier();
   DidBlockContentType(CONTENT_SETTINGS_TYPE_PLUGINS, resource);
-  int resource_id;
-  int message_id;
   if (plugin_setting == CONTENT_SETTING_ASK) {
-    resource_id = IDR_BLOCKED_PLUGIN_HTML;
-    message_id = IDS_PLUGIN_LOAD;
+    return CreatePluginPlaceholder(frame,
+                                   params,
+                                   *group,
+                                   IDR_CLICK_TO_PLAY_PLUGIN_HTML,
+                                   IDS_PLUGIN_LOAD,
+                                   false);
   } else {
-    resource_id = IDR_OUTDATED_PLUGIN_HTML;
-    message_id = IDS_PLUGIN_BLOCKED;
+    return CreatePluginPlaceholder(frame,
+                                   params,
+                                   *group,
+                                   IDR_BLOCKED_PLUGIN_HTML,
+                                   IDS_PLUGIN_BLOCKED,
+                                   false);
   }
-  // |blocked_plugin| will delete itself when the WebViewPlugin
-  // is destroyed.
-  BlockedPlugin* blocked_plugin =
-      new BlockedPlugin(this,
-                        frame,
-                        *group,
-                        params,
-                        webkit_preferences_,
-                        resource_id,
-                        l10n_util::GetStringUTF16(message_id));
-  return blocked_plugin->plugin();
 }
 
 WebWorker* RenderView::createWorker(WebFrame* frame, WebWorkerClient* client) {
@@ -2802,8 +2806,10 @@ WebSharedWorker* RenderView::createSharedWorker(
 
 WebMediaPlayer* RenderView::createMediaPlayer(
     WebFrame* frame, WebMediaPlayerClient* client) {
-  scoped_ptr<media::MediaFilterCollection> collection(
-      new media::MediaFilterCollection());
+  scoped_ptr<media::MessageLoopFactory> message_loop_factory(
+      new media::MessageLoopFactoryImpl());
+  scoped_ptr<media::FilterCollection> collection(
+      new media::FilterCollection());
 
   // Add in any custom filter factories first.
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
@@ -2829,29 +2835,6 @@ WebMediaPlayer* RenderView::createMediaPlayer(
         MessageLoop::current(), context->context()));
   }
 
-  WebApplicationCacheHostImpl* appcache_host =
-      WebApplicationCacheHostImpl::FromFrame(frame);
-
-  // TODO(hclam): obtain the following parameters from |client|.
-  // Create two bridge factory for two data sources.
-  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_simple =
-      new webkit_glue::MediaResourceLoaderBridgeFactory(
-          GURL(frame->url()),  // referrer
-          "null",  // frame origin
-          "null",  // main_frame_origin
-          base::GetCurrentProcId(),
-          appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
-          routing_id());
-
-  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_buffered =
-      new webkit_glue::MediaResourceLoaderBridgeFactory(
-          GURL(frame->url()),  // referrer
-          "null",  // frame origin
-          "null",  // main_frame_origin
-          base::GetCurrentProcId(),
-          appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
-          routing_id());
-
   scoped_refptr<webkit_glue::WebVideoRenderer> video_renderer;
   bool pts_logging = cmd_line->HasSwitch(switches::kEnableVideoLogging);
   scoped_refptr<webkit_glue::VideoRendererImpl> renderer(
@@ -2860,9 +2843,10 @@ WebMediaPlayer* RenderView::createMediaPlayer(
   video_renderer = renderer;
 
   scoped_ptr<webkit_glue::WebMediaPlayerImpl> result(
-      new webkit_glue::WebMediaPlayerImpl(client, collection.release()));
-  if (!result->Initialize(bridge_factory_simple,
-                          bridge_factory_buffered,
+      new webkit_glue::WebMediaPlayerImpl(client,
+                                          collection.release(),
+                                          message_loop_factory.release()));
+  if (!result->Initialize(frame,
                           cmd_line->HasSwitch(switches::kSimpleDataSource),
                           video_renderer)) {
     return NULL;
@@ -2877,18 +2861,12 @@ WebApplicationCacheHost* RenderView::createApplicationCacheHost(
       RenderThread::current()->appcache_dispatcher()->backend_proxy());
 }
 
-// TODO(jochen): remove after roll.
-WebCookieJar* RenderView::cookieJar() {
-  return &cookie_jar_;
-}
-
 WebCookieJar* RenderView::cookieJar(WebFrame* frame) {
   return &cookie_jar_;
 }
 
 void RenderView::frameDetached(WebFrame* frame) {
-  autofill_helper_->FrameDetached(frame);
-  page_click_tracker_->StopTrackingFrame(frame, true);
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FrameDetached(frame));
 }
 
 void RenderView::willClose(WebFrame* frame) {
@@ -2898,8 +2876,7 @@ void RenderView::willClose(WebFrame* frame) {
   page_load_histograms_.Dump(frame);
   navigation_state->user_script_idle_scheduler()->Cancel();
 
-  // TODO(jhawkins): Remove once frameDetached is called by WebKit.
-  autofill_helper_->FrameWillClose(frame);
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FrameWillClose(frame));
 }
 
 bool RenderView::allowImages(WebFrame* frame, bool enabled_per_settings) {
@@ -2958,35 +2935,28 @@ WebNavigationPolicy RenderView::decidePolicyForNavigation(
           is_content_initiated();
   GURL old_url(frame->url());
 
-  // We only care about navigations that are within the current tab (as opposed
-  // to, for example, opening a new window).
-  // But we sometimes navigate to about:blank to clear a tab, and we want to
-  // still allow that.
-  if (default_policy == WebKit::WebNavigationPolicyCurrentTab &&
-      is_content_initiated && frame->parent() == NULL &&
-      type != WebKit::WebNavigationTypeFormSubmitted &&
-      !url.SchemeIs(chrome::kAboutScheme)) {
-    // When we received such unsolicited navigations, we sometimes want to
-    // punt them up to the browser to handle.
-    if (BindingsPolicy::is_dom_ui_enabled(enabled_bindings_) ||
+  // Detect when we're crossing a permission-based boundary (e.g. into or out of
+  // an extension or app origin, leaving a DOMUI page, etc). We only care about
+  // top-level navigations withing the current tab (as opposed to, for example,
+  // opening a new window). But we sometimes navigate to about:blank to clear a
+  // tab, and we want to still allow that.
+  //
+  // Note: we do this only for GET requests because we our mechanism for
+  // switching processes only issues GET requests. In particular, POST
+  // requests don't work, because this mechanism does not preserve form POST
+  // data. If it becomes necessary to support process switching for POST
+  // requests, we will need to send the request's httpBody data up to the
+  // browser process, and issue a special POST navigation in WebKit (via
+  // FrameLoader::loadFrameRequest). See ResourceDispatcher and
+  // WebURLLoaderImpl for examples of how to send the httpBody data.
+  if (!frame->parent() && is_content_initiated &&
+      default_policy == WebKit::WebNavigationPolicyCurrentTab &&
+      request.httpMethod() == "GET" && !url.SchemeIs(chrome::kAboutScheme)) {
+    bool send_referrer = false;
+    bool should_fork =
+        BindingsPolicy::is_dom_ui_enabled(enabled_bindings_) ||
         frame->isViewSourceModeEnabled() ||
-        url.SchemeIs(chrome::kViewSourceScheme)) {
-      // We don't send referrer from these special pages.
-      OpenURL(url, GURL(), default_policy);
-      return WebKit::WebNavigationPolicyIgnore;  // Suppress the load here.
-    }
-
-    // We forward non-local navigations from extensions to the browser if they
-    // are top-level events, even if the browser hasn't expressed interest.
-    // TODO(erikkay) crbug.com/54118 - combine this clause and the next into
-    // some shared logic.
-    if (BindingsPolicy::is_extension_enabled(enabled_bindings_) &&
-        old_url.SchemeIs(chrome::kExtensionScheme) &&
-        IsNonLocalTopLevelNavigation(url, frame, type)) {
-        // We don't send referrer from extensions.
-        OpenURL(url, GURL(), default_policy);
-        return WebKit::WebNavigationPolicyIgnore;  // Suppress the load here.
-    }
+        url.SchemeIs(chrome::kViewSourceScheme);
 
     // If the navigation would cross an app extent boundary, we also need
     // to defer to the browser to ensure process isolation.
@@ -2996,12 +2966,21 @@ WebNavigationPolicy RenderView::decidePolicyForNavigation(
     // TODO(creis): For now, we only swap processes to enter an app and not
     // exit it, since we currently lose context (e.g., window.opener) if the
     // window navigates back.  See crbug.com/65953.
-    if (CrossesIntoExtensionExtent(frame, url)) {
+    if (!should_fork &&
+        CrossesIntoExtensionExtent(
+            render_thread_->GetExtensions(),
+            frame,
+            url)) {
       // Include the referrer in this case since we're going from a hosted web
       // page. (the packaged case is handled previously by the extension
       // navigation test)
+      should_fork = true;
+      send_referrer = true;
+    }
+
+    if (should_fork) {
       GURL referrer(request.httpHeaderField(WebString::fromUTF8("Referer")));
-      OpenURL(url, referrer, default_policy);
+      OpenURL(url, send_referrer ? referrer : GURL(), default_policy);
       return WebKit::WebNavigationPolicyIgnore;  // Suppress the load here.
     }
   }
@@ -3228,8 +3207,16 @@ void RenderView::didCreateDataSource(WebFrame* frame, WebDataSource* ds) {
     }
   }
 
-  state->set_user_script_idle_scheduler(
-      new UserScriptIdleScheduler(this, frame));
+  // If this datasource already has a UserScriptIdleScheduler, reuse that one.
+  // This is for navigations within a page (didNavigateWithinPage). See
+  // http://code.google.com/p/chromium/issues/detail?id=64093
+  NavigationState* old_state = NavigationState::FromDataSource(ds);
+  if (old_state && old_state->user_script_idle_scheduler()) {
+    state->swap_user_script_idle_scheduler(old_state);
+  } else {
+    state->set_user_script_idle_scheduler(
+        new UserScriptIdleScheduler(this, frame));
+  }
   ds->setExtraData(state);
 }
 
@@ -3250,7 +3237,7 @@ void RenderView::didStartProvisionalLoad(WebFrame* frame) {
   bool is_top_most = !frame->parent();
   if (is_top_most) {
     navigation_gesture_ = frame->isProcessingUserGesture() ?
-        NavigationGestureUnknown : NavigationGestureAuto;
+        NavigationGestureUser : NavigationGestureAuto;
 
     // Make sure redirect tracking state is clear for the new load.
     completed_client_redirect_src_ = GURL();
@@ -3448,12 +3435,12 @@ void RenderView::didClearWindowObject(WebFrame* frame) {
       frame_url.SchemeIs(chrome::kDataScheme))) {
     GetDOMUIBindings()->set_message_sender(this);
     GetDOMUIBindings()->set_routing_id(routing_id_);
-    GetDOMUIBindings()->BindToJavascript(frame, L"chrome");
+    GetDOMUIBindings()->BindToJavascript(frame, "chrome");
   }
   if (BindingsPolicy::is_external_host_enabled(enabled_bindings_)) {
     GetExternalHostBindings()->set_message_sender(this);
     GetExternalHostBindings()->set_routing_id(routing_id_);
-    GetExternalHostBindings()->BindToJavascript(frame, L"externalHost");
+    GetExternalHostBindings()->BindToJavascript(frame, "externalHost");
   }
 }
 
@@ -3495,11 +3482,8 @@ void RenderView::didFinishDocumentLoad(WebFrame* frame) {
 
   Send(new ViewHostMsg_DocumentLoadedInFrame(routing_id_, frame->identifier()));
 
-  page_click_tracker_->StartTrackingFrame(frame);
-  // The document has now been fully loaded.  Scan for forms to be sent up to
-  // the browser.
-  autofill_helper_->FrameContentsAvailable(frame);
-  password_autocomplete_manager_->SendPasswordForms(frame, false);
+  FOR_EACH_OBSERVER(
+      RenderViewObserver, observers_, DidFinishDocumentLoad(frame));
 
   // Check whether we have new encoding name.
   UpdateEncoding(frame, frame->view()->pageEncoding().utf8());
@@ -3550,19 +3534,13 @@ void RenderView::didFinishLoad(WebFrame* frame) {
   navigation_state->set_finish_load_time(Time::Now());
   navigation_state->user_script_idle_scheduler()->DidFinishLoad();
 
-  // Let the password manager know which password forms are actually visible.
-  password_autocomplete_manager_->SendPasswordForms(frame, true);
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidFinishLoad(frame));
 
   Send(new ViewHostMsg_DidFinishLoad(routing_id_, frame->identifier()));
 }
 
 void RenderView::didNavigateWithinPage(
     WebFrame* frame, bool is_new_navigation) {
-  // Determine if the UserScriptIdleScheduler already ran scripts on this page,
-  // since a new one gets created by didCreateDataSource.
-  NavigationState* state = NavigationState::FromDataSource(frame->dataSource());
-  bool idle_scheduler_ran = state->user_script_idle_scheduler()->has_run();
-
   // If this was a reference fragment navigation that we initiated, then we
   // could end up having a non-null pending navigation state.  We just need to
   // update the ExtraData on the datasource so that others who read the
@@ -3575,11 +3553,6 @@ void RenderView::didNavigateWithinPage(
   NavigationState* new_state =
       NavigationState::FromDataSource(frame->dataSource());
   new_state->set_was_within_same_page(true);
-
-  if (idle_scheduler_ran) {
-    // Update the new UserScriptIdleScheduler so we don't re-run scripts.
-    new_state->user_script_idle_scheduler()->set_has_run(true);
-  }
 
   didCommitProvisionalLoad(frame, is_new_navigation);
 
@@ -3605,6 +3578,19 @@ void RenderView::willSendRequest(
   WebDataSource* top_data_source = top_frame->dataSource();
   WebDataSource* data_source =
       provisional_data_source ? provisional_data_source : top_data_source;
+
+  // If the request is for an extension resource, check whether it should be
+  // allowed. If not allowed, we reset the URL to something invalid to prevent
+  // the request and cause an error.
+  GURL request_url(request.url());
+  if (request_url.SchemeIs(chrome::kExtensionScheme) &&
+      !ExtensionResourceRequestPolicy::CanRequestResource(
+          request_url,
+          GURL(frame->url()),
+          render_thread_->GetExtensions())) {
+    request.setURL(WebURL(GURL("chrome-extension://invalid/")));
+  }
+
   if (data_source) {
     NavigationState* state = NavigationState::FromDataSource(data_source);
     if (state && state->is_cache_policy_override_set())
@@ -3618,6 +3604,8 @@ void RenderView::willSendRequest(
   }
 
   request.setRequestorID(routing_id_);
+  request.setHasUserGesture(frame->isProcessingUserGesture());
+
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoReferrers))
     request.clearHTTPHeaderField("Referer");
 
@@ -3733,11 +3721,20 @@ void RenderView::didDisplayInsecureContent(WebFrame* frame) {
   Send(new ViewHostMsg_DidDisplayInsecureContent(routing_id_));
 }
 
+// We have two didRunInsecureContent's with the same name. That's because
+// we're in the process of adding an argument and one of them will be correct.
+// Once the WebKit change is in, the first should be removed.
 void RenderView::didRunInsecureContent(
     WebFrame* frame, const WebSecurityOrigin& origin) {
+  didRunInsecureContent(frame, origin, GURL());
+}
+
+void RenderView::didRunInsecureContent(
+    WebFrame* frame, const WebSecurityOrigin& origin, const WebURL& target) {
   Send(new ViewHostMsg_DidRunInsecureContent(
       routing_id_,
-      origin.toString().utf8()));
+      origin.toString().utf8(),
+      target));
 }
 
 bool RenderView::allowScript(WebFrame* frame, bool enabled_per_settings) {
@@ -3759,7 +3756,7 @@ bool RenderView::allowDatabase(
     return false;  // Uninitialized document?
 
   bool result;
-  if (!Send(new ViewHostMsg_AllowDatabase(routing_id_,
+  if (!Send(new DatabaseHostMsg_Allow(routing_id_,
       origin.toString().utf8(), name, display_name, estimated_size, &result)))
     return false;
   Send(new ViewHostMsg_WebDatabaseAccessed(routing_id_,
@@ -3914,7 +3911,7 @@ void RenderView::openFileSystem(
 
 // webkit_glue::WebPluginPageDelegate -----------------------------------------
 
-webkit_glue::WebPluginDelegate* RenderView::CreatePluginDelegate(
+webkit::npapi::WebPluginDelegate* RenderView::CreatePluginDelegate(
     const FilePath& file_path,
     const std::string& mime_type) {
   if (!PluginChannelHost::IsListening())
@@ -3949,8 +3946,8 @@ webkit_glue::WebPluginDelegate* RenderView::CreatePluginDelegate(
     // appropriate permission, or when explicitly enabled on the command line.
 
     GURL main_frame_url(webview()->mainFrame()->url());
-    ExtensionRendererInfo* extension =
-        ExtensionRendererInfo::GetByURL(main_frame_url);
+    const Extension* extension =
+        render_thread_->GetExtensions()->GetByURL(main_frame_url);
     bool in_ext = extension != NULL;
     bool explicit_enable =
         CommandLine::ForCurrentProcess()->HasSwitch(switches::kInternalNaCl);
@@ -3982,7 +3979,7 @@ webkit_glue::WebPluginDelegate* RenderView::CreatePluginDelegate(
       return pepper_plugin;
     } else {
 #if defined(OS_WIN)  // In-proc plugins aren't supported on Linux or Mac.
-      return WebPluginDelegateImpl::Create(
+      return webkit::npapi::WebPluginDelegateImpl::Create(
           file_path, mime_type, gfx::NativeViewFromId(host_window_));
 #else
       NOTIMPLEMENTED();
@@ -4009,7 +4006,7 @@ void RenderView::WillDestroyPluginWindow(gfx::PluginWindowHandle window) {
   CleanupWindowInPluginMoves(window);
 }
 
-void RenderView::DidMovePlugin(const webkit_glue::WebPluginGeometry& move) {
+void RenderView::DidMovePlugin(const webkit::npapi::WebPluginGeometry& move) {
   SchedulePluginMove(move);
 }
 
@@ -4402,46 +4399,44 @@ void RenderView::ClearBlockedContentSettings() {
     content_blocked_[i] = false;
 }
 
-WebPlugin* RenderView::CreatePepperPlugin(WebFrame* frame,
-                                          const WebPluginParams& params,
-                                          const FilePath& path,
-                                          pepper::PluginModule* pepper_module) {
-  return new pepper::WebPluginImpl(
+WebPlugin* RenderView::CreatePepperPlugin(
+    WebFrame* frame,
+    const WebPluginParams& params,
+    const FilePath& path,
+    webkit::ppapi::PluginModule* pepper_module) {
+  return new webkit::ppapi::WebPluginImpl(
       pepper_module, params, pepper_delegate_.AsWeakPtr());
 }
 
-WebPlugin* RenderView::CreateNPAPIPlugin(WebFrame* frame,
-                                         const WebPluginParams& params,
-                                         const FilePath& path,
-                                         const std::string& mime_type) {
-  return new webkit_glue::WebPluginImpl(
+WebPlugin* RenderView::CreateNPAPIPlugin(
+    WebFrame* frame,
+    const WebPluginParams& params,
+    const FilePath& path,
+    const std::string& mime_type) {
+  return new webkit::npapi::WebPluginImpl(
       frame, params, path, mime_type, AsWeakPtr());
 }
 
-WebPlugin* RenderView::CreateOutdatedPluginPlaceholder(
+WebPlugin* RenderView::CreatePluginPlaceholder(
     WebFrame* frame,
     const WebPluginParams& params,
-    PluginGroup* group) {
-  int resource_id = IDR_OUTDATED_PLUGIN_HTML;
-  const base::StringPiece template_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
-
-  DCHECK(!template_html.empty()) << "unable to load template. ID: "
-                                 << resource_id;
-
-  DictionaryValue values;
-  values.SetString("message",
-      l10n_util::GetStringFUTF8(IDS_PLUGIN_OUTDATED, group->GetGroupName()));
-  values.Set("pluginGroup", group->GetDataForUI());
-
-  // "t" is the id of the templates root node.
-  std::string htmlData = jstemplate_builder::GetTemplatesHtml(
-      template_html, &values, "t");
-
-  return WebViewPlugin::Create(NULL,
-                               webkit_preferences_,
-                               htmlData,
-                               GURL("chrome://outdatedplugin/"));
+    const webkit::npapi::PluginGroup& group,
+    int resource_id,
+    int message_id,
+    bool is_blocked_for_prerendering) {
+  // |blocked_plugin| will delete itself when the WebViewPlugin
+  // is destroyed.
+  BlockedPlugin* blocked_plugin =
+      new BlockedPlugin(this,
+                        frame,
+                        group,
+                        params,
+                        webkit_preferences_,
+                        resource_id,
+                        l10n_util::GetStringFUTF16(message_id,
+                                                   group.GetGroupName()),
+                        is_blocked_for_prerendering);
+  return blocked_plugin->plugin();
 }
 
 void RenderView::OnZoom(PageZoom::Function function) {
@@ -4561,9 +4556,16 @@ void RenderView::EvaluateScript(const string16& frame_xpath,
   if (web_frame)
     result = web_frame->executeScriptAndReturnValue(WebScriptSource(script));
   if (notify_result) {
-    bool bool_result = !result.IsEmpty() && result->IsBoolean() ?
-        result->BooleanValue() : false;
-    Send(new ViewHostMsg_ScriptEvalResponse(routing_id_, id, bool_result));
+    ListValue list;
+    if (web_frame) {
+      v8::HandleScope handle_scope;
+      v8::Local<v8::Context> context = web_frame->mainWorldScriptContext();
+      v8::Context::Scope context_scope(context);
+      list.Set(0, ConvertV8Value(result));
+    } else {
+      list.Set(0, Value::CreateNullValue());
+    }
+    Send(new ViewHostMsg_ScriptEvalResponse(routing_id_, id, list));
   }
 }
 
@@ -4660,12 +4662,6 @@ void RenderView::OnDragSourceSystemDragEnded() {
   webview()->dragSourceSystemDragEnded();
 }
 
-void RenderView::OnFillPasswordForm(
-    const webkit_glue::PasswordFormFillData& form_data) {
-  password_autocomplete_manager_->ReceivedPasswordFormFillData(webview(),
-                                                              form_data);
-}
-
 void RenderView::OnDragTargetDragEnter(const WebDropData& drop_data,
                                        const gfx::Point& client_point,
                                        const gfx::Point& screen_point,
@@ -4731,12 +4727,15 @@ void RenderView::OnInstallMissingPlugin() {
     first_default_plugin_->InstallMissingPlugin();
 }
 
-void RenderView::OnLoadBlockedPlugins() {
-  current_content_settings_.settings[CONTENT_SETTINGS_TYPE_PLUGINS] =
-      CONTENT_SETTING_ALLOW;
-  NotificationService::current()->Notify(NotificationType::SHOULD_LOAD_PLUGINS,
-                                         Source<RenderView>(this),
-                                         NotificationService::NoDetails());
+void RenderView::OnDisplayPrerenderedPage() {
+  NavigationState* navigation_state = pending_navigation_state_.get();
+  if (!navigation_state) {
+    WebDataSource* ds = webview()->mainFrame()->dataSource();
+    navigation_state = NavigationState::FromDataSource(ds);
+  }
+
+  DCHECK(navigation_state->is_prerendering());
+  navigation_state->set_is_prerendering(false);
 }
 
 void RenderView::OnFileChooserResponse(const std::vector<FilePath>& paths) {
@@ -4826,9 +4825,13 @@ void RenderView::OnSearchBoxResize(const gfx::Rect& bounds) {
 }
 
 void RenderView::OnDetermineIfPageSupportsInstant(const string16& value,
-                                                  bool verbatim) {
+                                                  bool verbatim,
+                                                  int selection_start,
+                                                  int selection_end) {
   search_box_.value = value;
   search_box_.verbatim = verbatim;
+  search_box_.selection_start = selection_start;
+  search_box_.selection_end = selection_end;
   bool result = extensions_v8::SearchBoxExtension::PageSupportsInstant(
       webview()->mainFrame());
   Send(new ViewHostMsg_InstantSupportDetermined(routing_id_, page_id_, result));
@@ -5195,13 +5198,18 @@ void RenderView::DidFlushPaint() {
   }
 }
 
-bool RenderView::GetBitmapForOptimizedPluginPaint(
+webkit::ppapi::PluginInstance* RenderView::GetBitmapForOptimizedPluginPaint(
     const gfx::Rect& paint_bounds,
     TransportDIB** dib,
     gfx::Rect* location,
     gfx::Rect* clip) {
   return pepper_delegate_.GetBitmapForOptimizedPluginPaint(
       paint_bounds, dib, location, clip);
+}
+
+gfx::Size RenderView::GetScrollOffset() {
+  WebKit::WebSize scroll_offset = webview()->mainFrame()->scrollOffset();
+  return gfx::Size(scroll_offset.width, scroll_offset.height);
 }
 
 void RenderView::OnClearFocusedNode() {
@@ -5249,14 +5257,14 @@ void RenderView::OnWindowFrameChanged(const gfx::Rect& window_frame,
   }
 }
 
-void RenderView::OnPluginImeCompositionConfirmed(const string16& text,
+void RenderView::OnPluginImeCompositionCompleted(const string16& text,
                                                  int plugin_id) {
-  // WebPluginDelegateProxy is responsible for figuring out if this text
+  // WebPluginDelegateProxy is responsible for figuring out if this event
   // applies to it or not, so inform all the delegates.
   std::set<WebPluginDelegateProxy*>::iterator plugin_it;
   for (plugin_it = plugin_delegates_.begin();
        plugin_it != plugin_delegates_.end(); ++plugin_it) {
-    (*plugin_it)->ImeCompositionConfirmed(text, plugin_id);
+    (*plugin_it)->ImeCompositionCompleted(text, plugin_id);
   }
 }
 #endif  // OS_MACOSX
@@ -5346,14 +5354,29 @@ void RenderView::postAccessibilityNotification(
   }
 }
 
+void RenderView::OnPrint(bool is_preview) {
+  DCHECK(webview());
+  if (webview()) {
+    // If the user has selected text in the currently focused frame we print
+    // only that frame (this makes print selection work for multiple frames).
+    if (webview()->focusedFrame()->hasSelection())
+      Print(webview()->focusedFrame(), false, is_preview);
+    else
+      Print(webview()->mainFrame(), false, is_preview);
+  }
+}
+
 void RenderView::Print(WebFrame* frame,
                        bool script_initiated,
                        bool is_preview) {
   DCHECK(frame);
-  if (print_helper_.get() == NULL) {
+  GetPrintWebViewHelper()->PrintFrame(frame, script_initiated, is_preview);
+}
+
+PrintWebViewHelper* RenderView::GetPrintWebViewHelper() {
+  if (print_helper_.get() == NULL)
     print_helper_.reset(new PrintWebViewHelper(this));
-  }
-  print_helper_->Print(frame, script_initiated, is_preview);
+  return print_helper_.get();
 }
 
 void RenderView::OnSetEditCommandsForNextKeyEvent(
@@ -5392,24 +5415,16 @@ void RenderView::ExecuteCodeImpl(WebFrame* frame,
        frame_it != frame_vector.end(); ++frame_it) {
     WebFrame* frame = *frame_it;
     if (params.is_javascript) {
-      ExtensionRendererInfo* extension =
-          ExtensionRendererInfo::GetByID(params.extension_id);
+      const Extension* extension =
+          render_thread_->GetExtensions()->GetByID(params.extension_id);
 
     // Since extension info is sent separately from user script info, they can
     // be out of sync. We just ignore this situation.
     if (!extension)
       continue;
 
-      const std::vector<URLPattern> host_permissions =
-          extension->host_permissions();
-      if (!Extension::CanExecuteScriptOnPage(
-              frame->url(),
-              extension->allowed_to_execute_script_everywhere(),
-              &host_permissions,
-              NULL,
-              NULL)) {
+      if (!extension->CanExecuteScriptOnPage(frame->url(), NULL, NULL))
         continue;
-      }
 
       std::vector<WebScriptSource> sources;
       sources.push_back(
@@ -5430,7 +5445,7 @@ void RenderView::Close() {
   // We need to grab a pointer to the doomed WebView before we destroy it.
   WebView* doomed = webview();
   RenderWidget::Close();
-  Singleton<ViewMap>::get()->erase(doomed);
+  g_view_map.Get().erase(doomed);
 }
 
 void RenderView::DidHandleKeyEvent() {
@@ -5438,7 +5453,7 @@ void RenderView::DidHandleKeyEvent() {
 }
 
 void RenderView::DidHandleMouseEvent(const WebKit::WebMouseEvent& event) {
-  page_click_tracker_->DidHandleMouseEvent(event);
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidHandleMouseEvent(event));
 }
 
 #if defined(OS_MACOSX)
@@ -5500,9 +5515,14 @@ void RenderView::EnsureDocumentTag() {
 }
 
 #if defined(OS_MACOSX)
-void RenderView::SetPluginImeEnabled(bool enabled, int plugin_id) {
-  IPC::Message* msg = new ViewHostMsg_SetPluginImeEnabled(routing_id(),
-                                                          enabled, plugin_id);
+void RenderView::PluginFocusChanged(bool focused, int plugin_id) {
+  IPC::Message* msg = new ViewHostMsg_PluginFocusChanged(routing_id(),
+                                                         focused, plugin_id);
+  Send(msg);
+}
+
+void RenderView::StartPluginIme() {
+  IPC::Message* msg = new ViewHostMsg_StartPluginIme(routing_id());
   // This message can be sent during event-handling, and needs to be delivered
   // within that context.
   msg->set_unblock(true);
@@ -5596,27 +5616,26 @@ void RenderView::OnPageTranslated() {
   if (!frame)
     return;
 
-  // The page is translated, so try to extract the form data again.
-  autofill_helper_->FrameContentsAvailable(frame);
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FrameTranslated(frame));
 }
 
-WebKit::WebGeolocationService* RenderView::geolocationService() {
-  if (!geolocation_dispatcher_.get())
-    geolocation_dispatcher_.reset(new GeolocationDispatcherOld(this));
-  return geolocation_dispatcher_.get();
+WebKit::WebGeolocationClient* RenderView::geolocationClient() {
+  if (!geolocation_dispatcher_)
+    geolocation_dispatcher_ = new GeolocationDispatcher(this);
+  return geolocation_dispatcher_;
 }
 
 WebKit::WebSpeechInputController* RenderView::speechInputController(
     WebKit::WebSpeechInputListener* listener) {
-  if (!speech_input_dispatcher_.get())
-    speech_input_dispatcher_.reset(new SpeechInputDispatcher(this, listener));
-  return speech_input_dispatcher_.get();
+  if (!speech_input_dispatcher_)
+    speech_input_dispatcher_ = new SpeechInputDispatcher(this, listener);
+  return speech_input_dispatcher_;
 }
 
 WebKit::WebDeviceOrientationClient* RenderView::deviceOrientationClient() {
-  if (!device_orientation_dispatcher_.get())
-    device_orientation_dispatcher_.reset(new DeviceOrientationDispatcher(this));
-  return device_orientation_dispatcher_.get();
+  if (!device_orientation_dispatcher_)
+    device_orientation_dispatcher_ = new DeviceOrientationDispatcher(this);
+  return device_orientation_dispatcher_;
 }
 
 void RenderView::zoomLimitsChanged(double minimum_level, double maximum_level) {
@@ -5661,9 +5680,10 @@ bool RenderView::IsNonLocalTopLevelNavigation(
   if (!url.SchemeIs("http") && !url.SchemeIs("https"))
     return false;
 
-  // Not interested in reloads.
+  // Not interested in reloads/form submits/resubmits/back forward navigations.
   if (type != WebKit::WebNavigationTypeReload &&
       type != WebKit::WebNavigationTypeFormSubmitted &&
+      type != WebKit::WebNavigationTypeFormResubmitted &&
       type != WebKit::WebNavigationTypeBackForward) {
     // The opener relationship between the new window and the parent allows the
     // new window to script the parent and vice versa. This is not allowed if
@@ -5719,4 +5739,30 @@ void RenderView::AddErrorToRootConsole(const string16& message) {
     webview()->mainFrame()->addMessageToConsole(
         WebConsoleMessage(WebConsoleMessage::LevelError, message));
   }
+}
+
+#if defined(ENABLE_FLAPPER_HACKS)
+void RenderView::OnConnectTcpACK(
+    int request_id,
+    IPC::PlatformFileForTransit socket_for_transit,
+    const PP_Flash_NetAddress& local_addr,
+    const PP_Flash_NetAddress& remote_addr) {
+  pepper_delegate_.OnConnectTcpACK(
+      request_id,
+      IPC::PlatformFileForTransitToPlatformFile(socket_for_transit),
+      local_addr,
+      remote_addr);
+}
+#endif
+
+void RenderView::OnJavaScriptStressTestControl(int cmd, int param) {
+  if (cmd == kJavaScriptStressTestSetStressRunType) {
+    v8::Testing::SetStressRunType(static_cast<v8::Testing::StressType>(param));
+  } else if (cmd == kJavaScriptStressTestPrepareStressRun) {
+    v8::Testing::PrepareStressRun(param);
+  }
+}
+
+void RenderView::OnContextMenuClosed() {
+  context_menu_node_.reset();
 }

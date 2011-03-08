@@ -9,10 +9,10 @@ extern "C" {
 #include <X11/Xlib.h>
 }
 
-#include "app/x11_util.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
-#include "base/singleton.h"
+#include "ui/base/x/x11_util.h"
 
 namespace chromeos {
 
@@ -45,7 +45,7 @@ bool SetIntProperty(XID xid, Atom xatom, const std::vector<int>& values) {
     data[i] = values[i];
 
   // TODO: Trap errors and return false on failure.
-  XChangeProperty(x11_util::GetXDisplay(),
+  XChangeProperty(ui::GetXDisplay(),
                   xid,
                   xatom,
                   xatom,
@@ -53,18 +53,17 @@ bool SetIntProperty(XID xid, Atom xatom, const std::vector<int>& values) {
                   PropModeReplace,
                   reinterpret_cast<const unsigned char*>(data.get()),
                   values.size());  // num items
-  XFlush(x11_util::GetXDisplay());
+  XFlush(ui::GetXDisplay());
   return true;
 }
 
 }  // namespace
 
+static base::LazyInstance<WmIpc> g_wm_ipc(base::LINKER_INITIALIZED);
+
 // static
 WmIpc* WmIpc::instance() {
-  static WmIpc* instance = NULL;
-  if (!instance)
-    instance = Singleton<WmIpc>::get();
-  return instance;
+  return g_wm_ipc.Pointer();
 }
 
 bool WmIpc::SetWindowType(GtkWidget* widget,
@@ -74,15 +73,15 @@ bool WmIpc::SetWindowType(GtkWidget* widget,
   values.push_back(type);
   if (params)
     values.insert(values.end(), params->begin(), params->end());
-  return SetIntProperty(x11_util::GetX11WindowFromGtkWidget(widget),
+  return SetIntProperty(ui::GetX11WindowFromGtkWidget(widget),
                         type_to_atom_[ATOM_CHROME_WINDOW_TYPE], values);
 }
 
 WmIpcWindowType WmIpc::GetWindowType(GtkWidget* widget,
                                      std::vector<int>* params) {
   std::vector<int> properties;
-  if (x11_util::GetIntArrayProperty(
-          x11_util::GetX11WindowFromGtkWidget(widget),
+  if (ui::GetIntArrayProperty(
+          ui::GetX11WindowFromGtkWidget(widget),
           atom_to_string_[type_to_atom_[ATOM_CHROME_WINDOW_TYPE]],
           &properties)) {
     int type = properties.front();
@@ -110,7 +109,7 @@ void WmIpc::SendMessage(const Message& msg) {
   for (int i = 0; i < msg.max_params(); ++i)
     e.xclient.data.l[i+1] = msg.param(i);
 
-  XSendEvent(x11_util::GetXDisplay(),
+  XSendEvent(ui::GetXDisplay(),
              wm_,
              False,  // propagate
              0,  // empty event mask
@@ -164,6 +163,12 @@ void WmIpc::SetLoggedInProperty(bool logged_in) {
                  values);
 }
 
+void WmIpc::NotifyAboutSignout() {
+  Message msg(chromeos::WM_IPC_MESSAGE_WM_NOTIFY_SIGNING_OUT);
+  SendMessage(msg);
+  XFlush(ui::GetXDisplay());
+}
+
 WmIpc::WmIpc() {
   scoped_array<char*> names(new char*[kNumAtoms]);
   scoped_array<Atom> atoms(new Atom[kNumAtoms]);
@@ -173,7 +178,7 @@ WmIpc::WmIpc() {
     names[i] = const_cast<char*>(kAtomInfos[i].name);
   }
 
-  XInternAtoms(x11_util::GetXDisplay(), names.get(), kNumAtoms,
+  XInternAtoms(ui::GetXDisplay(), names.get(), kNumAtoms,
                False,  // only_if_exists
                atoms.get());
 
@@ -196,7 +201,7 @@ WmIpc::WmIpc() {
 }
 
 void WmIpc::InitWmInfo() {
-  wm_ = XGetSelectionOwner(x11_util::GetXDisplay(), type_to_atom_[ATOM_WM_S0]);
+  wm_ = XGetSelectionOwner(ui::GetXDisplay(), type_to_atom_[ATOM_WM_S0]);
 
   // Let the window manager know which version of the IPC messages we support.
   Message msg(chromeos::WM_IPC_MESSAGE_WM_NOTIFY_IPC_VERSION);

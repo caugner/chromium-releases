@@ -7,11 +7,11 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "base/platform_thread.h"
 #include "base/ref_counted.h"
 #include "base/scoped_vector.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/threading/platform_thread.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
@@ -110,6 +110,7 @@ class MockClientSocketFactory : public ClientSocketFactory {
       const HostPortPair& host_and_port,
       const SSLConfig& ssl_config,
       SSLHostInfo* ssl_host_info,
+      CertVerifier* cert_verifier,
       DnsCertProvenanceChecker* dns_cert_checker) {
     NOTIMPLEMENTED();
     delete ssl_host_info;
@@ -617,24 +618,27 @@ TEST_F(ClientSocketPoolBaseTest, ConnectJob_TimedOut) {
                          &client_socket_factory_,
                          &log);
   ASSERT_EQ(ERR_IO_PENDING, job->Connect());
-  PlatformThread::Sleep(1);
+  base::PlatformThread::Sleep(1);
   EXPECT_EQ(ERR_TIMED_OUT, delegate.WaitForResult());
 
-  EXPECT_EQ(6u, log.entries().size());
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
+
+  EXPECT_EQ(6u, entries.size());
   EXPECT_TRUE(LogContainsBeginEvent(
-      log.entries(), 0, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB));
+      entries, 0, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB));
   EXPECT_TRUE(LogContainsBeginEvent(
-      log.entries(), 1, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_CONNECT));
+      entries, 1, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_CONNECT));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 2, NetLog::TYPE_CONNECT_JOB_SET_SOCKET,
+      entries, 2, NetLog::TYPE_CONNECT_JOB_SET_SOCKET,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 3, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_TIMED_OUT,
+      entries, 3, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_TIMED_OUT,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 4, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_CONNECT));
+      entries, 4, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB_CONNECT));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 5, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB));
+      entries, 5, NetLog::TYPE_SOCKET_POOL_CONNECT_JOB));
 }
 
 TEST_F(ClientSocketPoolBaseTest, BasicSynchronous) {
@@ -655,17 +659,20 @@ TEST_F(ClientSocketPoolBaseTest, BasicSynchronous) {
   EXPECT_TRUE(handle.socket());
   handle.Reset();
 
-  EXPECT_EQ(4u, log.entries().size());
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
+
+  EXPECT_EQ(4u, entries.size());
   EXPECT_TRUE(LogContainsBeginEvent(
-      log.entries(), 0, NetLog::TYPE_SOCKET_POOL));
+      entries, 0, NetLog::TYPE_SOCKET_POOL));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
+      entries, 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 2, NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
+      entries, 2, NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 3, NetLog::TYPE_SOCKET_POOL));
+      entries, 3, NetLog::TYPE_SOCKET_POOL));
 }
 
 TEST_F(ClientSocketPoolBaseTest, InitConnectionFailure) {
@@ -692,14 +699,17 @@ TEST_F(ClientSocketPoolBaseTest, InitConnectionFailure) {
   EXPECT_FALSE(handle.is_ssl_error());
   EXPECT_TRUE(handle.ssl_error_response_info().headers.get() == NULL);
 
-  EXPECT_EQ(3u, log.entries().size());
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
+
+  EXPECT_EQ(3u, entries.size());
   EXPECT_TRUE(LogContainsBeginEvent(
-      log.entries(), 0, NetLog::TYPE_SOCKET_POOL));
+      entries, 0, NetLog::TYPE_SOCKET_POOL));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
+      entries, 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 2, NetLog::TYPE_SOCKET_POOL));
+      entries, 2, NetLog::TYPE_SOCKET_POOL));
 }
 
 TEST_F(ClientSocketPoolBaseTest, TotalLimit) {
@@ -862,7 +872,7 @@ TEST_F(ClientSocketPoolBaseTest, TotalLimitCountsConnectingSockets) {
   // actually become pending until 2ms after they have been created. In order
   // to flush all tasks, we need to wait so that we know there are no
   // soon-to-be-pending tasks waiting.
-  PlatformThread::Sleep(10);
+  base::PlatformThread::Sleep(10);
   MessageLoop::current()->RunAllPending();
 
   // The next synchronous request should wait for its turn.
@@ -1305,7 +1315,7 @@ class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
           {
             MessageLoop::ScopedNestableTaskAllower nestable(
                 MessageLoop::current());
-            PlatformThread::Sleep(10);
+            base::PlatformThread::Sleep(10);
             EXPECT_EQ(OK, next_job_callback.WaitForResult());
           }
           break;
@@ -1503,17 +1513,20 @@ TEST_F(ClientSocketPoolBaseTest, BasicAsynchronous) {
   EXPECT_TRUE(handle.socket());
   handle.Reset();
 
-  EXPECT_EQ(4u, log.entries().size());
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
+
+  EXPECT_EQ(4u, entries.size());
   EXPECT_TRUE(LogContainsBeginEvent(
-      log.entries(), 0, NetLog::TYPE_SOCKET_POOL));
+      entries, 0, NetLog::TYPE_SOCKET_POOL));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
+      entries, 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 2, NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
+      entries, 2, NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 3, NetLog::TYPE_SOCKET_POOL));
+      entries, 3, NetLog::TYPE_SOCKET_POOL));
 }
 
 TEST_F(ClientSocketPoolBaseTest,
@@ -1540,14 +1553,17 @@ TEST_F(ClientSocketPoolBaseTest,
   EXPECT_FALSE(handle.is_ssl_error());
   EXPECT_TRUE(handle.ssl_error_response_info().headers.get() == NULL);
 
-  EXPECT_EQ(3u, log.entries().size());
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
+
+  EXPECT_EQ(3u, entries.size());
   EXPECT_TRUE(LogContainsBeginEvent(
-      log.entries(), 0, NetLog::TYPE_SOCKET_POOL));
+      entries, 0, NetLog::TYPE_SOCKET_POOL));
   EXPECT_TRUE(LogContainsEvent(
-      log.entries(), 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
+      entries, 1, NetLog::TYPE_SOCKET_POOL_BOUND_TO_CONNECT_JOB,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 2, NetLog::TYPE_SOCKET_POOL));
+      entries, 2, NetLog::TYPE_SOCKET_POOL));
 }
 
 TEST_F(ClientSocketPoolBaseTest, TwoRequestsCancelOne) {
@@ -1874,7 +1890,7 @@ TEST_F(ClientSocketPoolBaseTest, CleanupTimedOutIdleSockets) {
   // actually become pending until 2ms after they have been created. In order
   // to flush all tasks, we need to wait so that we know there are no
   // soon-to-be-pending tasks waiting.
-  PlatformThread::Sleep(10);
+  base::PlatformThread::Sleep(10);
   MessageLoop::current()->RunAllPending();
 
   ASSERT_EQ(2, pool_->IdleSocketCount());
@@ -1892,8 +1908,11 @@ TEST_F(ClientSocketPoolBaseTest, CleanupTimedOutIdleSockets) {
                    log.bound());
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(handle.is_reused());
+
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsEntryWithType(
-      log.entries(), 1, NetLog::TYPE_SOCKET_POOL_REUSED_AN_EXISTING_SOCKET));
+      entries, 1, NetLog::TYPE_SOCKET_POOL_REUSED_AN_EXISTING_SOCKET));
 }
 
 // Make sure that we process all pending requests even when we're stalling
@@ -2294,7 +2313,8 @@ TEST_F(ClientSocketPoolBaseTest, BackupSocketCancelAtMaxSockets) {
   handle.Reset();
 
   // Wait for the backup timer to fire (add some slop to ensure it fires)
-  PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs / 2 * 3);
+  base::PlatformThread::Sleep(
+      ClientSocketPool::kMaxConnectRetryIntervalMs / 2 * 3);
 
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(kDefaultMaxSockets, client_socket_factory_.allocation_count());
@@ -2322,7 +2342,8 @@ TEST_F(ClientSocketPoolBaseTest, CancelBackupSocketAfterCancelingAllRequests) {
   // the backup time to see if it indeed got canceled.
   handle.Reset();
   // Wait for the backup timer to fire (add some slop to ensure it fires)
-  PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs / 2 * 3);
+  base::PlatformThread::Sleep(
+      ClientSocketPool::kMaxConnectRetryIntervalMs / 2 * 3);
   MessageLoop::current()->RunAllPending();
   ASSERT_TRUE(pool_->HasGroup("bar"));
   EXPECT_EQ(1, pool_->NumConnectJobsInGroup("bar"));
@@ -2360,7 +2381,8 @@ TEST_F(ClientSocketPoolBaseTest, CancelBackupSocketAfterFinishingAllRequests) {
   handle.Reset();
   EXPECT_EQ(OK, callback2.WaitForResult());
   // Wait for the backup timer to fire (add some slop to ensure it fires)
-  PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs / 2 * 3);
+  base::PlatformThread::Sleep(
+      ClientSocketPool::kMaxConnectRetryIntervalMs / 2 * 3);
   MessageLoop::current()->RunAllPending();
 }
 

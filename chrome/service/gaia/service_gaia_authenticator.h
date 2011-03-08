@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/ref_counted.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/net/gaia/gaia_authenticator.h"
 
@@ -31,10 +31,12 @@ class ServiceGaiaAuthenticator
   ~ServiceGaiaAuthenticator();
 
   // URLFetcher::Delegate implementation.
-  void OnURLFetchComplete(const URLFetcher *source, const GURL &url,
-                          const URLRequestStatus &status, int response_code,
-                          const ResponseCookies &cookies,
-                          const std::string &data);
+  virtual void OnURLFetchComplete(const URLFetcher *source,
+                                  const GURL &url,
+                                  const net::URLRequestStatus &status,
+                                  int response_code,
+                                  const ResponseCookies &cookies,
+                                  const std::string &data);
 
  protected:
   // GaiaAuthenticator overrides.

@@ -25,14 +25,18 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_METHOD1(RemoveObserverForAllNetworks, void(NetworkObserver*));
   MOCK_METHOD1(AddCellularDataPlanObserver, void(CellularDataPlanObserver*));
   MOCK_METHOD1(RemoveCellularDataPlanObserver, void(CellularDataPlanObserver*));
-  MOCK_METHOD0(ethernet_network, EthernetNetwork*(void));
+  MOCK_METHOD0(Lock, void(void));
+  MOCK_METHOD0(Unlock, void(void));
+  MOCK_METHOD0(IsLocked, bool(void));
+  MOCK_CONST_METHOD0(ethernet_network, const EthernetNetwork*(void));
   MOCK_CONST_METHOD0(ethernet_connecting, bool(void));
   MOCK_CONST_METHOD0(ethernet_connected, bool(void));
-  MOCK_METHOD0(wifi_network, WifiNetwork*(void));
+
+  MOCK_CONST_METHOD0(wifi_network, const WifiNetwork*(void));
   MOCK_CONST_METHOD0(wifi_connecting, bool(void));
   MOCK_CONST_METHOD0(wifi_connected, bool(void));
 
-  MOCK_METHOD0(cellular_network, CellularNetwork*(void));
+  MOCK_CONST_METHOD0(cellular_network, const CellularNetwork*(void));
   MOCK_CONST_METHOD0(cellular_connecting, bool(void));
   MOCK_CONST_METHOD0(cellular_connected, bool(void));
 
@@ -61,6 +65,8 @@ class MockNetworkLibrary : public NetworkLibrary {
                                           bool));
   MOCK_METHOD1(ConnectToCellularNetwork, bool(const CellularNetwork*));
   MOCK_METHOD1(RefreshCellularDataPlans, void(const CellularNetwork* network));
+  MOCK_METHOD0(SignalCellularPlanPayment, void(void));
+  MOCK_METHOD0(HasRecentCellularPlanPayment, bool(void));
 
   MOCK_METHOD1(DisconnectFromWirelessNetwork, void(const WirelessNetwork*));
   MOCK_METHOD1(SaveCellularNetwork, void(const CellularNetwork*));

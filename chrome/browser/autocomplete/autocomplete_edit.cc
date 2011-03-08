@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/notification_service.h"
@@ -45,13 +45,11 @@ AutocompleteEditController::~AutocompleteEditController() {
 AutocompleteEditModel::State::State(bool user_input_in_progress,
                                     const std::wstring& user_text,
                                     const std::wstring& keyword,
-                                    bool is_keyword_hint,
-                                    KeywordUIState keyword_ui_state)
+                                    bool is_keyword_hint)
     : user_input_in_progress(user_input_in_progress),
       user_text(user_text),
       keyword(keyword),
-      is_keyword_hint(is_keyword_hint),
-      keyword_ui_state(keyword_ui_state) {
+      is_keyword_hint(is_keyword_hint) {
 }
 
 AutocompleteEditModel::State::~State() {
@@ -71,11 +69,9 @@ AutocompleteEditModel::AutocompleteEditModel(
       user_input_in_progress_(false),
       just_deleted_text_(false),
       has_temporary_text_(false),
-      original_keyword_ui_state_(NORMAL),
       paste_state_(NONE),
       control_key_state_(UP),
       is_keyword_hint_(false),
-      keyword_ui_state_(NORMAL),
       paste_and_go_transition_(PageTransition::TYPED),
       profile_(profile) {
 }
@@ -114,8 +110,7 @@ const AutocompleteEditModel::State
     }
   }
 
-  return State(user_input_in_progress_, user_text_, keyword_, is_keyword_hint_,
-               keyword_ui_state_);
+  return State(user_input_in_progress_, user_text_, keyword_, is_keyword_hint_);
 }
 
 void AutocompleteEditModel::RestoreState(const State& state) {
@@ -125,7 +120,6 @@ void AutocompleteEditModel::RestoreState(const State& state) {
     // DisplayTextFromUserText(), as its result depends upon this state.
     keyword_ = state.keyword;
     is_keyword_hint_ = state.is_keyword_hint;
-    keyword_ui_state_ = state.keyword_ui_state;
     view_->SetUserText(state.user_text,
         DisplayTextFromUserText(state.user_text), false);
   }
@@ -178,9 +172,23 @@ void AutocompleteEditModel::GetDataForURLExport(GURL* url,
 }
 
 bool AutocompleteEditModel::UseVerbatimInstant() {
+#if defined(OS_MACOSX)
+  // TODO(suzhe): Fix Mac port to display Instant suggest in a separated NSView,
+  // so that we can display instant suggest along with composition text.
   const AutocompleteInput& input = popup_->autocomplete_controller()->input();
-  if (input.initial_prevent_inline_autocomplete() ||
-      view_->DeleteAtEndPressed() || (popup_->selected_line() != 0))
+  if (input.initial_prevent_inline_autocomplete())
+    return true;
+#endif
+
+  // The value of input.initial_prevent_inline_autocomplete() is determined by
+  // following conditions:
+  // 1. If the caret is at the end of the text (checked below).
+  // 2. If it's in IME composition mode.
+  // As we use a separated widget for displaying the instant suggest, it won't
+  // interfere with IME composition, so we don't need to care about the value of
+  // input.initial_prevent_inline_autocomplete() here.
+  if (view_->DeleteAtEndPressed() || (popup_->selected_line() != 0) ||
+      just_deleted_text_)
     return true;
 
   std::wstring::size_type start, end;
@@ -223,17 +231,6 @@ AutocompleteMatch::Type AutocompleteEditModel::CurrentTextType() const {
   AutocompleteMatch match;
   GetInfoForCurrentText(&match, NULL);
   return match.type;
-}
-
-bool AutocompleteEditModel::GetURLForText(const std::wstring& text,
-                                          GURL* url) const {
-  const AutocompleteInput::Type type = AutocompleteInput::Parse(
-      UserTextFromDisplayText(text), std::wstring(), NULL, NULL);
-  if (type != AutocompleteInput::URL)
-    return false;
-
-  *url = URLFixerUpper::FixupURL(WideToUTF8(text), std::string());
-  return true;
 }
 
 void AutocompleteEditModel::AdjustTextForCopy(int sel_min,
@@ -293,7 +290,6 @@ void AutocompleteEditModel::Revert() {
   InternalSetUserText(std::wstring());
   keyword_.clear();
   is_keyword_hint_ = false;
-  keyword_ui_state_ = NORMAL;
   has_temporary_text_ = false;
   view_->SetWindowTextAndCaretPos(permanent_text_,
                                   has_focus_ ? permanent_text_.length() : 0);
@@ -302,10 +298,11 @@ void AutocompleteEditModel::Revert() {
 void AutocompleteEditModel::StartAutocomplete(
     bool has_selected_text,
     bool prevent_inline_autocomplete) const {
+  bool keyword_is_selected = KeywordIsSelected();
   popup_->StartAutocomplete(user_text_, GetDesiredTLD(),
       prevent_inline_autocomplete || just_deleted_text_ ||
       (has_selected_text && inline_autocomplete_text_.empty()) ||
-      (paste_state_ != NONE), keyword_ui_state_ == KEYWORD);
+      (paste_state_ != NONE), keyword_is_selected, keyword_is_selected);
 }
 
 bool AutocompleteEditModel::CanPasteAndGo(const std::wstring& text) const {
@@ -396,7 +393,7 @@ void AutocompleteEditModel::OpenURL(const GURL& url,
   TemplateURLModel* template_url_model = profile_->GetTemplateURLModel();
   if (template_url_model && !keyword.empty()) {
     const TemplateURL* const template_url =
-        template_url_model->GetTemplateURLForKeyword(keyword);
+        template_url_model->GetTemplateURLForKeyword(WideToUTF16Hack(keyword));
 
     // Special case for extension keywords. Don't increment usage count for
     // these.
@@ -426,25 +423,27 @@ void AutocompleteEditModel::OpenURL(const GURL& url,
     // search engine, if applicable; see comments in template_url.h.
   }
 
-  controller_->OnAutocompleteWillAccept();
-
-  if (disposition != NEW_BACKGROUND_TAB)
+  if (disposition != NEW_BACKGROUND_TAB) {
+    controller_->OnAutocompleteWillAccept();
     view_->RevertAll();  // Revert the box to its unedited state
+  }
   controller_->OnAutocompleteAccept(url, disposition, transition,
                                     alternate_nav_url);
 }
 
-void AutocompleteEditModel::AcceptKeyword() {
+bool AutocompleteEditModel::AcceptKeyword() {
+  DCHECK(is_keyword_hint_ && !keyword_.empty());
+
   view_->OnBeforePossibleChange();
   view_->SetWindowTextAndCaretPos(std::wstring(), 0);
   is_keyword_hint_ = false;
-  keyword_ui_state_ = KEYWORD;
   view_->OnAfterPossibleChange();
   just_deleted_text_ = false;  // OnAfterPossibleChange() erroneously sets this
                                // since the edit contents have disappeared.  It
                                // doesn't really matter, but we clear it to be
                                // consistent.
   UserMetrics::RecordAction(UserMetricsAction("AcceptedKeywordHint"), profile_);
+  return true;
 }
 
 void AutocompleteEditModel::ClearKeyword(const std::wstring& visible_text) {
@@ -452,7 +451,7 @@ void AutocompleteEditModel::ClearKeyword(const std::wstring& visible_text) {
   const std::wstring window_text(keyword_ + visible_text);
   view_->SetWindowTextAndCaretPos(window_text.c_str(), keyword_.length());
   keyword_.clear();
-  keyword_ui_state_ = NORMAL;
+  is_keyword_hint_ = false;
   view_->OnAfterPossibleChange();
   just_deleted_text_ = true;  // OnAfterPossibleChange() fails to clear this
                               // since the edit contents have actually grown
@@ -498,7 +497,6 @@ bool AutocompleteEditModel::OnEscapeKeyPressed() {
       // NOTE: This purposefully does not reset paste_state_.
       just_deleted_text_ = false;
       has_temporary_text_ = false;
-      keyword_ui_state_ = original_keyword_ui_state_;
       popup_->ResetToDefaultMatch();
       view_->OnRevertTemporaryText();
       return true;
@@ -565,11 +563,6 @@ void AutocompleteEditModel::OnUpOrDownKeyPressed(int count) {
     // normally.
     popup_->Move(count);
   }
-
-  // NOTE: We need to reset the keyword_ui_state_ after the popup updates, since
-  // Move() will eventually call back to OnPopupDataChanged(), which needs to
-  // save off the current keyword_ui_state_.
-  keyword_ui_state_ = NORMAL;
 }
 
 void AutocompleteEditModel::OnPopupDataChanged(
@@ -583,6 +576,9 @@ void AutocompleteEditModel::OnPopupDataChanged(
   if (keyword_state_changed) {
     keyword_ = keyword;
     is_keyword_hint_ = is_keyword_hint;
+
+    // |is_keyword_hint_| should always be false if |keyword_| is empty.
+    DCHECK(!keyword_.empty() || !is_keyword_hint_);
   }
 
   // Handle changes to temporary text.
@@ -592,7 +588,7 @@ void AutocompleteEditModel::OnPopupDataChanged(
       // Save the original selection and URL so it can be reverted later.
       has_temporary_text_ = true;
       original_url_ = *destination_for_temporary_text_change;
-      original_keyword_ui_state_ = keyword_ui_state_;
+      inline_autocomplete_text_.clear();
     }
     if (control_key_state_ == DOWN_WITHOUT_CHANGE) {
       // Arrowing around the popup cancels control-enter.
@@ -609,23 +605,15 @@ void AutocompleteEditModel::OnPopupDataChanged(
     return;
   }
 
-  // TODO(suzhe): Instead of messing with |inline_autocomplete_text_| here,
-  // we should probably do it inside Observe(), and save/restore it around
-  // changes to the temporary text.  This will let us remove knowledge of
-  // inline autocompletions from the popup code.
-  //
-  // Handle changes to inline autocomplete text.  Don't make changes if the user
-  // is showing temporary text.  Making display changes would be obviously
-  // wrong; making changes to the inline_autocomplete_text_ itself turns out to
-  // be more subtlely wrong, because it means hitting esc will no longer revert
-  // to the original state before arrowing.
-  if (!has_temporary_text_) {
-    inline_autocomplete_text_ = text;
-    if (view_->OnInlineAutocompleteTextMaybeChanged(
-        DisplayTextFromUserText(user_text_ + inline_autocomplete_text_),
-        DisplayTextFromUserText(user_text_).length()))
-      return;
-  }
+  // All cases that can result in |has_temporary_text_| being set should have
+  // been handled by the conditional above.
+  DCHECK(!has_temporary_text_);
+
+  inline_autocomplete_text_ = text;
+  if (view_->OnInlineAutocompleteTextMaybeChanged(
+      DisplayTextFromUserText(user_text_ + inline_autocomplete_text_),
+      DisplayTextFromUserText(user_text_).length()))
+    return;
 
   // All other code paths that return invoke OnChanged. We need to invoke
   // OnChanged in case the destination url changed (as could happen when control
@@ -633,16 +621,17 @@ void AutocompleteEditModel::OnPopupDataChanged(
   controller_->OnChanged();
 }
 
-bool AutocompleteEditModel::OnAfterPossibleChange(const std::wstring& new_text,
-                                                  bool selection_differs,
-                                                  bool text_differs,
-                                                  bool just_deleted_text,
-                                                  bool at_end_of_edit) {
+bool AutocompleteEditModel::OnAfterPossibleChange(
+    const std::wstring& new_text,
+    bool selection_differs,
+    bool text_differs,
+    bool just_deleted_text,
+    bool allow_keyword_ui_change) {
   // Update the paste state as appropriate: if we're just finishing a paste
   // that replaced all the text, preserve that information; otherwise, if we've
   // made some other edit, clear paste tracking.
-  if (paste_state_ == REPLACING_ALL)
-    paste_state_ = REPLACED_ALL;
+  if (paste_state_ == PASTING)
+    paste_state_ = PASTED;
   else if (text_differs)
     paste_state_ = NONE;
 
@@ -662,8 +651,7 @@ bool AutocompleteEditModel::OnAfterPossibleChange(const std::wstring& new_text,
     return false;
   }
 
-  const bool had_keyword = KeywordIsSelected();
-
+  const std::wstring old_user_text = user_text_;
   // If the user text has not changed, we do not want to change the model's
   // state associated with the text.  Otherwise, we can get surprising behavior
   // where the autocompleted text unexpectedly reappears, e.g. crbug.com/55983
@@ -676,34 +664,20 @@ bool AutocompleteEditModel::OnAfterPossibleChange(const std::wstring& new_text,
     just_deleted_text_ = just_deleted_text;
   }
 
-  // Disable the fancy keyword UI if the user didn't already have a visible
-  // keyword and is not at the end of the edit.  This prevents us from showing
-  // the fancy UI (and interrupting the user's editing) if the user happens to
-  // have a keyword for 'a', types 'ab' then puts a space between the 'a' and
-  // the 'b'.
-  if (!had_keyword)
-    keyword_ui_state_ = at_end_of_edit ? NORMAL : NO_KEYWORD;
-
   view_->UpdatePopup();
 
-  if (had_keyword) {
-    if (is_keyword_hint_ || keyword_.empty())
-      keyword_ui_state_ = NORMAL;
-  } else if ((keyword_ui_state_ != NO_KEYWORD) && !is_keyword_hint_ &&
-             !keyword_.empty()) {
-    // Went from no selected keyword to a selected keyword.
-    keyword_ui_state_ = KEYWORD;
-  }
+  // Change to keyword mode if the user has typed a keyword name and is now
+  // pressing space after the name. Accepting the keyword will update our
+  // state, so in that case there's no need to also return true here.
+  if (text_differs && allow_keyword_ui_change && !just_deleted_text &&
+      MaybeAcceptKeywordBySpace(old_user_text, user_text_))
+    return false;
 
   return true;
 }
 
 void AutocompleteEditModel::PopupBoundsChangedTo(const gfx::Rect& bounds) {
   controller_->OnPopupBoundsChanged(bounds);
-}
-
-void AutocompleteEditModel::ResultsUpdated() {
-  UpdateSuggestedSearchText();
 }
 
 // Return true if the suggestion type warrants a TCP/IP preconnection.
@@ -767,14 +741,13 @@ void AutocompleteEditModel::InternalSetUserText(const std::wstring& text) {
 }
 
 bool AutocompleteEditModel::KeywordIsSelected() const {
-  return ((keyword_ui_state_ != NO_KEYWORD) && !is_keyword_hint_ &&
-          !keyword_.empty());
+  return !is_keyword_hint_ && !keyword_.empty();
 }
 
 std::wstring AutocompleteEditModel::DisplayTextFromUserText(
     const std::wstring& text) const {
   return KeywordIsSelected() ?
-      KeywordProvider::SplitReplacementStringFromInput(text) : text;
+      KeywordProvider::SplitReplacementStringFromInput(text, false) : text;
 }
 
 std::wstring AutocompleteEditModel::UserTextFromDisplayText(
@@ -794,37 +767,38 @@ void AutocompleteEditModel::GetInfoForCurrentText(
   }
 }
 
-// Returns true if suggested search text should be shown for the specified match
-// type.
-static bool ShouldShowSuggestSearchTextFor(AutocompleteMatch::Type type) {
-  // TODO: add support for other engines when in keyword mode.
-  return ((type == AutocompleteMatch::SEARCH_HISTORY) ||
-          (type == AutocompleteMatch::SEARCH_SUGGEST));
+bool AutocompleteEditModel::GetURLForText(const std::wstring& text,
+                                          GURL* url) const {
+  GURL parsed_url;
+  const AutocompleteInput::Type type = AutocompleteInput::Parse(
+      UserTextFromDisplayText(text), std::wstring(), NULL, NULL, &parsed_url);
+  if (type != AutocompleteInput::URL)
+    return false;
+
+  *url = parsed_url;
+  return true;
 }
 
-void AutocompleteEditModel::UpdateSuggestedSearchText() {
-  if (!InstantController::IsEnabled(profile_, InstantController::VERBATIM_TYPE))
-    return;
+bool AutocompleteEditModel::MaybeAcceptKeywordBySpace(
+    const std::wstring& old_user_text,
+    const std::wstring& new_user_text) {
+  return (paste_state_ == NONE) && is_keyword_hint_ && !keyword_.empty() &&
+      inline_autocomplete_text_.empty() && new_user_text.length() >= 2 &&
+      IsSpaceCharForAcceptingKeyword(*new_user_text.rbegin()) &&
+      !IsWhitespace(*(new_user_text.rbegin() + 1)) &&
+      (old_user_text.length() + 1 >= new_user_text.length()) &&
+      !new_user_text.compare(0, new_user_text.length() - 1, old_user_text,
+                             0, new_user_text.length() - 1) &&
+      AcceptKeyword();
+}
 
-  string16 suggested_text;
-  // The suggested text comes from the first search result.
-  if (popup_->IsOpen()) {
-    const AutocompleteResult& result = popup_->result();
-    if ((result.size() > 1) && (popup_->selected_line() == 0) &&
-        ((result.begin()->inline_autocomplete_offset == std::wstring::npos) ||
-         (result.begin()->inline_autocomplete_offset ==
-          result.begin()->fill_into_edit.size()))) {
-      for (AutocompleteResult::const_iterator i = result.begin() + 1;
-           i != result.end(); ++i) {
-        // TODO: add support for other engines when in keyword mode.
-        if (ShouldShowSuggestSearchTextFor(i->type) &&
-            i->inline_autocomplete_offset != std::wstring::npos) {
-          suggested_text = WideToUTF16(i->fill_into_edit.substr(
-                                           i->inline_autocomplete_offset));
-          break;
-        }
-      }
-    }
+//  static
+bool AutocompleteEditModel::IsSpaceCharForAcceptingKeyword(wchar_t c) {
+  switch (c) {
+    case 0x0020:  // Space
+    case 0x3000:  // Ideographic Space
+      return true;
+    default:
+      return false;
   }
-  controller_->OnSetSuggestedSearchText(suggested_text);
 }

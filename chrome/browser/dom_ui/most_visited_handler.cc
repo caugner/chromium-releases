@@ -6,7 +6,6 @@
 
 #include <set>
 
-#include "app/l10n_util.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/md5.h"
@@ -15,7 +14,7 @@
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
@@ -23,12 +22,10 @@
 #include "chrome/browser/dom_ui/dom_ui_thumbnail_source.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/history/page_usage_data.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/pref_names.h"
@@ -36,6 +33,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -75,7 +73,7 @@ DOMMessageHandler* MostVisitedHandler::Attach(DOMUI* dom_ui) {
       new DOMUIThumbnailSource(dom_ui->GetProfile());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
                         &ChromeURLDataManager::AddDataSource,
                         make_scoped_refptr(thumbnail_src)));
 
@@ -83,7 +81,7 @@ DOMMessageHandler* MostVisitedHandler::Attach(DOMUI* dom_ui) {
       new DOMUIFavIconSource(dom_ui->GetProfile());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
                         &ChromeURLDataManager::AddDataSource,
                         make_scoped_refptr(favicon_src)));
 
@@ -133,11 +131,9 @@ void MostVisitedHandler::HandleGetMostVisited(const ListValue* args) {
 void MostVisitedHandler::SendPagesValue() {
   if (pages_value_.get()) {
     bool has_blacklisted_urls = !url_blacklist_->empty();
-    if (history::TopSites::IsEnabled()) {
-      history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
-      if (ts)
-        has_blacklisted_urls = ts->HasBlacklistedItems();
-    }
+    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+    if (ts)
+      has_blacklisted_urls = ts->HasBlacklistedItems();
     FundamentalValue first_run(IsFirstRun());
     FundamentalValue has_blacklisted_urls_value(has_blacklisted_urls);
     dom_ui_->CallJavascriptFunction(L"mostVisitedPages",
@@ -149,32 +145,12 @@ void MostVisitedHandler::SendPagesValue() {
 }
 
 void MostVisitedHandler::StartQueryForMostVisited() {
-  if (history::TopSites::IsEnabled()) {
-    // Use TopSites.
-    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
-    if (ts) {
-      ts->GetMostVisitedURLs(
-          &topsites_consumer_,
-          NewCallback(this, &MostVisitedHandler::OnMostVisitedURLsAvailable));
-    }
-    return;
-  }
-
-  const int page_count = kMostVisitedPages;
-  // Let's query for the number of items we want plus the blacklist size as
-  // we'll be filtering-out the returned list with the blacklist URLs.
-  // We do not subtract the number of pinned URLs we have because the
-  // HistoryService does not know about those.
-  const int result_count = page_count + url_blacklist_->size();
-  HistoryService* hs =
-      dom_ui_->GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  // |hs| may be null during unit tests.
-  if (hs) {
-    hs->QuerySegmentUsageSince(
-        &cancelable_consumer_,
-        base::Time::Now() - base::TimeDelta::FromDays(kMostVisitedScope),
-        result_count,
-        NewCallback(this, &MostVisitedHandler::OnSegmentUsageAvailable));
+  // Use TopSites.
+  history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+  if (ts) {
+    ts->GetMostVisitedURLs(
+        &topsites_consumer_,
+        NewCallback(this, &MostVisitedHandler::OnMostVisitedURLsAvailable));
   }
 }
 
@@ -196,15 +172,9 @@ void MostVisitedHandler::HandleRemoveURLsFromBlacklist(const ListValue* args) {
     }
     UserMetrics::RecordAction(UserMetricsAction("MostVisited_UrlRemoved"),
                               dom_ui_->GetProfile());
-    if (history::TopSites::IsEnabled()) {
-      history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
-      if (ts)
-        ts->RemoveBlacklistedURL(GURL(url));
-      return;
-    }
-
-    r = url_blacklist_->Remove(GetDictionaryKeyForURL(url), NULL);
-    DCHECK(r) << "Unknown URL removed from the NTP Most Visited blacklist.";
+    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+    if (ts)
+      ts->RemoveBlacklistedURL(GURL(url));
   }
 }
 
@@ -212,14 +182,9 @@ void MostVisitedHandler::HandleClearBlacklist(const ListValue* args) {
   UserMetrics::RecordAction(UserMetricsAction("MostVisited_BlacklistCleared"),
                             dom_ui_->GetProfile());
 
-  if (history::TopSites::IsEnabled()) {
-    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
-    if (ts)
-      ts->ClearBlacklistedURLs();
-    return;
-  }
-
-  url_blacklist_->Clear();
+  history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+  if (ts)
+    ts->ClearBlacklistedURLs();
 }
 
 void MostVisitedHandler::HandleAddPinnedURL(const ListValue* args) {
@@ -257,28 +222,9 @@ void MostVisitedHandler::HandleAddPinnedURL(const ListValue* args) {
 }
 
 void MostVisitedHandler::AddPinnedURL(const MostVisitedPage& page, int index) {
-  if (history::TopSites::IsEnabled()) {
-    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
-    if (ts)
-      ts->AddPinnedURL(page.url, index);
-    return;
-  }
-
-  // Remove any pinned URL at the given index.
-  MostVisitedPage old_page;
-  if (GetPinnedURLAtIndex(index, &old_page)) {
-    RemovePinnedURL(old_page.url);
-  }
-
-  DictionaryValue* new_value = new DictionaryValue();
-  SetMostVisistedPage(new_value, page);
-
-  new_value->SetInteger("index", index);
-  pinned_urls_->Set(GetDictionaryKeyForURL(page.url.spec()), new_value);
-
-  // TODO(arv): Notify observers?
-
-  // Don't call HandleGetMostVisited. Let the client call this as needed.
+  history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+  if (ts)
+    ts->AddPinnedURL(page.url, index);
 }
 
 void MostVisitedHandler::HandleRemovePinnedURL(const ListValue* args) {
@@ -287,20 +233,9 @@ void MostVisitedHandler::HandleRemovePinnedURL(const ListValue* args) {
 }
 
 void MostVisitedHandler::RemovePinnedURL(const GURL& url) {
-  if (history::TopSites::IsEnabled()) {
-    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
-    if (ts)
-      ts->RemovePinnedURL(url);
-    return;
-  }
-
-  const std::string key = GetDictionaryKeyForURL(url.spec());
-  if (pinned_urls_->HasKey(key))
-    pinned_urls_->Remove(key, NULL);
-
-  // TODO(arv): Notify observers?
-
-  // Don't call HandleGetMostVisited. Let the client call this as needed.
+  history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+  if (ts)
+    ts->RemovePinnedURL(url);
 }
 
 bool MostVisitedHandler::GetPinnedURLAtIndex(int index,
@@ -344,84 +279,8 @@ bool MostVisitedHandler::GetPinnedURLAtIndex(int index,
   return false;
 }
 
-void MostVisitedHandler::OnSegmentUsageAvailable(
-    CancelableRequestProvider::Handle handle,
-    std::vector<PageUsageData*>* data) {
-  SetPagesValue(data);
-  if (got_first_most_visited_request_) {
-    SendPagesValue();
-  }
-}
-
-void MostVisitedHandler::SetPagesValue(std::vector<PageUsageData*>* data) {
-  most_visited_urls_.clear();
-  pages_value_.reset(new ListValue);
-  std::set<GURL> seen_urls;
-
-  size_t data_index = 0;
-  size_t output_index = 0;
-  size_t pre_populated_index = 0;
-  const std::vector<MostVisitedPage> pre_populated_pages =
-      MostVisitedHandler::GetPrePopulatedPages();
-
-  while (output_index < kMostVisitedPages) {
-    bool found = false;
-    bool pinned = false;
-    std::string pinned_url;
-    std::string pinned_title;
-    MostVisitedPage mvp;
-
-    if (MostVisitedHandler::GetPinnedURLAtIndex(output_index, &mvp)) {
-      pinned = true;
-      found = true;
-    }
-
-    while (!found && data_index < data->size()) {
-      const PageUsageData& page = *(*data)[data_index];
-      data_index++;
-      mvp.url = page.GetURL();
-
-      // Don't include blacklisted or pinned URLs.
-      std::string key = GetDictionaryKeyForURL(mvp.url.spec());
-      if (pinned_urls_->HasKey(key) || url_blacklist_->HasKey(key))
-        continue;
-
-      mvp.title = page.GetTitle();
-      found = true;
-    }
-
-    while (!found && pre_populated_index < pre_populated_pages.size()) {
-      mvp = pre_populated_pages[pre_populated_index++];
-      std::string key = GetDictionaryKeyForURL(mvp.url.spec());
-      if (pinned_urls_->HasKey(key) || url_blacklist_->HasKey(key) ||
-          seen_urls.find(mvp.url) != seen_urls.end())
-        continue;
-
-      found = true;
-    }
-
-    if (found) {
-      // Add fillers as needed.
-      while (pages_value_->GetSize() < output_index) {
-        DictionaryValue* filler_value = new DictionaryValue();
-        filler_value->SetBoolean("filler", true);
-        pages_value_->Append(filler_value);
-      }
-
-      DictionaryValue* page_value = new DictionaryValue();
-      SetMostVisistedPage(page_value, mvp);
-      page_value->SetBoolean("pinned", pinned);
-      pages_value_->Append(page_value);
-      most_visited_urls_.push_back(mvp.url);
-      seen_urls.insert(mvp.url);
-    }
-    output_index++;
-  }
-}
-
 void MostVisitedHandler::SetPagesValueFromTopSites(
     const history::MostVisitedURLList& data) {
-  DCHECK(history::TopSites::IsEnabled());
   pages_value_.reset(new ListValue);
   for (size_t i = 0; i < data.size(); i++) {
     const history::MostVisitedURL& url = data[i];
@@ -474,18 +333,6 @@ bool MostVisitedHandler::IsFirstRun() {
 }
 
 // static
-void MostVisitedHandler::SetMostVisistedPage(
-    DictionaryValue* dict,
-    const MostVisitedHandler::MostVisitedPage& page) {
-  NewTabUI::SetURLTitleAndDirection(dict, page.title, page.url);
-  if (!page.favicon_url.is_empty())
-    dict->SetString("faviconUrl", page.favicon_url.spec());
-  if (!page.thumbnail_url.is_empty())
-    dict->SetString("thumbnailUrl", page.thumbnail_url.spec());
-}
-
-
-// static
 const std::vector<MostVisitedHandler::MostVisitedPage>&
     MostVisitedHandler::GetPrePopulatedPages() {
   // TODO(arv): This needs to get the data from some configurable place.
@@ -523,19 +370,9 @@ void MostVisitedHandler::Observe(NotificationType type,
 }
 
 void MostVisitedHandler::BlacklistURL(const GURL& url) {
-  if (history::TopSites::IsEnabled()) {
-    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
-    if (ts)
-      ts->AddBlacklistedURL(url);
-    return;
-  }
-
-  RemovePinnedURL(url);
-
-  std::string key = GetDictionaryKeyForURL(url.spec());
-  if (url_blacklist_->HasKey(key))
-    return;
-  url_blacklist_->SetBoolean(key, true);
+  history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+  if (ts)
+    ts->AddBlacklistedURL(url);
 }
 
 std::string MostVisitedHandler::GetDictionaryKeyForURL(const std::string& url) {

@@ -9,6 +9,7 @@
 #define CHROME_INSTALLER_UTIL_MASTER_PREFERENCES_H_
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "base/command_line.h"
@@ -18,7 +19,7 @@
 class DictionaryValue;
 class FilePath;
 
-namespace installer_util {
+namespace installer {
 
 // This is the default name for the master preferences file used to pre-set
 // values in the user profile at first run.
@@ -69,8 +70,14 @@ const char kDefaultMasterPrefs[] = "master_preferences";
 // installation properties. This entry will be ignored at other times.
 // This function parses the 'distribution' entry and returns a combination
 // of MasterPrefResult.
+
 class MasterPreferences {
  public:
+  // Construct a master preferences from the current process' current command
+  // line. Equivalent to calling
+  // MasterPreferences(*CommandLine::ForCurrentProcess()).
+  MasterPreferences();
+
   // Parses the command line and optionally reads the master preferences file
   // to get distribution related install options (if the "installerdata" switch
   // is present in the command line.
@@ -165,8 +172,16 @@ class MasterPreferences {
     return multi_install_;
   }
 
+  // Returns a static preference object that has been initialized with the
+  // CommandLine object for the current process.
+  // NOTE: Must not be called before CommandLine::Init() is called!
+  // OTHER NOTE: Not thread safe.
+  static const MasterPreferences& ForCurrentProcess();
+
  protected:
   void InitializeProductFlags();
+
+  void InitializeFromCommandLine(const CommandLine& cmd_line);
 
  protected:
   scoped_ptr<DictionaryValue> master_dictionary_;
@@ -181,6 +196,6 @@ class MasterPreferences {
   DISALLOW_COPY_AND_ASSIGN(MasterPreferences);
 };
 
-}  // namespace installer_util
+}  // namespace installer
 
 #endif  // CHROME_INSTALLER_UTIL_MASTER_PREFERENCES_H_

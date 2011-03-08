@@ -17,7 +17,6 @@
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/browser_thread.h"
@@ -37,7 +36,7 @@
 namespace {
 
 // Helper function for ShellIntegration::GetAppId to generates profile id
-// from profile path. "profile_id"  is composed of sanitized basenames of
+// from profile path. "profile_id" is composed of sanitized basenames of
 // user data dir and profile dir joined by a ".".
 std::wstring GetProfileIdFromPath(const FilePath& profile_path) {
   // Return empty string if profile_path is empty
@@ -228,6 +227,9 @@ bool MigrateChromiumShortcutsTask::GetExpectedAppId(
   if (command_line.HasSwitch(switches::kApp)) {
     app_name = UTF8ToWide(web_app::GenerateApplicationNameFromURL(
         GURL(command_line.GetSwitchValueASCII(switches::kApp))));
+  } else if (command_line.HasSwitch(switches::kAppId)) {
+    app_name = UTF8ToWide(web_app::GenerateApplicationNameFromExtensionId(
+        command_line.GetSwitchValueASCII(switches::kAppId)));
   } else {
     app_name = BrowserDistribution::GetDistribution()->GetBrowserAppId();
   }
@@ -265,15 +267,16 @@ bool MigrateChromiumShortcutsTask::GetShortcutAppId(
 };
 
 bool ShellIntegration::SetAsDefaultBrowser() {
-  std::wstring chrome_exe;
+  FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
     LOG(ERROR) << "Error getting app exe path";
     return false;
   }
 
   // From UI currently we only allow setting default browser for current user.
-  if (!ShellUtil::MakeChromeDefault(ShellUtil::CURRENT_USER,
-                                    chrome_exe, true)) {
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  if (!ShellUtil::MakeChromeDefault(dist, ShellUtil::CURRENT_USER,
+                                    chrome_exe.value(), true)) {
     LOG(ERROR) << "Chrome could not be set as default browser.";
     return false;
   }
@@ -285,7 +288,7 @@ bool ShellIntegration::SetAsDefaultBrowser() {
 ShellIntegration::DefaultBrowserState ShellIntegration::IsDefaultBrowser() {
   // First determine the app path. If we can't determine what that is, we have
   // bigger fish to fry...
-  std::wstring app_path;
+  FilePath app_path;
   if (!PathService::Get(base::FILE_EXE, &app_path)) {
     LOG(ERROR) << "Error getting app exe path";
     return UNKNOWN_DEFAULT_BROWSER;
@@ -315,7 +318,7 @@ ShellIntegration::DefaultBrowserState ShellIntegration::IsDefaultBrowser() {
     // app name being default. If not, then default browser is just called
     // Google Chrome or Chromium so we do not append suffix to app name.
     std::wstring suffix;
-    if (ShellUtil::GetUserSpecificDefaultBrowserSuffix(&suffix))
+    if (ShellUtil::GetUserSpecificDefaultBrowserSuffix(dist, &suffix))
       app_name += suffix;
 
     for (int i = 0; i < _countof(kChromeProtocols); i++) {
@@ -330,7 +333,8 @@ ShellIntegration::DefaultBrowserState ShellIntegration::IsDefaultBrowser() {
     pAAR->Release();
   } else {
     std::wstring short_app_path;
-    GetShortPathName(app_path.c_str(), WriteInto(&short_app_path, MAX_PATH),
+    GetShortPathName(app_path.value().c_str(),
+                     WriteInto(&short_app_path, MAX_PATH),
                      MAX_PATH);
 
     // open command for protocol associations
@@ -342,7 +346,7 @@ ShellIntegration::DefaultBrowserState ShellIntegration::IsDefaultBrowser() {
       std::wstring key_path(kChromeProtocols[i] + ShellUtil::kRegShellOpen);
       base::win::RegKey key(root_key, key_path.c_str(), KEY_READ);
       std::wstring value;
-      if (!key.Valid() || !key.ReadValue(L"", &value))
+      if (!key.Valid() || (key.ReadValue(L"", &value) != ERROR_SUCCESS))
         return NOT_DEFAULT_BROWSER;
       // Need to normalize path in case it's been munged.
       CommandLine command_line = CommandLine::FromString(value);
@@ -373,7 +377,7 @@ bool ShellIntegration::IsFirefoxDefaultBrowser() {
     std::wstring app_cmd;
     base::win::RegKey key(HKEY_CURRENT_USER,
                           ShellUtil::kRegVistaUrlPrefs, KEY_READ);
-    if (key.Valid() && key.ReadValue(L"Progid", &app_cmd) &&
+    if (key.Valid() && (key.ReadValue(L"Progid", &app_cmd) == ERROR_SUCCESS) &&
         app_cmd == L"FirefoxURL")
       ff_default = true;
   } else {
@@ -381,7 +385,7 @@ bool ShellIntegration::IsFirefoxDefaultBrowser() {
     key_path.append(ShellUtil::kRegShellOpen);
     base::win::RegKey key(HKEY_CLASSES_ROOT, key_path.c_str(), KEY_READ);
     std::wstring app_cmd;
-    if (key.Valid() && key.ReadValue(L"", &app_cmd) &&
+    if (key.Valid() && (key.ReadValue(L"", &app_cmd) == ERROR_SUCCESS) &&
         std::wstring::npos != StringToLowerASCII(app_cmd).find(L"firefox"))
       ff_default = true;
   }

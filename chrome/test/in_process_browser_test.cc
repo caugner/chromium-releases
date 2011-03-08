@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,8 @@
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -41,16 +41,12 @@
 #include "net/test/test_server.h"
 #include "sandbox/src/dep.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#endif  // defined(OS_CHROMEOS)
-
 #if defined(OS_MACOSX)
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #endif
 
 #if defined(OS_WIN)
-#include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #endif
 
 namespace {
@@ -70,7 +66,7 @@ void InitializeBrowser(Browser* browser) {
 
 extern int BrowserMain(const MainFunctionParams&);
 
-const wchar_t kUnitTestShowWindows[] = L"show-windows";
+const char kUnitTestShowWindows[] = "show-windows";
 
 // Passed as value of kTestType.
 static const char kBrowserTestType[] = "browser";
@@ -82,7 +78,7 @@ InProcessBrowserTest::InProcessBrowserTest()
       tab_closeable_state_watcher_enabled_(false),
       original_single_process_(false) {
 #if defined(OS_MACOSX)
-  mac_util::SetOverrideAmIBundled(true);
+  base::mac::SetOverrideAmIBundled(true);
 #endif
 
   // Before we run the browser, we have to hack the path to the exe to match
@@ -92,12 +88,7 @@ InProcessBrowserTest::InProcessBrowserTest()
   FilePath chrome_path;
   CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
   chrome_path = chrome_path.DirName();
-#if defined(OS_WIN)
   chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
-#elif defined(OS_POSIX)
-  chrome_path = chrome_path.Append(
-      WideToASCII(chrome::kBrowserProcessExecutablePath));
-#endif
   CHECK(PathService::Override(base::FILE_EXE, chrome_path));
 
   test_server_.reset(new net::TestServer(
@@ -150,8 +141,6 @@ void InProcessBrowserTest::SetUp() {
     RenderProcessHost::set_run_renderer_in_process(true);
 
 #if defined(OS_CHROMEOS)
-  chromeos::CrosLibrary::Get()->GetTestApi()->SetUseStubImpl();
-
   // Make sure that the log directory exists.
   FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
   file_util::CreateDirectory(log_dir);
@@ -285,6 +274,14 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
   return browser;
 }
 
+Browser* InProcessBrowserTest::CreateIncognitoBrowser() {
+  // Create a new browser with using the incognito profile.
+  Browser* incognito =
+      Browser::Create(browser()->profile()->GetOffTheRecordProfile());
+  InitializeBrowser(incognito);
+  return incognito;
+}
+
 Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
   Browser* browser = Browser::CreateForType(Browser::TYPE_POPUP, profile);
   InitializeBrowser(browser);
@@ -333,6 +330,9 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   // Pump any pending events that were created as a result of creating a
   // browser.
   MessageLoopForUI::current()->RunAllPending();
+
+  SetUpOnMainThread();
+  pool.Recycle();
 
   RunTestOnMainThread();
   pool.Recycle();

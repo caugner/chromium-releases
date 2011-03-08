@@ -6,7 +6,6 @@
 
 #include "base/message_loop.h"
 #include "base/time.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/sync/engine/apply_updates_command.h"
 #include "chrome/browser/sync/engine/build_and_process_conflict_sets_command.h"
 #include "chrome/browser/sync/engine/build_commit_command.h"
@@ -63,12 +62,12 @@ Syncer::Syncer()
 Syncer::~Syncer() {}
 
 bool Syncer::ExitRequested() {
-  AutoLock lock(early_exit_requested_lock_);
+  base::AutoLock lock(early_exit_requested_lock_);
   return early_exit_requested_;
 }
 
 void Syncer::RequestEarlyExit() {
-  AutoLock lock(early_exit_requested_lock_);
+  base::AutoLock lock(early_exit_requested_lock_);
   early_exit_requested_ = true;
 }
 

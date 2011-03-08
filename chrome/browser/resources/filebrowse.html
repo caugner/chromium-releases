@@ -14,13 +14,8 @@ div.header {
   top: 0;
   height: 32px;
   position: absolute;
-  -webkit-box-sizing: border-box;
   box-sizing: border-box;
-  background-image: -webkit-gradient(linear,
-                                     left top,
-                                     left bottom,
-                                     from(#D0DAF8),
-                                     to(#A6BAF7));
+  background-image: -webkit-linear-gradient(#D0DAF8, #A6BAF7);
   border-bottom-color: #999;
   border-bottom-width: 1px;
   border-left-color: #999;
@@ -56,24 +51,21 @@ div.header {
   border-top-width: 1px;
   padding-top: 6px;
   padding-left: 10px;
-  background-image: -webkit-gradient(linear,
-                                     left top,
-                                     left bottom,
-                                     from(#D0DAF8),
-                                     to(#A6BAF7));
+  background-image: -webkit-linear-gradient(#D0DAF8, #A6BAF7);
+}
+.deleteYesNoContainer {
+  display: -webkit-box;
+  -webkit-box-align: center;
+  -webkit-box-pack: center;
 }
 .deleteYes {
-  width: 40px;
-  height: 30px;
-  float: left;
+  margin: 4px;
   text-decoration: underline;
   color: blue;
 }
 
 .deleteNo {
-  width: 40px;
-  height: 30px;
-  float: left;
+  margin: 4px;
   text-decoration: underline;
   color: blue;
 }
@@ -82,7 +74,7 @@ div.header {
   text-align: center;
   border: 1px solid rgba(0, 0, 0, 0.25);
   border-radius: 2px;
-  height: 36px;
+  min-height: 36px;
   padding: 4px;
 }
 
@@ -323,20 +315,12 @@ div.controlbutton {
   cursor: pointer;
   padding: 4px;
   padding-bottom: 0;
-  background: -webkit-gradient(linear,
-                               left top,
-                               left bottom,
-                               from(#F4F6FB),
-                               to(#CCD7F8));
+  background: -webkit-linear-gradient(#F4F6FB, #CCD7F8);
 }
 
 div.controlbutton:hover {
 
-  background: -webkit-gradient(linear,
-                               left top,
-                               left bottom,
-                               from(#FFF),
-                               to(#D9E0F6));
+  background: -webkit-linear-gradient(#FFF, #D9E0F6);
 }
 
 div.column {
@@ -407,21 +391,6 @@ div.scanningcontainer {
   height: 100%;
 }
 
-div.filebutton {
-  height: 18px;
-  cursor: pointer;
-  padding: 5px 15px 2px;
-  border: 1px solid #abb6ce;
-  background-image: -webkit-gradient(linear,
-                                     left top,
-                                     left bottom,
-                                     color-stop(0.80, #fcfcfc),
-                                     color-stop(0.97, #e3e3e3));
-  border-radius: 3px;
-  text-align: center;
-  font-size: .8em;
-}
-
 .filenameprompt {
   top: 8px;
   left: 13px;
@@ -438,18 +407,21 @@ div.filebutton {
   position: absolute;
 }
 
-div.openbutton {
-  bottom: 3px;
-  right: 100px;
+div.buttonscontainer {
+  display: -webkit-box;
+  bottom: 0;
+  right: 10px;
   position: absolute;
-  width: 50px;
+}
+
+div.openbutton {
+  min-width: 50px;
+  margin: 3px;
 }
 
 div.cancelbutton {
-  bottom: 3px;
-  right: 10px;
-  position: absolute;
-  width: 50px;
+  min-width: 50px;
+  margin: 3px;
 }
 
 div.newfolderbutton {
@@ -469,11 +441,7 @@ div.opencontainer {
   left: 0;
   height: 30px;
   position: absolute;
-  background-image: -webkit-gradient(linear,
-                                     0% 0%,
-                                     0% 90%,
-                                     from(#fcfcfc),
-                                     to(#eff1f2));
+  background-image: -webkit-linear-gradient(#fcfcfc, #eff1f2 90%);
 }
 
 div.savecontainer {
@@ -482,11 +450,7 @@ div.savecontainer {
   left: 0;
   height: 60px;
   position: absolute;
-  background-image: -webkit-gradient(linear,
-                                     0% 0%,
-                                     0% 90%,
-                                     from(#fcfcfc),
-                                     to(#eff1f2));
+  background-image: -webkit-linear-gradient(#fcfcfc, #eff1f2 90%);
 }
 
 div.container {
@@ -554,7 +518,7 @@ div.fullcontainer {
 .menu {
   top: 14px;
   right: 2px;
-  width: 100px;
+  width: 180px;
   -webkit-box-shadow: rgba(0, 0, 0, 0.3) 0px 3px 3px;
   border-bottom-left-radius: 4px 4px;
   border-bottom-right-radius: 4px 4px;
@@ -698,16 +662,21 @@ function enabledResult(info) {
         var savemenu = document.createElement('div');
         savemenu.className = 'savecontainer';
 
-        var savebutton = document.createElement('div');
+        // The container is used for placing buttons horizontally.
+        var buttonsContainer = document.createElement('div');
+        buttonsContainer.className = 'buttonscontainer';
+        savemenu.appendChild(buttonsContainer);
+
+        var savebutton = document.createElement('button');
         savebutton.id = 'savebutton';
-        savebutton.className = 'filebutton openbutton disabled';
+        savebutton.className = 'openbutton disabled';
         savebutton.onclick = dialogSaveClick;
         savebutton.textContent = localStrings.getString('save');
-        savemenu.appendChild(savebutton);
+        buttonsContainer.appendChild(savebutton);
 
-        var cancelbutton = document.createElement('div');
-        cancelbutton.className = 'filebutton cancelbutton';
-        savemenu.appendChild(cancelbutton);
+        var cancelbutton = document.createElement('button');
+        cancelbutton.className = 'cancelbutton';
+        buttonsContainer.appendChild(cancelbutton);
         cancelbutton.textContent = localStrings.getString('confirmcancel');
         cancelbutton.onclick = dialogCancelClick;
 
@@ -727,25 +696,28 @@ function enabledResult(info) {
         filename.value = args.current_file;
         savemenu.appendChild(filename);
         if (advancedEnabled) {
-          var newfolderbutton = document.createElement('div');
+          var newfolderbutton = document.createElement('button');
           newfolderbutton.id = 'newfolderbutton';
-          newfolderbutton.className = 'filebutton newfolderbutton disabled';
+          newfolderbutton.className = 'newfolderbutton disabled';
           newfolderbutton.textContent = localStrings.getString('newfolder');
           newfolderbutton.onclick = dialogNewFolderClick;
           savemenu.appendChild(newfolderbutton);
         }
         document.body.appendChild(savemenu);
+        // Give focus to the save button. This has to be done after the
+        // parent node is added to document.body.
+        savebutton.focus();
 
       } else {
         var main = mainColumn;
         main.className = 'containerwithopenbuttons';
         var openmenu = document.createElement('div');
         openmenu.className = 'opencontainer';
-        var openbutton = document.createElement('div');
+        var openbutton = document.createElement('button');
         openbutton.id = 'openbutton';
-        openbutton.className = 'filebutton openbutton disabled';
-        var cancelbutton = document.createElement('div');
-        cancelbutton.className = 'filebutton cancelbutton';
+        openbutton.className = 'openbutton disabled';
+        var cancelbutton = document.createElement('button');
+        cancelbutton.className = 'cancelbutton';
         openmenu.appendChild(openbutton);
         openbutton.onclick = dialogOkClick;
         openmenu.appendChild(cancelbutton);
@@ -943,26 +915,26 @@ function getDataForPath(path) {
     if (inSaveMode) {
       if (advancedEnabled) {
         var newfolderbutton = $('newfolderbutton');
-        newfolderbutton.className = 'filebutton newfolderbutton disabled';
+        newfolderbutton.className = 'newfolderbutton disabled';
       }
       var savebutton = $('savebutton');
-      savebutton.className = 'filebutton openbutton disabled';
+      savebutton.className = 'openbutton disabled';
     } else if (inSelectMode) {
       var openbutton = $('openbutton');
-      openbutton.className = 'filebutton openbutton disabled';
+      openbutton.className = 'openbutton disabled';
     }
     chrome.send('getRoots', []);
   } else {
     if (inSaveMode) {
       if (advancedEnabled) {
         var newfolderbutton = $('newfolderbutton');
-        newfolderbutton.className = 'filebutton newfolderbutton';
+        newfolderbutton.className = 'newfolderbutton';
       }
       var savebutton = $('savebutton');
-      savebutton.className = 'filebutton openbutton';
+      savebutton.className = 'openbutton';
     } else if (inSelectMode) {
       var openbutton = $('openbutton');
-      openbutton.className = 'filebutton openbutton';
+      openbutton.className = 'openbutton';
     }
     chrome.send('getChildren', [path]);
   }
@@ -1116,6 +1088,8 @@ function deleteFileConfirm(path) {
   var askingDiv = document.createElement('div');
   askingDiv.className = 'confirmdelete';
   askingDiv.textContent = localStrings.getString('confirmdelete');
+  yesNoDiv = document.createElement('div');
+  yesNoDiv.className = 'deleteYesNoContainer';
   var yes = document.createElement('div');
   yes.className = 'deleteYes';
   yes.textContent = localStrings.getString('confirmyes');
@@ -1124,8 +1098,9 @@ function deleteFileConfirm(path) {
   no.onclick = partial(removeDeleteConfirm, path);
   no.textContent = localStrings.getString('confirmcancel');
   no.className = 'deleteNo';
-  askingDiv.appendChild(yes);
-  askingDiv.appendChild(no);
+  yesNoDiv.appendChild(yes);
+  yesNoDiv.appendChild(no);
+  askingDiv.appendChild(yesNoDiv);
   element.firstChild.appendChild(askingDiv);
   askingDiv.scrollIntoView();
   window.event.stopPropagation();

@@ -29,7 +29,11 @@ namespace WebKit {
 class WebInputEvent;
 }
 
+namespace webkit {
+namespace npapi {
 class WebPluginDelegateImpl;
+}
+}
 
 // Converts the IPC messages from WebPluginDelegateProxy into calls to the
 // actual WebPluginDelegateImpl object.
@@ -41,7 +45,7 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
                         PluginChannel* channel);
 
   // IPC::Channel::Listener implementation:
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
   // IPC::Message::Sender implementation:
   virtual bool Send(IPC::Message* msg);
@@ -85,7 +89,7 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
                         bool has_focus);
   void OnWindowFrameChanged(const gfx::Rect& window_frame,
                             const gfx::Rect& view_frame);
-  void OnImeCompositionConfirmed(const string16& text);
+  void OnImeCompositionCompleted(const string16& text);
 #endif
 
   void OnDidReceiveManualResponse(
@@ -111,7 +115,7 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
 
   scoped_refptr<PluginChannel> channel_;
 
-  WebPluginDelegateImpl* delegate_;
+  webkit::npapi::WebPluginDelegateImpl* delegate_;
   WebPluginProxy* webplugin_;
   bool in_destructor_;
 

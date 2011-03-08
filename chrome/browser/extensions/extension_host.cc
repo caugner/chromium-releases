@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,6 @@
 
 #include <list>
 
-#include "app/keyboard_codes.h"
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/metrics/histogram.h"
@@ -21,12 +18,10 @@
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/file_select_helper.h"
-#include "chrome/browser/message_box_handler.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
@@ -37,19 +32,22 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
+#include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/view_types.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/context_menu.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -66,7 +64,7 @@ bool ExtensionHost::enable_dom_automation_ = false;
 // ExtensionHosts, to avoid blocking the UI.
 class ExtensionHost::ProcessCreationQueue {
  public:
-  static ProcessCreationQueue* get() {
+  static ProcessCreationQueue* GetInstance() {
     return Singleton<ProcessCreationQueue>::get();
   }
 
@@ -155,7 +153,7 @@ ExtensionHost::~ExtensionHost() {
       NotificationType::EXTENSION_HOST_DESTROYED,
       Source<Profile>(profile_),
       Details<ExtensionHost>(this));
-  ProcessCreationQueue::get()->Remove(this);
+  ProcessCreationQueue::GetInstance()->Remove(this);
   render_view_host_->Shutdown();  // deletes render_view_host
 }
 
@@ -175,6 +173,10 @@ void ExtensionHost::CreateView(Browser* browser) {
   // TODO(port)
   NOTREACHED();
 #endif
+}
+
+TabContents* ExtensionHost::associated_tab_contents() const {
+  return associated_tab_contents_;
 }
 
 RenderProcessHost* ExtensionHost::render_process_host() const {
@@ -197,7 +199,7 @@ void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
     // to defer.
     CreateRenderViewNow();
   } else {
-    ProcessCreationQueue::get()->CreateSoon(this);
+    ProcessCreationQueue::GetInstance()->CreateSoon(this);
   }
 }
 
@@ -206,11 +208,15 @@ void ExtensionHost::CreateRenderViewNow() {
   NavigateToURL(url_);
   DCHECK(IsRenderViewLive());
   if (is_background_page())
-    profile_->GetExtensionsService()->DidCreateRenderViewForBackgroundPage(
+    profile_->GetExtensionService()->DidCreateRenderViewForBackgroundPage(
         this);
 }
 
-Browser* ExtensionHost::GetBrowser() const {
+const Browser* ExtensionHost::GetBrowser() const {
+  return view() ? view()->browser() : NULL;
+}
+
+Browser* ExtensionHost::GetBrowser() {
   return view() ? view()->browser() : NULL;
 }
 
@@ -231,7 +237,7 @@ void ExtensionHost::NavigateToURL(const GURL& url) {
   url_ = url;
 
   if (!is_background_page() &&
-      !profile_->GetExtensionsService()->IsBackgroundPageReady(extension_)) {
+      !profile_->GetExtensionService()->IsBackgroundPageReady(extension_)) {
     // Make sure the background page loads before any others.
     registrar_.Add(this, NotificationType::EXTENSION_BACKGROUND_PAGE_READY,
                    Source<Extension>(extension_));
@@ -246,7 +252,7 @@ void ExtensionHost::Observe(NotificationType type,
                             const NotificationDetails& details) {
   switch (type.value) {
     case NotificationType::EXTENSION_BACKGROUND_PAGE_READY:
-      DCHECK(profile_->GetExtensionsService()->
+      DCHECK(profile_->GetExtensionService()->
            IsBackgroundPageReady(extension_));
       NavigateToURL(url_);
       break;
@@ -261,7 +267,7 @@ void ExtensionHost::Observe(NotificationType type,
       // sent. NULL it out so that dirty pointer issues don't arise in cases
       // when multiple ExtensionHost objects pointing to the same Extension are
       // present.
-      if (extension_ == Details<const Extension>(details).ptr())
+      if (extension_ == Details<UnloadedExtensionInfo>(details)->extension)
         extension_ = NULL;
       break;
     default:
@@ -284,7 +290,9 @@ void ExtensionHost::ClearInspectorSettings() {
   RenderViewHostDelegateHelper::ClearInspectorSettings(profile());
 }
 
-void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host) {
+void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host,
+                                   base::TerminationStatus status,
+                                   int error_code) {
   // During browser shutdown, we may use sudden termination on an extension
   // process, so it is expected to lose our connection to the render view.
   // Do nothing.
@@ -391,7 +399,7 @@ void ExtensionHost::DocumentAvailableInMainFrame(RenderViewHost* rvh) {
 
   document_element_available_ = true;
   if (is_background_page()) {
-    profile_->GetExtensionsService()->SetBackgroundPageReady(extension_);
+    profile_->GetExtensionService()->SetBackgroundPageReady(extension_);
   } else {
     switch (extension_host_type_) {
       case ViewType::EXTENSION_INFOBAR:
@@ -444,6 +452,14 @@ gfx::NativeWindow ExtensionHost::GetMessageBoxRootWindow() {
   return NULL;
 }
 
+TabContents* ExtensionHost::AsTabContents() {
+  return NULL;
+}
+
+ExtensionHost* ExtensionHost::AsExtensionHost() {
+  return this;
+}
+
 void ExtensionHost::OnMessageBoxClosed(IPC::Message* reply_msg,
                                        bool success,
                                        const std::wstring& prompt) {
@@ -486,6 +502,14 @@ WebPreferences ExtensionHost::GetWebkitPrefs() {
   if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
       extension_host_type_ == ViewType::EXTENSION_INFOBAR)
     webkit_prefs.allow_scripts_to_close_windows = true;
+
+  // Disable anything that requires the GPU process for background pages.
+  // See http://crbug.com/64512 and http://crbug.com/64841.
+  if (extension_host_type_ == ViewType::EXTENSION_BACKGROUND_PAGE) {
+    webkit_prefs.experimental_webgl_enabled = false;
+    webkit_prefs.accelerated_compositing_enabled = false;
+    webkit_prefs.accelerated_2d_canvas_enabled = false;
+  }
 
   // TODO(dcheng): incorporate this setting into kClipboardPermission check.
   webkit_prefs.javascript_can_access_clipboard = true;
@@ -686,7 +710,7 @@ bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                            bool* is_keyboard_shortcut) {
   if (extension_host_type_ == ViewType::EXTENSION_POPUP &&
       event.type == NativeWebKeyboardEvent::RawKeyDown &&
-      event.windowsKeyCode == app::VKEY_ESCAPE) {
+      event.windowsKeyCode == ui::VKEY_ESCAPE) {
     DCHECK(is_keyboard_shortcut != NULL);
     *is_keyboard_shortcut = true;
   }
@@ -696,7 +720,7 @@ bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 void ExtensionHost::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
   if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
     if (event.type == NativeWebKeyboardEvent::RawKeyDown &&
-        event.windowsKeyCode == app::VKEY_ESCAPE) {
+        event.windowsKeyCode == ui::VKEY_ESCAPE) {
       NotificationService::current()->Notify(
           NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE,
           Source<Profile>(profile_),
@@ -734,6 +758,10 @@ ViewType::Type ExtensionHost::GetRenderViewType() const {
   return extension_host_type_;
 }
 
+const GURL& ExtensionHost::GetURL() const {
+  return url_;
+}
+
 void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
   if (view_.get())
     view_->RenderViewCreated();
@@ -767,7 +795,7 @@ int ExtensionHost::GetBrowserWindowID() const {
     // If the host is bound to a browser, then extract its window id.
     // Extensions hosted in ExternalTabContainer objects may not have
     // an associated browser.
-    Browser* browser = GetBrowser();
+    const Browser* browser = GetBrowser();
     if (browser)
       window_id = ExtensionTabUtil::GetWindowId(browser);
   } else if (extension_host_type_ != ViewType::EXTENSION_BACKGROUND_PAGE) {

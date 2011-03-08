@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/callback.h"
+#include "base/threading/platform_thread.h"
 #include "media/base/buffers.h"
 #include "media/base/callback.h"
 #include "media/base/filter_host.h"
@@ -30,14 +31,15 @@ VideoRendererBase::VideoRendererBase()
       height_(0),
       frame_available_(&lock_),
       state_(kUninitialized),
-      thread_(kNullThreadHandle),
+      thread_(base::kNullThreadHandle),
       pending_reads_(0),
       pending_paint_(false),
+      pending_paint_with_last_available_(false),
       playback_rate_(0) {
 }
 
 VideoRendererBase::~VideoRendererBase() {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   DCHECK(state_ == kUninitialized || state_ == kStopped);
 }
 
@@ -76,7 +78,7 @@ bool VideoRendererBase::ParseMediaFormat(
 }
 
 void VideoRendererBase::Play(FilterCallback* callback) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   DCHECK_EQ(kPrerolled, state_);
   scoped_ptr<FilterCallback> c(callback);
   state_ = kPlaying;
@@ -84,7 +86,7 @@ void VideoRendererBase::Play(FilterCallback* callback) {
 }
 
 void VideoRendererBase::Pause(FilterCallback* callback) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   DCHECK(state_ != kUninitialized || state_ == kError);
   AutoCallbackRunner done_runner(callback);
   state_ = kPaused;
@@ -93,7 +95,7 @@ void VideoRendererBase::Pause(FilterCallback* callback) {
 void VideoRendererBase::Flush(FilterCallback* callback) {
   DCHECK_EQ(state_, kPaused);
 
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   flush_callback_.reset(callback);
   state_ = kFlushing;
 
@@ -105,7 +107,7 @@ void VideoRendererBase::Stop(FilterCallback* callback) {
   DCHECK_EQ(pending_reads_, 0);
 
   {
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
     state_ = kStopped;
 
     // Clean up our thread if present.
@@ -114,10 +116,10 @@ void VideoRendererBase::Stop(FilterCallback* callback) {
       // thread waiting for a read to complete.
       frame_available_.Signal();
       {
-        AutoUnlock auto_unlock(lock_);
-        PlatformThread::Join(thread_);
+        base::AutoUnlock auto_unlock(lock_);
+        base::PlatformThread::Join(thread_);
       }
-      thread_ = kNullThreadHandle;
+      thread_ = base::kNullThreadHandle;
     }
 
   }
@@ -126,12 +128,12 @@ void VideoRendererBase::Stop(FilterCallback* callback) {
 }
 
 void VideoRendererBase::SetPlaybackRate(float playback_rate) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   playback_rate_ = playback_rate;
 }
 
 void VideoRendererBase::Seek(base::TimeDelta time, FilterCallback* callback) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   // There is a race condition between filters to receive SeekTask().
   // It turns out we could receive buffer from decoder before seek()
   // is called on us. so we do the following:
@@ -156,7 +158,7 @@ void VideoRendererBase::Seek(base::TimeDelta time, FilterCallback* callback) {
 
 void VideoRendererBase::Initialize(VideoDecoder* decoder,
                                    FilterCallback* callback) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   DCHECK(decoder);
   DCHECK(callback);
   DCHECK_EQ(kUninitialized, state_);
@@ -192,7 +194,7 @@ void VideoRendererBase::Initialize(VideoDecoder* decoder,
   state_ = kFlushed;
 
   // Create our video thread.
-  if (!PlatformThread::Create(0, this, &thread_)) {
+  if (!base::PlatformThread::Create(0, this, &thread_)) {
     NOTREACHED() << "Video thread creation failed";
     host()->SetError(PIPELINE_ERROR_INITIALIZATION_FAILED);
     state_ = kError;
@@ -208,17 +210,17 @@ void VideoRendererBase::Initialize(VideoDecoder* decoder,
 }
 
 bool VideoRendererBase::HasEnded() {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   return state_ == kEnded;
 }
 
 // PlatformThread::Delegate implementation.
 void VideoRendererBase::ThreadMain() {
-  PlatformThread::SetName("CrVideoRenderer");
+  base::PlatformThread::SetName("CrVideoRenderer");
   base::TimeDelta remaining_time;
 
   for (;;) {
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
 
     const base::TimeDelta kIdleTimeDelta =
         base::TimeDelta::FromMilliseconds(kIdleMilliseconds);
@@ -315,7 +317,7 @@ void VideoRendererBase::ThreadMain() {
         ScheduleRead_Locked();
       }
       if (new_frame_available) {
-        AutoUnlock auto_unlock(lock_);
+        base::AutoUnlock auto_unlock(lock_);
         // Notify subclass that |current_frame_| has been updated.
         OnFrameAvailable();
       }
@@ -324,29 +326,47 @@ void VideoRendererBase::ThreadMain() {
 }
 
 void VideoRendererBase::GetCurrentFrame(scoped_refptr<VideoFrame>* frame_out) {
-  AutoLock auto_lock(lock_);
-  DCHECK(!pending_paint_);
+  base::AutoLock auto_lock(lock_);
+  DCHECK(!pending_paint_ && !pending_paint_with_last_available_);
 
   if (!current_frame_.get() || current_frame_->IsEndOfStream()) {
-    *frame_out = NULL;
-    return;
+    if (!last_available_frame_.get() ||
+        last_available_frame_->IsEndOfStream()) {
+      *frame_out = NULL;
+      return;
+    }
   }
 
   // We should have initialized and have the current frame.
   DCHECK(state_ != kUninitialized && state_ != kStopped && state_ != kError);
-  *frame_out = current_frame_;
-  pending_paint_ = true;
+
+  if (current_frame_) {
+    *frame_out = current_frame_;
+    last_available_frame_ = current_frame_;
+    pending_paint_ = true;
+  } else {
+    DCHECK(last_available_frame_.get() != NULL);
+    *frame_out = last_available_frame_;
+    pending_paint_with_last_available_ = true;
+  }
 }
 
 void VideoRendererBase::PutCurrentFrame(scoped_refptr<VideoFrame> frame) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
 
   // Note that we do not claim |pending_paint_| when we return NULL frame, in
   // that case, |current_frame_| could be changed before PutCurrentFrame.
-  DCHECK(pending_paint_ || frame.get() == NULL);
-  DCHECK(current_frame_.get() == frame.get() || frame.get() == NULL);
+  if (pending_paint_) {
+    DCHECK(current_frame_.get() == frame.get());
+    DCHECK(pending_paint_with_last_available_ == false);
+    pending_paint_ = false;
+  } else if (pending_paint_with_last_available_) {
+    DCHECK(last_available_frame_.get() == frame.get());
+    pending_paint_with_last_available_ = false;
+  } else {
+    DCHECK(frame.get() == NULL);
+  }
 
-  pending_paint_ = false;
   // We had cleared the |pending_paint_| flag, there are chances that current
   // frame is timed-out. We will wake up our main thread to advance the current
   // frame when this is true.
@@ -356,7 +376,7 @@ void VideoRendererBase::PutCurrentFrame(scoped_refptr<VideoFrame> frame) {
 }
 
 void VideoRendererBase::ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
 
   // Decoder could reach seek state before our Seek() get called.
   // We will enter kSeeking
@@ -388,7 +408,7 @@ void VideoRendererBase::ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
 
   // Discard frames until we reach our desired seek timestamp.
   if (state_ == kSeeking && !frame->IsEndOfStream() &&
-      (frame->GetTimestamp() + frame->GetDuration()) < seek_timestamp_) {
+      (frame->GetTimestamp() + frame->GetDuration()) <= seek_timestamp_) {
     frames_queue_done_.push_back(frame);
     ScheduleRead_Locked();
   } else {
@@ -428,6 +448,10 @@ void VideoRendererBase::ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
   } else if (state_ == kFlushing && pending_reads_ == 0 && !pending_paint_) {
     OnFlushDone();
   }
+}
+
+VideoDecoder* VideoRendererBase::GetDecoder() {
+  return decoder_.get();
 }
 
 void VideoRendererBase::ReadInput(scoped_refptr<VideoFrame> frame) {

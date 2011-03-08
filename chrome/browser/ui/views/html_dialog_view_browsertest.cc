@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
-#include "chrome/browser/views/html_dialog_view.h"
+#include "chrome/browser/ui/views/html_dialog_view.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
@@ -73,7 +72,7 @@ class HtmlDialogBrowserTest : public InProcessBrowserTest {
    public:
     WindowChangedObserver() {}
 
-    static WindowChangedObserver* Get() {
+    static WindowChangedObserver* GetInstance() {
       return Singleton<WindowChangedObserver>::get();
     }
 
@@ -95,7 +94,7 @@ class HtmlDialogBrowserTest : public InProcessBrowserTest {
    public:
     WindowChangedObserver() {}
 
-    static WindowChangedObserver* Get() {
+    static WindowChangedObserver* GetInstance() {
       return Singleton<WindowChangedObserver>::get();
     }
 
@@ -136,7 +135,8 @@ IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, MAYBE_SizeWindow) {
   html_view->InitDialog();
   html_view->window()->Show();
 
-  MessageLoopForUI::current()->AddObserver(WindowChangedObserver::Get());
+  MessageLoopForUI::current()->AddObserver(
+      WindowChangedObserver::GetInstance());
 
   gfx::Rect bounds;
   html_view->GetWidget()->GetBounds(&bounds, false);
@@ -202,5 +202,6 @@ IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, MAYBE_SizeWindow) {
   EXPECT_LT(0, actual_bounds.width());
   EXPECT_LT(0, actual_bounds.height());
 
-  MessageLoopForUI::current()->RemoveObserver(WindowChangedObserver::Get());
+  MessageLoopForUI::current()->RemoveObserver(
+      WindowChangedObserver::GetInstance());
 }

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/dom_ui/imageburner_ui.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include <algorithm>
+
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -17,14 +17,16 @@
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_types.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -105,7 +107,7 @@ ImageBurnHandler::ImageBurnHandler(TabContents* contents)
           chromeos::CrosLibrary::Get()->GetBurnLibrary();
   burn_lib->AddObserver(this);
   local_image_file_path_.clear();
-  burn_resource_manager_ = Singleton<ImageBurnResourceManager>::get();
+  burn_resource_manager_ = ImageBurnResourceManager::GetInstance();
 }
 
 ImageBurnHandler::~ImageBurnHandler() {
@@ -292,7 +294,7 @@ void ImageBurnHandler::UpdateBurnProgress(int64 total_burnt,
                                           chromeos::BurnEventType event) {
   DictionaryValue progress_value;
   progress_value.SetString("progress_status_text",
-      WideToUTF16Hack(GetBurnProgressText(total_burnt, image_size)));
+      GetBurnProgressText(total_burnt, image_size));
   if (event == chromeos::BURN_UPDATED)
     progress_value.SetString("state", "IN_PROGRESS");
   else if (event == chromeos::BURN_CANCELED)
@@ -306,26 +308,24 @@ void ImageBurnHandler::UpdateBurnProgress(int64 total_burnt,
   dom_ui_->CallJavascriptFunction(L"burnProgressUpdated", progress_value);
 }
 
-std::wstring ImageBurnHandler::GetBurnProgressText(int64 total_burnt,
-                                                   int64 image_size) {
+string16 ImageBurnHandler::GetBurnProgressText(int64 total_burnt,
+                                               int64 image_size) {
   DataUnits amount_units = GetByteDisplayUnits(total_burnt);
-  std::wstring burnt_size =
-      UTF16ToWideHack(FormatBytes(total_burnt, amount_units, true));
+  string16 burnt_size = FormatBytes(total_burnt, amount_units, true);
 
   base::i18n::AdjustStringForLocaleDirection(&burnt_size);
 
   if (image_size) {
     amount_units = GetByteDisplayUnits(image_size);
-    std::wstring total_text =
-        UTF16ToWideHack(FormatBytes(image_size, amount_units, true));
+    string16 total_text = FormatBytes(image_size, amount_units, true);
     base::i18n::AdjustStringForLocaleDirection(&total_text);
 
-    return l10n_util::GetStringF(IDS_IMAGEBURN_BURN_PROGRESS,
-                                 burnt_size,
-                                 total_text);
+    return l10n_util::GetStringFUTF16(IDS_IMAGEBURN_BURN_PROGRESS,
+                                      burnt_size,
+                                      total_text);
   } else {
-    return l10n_util::GetStringF(IDS_IMAGEBURN_BURN_PROGRESS_SIZE_UNKNOWN,
-                                  burnt_size);
+    return l10n_util::GetStringFUTF16(IDS_IMAGEBURN_BURN_PROGRESS_SIZE_UNKNOWN,
+                                      burnt_size);
   }
 }
 
@@ -398,7 +398,7 @@ void ImageBurnHandler::CreateLocalImagePath() {
 ImageBurnTaskProxy::ImageBurnTaskProxy(
                         const base::WeakPtr<ImageBurnHandler>& handler)
                             : handler_(handler) {
-  resource_manager_ = Singleton<ImageBurnResourceManager>::get();
+  resource_manager_ = ImageBurnResourceManager::GetInstance();
 }
 
 bool ImageBurnTaskProxy::ReportDownloadInitialized() {
@@ -462,6 +462,11 @@ ImageBurnResourceManager::~ImageBurnResourceManager() {
   }
   if (download_manager_)
     download_manager_->RemoveObserver(this);
+}
+
+// static
+ImageBurnResourceManager* ImageBurnResourceManager::GetInstance() {
+  return Singleton<ImageBurnResourceManager>::get();
 }
 
 void ImageBurnResourceManager::OnDownloadUpdated(DownloadItem* download) {
@@ -610,7 +615,7 @@ ImageBurnUI::ImageBurnUI(TabContents* contents) : DOMUI(contents) {
   BrowserThread::PostTask(
        BrowserThread::IO, FROM_HERE,
        NewRunnableMethod(
-           Singleton<ChromeURLDataManager>::get(),
+           ChromeURLDataManager::GetInstance(),
            &ChromeURLDataManager::AddDataSource,
            make_scoped_refptr(html_source)));
 }

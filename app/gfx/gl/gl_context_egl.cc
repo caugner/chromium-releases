@@ -4,11 +4,14 @@
 
 #include <EGL/egl.h>
 
-#include "build/build_config.h"
 #if defined(OS_LINUX)
-#include "app/x11_util.h"
+extern "C" {
+#include <X11/Xlib.h>
+}
 #define EGL_HAS_PBUFFERS 1
 #endif
+
+#include "build/build_config.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "app/gfx/gl/gl_bindings.h"
@@ -58,13 +61,29 @@ const char* GetLastEGLErrorString() {
 }
 }  // namespace anonymous
 
+SharedEGLSurface::SharedEGLSurface(EGLSurface surface) : surface_(surface) {
+}
+
+SharedEGLSurface::~SharedEGLSurface() {
+  if (surface_) {
+    if (!eglDestroySurface(g_display, surface_)) {
+      LOG(ERROR) << "eglDestroySurface failed with error "
+                 << GetLastEGLErrorString();
+    }
+  }
+}
+
+EGLSurface SharedEGLSurface::egl_surface() const {
+  return surface_;
+}
+
 bool BaseEGLContext::InitializeOneOff() {
   static bool initialized = false;
   if (initialized)
     return true;
 
 #ifdef OS_LINUX
-  EGLNativeDisplayType native_display = x11_util::GetXDisplay();
+  EGLNativeDisplayType native_display = XOpenDisplay(NULL);
 #else
   EGLNativeDisplayType native_display = EGL_DEFAULT_DISPLAY;
 #endif
@@ -143,7 +162,6 @@ std::string BaseEGLContext::GetExtensions() {
 
 NativeViewEGLContext::NativeViewEGLContext(void* window)
     : window_(window),
-      surface_(NULL),
       context_(NULL)
 {
 }
@@ -157,9 +175,12 @@ bool NativeViewEGLContext::Initialize() {
   // Create a surface for the native window.
   EGLNativeWindowType native_window =
       reinterpret_cast<EGLNativeWindowType>(window_);
-  surface_ = eglCreateWindowSurface(g_display, g_config, native_window, NULL);
+  surface_ = new SharedEGLSurface(eglCreateWindowSurface(g_display,
+                                                         g_config,
+                                                         native_window,
+                                                         NULL));
 
-  if (!surface_) {
+  if (!surface_->egl_surface()) {
     LOG(ERROR) << "eglCreateWindowSurface failed with error "
                << GetLastEGLErrorString();
     Destroy();
@@ -204,20 +225,14 @@ void NativeViewEGLContext::Destroy() {
     context_ = NULL;
   }
 
-  if (surface_) {
-    if (!eglDestroySurface(g_display, surface_)) {
-      LOG(ERROR) << "eglDestroySurface failed with error "
-                 << GetLastEGLErrorString();
-    }
-
-    surface_ = NULL;
-  }
+  surface_ = NULL;
 }
 
 bool NativeViewEGLContext::MakeCurrent() {
   DCHECK(context_);
   if (!eglMakeCurrent(g_display,
-                      surface_, surface_,
+                      surface_->egl_surface(),
+                      surface_->egl_surface(),
                       context_)) {
     VLOG(1) << "eglMakeCurrent failed with error "
             << GetLastEGLErrorString();
@@ -237,7 +252,7 @@ bool NativeViewEGLContext::IsOffscreen() {
 }
 
 bool NativeViewEGLContext::SwapBuffers() {
-  if (!eglSwapBuffers(g_display, surface_)) {
+  if (!eglSwapBuffers(g_display, surface_->egl_surface())) {
     VLOG(1) << "eglSwapBuffers failed with error "
             << GetLastEGLErrorString();
     return false;
@@ -260,8 +275,10 @@ gfx::Size NativeViewEGLContext::GetSize() {
   // get updated on resize. When it does, we can share the code.
   EGLint width;
   EGLint height;
-  if (!eglQuerySurface(g_display, surface_, EGL_WIDTH, &width) ||
-      !eglQuerySurface(g_display, surface_, EGL_HEIGHT, &height)) {
+  if (!eglQuerySurface(
+          g_display, surface_->egl_surface(), EGL_WIDTH, &width) ||
+      !eglQuerySurface(
+          g_display, surface_->egl_surface(), EGL_HEIGHT, &height)) {
     NOTREACHED() << "eglQuerySurface failed with error "
                  << GetLastEGLErrorString();
     return gfx::Size();
@@ -283,14 +300,12 @@ void NativeViewEGLContext::SetSwapInterval(int interval) {
   }
 }
 
-EGLSurface NativeViewEGLContext::GetSurface() {
+SharedEGLSurface* NativeViewEGLContext::GetSurface() {
   return surface_;
 }
 
 SecondaryEGLContext::SecondaryEGLContext()
-    : surface_(NULL),
-      own_surface_(false),
-      context_(NULL)
+    : context_(NULL)
 {
 }
 
@@ -307,7 +322,6 @@ bool SecondaryEGLContext::Initialize(GLContext* shared_context) {
 
   if (shared_context) {
     surface_ = static_cast<BaseEGLContext*>(shared_context)->GetSurface();
-    own_surface_ = false;
 
     // Create a context.
     context_ = eglCreateContext(g_display,
@@ -322,13 +336,15 @@ bool SecondaryEGLContext::Initialize(GLContext* shared_context) {
       EGL_NONE
     };
 
-    surface_ = eglCreatePbufferSurface(g_display, g_config, kPbufferAttribs);
-    if (!surface_) {
+    surface_ = new SharedEGLSurface(eglCreatePbufferSurface(g_display,
+                                                            g_config,
+                                                            kPbufferAttribs));
+    if (!surface_->egl_surface()) {
       LOG(ERROR) << "eglCreatePbufferSurface failed with error "
                  << GetLastEGLErrorString();
+      Destroy();
       return false;
     }
-    own_surface_ = true;
 
     context_ = eglCreateContext(g_display, g_config, NULL, kContextAttributes);
 #else
@@ -348,16 +364,6 @@ bool SecondaryEGLContext::Initialize(GLContext* shared_context) {
 }
 
 void SecondaryEGLContext::Destroy() {
-  if (own_surface_) {
-    if (!eglDestroySurface(g_display, surface_)) {
-      LOG(ERROR) << "eglDestroySurface failed with error "
-                 << GetLastEGLErrorString();
-    }
-
-    own_surface_ = false;
-  }
-  surface_ = NULL;
-
   if (context_) {
     if (!eglDestroyContext(g_display, context_)) {
       LOG(ERROR) << "eglDestroyContext failed with error "
@@ -366,12 +372,15 @@ void SecondaryEGLContext::Destroy() {
 
     context_ = NULL;
   }
+
+  surface_ = NULL;
 }
 
 bool SecondaryEGLContext::MakeCurrent() {
   DCHECK(context_);
   if (!eglMakeCurrent(g_display,
-                      surface_, surface_,
+                      surface_->egl_surface(),
+                      surface_->egl_surface(),
                       context_)) {
     VLOG(1) << "eglMakeCurrent failed with error "
             << GetLastEGLErrorString();
@@ -409,7 +418,7 @@ void SecondaryEGLContext::SetSwapInterval(int interval) {
   NOTREACHED() << "Attempt to call SetSwapInterval on a SecondaryEGLContext.";
 }
 
-EGLSurface SecondaryEGLContext::GetSurface() {
+SharedEGLSurface* SecondaryEGLContext::GetSurface() {
   return surface_;
 }
 

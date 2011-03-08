@@ -11,14 +11,14 @@
 #include "base/logging.h"
 #include "base/message_pump_default.h"
 #include "base/metrics/histogram.h"
-#include "base/thread_local.h"
+#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
+#include "base/threading/thread_local.h"
 
 #if defined(OS_MACOSX)
 #include "base/message_pump_mac.h"
 #endif
 #if defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
-#include "base/third_party/valgrind/valgrind.h"
 #endif
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/message_pump_glib.h"
@@ -27,7 +27,6 @@
 #include "base/message_pump_glib_x.h"
 #endif
 
-using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
 
@@ -114,14 +113,6 @@ MessageLoop::DestructionObserver::~DestructionObserver() {
 
 //------------------------------------------------------------------------------
 
-// static
-MessageLoop* MessageLoop::current() {
-  // TODO(darin): sadly, we cannot enable this yet since people call us even
-  // when they have no intention of using us.
-  // DCHECK(loop) << "Ouch, did you forget to initialize me?";
-  return lazy_tls_ptr.Pointer()->Get();
-}
-
 MessageLoop::MessageLoop(Type type)
     : type_(type),
       nestable_tasks_allowed_(true),
@@ -139,9 +130,13 @@ MessageLoop::MessageLoop(Type type)
 #define MESSAGE_PUMP_UI base::MessagePumpMac::Create()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #elif defined(TOUCH_UI)
-// TODO(sadrul): enable the new message pump when ready
-#define MESSAGE_PUMP_UI new base::MessagePumpForUI()
+#define MESSAGE_PUMP_UI new base::MessagePumpGlibX()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
+#elif defined(OS_NACL)
+// Currently NaCl doesn't have a UI or an IO MessageLoop.
+// TODO(abarth): Figure out if we need these.
+#define MESSAGE_PUMP_UI NULL
+#define MESSAGE_PUMP_IO NULL
 #elif defined(OS_POSIX)  // POSIX but not MACOSX.
 #define MESSAGE_PUMP_UI new base::MessagePumpForUI()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
@@ -189,6 +184,19 @@ MessageLoop::~MessageLoop() {
   lazy_tls_ptr.Pointer()->Set(NULL);
 }
 
+// static
+MessageLoop* MessageLoop::current() {
+  // TODO(darin): sadly, we cannot enable this yet since people call us even
+  // when they have no intention of using us.
+  // DCHECK(loop) << "Ouch, did you forget to initialize me?";
+  return lazy_tls_ptr.Pointer()->Get();
+}
+
+// static
+void MessageLoop::EnableHistogrammer(bool enable) {
+  enable_histogrammer_ = enable;
+}
+
 void MessageLoop::AddDestructionObserver(
     DestructionObserver* destruction_observer) {
   DCHECK_EQ(this, current());
@@ -199,108 +207,6 @@ void MessageLoop::RemoveDestructionObserver(
     DestructionObserver* destruction_observer) {
   DCHECK_EQ(this, current());
   destruction_observers_.RemoveObserver(destruction_observer);
-}
-
-void MessageLoop::AddTaskObserver(TaskObserver* task_observer) {
-  DCHECK_EQ(this, current());
-  task_observers_.AddObserver(task_observer);
-}
-
-void MessageLoop::RemoveTaskObserver(TaskObserver* task_observer) {
-  DCHECK_EQ(this, current());
-  task_observers_.RemoveObserver(task_observer);
-}
-
-void MessageLoop::Run() {
-  AutoRunState save_state(this);
-  RunHandler();
-}
-
-void MessageLoop::RunAllPending() {
-  AutoRunState save_state(this);
-  state_->quit_received = true;  // Means run until we would otherwise block.
-  RunHandler();
-}
-
-// Runs the loop in two different SEH modes:
-// enable_SEH_restoration_ = false : any unhandled exception goes to the last
-// one that calls SetUnhandledExceptionFilter().
-// enable_SEH_restoration_ = true : any unhandled exception goes to the filter
-// that was existed before the loop was run.
-void MessageLoop::RunHandler() {
-#if defined(OS_WIN)
-  if (exception_restoration_) {
-    RunInternalInSEHFrame();
-    return;
-  }
-#endif
-
-  RunInternal();
-}
-//------------------------------------------------------------------------------
-#if defined(OS_WIN)
-__declspec(noinline) void MessageLoop::RunInternalInSEHFrame() {
-  LPTOP_LEVEL_EXCEPTION_FILTER current_filter = GetTopSEHFilter();
-  __try {
-    RunInternal();
-  } __except(SEHFilter(current_filter)) {
-  }
-  return;
-}
-#endif
-//------------------------------------------------------------------------------
-
-void MessageLoop::RunInternal() {
-  DCHECK_EQ(this, current());
-
-  StartHistogrammer();
-
-#if !defined(OS_MACOSX)
-  if (state_->dispatcher && type() == TYPE_UI) {
-    static_cast<base::MessagePumpForUI*>(pump_.get())->
-        RunWithDispatcher(this, state_->dispatcher);
-    return;
-  }
-#endif
-
-  pump_->Run(this);
-}
-
-//------------------------------------------------------------------------------
-// Wrapper functions for use in above message loop framework.
-
-bool MessageLoop::ProcessNextDelayedNonNestableTask() {
-  if (state_->run_depth != 1)
-    return false;
-
-  if (deferred_non_nestable_work_queue_.empty())
-    return false;
-
-  Task* task = deferred_non_nestable_work_queue_.front().task;
-  deferred_non_nestable_work_queue_.pop();
-
-  RunTask(task);
-  return true;
-}
-
-//------------------------------------------------------------------------------
-
-void MessageLoop::Quit() {
-  DCHECK_EQ(this, current());
-  if (state_) {
-    state_->quit_received = true;
-  } else {
-    NOTREACHED() << "Must be inside Run to call Quit";
-  }
-}
-
-void MessageLoop::QuitNow() {
-  DCHECK_EQ(this, current());
-  if (state_) {
-    pump_->Quit();
-  } else {
-    NOTREACHED() << "Must be inside Run to call Quit";
-  }
 }
 
 void MessageLoop::PostTask(
@@ -323,68 +229,33 @@ void MessageLoop::PostNonNestableDelayedTask(
   PostTask_Helper(from_here, task, delay_ms, false);
 }
 
-// Possibly called on a background thread!
-void MessageLoop::PostTask_Helper(
-    const tracked_objects::Location& from_here, Task* task, int64 delay_ms,
-    bool nestable) {
-  task->SetBirthPlace(from_here);
+void MessageLoop::Run() {
+  AutoRunState save_state(this);
+  RunHandler();
+}
 
-  PendingTask pending_task(task, nestable);
+void MessageLoop::RunAllPending() {
+  AutoRunState save_state(this);
+  state_->quit_received = true;  // Means run until we would otherwise block.
+  RunHandler();
+}
 
-  if (delay_ms > 0) {
-    pending_task.delayed_run_time =
-        TimeTicks::Now() + TimeDelta::FromMilliseconds(delay_ms);
-
-#if defined(OS_WIN)
-    if (high_resolution_timer_expiration_.is_null()) {
-      // Windows timers are granular to 15.6ms.  If we only set high-res
-      // timers for those under 15.6ms, then a 18ms timer ticks at ~32ms,
-      // which as a percentage is pretty inaccurate.  So enable high
-      // res timers for any timer which is within 2x of the granularity.
-      // This is a tradeoff between accuracy and power management.
-      bool needs_high_res_timers =
-          delay_ms < (2 * Time::kMinLowResolutionThresholdMs);
-      if (needs_high_res_timers) {
-        Time::ActivateHighResolutionTimer(true);
-        high_resolution_timer_expiration_ = TimeTicks::Now() +
-            TimeDelta::FromMilliseconds(kHighResolutionTimerModeLeaseTimeMs);
-      }
-    }
-#endif
+void MessageLoop::Quit() {
+  DCHECK_EQ(this, current());
+  if (state_) {
+    state_->quit_received = true;
   } else {
-    DCHECK_EQ(delay_ms, 0) << "delay should not be negative";
+    NOTREACHED() << "Must be inside Run to call Quit";
   }
+}
 
-#if defined(OS_WIN)
-  if (!high_resolution_timer_expiration_.is_null()) {
-    if (TimeTicks::Now() > high_resolution_timer_expiration_) {
-      Time::ActivateHighResolutionTimer(false);
-      high_resolution_timer_expiration_ = TimeTicks();
-    }
+void MessageLoop::QuitNow() {
+  DCHECK_EQ(this, current());
+  if (state_) {
+    pump_->Quit();
+  } else {
+    NOTREACHED() << "Must be inside Run to call Quit";
   }
-#endif
-
-  // Warning: Don't try to short-circuit, and handle this thread's tasks more
-  // directly, as it could starve handling of foreign threads.  Put every task
-  // into this queue.
-
-  scoped_refptr<base::MessagePump> pump;
-  {
-    AutoLock locked(incoming_queue_lock_);
-
-    bool was_empty = incoming_queue_.empty();
-    incoming_queue_.push(pending_task);
-    if (!was_empty)
-      return;  // Someone else should have started the sub-pump.
-
-    pump = pump_;
-  }
-  // Since the incoming_queue_ may contain a task that destroys this message
-  // loop, we cannot exit incoming_queue_lock_ until we are done with |this|.
-  // We use a stack-based reference to the message pump so that we can call
-  // ScheduleWork outside of incoming_queue_lock_.
-
-  pump->ScheduleWork();
 }
 
 void MessageLoop::SetNestableTasksAllowed(bool allowed) {
@@ -405,7 +276,74 @@ bool MessageLoop::IsNested() {
   return state_->run_depth > 1;
 }
 
+void MessageLoop::AddTaskObserver(TaskObserver* task_observer) {
+  DCHECK_EQ(this, current());
+  task_observers_.AddObserver(task_observer);
+}
+
+void MessageLoop::RemoveTaskObserver(TaskObserver* task_observer) {
+  DCHECK_EQ(this, current());
+  task_observers_.RemoveObserver(task_observer);
+}
+
 //------------------------------------------------------------------------------
+
+// Runs the loop in two different SEH modes:
+// enable_SEH_restoration_ = false : any unhandled exception goes to the last
+// one that calls SetUnhandledExceptionFilter().
+// enable_SEH_restoration_ = true : any unhandled exception goes to the filter
+// that was existed before the loop was run.
+void MessageLoop::RunHandler() {
+#if defined(OS_WIN)
+  if (exception_restoration_) {
+    RunInternalInSEHFrame();
+    return;
+  }
+#endif
+
+  RunInternal();
+}
+
+#if defined(OS_WIN)
+__declspec(noinline) void MessageLoop::RunInternalInSEHFrame() {
+  LPTOP_LEVEL_EXCEPTION_FILTER current_filter = GetTopSEHFilter();
+  __try {
+    RunInternal();
+  } __except(SEHFilter(current_filter)) {
+  }
+  return;
+}
+#endif
+
+void MessageLoop::RunInternal() {
+  DCHECK_EQ(this, current());
+
+  StartHistogrammer();
+
+#if !defined(OS_MACOSX)
+  if (state_->dispatcher && type() == TYPE_UI) {
+    static_cast<base::MessagePumpForUI*>(pump_.get())->
+        RunWithDispatcher(this, state_->dispatcher);
+    return;
+  }
+#endif
+
+  pump_->Run(this);
+}
+
+bool MessageLoop::ProcessNextDelayedNonNestableTask() {
+  if (state_->run_depth != 1)
+    return false;
+
+  if (deferred_non_nestable_work_queue_.empty())
+    return false;
+
+  Task* task = deferred_non_nestable_work_queue_.front().task;
+  deferred_non_nestable_work_queue_.pop();
+
+  RunTask(task);
+  return true;
+}
 
 void MessageLoop::RunTask(Task* task) {
   DCHECK(nestable_tasks_allowed_);
@@ -456,7 +394,7 @@ void MessageLoop::ReloadWorkQueue() {
 
   // Acquire all we can from the inter-thread queue with one lock acquisition.
   {
-    AutoLock lock(incoming_queue_lock_);
+    base::AutoLock lock(incoming_queue_lock_);
     if (incoming_queue_.empty())
       return;
     incoming_queue_.Swap(&work_queue_);  // Constant time
@@ -480,8 +418,8 @@ bool MessageLoop::DeletePendingTasks() {
       // Valgrind.
 #if defined(PURIFY) || defined(USE_HEAPCHECKER)
       delete pending_task.task;
-#elif defined(OS_POSIX)
-      if (RUNNING_ON_VALGRIND)
+#else
+      if (RunningOnValgrind())
         delete pending_task.task;
 #endif  // defined(OS_POSIX)
     }
@@ -493,8 +431,8 @@ bool MessageLoop::DeletePendingTasks() {
     Task* task = NULL;
 #if defined(PURIFY) || defined(USE_HEAPCHECKER)
     task = deferred_non_nestable_work_queue_.front().task;
-#elif defined(OS_POSIX)
-    if (RUNNING_ON_VALGRIND)
+#else
+    if (RunningOnValgrind())
       task = deferred_non_nestable_work_queue_.front().task;
 #endif
     deferred_non_nestable_work_queue_.pop();
@@ -508,6 +446,92 @@ bool MessageLoop::DeletePendingTasks() {
     delete task;
   }
   return did_work;
+}
+
+// Possibly called on a background thread!
+void MessageLoop::PostTask_Helper(
+    const tracked_objects::Location& from_here, Task* task, int64 delay_ms,
+    bool nestable) {
+  task->SetBirthPlace(from_here);
+
+  PendingTask pending_task(task, nestable);
+
+  if (delay_ms > 0) {
+    pending_task.delayed_run_time =
+        TimeTicks::Now() + TimeDelta::FromMilliseconds(delay_ms);
+
+#if defined(OS_WIN)
+    if (high_resolution_timer_expiration_.is_null()) {
+      // Windows timers are granular to 15.6ms.  If we only set high-res
+      // timers for those under 15.6ms, then a 18ms timer ticks at ~32ms,
+      // which as a percentage is pretty inaccurate.  So enable high
+      // res timers for any timer which is within 2x of the granularity.
+      // This is a tradeoff between accuracy and power management.
+      bool needs_high_res_timers =
+          delay_ms < (2 * base::Time::kMinLowResolutionThresholdMs);
+      if (needs_high_res_timers) {
+        base::Time::ActivateHighResolutionTimer(true);
+        high_resolution_timer_expiration_ = TimeTicks::Now() +
+            TimeDelta::FromMilliseconds(kHighResolutionTimerModeLeaseTimeMs);
+      }
+    }
+#endif
+  } else {
+    DCHECK_EQ(delay_ms, 0) << "delay should not be negative";
+  }
+
+#if defined(OS_WIN)
+  if (!high_resolution_timer_expiration_.is_null()) {
+    if (TimeTicks::Now() > high_resolution_timer_expiration_) {
+      base::Time::ActivateHighResolutionTimer(false);
+      high_resolution_timer_expiration_ = TimeTicks();
+    }
+  }
+#endif
+
+  // Warning: Don't try to short-circuit, and handle this thread's tasks more
+  // directly, as it could starve handling of foreign threads.  Put every task
+  // into this queue.
+
+  scoped_refptr<base::MessagePump> pump;
+  {
+    base::AutoLock locked(incoming_queue_lock_);
+
+    bool was_empty = incoming_queue_.empty();
+    incoming_queue_.push(pending_task);
+    if (!was_empty)
+      return;  // Someone else should have started the sub-pump.
+
+    pump = pump_;
+  }
+  // Since the incoming_queue_ may contain a task that destroys this message
+  // loop, we cannot exit incoming_queue_lock_ until we are done with |this|.
+  // We use a stack-based reference to the message pump so that we can call
+  // ScheduleWork outside of incoming_queue_lock_.
+
+  pump->ScheduleWork();
+}
+
+//------------------------------------------------------------------------------
+// Method and data for histogramming events and actions taken by each instance
+// on each thread.
+
+void MessageLoop::StartHistogrammer() {
+  if (enable_histogrammer_ && !message_histogram_.get()
+      && base::StatisticsRecorder::IsActive()) {
+    DCHECK(!thread_name_.empty());
+    message_histogram_ = base::LinearHistogram::FactoryGet(
+        "MsgLoop:" + thread_name_,
+        kLeastNonZeroMessageId, kMaxMessageId,
+        kNumberOfDistinctMessagesDisplayed,
+        message_histogram_->kHexRangePrintingFlag);
+    message_histogram_->SetRangeDescriptions(event_descriptions_);
+  }
+}
+
+void MessageLoop::HistogramEvent(int event) {
+  if (message_histogram_.get())
+    message_histogram_->Add(event);
 }
 
 bool MessageLoop::DoWork() {
@@ -626,33 +650,6 @@ bool MessageLoop::PendingTask::operator<(const PendingTask& other) const {
 }
 
 //------------------------------------------------------------------------------
-// Method and data for histogramming events and actions taken by each instance
-// on each thread.
-
-// static
-void MessageLoop::EnableHistogrammer(bool enable) {
-  enable_histogrammer_ = enable;
-}
-
-void MessageLoop::StartHistogrammer() {
-  if (enable_histogrammer_ && !message_histogram_.get()
-      && base::StatisticsRecorder::WasStarted()) {
-    DCHECK(!thread_name_.empty());
-    message_histogram_ = base::LinearHistogram::FactoryGet(
-        "MsgLoop:" + thread_name_,
-        kLeastNonZeroMessageId, kMaxMessageId,
-        kNumberOfDistinctMessagesDisplayed,
-        message_histogram_->kHexRangePrintingFlag);
-    message_histogram_->SetRangeDescriptions(event_descriptions_);
-  }
-}
-
-void MessageLoop::HistogramEvent(int event) {
-  if (message_histogram_.get())
-    message_histogram_->Add(event);
-}
-
-//------------------------------------------------------------------------------
 // MessageLoopForUI
 
 #if defined(OS_WIN)
@@ -661,7 +658,7 @@ void MessageLoopForUI::DidProcessMessage(const MSG& message) {
 }
 #endif  // defined(OS_WIN)
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_NACL)
 void MessageLoopForUI::AddObserver(Observer* observer) {
   pump_ui()->AddObserver(observer);
 }
@@ -675,7 +672,7 @@ void MessageLoopForUI::Run(Dispatcher* dispatcher) {
   state_->dispatcher = dispatcher;
   RunHandler();
 }
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_MACOSX) && !defined(OS_NACL)
 
 //------------------------------------------------------------------------------
 // MessageLoopForIO
@@ -690,7 +687,7 @@ bool MessageLoopForIO::WaitForIOCompletion(DWORD timeout, IOHandler* filter) {
   return pump_io()->WaitForIOCompletion(timeout, filter);
 }
 
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) && !defined(OS_NACL)
 
 bool MessageLoopForIO::WatchFileDescriptor(int fd,
                                            bool persistent,

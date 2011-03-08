@@ -12,11 +12,14 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/singleton.h"
-#include "cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 
 typedef unsigned long Atom;
 typedef unsigned long XID;
+
+namespace base {
+template <typename T> struct DefaultLazyInstanceTraits;
+}
 
 namespace chromeos {
 
@@ -112,8 +115,11 @@ class WmIpc {
   // the user is currently logged in or not.
   void SetLoggedInProperty(bool logged_in);
 
+  // Sends a message to the window manager notifying it that we're signing out.
+  void NotifyAboutSignout();
+
  private:
-  friend struct DefaultSingletonTraits<WmIpc>;
+  friend struct base::DefaultLazyInstanceTraits<WmIpc>;
 
   WmIpc();
 

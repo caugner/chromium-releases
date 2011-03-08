@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -163,6 +163,8 @@ class IEEventSink
   // Used only for debugging/logging purposes.
   bool reference_count() { return m_dwRef; }
 
+  static void SetAbnormalShutdown(bool abnormal_shutdown);
+
  private:
   void ConnectToChromeFrame();
   void DisconnectFromChromeFrame();
@@ -212,7 +214,7 @@ END_SINK_MAP()
                                    VARIANT_BOOL* cancel);
   STDMETHOD_(void, OnQuit)();
 
-#ifdef _DEBUG
+#ifndef NDEBUG
   STDMETHOD(Invoke)(DISPID dispid,
                     REFIID riid, LCID lcid,
                     WORD flags,
@@ -239,6 +241,7 @@ END_SINK_MAP()
   IEEventListener* listener_;
   base::ProcessId ie_process_id_;
   bool did_receive_on_quit_;
+  static bool abnormal_shutdown_;
 
   static _ATL_FUNC_INFO kBeforeNavigate2Info;
   static _ATL_FUNC_INFO kNavigateComplete2Info;

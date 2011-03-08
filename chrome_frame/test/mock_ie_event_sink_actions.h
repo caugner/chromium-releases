@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/platform_thread.h"
+#include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
@@ -25,6 +25,10 @@ namespace chrome_frame_test {
 
 MATCHER_P(UrlPathEq, url, "equals the path and query portion of the url") {
   return arg == chrome_frame_test::GetPathAndQueryFromUrl(url);
+}
+
+MATCHER_P(AccSatisfies, matcher, "satisfies the given AccObjectMatcher") {
+  return matcher.DoesMatch(arg);
 }
 
 // IWebBrowser2 actions
@@ -80,6 +84,10 @@ ACTION_P3(DelayGoForward, mock, loop, delay) {
 ACTION_P3(DelayRefresh, mock, loop, delay) {
   loop->PostDelayedTask(FROM_HERE, NewRunnableMethod(mock->event_sink(),
       &IEEventSink::Refresh), delay);
+}
+
+ACTION_P2(PostMessageToCF, mock, message) {
+  mock->event_sink()->PostMessageToCF(message, L"*");
 }
 
 // Accessibility-related actions
@@ -157,6 +165,12 @@ ACTION_P2(AccDoDefaultActionInBrowser, mock, matcher) {
 }
 
 ACTION_P2(AccDoDefaultActionInRenderer, mock, matcher) {
+  AccInWindow<void>(AccDoDefaultAction(matcher),
+                    mock->event_sink()->GetRendererWindow());
+}
+
+ACTION_P3(DelayAccDoDefaultActionInRenderer, mock, matcher, delay) {
+  SleepEx(delay, false);
   AccInWindow<void>(AccDoDefaultAction(matcher),
                     mock->event_sink()->GetRendererWindow());
 }
@@ -319,12 +333,21 @@ ACTION_P2(ExpectDocumentReadystate, mock, ready_state) {
   mock->ExpectDocumentReadystate(ready_state);
 }
 
+ACTION_P(VerifySelectedText, expected_text) {
+  std::wstring actual_text;
+  bool got_selection = arg1->GetSelectedText(&actual_text);
+  EXPECT_TRUE(got_selection);
+  if (got_selection) {
+    EXPECT_EQ(expected_text, actual_text);
+  }
+}
+
 // Polling actions
 
 ACTION_P3(CloseWhenFileSaved, mock, file, timeout_ms) {
   base::Time start = base::Time::Now();
   while (!file_util::PathExists(file)) {
-    PlatformThread::Sleep(200);
+    base::PlatformThread::Sleep(200);
     if ((base::Time::Now() - start).InMilliseconds() > timeout_ms) {
       ADD_FAILURE() << "File was not saved within timeout";
       break;
@@ -336,7 +359,7 @@ ACTION_P3(CloseWhenFileSaved, mock, file, timeout_ms) {
 ACTION_P2(WaitForFileSave, file, timeout_ms) {
   base::Time start = base::Time::Now();
   while (!file_util::PathExists(file)) {
-    PlatformThread::Sleep(200);
+    base::PlatformThread::Sleep(200);
     if ((base::Time::Now() - start).InMilliseconds() > timeout_ms) {
       ADD_FAILURE() << "File was not saved within timeout";
       break;

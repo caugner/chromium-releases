@@ -13,18 +13,24 @@
 
 namespace appcache {
 
-void AppCacheInterceptor::SetHandler(
-    URLRequest* request, AppCacheRequestHandler* handler) {
-  request->SetUserData(instance(), handler);  // request takes ownership
+// static
+AppCacheInterceptor* AppCacheInterceptor::GetInstance() {
+  return Singleton<AppCacheInterceptor>::get();
 }
 
-AppCacheRequestHandler* AppCacheInterceptor::GetHandler(URLRequest* request) {
+void AppCacheInterceptor::SetHandler(
+    net::URLRequest* request, AppCacheRequestHandler* handler) {
+  request->SetUserData(GetInstance(), handler);  // request takes ownership
+}
+
+AppCacheRequestHandler* AppCacheInterceptor::GetHandler(
+    net::URLRequest* request) {
   return reinterpret_cast<AppCacheRequestHandler*>(
-      request->GetUserData(instance()));
+      request->GetUserData(GetInstance()));
 }
 
 void AppCacheInterceptor::SetExtraRequestInfo(
-    URLRequest* request, AppCacheService* service, int process_id,
+    net::URLRequest* request, AppCacheService* service, int process_id,
     int host_id, ResourceType::Type resource_type) {
   if (!service || (host_id == kNoHostId))
     return;
@@ -46,7 +52,7 @@ void AppCacheInterceptor::SetExtraRequestInfo(
     SetHandler(request, handler);
 }
 
-void AppCacheInterceptor::GetExtraResponseInfo(URLRequest* request,
+void AppCacheInterceptor::GetExtraResponseInfo(net::URLRequest* request,
                                                int64* cache_id,
                                                GURL* manifest_url) {
   DCHECK(*cache_id == kNoCacheId);
@@ -57,31 +63,32 @@ void AppCacheInterceptor::GetExtraResponseInfo(URLRequest* request,
 }
 
 AppCacheInterceptor::AppCacheInterceptor() {
-  URLRequest::RegisterRequestInterceptor(this);
+  net::URLRequest::RegisterRequestInterceptor(this);
 }
 
 AppCacheInterceptor::~AppCacheInterceptor() {
-  URLRequest::UnregisterRequestInterceptor(this);
+  net::URLRequest::UnregisterRequestInterceptor(this);
 }
 
-URLRequestJob* AppCacheInterceptor::MaybeIntercept(URLRequest* request) {
+net::URLRequestJob* AppCacheInterceptor::MaybeIntercept(
+    net::URLRequest* request) {
   AppCacheRequestHandler* handler = GetHandler(request);
   if (!handler)
     return NULL;
   return handler->MaybeLoadResource(request);
 }
 
-URLRequestJob* AppCacheInterceptor::MaybeInterceptRedirect(
-                                        URLRequest* request,
-                                        const GURL& location) {
+net::URLRequestJob* AppCacheInterceptor::MaybeInterceptRedirect(
+    net::URLRequest* request,
+    const GURL& location) {
   AppCacheRequestHandler* handler = GetHandler(request);
   if (!handler)
     return NULL;
   return handler->MaybeLoadFallbackForRedirect(request, location);
 }
 
-URLRequestJob* AppCacheInterceptor::MaybeInterceptResponse(
-                                        URLRequest* request) {
+net::URLRequestJob* AppCacheInterceptor::MaybeInterceptResponse(
+    net::URLRequest* request) {
   AppCacheRequestHandler* handler = GetHandler(request);
   if (!handler)
     return NULL;

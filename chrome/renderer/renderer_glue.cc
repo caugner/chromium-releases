@@ -12,8 +12,6 @@
 
 #include <vector>
 
-#include "app/clipboard/clipboard.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
@@ -28,13 +26,20 @@
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
 #include "googleurl/src/url_util.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/clipboard/clipboard.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/websocketstreamhandle_bridge.h"
+
+#if !defined(DISABLE_NACL)
+#include "native_client/src/shared/imc/nacl_imc.h"
+#include "native_client/src/trusted/plugin/nacl_entry_points.h"
+#endif
 
 #if defined(OS_WIN)
 #include <strsafe.h>  // note: per msdn docs, this must *follow* other includes
@@ -87,19 +92,19 @@ void ScopedClipboardWriterGlue::WriteBitmapFromPixels(const void* pixels,
   memcpy(shared_buf_->memory(), pixels, buf_size);
   shared_buf_->Unmap();
 
-  Clipboard::ObjectMapParam size_param;
+  ui::Clipboard::ObjectMapParam size_param;
   const char* size_data = reinterpret_cast<const char*>(&size);
   for (size_t i = 0; i < sizeof(gfx::Size); ++i)
     size_param.push_back(size_data[i]);
 
-  Clipboard::ObjectMapParams params;
+  ui::Clipboard::ObjectMapParams params;
 
   // The first parameter is replaced on the receiving end with a pointer to
   // a shared memory object containing the bitmap. We reserve space for it here.
-  Clipboard::ObjectMapParam place_holder_param;
+  ui::Clipboard::ObjectMapParam place_holder_param;
   params.push_back(place_holder_param);
   params.push_back(size_param);
-  objects_[Clipboard::CBF_SMBITMAP] = params;
+  objects_[ui::Clipboard::CBF_SMBITMAP] = params;
 }
 
 // Define a destructor that makes IPCs to flush the contents to the
@@ -148,34 +153,35 @@ HCURSOR LoadCursor(int cursor_id) {
 
 // Clipboard glue
 
-Clipboard* ClipboardGetClipboard() {
+ui::Clipboard* ClipboardGetClipboard() {
   return NULL;
 }
 
-bool ClipboardIsFormatAvailable(const Clipboard::FormatType& format,
-                                Clipboard::Buffer buffer) {
+bool ClipboardIsFormatAvailable(const ui::Clipboard::FormatType& format,
+                                ui::Clipboard::Buffer buffer) {
   bool result;
   RenderThread::current()->Send(
       new ViewHostMsg_ClipboardIsFormatAvailable(format, buffer, &result));
   return result;
 }
 
-void ClipboardReadText(Clipboard::Buffer buffer, string16* result) {
+void ClipboardReadText(ui::Clipboard::Buffer buffer, string16* result) {
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadText(buffer,
                                                                   result));
 }
 
-void ClipboardReadAsciiText(Clipboard::Buffer buffer, std::string* result) {
+void ClipboardReadAsciiText(ui::Clipboard::Buffer buffer, std::string* result) {
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadAsciiText(buffer,
                                                                        result));
 }
 
-void ClipboardReadHTML(Clipboard::Buffer buffer, string16* markup, GURL* url) {
+void ClipboardReadHTML(ui::Clipboard::Buffer buffer, string16* markup,
+                       GURL* url) {
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadHTML(buffer,
                                                                   markup, url));
 }
 
-bool ClipboardReadAvailableTypes(Clipboard::Buffer buffer,
+bool ClipboardReadAvailableTypes(ui::Clipboard::Buffer buffer,
                                  std::vector<string16>* types,
                                  bool* contains_filenames) {
   bool result = false;
@@ -184,7 +190,7 @@ bool ClipboardReadAvailableTypes(Clipboard::Buffer buffer,
   return result;
 }
 
-bool ClipboardReadData(Clipboard::Buffer buffer, const string16& type,
+bool ClipboardReadData(ui::Clipboard::Buffer buffer, const string16& type,
                        string16* data, string16* metadata) {
   bool result = false;
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadData(
@@ -192,7 +198,7 @@ bool ClipboardReadData(Clipboard::Buffer buffer, const string16& type,
   return result;
 }
 
-bool ClipboardReadFilenames(Clipboard::Buffer buffer,
+bool ClipboardReadFilenames(ui::Clipboard::Buffer buffer,
                             std::vector<string16>* filenames) {
   bool result;
   RenderThread::current()->Send(new ViewHostMsg_ClipboardReadFilenames(
@@ -200,7 +206,8 @@ bool ClipboardReadFilenames(Clipboard::Buffer buffer,
   return result;
 }
 
-void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
+void GetPlugins(bool refresh,
+                std::vector<webkit::npapi::WebPluginInfo>* plugins) {
   if (!RenderThread::current()->plugin_refresh_allowed())
     refresh = false;
   RenderThread::current()->Send(new ViewHostMsg_GetPlugins(refresh, plugins));
@@ -273,6 +280,30 @@ void UserMetricsRecordAction(const std::string& action) {
   RenderThread::current()->Send(
       new ViewHostMsg_UserMetricsRecordAction(action));
 }
+
+#if !defined(DISABLE_NACL)
+bool LaunchSelLdr(const char* alleged_url, int socket_count, void* imc_handles,
+                  void* nacl_process_handle, int* nacl_process_id) {
+  std::vector<nacl::FileDescriptor> sockets;
+  base::ProcessHandle nacl_process;
+  if (!RenderThread::current()->Send(
+    new ViewHostMsg_LaunchNaCl(
+        ASCIIToWide(alleged_url),
+        socket_count,
+        &sockets,
+        &nacl_process,
+        reinterpret_cast<base::ProcessId*>(nacl_process_id)))) {
+    return false;
+  }
+  CHECK(static_cast<int>(sockets.size()) == socket_count);
+  for (int i = 0; i < socket_count; i++) {
+    static_cast<nacl::Handle*>(imc_handles)[i] =
+        nacl::ToNativeHandle(sockets[i]);
+  }
+  *static_cast<nacl::Handle*>(nacl_process_handle) = nacl_process;
+  return true;
+}
+#endif
 
 #if defined(OS_LINUX)
 int MatchFontWithFallback(const std::string& face, bool bold,

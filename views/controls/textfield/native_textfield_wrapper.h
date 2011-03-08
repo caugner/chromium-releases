@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,9 @@ class Insets;
 
 namespace views {
 
+class KeyEvent;
 class Textfield;
+class TextRange;
 class View;
 
 // An interface implemented by an object that provides a platform-native
@@ -77,8 +79,9 @@ class NativeTextfieldWrapper {
   // Updates the vertical margins for the native text field.
   virtual void UpdateVerticalMargins() = 0;
 
-  // Sets the focus to the text field.
-  virtual void SetFocus() = 0;
+  // Sets the focus to the text field. Returns false if the wrapper
+  // didn't take focus.
+  virtual bool SetFocus() = 0;
 
   // Retrieves the views::View that hosts the native control.
   virtual View* GetView() = 0;
@@ -88,6 +91,32 @@ class NativeTextfieldWrapper {
 
   // Returns whether or not an IME is composing text.
   virtual bool IsIMEComposing() const = 0;
+
+  // Gets the selected range.
+  virtual void GetSelectedRange(TextRange* range) const = 0;
+
+  // Selects the text given by |range|.
+  virtual void SelectRange(const TextRange& range) = 0;
+
+  // Returns the currnet cursor position.
+  virtual size_t GetCursorPosition() const = 0;
+
+  // Following methods are to forward key/focus related events to the
+  // views wrapper so that TextfieldViews can handle key inputs without
+  // having focus.
+
+  // Invoked when a key is pressed/release on Textfield.  Subclasser
+  // should return true if the event has been processed and false
+  // otherwise.
+  // See also View::OnKeyPressed/OnKeyReleased.
+  virtual bool HandleKeyPressed(const views::KeyEvent& e) = 0;
+  virtual bool HandleKeyReleased(const views::KeyEvent& e) = 0;
+
+  // Invoked when focus is being moved from or to the Textfield.
+  // See also View::WillGainFocus/DidGainFocus/WillLoseFocus.
+  virtual void HandleWillGainFocus() = 0;
+  virtual void HandleDidGainFocus() = 0;
+  virtual void HandleWillLoseFocus() = 0;
 
   // Creates an appropriate NativeTextfieldWrapper for the platform.
   static NativeTextfieldWrapper* CreateWrapper(Textfield* field);

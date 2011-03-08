@@ -16,7 +16,7 @@ media::FFmpegURLProtocol* ToProtocol(void* data) {
 // FFmpeg protocol interface.
 int OpenContext(URLContext* h, const char* filename, int flags) {
   media::FFmpegURLProtocol* protocol;
-  media::FFmpegGlue::get()->GetProtocol(filename, &protocol);
+  media::FFmpegGlue::GetInstance()->GetProtocol(filename, &protocol);
   if (!protocol)
     return AVERROR_IO;
 
@@ -88,21 +88,21 @@ int CloseContext(URLContext* h) {
 int LockManagerOperation(void** lock, enum AVLockOp op) {
   switch (op) {
     case AV_LOCK_CREATE:
-      *lock = new Lock();
+      *lock = new base::Lock();
       if (!*lock)
         return 1;
       return 0;
 
     case AV_LOCK_OBTAIN:
-      static_cast<Lock*>(*lock)->Acquire();
+      static_cast<base::Lock*>(*lock)->Acquire();
       return 0;
 
     case AV_LOCK_RELEASE:
-      static_cast<Lock*>(*lock)->Release();
+      static_cast<base::Lock*>(*lock)->Release();
       return 0;
 
     case AV_LOCK_DESTROY:
-      delete static_cast<Lock*>(*lock);
+      delete static_cast<base::Lock*>(*lock);
       *lock = NULL;
       return 0;
   }
@@ -145,8 +145,13 @@ FFmpegGlue::~FFmpegGlue() {
   av_lockmgr_register(NULL);
 }
 
+// static
+FFmpegGlue* FFmpegGlue::GetInstance() {
+  return Singleton<FFmpegGlue>::get();
+}
+
 std::string FFmpegGlue::AddProtocol(FFmpegURLProtocol* protocol) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   std::string key = GetProtocolKey(protocol);
   if (protocols_.find(key) == protocols_.end()) {
     protocols_[key] = protocol;
@@ -155,7 +160,7 @@ std::string FFmpegGlue::AddProtocol(FFmpegURLProtocol* protocol) {
 }
 
 void FFmpegGlue::RemoveProtocol(FFmpegURLProtocol* protocol) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   for (ProtocolMap::iterator cur, iter = protocols_.begin();
        iter != protocols_.end();) {
     cur = iter;
@@ -168,7 +173,7 @@ void FFmpegGlue::RemoveProtocol(FFmpegURLProtocol* protocol) {
 
 void FFmpegGlue::GetProtocol(const std::string& key,
                              FFmpegURLProtocol** protocol) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   ProtocolMap::iterator iter = protocols_.find(key);
   if (iter == protocols_.end()) {
     *protocol = NULL;

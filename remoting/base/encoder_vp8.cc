@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "remoting/base/encoder_vp8.h"
+
 #include "base/logging.h"
 #include "media/base/callback.h"
-#include "media/base/media.h"
 #include "remoting/base/capture_data.h"
-#include "remoting/base/encoder_vp8.h"
 #include "remoting/proto/video.pb.h"
 
 extern "C" {
 #define VPX_CODEC_DISABLE_COMPAT 1
-#include "third_party/libvpx/include/vpx/vpx_codec.h"
-#include "third_party/libvpx/include/vpx/vpx_encoder.h"
-#include "third_party/libvpx/include/vpx/vp8cx.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_encoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8cx.h"
 }
 
 namespace remoting {
@@ -46,8 +46,7 @@ bool EncoderVp8::Init(int width, int height) {
   image_->h = height;
 
   vpx_codec_enc_cfg_t config;
-  const vpx_codec_iface_t* algo =
-      (const vpx_codec_iface_t*)media::GetVp8CxAlgoAddress();
+  const vpx_codec_iface_t* algo = vpx_codec_vp8_cx();
   CHECK(algo);
   vpx_codec_err_t ret = vpx_codec_enc_config_default(algo, &config, 0);
   if (ret != VPX_CODEC_OK)
@@ -126,13 +125,13 @@ bool EncoderVp8::PrepareImage(scoped_refptr<CaptureData> capture_data) {
     for (int j = 0; j < capture_data->width(); ++j) {
       // Since the input pixel format is RGB32, there are 4 bytes per pixel.
       uint8* pixel = in + 4 * j;
-      y_out[j] = clip_byte(((pixel[0] * 66 + pixel[1] * 129 +
-                             pixel[2] * 25 + 128) >> 8) + 16);
+      y_out[j] = clip_byte(((pixel[2] * 66 + pixel[1] * 129 +
+                             pixel[0] * 25 + 128) >> 8) + 16);
       if (i % 2 == 0 && j % 2 == 0) {
-        u_out[j / 2] = clip_byte(((pixel[0] * -38 + pixel[1] * -74 +
-                                   pixel[2] * 112 + 128) >> 8) + 128);
-        v_out[j / 2] = clip_byte(((pixel[0] * 112 + pixel[1] * -94 +
-                                   pixel[2] * -18 + 128) >> 8) + 128);
+        u_out[j / 2] = clip_byte(((pixel[2] * -38 + pixel[1] * -74 +
+                                   pixel[0] * 112 + 128) >> 8) + 128);
+        v_out[j / 2] = clip_byte(((pixel[2] * 112 + pixel[1] * -94 +
+                                   pixel[1] * -18 + 128) >> 8) + 128);
       }
     }
     in += in_stride;
@@ -188,6 +187,7 @@ void EncoderVp8::Encode(scoped_refptr<CaptureData> capture_data,
     switch (packet->kind) {
       case VPX_CODEC_CX_FRAME_PKT:
         got_data = true;
+        // TODO(sergeyu): Split each frame into multiple partitions.
         message->set_data(packet->data.frame.buf, packet->data.frame.sz);
         break;
       default:
@@ -196,7 +196,8 @@ void EncoderVp8::Encode(scoped_refptr<CaptureData> capture_data,
   }
 
   message->mutable_format()->set_encoding(VideoPacketFormat::ENCODING_VP8);
-  message->set_flags(VideoPacket::FIRST_PACKET | VideoPacket::LAST_PACKET);
+  message->set_flags(VideoPacket::FIRST_PACKET | VideoPacket::LAST_PACKET |
+                     VideoPacket::LAST_PARTITION);
 
   data_available_callback->Run(message);
   delete data_available_callback;

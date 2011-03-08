@@ -4,14 +4,12 @@
 
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_source.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include <algorithm>
+
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_resources.h"
@@ -19,6 +17,8 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 // Define the values of standard URLs.
 const char CloudPrintSetupSource::kInvalidPasswordHelpUrl[] =
@@ -123,6 +123,10 @@ void CloudPrintSetupSource::StartDataRequest(const std::string& path_raw,
   html_bytes->data.resize(response.size());
   std::copy(response.begin(), response.end(), html_bytes->data.begin());
   SendResponse(request_id, html_bytes);
+}
+
+std::string CloudPrintSetupSource::GetMimeType(const std::string& path) const {
+  return "text/html";
 }
 
 std::string CloudPrintSetupSource::GetLocalizedUrl(

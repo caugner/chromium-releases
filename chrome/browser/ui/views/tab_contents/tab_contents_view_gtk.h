@@ -56,12 +56,14 @@ class TabContentsViewGtk : public TabContentsView,
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const;
   virtual void GetContainerBounds(gfx::Rect* out) const;
   virtual void SetPageTitle(const std::wstring& title);
-  virtual void OnTabCrashed();
+  virtual void OnTabCrashed(base::TerminationStatus status,
+                            int error_code);
   virtual void SizeContents(const gfx::Size& size);
   virtual void Focus();
   virtual void SetInitialFocus();
   virtual void StoreFocus();
   virtual void RestoreFocus();
+  virtual void GetViewBounds(gfx::Rect* out) const;
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);

@@ -8,8 +8,8 @@
 #include <oleacc.h>
 
 #include "base/logging.h"
-#include "base/scoped_comptr_win.h"
-#include "base/win_util.h"
+#include "base/win/scoped_comptr.h"
+#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/button/native_button.h"
@@ -41,7 +41,7 @@ void NativeButtonWin::UpdateLabel() {
   // update the button text so Windows can lay out the shield icon and the
   // button text correctly.
   if (base::win::GetVersion() >= base::win::VERSION_VISTA &&
-      win_util::UserAccountControlIsEnabled()) {
+      base::win::UserAccountControlIsEnabled()) {
     Button_SetElevationRequiredState(native_view(),
                                      native_button_->need_elevation());
   }
@@ -71,9 +71,9 @@ void NativeButtonWin::UpdateDefault() {
 }
 
 void NativeButtonWin::UpdateAccessibleName() {
-  std::wstring name;
+  string16 name;
   if (native_button_->GetAccessibleName(&name)) {
-    ScopedComPtr<IAccPropServices> pAccPropServices;
+    base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
     HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
         IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
     if (SUCCEEDED(hr)) {
@@ -111,7 +111,7 @@ gfx::NativeView NativeButtonWin::GetTestingHandle() const {
 // NativeButtonWin, View overrides:
 
 gfx::Size NativeButtonWin::GetPreferredSize() {
-  if (!button_size_valid_) {
+  if (!button_size_valid_ && native_view()) {
     SIZE sz = {0};
     Button_GetIdealSize(native_view(), reinterpret_cast<LPARAM>(&sz));
     button_size_.SetSize(sz.cx, sz.cy);

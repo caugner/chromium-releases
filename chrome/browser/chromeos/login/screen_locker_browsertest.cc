@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/automation/ui_controls.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/cros/mock_input_method_library.h"
@@ -16,7 +15,7 @@
 #include "chrome/browser/chromeos/login/screen_locker_tester.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/views/browser_dialogs.h"
+#include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
@@ -257,7 +256,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestNoPasswordWithMouseClick) {
 
 void KeyPress(views::Widget* widget) {
   ui_controls::SendKeyPress(GTK_WINDOW(widget->GetNativeView()),
-                            app::VKEY_SPACE, false, false, false, false);
+                            ui::VKEY_SPACE, false, false, false, false);
 }
 
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestNoPasswordWithKeyPress) {

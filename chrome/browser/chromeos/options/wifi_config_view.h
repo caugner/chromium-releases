@@ -8,11 +8,11 @@
 
 #include <string>
 
-#include "app/combobox_model.h"
 #include "base/gtest_prod_util.h"
 #include "base/string16.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/shell_dialogs.h"
+#include "ui/base/models/combobox_model.h"
 #include "views/controls/button/button.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/button/image_button.h"
@@ -41,8 +41,8 @@ class WifiConfigView : public views::View,
   // views::Textfield::Controller methods.
   virtual void ContentsChanged(views::Textfield* sender,
                                const string16& new_contents);
-  virtual bool HandleKeystroke(views::Textfield* sender,
-                               const views::Textfield::Keystroke& keystroke);
+  virtual bool HandleKeyEvent(views::Textfield* sender,
+                              const views::KeyEvent& key_event);
 
   // views::ButtonListener
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
@@ -71,15 +71,8 @@ class WifiConfigView : public views::View,
   // Returns true if the textfields are non-empty and we can login.
   bool can_login() const { return can_login_; }
 
-  // Focus the first field in the UI.
-  void FocusFirstField();
-
  private:
-  FRIEND_TEST_ALL_PREFIXES(WifiConfigViewTest, NoChangeSaveTest);
-  FRIEND_TEST_ALL_PREFIXES(WifiConfigViewTest, ChangeAutoConnectSaveTest);
-  FRIEND_TEST_ALL_PREFIXES(WifiConfigViewTest, ChangePasswordSaveTest);
-
-  class SecurityComboboxModel : public ComboboxModel {
+   class SecurityComboboxModel : public ui::ComboboxModel {
    public:
     SecurityComboboxModel() {}
     virtual ~SecurityComboboxModel() {}
@@ -95,15 +88,10 @@ class WifiConfigView : public views::View,
   // Updates state of the Login button.
   void UpdateCanLogin();
 
-  // Updates state of the "view password" button.
-  void UpdateCanViewPassword();
-
   // Updates the error text label.
   void UpdateErrorLabel(bool failed);
 
   NetworkConfigView* parent_;
-
-  bool other_network_;
 
   // Whether or not we can log in. This gets recalculated when textfield
   // contents change.
@@ -119,7 +107,6 @@ class WifiConfigView : public views::View,
   views::Combobox* security_combobox_;
   views::Textfield* passphrase_textfield_;
   views::ImageButton* passphrase_visible_button_;
-  views::Checkbox* autoconnect_checkbox_;
   views::Label* error_label_;
 
   DISALLOW_COPY_AND_ASSIGN(WifiConfigView);

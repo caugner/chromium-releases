@@ -14,7 +14,6 @@
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
 
 namespace IPC {
 class Message;
@@ -49,7 +48,7 @@ class DevToolsWindow
   RenderViewHost* GetRenderViewHost();
 
   TabContentsWrapper* tab_contents() { return tab_contents_; }
-  Browser* browser() { return browser_; } //  For tests.
+  Browser* browser() { return browser_; }  // For tests.
   bool is_docked() { return docked_; }
 
  private:
@@ -82,13 +81,13 @@ class DevToolsWindow
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) {}
+                              bool user_gesture);
   virtual void ActivateContents(TabContents* contents) {}
   virtual void DeactivateContents(TabContents* contents) {}
   virtual void LoadingStateChanged(TabContents* source) {}
   virtual void CloseContents(TabContents* source) {}
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
-  virtual bool CanReloadContents(TabContents* source) const { return false; }
+  virtual bool CanReloadContents(TabContents* source) const;
   virtual void URLStarredChanged(TabContents* source, bool starred) {}
   virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
   virtual void ToolbarSizeChanged(TabContents* source, bool is_animating) {}

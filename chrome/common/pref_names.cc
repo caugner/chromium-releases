@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,22 @@ const char kRestoreOnStartup[] = "session.restore_on_startup";
 const char kURLsToRestoreOnStartup[] = "session.urls_to_restore_on_startup";
 
 // The application locale.
+// For OS_CHROMEOS we maintain kApplicationLocale property in both local state
+// and user's profile.  Global property determines locale of login screen,
+// while user's profile determines his personal locale preference.
 const char kApplicationLocale[] = "intl.app_locale";
+#if defined(OS_CHROMEOS)
+// Non-syncable item.  Used to detect locale change.
+// Used for two-step initialization of locale in ChromeOS
+// because synchronization of kApplicationLocale is not instant.
+const char kApplicationLocaleBackup[] = "intl.app_locale_backup";
+// Non-syncable item.
+// Used to locally override synchronized kApplicationLocale preference.
+const char kApplicationLocaleOverride[] = "intl.app_locale_override";
+// Locale accepted by user.  Non-syncable.
+// Used to determine whether we need to show Locale Change notification.
+const char kApplicationLocaleAccepted[] = "intl.app_locale_accepted";
+#endif
 
 // The default character encoding to assume for a web page in the
 // absence of MIME charset specification
@@ -194,18 +209,27 @@ const char kAlternateErrorPagesEnabled[] = "alternate_error_pages.enabled";
 // A boolean pref set to true if DNS pre-fetching is being done in browser.
 const char kDnsPrefetchingEnabled[] = "dns_prefetching.enabled";
 
-// An adaptively identified list of domain names to be pre-fetched during the
-// next startup, based on what was actually needed during this startup.
+// OBSOLETE: new pref now stored with user prefs instead of profile, as
+// kDnsPrefetchingStartupList.
 const char kDnsStartupPrefetchList[] = "StartupDNSPrefetchList";
 
-// Disables the SPDY protocol.
-const char kDisableSpdy[] = "spdy.disabled";
+// An adaptively identified list of domain names to be pre-fetched during the
+// next startup, based on what was actually needed during this startup.
+const char kDnsPrefetchingStartupList[] = "dns_prefetching.startup_list";
+
+// OBSOLETE: new pref now stored with user prefs instead of profile, as
+// kDnsPrefetchingHostReferralList.
+const char kDnsHostReferralList[] = "HostReferralList";
 
 // A list of host names used to fetch web pages, and their commonly used
 // sub-resource hostnames (and expected latency benefits from pre-resolving, or
 // preconnecting to, such sub-resource hostnames).
 // This list is adaptively grown and pruned.
-const char kDnsHostReferralList[] = "HostReferralList";
+const char kDnsPrefetchingHostReferralList[] =
+    "dns_prefetching.host_referral_list";
+
+// Disables the SPDY protocol.
+const char kDisableSpdy[] = "spdy.disabled";
 
 // Is the cookie prompt expanded?
 const char kCookiePromptExpanded[] = "cookieprompt.expanded";
@@ -226,16 +250,29 @@ const char kInstantEnabledTime[] = "instant.enabled_time";
 // that are used.
 const char kInstantPromo[] = "instant.promo";
 
+// Used to migrate preferences from local state to user preferences to
+// enable multiple profiles.
+// Holds possible values:
+// 0: no preferences migrated yet.
+// 1: dns prefetching preferences stored in user preferences.
+const char kMultipleProfilePrefMigration[] =
+    "profile.multiple_profile_prefs_version";
+
 #if defined(USE_NSS) || defined(USE_OPENSSL)
 // Prefs for SSLConfigServicePref.  Currently, these are only present on
 // and used by NSS/OpenSSL using OSes.
 const char kCertRevocationCheckingEnabled[] = "ssl.rev_checking.enabled";
-const char kSSL2Enabled[] = "ssl.ssl2.enabled";
 const char kSSL3Enabled[] = "ssl.ssl3.enabled";
 const char kTLS1Enabled[] = "ssl.tls1.enabled";
 #endif
 
 #if defined(OS_CHROMEOS)
+// An integer pref to initially mute volume if 1.
+const char kAudioMute[] = "settings.audio.mute";
+
+// A double pref to set initial volume.
+const char kAudioVolume[] = "settings.audio.volume";
+
 // A boolean pref set to true if TapToClick is being done in browser.
 const char kTapToClickEnabled[] = "settings.touchpad.enable_tap_to_click";
 
@@ -445,6 +482,9 @@ const char kDeletePasswords[] = "browser.clear_data.passwords";
 const char kDeleteFormData[] = "browser.clear_data.form_data";
 const char kDeleteTimePeriod[] = "browser.clear_data.time_period";
 
+// Whether there is a Flash version installed that supports clearing LSO data.
+const char kClearPluginLSODataEnabled[] = "browser.clear_lso_data_enabled";
+
 // Boolean pref to define the default values for using spellchecker.
 const char kEnableSpellCheck[] = "browser.enable_spellchecking";
 
@@ -500,6 +540,9 @@ const char kPluginsPluginsBlacklist[] = "plugins.plugins_blacklist";
 // enable it by default, we'll want to do so only once.
 const char kPluginsEnabledInternalPDF[] = "plugins.enabled_internal_pdf3";
 
+const char kPluginsShowSetReaderDefaultInfobar[] =
+    "plugins.show_set_reader_default";
+
 // Boolean that indicates whether we should check if we are the default browser
 // on start-up.
 const char kCheckDefaultBrowser[] = "browser.check_default_browser";
@@ -527,6 +570,10 @@ const char kDesktopNotificationAllowedOrigins[] =
     "profile.notification_allowed_sites";
 const char kDesktopNotificationDeniedOrigins[] =
     "profile.notification_denied_sites";
+
+// The preferred position (which corner of screen) for desktop notifications.
+const char kDesktopNotificationPosition[] =
+    "browser.desktop_notification_position";
 
 // Dictionary of content settings applied to all hosts by default.
 const char kDefaultContentSettings[] = "profile.default_content_settings";
@@ -590,6 +637,11 @@ const char kUseVerticalTabs[] = "tabs.use_vertical_tabs";
 const char kEnableTranslate[] = "translate.enabled";
 
 const char kPinnedTabs[] = "pinned_tabs";
+
+// Integer that specifies the policy refresh rate in milliseconds. Not all
+// values are meaningful, so it is clamped to a sane range by the policy
+// provider.
+const char kPolicyRefreshRate[] = "policy.refresh_rate";
 
 // Integer containing the default Geolocation content setting.
 const char kGeolocationDefaultContentSetting[] =
@@ -706,6 +758,20 @@ const char kStabilityRendererHangCount[] =
 const char kStabilityChildProcessCrashCount[] =
     "user_experience_metrics.stability.child_process_crash_count";
 
+// On Chrome OS, total number of non-Chrome user process crashes
+// since the last report.
+const char kStabilityOtherUserCrashCount[] =
+    "user_experience_metrics.stability.other_user_crash_count";
+
+// On Chrome OS, total number of kernel crashes since the last report.
+const char kStabilityKernelCrashCount[] =
+    "user_experience_metrics.stability.kernel_crash_count";
+
+// On Chrome OS, total number of unclean system shutdowns since the
+// last report.
+const char kStabilitySystemUncleanShutdownCount[] =
+    "user_experience_metrics.stability.system_unclean_shutdowns";
+
 // Number of times the browser has been able to register crash reporting.
 const char kStabilityBreakpadRegistrationSuccess[] =
     "user_experience_metrics.stability.breakpad_registration_ok";
@@ -762,11 +828,6 @@ const char kPreferencesWindowPlacement[] = "preferences.window_placement";
 // An integer specifying the total number of bytes to be used by the
 // renderer's in-memory cache of objects.
 const char kMemoryCacheSize[] = "renderer.memory_cache.size";
-
-// Boolean that records if chrome has set "launch on startup" property for
-// itself earlier and is allowed to reset it later, reducing likelihood of
-// overriding user choices.
-const char kLaunchOnStartupResetAllowed[] = "launch_on_startup_reset_allowed";
 
 // String which specifies where to download files to by default.
 const char kDownloadDefaultDirectory[] = "download.default_directory";
@@ -964,16 +1025,27 @@ const char kNTPPrefVersion[] = "ntp.pref_version";
 const char kNTPCustomLogoStart[] = "ntp.alt_logo_start";
 const char kNTPCustomLogoEnd[] = "ntp.alt_logo_end";
 
-// Dates between which the NTP should show a promotional line downloaded
-// from the promo server.
-const char kNTPPromoStart[] = "ntp.promo_start";
-const char kNTPPromoEnd[] = "ntp.promo_end";
+// Whether promo should be shown to Dev builds, Beta and Dev, or all builds.
+const char kNTPPromoBuild[] = "ntp.promo_build";
+
+// True if user has explicitly closed the promo line.
+const char kNTPPromoClosed[] = "ntp.promo_closed";
+
+// Users are randomly divided into 16 groups in order to slowly roll out
+// special promos.
+const char kNTPPromoGroup[] = "ntp.promo_group";
+
+// Amount of time each promo group should be shown a promo that is being slowly
+// rolled out, in hours.
+const char kNTPPromoGroupTimeSlice[] = "ntp.promo_group_timeslice";
 
 // Promo line from server.
 const char kNTPPromoLine[] = "ntp.promo_line";
 
-// True if user has explicitly closed the promo line.
-const char kNTPPromoClosed[] = "ntp.promo_closed";
+// Dates between which the NTP should show a promotional line downloaded
+// from the promo server.
+const char kNTPPromoStart[] = "ntp.promo_start";
+const char kNTPPromoEnd[] = "ntp.promo_end";
 
 const char kDevToolsDisabled[] = "devtools.disabled";
 
@@ -1001,6 +1073,7 @@ const char kSyncPasswords[] = "sync.passwords";
 const char kSyncPreferences[] = "sync.preferences";
 const char kSyncApps[] = "sync.apps";
 const char kSyncAutofill[] = "sync.autofill";
+const char kSyncAutofillProfile[] = "sync.autofill_profile";
 const char kSyncThemes[] = "sync.themes";
 const char kSyncTypedUrls[] = "sync.typed_urls";
 const char kSyncExtensions[] = "sync.extensions";
@@ -1017,6 +1090,10 @@ const char kSyncSuppressStart[] = "sync.suppress_start";
 // Boolean to reperesent if sync credentials have been migrated from the
 // user settings DB to the token service.
 const char kSyncCredentialsMigrated[] = "sync.credentials_migrated";
+
+// Boolean to represent whether the legacy autofill profile data has been
+// migrated to the new model.
+const char kAutofillProfileMigrated[] = "sync.autofill_migrated";
 
 // A string that can be used to restore sync encryption infrastructure on
 // startup so that the user doesn't need to provide credentials on each start.
@@ -1102,11 +1179,10 @@ const char kCloudPrintPrintSystemSettings[] =
 // Used by the service process to determine if the remoting host is enabled.
 const char kRemotingHostEnabled[] = "remoting.host_enabled";
 
-// Boolean to disable proxy altogether. If true, other proxy
-// preferences are ignored.
-const char kNoProxyServer[] = "proxy.disabled";
-// Boolean specifying if proxy should be auto-detected.
-const char kProxyAutoDetect[] = "proxy.auto_detect";
+// Integer to specify the type of proxy settings.
+// See ProxyPrefs for possible values and interactions with the other proxy
+// preferences.
+const char kProxyMode[] = "proxy.mode";
 // String specifying the proxy server. For a specification of the expected
 // syntax see net::ProxyConfig::ProxyRules::ParseFromString().
 const char kProxyServer[] = "proxy.server";

@@ -12,7 +12,7 @@
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stl_util-inl.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/win/registry.h"
 #include "net/base/net_errors.h"
 #include "net/proxy/proxy_config.h"
@@ -39,10 +39,10 @@ void FreeIEConfig(WINHTTP_CURRENT_USER_IE_PROXY_CONFIG* ie_config) {
 // RegKey and ObjectWatcher pair.
 class ProxyConfigServiceWin::KeyEntry {
  public:
-  bool StartWatching(base::ObjectWatcher::Delegate* delegate) {
+  bool StartWatching(base::win::ObjectWatcher::Delegate* delegate) {
     // Try to create a watch event for the registry key (which watches the
     // sibling tree as well).
-    if (!key_.StartWatching())
+    if (key_.StartWatching() != ERROR_SUCCESS)
       return false;
 
     // Now setup an ObjectWatcher for this event, so we get OnObjectSignaled()
@@ -54,7 +54,7 @@ class ProxyConfigServiceWin::KeyEntry {
   }
 
   bool CreateRegKey(HKEY rootkey, const wchar_t* subkey) {
-    return key_.Create(rootkey, subkey, KEY_NOTIFY);
+    return key_.Create(rootkey, subkey, KEY_NOTIFY) == ERROR_SUCCESS;
   }
 
   HANDLE watch_event() const {
@@ -63,7 +63,7 @@ class ProxyConfigServiceWin::KeyEntry {
 
  private:
   base::win::RegKey key_;
-  base::ObjectWatcher watcher_;
+  base::win::ObjectWatcher watcher_;
 };
 
 ProxyConfigServiceWin::ProxyConfigServiceWin()

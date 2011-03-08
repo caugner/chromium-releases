@@ -1,21 +1,16 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/simple_thread.h"
 #include "base/test/test_file_util.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/test/automation/browser_proxy.h"
+#include "base/threading/simple_thread.h"
 #include "chrome/test/automation/tab_proxy.h"
-#include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "gfx/gdi_util.h"
 #include "net/test/test_server.h"
 #include "printing/image.h"
 #include "printing/printing_test.h"
-#include "printing/native_metafile.h"
 
 namespace {
 
@@ -169,7 +164,7 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
       }
       if (found_emf && found_prn)
         break;
-      PlatformThread::Sleep(100);
+      base::PlatformThread::Sleep(100);
     }
     EXPECT_TRUE(found_emf) << ".PRN file is: " << prn_file;
     EXPECT_TRUE(found_prn) << ".EMF file is: " << emf_file;
@@ -199,8 +194,8 @@ class PrintingLayoutTextTest : public PrintingLayoutTest {
   typedef PrintingLayoutTest Parent;
  public:
   // Returns if the test is disabled.
-  // TODO(maruel):  http://b/1157665 Until the issue is fixed, disable the test
-  // if ClearType is enabled.
+  // http://crbug.com/64869 Until the issue is fixed, disable the test if
+  // ClearType is enabled.
   static bool IsTestCaseDisabled() {
     return Parent::IsTestCaseDisabled() || IsClearTypeEnabled();
   }
@@ -261,13 +256,13 @@ class DismissTheWindow : public base::DelegateSimpleThread::Delegate {
           break;
         }
       }
-      PlatformThread::Sleep(10);
+      base::PlatformThread::Sleep(10);
     }
 
     // Now verify that it indeed closed itself.
     while (IsWindow(dialog_window)) {
       CloseDialogWindow(dialog_window);
-      PlatformThread::Sleep(10);
+      base::PlatformThread::Sleep(10);
     }
   }
 
@@ -280,7 +275,7 @@ class DismissTheWindow : public base::DelegateSimpleThread::Delegate {
 }  // namespace
 
 // Fails, see http://crbug.com/7721.
-TEST_F(PrintingLayoutTextTest, FAILS_Complex) {
+TEST_F(PrintingLayoutTextTest, DISABLED_Complex) {
   if (IsTestCaseDisabled())
     return;
 
@@ -311,11 +306,9 @@ const TestPool kTestPool[] = {
   "files/printing/test3.html", L"test3",
   // ImageColor
   "files/printing/test4.html", L"test4",
-  // TODO(maruel):  http://b/1171450 Transparent overlays are drawn opaque
-  // "files/printing/test5.html", L"test5",
 };
 
-// TODO(maruel:)  http://code.google.com/p/chromium/issues/detail?id=7721
+// http://crbug.com/7721
 TEST_F(PrintingLayoutTestHidden, DISABLED_ManyTimes) {
   if (IsTestCaseDisabled())
     return;
@@ -365,8 +358,7 @@ TEST_F(PrintingLayoutTestHidden, DISABLED_ManyTimes) {
   }
 }
 
-// Prints a popup and immediately closes it.
-// TODO(maruel): Reenable it, it causes crashes.
+// Prints a popup and immediately closes it. Disabled because it crashes.
 TEST_F(PrintingLayoutTest, DISABLED_Delayed) {
   if (IsTestCaseDisabled())
     return;
@@ -399,8 +391,7 @@ TEST_F(PrintingLayoutTest, DISABLED_Delayed) {
       << L"popup_delayed_print";
 }
 
-// Prints a popup and immediately closes it.
-// TODO(maruel:)  http://code.google.com/p/chromium/issues/detail?id=7721
+// Prints a popup and immediately closes it. http://crbug.com/7721
 TEST_F(PrintingLayoutTest, DISABLED_IFrame) {
   if (IsTestCaseDisabled())
     return;

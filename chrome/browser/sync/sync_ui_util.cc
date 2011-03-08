@@ -1,18 +1,26 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/sync_ui_util.h"
 
-#include "app/l10n_util.h"
+#include "base/command_line.h"
 #include "base/i18n/number_formatting.h"
+#include "base/i18n/time_formatting.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/options_window.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/options/options_window.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "chrome/common/url_constants.h"
+#include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 typedef GoogleServiceAuthError AuthError;
 
@@ -100,8 +108,25 @@ MessageType GetStatusInfo(ProfileSyncService* service,
           l10n_util::GetStringUTF16(IDS_SYNC_AUTHENTICATING_LABEL));
       }
       result_type = PRE_SYNCED;
-    } else if (auth_error.state() != AuthError::NONE ||
-               service->observed_passphrase_required()) {
+    } else if (service->observed_passphrase_required()) {
+      if (service->passphrase_required_for_decryption()) {
+        // NOT first machine.
+        // Show a link ("needs attention"), but still indicate the
+        // current synced status.  Return SYNC_PROMO so that
+        // the configure link will still be shown.
+        if (status_label && link_label) {
+          status_label->assign(GetSyncedStateStatusLabel(service));
+          link_label->assign(
+              l10n_util::GetStringUTF16(IDS_SYNC_PASSWORD_SYNC_ATTENTION));
+        }
+        result_type = SYNC_PROMO;
+      } else {
+        // First machine.  Don't show promotion, just show everything
+        // normal.
+        if (status_label)
+          status_label->assign(GetSyncedStateStatusLabel(service));
+      }
+    } else if (auth_error.state() != AuthError::NONE) {
       if (status_label && link_label) {
         GetStatusLabelsForAuthError(auth_error, service,
                                     status_label, link_label);
@@ -152,7 +177,58 @@ MessageType GetStatusInfo(ProfileSyncService* service,
   return result_type;
 }
 
+// Returns the status info for use on the new tab page, where we want slightly
+// different information than in the settings panel.
+MessageType GetStatusInfoForNewTabPage(ProfileSyncService* service,
+                                       string16* status_label,
+                                       string16* link_label) {
+  DCHECK(status_label);
+  DCHECK(link_label);
+
+  if (service->HasSyncSetupCompleted() &&
+      service->observed_passphrase_required()) {
+    if (!service->passphrase_required_for_decryption()) {
+      // First machine migrating to passwords.  Show as a promotion.
+      if (status_label && link_label) {
+        status_label->assign(
+            l10n_util::GetStringFUTF16(
+                IDS_SYNC_NTP_PASSWORD_PROMO,
+                l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+        link_label->assign(
+            l10n_util::GetStringUTF16(IDS_SYNC_NTP_PASSWORD_ENABLE));
+      }
+      return SYNC_PROMO;
+    } else {
+      // NOT first machine.
+      // Show a link and present as an error ("needs attention").
+      if (status_label && link_label) {
+        status_label->assign(string16());
+        link_label->assign(
+            l10n_util::GetStringUTF16(IDS_SYNC_CONFIGURE_ENCRYPTION));
+      }
+      return SYNC_ERROR;
+    }
+  }
+
+  // Fallback to default.
+  return GetStatusInfo(service, status_label, link_label);
+}
+
 }  // namespace
+
+// Returns an HTML chunk for a login prompt related to encryption.
+string16 GetLoginMessageForEncryption() {
+  std::vector<std::string> subst;
+  const base::StringPiece html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+          IDR_SYNC_ENCRYPTION_LOGIN_HTML));
+  subst.push_back(l10n_util::GetStringUTF8(IDS_SYNC_PLEASE_SIGN_IN));
+  subst.push_back(
+      l10n_util::GetStringFUTF8(IDS_SYNC_LOGIN_FOR_ENCRYPTION,
+                                l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+
+  return UTF8ToUTF16(ReplaceStringPlaceholders(html, subst, NULL));
+}
 
 MessageType GetStatusLabels(ProfileSyncService* service,
                             string16* status_label,
@@ -160,6 +236,15 @@ MessageType GetStatusLabels(ProfileSyncService* service,
   DCHECK(status_label);
   DCHECK(link_label);
   return sync_ui_util::GetStatusInfo(service, status_label, link_label);
+}
+
+MessageType GetStatusLabelsForNewTabPage(ProfileSyncService* service,
+                                         string16* status_label,
+                                         string16* link_label) {
+  DCHECK(status_label);
+  DCHECK(link_label);
+  return sync_ui_util::GetStatusInfoForNewTabPage(
+      service, status_label, link_label);
 }
 
 MessageType GetStatus(ProfileSyncService* service) {
@@ -182,16 +267,30 @@ string16 GetSyncMenuLabel(ProfileSyncService* service) {
     return l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL);
 }
 
-void OpenSyncMyBookmarksDialog(
-    Profile* profile, ProfileSyncService::SyncEventCodes code) {
+void OpenSyncMyBookmarksDialog(Profile* profile,
+                               Browser* browser,
+                               ProfileSyncService::SyncEventCodes code) {
   ProfileSyncService* service =
     profile->GetOriginalProfile()->GetProfileSyncService();
   if (!service || !service->IsSyncEnabled()) {
     LOG(DFATAL) << "OpenSyncMyBookmarksDialog called with sync disabled";
     return;
   }
+
+  bool use_tabbed_options = !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableTabbedOptions);
+
   if (service->HasSyncSetupCompleted()) {
-    ShowOptionsWindow(OPTIONS_PAGE_CONTENT, OPTIONS_GROUP_NONE, profile);
+    if (use_tabbed_options) {
+      bool create_window = browser == NULL;
+      if (create_window)
+        browser = Browser::Create(profile);
+      browser->ShowOptionsTab(chrome::kPersonalOptionsSubPage);
+      if (create_window)
+        browser->window()->Show();
+    } else {
+      ShowOptionsWindow(OPTIONS_PAGE_CONTENT, OPTIONS_GROUP_NONE, profile);
+    }
   } else {
     service->ShowLoginDialog(NULL);
     ProfileSyncService::SyncEvent(code);  // UMA stats
@@ -215,6 +314,15 @@ void AddIntSyncDetail(ListValue* details, const std::string& stat_name,
   details->Append(val);
 }
 
+string16 ConstructTime(int64 time_in_int) {
+  base::Time time = base::Time::FromInternalValue(time_in_int);
+
+  // If time is null the format function returns a time in 1969.
+  if (time.is_null())
+    return string16();
+  return base::TimeFormatFriendlyDateAndTime(time);
+}
+
 std::string MakeSyncAuthErrorText(
     const GoogleServiceAuthError::State& state) {
   switch (state) {
@@ -234,8 +342,8 @@ std::string MakeSyncAuthErrorText(
 
 void ConstructAboutInformation(ProfileSyncService* service,
                                DictionaryValue* strings) {
-  CHECK(strings != NULL);
-  if (!service->HasSyncSetupCompleted()) {
+  CHECK(strings);
+  if (!service || !service->HasSyncSetupCompleted()) {
     strings->SetString("summary", "SYNC DISABLED");
   } else {
     sync_api::SyncManager::Status full_status(
@@ -291,14 +399,14 @@ void ConstructAboutInformation(ProfileSyncService* service,
                                    "Updates Available",
                                    full_status.updates_available);
     sync_ui_util::AddIntSyncDetail(details,
-                                   "Updates Received",
+                                   "Updates Downloaded (All)",
                                    full_status.updates_received);
+    sync_ui_util::AddIntSyncDetail(details,
+                                   "Updates Downloaded (Tombstones)",
+                                   full_status.tombstone_updates_received);
     sync_ui_util::AddBoolSyncDetail(details,
                                     "Disk Full",
                                     full_status.disk_full);
-    sync_ui_util::AddBoolSyncDetail(details,
-                                    "Invalid Store",
-                                    full_status.invalid_store);
     sync_ui_util::AddIntSyncDetail(details,
                                    "Max Consecutive Errors",
                                    full_status.max_consecutive_errors);
@@ -311,6 +419,12 @@ void ConstructAboutInformation(ProfileSyncService* service,
       std::string location_str;
       loc.Write(true, true, &location_str);
       strings->SetString("unrecoverable_error_location", location_str);
+    } else if (!service->sync_initialized()) {
+      strings->SetString("summary", "Sync not yet initialized");
+    } else if (service->backend() == NULL) {
+      strings->SetString("summary",
+          "Unrecoverable error detected. Backend is null when it shouldnt be");
+      NOTREACHED();
     } else {
       browser_sync::ModelSafeRoutingInfo routes;
       service->backend()->GetModelSafeRoutingInfo(&routes);
@@ -323,6 +437,28 @@ void ConstructAboutInformation(ProfileSyncService* service,
         val->SetString("group", ModelSafeGroupToString(it->second));
         routing_info->Append(val);
       }
+
+      sync_ui_util::AddBoolSyncDetail(details,
+          "Autofill Migrated",
+          service->backend()->GetAutofillMigrationState() ==
+          syncable::MIGRATED);
+      syncable::AutofillMigrationDebugInfo info =
+          service->backend()->GetAutofillMigrationDebugInfo();
+
+      sync_ui_util::AddIntSyncDetail(details,
+                                     "Bookmarks created during migration",
+                                     info.bookmarks_added_during_migration);
+      sync_ui_util::AddIntSyncDetail(details,
+          "Autofill entries created during migration",
+          info.autofill_entries_added_during_migration);
+      sync_ui_util::AddIntSyncDetail(details,
+          "Autofill Profiles created during migration",
+          info.autofill_profile_added_during_migration);
+
+      DictionaryValue* val = new DictionaryValue;
+      val->SetString("stat_name", "Autofill Migration Time");
+      val->SetString("stat_value", ConstructTime(info.autofill_migration_time));
+      details->Append(val);
     }
   }
 }

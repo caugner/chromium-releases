@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,7 +66,8 @@ TEST(EscapeTest, EscapeTextForFormSubmission) {
   };
   for (size_t i = 0; i < arraysize(escape_cases); ++i) {
     EscapeCase value = escape_cases[i];
-    EXPECT_EQ(value.output, EscapeQueryParamValueUTF8(value.input, true));
+    EXPECT_EQ(WideToUTF16Hack(value.output),
+              EscapeQueryParamValueUTF8(WideToUTF16Hack(value.input), true));
   }
 
   const EscapeCase escape_cases_no_plus[] = {
@@ -76,7 +77,8 @@ TEST(EscapeTest, EscapeTextForFormSubmission) {
   };
   for (size_t i = 0; i < arraysize(escape_cases_no_plus); ++i) {
     EscapeCase value = escape_cases_no_plus[i];
-    EXPECT_EQ(value.output, EscapeQueryParamValueUTF8(value.input, false));
+    EXPECT_EQ(WideToUTF16Hack(value.output),
+              EscapeQueryParamValueUTF8(WideToUTF16Hack(value.input), false));
   }
 
   // Test all the values in we're supposed to be escaping.
@@ -114,12 +116,10 @@ TEST(EscapeTest, EscapeTextForFormSubmission) {
   string16 wide;
   EXPECT_TRUE(EscapeQueryParamValue(test_str, base::kCodepageUTF8, true,
                                     &wide));
-  EXPECT_EQ(UTF16ToWideHack(wide),
-            EscapeQueryParamValueUTF8(UTF16ToWideHack(test_str), true));
+  EXPECT_EQ(wide, EscapeQueryParamValueUTF8(test_str, true));
   EXPECT_TRUE(EscapeQueryParamValue(test_str, base::kCodepageUTF8, false,
                                     &wide));
-  EXPECT_EQ(UTF16ToWideHack(wide),
-            EscapeQueryParamValueUTF8(UTF16ToWideHack(test_str), false));
+  EXPECT_EQ(wide, EscapeQueryParamValueUTF8(test_str, false));
 }
 
 TEST(EscapeTest, EscapePath) {
@@ -159,17 +159,17 @@ TEST(EscapeTest, UnescapeURLComponentASCII) {
     {"%%%%%%", UnescapeRule::NORMAL, "%%%%%%"},
     {"Don't escape anything", UnescapeRule::NORMAL, "Don't escape anything"},
     {"Invalid %escape %2", UnescapeRule::NORMAL, "Invalid %escape %2"},
-    {"Some%20random text %25%3bOK", UnescapeRule::NONE,
-     "Some%20random text %25%3bOK"},
-    {"Some%20random text %25%3bOK", UnescapeRule::NORMAL,
-     "Some%20random text %25;OK"},
-    {"Some%20random text %25%3bOK", UnescapeRule::SPACES,
-     "Some random text %25;OK"},
-    {"Some%20random text %25%3bOK", UnescapeRule::URL_SPECIAL_CHARS,
-     "Some%20random text %;OK"},
-    {"Some%20random text %25%3bOK",
+    {"Some%20random text %25%2dOK", UnescapeRule::NONE,
+     "Some%20random text %25%2dOK"},
+    {"Some%20random text %25%2dOK", UnescapeRule::NORMAL,
+     "Some%20random text %25-OK"},
+    {"Some%20random text %25%2dOK", UnescapeRule::SPACES,
+     "Some random text %25-OK"},
+    {"Some%20random text %25%2dOK", UnescapeRule::URL_SPECIAL_CHARS,
+     "Some%20random text %-OK"},
+    {"Some%20random text %25%2dOK",
      UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS,
-     "Some random text %;OK"},
+     "Some random text %-OK"},
     {"%A0%B1%C2%D3%E4%F5", UnescapeRule::NORMAL, "\xA0\xB1\xC2\xD3\xE4\xF5"},
     {"%Aa%Bb%Cc%Dd%Ee%Ff", UnescapeRule::NORMAL, "\xAa\xBb\xCc\xDd\xEe\xFf"},
     // Certain URL-sensitive characters should not be unescaped unless asked.
@@ -220,17 +220,17 @@ TEST(EscapeTest, UnescapeURLComponent) {
     {L"%%%%%%", UnescapeRule::NORMAL, L"%%%%%%"},
     {L"Don't escape anything", UnescapeRule::NORMAL, L"Don't escape anything"},
     {L"Invalid %escape %2", UnescapeRule::NORMAL, L"Invalid %escape %2"},
-    {L"Some%20random text %25%3bOK", UnescapeRule::NONE,
-     L"Some%20random text %25%3bOK"},
-    {L"Some%20random text %25%3bOK", UnescapeRule::NORMAL,
-     L"Some%20random text %25;OK"},
-    {L"Some%20random text %25%3bOK", UnescapeRule::SPACES,
-     L"Some random text %25;OK"},
-    {L"Some%20random text %25%3bOK", UnescapeRule::URL_SPECIAL_CHARS,
-     L"Some%20random text %;OK"},
-    {L"Some%20random text %25%3bOK",
+    {L"Some%20random text %25%2dOK", UnescapeRule::NONE,
+     L"Some%20random text %25%2dOK"},
+    {L"Some%20random text %25%2dOK", UnescapeRule::NORMAL,
+     L"Some%20random text %25-OK"},
+    {L"Some%20random text %25%2dOK", UnescapeRule::SPACES,
+     L"Some random text %25-OK"},
+    {L"Some%20random text %25%2dOK", UnescapeRule::URL_SPECIAL_CHARS,
+     L"Some%20random text %-OK"},
+    {L"Some%20random text %25%2dOK",
      UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS,
-     L"Some random text %;OK"},
+     L"Some random text %-OK"},
     {L"%A0%B1%C2%D3%E4%F5", UnescapeRule::NORMAL, L"\xA0\xB1\xC2\xD3\xE4\xF5"},
     {L"%Aa%Bb%Cc%Dd%Ee%Ff", UnescapeRule::NORMAL, L"\xAa\xBb\xCc\xDd\xEe\xFf"},
     // Certain URL-sensitive characters should not be unescaped unless asked.
@@ -307,10 +307,10 @@ TEST(EscapeTest, UnescapeAndDecodeUTF8URLComponent) {
       "+Invalid %escape %2+",
       " Invalid %escape %2 ",
      L"+Invalid %escape %2+"},
-    { "Some random text %25%3BOK",
-      "Some random text %25;OK",
-      "Some random text %25;OK",
-     L"Some random text %25;OK"},
+    { "Some random text %25%2dOK",
+      "Some random text %25-OK",
+      "Some random text %25-OK",
+     L"Some random text %25-OK"},
     { "%01%02%03%04%05%06%07%08%09",
       "%01%02%03%04%05%06%07%08%09",
       "%01%02%03%04%05%06%07%08%09",
@@ -349,9 +349,9 @@ TEST(EscapeTest, AdjustOffset) {
     {"test", 2, 2},
     {"test", 4, std::wstring::npos},
     {"test", std::wstring::npos, std::wstring::npos},
-    {"%3Btest", 6, 4},
-    {"%3Btest", 2, std::wstring::npos},
-    {"test%3B", 2, 2},
+    {"%2dtest", 6, 4},
+    {"%2dtest", 2, std::wstring::npos},
+    {"test%2d", 2, 2},
     {"%E4%BD%A0+%E5%A5%BD", 9, 1},
     {"%E4%BD%A0+%E5%A5%BD", 6, std::wstring::npos},
     {"%ED%B0%80+%E5%A5%BD", 6, 6},

@@ -45,6 +45,9 @@ TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
                      kInvalidSessionStorageNamespaceId),
       render_view_created_(false),
       delete_counter_(NULL) {
+  // For normal RenderViewHosts, this is freed when |Shutdown()| is called.
+  // For TestRenderViewHost, the view is explicitly deleted in the destructor
+  // below, because TestRenderWidgetHostView::Destroy() doesn't |delete this|.
   set_view(new TestRenderWidgetHostView(this));
 }
 
@@ -67,8 +70,8 @@ bool TestRenderViewHost::IsRenderViewLive() const {
   return render_view_created_;
 }
 
-void TestRenderViewHost::TestOnMessageReceived(const IPC::Message& msg) {
-  OnMessageReceived(msg);
+bool TestRenderViewHost::TestOnMessageReceived(const IPC::Message& msg) {
+  return OnMessageReceived(msg);
 }
 
 void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
@@ -105,6 +108,9 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
       is_showing_(false) {
 }
 
+TestRenderWidgetHostView::~TestRenderWidgetHostView() {
+}
+
 gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
   return gfx::Rect();
 }
@@ -137,8 +143,11 @@ void TestRenderWidgetHostView::SetActive(bool active) {
   // <viettrungluu@gmail.com>: Do I need to do anything here?
 }
 
-void TestRenderWidgetHostView::SetPluginImeEnabled(bool enabled,
-                                                   int plugin_id) {
+void TestRenderWidgetHostView::PluginFocusChanged(bool focused,
+                                                  int plugin_id) {
+}
+
+void TestRenderWidgetHostView::StartPluginIme() {
 }
 
 bool TestRenderWidgetHostView::PostProcessEventForPluginIme(

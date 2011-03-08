@@ -6,13 +6,12 @@
 
 #include <algorithm>
 
-#include "app/resource_bundle.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
@@ -23,24 +22,25 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_util.h"
-#include "grit/bookmark_manager_resources_map.h"
+#include "grit/component_extension_resources_map.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_error_job.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_simple_job.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
-class URLRequestResourceBundleJob : public URLRequestSimpleJob {
+class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
  public:
-  explicit URLRequestResourceBundleJob(URLRequest* request,
+  explicit URLRequestResourceBundleJob(net::URLRequest* request,
       const FilePath& filename, int resource_id)
-          : URLRequestSimpleJob(request),
+          : net::URLRequestSimpleJob(request),
             filename_(filename),
             resource_id_(resource_id) { }
 
-  // URLRequestSimpleJob method.
+  // Overridden from URLRequestSimpleJob:
   virtual bool GetData(std::string* mime_type,
                        std::string* charset,
                        std::string* data) const {
@@ -67,7 +67,9 @@ class URLRequestResourceBundleJob : public URLRequestSimpleJob {
 };
 
 // Returns true if an chrome-extension:// resource should be allowed to load.
-bool AllowExtensionResourceLoad(URLRequest* request,
+// TODO(aa): This should be moved into ExtensionResourceRequestPolicy, but we
+// first need to find a way to get CanLoadInIncognito state into the renderers.
+bool AllowExtensionResourceLoad(net::URLRequest* request,
                                 ChromeURLRequestContext* context,
                                 const std::string& scheme) {
   const ResourceDispatcherHostRequestInfo* info =
@@ -79,27 +81,6 @@ bool AllowExtensionResourceLoad(URLRequest* request,
                << "from unknown origin. Could not find user data for "
                << "request.";
     return true;
-  }
-
-  GURL origin_url(info->frame_origin());
-
-  // chrome:// URLs are always allowed to load chrome-extension:// resources.
-  // The app launcher in the NTP uses this feature, as does dev tools.
-  if (origin_url.SchemeIs(chrome::kChromeDevToolsScheme) ||
-      origin_url.SchemeIs(chrome::kChromeUIScheme))
-    return true;
-
-  // Disallow loading of packaged resources for hosted apps. We don't allow
-  // hybrid hosted/packaged apps. The one exception is access to icons, since
-  // some extensions want to be able to do things like create their own
-  // launchers.
-  if (context->extension_info_map()->
-          ExtensionHasWebExtent(request->url().host())) {
-    if (!context->extension_info_map()->URLIsForExtensionIcon(request->url())) {
-      LOG(ERROR) << "Denying load of " << request->url().spec() << " from "
-                 << "hosted app.";
-      return false;
-    }
   }
 
   // Don't allow toplevel navigations to extension resources in incognito mode.
@@ -114,44 +95,24 @@ bool AllowExtensionResourceLoad(URLRequest* request,
     return false;
   }
 
-  // Otherwise, pages are allowed to load resources from extensions if the
-  // extension has host permissions to (and therefore could be running script
-  // in, which might need access to the extension resources).
-  //
-  // Exceptions are:
-  // - empty origin (needed for some edge cases when we have empty origins)
-  // - chrome-extension:// (for legacy reasons -- some extensions interop)
-  // - data: (basic HTML notifications use data URLs internally)
-  if (origin_url.is_empty() ||
-      origin_url.SchemeIs(chrome::kExtensionScheme) |
-      origin_url.SchemeIs(chrome::kDataScheme)) {
-    return true;
-  } else {
-    ExtensionExtent host_permissions = context->extension_info_map()->
-        GetEffectiveHostPermissionsForExtension(request->url().host());
-    if (host_permissions.ContainsURL(origin_url)) {
-      return true;
-    } else {
-      LOG(ERROR) << "Denying load of " << request->url().spec() << " from "
-                 << origin_url.spec() << " because the extension does not have "
-                 << "access to the requesting page.";
-      return false;
-    }
-  }
+  return true;
 }
 
 }  // namespace
 
-// Factory registered with URLRequest to create URLRequestJobs for extension://
-// URLs.
-static URLRequestJob* CreateExtensionURLRequestJob(URLRequest* request,
-                                                   const std::string& scheme) {
+// Factory registered with net::URLRequest to create URLRequestJobs for
+// extension:// URLs.
+static net::URLRequestJob* CreateExtensionURLRequestJob(
+    net::URLRequest* request,
+    const std::string& scheme) {
   ChromeURLRequestContext* context =
       static_cast<ChromeURLRequestContext*>(request->context());
 
   // TODO(mpcomplete): better error code.
-  if (!AllowExtensionResourceLoad(request, context, scheme))
-    return new URLRequestErrorJob(request, net::ERR_ADDRESS_UNREACHABLE);
+  if (!AllowExtensionResourceLoad(request, context, scheme)) {
+    LOG(ERROR) << "disallowed in extension protocols";
+    return new net::URLRequestErrorJob(request, net::ERR_ADDRESS_UNREACHABLE);
+  }
 
   // chrome-extension://extension-id/resource/path.js
   const std::string& extension_id = request->url().host();
@@ -174,15 +135,15 @@ static URLRequestJob* CreateExtensionURLRequestJob(URLRequest* request,
     // TODO(tc): Make a map of FilePath -> resource ids so we don't have to
     // covert to FilePaths all the time.  This will be more useful as we add
     // more resources.
-    for (size_t i = 0; i < kBookmarkManagerResourcesSize; ++i) {
+    for (size_t i = 0; i < kComponentExtensionResourcesSize; ++i) {
       FilePath bm_resource_path =
-          FilePath().AppendASCII(kBookmarkManagerResources[i].name);
+          FilePath().AppendASCII(kComponentExtensionResources[i].name);
 #if defined(OS_WIN)
       bm_resource_path = bm_resource_path.NormalizeWindowsPathSeparators();
 #endif
       if (relative_path == bm_resource_path) {
         return new URLRequestResourceBundleJob(request, relative_path,
-            kBookmarkManagerResources[i].value);
+            kComponentExtensionResources[i].value);
       }
     }
   }
@@ -198,13 +159,14 @@ static URLRequestJob* CreateExtensionURLRequestJob(URLRequest* request,
     base::ThreadRestrictions::ScopedAllowIO allow_io;
     resource_file_path = resource.GetFilePath();
   }
-  return new URLRequestFileJob(request, resource_file_path);
+  return new net::URLRequestFileJob(request, resource_file_path);
 }
 
-// Factory registered with URLRequest to create URLRequestJobs for
+// Factory registered with net::URLRequest to create URLRequestJobs for
 // chrome-user-script:/ URLs.
-static URLRequestJob* CreateUserScriptURLRequestJob(URLRequest* request,
-                                                    const std::string& scheme) {
+static net::URLRequestJob* CreateUserScriptURLRequestJob(
+    net::URLRequest* request,
+    const std::string& scheme) {
   ChromeURLRequestContext* context =
       static_cast<ChromeURLRequestContext*>(request->context());
 
@@ -214,12 +176,12 @@ static URLRequestJob* CreateUserScriptURLRequestJob(URLRequest* request,
   ExtensionResource resource(request->url().host(), directory_path,
       extension_file_util::ExtensionURLToRelativeFilePath(request->url()));
 
-  return new URLRequestFileJob(request, resource.GetFilePath());
+  return new net::URLRequestFileJob(request, resource.GetFilePath());
 }
 
 void RegisterExtensionProtocols() {
-  URLRequest::RegisterProtocolFactory(chrome::kExtensionScheme,
-                                      &CreateExtensionURLRequestJob);
-  URLRequest::RegisterProtocolFactory(chrome::kUserScriptScheme,
-                                      &CreateUserScriptURLRequestJob);
+  net::URLRequest::RegisterProtocolFactory(chrome::kExtensionScheme,
+                                           &CreateExtensionURLRequestJob);
+  net::URLRequest::RegisterProtocolFactory(chrome::kUserScriptScheme,
+                                           &CreateUserScriptURLRequestJob);
 }

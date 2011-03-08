@@ -16,12 +16,12 @@
 #include "chrome/worker/worker_thread.h"
 #include "chrome/worker/worker_webapplicationcachehost_impl.h"
 #include "ipc/ipc_logging.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystemCallbacks.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebWorker.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWorker.h"
 
 using WebKit::WebApplicationCacheHost;
 using WebKit::WebFrame;
@@ -115,6 +115,14 @@ WebKit::WebWorker* WebWorkerClientProxy::createWorker(
     WebKit::WebWorkerClient* client) {
   return new WebWorkerProxy(client, WorkerThread::current(),
                             0, appcache_host_id_);
+}
+
+WebKit::WebNotificationPresenter*
+WebWorkerClientProxy::notificationPresenter() {
+  // TODO(johnnyg): Notifications are not yet hooked up to workers.
+  // Coming soon.
+  NOTREACHED();
+  return NULL;
 }
 
 WebApplicationCacheHost* WebWorkerClientProxy::createApplicationCacheHost(

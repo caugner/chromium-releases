@@ -9,7 +9,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
-#include "base/scoped_handle_win.h"
+#include "base/win/scoped_gdi_object.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/status_icons/status_icon.h"
 
@@ -37,9 +37,12 @@ class StatusIconWin : public StatusIcon {
   // otherwise displays the context menu if there is one.
   void HandleClickEvent(int x, int y, bool left_button_click);
 
+  // Re-creates the status tray icon now after the taskbar has been created.
+  void ResetIcon();
+
  protected:
   // Overridden from StatusIcon.
-  virtual void UpdatePlatformContextMenu(menus::MenuModel* menu);
+  virtual void UpdatePlatformContextMenu(ui::MenuModel* menu);
 
  private:
   void InitIconData(NOTIFYICONDATA* icon_data);
@@ -54,7 +57,7 @@ class StatusIconWin : public StatusIcon {
   UINT message_id_;
 
   // The currently-displayed icon for the window.
-  ScopedHICON icon_;
+  base::win::ScopedHICON icon_;
 
   // Context menu associated with this icon (if any).
   scoped_ptr<views::Menu2> context_menu_;

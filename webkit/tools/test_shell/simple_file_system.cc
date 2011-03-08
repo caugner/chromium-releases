@@ -5,17 +5,18 @@
 #include "webkit/tools/test_shell/simple_file_system.h"
 
 #include "base/file_path.h"
+#include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/scoped_callback_factory.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileInfo.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystemCallbacks.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystemEntry.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemEntry.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_types.h"
@@ -54,17 +55,11 @@ class SimpleFileSystemCallbackDispatcher
   }
 
   ~SimpleFileSystemCallbackDispatcher() {
-    DCHECK(!operation_.get());
-  }
-
-  void set_operation(SandboxedFileSystemOperation* operation) {
-    operation_.reset(operation);
   }
 
   virtual void DidSucceed() {
-    if (file_system_)
-      callbacks_->didSucceed();
-    RemoveOperation();
+    DCHECK(file_system_);
+    callbacks_->didSucceed();
   }
 
   virtual void DidReadMetadata(const base::PlatformFileInfo& info) {
@@ -75,7 +70,6 @@ class SimpleFileSystemCallbackDispatcher
     web_file_info.type = info.is_directory ?
         WebFileInfo::TypeDirectory : WebFileInfo::TypeFile;
     callbacks_->didReadMetadata(web_file_info);
-    RemoveOperation();
   }
 
   virtual void DidReadDirectory(
@@ -93,7 +87,6 @@ class SimpleFileSystemCallbackDispatcher
     WebVector<WebKit::WebFileSystemEntry> web_entries =
         web_entries_vector;
     callbacks_->didReadDirectory(web_entries, has_more);
-    RemoveOperation();
   }
 
   virtual void DidOpenFileSystem(
@@ -104,14 +97,12 @@ class SimpleFileSystemCallbackDispatcher
     else
       callbacks_->didOpenFileSystem(
           UTF8ToUTF16(name), webkit_glue::FilePathToWebString(path));
-    RemoveOperation();
   }
 
   virtual void DidFail(base::PlatformFileError error_code) {
     DCHECK(file_system_);
     callbacks_->didFail(
         webkit_glue::PlatformFileErrorToWebFileError(error_code));
-    RemoveOperation();
   }
 
   virtual void DidWrite(int64, bool) {
@@ -119,29 +110,21 @@ class SimpleFileSystemCallbackDispatcher
   }
 
  private:
-  void RemoveOperation() {
-    // We need to make sure operation_ is null when we delete the operation
-    // (which in turn deletes this dispatcher instance).
-    scoped_ptr<SandboxedFileSystemOperation> operation;
-    operation.swap(operation_);
-    operation.reset();
-  }
-
   WeakPtr<SimpleFileSystem> file_system_;
   WebFileSystemCallbacks* callbacks_;
-  scoped_ptr<SandboxedFileSystemOperation> operation_;
 };
 
 }  // namespace
 
 SimpleFileSystem::SimpleFileSystem() {
   if (file_system_dir_.CreateUniqueTempDir()) {
-    sandboxed_context_.reset(new SandboxedFileSystemContext(
+    sandboxed_context_ = new SandboxedFileSystemContext(
+        base::MessageLoopProxy::CreateForCurrentThread(),
         base::MessageLoopProxy::CreateForCurrentThread(),
         file_system_dir_.path(),
         false /* incognito */,
         true /* allow_file_access */,
-        false /* unlimited_quota */));
+        false /* unlimited_quota */);
   } else {
     LOG(WARNING) << "Failed to create a temp dir for the filesystem."
                     "FileSystem feature will be disabled.";
@@ -262,6 +245,5 @@ SandboxedFileSystemOperation* SimpleFileSystem::GetNewOperation(
   SandboxedFileSystemOperation* operation = new SandboxedFileSystemOperation(
       dispatcher, base::MessageLoopProxy::CreateForCurrentThread(),
       sandboxed_context_.get());
-  dispatcher->set_operation(operation);
   return operation;
 }

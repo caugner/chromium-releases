@@ -9,19 +9,20 @@
 #include <windows.h>
 #endif
 
-#include "app/hi_res_timer_manager.h"
-#include "app/system_monitor.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/threading/platform_thread.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/default_plugin.h"
 #include "chrome/common/gpu_plugin.h"
+#include "chrome/common/hi_res_timer_manager.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/plugin/plugin_thread.h"
+#include "ui/base/system_monitor/system_monitor.h"
 
 #if defined(OS_WIN)
 #include "chrome/test/injection_test_dll.h"
@@ -66,6 +67,7 @@ bool IsPluginBuiltInFlash(const CommandLine& cmd_line) {
   FilePath path =  cmd_line.GetSwitchValuePath(switches::kPluginPath);
   return (path.BaseName() == FilePath(L"gcswf32.dll"));
 }
+
 #endif
 
 // main() routine for running as the plugin process.
@@ -83,18 +85,14 @@ int PluginMain(const MainFunctionParams& parameters) {
   InitializeChromeApplication();
 #endif
   MessageLoop main_message_loop(MessageLoop::TYPE_UI);
-  PlatformThread::SetName("CrPluginMain");
+  base::PlatformThread::SetName("CrPluginMain");
 
-  SystemMonitor system_monitor;
+  ui::SystemMonitor system_monitor;
   HighResolutionTimerManager high_resolution_timer_manager;
 
   const CommandLine& parsed_command_line = parameters.command_line_;
 
 #if defined(OS_LINUX)
-  // On Linux we exec ourselves from /proc/self/exe, but that makes the
-  // process name that shows up in "ps" etc. for plugins show as "exe"
-  // instead of "chrome" or something reasonable. Try to fix it.
-  CommandLine::SetProcTitle();
 
 #if defined(ARCH_CPU_64_BITS)
   WorkaroundFlashLAHF();
@@ -136,6 +134,8 @@ int PluginMain(const MainFunctionParams& parameters) {
       if (IsPluginBuiltInFlash(parsed_command_line)) {
         DVLOG(1) << "Sandboxing flash";
         DelayedLowerToken(target_services);
+      } else {
+        target_services->LowerToken();
       }
     }
     if (sandbox_test_module) {

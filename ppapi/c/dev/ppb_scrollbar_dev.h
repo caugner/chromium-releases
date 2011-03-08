@@ -1,12 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_DEV_PPB_SCROLLBAR_DEV_H_
 #define PPAPI_C_DEV_PPB_SCROLLBAR_DEV_H_
 
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 
@@ -18,8 +19,9 @@ typedef enum {
   PP_SCROLLBY_PAGE = 2,
   PP_SCROLLBY_DOCUMENT = 3
 } PP_ScrollBy_Dev;
+PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_ScrollBy_Dev, 4);
 
-#define PPB_SCROLLBAR_DEV_INTERFACE "PPB_Scrollbar(Dev);0.2"
+#define PPB_SCROLLBAR_DEV_INTERFACE "PPB_Scrollbar(Dev);0.3"
 
 // The interface for a scrollbar.  A scrollbar is a widget, so the functions
 // in PPB_Widget can also be used with scrollbar objects.
@@ -60,4 +62,5 @@ struct PPB_Scrollbar_Dev {
                    int32_t multiplier);
 };
 
-#endif  // PPAPI_C_DEV_PPB_SCROLLBAR_DEV_H_
+#endif  /* PPAPI_C_DEV_PPB_SCROLLBAR_DEV_H_ */
+

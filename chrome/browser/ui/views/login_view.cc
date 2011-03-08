@@ -1,15 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/login_view.h"
+#include "chrome/browser/ui/views/login_view.h"
 
 #include <string>
 
-#include "app/l10n_util.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/grid_layout.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
@@ -28,10 +29,10 @@ LoginView::LoginView(const std::wstring& explanation,
                      bool focus_view)
     : username_field_(new views::Textfield),
       password_field_(new views::Textfield(views::Textfield::STYLE_PASSWORD)),
-      username_label_(new views::Label(
-          l10n_util::GetString(IDS_LOGIN_DIALOG_USERNAME_FIELD))),
-      password_label_(new views::Label(
-          l10n_util::GetString(IDS_LOGIN_DIALOG_PASSWORD_FIELD))),
+      username_label_(new views::Label(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_USERNAME_FIELD)))),
+      password_label_(new views::Label(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_PASSWORD_FIELD)))),
       message_label_(new views::Label(explanation)),
       ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)),
       login_model_(NULL),
@@ -42,7 +43,7 @@ LoginView::LoginView(const std::wstring& explanation,
   message_label_->SetAllowCharacterBreak(true);
 
   // Initialize the Grid Layout Manager used for this dialog box.
-  GridLayout* layout = CreatePanelGridLayout(this);
+  GridLayout* layout = GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   // Add the column set for the information message at the top of the dialog

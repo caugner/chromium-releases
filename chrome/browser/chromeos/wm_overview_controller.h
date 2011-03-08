@@ -20,7 +20,6 @@ namespace views {
 class Widget;
 }
 
-class Animation;
 class Browser;
 class RenderWidgetHost;
 
@@ -64,7 +63,7 @@ class WmOverviewController : public BrowserList::Observer,
   };
 
   // This class is a singleton.
-  static WmOverviewController* instance();
+  static WmOverviewController* GetInstance();
 
   // BrowserList::Observer methods
   void OnBrowserAdded(const Browser* browser) {}

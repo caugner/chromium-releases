@@ -1,65 +1,64 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 
 #if defined(OS_LINUX)
 #include <gtk/gtk.h>
 #endif
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/app_modal_dialog_queue.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/dom_ui/bug_report_ui.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/ntp_background_util.h"
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sidebar/sidebar_container.h"
 #include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
-#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
+#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/view_ids.h"
-#include "chrome/browser/views/accessible_view_helper.h"
-#include "chrome/browser/views/bookmark_bar_view.h"
-#include "chrome/browser/views/browser_dialogs.h"
-#include "chrome/browser/views/default_search_view.h"
-#include "chrome/browser/views/download_shelf_view.h"
-#include "chrome/browser/views/frame/browser_view_layout.h"
-#include "chrome/browser/views/frame/contents_container.h"
-#include "chrome/browser/views/fullscreen_exit_bubble.h"
-#include "chrome/browser/views/status_bubble_views.h"
-#include "chrome/browser/views/tab_contents/tab_contents_container.h"
-#include "chrome/browser/views/tabs/browser_tab_strip_controller.h"
-#include "chrome/browser/views/tabs/side_tab_strip.h"
-#include "chrome/browser/views/theme_install_bubble_view.h"
-#include "chrome/browser/views/toolbar_view.h"
-#include "chrome/browser/views/update_recommended_message_box.h"
-#include "chrome/browser/views/window.h"
-#include "chrome/browser/window_sizer.h"
-#include "chrome/browser/wrench_menu_model.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/toolbar/wrench_menu_model.h"
+#include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/accessible_view_helper.h"
+#include "chrome/browser/ui/views/bookmark_bar_view.h"
+#include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/browser/ui/views/default_search_view.h"
+#include "chrome/browser/ui/views/download_shelf_view.h"
+#include "chrome/browser/ui/views/frame/browser_view_layout.h"
+#include "chrome/browser/ui/views/frame/contents_container.h"
+#include "chrome/browser/ui/views/fullscreen_exit_bubble.h"
+#include "chrome/browser/ui/views/status_bubble_views.h"
+#include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
+#include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
+#include "chrome/browser/ui/views/tabs/side_tab_strip.h"
+#include "chrome/browser/ui/views/theme_install_bubble_view.h"
+#include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/browser/ui/views/update_recommended_message_box.h"
+#include "chrome/browser/ui/views/window.h"
+#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/native_window_notification_source.h"
@@ -73,6 +72,8 @@
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "grit/webkit_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/single_split_view.h"
 #include "views/focus/external_focus_tracker.h"
 #include "views/focus/view_storage.h"
@@ -82,14 +83,18 @@
 #include "views/window/window.h"
 
 #if defined(OS_WIN)
-#include "app/view_prop.h"
-#include "app/win_util.h"
+#include "app/win/win_util.h"
 #include "chrome/browser/aeropeek_manager.h"
 #include "chrome/browser/jumplist_win.h"
+#include "ui/base/view_prop.h"
 #elif defined(OS_LINUX)
-#include "chrome/browser/views/accelerator_table_gtk.h"
+#include "chrome/browser/ui/views/accelerator_table_gtk.h"
 #include "views/window/hit_test.h"
 #include "views/window/window_gtk.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/views/keyboard_overlay_delegate.h"
 #endif
 
 using base::TimeDelta;
@@ -118,7 +123,7 @@ static const int kNewtabBarRoundness = 5;
 // ------------
 
 // Returned from BrowserView::GetClassName.
-const char BrowserView::kViewClassName[] = "browser/views/BrowserView";
+const char BrowserView::kViewClassName[] = "browser/ui/views/BrowserView";
 
 #if defined(OS_CHROMEOS)
 // Get a normal browser window of given |profile| to use as dialog parent
@@ -174,7 +179,7 @@ BookmarkExtensionBackground::BookmarkExtensionBackground(
 
 void BookmarkExtensionBackground::Paint(gfx::Canvas* canvas,
                                         views::View* view) const {
-  ThemeProvider* tp = host_view_->GetThemeProvider();
+  ui::ThemeProvider* tp = host_view_->GetThemeProvider();
   int toolbar_overlap = host_view_->GetToolbarOverlap();
   // The client edge is drawn below the toolbar bounds.
   if (toolbar_overlap)
@@ -285,35 +290,36 @@ class DownloadInProgressConfirmDialogDelegate : public views::DialogDelegate,
  public:
   explicit DownloadInProgressConfirmDialogDelegate(Browser* browser)
       : browser_(browser),
-        product_name_(l10n_util::GetString(IDS_PRODUCT_NAME)) {
+        product_name_(
+            UTF16ToWide(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME))) {
     int download_count = browser->profile()->GetDownloadManager()->
         in_progress_count();
 
     std::wstring warning_text;
     std::wstring explanation_text;
     if (download_count == 1) {
-      warning_text =
-          l10n_util::GetStringF(IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING,
-                                product_name_);
-      explanation_text =
-          l10n_util::GetStringF(IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION,
-                                product_name_);
-      ok_button_text_ = l10n_util::GetString(
-          IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
-      cancel_button_text_ = l10n_util::GetString(
-          IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
+      warning_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+          IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING,
+          WideToUTF16(product_name_)));
+      explanation_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+          IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION,
+          WideToUTF16(product_name_)));
+      ok_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
+          IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL));
+      cancel_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
+          IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL));
     } else {
-      warning_text =
-          l10n_util::GetStringF(IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
-                                product_name_,
-                                UTF8ToWide(base::IntToString(download_count)));
-      explanation_text =
-          l10n_util::GetStringF(
-              IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION, product_name_);
-      ok_button_text_ = l10n_util::GetString(
-          IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL);
-      cancel_button_text_ = l10n_util::GetString(
-          IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
+      warning_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+          IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
+          WideToUTF16(product_name_),
+          UTF8ToUTF16(base::IntToString(download_count))));
+      explanation_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+          IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION,
+          WideToUTF16(product_name_)));
+      ok_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
+          IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL));
+      cancel_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
+          IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL));
     }
 
     // There are two lines of text: the bold warning label and the text
@@ -421,7 +427,7 @@ void BrowserView::SetShowState(int state) {
 BrowserView::BrowserView(Browser* browser)
     : views::ClientView(NULL, NULL),
       last_focused_view_storage_id_(
-          views::ViewStorage::GetSharedInstance()->CreateStorageID()),
+          views::ViewStorage::GetInstance()->CreateStorageID()),
       frame_(NULL),
       browser_(browser),
       active_bookmark_bar_(NULL),
@@ -484,7 +490,7 @@ BrowserView* BrowserView::GetBrowserViewForNativeWindow(
 #if defined(OS_WIN)
   if (IsWindow(window)) {
     return reinterpret_cast<BrowserView*>(
-        app::ViewProp::GetValue(window, kBrowserViewKey));
+        ui::ViewProp::GetValue(window, kBrowserViewKey));
   }
 #else
   if (window) {
@@ -599,31 +605,39 @@ bool BrowserView::ShouldShowOffTheRecordAvatar() const {
 }
 
 bool BrowserView::AcceleratorPressed(const views::Accelerator& accelerator) {
+#if defined(OS_CHROMEOS)
+  // If accessibility is enabled, ignore accelerators involving the Search
+  // key so that key combinations involving Search can be used for extra
+  // accessibility functionality.
+  if (accelerator.GetKeyCode() == ui::VKEY_LWIN &&
+      g_browser_process->local_state()->GetBoolean(
+          prefs::kAccessibilityEnabled)) {
+    return false;
+  }
+#endif
+
   std::map<views::Accelerator, int>::const_iterator iter =
       accelerator_table_.find(accelerator);
   DCHECK(iter != accelerator_table_.end());
-
   int command_id = iter->second;
-  if (browser_->command_updater()->SupportsCommand(command_id) &&
-      browser_->command_updater()->IsCommandEnabled(command_id)) {
-    browser_->ExecuteCommand(command_id);
-    return true;
-  }
-  return false;
+
+  if (!browser_->block_command_execution())
+    UpdateAcceleratorMetrics(accelerator, command_id);
+  return browser_->ExecuteCommandIfEnabled(command_id);
 }
 
-bool BrowserView::GetAccelerator(int cmd_id, menus::Accelerator* accelerator) {
+bool BrowserView::GetAccelerator(int cmd_id, ui::Accelerator* accelerator) {
   // The standard Ctrl-X, Ctrl-V and Ctrl-C are not defined as accelerators
   // anywhere so we need to check for them explicitly here.
   switch (cmd_id) {
     case IDC_CUT:
-      *accelerator = views::Accelerator(app::VKEY_X, false, true, false);
+      *accelerator = views::Accelerator(ui::VKEY_X, false, true, false);
       return true;
     case IDC_COPY:
-      *accelerator = views::Accelerator(app::VKEY_C, false, true, false);
+      *accelerator = views::Accelerator(ui::VKEY_C, false, true, false);
       return true;
     case IDC_PASTE:
-      *accelerator = views::Accelerator(app::VKEY_V, false, true, false);
+      *accelerator = views::Accelerator(ui::VKEY_V, false, true, false);
       return true;
   }
   // Else, we retrieve the accelerator information from the accelerator table.
@@ -640,13 +654,13 @@ bool BrowserView::GetAccelerator(int cmd_id, menus::Accelerator* accelerator) {
 
 bool BrowserView::ActivateAppModalDialog() const {
   // If another browser is app modal, flash and activate the modal browser.
-  if (Singleton<AppModalDialogQueue>()->HasActiveDialog()) {
+  if (AppModalDialogQueue::GetInstance()->HasActiveDialog()) {
     Browser* active_browser = BrowserList::GetLastActive();
     if (active_browser && (browser_ != active_browser)) {
       active_browser->window()->FlashFrame();
       active_browser->window()->Activate();
     }
-    Singleton<AppModalDialogQueue>()->ActivateModalDialog();
+    AppModalDialogQueue::GetInstance()->ActivateModalDialog();
     return true;
   }
   return false;
@@ -979,7 +993,7 @@ void BrowserView::RotatePaneFocus(bool forwards) {
 }
 
 void BrowserView::SaveFocusedView() {
-  views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
+  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
   if (view_storage->RetrieveView(last_focused_view_storage_id_))
     view_storage->RemoveView(last_focused_view_storage_id_);
   views::View* focused_view = GetRootView()->GetFocusedView();
@@ -1003,6 +1017,10 @@ bool BrowserView::IsBookmarkBarVisible() const {
 
 bool BrowserView::IsBookmarkBarAnimating() const {
   return bookmark_bar_view_.get() && bookmark_bar_view_->is_animating();
+}
+
+bool BrowserView::IsTabStripEditable() const {
+  return !tabstrip_->IsDragSessionActive() && !tabstrip_->IsActiveDropTarget();
 }
 
 bool BrowserView::IsToolbarVisible() const {
@@ -1051,6 +1069,10 @@ void BrowserView::ShowTaskManager() {
   browser::ShowTaskManager();
 }
 
+void BrowserView::ShowBackgroundPages() {
+  browser::ShowBackgroundPages();
+}
+
 void BrowserView::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
   toolbar_->location_bar()->ShowStarBubble(url, !already_bookmarked);
 }
@@ -1087,10 +1109,6 @@ DownloadShelf* BrowserView::GetDownloadShelf() {
   return download_shelf_.get();
 }
 
-void BrowserView::ShowReportBugDialog() {
-  browser::ShowHtmlBugReportView(GetWindow(), browser_.get());
-}
-
 void BrowserView::ShowClearBrowsingDataDialog() {
   browser::ShowClearBrowsingDataView(GetWindow()->GetNativeWindow(),
                                      browser_->profile());
@@ -1123,9 +1141,9 @@ void BrowserView::ShowCollectedCookiesDialog(TabContents* tab_contents) {
 
 void BrowserView::ShowProfileErrorDialog(int message_id) {
 #if defined(OS_WIN)
-  std::wstring title = l10n_util::GetString(IDS_PRODUCT_NAME);
-  std::wstring message = l10n_util::GetString(message_id);
-  win_util::MessageBox(GetNativeHandle(), message, title,
+  string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+  string16 message = l10n_util::GetStringUTF16(message_id);
+  app::win::MessageBox(GetNativeHandle(), message, title,
                        MB_OK | MB_ICONWARNING | MB_TOPMOST);
 #elif defined(OS_LINUX)
   std::string title = l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
@@ -1195,10 +1213,6 @@ void BrowserView::ShowPageInfo(Profile* profile,
                                bool show_history) {
   gfx::NativeWindow parent = GetWindow()->GetNativeWindow();
 
-#if defined(OS_CHROMEOS)
-  parent = GetNormalBrowserWindowForBrowser(browser(), profile);
-#endif  // defined(OS_CHROMEOS)
-
   browser::ShowPageInfoBubble(parent, profile, url, ssl, show_history);
 }
 
@@ -1214,7 +1228,7 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 #if defined(OS_WIN)
   // As Alt+F4 is the close-app keyboard shortcut, it needs processing
   // immediately.
-  if (event.windowsKeyCode == app::VKEY_F4 &&
+  if (event.windowsKeyCode == ui::VKEY_F4 &&
       event.modifiers == NativeWebKeyboardEvent::AltKey) {
     DefWindowProc(event.os_event.hwnd, event.os_event.message,
                   event.os_event.wParam, event.os_event.lParam);
@@ -1225,7 +1239,7 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
   views::FocusManager* focus_manager = GetFocusManager();
   DCHECK(focus_manager);
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) && !defined(TOUCH_UI)
   // Views and WebKit use different tables for GdkEventKey -> views::KeyEvent
   // conversion. We need to use View's conversion table here to keep consistent
   // behavior with views::FocusManager::OnKeyEvent() method.
@@ -1239,7 +1253,7 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                  views_event.IsAltDown());
 #else
   views::Accelerator accelerator(
-      static_cast<app::KeyboardCode>(event.windowsKeyCode),
+      static_cast<ui::KeyboardCode>(event.windowsKeyCode),
       (event.modifiers & NativeWebKeyboardEvent::ShiftKey) ==
           NativeWebKeyboardEvent::ShiftKey,
       (event.modifiers & NativeWebKeyboardEvent::ControlKey) ==
@@ -1271,13 +1285,14 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
   if (id == -1)
     return false;
 
+  // Executing the command may cause |this| object to be destroyed.
+#if defined(OS_LINUX) && !defined(TOUCH_UI)
+  if (browser_->IsReservedCommand(id) && !event.match_edit_command) {
+#else
   if (browser_->IsReservedCommand(id)) {
-    // TODO(suzhe): For Linux, should we send things like Ctrl+w, Ctrl+n
-    // to the renderer first, just like what
-    // BrowserWindowGtk::HandleKeyboardEvent() does?
-    // Executing the command may cause |this| object to be destroyed.
-    browser_->ExecuteCommand(id);
-    return true;
+#endif
+    UpdateAcceleratorMetrics(accelerator, id);
+    return browser_->ExecuteCommandIfEnabled(id);
   }
 
   DCHECK(is_keyboard_shortcut != NULL);
@@ -1287,7 +1302,7 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 }
 
 void BrowserView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) && !defined(TOUCH_UI)
   views::Window* window = GetWidget()->GetWindow();
   if (window && event.os_event && !event.skip_in_browser)
     static_cast<views::WindowGtk*>(window)->HandleKeyboardEvent(event.os_event);
@@ -1306,34 +1321,34 @@ void BrowserView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
 // manager to do that.
 #if !defined(OS_MACOSX)
 void BrowserView::Cut() {
-  ui_controls::SendKeyPress(GetNativeHandle(), app::VKEY_X,
+  ui_controls::SendKeyPress(GetNativeHandle(), ui::VKEY_X,
                             true, false, false, false);
 }
 
 void BrowserView::Copy() {
-  ui_controls::SendKeyPress(GetNativeHandle(), app::VKEY_C,
+  ui_controls::SendKeyPress(GetNativeHandle(), ui::VKEY_C,
                             true, false, false, false);
 }
 
 void BrowserView::Paste() {
-  ui_controls::SendKeyPress(GetNativeHandle(), app::VKEY_V,
+  ui_controls::SendKeyPress(GetNativeHandle(), ui::VKEY_V,
                             true, false, false, false);
 }
 #else
 // Mac versions.  Not tested by antyhing yet;
 // don't assume written == works.
 void BrowserView::Cut() {
-  ui_controls::SendKeyPress(GetNativeHandle(), app::VKEY_X,
+  ui_controls::SendKeyPress(GetNativeHandle(), ui::VKEY_X,
                             false, false, false, true);
 }
 
 void BrowserView::Copy() {
-  ui_controls::SendKeyPress(GetNativeHandle(), app::VKEY_C,
+  ui_controls::SendKeyPress(GetNativeHandle(), ui::VKEY_C,
                             false, false, false, true);
 }
 
 void BrowserView::Paste() {
-  ui_controls::SendKeyPress(GetNativeHandle(), app::VKEY_V,
+  ui_controls::SendKeyPress(GetNativeHandle(), ui::VKEY_V,
                             false, false, false, true);
 }
 #endif
@@ -1348,10 +1363,8 @@ void BrowserView::PrepareForInstant() {
 }
 
 void BrowserView::ShowInstant(TabContents* preview_contents) {
-  if (!preview_container_) {
+  if (!preview_container_)
     preview_container_ = new TabContentsContainer();
-    preview_container_->set_reserved_area_delegate(this);
-  }
   contents_->SetPreview(preview_container_, preview_contents);
   preview_container_->ChangeTabContents(preview_contents);
 
@@ -1384,6 +1397,25 @@ void BrowserView::HideInstant(bool instant_is_active) {
 gfx::Rect BrowserView::GetInstantBounds() {
   return contents_->GetPreviewBounds();
 }
+
+gfx::Rect BrowserView::GrabWindowSnapshot(std::vector<unsigned char>*
+                                          png_representation) {
+  views::Window* window = GetWindow();
+
+#if defined(USE_X11)
+  ui::GrabWindowSnapshot(window->GetNativeWindow(), png_representation);
+#elif defined(OS_WIN)
+  app::win::GrabWindowSnapshot(window->GetNativeWindow(), png_representation);
+#endif
+
+  return window->GetBounds();
+}
+
+#if defined(OS_CHROMEOS)
+void BrowserView::ShowKeyboardOverlay(gfx::NativeWindow owning_window) {
+  KeyboardOverlayDelegate::ShowDialog(owning_window);
+}
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserView, BrowserWindowTesting implementation:
@@ -1472,7 +1504,8 @@ void BrowserView::TabSelectedAt(TabContentsWrapper* old_contents,
   ProcessTabSelected(new_contents, true);
 }
 
-void BrowserView::TabReplacedAt(TabContentsWrapper* old_contents,
+void BrowserView::TabReplacedAt(TabStripModel* tab_strip_model,
+                                TabContentsWrapper* old_contents,
                                 TabContentsWrapper* new_contents,
                                 int index) {
   if (index != browser_->tabstrip_model()->selected_index())
@@ -1499,7 +1532,7 @@ void BrowserView::TabStripEmpty() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// BrowserView, menus::SimpleMenuModel::Delegate implementation:
+// BrowserView, ui::SimpleMenuModel::Delegate implementation:
 
 bool BrowserView::IsCommandIdChecked(int command_id) const {
   // TODO(beng): encoding menu.
@@ -1512,12 +1545,12 @@ bool BrowserView::IsCommandIdEnabled(int command_id) const {
 }
 
 bool BrowserView::GetAcceleratorForCommandId(int command_id,
-                                             menus::Accelerator* accelerator) {
+                                             ui::Accelerator* accelerator) {
   // Let's let the ToolbarView own the canonical implementation of this method.
   return toolbar_->GetAcceleratorForCommandId(command_id, accelerator);
 }
 
-bool BrowserView::IsLabelForCommandIdDynamic(int command_id) const {
+bool BrowserView::IsItemForCommandIdDynamic(int command_id) const {
   return command_id == IDC_RESTORE_TAB;
 }
 
@@ -1534,7 +1567,7 @@ string16 BrowserView::GetLabelForCommandId(int command_id) const {
 }
 
 void BrowserView::ExecuteCommand(int command_id) {
-  browser_->ExecuteCommand(command_id);
+  browser_->ExecuteCommandIfEnabled(command_id);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1558,8 +1591,9 @@ std::wstring BrowserView::GetWindowTitle() const {
 
 std::wstring BrowserView::GetAccessibleWindowTitle() const {
   if (IsOffTheRecord()) {
-    return l10n_util::GetStringF(
-        IDS_ACCESSIBLE_INCOGNITO_WINDOW_TITLE_FORMAT, GetWindowTitle());
+    return UTF16ToWide(l10n_util::GetStringFUTF16(
+        IDS_ACCESSIBLE_INCOGNITO_WINDOW_TITLE_FORMAT,
+        WideToUTF16(GetWindowTitle())));
   }
   return GetWindowTitle();
 }
@@ -1603,12 +1637,7 @@ bool BrowserView::ExecuteWindowsCommand(int command_id) {
   if (command_id_from_app_command != -1)
     command_id = command_id_from_app_command;
 
-  if (browser_->command_updater()->SupportsCommand(command_id)) {
-    if (browser_->command_updater()->IsCommandEnabled(command_id))
-      browser_->ExecuteCommand(command_id);
-    return true;
-  }
-  return false;
+  return browser_->ExecuteCommandIfEnabled(command_id);
 }
 
 std::wstring BrowserView::GetWindowName() const {
@@ -1805,45 +1834,16 @@ AccessibilityTypes::Role BrowserView::GetAccessibleRole() {
   return AccessibilityTypes::ROLE_CLIENT;
 }
 
-void BrowserView::InfoBarSizeChanged(bool is_animating) {
+void BrowserView::InfoBarContainerSizeChanged(bool is_animating) {
   SelectedTabToolbarSizeChanged(is_animating);
 }
 
-void BrowserView::UpdateReservedContentsRect(
-    const TabContentsContainer* source) {
-  RenderWidgetHostView* render_widget_host_view =
-      source->tab_contents() ? source->tab_contents()->GetRenderWidgetHostView()
-                             : NULL;
-  if (!render_widget_host_view)
-    return;
-
-  gfx::Rect reserved_rect;
-
-  if (!frame_->GetWindow()->IsMaximized() &&
-      !frame_->GetWindow()->IsFullscreen()) {
-    gfx::Size resize_corner_size = ResizeCorner::GetSize();
-    if (!resize_corner_size.IsEmpty()) {
-      gfx::Point resize_corner_origin;
-      gfx::Rect bounds = GetLocalBounds(false);
-      resize_corner_origin.set_x(bounds.right() - resize_corner_size.width());
-      resize_corner_origin.set_y(bounds.bottom() - resize_corner_size.height());
-
-      View::ConvertPointToView(this, source, &resize_corner_origin);
-
-      gfx::Size container_size = source->size();
-
-      if (resize_corner_origin.x() < container_size.width() &&
-          resize_corner_origin.y() < container_size.height()) {
-        reserved_rect = gfx::Rect(resize_corner_origin, resize_corner_size);
-      }
-    }
-  }
-
-  // TODO(alekseys): for source == contents_container_, consult SidebarTabView
-  // for the current size to reserve. Something like this:
-  // reserved_rect = reserved_rect.Union(SidebarTabView::GetCurrentBounds());
-
-  render_widget_host_view->set_reserved_contents_rect(reserved_rect);
+bool BrowserView::SplitHandleMoved(views::SingleSplitView* view) {
+  for (int i = 0; i < view->GetChildViewCount(); ++i)
+    view->GetChildViewAt(i)->InvalidateLayout();
+  SchedulePaint();
+  Layout();
+  return false;
 }
 
 views::LayoutManager* BrowserView::CreateLayoutManager() const {
@@ -1852,9 +1852,9 @@ views::LayoutManager* BrowserView::CreateLayoutManager() const {
 
 void BrowserView::InitTabStrip(TabStripModel* model) {
   // Throw away the existing tabstrip if we're switching display modes.
+  scoped_ptr<BaseTabStrip> old_strip(tabstrip_);
   if (tabstrip_) {
     tabstrip_->GetParent()->RemoveChildView(tabstrip_);
-    delete tabstrip_;
   }
 
   BrowserTabStripController* tabstrip_controller =
@@ -1865,7 +1865,7 @@ void BrowserView::InitTabStrip(TabStripModel* model) {
   else
     tabstrip_ = new TabStrip(tabstrip_controller);
 
-  tabstrip_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_TABSTRIP));
+  tabstrip_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_TABSTRIP));
   AddChildView(tabstrip_);
 
   tabstrip_controller->InitFromModel(tabstrip_);
@@ -1891,20 +1891,19 @@ void BrowserView::Init() {
   }
 
   LoadAccelerators();
-  SetAccessibleName(l10n_util::GetString(IDS_PRODUCT_NAME));
+  SetAccessibleName(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
 
   InitTabStrip(browser_->tabstrip_model());
 
   toolbar_ = new ToolbarView(browser_.get());
   AddChildView(toolbar_);
   toolbar_->Init(browser_->profile());
-  toolbar_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_TOOLBAR));
+  toolbar_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_TOOLBAR));
 
   infobar_container_ = new InfoBarContainer(this);
   AddChildView(infobar_container_);
 
   contents_container_ = new TabContentsContainer;
-  contents_container_->set_reserved_area_delegate(this);
   contents_ = new ContentsContainer(contents_container_);
 
   SkColor bg_color = GetWidget()->GetThemeProvider()->
@@ -1913,23 +1912,22 @@ void BrowserView::Init() {
   bool sidebar_allowed = SidebarManager::IsSidebarAllowed();
   if (sidebar_allowed) {
     sidebar_container_ = new TabContentsContainer;
-    sidebar_container_->set_reserved_area_delegate(this);
     sidebar_container_->SetID(VIEW_ID_SIDE_BAR_CONTAINER);
     sidebar_container_->SetVisible(false);
 
     sidebar_split_ = new views::SingleSplitView(
         contents_,
         sidebar_container_,
-        views::SingleSplitView::HORIZONTAL_SPLIT);
+        views::SingleSplitView::HORIZONTAL_SPLIT,
+        this);
     sidebar_split_->SetID(VIEW_ID_SIDE_BAR_SPLIT);
-    sidebar_split_->
-        SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_SIDE_BAR));
+    sidebar_split_->SetAccessibleName(
+        l10n_util::GetStringUTF16(IDS_ACCNAME_SIDE_BAR));
     sidebar_split_->set_background(
         views::Background::CreateSolidBackground(bg_color));
   }
 
   devtools_container_ = new TabContentsContainer;
-  devtools_container_->set_reserved_area_delegate(this);
   devtools_container_->SetID(VIEW_ID_DEV_TOOLS_DOCKED);
   devtools_container_->SetVisible(false);
 
@@ -1940,10 +1938,11 @@ void BrowserView::Init() {
   contents_split_ = new views::SingleSplitView(
       contents_view,
       devtools_container_,
-      views::SingleSplitView::VERTICAL_SPLIT);
+      views::SingleSplitView::VERTICAL_SPLIT,
+      this);
   contents_split_->SetID(VIEW_ID_CONTENTS_SPLIT);
-  contents_split_->
-      SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_WEB_CONTENTS));
+  contents_split_->SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_ACCNAME_WEB_CONTENTS));
   contents_split_->set_background(
       views::Background::CreateSolidBackground(bg_color));
   AddChildView(contents_split_);
@@ -2021,8 +2020,8 @@ bool BrowserView::MaybeShowBookmarkBar(TabContentsWrapper* contents) {
       bookmark_bar_view_->SetProfile(contents->profile());
     }
     bookmark_bar_view_->SetPageNavigator(contents->tab_contents());
-    bookmark_bar_view_->
-        SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_BOOKMARKS));
+    bookmark_bar_view_->SetAccessibleName(
+        l10n_util::GetStringUTF16(IDS_ACCNAME_BOOKMARKS));
     new_bookmark_bar_view = bookmark_bar_view_.get();
   }
   return UpdateChildViewAndLayout(new_bookmark_bar_view, &active_bookmark_bar_);
@@ -2084,7 +2083,8 @@ void BrowserView::UpdateSidebarForContents(TabContentsWrapper* tab_contents) {
         sidebar_split_->width() - sidebar_width);
 
     sidebar_container_->SetVisible(true);
-    sidebar_split_->Layout();
+    sidebar_split_->InvalidateLayout();
+    Layout();
   } else if (should_hide) {
     // Store split offset when hiding sidebar only.
     g_browser_process->local_state()->SetInteger(
@@ -2092,7 +2092,8 @@ void BrowserView::UpdateSidebarForContents(TabContentsWrapper* tab_contents) {
         sidebar_split_->width() - sidebar_split_->divider_offset());
 
     sidebar_container_->SetVisible(false);
-    sidebar_split_->Layout();
+    sidebar_split_->InvalidateLayout();
+    Layout();
   }
 }
 
@@ -2129,7 +2130,8 @@ void BrowserView::UpdateDevToolsForContents(TabContentsWrapper* wrapper) {
     contents_split_->set_divider_offset(split_offset);
 
     devtools_container_->SetVisible(true);
-    contents_split_->Layout();
+    contents_split_->InvalidateLayout();
+    Layout();
   } else if (should_hide) {
     // Store split offset when hiding devtools window only.
     g_browser_process->local_state()->SetInteger(
@@ -2139,7 +2141,8 @@ void BrowserView::UpdateDevToolsForContents(TabContentsWrapper* wrapper) {
     devtools_focus_tracker_->FocusLastFocusedExternalView();
 
     devtools_container_->SetVisible(false);
-    contents_split_->Layout();
+    contents_split_->InvalidateLayout();
+    Layout();
   }
 }
 
@@ -2299,7 +2302,7 @@ void BrowserView::LoadAccelerators() {
     bool ctrl_down = (accelerators[i].fVirt & FCONTROL) == FCONTROL;
     bool shift_down = (accelerators[i].fVirt & FSHIFT) == FSHIFT;
     views::Accelerator accelerator(
-        static_cast<app::KeyboardCode>(accelerators[i].key),
+        static_cast<ui::KeyboardCode>(accelerators[i].key),
         shift_down, ctrl_down, alt_down);
     accelerator_table_[accelerator] = accelerators[i].cmd;
 
@@ -2453,6 +2456,67 @@ void BrowserView::InitHangMonitor() {
 #endif
 }
 
+void BrowserView::UpdateAcceleratorMetrics(
+    const views::Accelerator& accelerator, int command_id) {
+#if defined(OS_CHROMEOS)
+  // Collect information about the relative popularity of various accelerators
+  // on Chrome OS.
+  const ui::KeyboardCode key_code = accelerator.GetKeyCode();
+  switch (command_id) {
+    case IDC_BACK:
+      if (key_code == ui::VKEY_BACK)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Back_Backspace"));
+      else if (key_code == ui::VKEY_F1)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Back_F1"));
+      else if (key_code == ui::VKEY_LEFT)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Back_Left"));
+      break;
+    case IDC_FORWARD:
+      if (key_code == ui::VKEY_BACK)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Forward_Backspace"));
+      else if (key_code == ui::VKEY_F2)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Forward_F2"));
+      else if (key_code == ui::VKEY_LEFT)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Forward_Right"));
+      break;
+    case IDC_RELOAD:
+    case IDC_RELOAD_IGNORING_CACHE:
+      if (key_code == ui::VKEY_R)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Reload_R"));
+      else if (key_code == ui::VKEY_F3)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Reload_F3"));
+      break;
+    case IDC_FULLSCREEN:
+      if (key_code == ui::VKEY_F4)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Fullscreen_F4"));
+      break;
+    case IDC_NEW_TAB:
+      if (key_code == ui::VKEY_T)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_NewTab_T"));
+      break;
+    case IDC_SEARCH:
+      if (key_code == ui::VKEY_LWIN)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_Search_LWin"));
+      break;
+    case IDC_FOCUS_LOCATION:
+      if (key_code == ui::VKEY_D)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_FocusLocation_D"));
+      else if (key_code == ui::VKEY_L)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_FocusLocation_L"));
+      break;
+    case IDC_FOCUS_SEARCH:
+      if (key_code == ui::VKEY_E)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_FocusSearch_E"));
+      else if (key_code == ui::VKEY_K)
+        UserMetrics::RecordAction(UserMetricsAction("Accel_FocusSearch_K"));
+      break;
+    default:
+      // Do nothing.
+      break;
+  }
+#endif
+}
+
 void BrowserView::ProcessTabSelected(TabContentsWrapper* new_contents,
                                      bool change_tab_contents) {
   // Update various elements that are interested in knowing the current
@@ -2488,6 +2552,10 @@ void BrowserView::ProcessTabSelected(TabContentsWrapper* new_contents,
   UpdateUIForContents(new_contents);
 }
 
+gfx::Size BrowserView::GetResizeCornerSize() const {
+  return ResizeCorner::GetSize();
+}
+
 #if !defined(OS_CHROMEOS)
 // static
 BrowserWindow* BrowserWindow::CreateBrowserWindow(Browser* browser) {
@@ -2496,8 +2564,8 @@ BrowserWindow* BrowserWindow::CreateBrowserWindow(Browser* browser) {
   BrowserView* view = new BrowserView(browser);
   BrowserFrame::Create(view, browser->profile());
 
-  view->GetWindow()->GetNonClientView()->
-      SetAccessibleName(l10n_util::GetString(IDS_PRODUCT_NAME));
+  view->GetWindow()->GetNonClientView()->SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
 
   return view;
 }

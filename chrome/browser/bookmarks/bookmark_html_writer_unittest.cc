@@ -4,7 +4,6 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-#include "app/l10n_util.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -21,6 +20,7 @@
 #include "gfx/codec/png_codec.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -75,8 +75,7 @@ class BookmarkHTMLWriterTest : public testing::Test {
     result.append(WideToUTF16Hack(entry.title));
 
     result.append(ASCIIToUTF16(" time="));
-    result.append(WideToUTF16Hack(
-        base::TimeFormatFriendlyDateAndTime(entry.creation_time)));
+    result.append(base::TimeFormatFriendlyDateAndTime(entry.creation_time));
     return result;
   }
 

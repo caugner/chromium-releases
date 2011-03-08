@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,30 +11,34 @@
 #include <algorithm>
 #include <string>
 
-#include "app/animation_delegate.h"
-#include "app/gtk_signal.h"
-#include "app/gtk_signal_registrar.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
-#include "chrome/browser/gtk/owned_widget_gtk.h"
-#include "chrome/browser/toolbar_model.h"
+#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
+#include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/page_transition_types.h"
 #include "gfx/rect.h"
+#include "ui/base/animation/animation_delegate.h"
+#include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/gtk_signal_registrar.h"
 #include "webkit/glue/window_open_disposition.h"
 
+class AccessibleWidgetHelper;
 class AutocompleteEditController;
 class AutocompleteEditModel;
 class AutocompletePopupView;
-class MultiAnimation;
 class Profile;
 class TabContents;
 
-namespace gfx{
+namespace gfx {
 class Font;
+}
+
+namespace ui {
+class MultiAnimation;
 }
 
 namespace views {
@@ -47,7 +51,7 @@ class GtkThemeProvider;
 
 class AutocompleteEditViewGtk : public AutocompleteEditView,
                                 public NotificationObserver,
-                                public AnimationDelegate {
+                                public ui::AnimationDelegate {
  public:
   // Modeled like the Windows CHARRANGE.  Represent a pair of cursor position
   // offsets.  Since GtkTextIters are invalid after the buffer is changed, we
@@ -71,19 +75,15 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
                           CommandUpdater* command_updater,
                           bool popup_window_mode,
 #if defined(TOOLKIT_VIEWS)
-                          const views::View* location_bar);
+                          const views::View* location_bar
 #else
-                          GtkWidget* location_bar);
+                          GtkWidget* location_bar
 #endif
-  ~AutocompleteEditViewGtk();
+                          );
+  virtual ~AutocompleteEditViewGtk();
 
   // Initialize, create the underlying widgets, etc.
   void Init();
-
-  // Returns the width in pixels needed to display the current text. The
-  // returned value includes margins.
-  int TextWidth();
-
   // Returns the width in pixels needed to display the text from one character
   // before the caret to the end of the string. See comments in
   // LocationBarView::Layout as to why this uses -1.
@@ -93,8 +93,8 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   gfx::Font GetFont();
 
   // Implement the AutocompleteEditView interface.
-  virtual AutocompleteEditModel* model() { return model_.get(); }
-  virtual const AutocompleteEditModel* model() const { return model_.get(); }
+  virtual AutocompleteEditModel* model();
+  virtual const AutocompleteEditModel* model() const;
 
   virtual void SaveStateToTab(TabContents* tab);
 
@@ -143,16 +143,39 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   virtual bool OnAfterPossibleChange();
   virtual gfx::NativeView GetNativeView() const;
   virtual CommandUpdater* GetCommandUpdater();
+  virtual void SetInstantSuggestion(const string16& suggestion);
+  virtual int TextWidth() const;
+  virtual bool IsImeComposing() const;
+
+#if defined(TOOLKIT_VIEWS)
+  virtual views::View* AddToView(views::View* parent);
+  virtual bool CommitInstantSuggestion(const std::wstring& typed_text,
+                                       const std::wstring& suggested_text);
+
+  // Enables accessibility on AutocompleteEditView.
+  void EnableAccessibility();
+
+  // A factory method to create an AutocompleteEditView instance initialized for
+  // linux_views.  This currently returns an instance of
+  // AutocompleteEditViewGtk only, but AutocompleteEditViewViews will
+  // be added as an option when TextfieldViews is enabled.
+  static AutocompleteEditView* Create(AutocompleteEditController* controller,
+                                      ToolbarModel* toolbar_model,
+                                      Profile* profile,
+                                      CommandUpdater* command_updater,
+                                      bool popup_window_mode,
+                                      const views::View* location_bar);
+#endif
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Overridden from AnimationDelegate.
-  virtual void AnimationEnded(const Animation* animation);
-  virtual void AnimationProgressed(const Animation* animation);
-  virtual void AnimationCanceled(const Animation* animation);
+  // Overridden from ui::AnimationDelegate.
+  virtual void AnimationEnded(const ui::Animation* animation);
+  virtual void AnimationProgressed(const ui::Animation* animation);
+  virtual void AnimationCanceled(const ui::Animation* animation);
 
   // Sets the colors of the text view according to the theme.
   void SetBaseColor();
@@ -160,15 +183,7 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   // the animation state.
   void UpdateInstantViewColors();
 
-  void SetInstantSuggestion(const std::string& suggestion);
   bool CommitInstantSuggestion();
-
-  // Used by LocationBarViewGtk to inform AutocompleteEditViewGtk if the tab to
-  // search should be enabled or not. See the comment of |enable_tab_to_search_|
-  // for details.
-  void set_enable_tab_to_search(bool enable) {
-    enable_tab_to_search_ = enable;
-  }
 
   GtkWidget* text_view() {
     return text_view_;
@@ -366,7 +381,7 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   GtkWidget* instant_view_;
   // Animation from instant suggest (faded text) to autocomplete (selected
   // text).
-  scoped_ptr<MultiAnimation> instant_animation_;
+  scoped_ptr<ui::MultiAnimation> instant_animation_;
 
   // A mark to split the content and the instant anchor. Wherever the end
   // iterator of the text buffer is required, the iterator to this mark should
@@ -473,11 +488,6 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   // is needed.
   CharRange strikethrough_;
 
-  // Indicate if the tab to search should be enabled or not. It's true by
-  // default and will only be set to false if the location bar view is not able
-  // to show the tab to search hint.
-  bool enable_tab_to_search_;
-
   // Indicates if the selected text is suggested text or not. If the selection
   // is not suggested text, that means the user manually made the selection.
   bool selection_suggested_;
@@ -488,16 +498,35 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   // Was the delete key pressed with an empty selection at the end of the edit?
   bool delete_at_end_pressed_;
 
+  // Indicates if we are handling a key press event.
+  bool handling_key_press_;
+
+  // Indicates if omnibox's content maybe changed by a key press event, so that
+  // we need to call OnAfterPossibleChange() after handling the event.
+  // This flag should be set for changes directly caused by a key press event,
+  // including changes to content text, selection range and preedit string.
+  // Changes caused by function calls like SetUserText() should not affect this
+  // flag.
+  bool content_maybe_changed_by_key_press_;
+
 #if GTK_CHECK_VERSION(2, 20, 0)
   // Stores the text being composed by the input method.
   std::wstring preedit_;
+
+  // Tracking preedit state before and after a possible change. We don't need to
+  // track preedit_'s content, as it'll be treated as part of text content.
+  size_t preedit_size_before_change_;
 #endif
 
   // The view that is going to be focused next. Only valid while handling
   // "focus-out" events.
   GtkWidget* going_to_focus_;
 
-  GtkSignalRegistrar signals_;
+  ui::GtkSignalRegistrar signals_;
+
+#if defined(TOOLKIT_VIEWS)
+  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditViewGtk);
 };

@@ -10,19 +10,21 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
-#endif
+#endif  // defined(OS_WIN)
 
 #include "base/basictypes.h"
-#if defined(USE_X11) || defined(OS_MACOSX)
-#include "base/file_path.h"
-#endif
 #include "base/logging.h"
-#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
+#include "base/threading/non_thread_safe.h"
 #include "gfx/native_widget_types.h"
+
+#if defined(OS_POSIX)
+#include "base/file_path.h"
+#endif  // defined(OS_POSIX)
+
 #if defined(USE_X11)
 #include "base/scoped_temp_dir.h"
-#endif
+#endif  // defined(USE_X11)
 
 class CommandLine;
 class FilePath;
@@ -38,7 +40,7 @@ class FilePath;
 // - the Windows implementation uses an invisible global message window;
 // - the Linux implementation uses a Unix domain socket in the user data dir.
 
-class ProcessSingleton : public NonThreadSafe {
+class ProcessSingleton : public base::NonThreadSafe {
  public:
   enum NotifyResult {
     PROCESS_NONE,
@@ -65,7 +67,7 @@ class ProcessSingleton : public NonThreadSafe {
   // instance.
   NotifyResult NotifyOtherProcessOrCreate();
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_LINUX)
   // Exposed for testing.  We use a timeout on Linux, and in tests we want
   // this timeout to be short.
   NotifyResult NotifyOtherProcessWithTimeout(const CommandLine& command_line,
@@ -74,7 +76,7 @@ class ProcessSingleton : public NonThreadSafe {
   NotifyResult NotifyOtherProcessWithTimeoutOrCreate(
       const CommandLine& command_line,
       int timeout_seconds);
-#endif
+#endif  // defined(OS_LINUX)
 
   // Sets ourself up as the singleton instance.  Returns true on success.  If
   // false is returned, we are not the singleton instance and the caller must

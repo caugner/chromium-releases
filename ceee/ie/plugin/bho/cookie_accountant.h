@@ -13,8 +13,8 @@
 #include <string>
 
 #include "app/win/iat_patch_function.h"
-#include "base/lock.h"
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "ceee/ie/plugin/bho/cookie_events_funnel.h"
 #include "net/base/cookie_monster.h"
@@ -26,7 +26,7 @@
 class CookieAccountant {
  public:
   // Patch cookie-related functions to observe IE session cookies.
-  void PatchWininetFunctions();
+  void Initialize();
 
   // Record Set-Cookie changes coming from the HTTP response headers.
   void RecordHttpResponseCookies(
@@ -54,10 +54,9 @@ class CookieAccountant {
   // queue the events sent to the broker. They don't need to be sent to the BHO
   // because they don't need tab_id anyway.
   CookieAccountant()
-      : cookie_events_funnel_(&broker_rpc_client_),
-        patching_wininet_functions_(false) {
-    HRESULT hr = broker_rpc_client_.Connect(true);
-    DCHECK(SUCCEEDED(hr));
+      : broker_rpc_client_(true),
+        cookie_events_funnel_(&broker_rpc_client_),
+        initializing_(false) {
   }
 
   virtual ~CookieAccountant();
@@ -73,6 +72,9 @@ class CookieAccountant {
     return cookie_events_funnel_;
   }
 
+  // Connects to broker.
+  virtual void ConnectBroker();
+
   // Function patches that allow us to intercept scripted cookie changes.
   app::win::IATPatchFunction internet_set_cookie_ex_a_patch_;
   app::win::IATPatchFunction internet_set_cookie_ex_w_patch_;
@@ -81,10 +83,10 @@ class CookieAccountant {
   // We use this boolean instead of a simple lock so that threads that lose
   // the race will return immediately instead of blocking on the lock.
   // Protected by CookieAccountant::lock_.
-  bool patching_wininet_functions_;
+  bool initializing_;
 
   // A lock that protects access to the function patches.
-  Lock lock_;
+  base::Lock lock_;
 
   // Cached singleton instance. Useful for unit testing.
   static CookieAccountant* singleton_instance_;
@@ -124,8 +126,10 @@ class CookieAccountant {
 // A singleton that initializes and keeps the CookieAccountant used by
 // production code. This class is separate so that CookieAccountant can still
 // be accessed for unit testing.
-class ProductionCookieAccountant : public CookieAccountant,
-    public Singleton<ProductionCookieAccountant> {
+class ProductionCookieAccountant : public CookieAccountant {
+ public:
+  static ProductionCookieAccountant* GetInstance();
+
  private:
   // This ensures no construction is possible outside of the class itself.
   friend struct DefaultSingletonTraits<ProductionCookieAccountant>;

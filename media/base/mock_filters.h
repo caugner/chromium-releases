@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -15,9 +15,8 @@
 
 #include <string>
 
-#include "base/callback.h"
 #include "media/base/filters.h"
-#include "media/base/media_filter_collection.h"
+#include "media/base/filter_collection.h"
 #include "media/base/video_frame.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -44,57 +43,31 @@ class Destroyable : public MockClass {
   DISALLOW_COPY_AND_ASSIGN(Destroyable);
 };
 
-// Helper class used to test that callbacks are executed.  It is recommend you
-// combine this class with StrictMock<> to verify that the callback is executed.
-// You can reuse the same instance of a MockFilterCallback many times since
-// gmock will track the number of times the methods are executed.
-class MockFilterCallback {
+class MockFilter : public Filter {
  public:
-  MockFilterCallback() {}
-  virtual ~MockFilterCallback() {}
+  MockFilter();
 
-  MOCK_METHOD0(OnCallbackDestroyed, void());
-  MOCK_METHOD0(OnFilterCallback, void());
+  // Filter implementation.
+  MOCK_METHOD1(Play, void(FilterCallback* callback));
+  MOCK_METHOD1(Pause, void(FilterCallback* callback));
+  MOCK_METHOD1(Flush, void(FilterCallback* callback));
+  MOCK_METHOD1(Stop, void(FilterCallback* callback));
+  MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
+  MOCK_METHOD2(Seek, void(base::TimeDelta time, FilterCallback* callback));
+  MOCK_METHOD0(OnAudioRendererDisabled, void());
 
-  // Helper method to create a new callback for this mock.  The callback will
-  // call OnFilterCallback() when executed and OnCallbackDestroyed() when
-  // destroyed.  Clients should use NiceMock<> or StrictMock<> depending on the
-  // test.
-  FilterCallback* NewCallback() {
-    return new CallbackImpl(this);
-  }
+ protected:
+  virtual ~MockFilter();
 
  private:
-  // Private implementation of CallbackRunner used to trigger expectations on
-  // MockFilterCallback.
-  class CallbackImpl : public CallbackRunner<Tuple0> {
-   public:
-    explicit CallbackImpl(MockFilterCallback* mock_callback)
-        : mock_callback_(mock_callback) {
-    }
-
-    virtual ~CallbackImpl() {
-      mock_callback_->OnCallbackDestroyed();
-    }
-
-    virtual void RunWithParams(const Tuple0& params) {
-      mock_callback_->OnFilterCallback();
-    }
-
-   private:
-    MockFilterCallback* mock_callback_;
-
-    DISALLOW_COPY_AND_ASSIGN(CallbackImpl);
-  };
-
-  DISALLOW_COPY_AND_ASSIGN(MockFilterCallback);
+  DISALLOW_COPY_AND_ASSIGN(MockFilter);
 };
 
 class MockDataSource : public DataSource {
  public:
-  MockDataSource() {}
+  MockDataSource();
 
-  // MediaFilter implementation.
+  // Filter implementation.
   MOCK_METHOD1(Stop, void(FilterCallback* callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, FilterCallback* callback));
@@ -111,7 +84,7 @@ class MockDataSource : public DataSource {
   MOCK_METHOD0(IsStreaming, bool());
 
  protected:
-  virtual ~MockDataSource() {}
+  virtual ~MockDataSource();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDataSource);
@@ -119,9 +92,9 @@ class MockDataSource : public DataSource {
 
 class MockDemuxer : public Demuxer {
  public:
-  MockDemuxer() {}
+  MockDemuxer();
 
-  // MediaFilter implementation.
+  // Filter implementation.
   MOCK_METHOD1(Stop, void(FilterCallback* callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, FilterCallback* callback));
@@ -134,7 +107,7 @@ class MockDemuxer : public Demuxer {
   MOCK_METHOD1(GetStream, scoped_refptr<DemuxerStream>(int stream_id));
 
  protected:
-  virtual ~MockDemuxer() {}
+  virtual ~MockDemuxer();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDemuxer);
@@ -142,7 +115,7 @@ class MockDemuxer : public Demuxer {
 
 class MockDemuxerStream : public DemuxerStream {
  public:
-  MockDemuxerStream() {}
+  MockDemuxerStream();
 
   // DemuxerStream implementation.
   MOCK_METHOD0(media_format, const MediaFormat&());
@@ -151,7 +124,7 @@ class MockDemuxerStream : public DemuxerStream {
   MOCK_METHOD0(EnableBitstreamConverter, void());
 
  protected:
-  virtual ~MockDemuxerStream() {}
+  virtual ~MockDemuxerStream();
 
  private:
   MediaFormat media_format_;
@@ -161,9 +134,9 @@ class MockDemuxerStream : public DemuxerStream {
 
 class MockVideoDecoder : public VideoDecoder {
  public:
-  MockVideoDecoder() {}
+  MockVideoDecoder();
 
-  // MediaFilter implementation.
+  // Filter implementation.
   MOCK_METHOD1(Stop, void(FilterCallback* callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, FilterCallback* callback));
@@ -182,7 +155,7 @@ class MockVideoDecoder : public VideoDecoder {
   }
 
  protected:
-  virtual ~MockVideoDecoder() {}
+  virtual ~MockVideoDecoder();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoDecoder);
@@ -190,9 +163,9 @@ class MockVideoDecoder : public VideoDecoder {
 
 class MockAudioDecoder : public AudioDecoder {
  public:
-  MockAudioDecoder() {}
+  MockAudioDecoder();
 
-  // MediaFilter implementation.
+  // Filter implementation.
   MOCK_METHOD1(Stop, void(FilterCallback* callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, FilterCallback* callback));
@@ -210,7 +183,7 @@ class MockAudioDecoder : public AudioDecoder {
   }
 
  protected:
-  virtual ~MockAudioDecoder() {}
+  virtual ~MockAudioDecoder();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioDecoder);
@@ -218,9 +191,9 @@ class MockAudioDecoder : public AudioDecoder {
 
 class MockVideoRenderer : public VideoRenderer {
  public:
-  MockVideoRenderer() {}
+  MockVideoRenderer();
 
-  // MediaFilter implementation.
+  // Filter implementation.
   MOCK_METHOD1(Stop, void(FilterCallback* callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, FilterCallback* callback));
@@ -233,7 +206,7 @@ class MockVideoRenderer : public VideoRenderer {
   MOCK_METHOD1(ConsumeVideoFrame, void(scoped_refptr<VideoFrame> frame));
 
  protected:
-  virtual ~MockVideoRenderer() {}
+  virtual ~MockVideoRenderer();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoRenderer);
@@ -241,9 +214,9 @@ class MockVideoRenderer : public VideoRenderer {
 
 class MockAudioRenderer : public AudioRenderer {
  public:
-  MockAudioRenderer() {}
+  MockAudioRenderer();
 
-  // MediaFilter implementation.
+  // Filter implementation.
   MOCK_METHOD1(Stop, void(FilterCallback* callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, FilterCallback* callback));
@@ -256,7 +229,7 @@ class MockAudioRenderer : public AudioRenderer {
   MOCK_METHOD1(SetVolume, void(float volume));
 
  protected:
-  virtual ~MockAudioRenderer() {}
+  virtual ~MockAudioRenderer();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioRenderer);
@@ -266,16 +239,8 @@ class MockAudioRenderer : public AudioRenderer {
 // expectations on the filters and then pass the collection into a pipeline.
 class MockFilterCollection {
  public:
-  MockFilterCollection()
-      : data_source_(new MockDataSource()),
-        demuxer_(new MockDemuxer()),
-        video_decoder_(new MockVideoDecoder()),
-        audio_decoder_(new MockAudioDecoder()),
-        video_renderer_(new MockVideoRenderer()),
-        audio_renderer_(new MockAudioRenderer()) {
-  }
-
-  virtual ~MockFilterCollection() {}
+  MockFilterCollection();
+  virtual ~MockFilterCollection();
 
   // Mock accessors.
   MockDataSource* data_source() const { return data_source_; }
@@ -285,23 +250,11 @@ class MockFilterCollection {
   MockVideoRenderer* video_renderer() const { return video_renderer_; }
   MockAudioRenderer* audio_renderer() const { return audio_renderer_; }
 
-  MediaFilterCollection* filter_collection() const {
+  FilterCollection* filter_collection() const {
     return filter_collection(true);
   }
 
-  MediaFilterCollection* filter_collection(bool include_data_source) const {
-    MediaFilterCollection* collection = new MediaFilterCollection();
-
-    if (include_data_source) {
-      collection->AddDataSource(data_source_);
-    }
-    collection->AddDemuxer(demuxer_);
-    collection->AddVideoDecoder(video_decoder_);
-    collection->AddAudioDecoder(audio_decoder_);
-    collection->AddVideoRenderer(video_renderer_);
-    collection->AddAudioRenderer(audio_renderer_);
-    return collection;
-  }
+  FilterCollection* filter_collection(bool include_data_source) const;
 
  private:
   scoped_refptr<MockDataSource> data_source_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -27,7 +27,8 @@ struct DownloadCreateInfo {
                      int64 received_bytes,
                      int64 total_bytes,
                      int32 state,
-                     int32 download_id);
+                     int32 download_id,
+                     bool has_user_gesture);
   DownloadCreateInfo();
   ~DownloadCreateInfo();
 
@@ -35,7 +36,11 @@ struct DownloadCreateInfo {
 
   // DownloadItem fields
   FilePath path;
+  // The URL from which we are downloading. This is the final URL after any
+  // redirection by the server for |original_url_|.
   GURL url;
+  // The original URL before any redirection by the server for this URL.
+  GURL original_url;
   GURL referrer_url;
   FilePath suggested_path;
   // A number that should be added to the suggested path to make it unique.
@@ -46,6 +51,7 @@ struct DownloadCreateInfo {
   int64 total_bytes;
   int32 state;
   int32 download_id;
+  bool has_user_gesture;
   int child_id;
   int render_view_id;
   int request_id;

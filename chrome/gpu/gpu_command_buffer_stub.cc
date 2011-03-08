@@ -11,12 +11,13 @@
 #include "chrome/common/gpu_messages.h"
 #include "chrome/gpu/gpu_channel.h"
 #include "chrome/gpu/gpu_command_buffer_stub.h"
+#include "chrome/gpu/gpu_thread.h"
 
 using gpu::Buffer;
 
 #if defined(OS_WIN)
 #define kCompositorWindowOwner L"CompositorWindowOwner"
-#endif
+#endif  // defined(OS_WIN)
 
 GpuCommandBufferStub::GpuCommandBufferStub(
     GpuChannel* channel,
@@ -38,6 +39,9 @@ GpuCommandBufferStub::GpuCommandBufferStub(
       requested_attribs_(attribs),
       parent_texture_id_(parent_texture_id),
       route_id_(route_id),
+#if defined(OS_WIN)
+      compositor_window_(NULL),
+#endif  // defined(OS_WIN)
       renderer_id_(renderer_id),
       render_view_id_(render_view_id) {
 }
@@ -78,7 +82,7 @@ bool GpuCommandBufferStub::CreateCompositorWindow() {
   DCHECK(handle_ != gfx::kNullPluginWindow);
 
   // Ask the browser to create the the host window.
-  ChildThread* gpu_thread = ChildThread::current();
+  GpuThread* gpu_thread = channel_->gpu_thread();
   gfx::PluginWindowHandle host_window_id = gfx::kNullPluginWindow;
   gpu_thread->Send(new GpuHostMsg_GetCompositorHostWindow(
       renderer_id_,
@@ -143,7 +147,7 @@ bool GpuCommandBufferStub::CreateCompositorWindow() {
 }
 
 void GpuCommandBufferStub::OnCompositorWindowPainted() {
-  ChildThread* gpu_thread = ChildThread::current();
+  GpuThread* gpu_thread = channel_->gpu_thread();
   gpu_thread->Send(new GpuHostMsg_ScheduleComposite(
       renderer_id_, render_view_id_));
 }
@@ -160,13 +164,14 @@ GpuCommandBufferStub::~GpuCommandBufferStub() {
     compositor_window_ = NULL;
   }
 #elif defined(OS_LINUX)
-  ChildThread* gpu_thread = ChildThread::current();
+  GpuThread* gpu_thread = channel_->gpu_thread();
   gpu_thread->Send(
       new GpuHostMsg_ReleaseXID(handle_));
-#endif
+#endif  // defined(OS_WIN)
 }
 
-void GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
+bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(GpuCommandBufferStub, message)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_Initialize, OnInitialize);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_GetState, OnGetState);
@@ -183,9 +188,11 @@ void GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
                         OnResizeOffscreenFrameBuffer);
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SetWindowSize, OnSetWindowSize);
-#endif
-    IPC_MESSAGE_UNHANDLED_ERROR()
+#endif  // defined(OS_MACOSX)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  DCHECK(handled);
+  return handled;
 }
 
 bool GpuCommandBufferStub::Send(IPC::Message* message) {
@@ -214,7 +221,7 @@ void GpuCommandBufferStub::OnInitialize(
   }
 #else
   gfx::PluginWindowHandle output_window_handle = handle_;
-#endif
+#endif  // defined(OS_WIN)
 
   // Initialize the CommandBufferService and GPUProcessor.
   if (command_buffer_->Initialize(size)) {
@@ -258,7 +265,7 @@ void GpuCommandBufferStub::OnInitialize(
               NewCallback(this,
                           &GpuCommandBufferStub::ResizeCallback));
         }
-#endif
+#endif  // defined(OS_MACOSX)
       } else {
         processor_.reset();
         command_buffer_.reset();
@@ -283,11 +290,11 @@ void GpuCommandBufferStub::OnFlush(int32 put_offset,
   if (channel_->IsRenderViewGone(render_view_id_))
     processor_->DidDestroySurface();
 #endif
-  *state = command_buffer_->Flush(put_offset);
+  *state = command_buffer_->FlushSync(put_offset);
 }
 
 void GpuCommandBufferStub::OnAsyncFlush(int32 put_offset) {
-  gpu::CommandBuffer::State state = command_buffer_->Flush(put_offset);
+  gpu::CommandBuffer::State state = command_buffer_->FlushSync(put_offset);
   Send(new GpuCommandBufferMsg_UpdateState(route_id_, state));
 }
 
@@ -326,7 +333,7 @@ void GpuCommandBufferStub::OnSwapBuffers() {
 
 #if defined(OS_MACOSX)
 void GpuCommandBufferStub::OnSetWindowSize(const gfx::Size& size) {
-  ChildThread* gpu_thread = ChildThread::current();
+  GpuThread* gpu_thread = channel_->gpu_thread();
   // Try using the IOSurface version first.
   uint64 new_backing_store = processor_->SetWindowSizeForIOSurface(size);
   if (new_backing_store) {
@@ -348,7 +355,7 @@ void GpuCommandBufferStub::OnSetWindowSize(const gfx::Size& size) {
 
 void GpuCommandBufferStub::SwapBuffersCallback() {
   OnSwapBuffers();
-  ChildThread* gpu_thread = ChildThread::current();
+  GpuThread* gpu_thread = channel_->gpu_thread();
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
   params.renderer_id = renderer_id_;
   params.render_view_id = render_view_id_;
@@ -372,7 +379,7 @@ void GpuCommandBufferStub::ResizeCallback(gfx::Size size) {
     return;
 
 #if defined(OS_LINUX)
-  ChildThread* gpu_thread = ChildThread::current();
+  GpuThread* gpu_thread = channel_->gpu_thread();
   bool result = false;
   gpu_thread->Send(
       new GpuHostMsg_ResizeXID(handle_, size, &result));
@@ -381,7 +388,7 @@ void GpuCommandBufferStub::ResizeCallback(gfx::Size size) {
   UINT swp_flags = SWP_NOSENDCHANGING | SWP_NOOWNERZORDER | SWP_NOCOPYBITS |
     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE;
   SetWindowPos(hwnd, NULL, 0, 0, size.width(), size.height(), swp_flags);
-#endif
+#endif  // defined(OS_LINUX)
 }
 
-#endif  // ENABLE_GPU
+#endif  // defined(ENABLE_GPU)

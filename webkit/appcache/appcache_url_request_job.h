@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/task.h"
 #include "net/http/http_byte_range.h"
 #include "net/url_request/url_request_job.h"
 #include "webkit/appcache/appcache_entry.h"
@@ -15,13 +16,12 @@
 
 namespace appcache {
 
-// A URLRequestJob derivative that knows how to return a response stored
+// A net::URLRequestJob derivative that knows how to return a response stored
 // in the appcache.
 class AppCacheURLRequestJob : public net::URLRequestJob,
                               public AppCacheStorage::Delegate {
  public:
-  explicit AppCacheURLRequestJob(net::URLRequest* request,
-                                 AppCacheStorage* storage);
+  AppCacheURLRequestJob(net::URLRequest* request, AppCacheStorage* storage);
   virtual ~AppCacheURLRequestJob();
 
   // Informs the job of what response it should deliver. Only one of these
@@ -55,7 +55,7 @@ class AppCacheURLRequestJob : public net::URLRequestJob,
   int64 cache_id() { return cache_id_; }
   const AppCacheEntry& entry() { return entry_; }
 
-  // URLRequestJob's Kill method is made public so the users of this
+  // net::URLRequestJob's Kill method is made public so the users of this
   // class in the appcache namespace can call it.
   virtual void Kill();
 
@@ -104,7 +104,7 @@ class AppCacheURLRequestJob : public net::URLRequestJob,
   // AppCacheResponseReader completion callback
   void OnReadComplete(int result);
 
-  // URLRequestJob methods, see url_request_job.h for doc comments
+  // net::URLRequestJob methods, see url_request_job.h for doc comments
   virtual void Start();
   virtual net::LoadState GetLoadState() const;
   virtual bool GetCharset(std::string* charset);
@@ -125,9 +125,7 @@ class AppCacheURLRequestJob : public net::URLRequestJob,
   // FilterContext methods
   virtual bool GetMimeType(std::string* mime_type) const;
   virtual int GetResponseCode() const;
-  virtual bool IsCachedContent() const {
-    return is_delivering_appcache_response();
-  }
+  virtual bool IsCachedContent() const;
 
   AppCacheStorage* storage_;
   bool has_been_started_;
@@ -143,9 +141,9 @@ class AppCacheURLRequestJob : public net::URLRequestJob,
   scoped_ptr<net::HttpResponseInfo> range_response_info_;
   scoped_ptr<AppCacheResponseReader> reader_;
   net::CompletionCallbackImpl<AppCacheURLRequestJob> read_callback_;
+  ScopedRunnableMethodFactory<AppCacheURLRequestJob> method_factory_;
 };
 
 }  // namespace appcache
 
 #endif  // WEBKIT_APPCACHE_APPCACHE_REQUEST_HANDLER_H_
-

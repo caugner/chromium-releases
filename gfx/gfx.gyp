@@ -1,12 +1,13 @@
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
   'variables': {
     'chromium_code': 1,
-    'grit_info_cmd': ['python', '../tools/grit/grit_info.py'],
-    'grit_cmd': ['python', '../tools/grit/grit.py'],    
+    'grit_info_cmd': ['python', '../tools/grit/grit_info.py',
+                      '<@(grit_defines)'],
+    'grit_cmd': ['python', '../tools/grit/grit.py'],
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/gfx',
   },
   'targets': [
@@ -32,6 +33,7 @@
         'run_all_unittests.cc',
         'scoped_image_unittest.cc',
         'skbitmap_operations_unittest.cc',
+        'test_suite.cc',
         'test_suite.h',
         '<(SHARED_INTERMEDIATE_DIR)/gfx/gfx_resources.rc',
       ],
@@ -41,6 +43,7 @@
       'conditions': [
         ['OS=="win"', {
           'sources': [
+            # TODO(brettw) re-enable this when the dependencies on WindowImpl are fixed!
             'canvas_direct2d_unittest.cc',
             'icon_util_unittest.cc',
             'native_theme_win_unittest.cc',
@@ -79,15 +82,16 @@
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
-        '../third_party/libjpeg/libjpeg.gyp:libjpeg',
         '../third_party/libpng/libpng.gyp:libpng',
         '../third_party/zlib/zlib.gyp:zlib',
         'gfx_resources',
+        '<(libjpeg_gyp_path):libjpeg',
       ],
       'sources': [
         'blit.cc',
         'blit.h',
         'brush.h',
+        'canvas.cc',
         'canvas.h',
         'canvas_skia.h',
         'canvas_skia.cc',
@@ -106,6 +110,8 @@
         'font.cc',
         'gfx_paths.cc',
         'gfx_paths.h',
+        'gfx_module.cc',
+        'gfx_module.h',
         'insets.cc',
         'insets.h',
         'native_widget_types.h',
@@ -124,6 +130,7 @@
         'point.h',
         'rect.cc',
         'rect.h',
+        'scoped_cg_context_state_mac.h',
         'scoped_image.h',
         'scrollbar_size.cc',
         'scrollbar_size.h',
@@ -147,15 +154,13 @@
             'icon_util.h',
             'native_theme_win.cc',
             'native_theme_win.h',
-            'window_impl.cc',
-            'window_impl.h',
             'win_util.cc',
             'win_util.h',
           ],
           'include_dirs': [
             '..',
             '<(DEPTH)/third_party/wtl/include',
-          ],          
+          ],
         }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'dependencies': [
@@ -199,11 +204,7 @@
             '<@(grit_cmd)',
             '-i', '<(input_path)', 'build',
             '-o', '<(grit_out_dir)',
-          ],
-          'conditions': [
-            ['use_titlecase_in_grd_files==1', {
-              'action': ['-D', 'use_titlecase'],
-            }],
+            '<@(grit_defines)',
           ],
           'message': 'Generating resources from <(input_path)',
         },
@@ -219,7 +220,7 @@
         }],
       ],
     },
-    
+
   ],
 }
 
