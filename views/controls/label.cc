@@ -12,12 +12,12 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/color_utils.h"
-#include "gfx/font.h"
-#include "gfx/insets.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/insets.h"
 #include "views/background.h"
 
 namespace views {
@@ -73,13 +73,16 @@ int Label::GetHeightForWidth(int w) {
   return h + GetInsets().height();
 }
 
-void Label::DidChangeBounds(const gfx::Rect& previous,
-                            const gfx::Rect& current) {
+void Label::OnBoundsChanged() {
   text_size_valid_ &= !is_multi_line_;
 }
 
-void Label::Paint(gfx::Canvas* canvas) {
-  PaintBackground(canvas);
+std::string Label::GetClassName() const {
+  return kViewClassName;
+}
+
+void Label::OnPaint(gfx::Canvas* canvas) {
+  OnPaintBackground(canvas);
 
   std::wstring paint_text;
   gfx::Rect text_bounds;
@@ -88,7 +91,7 @@ void Label::Paint(gfx::Canvas* canvas) {
   PaintText(canvas, paint_text, text_bounds, flags);
 }
 
-void Label::PaintBackground(gfx::Canvas* canvas) {
+void Label::OnPaintBackground(gfx::Canvas* canvas) {
   const Background* bg = contains_mouse_ ? GetMouseOverBackground() : NULL;
   if (!bg)
     bg = background();
@@ -127,6 +130,14 @@ void Label::SetURL(const GURL& url) {
 
 const GURL Label::GetURL() const {
   return url_set_ ? url_ : GURL(UTF16ToUTF8(text_));
+}
+
+void Label::SetColor(const SkColor& color) {
+  color_ = color;
+}
+
+SkColor Label::GetColor() const {
+  return color_;
 }
 
 void Label::SetHorizontalAlignment(Alignment alignment) {
@@ -428,7 +439,7 @@ void Label::CalculateDrawStringParams(std::wstring* paint_text,
     // TODO(jungshik) : Figure out how to get 'intl.accept_languages'
     // preference and use it when calling ElideUrl.
     *paint_text = UTF16ToWideHack(
-        ui::ElideUrl(url_, font_, GetAvailableRect().width(), std::wstring()));
+        ui::ElideUrl(url_, font_, GetAvailableRect().width(), std::string()));
 
     // An URLs is always treated as an LTR text and therefore we should
     // explicitly mark it as such if the locale is RTL so that URLs containing

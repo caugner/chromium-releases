@@ -20,8 +20,6 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_options_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_provider.h"
@@ -31,18 +29,20 @@
 #include "chrome/browser/ui/gtk/notifications/balloon_view_host_gtk.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/notification_details.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_source.h"
-#include "chrome/common/notification_type.h"
-#include "gfx/canvas.h"
-#include "gfx/insets.h"
-#include "gfx/native_widget_types.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/common/notification_details.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_source.h"
+#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/insets.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace {
 
@@ -222,6 +222,8 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   html_contents_.reset(new BalloonViewHost(balloon));
   html_contents_->Init();
   gfx::NativeView contents = html_contents_->native_view();
+  g_signal_connect_after(contents, "expose-event",
+                         G_CALLBACK(OnContentsExposeThunk), this);
 
   // Divide the frame vertically into the shelf and the content area.
   GtkWidget* vbox = gtk_vbox_new(0, 0);
@@ -295,7 +297,7 @@ void BalloonViewImpl::Show(Balloon* balloon) {
                                                   0));
   gtk_widget_set_tooltip_text(options_menu_button_->widget(),
                               options_text.c_str());
-  g_signal_connect(options_menu_button_->widget(), "clicked",
+  g_signal_connect(options_menu_button_->widget(), "button-press-event",
                    G_CALLBACK(OnOptionsMenuButtonThunk), this);
   GTK_WIDGET_UNSET_FLAGS(options_menu_button_->widget(), GTK_CAN_FOCUS);
   GtkWidget* options_alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
@@ -396,6 +398,31 @@ void BalloonViewImpl::OnCloseButton(GtkWidget* widget) {
   Close(true);
 }
 
+// We draw black dots on the bottom left and right corners to fill in the
+// border. Otherwise, the border has a gap because the sharp corners of the
+// HTML view cut off the roundedness of the notification window.
+gboolean BalloonViewImpl::OnContentsExpose(GtkWidget* sender,
+                                           GdkEventExpose* event) {
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
+  gdk_cairo_rectangle(cr, &event->area);
+  cairo_clip(cr);
+
+  // According to a discussion on a mailing list I found, these degenerate
+  // paths are the officially supported way to draw points in Cairo.
+  cairo_set_source_rgb(cr, 0, 0, 0);
+  cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+  cairo_set_line_width(cr, 1.0);
+  cairo_move_to(cr, 0.5, sender->allocation.height - 0.5);
+  cairo_close_path(cr);
+  cairo_move_to(cr, sender->allocation.width - 0.5,
+                    sender->allocation.height - 0.5);
+  cairo_close_path(cr);
+  cairo_stroke(cr);
+  cairo_destroy(cr);
+
+  return FALSE;
+}
+
 gboolean BalloonViewImpl::OnExpose(GtkWidget* sender, GdkEventExpose* event) {
   cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
   gdk_cairo_rectangle(cr, &event->area);
@@ -424,16 +451,21 @@ gboolean BalloonViewImpl::OnExpose(GtkWidget* sender, GdkEventExpose* event) {
   return FALSE;
 }
 
-void BalloonViewImpl::OnOptionsMenuButton(GtkWidget* widget) {
+void BalloonViewImpl::OnOptionsMenuButton(GtkWidget* widget,
+                                          GdkEventButton* event) {
   menu_showing_ = true;
-  options_menu_->PopupAsContext(gtk_get_current_event_time());
+  options_menu_->PopupForWidget(widget, event->button, event->time);
 }
 
 // Called when the menu stops showing.
 void BalloonViewImpl::StoppedShowing() {
-  if (pending_close_)
-    DelayedClose(false);
   menu_showing_ = false;
+  if (pending_close_) {
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        method_factory_.NewRunnableMethod(
+            &BalloonViewImpl::DelayedClose, false));
+  }
 }
 
 gboolean BalloonViewImpl::OnDestroy(GtkWidget* widget) {

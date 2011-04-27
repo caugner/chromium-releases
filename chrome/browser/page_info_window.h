@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_PAGE_INFO_WINDOW_H_
 #pragma once
 
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "gfx/native_widget_types.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "ui/gfx/native_widget_types.h"
 
 class Profile;
 class GURL;

@@ -10,15 +10,14 @@
 #include <vector>
 
 #include "base/hash_tables.h"
+#include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "chrome/common/gpu_info.h"
-#include "chrome/common/message_router.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/size.h"
-#include "ipc/ipc_channel.h"
+#include "content/common/message_router.h"
 #include "ipc/ipc_channel_handle.h"
-#include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/size.h"
 
 class CommandBufferProxy;
 class GpuVideoServiceHost;
@@ -44,7 +43,8 @@ class GpuChannelHost : public IPC::Channel::Listener,
   ~GpuChannelHost();
 
   // Connect to GPU process channel.
-  void Connect(const IPC::ChannelHandle& channel_handle);
+  void Connect(const IPC::ChannelHandle& channel_handle,
+               base::ProcessHandle renderer_process_for_gpu);
 
   State state() const { return state_; }
 
@@ -65,7 +65,6 @@ class GpuChannelHost : public IPC::Channel::Listener,
 
   // Create and connect to a command buffer in the GPU process.
   CommandBufferProxy* CreateViewCommandBuffer(
-      gfx::NativeViewId view,
       int render_view_id,
       const std::string& allowed_extensions,
       const std::vector<int32>& attribs);

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/blocked_content_container.h"
 
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "gfx/rect.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "ui/gfx/rect.h"
 
 // static
 const size_t BlockedContentContainer::kImpossibleNumberOfPopups = 30;

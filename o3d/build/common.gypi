@@ -6,6 +6,7 @@
   'variables': {
     'antlrdir': 'third_party/antlr3',
     'breakpaddir': 'breakpad/src',
+    'cairodir': 'third_party/cairo',
     'fcolladadir': 'third_party/fcollada/files',
     'glewdir': 'third_party/glew/files',
     'gtestdir': 'testing/gtest/include',
@@ -15,12 +16,16 @@
     'nixysadir': 'o3d/third_party/nixysa',
     'npapidir': 'o3d/third_party/npapi',
     'pdiffdir': 'third_party/pdiff/files',
+    'pixmandir': 'third_party/pixman',
+    'pkgconfigdir': 'third_party/pkg-config',
     'pngdir': 'third_party/libpng',
     'screenshotsdir': 'o3d_assets/tests/screenshots',
     'seleniumdir': 'third_party/selenium_rc/files',
     'skiadir': 'third_party/skia/include',
     'txcdir': 'third_party/libtxc_dxtn/files',
     'zlibdir': 'third_party/zlib',
+    
+    'pkgconfigroot': '<(SHARED_INTERMEDIATE_DIR)/pkgconfigroot',
 
     # Hack to ensure that these variables (specifically "renderer") are
     # available later in the file. Long term solution is late
@@ -109,13 +114,6 @@
           ],
         },
       ],
-      ['renderer == "cairo"',
-        {
-          'defines': [
-            'RENDERER_CAIRO',
-          ],
-        },
-      ],
       ['renderer == "gles2"',
         {
           'defines': [
@@ -180,6 +178,22 @@
     ],
     ['OS == "mac"',
       {
+        'conditions': [
+          ['target_arch == "ia32"',
+            {
+              'variables': {
+                'mac_gcc_arch': 'i386',
+              },
+            }
+          ],
+          ['target_arch == "x64"',
+            {
+              'variables': {
+                'mac_gcc_arch': 'x86_64',
+              },
+            }
+          ],  
+        ], 
         'target_defaults': {
           'defines': [
             'OS_MACOSX',

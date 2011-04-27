@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@ class Throbber;
 class Window;
 }
 
-class AccessibleViewHelper;
 class Profile;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -52,7 +51,7 @@ class AboutChromeView : public views::View,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
                                     views::View* child);
@@ -164,8 +163,6 @@ class AboutChromeView : public views::View,
   // Used to request the version.
   CancelableRequestConsumer consumer_;
 #endif
-
-  scoped_ptr<AccessibleViewHelper> accessible_view_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(AboutChromeView);
 };

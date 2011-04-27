@@ -58,7 +58,7 @@ class RenderThread;
 class RenderView;
 class SandboxInitWrapper;
 struct MainFunctionParams;
-struct ViewHostMsg_Resource_Request;
+struct ResourceHostMsg_Request;
 
 namespace WebKit {
 class WebFrame;
@@ -94,6 +94,9 @@ class RenderViewFakeResourcesTest : public ::testing::Test,
   // not supported.
   void LoadURLWithPost(const std::string& url);
 
+  // Navigates the main frame back in session history.
+  void GoBack();
+
   // Returns the main WebFrame for our RenderView.
   WebKit::WebFrame* GetMainFrame();
 
@@ -108,7 +111,7 @@ class RenderViewFakeResourcesTest : public ::testing::Test,
   // and the supplied content, otherwise we send it a 404 error.
   void OnRequestResource(const IPC::Message& message,
                          int request_id,
-                         const ViewHostMsg_Resource_Request& request_data);
+                         const ResourceHostMsg_Request& request_data);
 
   // Notification that the render view we've created is ready to use.
   void OnRenderViewReady();

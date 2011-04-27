@@ -8,11 +8,14 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/scoped_ptr.h"
 #include "base/string16.h"
+#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/win_util.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 
 namespace {
@@ -25,6 +28,22 @@ string16 GetServiceProcessReadyEventName() {
 string16 GetServiceProcessShutdownEventName() {
   return UTF8ToWide(
       GetServiceProcessScopedVersionedName("_service_shutdown_evt"));
+}
+
+std::string GetServiceProcessAutoRunKey() {
+  return GetServiceProcessScopedName("_service_run");
+}
+
+// Returns the name of the autotun reg value that we used to use for older
+// versions of Chrome.
+std::string GetObsoleteServiceProcessAutoRunKey() {
+  FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  std::string scoped_name = WideToUTF8(user_data_dir.value());
+  std::replace(scoped_name.begin(), scoped_name.end(), '\\', '!');
+  std::replace(scoped_name.begin(), scoped_name.end(), '/', '!');
+  scoped_name.append("_service_run");
+  return scoped_name;
 }
 
 class ServiceProcessShutdownMonitor
@@ -54,7 +73,8 @@ class ServiceProcessShutdownMonitor
 
 }  // namespace
 
-bool ForceServiceProcessShutdown(const std::string& version) {
+bool ForceServiceProcessShutdown(const std::string& version,
+                                 base::ProcessId process_id) {
   base::win::ScopedHandle shutdown_event;
   std::string versioned_name = version;
   versioned_name.append("_service_shutdown_evt");
@@ -83,8 +103,14 @@ struct ServiceProcessState::StateData {
   scoped_ptr<ServiceProcessShutdownMonitor> shutdown_monitor;
 };
 
-bool ServiceProcessState::TakeSingletonLock() {
+bool ServiceProcessState::InitializeState() {
   DCHECK(!state_);
+  state_ = new StateData;
+  return true;
+}
+
+bool ServiceProcessState::TakeSingletonLock() {
+  DCHECK(state_);
   string16 event_name = GetServiceProcessReadyEventName();
   CHECK(event_name.length() <= MAX_PATH);
   base::win::ScopedHandle service_process_ready_event;
@@ -94,53 +120,47 @@ bool ServiceProcessState::TakeSingletonLock() {
   if ((error == ERROR_ALREADY_EXISTS) || (error == ERROR_ACCESS_DENIED))
     return false;
   DCHECK(service_process_ready_event.IsValid());
-  state_ = new StateData;
   state_->ready_event.Set(service_process_ready_event.Take());
   return true;
 }
 
-void ServiceProcessState::SignalReady(Task* shutdown_task) {
+bool ServiceProcessState::SignalReady(
+    base::MessageLoopProxy* message_loop_proxy, Task* shutdown_task) {
   DCHECK(state_);
   DCHECK(state_->ready_event.IsValid());
-  SetEvent(state_->ready_event.Get());
+  if (!SetEvent(state_->ready_event.Get())) {
+    return false;
+  }
   if (shutdown_task) {
     state_->shutdown_monitor.reset(
         new ServiceProcessShutdownMonitor(shutdown_task));
     state_->shutdown_monitor->Start();
   }
-}
-
-void ServiceProcessState::SignalStopped() {
-  TearDownState();
-  shared_mem_service_data_.reset();
+  return true;
 }
 
 bool ServiceProcessState::AddToAutoRun() {
-  FilePath chrome_path;
-  if (PathService::Get(base::FILE_EXE, &chrome_path)) {
-    CommandLine cmd_line(chrome_path);
-    cmd_line.AppendSwitchASCII(switches::kProcessType,
-                               switches::kServiceProcess);
-    // We need a unique name for the command per user-date-dir. Just use the
-    // channel name.
-    return base::win::AddCommandToAutoRun(
-        HKEY_CURRENT_USER,
-        UTF8ToWide(GetAutoRunKey()),
-        cmd_line.command_line_string());
-  }
-  return false;
+  DCHECK(autorun_command_line_.get());
+  // Remove the old autorun value first because we changed the naming scheme
+  // for the autorun value name.
+  base::win::RemoveCommandFromAutoRun(
+      HKEY_CURRENT_USER, UTF8ToWide(GetObsoleteServiceProcessAutoRunKey()));
+  return base::win::AddCommandToAutoRun(
+      HKEY_CURRENT_USER,
+      UTF8ToWide(GetServiceProcessAutoRunKey()),
+      autorun_command_line_->command_line_string());
 }
 
 bool ServiceProcessState::RemoveFromAutoRun() {
+  // Remove the old autorun value first because we changed the naming scheme
+  // for the autorun value name.
+  base::win::RemoveCommandFromAutoRun(
+      HKEY_CURRENT_USER, UTF8ToWide(GetObsoleteServiceProcessAutoRunKey()));
   return base::win::RemoveCommandFromAutoRun(
-      HKEY_CURRENT_USER, UTF8ToWide(GetAutoRunKey()));
+      HKEY_CURRENT_USER, UTF8ToWide(GetServiceProcessAutoRunKey()));
 }
 
 void ServiceProcessState::TearDownState() {
   delete state_;
   state_ = NULL;
-}
-
-bool ServiceProcessState::ShouldHandleOtherVersion() {
-  return true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/command_line.h"
 #include "base/scoped_vector.h"
+#include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "media/base/video_frame.h"
@@ -21,16 +22,14 @@ using base::TimeDelta;
 using base::TimeTicks;
 using media::VideoFrame;
 
-namespace {
+static int source_width = 1280;
+static int source_height = 720;
+static int dest_width = 1366;
+static int dest_height = 768;
+static int num_frames = 500;
+static int num_buffers = 50;
 
-int source_width = 1280;
-int source_height = 720;
-int dest_width = 1366;
-int dest_height = 768;
-int num_frames = 500;
-int num_buffers = 50;
-
-double BenchmarkSkia() {
+static double BenchmarkSkia() {
   std::vector<scoped_refptr<VideoFrame> > source_frames;
   ScopedVector<SkBitmap> dest_frames;
   for (int i = 0; i < num_buffers; i++) {
@@ -86,7 +85,35 @@ double BenchmarkSkia() {
   return static_cast<double>((end - start).InMilliseconds()) / num_frames;
 }
 
-double BenchmarkFilter(media::ScaleFilter filter) {
+static double BenchmarkRGBToYUV() {
+  int rgb_stride = source_width * 4;
+  scoped_array<uint8> rgb_frame(new uint8[rgb_stride * source_height]);
+
+  int y_stride = source_width;
+  int uv_stride = source_width / 2;
+  scoped_array<uint8> y_plane(new uint8[y_stride * source_height]);
+  scoped_array<uint8> u_plane(new uint8[uv_stride * source_height / 2]);
+  scoped_array<uint8> v_plane(new uint8[uv_stride * source_height / 2]);
+
+  TimeTicks start = TimeTicks::HighResNow();
+
+  for (int i = 0; i < num_frames; ++i) {
+    media::ConvertRGB32ToYUV(rgb_frame.get(),
+                             y_plane.get(),
+                             u_plane.get(),
+                             v_plane.get(),
+                             source_width,
+                             source_height,
+                             rgb_stride,
+                             y_stride,
+                             uv_stride);
+  }
+
+  TimeTicks end = TimeTicks::HighResNow();
+  return static_cast<double>((end - start).InMilliseconds()) / num_frames;
+}
+
+static double BenchmarkFilter(media::ScaleFilter filter) {
   std::vector<scoped_refptr<VideoFrame> > source_frames;
   std::vector<scoped_refptr<VideoFrame> > dest_frames;
 
@@ -128,8 +155,6 @@ double BenchmarkFilter(media::ScaleFilter filter) {
   TimeTicks end = TimeTicks::HighResNow();
   return static_cast<double>((end - start).InMilliseconds()) / num_frames;
 }
-
-}  // namespace
 
 int main(int argc, const char** argv) {
   CommandLine::Init(argc, argv);
@@ -197,6 +222,8 @@ int main(int argc, const char** argv) {
   std::cout << "Number of buffers: " << num_buffers << std::endl;
 
   std::cout << "Skia: " << BenchmarkSkia()
+            << "ms/frame" << std::endl;
+  std::cout << "RGB To YUV: " << BenchmarkRGBToYUV()
             << "ms/frame" << std::endl;
   std::cout << "No filtering: " << BenchmarkFilter(media::FILTER_NONE)
             << "ms/frame" << std::endl;

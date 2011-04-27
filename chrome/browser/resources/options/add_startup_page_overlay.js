@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@ cr.define('options', function() {
    * @class
    */
   function AddStartupPageOverlay() {
-    OptionsPage.call(this, 'addStartupPageOverlay',
-                     templateData.addStartupPageTitle,
+    OptionsPage.call(this, 'addStartupPage',
+                     templateData.addStartupPageTabTitle,
                      'addStartupPageOverlay');
   }
 
@@ -67,7 +67,7 @@ cr.define('options', function() {
       $('addStartupPageURL').value = '';
       $('addStartupRecentPageList').selectionModel.unselectAll();
       this.updateAddButtonState_();
-      OptionsPage.clearOverlays();
+      OptionsPage.closeOverlay();
     },
 
     /**
@@ -110,6 +110,12 @@ cr.define('options', function() {
     setInputFieldValue_: function(url) {
       $('addStartupPageURL').value = url;
       this.updateAddButtonState_();
+    },
+
+    /** @inheritDoc */
+    canShowPage: function() {
+      return BrowserOptions.getInstance().
+          shouldEnableCustomStartupPageControls();
     },
   };
 

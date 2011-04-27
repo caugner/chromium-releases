@@ -66,9 +66,8 @@ class ExistingUserControllerTest : public WizardInProcessBrowserTest {
     gfx::Rect background_bounds(login::kWizardScreenWidth,
                                 login::kWizardScreenHeight);
     ExistingUserController* controller =
-        new ExistingUserController(std::vector<UserManager::User>(),
-                                   background_bounds);
-    controller->Init();
+        new ExistingUserController(background_bounds);
+    controller->Init(UserVector());
   }
 
   ExistingUserController* existing_user_controller() {
@@ -87,14 +86,18 @@ class ExistingUserControllerTest : public WizardInProcessBrowserTest {
         .Times(1);
     EXPECT_CALL(*mock_login_library_, RetrieveProperty(_, _, _))
         .Times(AnyNumber())
-        .WillRepeatedly((Return(true)));
+        .WillRepeatedly(Return(true));
     cros_mock_->test_api()->SetLoginLibrary(mock_login_library_, true);
 
     cros_mock_->InitMockCryptohomeLibrary();
     mock_cryptohome_library_ = cros_mock_->mock_cryptohome_library();
     EXPECT_CALL(*mock_cryptohome_library_, IsMounted())
         .Times(AnyNumber())
-        .WillRepeatedly((Return(true)));
+        .WillRepeatedly(Return(true));
+    EXPECT_CALL(*mock_cryptohome_library_,
+                AsyncDoAutomaticFreeDiskSpaceControl(_))
+        .Times(1)
+        .WillOnce(Return(true));
     LoginUtils::Set(new MockLoginUtils(kUsername, kPassword));
   }
 
@@ -116,7 +119,7 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, NewUserLogin) {
       new MockLoginPerformerDelegate(existing_user_controller());
   existing_user_controller()->set_login_performer_delegate(mock_delegate);
 
-  existing_user_controller()->LoginNewUser(kUsername, kPassword);
+  existing_user_controller()->Login(kUsername, kPassword);
 }
 
 }  // namespace chromeos

@@ -38,6 +38,8 @@ class WorkItemList : public WorkItem {
   virtual void AddWorkItem(WorkItem* work_item);
 
   // Add a CopyTreeWorkItem to the list of work items.
+  // See the NOTE in the documentation for the CopyTreeWorkItem class for
+  // special considerations regarding |temp_dir|.
   virtual WorkItem* AddCopyTreeWorkItem(
       const std::wstring& source_path,
       const std::wstring& dest_path,
@@ -69,10 +71,12 @@ class WorkItemList : public WorkItem {
   // by key_path.
   virtual WorkItem* AddDeleteTreeWorkItem(
       const FilePath& root_path,
+      const FilePath& temp_path,
       const std::vector<FilePath>& key_paths);
 
   // Same as above but without support for key files.
-  virtual WorkItem* AddDeleteTreeWorkItem(const FilePath& root_path);
+  virtual WorkItem* AddDeleteTreeWorkItem(const FilePath& root_path,
+                                          const FilePath& temp_path);
 
   // Add a MoveTreeWorkItem to the list of work items.
   virtual WorkItem* AddMoveTreeWorkItem(const std::wstring& source_path,

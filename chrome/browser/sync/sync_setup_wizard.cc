@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,16 @@
 
 #include "base/message_loop.h"
 #include "base/singleton.h"
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_resources.h"
 #include "grit/browser_resources.h"
@@ -191,6 +191,12 @@ void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
     AddString(dict, "passphraseWarning", IDS_SYNC_PASSPHRASE_WARNING);
     AddString(dict, "cleardatalink", IDS_SYNC_CLEAR_DATA_LINK);
 
+    AddString(dict, "cancelWarningHeader",
+              IDS_SYNC_PASSPHRASE_CANCEL_WARNING_HEADER);
+    AddString(dict, "cancelWarning", IDS_SYNC_PASSPHRASE_CANCEL_WARNING);
+    AddString(dict, "yes", IDS_SYNC_PASSPHRASE_CANCEL_YES);
+    AddString(dict, "no", IDS_SYNC_PASSPHRASE_CANCEL_NO);
+
     AddString(dict, "ok", IDS_OK);
     AddString(dict, "cancel", IDS_CANCEL);
   } else if (path_raw == kSyncFirstPassphrasePath) {
@@ -207,6 +213,11 @@ void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
     AddString(dict, "confirmLabel", IDS_SYNC_CONFIRM_PASSPHRASE_LABEL);
     AddString(dict, "emptyErrorMessage", IDS_SYNC_EMPTY_PASSPHRASE_ERROR);
     AddString(dict, "mismatchErrorMessage", IDS_SYNC_PASSPHRASE_MISMATCH_ERROR);
+
+    AddString(dict, "learnmore", IDS_LEARN_MORE);
+    dict->SetString("encryptionhelpurl",
+                    GetLocalizedUrl(kEncryptionHelpUrl));
+
     AddString(dict, "syncpasswords", IDS_SYNC_FIRST_PASSPHRASE_OK);
     AddString(dict, "nothanks", IDS_SYNC_FIRST_PASSPHRASE_CANCEL);
   } else if (path_raw == kSyncSettingUpPath) {
@@ -254,13 +265,15 @@ SyncSetupWizard::SyncSetupWizard(ProfileSyncService* service)
     : service_(service),
       flow_container_(new SyncSetupFlowContainer()),
       parent_window_(NULL) {
-  // Add our network layer data source for 'cloudy' URLs.
-  SyncResourcesSource* sync_source = new SyncResourcesSource();
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
-                        &ChromeURLDataManager::AddDataSource,
-                        make_scoped_refptr(sync_source)));
+  // If we're in a unit test, we may not have an IO thread or profile.  Avoid
+  // creating a SyncResourcesSource since we may leak it (since it's
+  // DeleteOnUIThread).
+  if (BrowserThread::IsMessageLoopValid(BrowserThread::IO) &&
+      service_->profile()) {
+    // Add our network layer data source for 'cloudy' URLs.
+    SyncResourcesSource* sync_source = new SyncResourcesSource();
+    service_->profile()->GetChromeURLDataManager()->AddDataSource(sync_source);
+  }
 }
 
 SyncSetupWizard::~SyncSetupWizard() {

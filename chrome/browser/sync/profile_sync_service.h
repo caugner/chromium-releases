@@ -21,6 +21,7 @@
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/js_event_handler_list.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_setup_wizard.h"
@@ -39,6 +40,10 @@ class Profile;
 class ProfileSyncFactory;
 class TabContents;
 class TokenMigrator;
+
+namespace browser_sync {
+class JsFrontend;
+}  // namespace browser_sync
 
 // ProfileSyncService is the layer between browser subsystems like bookmarks,
 // and the sync backend.  Each subsystem is logically thought of as being
@@ -185,6 +190,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void OnClearServerDataSucceeded();
   virtual void OnPassphraseRequired(bool for_decryption);
   virtual void OnPassphraseAccepted();
+  virtual void OnEncryptionComplete(
+      const syncable::ModelTypeSet& encrypted_types);
 
   // Called when a user enters credentials through UI.
   virtual void OnUserSubmittedAuth(const std::string& username,
@@ -306,6 +313,11 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Returns true if |observer| has already been added as an observer.
   bool HasObserver(Observer* observer) const;
 
+  // Returns a pointer to the service's JsFrontend (which is owned by
+  // the service).  Never returns NULL.  Overrideable for testing
+  // purposes.
+  virtual browser_sync::JsFrontend* GetJsFrontend();
+
   // Record stats on various events.
   static void SyncEvent(SyncEventCodes code);
 
@@ -323,7 +335,52 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
       const tracked_objects::Location& from_here,
       const std::string& message);
 
-  browser_sync::SyncBackendHost* backend() { return backend_.get(); }
+  // The functions below (until ActivateDataType()) should only be
+  // called if sync_initialized() is true.
+
+  // TODO(akalin): This is called mostly by ModelAssociators and
+  // tests.  Figure out how to pass the handle to the ModelAssociators
+  // directly, figure out how to expose this to tests, and remove this
+  // function.
+  sync_api::UserShare* GetUserShare() const;
+
+  // TODO(akalin): These two functions are used only by
+  // ProfileSyncServiceHarness.  Figure out a different way to expose
+  // this info to that class, and remove these functions.
+
+  const browser_sync::sessions::SyncSessionSnapshot*
+      GetLastSessionSnapshot() const;
+
+  // Returns whether or not the underlying sync engine has made any
+  // local changes to items that have not yet been synced with the
+  // server.
+  bool HasUnsyncedItems() const;
+
+  // Get the current routing information for all enabled model types.
+  // If a model type is not enabled (that is, if the syncer should not
+  // be trying to sync it), it is not in this map.
+  //
+  // TODO(akalin): This function is used by
+  // sync_ui_util::ConstructAboutInformation() and by some test
+  // classes.  Figure out a different way to expose this info and
+  // remove this function.
+  void GetModelSafeRoutingInfo(browser_sync::ModelSafeRoutingInfo* out);
+
+  // TODO(akalin): Remove these four functions once we're done with
+  // autofill migration.
+
+  syncable::AutofillMigrationState
+      GetAutofillMigrationState();
+
+  void SetAutofillMigrationState(
+      syncable::AutofillMigrationState state);
+
+  syncable::AutofillMigrationDebugInfo
+      GetAutofillMigrationDebugInfo();
+
+  void SetAutofillMigrationDebugInfo(
+      syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
+      const syncable::AutofillMigrationDebugInfo& info);
 
   virtual void ActivateDataType(
       browser_sync::DataTypeController* data_type_controller,
@@ -379,6 +436,19 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
                              bool is_explicit,
                              bool is_creation);
 
+  // Changes the set of datatypes that require encryption. This affects all
+  // machines synced to this account and all data belonging to the specified
+  // types.
+  // Note that this is an asynchronous operation (the encryption of data is
+  // performed on SyncBackendHost's core thread) and may not have an immediate
+  // effect.
+  virtual void EncryptDataTypes(
+      const syncable::ModelTypeSet& encrypted_types);
+
+  // Get the currently encrypted data types.
+  virtual void GetEncryptedDataTypes(
+      syncable::ModelTypeSet* encrypted_types) const;
+
   // Returns whether processing changes is allowed.  Check this before doing
   // any model-modifying operations.
   bool ShouldPushChanges();
@@ -394,6 +464,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // ProfileSyncService interface and a ProfileSyncServiceImpl class
   // so we don't need this hack anymore.
   ProfileSyncService();
+
+  // Used by test classes that derive from ProfileSyncService.
+  virtual browser_sync::SyncBackendHost* GetBackendForTest();
 
   // Helper to install and configure a data type manager.
   void ConfigureDataTypeManager();
@@ -413,11 +486,18 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   // Test need to override this to create backends that allow setting up
   // initial conditions, such as populating sync nodes.
+  //
+  // TODO(akalin): Figure out a better way to do this.  Ideally, we'd
+  // construct the backend outside this class and pass it in to the
+  // contructor or Initialize().
   virtual void CreateBackend();
 
   const browser_sync::DataTypeController::TypeMap& data_type_controllers() {
     return data_type_controllers_;
   }
+
+  // Helper method for managing encryption UI.
+  bool IsEncryptedDatatypeEnabled() const;
 
   // The wizard will try to read the auth state out of the profile sync
   // service using this member. Captcha and error state are reflected.
@@ -450,13 +530,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   bool passphrase_migration_in_progress_;
 
  private:
-  friend class ProfileSyncServiceTest;
   friend class ProfileSyncServicePasswordTest;
-  friend class ProfileSyncServicePreferenceTest;
-  friend class ProfileSyncServiceSessionTest;
+  friend class TestProfileSyncService;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
-  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest,
-                           UnrecoverableErrorSuspendsService);
 
   // If |delete_sync_data_folder| is true, then this method will delete all
   // previous "Sync Data" folders. (useful if the folder is partial/corrupt).
@@ -530,6 +606,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   ObserverList<Observer> observers_;
 
+  browser_sync::JsEventHandlerList js_event_handlers_;
+
   NotificationRegistrar registrar_;
 
   ScopedRunnableMethodFactory<ProfileSyncService>
@@ -576,6 +654,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // syncer paused, etc.).  It can only be removed correctly when the framework
   // is reworked to allow one-shot commands like clearing server data.
   base::OneShotTimer<ProfileSyncService> clear_server_data_timer_;
+
+  // The set of encrypted types. This is updated whenever datatypes are
+  // encrypted through the OnEncryptionComplete callback of SyncFrontend.
+  syncable::ModelTypeSet encrypted_types_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };

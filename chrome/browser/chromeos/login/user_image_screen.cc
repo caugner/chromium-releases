@@ -1,18 +1,19 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 
 #include "base/compiler_specific.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/user_image_downloader.h"
 #include "chrome/browser/chromeos/login/user_image_view.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_type.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_type.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -39,8 +40,8 @@ const char kCameraThreadName[] = "Chrome_CameraThread";
 UserImageScreen::UserImageScreen(WizardScreenDelegate* delegate)
     : ViewScreen<UserImageView>(delegate),
       capture_failure_counter_(0),
-      camera_init_failure_counter_(0),
-      camera_thread_(kCameraThreadName) {
+      camera_init_failure_counter_(0) {
+  camera_thread_.reset(new base::Thread(kCameraThreadName));
   registrar_.Add(
       this,
       NotificationType::SCREEN_LOCK_STATE_CHANGED,
@@ -50,11 +51,17 @@ UserImageScreen::UserImageScreen(WizardScreenDelegate* delegate)
 UserImageScreen::~UserImageScreen() {
   if (camera_.get())
     camera_->set_delegate(NULL);
+  {
+    // A ScopedAllowIO object is required to join the thread when calling Stop.
+    // See http://crosbug.com/11392.
+    base::ThreadRestrictions::ScopedAllowIO allow_io_for_thread_join;
+    camera_thread_.reset();
+  }
 }
 
 void UserImageScreen::Refresh() {
-  camera_thread_.Start();
-  camera_ = new Camera(this, &camera_thread_, true);
+  camera_thread_->Start();
+  camera_ = new Camera(this, camera_thread_.get(), true);
   InitCamera();
 }
 

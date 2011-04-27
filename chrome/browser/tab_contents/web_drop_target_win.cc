@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,15 @@
 #include <shlobj.h>
 
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/web_drag_utils_win.h"
-#include "gfx/point.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "ui/base/clipboard/clipboard_util_win.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
+#include "ui/gfx/point.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -121,7 +121,7 @@ DWORD WebDropTarget::OnDragEnter(IDataObject* data_object,
       gfx::Point(cursor_position.x, cursor_position.y),
       web_drag_utils_win::WinDragOpMaskToWebDragOpMask(effects));
 
-  // This is non-null if tab_contents_ is showing an ExtensionDOMUI with
+  // This is non-null if tab_contents_ is showing an ExtensionWebUI with
   // support for (at the moment experimental) drag and drop extensions.
   if (tab_contents_->GetBookmarkDragDelegate()) {
     ui::OSExchangeData os_exchange_data(

@@ -48,15 +48,24 @@ bool CollectGraphicsInfo(GPUInfo* gpu_info) {
 
   gpu_info->SetCanLoseContext(
       gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2);
-  gpu_info->SetProgress(GPUInfo::kComplete);
+  gpu_info->SetLevel(GPUInfo::kComplete);
   return CollectGraphicsInfoGL(gpu_info);
+}
+
+bool CollectPreliminaryGraphicsInfo(GPUInfo* gpu_info) {
+  DCHECK(gpu_info);
+
+  gpu_info->SetLevel(GPUInfo::kPartial);
+
+  bool rt = true;
+  if (!CollectVideoCardInfo(gpu_info))
+    rt = false;
+
+  return rt;
 }
 
 bool CollectVideoCardInfo(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
-
-  if (gfx::GetGLImplementation() != gfx::kGLImplementationDesktopGL)
-    return false;
 
   UInt32 vendor_id = 0, device_id = 0;
   io_registry_entry_t dsp_port = CGDisplayIOServicePort(kCGDirectMainDisplay);
@@ -75,7 +84,7 @@ bool CollectVideoCardInfo(GPUInfo* gpu_info) {
   return true;
 }
 
-bool CollectDriverInfo(GPUInfo* gpu_info) {
+bool CollectDriverInfoGL(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   // Extract the OpenGL driver version string from the GL_VERSION string.
@@ -86,7 +95,7 @@ bool CollectDriverInfo(GPUInfo* gpu_info) {
   size_t pos = gl_version_string.find_last_of('-');
   if (pos == std::string::npos)
     return false;
-  gpu_info->SetDriverInfo("", gl_version_string.substr(pos + 1));
+  gpu_info->SetDriverInfo("", gl_version_string.substr(pos + 1), "");
   return true;
 }
 

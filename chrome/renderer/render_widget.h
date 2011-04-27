@@ -13,9 +13,6 @@
 #include "base/ref_counted.h"
 #include "chrome/renderer/paint_aggregator.h"
 #include "chrome/renderer/render_process.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/rect.h"
-#include "gfx/size.h"
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
@@ -24,6 +21,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextInputType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidgetClient.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 #include "webkit/glue/webcursor.h"
 
 class RenderThreadBase;
@@ -224,7 +224,7 @@ class RenderWidget : public IPC::Channel::Listener,
 
   // Gets the scroll offset of this widget, if this widget has a notion of
   // scroll offset.
-  virtual gfx::Size GetScrollOffset();
+  virtual gfx::Point GetScrollOffset();
 
   // Sets the "hidden" state of this widget.  All accesses to is_hidden_ should
   // use this method so that we can properly inform the RenderThread of our

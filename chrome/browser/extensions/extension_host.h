@@ -12,9 +12,11 @@
 #include "base/perftimer.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/common/notification_registrar.h"
+
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/ui/views/extensions/extension_view.h"
 #elif defined(OS_MACOSX)
@@ -22,14 +24,15 @@
 #elif defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/extension_view_gtk.h"
 #endif
-#include "chrome/common/notification_registrar.h"
 
 class Browser;
+class DesktopNotificationHandler;
 class Extension;
 class FileSelectHelper;
 class RenderProcessHost;
 class RenderWidgetHostView;
 class TabContents;
+struct ViewHostMsg_RunFileChooser_Params;
 struct WebPreferences;
 
 // This class is the browser component of an extension component's RenderView.
@@ -106,11 +109,11 @@ class ExtensionHost : public RenderViewHostDelegate,
   // |size_limit| in both width and height.
   void DisableScrollbarsForSmallWindows(const gfx::Size& size_limit);
 
-  // RenderViewHostDelegate::View implementation.
+  // RenderViewHostDelegate implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message);
   virtual const GURL& GetURL() const;
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual ViewType::Type GetRenderViewType() const;
-  virtual FileSelect* GetFileSelectDelegate();
   virtual int GetBrowserWindowID() const;
   virtual void RenderViewGone(RenderViewHost* render_view_host,
                               base::TerminationStatus status,
@@ -126,7 +129,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   // RenderViewHostDelegate implementation.
   virtual RenderViewHostDelegate::View* GetViewDelegate();
   virtual WebPreferences GetWebkitPrefs();
-  virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
+  virtual void ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params);
   virtual void RunJavaScriptMessage(const std::wstring& message,
                                     const std::wstring& default_prompt,
                                     const GURL& frame_url,
@@ -139,11 +142,9 @@ class ExtensionHost : public RenderViewHostDelegate,
   // RenderViewHostDelegate::View
   virtual void CreateNewWindow(
       int route_id,
-      WindowContainerType window_container_type,
-      const string16& frame_name);
+      const ViewHostMsg_CreateWindow_Params& params);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type);
-  virtual void CreateNewFullscreenWidget(int route_id,
-                                         WebKit::WebPopupType popup_type);
+  virtual void CreateNewFullscreenWidget(int route_id);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
@@ -227,6 +228,9 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual Browser* GetBrowser();
   virtual gfx::NativeView GetNativeViewOfHost();
 
+  // Message handlers.
+  void OnRunFileChooser(const ViewHostMsg_RunFileChooser_Params& params);
+
   // Handles keyboard events that were not handled by HandleKeyboardEvent().
   // Platform specific implementation may override this method to handle the
   // event in platform specific way.
@@ -282,6 +286,9 @@ class ExtensionHost : public RenderViewHostDelegate,
 
   // FileSelectHelper, lazily created.
   scoped_ptr<FileSelectHelper> file_select_helper_;
+
+  // Handles desktop notification IPCs.
+  scoped_ptr<DesktopNotificationHandler> desktop_notification_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

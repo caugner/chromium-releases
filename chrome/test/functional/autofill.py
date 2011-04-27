@@ -3,8 +3,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
 import os
+import pickle
 
+import autofill_dataset_converter
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
 
@@ -77,7 +80,7 @@ class AutoFillTest(pyauto.PyUITest):
                        'ADDRESS_HOME_CITY': 'Sunnyvale',
                        'ADDRESS_HOME_STATE': 'CA',
                        'ADDRESS_HOME_ZIP': 'my_zip',
-                       'ADDRESS_HOME_COUNTRY': 'USA'}
+                       'ADDRESS_HOME_COUNTRY': 'United States'}
     # Add some invalid fields.
     with_invalid = without_invalid.copy()
     with_invalid['PHONE_HOME_WHOLE_NUMBER'] = 'Invalid_Phone_Number'
@@ -92,6 +95,126 @@ class AutoFillTest(pyauto.PyUITest):
     self.FillAutoFillProfile(credit_cards=[credit_card])
     self.assertEqual([expected_credit_card],
                      self.GetAutoFillProfile()['credit_cards'])
+
+  def testFilterIncompleteAddresses(self):
+    """Test Autofill filters out profile with incomplete address info."""
+    profile = {'NAME_FIRST': 'Bob',
+               'NAME_LAST': 'Smith',
+               'EMAIL_ADDRESS': 'bsmith@example.com',
+               'COMPANY_NAME': 'Company X',
+               'PHONE_HOME_WHOLE_NUMBER': '650-123-4567',}
+    url = self.GetHttpURLForDataPath(
+        os.path.join('autofill', 'dup-profiles-test.html'))
+    self.NavigateToURL(url)
+    for key, value in profile.iteritems():
+      script = ('document.getElementById("%s").value = "%s"; '
+                'window.domAutomationController.send("done");') % (key, value)
+      self.ExecuteJavascript(script, 0, 0)
+    js_code = """
+      document.getElementById("merge_dup").submit();
+      window.addEventListener("unload", function() {
+        window.domAutomationController.send("done");
+      });
+    """
+    self.ExecuteJavascript(js_code, 0, 0)
+    self.assertEqual([], self.GetAutoFillProfile()['profiles'])
+
+  def testFilterMalformedEmailAddresses(self):
+    """Test Autofill filters out malformed email address during form submit."""
+    profile = {'NAME_FIRST': 'Bob',
+               'NAME_LAST': 'Smith',
+               'EMAIL_ADDRESS': 'garbage',
+               'ADDRESS_HOME_LINE1': '1234 H St.',
+               'ADDRESS_HOME_CITY': 'San Jose',
+               'ADDRESS_HOME_STATE': 'CA',
+               'ADDRESS_HOME_ZIP': '95110',
+               'COMPANY_NAME': 'Company X',
+               'PHONE_HOME_WHOLE_NUMBER': '408-123-4567',}
+    url = self.GetHttpURLForDataPath(
+        os.path.join('autofill', 'dup-profiles-test.html'))
+    self.NavigateToURL(url)
+    for key, value in profile.iteritems():
+      script = ('document.getElementById("%s").value = "%s"; '
+                'window.domAutomationController.send("done");') % (key, value)
+      self.ExecuteJavascript(script, 0, 0)
+    js_code = """
+      document.getElementById("merge_dup").submit();
+      window.addEventListener("unload", function() {
+        window.domAutomationController.send("done");
+      });
+    """
+    self.ExecuteJavascript(js_code, 0, 0)
+    if 'EMAIL_ADDRESS' in self.GetAutoFillProfile()['profiles'][0]:
+      raise KeyError('TEST FAIL: Malformed email address is saved in profiles.')
+
+  def AutofillCrowdsourcing(self):
+    """Test able to send POST request of web form to Autofill server.
+
+    The Autofill server processes the data offline, so it can take a few days
+    for the result to be detectable. Manual verification is required.
+    """
+    # HTML file needs to be run from a specific http:// url to be able to verify
+    # the results a few days later by visiting the same url.
+    url = 'http://www.corp.google.com/~dyu/autofill/crowdsourcing-test.html'
+    # Adding crowdsourcing Autofill profile.
+    file_path = os.path.join(self.DataDir(), 'autofill',
+                             'crowdsource_autofill.txt')
+    profiles = self.EvalDataFrom(file_path)
+    self.FillAutoFillProfile(profiles=profiles)
+    # Autofill server captures 2.5% of the data posted.
+    # Looping 1000 times is a safe minimum to exceed the server's threshold or
+    # noise.
+    for i in range(1000):
+      fname = self.GetAutoFillProfile()['profiles'][0]['NAME_FIRST']
+      lname = self.GetAutoFillProfile()['profiles'][0]['NAME_LAST']
+      email = self.GetAutoFillProfile()['profiles'][0]['EMAIL_ADDRESS']
+      # Submit form to collect crowdsourcing data for Autofill.
+      self.NavigateToURL(url, 0, 0)
+      fname_field = ('document.getElementById("fn").value = "%s"; '
+                     'window.domAutomationController.send("done");') % fname
+      lname_field = ('document.getElementById("ln").value = "%s"; '
+                     'window.domAutomationController.send("done");') % lname
+      email_field = ('document.getElementById("em").value = "%s"; '
+                     'window.domAutomationController.send("done");') % email
+      self.ExecuteJavascript(fname_field, 0, 0);
+      self.ExecuteJavascript(lname_field, 0, 0);
+      self.ExecuteJavascript(email_field, 0, 0);
+      self.ExecuteJavascript('document.getElementById("frmsubmit").submit();'
+                             'window.domAutomationController.send("done");',
+                             0, 0)
+
+  def MergeDuplicateProfilesInAutofill(self):
+    """Test Autofill ability to merge duplicate profiles and throw away junk."""
+    # HTML file needs to be run from a http:// url.
+    url = self.GetHttpURLForDataPath(
+        os.path.join('autofill', 'duplicate_profiles_test.html'))
+    # Run the parser script to generate the dictionary list needed for the
+    # profiles.
+    c = autofill_dataset_converter.DatasetConverter(
+        os.path.join(self.DataDir(), 'autofill', 'dataset.txt'),
+        logging_level=logging.INFO)  # Set verbosity to INFO, WARNING, ERROR.
+    list_of_dict = c.Convert()
+
+    for profile in list_of_dict:
+      self.NavigateToURL(url)
+      for key, value in profile.iteritems():
+        script = ('document.getElementById("%s").value = "%s"; '
+                  'window.domAutomationController.send("done");') % (key, value)
+        self.ExecuteJavascript(script, 0, 0)
+      self.ExecuteJavascript('document.getElementById("merge_dup").submit();'
+                             'window.domAutomationController.send("done");',
+                             0, 0)
+    # Verify total number of inputted profiles is greater than the final number
+    # of profiles after merging.
+    self.assertTrue(
+        len(list_of_dict) > len(self.GetAutoFillProfile()['profiles']))
+    # Write profile dictionary to a file.
+    merged_profile = os.path.join(self.DataDir(), 'autofill',
+                                  'merged-profiles.txt')
+    profile_dict = self.GetAutoFillProfile()['profiles']
+    output = open(merged_profile, 'wb')
+    pickle.dump(profile_dict, output)
+    output.close()
 
 
 if __name__ == '__main__':

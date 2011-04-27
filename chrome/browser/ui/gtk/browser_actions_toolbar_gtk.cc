@@ -14,7 +14,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/extension_popup_gtk.h"
@@ -28,14 +27,15 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "chrome/common/notification_details.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_source.h"
-#include "chrome/common/notification_type.h"
-#include "gfx/canvas_skia_paint.h"
-#include "gfx/gtk_util.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_details.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_source.h"
+#include "content/common/notification_type.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/gtk_util.h"
 
 namespace {
 
@@ -266,9 +266,9 @@ class BrowserActionButton : public NotificationObserver,
   }
 
   static gboolean OnButtonPress(GtkWidget* widget,
-                                GdkEvent* event,
+                                GdkEventButton* event,
                                 BrowserActionButton* action) {
-    if (event->button.button != 3)
+    if (event->button != 3)
       return FALSE;
 
     MenuGtk* menu = action->GetContextMenu();
@@ -276,7 +276,7 @@ class BrowserActionButton : public NotificationObserver,
       return FALSE;
 
     action->button_->SetPaintOverride(GTK_STATE_ACTIVE);
-    menu->Popup(widget, event);
+    menu->PopupForWidget(widget, event->button, event->time);
 
     return TRUE;
   }
@@ -950,7 +950,8 @@ gboolean BrowserActionsToolbarGtk::OnOverflowMenuButtonPress(
   if (!menu)
     return FALSE;
 
-  menu->PopupAsContext(event->time);
+  menu->PopupAsContext(gfx::Point(event->x_root, event->y_root),
+                       event->time);
   return TRUE;
 }
 

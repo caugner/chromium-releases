@@ -8,9 +8,10 @@
 #include "base/singleton.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/common/autofill_messages.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -44,7 +45,6 @@ class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual SkBitmap* GetIcon() const;
   virtual Type GetInfoBarType() const;
   virtual string16 GetMessageText() const;
-  virtual int GetButtons() const;
   virtual string16 GetButtonLabel(InfoBarButton button) const;
   virtual bool Accept();
   virtual bool Cancel();
@@ -89,10 +89,6 @@ string16 SavePasswordInfoBarDelegate::GetMessageText() const {
   return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT);
 }
 
-int SavePasswordInfoBarDelegate::GetButtons() const {
-  return BUTTON_OK | BUTTON_CANCEL;
-}
-
 string16 SavePasswordInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
   return l10n_util::GetStringUTF16((button == BUTTON_OK) ?
@@ -118,7 +114,8 @@ bool SavePasswordInfoBarDelegate::Cancel() {
 
 void PasswordManagerDelegateImpl::FillPasswordForm(
     const webkit_glue::PasswordFormFillData& form_data) {
-  tab_contents_->render_view_host()->FillPasswordForm(form_data);
+  tab_contents_->render_view_host()->Send(new AutoFillMsg_FillPasswordForm(
+      tab_contents_->render_view_host()->routing_id(), form_data));
 }
 
 void PasswordManagerDelegateImpl::AddSavePasswordInfoBar(

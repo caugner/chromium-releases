@@ -2,22 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/geolocation/access_token_store.h"
+#include "content/browser/geolocation/access_token_store.h"
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/browser_thread.h"
 
 namespace {
+
 // The token store factory implementation expects to be used from any well-known
 // chrome thread other than UI. We could use any arbitrary thread; IO is
 // a good choice as this is the expected usage.
 const BrowserThread::ID kExpectedClientThreadId = BrowserThread::IO;
 const char* kRefServerUrl1 = "https://test.domain.example/foo?id=bar.bar";
 const char* kRefServerUrl2 = "http://another.domain.example/foo?id=bar.bar#2";
-}  // namespace
 
 class GeolocationAccessTokenStoreTest
     : public InProcessBrowserTest {
@@ -149,3 +149,5 @@ IN_PROC_BROWSER_TEST_F(GeolocationAccessTokenStoreTest, CancelRequest) {
           RunCancelTestInClientTread));
   ui_test_utils::RunMessageLoop();
 }
+
+}  // namespace

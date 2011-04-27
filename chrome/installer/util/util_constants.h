@@ -66,12 +66,25 @@ enum InstallStatus {
                                     // Chrome Frame.
   READY_MODE_END_TEMP_OPT_OUT_FAILED,   // 38. Failed to end temporary opt-out
                                         // of Chrome Frame.
+  CONFLICTING_CHANNEL_EXISTS,  // 39. A multi-install product on a different
+                               // update channel exists.
+  READY_MODE_REQUIRES_CHROME,  // 40. Chrome Frame in ready-mode requires Chrome
+  REQUIRES_MULTI_INSTALL,      // 41. --multi-install was missing from the
+                               // command line.
+};
+
+// The type of an update archive.
+enum ArchiveType {
+  UNKNOWN_ARCHIVE_TYPE,     // Unknown or uninitialized.
+  FULL_ARCHIVE_TYPE,        // Full chrome.7z archive.
+  INCREMENTAL_ARCHIVE_TYPE  // Incremental or differential archive.
 };
 
 namespace switches {
 extern const char kCeee[];
 extern const char kChrome[];
 extern const char kChromeFrame[];
+extern const char kChromeFrameQuickEnable[];
 extern const char kChromeFrameReadyMode[];
 extern const char kChromeFrameReadyModeOptIn[];
 extern const char kChromeFrameReadyModeTempOptOut[];
@@ -118,13 +131,16 @@ extern const wchar_t kChromeFrameDll[];
 extern const wchar_t kChromeFrameHelperExe[];
 extern const wchar_t kChromeFrameHelperWndClass[];
 extern const wchar_t kChromeFrameReadyModeField[];
+extern const wchar_t kChromeLauncherExe[];
 extern const wchar_t kChromeNaCl64Dll[];
 extern const wchar_t kChromeOldExe[];
 extern const wchar_t kChromeNewExe[];
+extern const wchar_t kCmdQuickEnableCf[];
 extern const wchar_t kGoogleChromeInstallSubDir1[];
 extern const wchar_t kGoogleChromeInstallSubDir2[];
 extern const wchar_t kInstallBinaryDir[];
 extern const wchar_t kInstallerDir[];
+extern const wchar_t kInstallTempDir[];
 extern const wchar_t kInstallUserDataDir[];
 extern const wchar_t kNaClExe[];
 extern const wchar_t kSetupExe[];
@@ -140,6 +156,11 @@ extern const wchar_t kInstallerResult[];
 extern const wchar_t kInstallerError[];
 extern const wchar_t kInstallerResultUIString[];
 extern const wchar_t kInstallerSuccessLaunchCmdLine[];
+
+// Product options.
+extern const wchar_t kOptionCeee[];
+extern const wchar_t kOptionMultiInstall[];
+extern const wchar_t kOptionReadyMode[];
 
 }  // namespace installer
 

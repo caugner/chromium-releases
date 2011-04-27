@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_instance.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
+#include "ppapi/proxy/plugin_resource.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
 
@@ -42,9 +44,15 @@ PP_Bool BindGraphics(PP_Instance instance, PP_Resource device) {
   if (!dispatcher)
     return PP_FALSE;
 
+  PluginResource* object =
+      PluginResourceTracker::GetInstance()->GetResourceObject(device);
+  if (!object || object->instance() != instance)
+    return PP_FALSE;
+
   PP_Bool result = PP_FALSE;
   dispatcher->Send(new PpapiHostMsg_PPBInstance_BindGraphics(
-      INTERFACE_ID_PPB_INSTANCE, instance, device, &result));
+      INTERFACE_ID_PPB_INSTANCE, instance, object->host_resource(),
+      &result));
   return result;
 }
 
@@ -83,6 +91,11 @@ const PPB_Instance instance_interface = {
   &ExecuteScript
 };
 
+InterfaceProxy* CreateInstanceProxy(Dispatcher* dispatcher,
+                                    const void* target_interface) {
+  return new PPB_Instance_Proxy(dispatcher, target_interface);
+}
+
 }  // namespace
 
 PPB_Instance_Proxy::PPB_Instance_Proxy(Dispatcher* dispatcher,
@@ -93,12 +106,16 @@ PPB_Instance_Proxy::PPB_Instance_Proxy(Dispatcher* dispatcher,
 PPB_Instance_Proxy::~PPB_Instance_Proxy() {
 }
 
-const void* PPB_Instance_Proxy::GetSourceInterface() const {
-  return &instance_interface;
-}
-
-InterfaceID PPB_Instance_Proxy::GetInterfaceId() const {
-  return INTERFACE_ID_PPB_INSTANCE;
+// static
+const InterfaceProxy::Info* PPB_Instance_Proxy::GetInfo() {
+  static const Info info = {
+    &instance_interface,
+    PPB_INSTANCE_INTERFACE,
+    INTERFACE_ID_PPB_INSTANCE,
+    false,
+    &CreateInstanceProxy,
+  };
+  return &info;
 }
 
 bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -134,9 +151,10 @@ void PPB_Instance_Proxy::OnMsgGetOwnerElementObject(
 }
 
 void PPB_Instance_Proxy::OnMsgBindGraphics(PP_Instance instance,
-                                           PP_Resource device,
+                                           HostResource device,
                                            PP_Bool* result) {
-  *result = ppb_instance_target()->BindGraphics(instance, device);
+  *result = ppb_instance_target()->BindGraphics(instance,
+                                                device.host_resource());
 }
 
 void PPB_Instance_Proxy::OnMsgIsFullFrame(PP_Instance instance,

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,22 +38,23 @@ using WebKit::WebFrameClient;
 using WebKit::WebURLResponse;
 using WebKit::WebView;
 
-namespace {
+namespace webkit_glue {
 
-const char* kHttpUrl = "http://test";
-const int kDataSize = 1024;
-const int kHttpOK = 200;
-const int kHttpPartialContent = 206;
+static const char* kHttpUrl = "http://test";
+static const char kHttpRedirectToSameDomainUrl1[] = "http://test/ing";
+static const char kHttpRedirectToSameDomainUrl2[] = "http://test/ing2";
+static const char kHttpRedirectToDifferentDomainUrl1[] = "http://test2";
+static const char kHttpRedirectToDifferentDomainUrl2[] = "http://test2/ing";
+
+static const int kDataSize = 1024;
+static const int kHttpOK = 200;
+static const int kHttpPartialContent = 206;
 
 enum NetworkState {
   NONE,
   LOADED,
   LOADING
 };
-
-}  // namespace
-
-namespace webkit_glue {
 
 // Submit a request completed event to the resource loader due to request
 // being canceled. Pretending the event is from external.
@@ -67,8 +68,6 @@ ACTION_P(RequestCanceled, loader) {
 class BufferedResourceLoaderTest : public testing::Test {
  public:
   BufferedResourceLoaderTest() {
-    url_loader_ = new NiceMock<MockWebURLLoader>();
-
     for (int i = 0; i < kDataSize; ++i)
       data_[i] = i;
   }
@@ -83,6 +82,7 @@ class BufferedResourceLoaderTest : public testing::Test {
 
     frame_.reset(new NiceMock<MockWebFrame>());
 
+    url_loader_ = new NiceMock<MockWebURLLoader>();
     loader_ = new BufferedResourceLoader(gurl_,
                                          first_position_, last_position_);
     loader_->SetURLLoaderForTest(url_loader_);
@@ -137,11 +137,22 @@ class BufferedResourceLoaderTest : public testing::Test {
     EXPECT_TRUE(loader_->partial_response());
   }
 
+  void Redirect(const char* url) {
+    GURL redirectUrl(url);
+    WebKit::WebURLRequest newRequest(redirectUrl);
+    WebKit::WebURLResponse redirectResponse(gurl_);
+
+    loader_->willSendRequest(url_loader_, newRequest, redirectResponse);
+
+    MessageLoop::current()->RunAllPending();
+  }
+
   void StopWhenLoad() {
     InSequence s;
     EXPECT_CALL(*url_loader_, cancel())
         .WillOnce(RequestCanceled(loader_));
     loader_->Stop();
+    loader_ = NULL;
   }
 
   // Helper method to write to |loader_| from |data_|.
@@ -479,6 +490,51 @@ TEST_F(BufferedResourceLoaderTest, AllowDefer_DeferredReadPastWindow) {
   ReadLoader(20, 5, buffer);
   StopWhenLoad();
 }
+
+// NOTE: This test will need to be reworked a little once
+// http://code.google.com/p/chromium/issues/detail?id=72578
+// is fixed.
+TEST_F(BufferedResourceLoaderTest, HasSingleOrigin) {
+  // Make sure no redirect case works as expected.
+  Initialize(kHttpUrl, -1, -1);
+  Start();
+  FullResponse(1024);
+  EXPECT_TRUE(loader_->HasSingleOrigin());
+  StopWhenLoad();
+
+  // Test redirect to the same domain.
+  Initialize(kHttpUrl, -1, -1);
+  Start();
+  Redirect(kHttpRedirectToSameDomainUrl1);
+  FullResponse(1024);
+  EXPECT_TRUE(loader_->HasSingleOrigin());
+  StopWhenLoad();
+
+  // Test redirect twice to the same domain.
+  Initialize(kHttpUrl, -1, -1);
+  Start();
+  Redirect(kHttpRedirectToSameDomainUrl1);
+  Redirect(kHttpRedirectToSameDomainUrl2);
+  FullResponse(1024);
+  EXPECT_TRUE(loader_->HasSingleOrigin());
+  StopWhenLoad();
+
+  // Test redirect to a different domain.
+  Initialize(kHttpUrl, -1, -1);
+  Start();
+  Redirect(kHttpRedirectToDifferentDomainUrl1);
+  EXPECT_FALSE(loader_->HasSingleOrigin());
+  StopWhenLoad();
+
+  // Test redirect to the same domain and then to a different domain.
+  Initialize(kHttpUrl, -1, -1);
+  Start();
+  Redirect(kHttpRedirectToSameDomainUrl1);
+  Redirect(kHttpRedirectToDifferentDomainUrl1);
+  EXPECT_FALSE(loader_->HasSingleOrigin());
+  StopWhenLoad();
+}
+
 // TODO(hclam): add unit test for defer loading.
 
 }  // namespace webkit_glue

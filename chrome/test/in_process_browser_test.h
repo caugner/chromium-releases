@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,7 +114,7 @@ class InProcessBrowserTest : public testing::Test {
   // If a test wishes to set up some initial non-empty state in the user data
   // directory before the browser starts up, it can do so here. Returns true if
   // successful.
-  virtual bool SetUpUserDataDirectory() WARN_UNUSED_RESULT { return true; }
+  virtual bool SetUpUserDataDirectory() WARN_UNUSED_RESULT;
 
   // We need these special methods because InProcessBrowserTest::SetUp is the
   // bottom of the stack that winds up calling your test method, so it is not
@@ -199,14 +199,6 @@ class InProcessBrowserTest : public testing::Test {
 
   // Whether this test requires the TabCloseableStateWatcher.
   bool tab_closeable_state_watcher_enabled_;
-
-  // We muck with the global command line for this process.  Keep the original
-  // so we can reset it when we're done.  This matters when running the browser
-  // tests in "single process" (all tests in one process) mode.
-  scoped_ptr<CommandLine> original_command_line_;
-
-  // Saved to restore the value of RenderProcessHost::run_renderer_in_process.
-  bool original_single_process_;
 
   // Host resolver to use during the test.
   scoped_refptr<net::RuleBasedHostResolverProc> host_resolver_;

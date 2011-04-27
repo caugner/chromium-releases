@@ -13,22 +13,30 @@
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "build/build_config.h"
-#include "chrome/common/child_thread.h"
 #include "chrome/common/gpu_info.h"
 #include "chrome/gpu/gpu_channel.h"
 #include "chrome/gpu/gpu_config.h"
 #include "chrome/gpu/x_util.h"
-#include "gfx/native_widget_types.h"
+#include "content/common/child_thread.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace IPC {
 struct ChannelHandle;
+}
+
+namespace sandbox {
+class TargetServices;
 }
 
 class GpuWatchdogThread;
 
 class GpuThread : public ChildThread {
  public:
+#if defined(OS_WIN)
+  explicit GpuThread(sandbox::TargetServices* target_services);
+#else
   GpuThread();
+#endif
 
   // For single-process mode.
   explicit GpuThread(const std::string& channel_id);
@@ -50,7 +58,12 @@ class GpuThread : public ChildThread {
   void OnEstablishChannel(int renderer_id);
   void OnCloseChannel(const IPC::ChannelHandle& channel_handle);
   void OnSynchronize();
-  void OnCollectGraphicsInfo();
+  void OnCollectGraphicsInfo(GPUInfo::Level level);
+  void OnCreateViewCommandBuffer(
+      gfx::PluginWindowHandle window,
+      int32 render_view_id,
+      int32 renderer_id,
+      const GPUCreateCommandBufferConfig& init_params);
 #if defined(OS_MACOSX)
   void OnAcceleratedSurfaceBuffersSwappedACK(
       int renderer_id, int32 route_id, uint64 swap_buffers_count);
@@ -72,6 +85,11 @@ class GpuThread : public ChildThread {
 
   // Information about the GPU, such as device and vendor ID.
   GPUInfo gpu_info_;
+
+#if defined(OS_WIN)
+  // Windows specific client sandbox interface.
+  sandbox::TargetServices* target_services_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(GpuThread);
 };

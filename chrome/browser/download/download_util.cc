@@ -24,7 +24,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
@@ -35,14 +34,14 @@
 #include "chrome/browser/history/download_create_info.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/time_format.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/rect.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
@@ -53,6 +52,9 @@
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/image.h"
+#include "ui/gfx/rect.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/base/dragdrop/os_exchange_data.h"
@@ -69,7 +71,6 @@
 #endif  // defined(TOOLKIT_USES_GTK)
 
 #if defined(OS_WIN)
-#include "app/win/win_util.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -113,9 +114,47 @@ bool IsShellIntegratedExtension(const string16& extension) {
   // See <http://www.juniper.net/security/auto/vulnerabilities/vuln2612.html>.
   // That vulnerability report is not exactly on point, but files become magical
   // if their end in a CLSID.  Here we block extensions that look like CLSIDs.
-  if (extension_lower.size() > 0 && extension_lower.at(0) == L'{' &&
-      extension_lower.at(extension_lower.length() - 1) == L'}')
+  if (!extension_lower.empty() && extension_lower[0] == L'{' &&
+      extension_lower[extension_lower.length() - 1] == L'}')
     return true;
+
+  return false;
+}
+
+// Returns whether the specified file name is a reserved name on windows.
+// This includes names like "com2.zip" (which correspond to devices) and
+// desktop.ini and thumbs.db which have special meaning to the windows shell.
+bool IsReservedName(const string16& filename) {
+  // This list is taken from the MSDN article "Naming a file"
+  // http://msdn2.microsoft.com/en-us/library/aa365247(VS.85).aspx
+  // I also added clock$ because GetSaveFileName seems to consider it as a
+  // reserved name too.
+  static const wchar_t* const known_devices[] = {
+    L"con", L"prn", L"aux", L"nul", L"com1", L"com2", L"com3", L"com4", L"com5",
+    L"com6", L"com7", L"com8", L"com9", L"lpt1", L"lpt2", L"lpt3", L"lpt4",
+    L"lpt5", L"lpt6", L"lpt7", L"lpt8", L"lpt9", L"clock$"
+  };
+  string16 filename_lower = StringToLowerASCII(filename);
+
+  for (int i = 0; i < arraysize(known_devices); ++i) {
+    // Exact match.
+    if (filename_lower == known_devices[i])
+      return true;
+    // Starts with "DEVICE.".
+    if (filename_lower.find(string16(known_devices[i]) + L".") == 0)
+      return true;
+  }
+
+  static const wchar_t* const magic_names[] = {
+    // These file names are used by the "Customize folder" feature of the shell.
+    L"desktop.ini",
+    L"thumbs.db",
+  };
+
+  for (int i = 0; i < arraysize(magic_names); ++i) {
+    if (filename_lower == magic_names[i])
+      return true;
+  }
 
   return false;
 }
@@ -217,20 +256,24 @@ void GenerateFileName(const GURL& url,
                       const std::string& referrer_charset,
                       const std::string& mime_type,
                       FilePath* generated_name) {
-#if defined(OS_WIN)
-  FilePath default_file_path(
+  string16 default_file_name(
       l10n_util::GetStringUTF16(IDS_DEFAULT_DOWNLOAD_FILENAME));
-#elif defined(OS_POSIX)
-  std::string default_file =
-      l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME);
-  FilePath default_file_path(
-      base::SysWideToNativeMB(base::SysUTF8ToWide(default_file)));
-#endif
 
-  *generated_name = net::GetSuggestedFilename(GURL(url),
-                                              content_disposition,
-                                              referrer_charset,
-                                              default_file_path);
+  string16 new_name = net::GetSuggestedFilename(GURL(url),
+                                                content_disposition,
+                                                referrer_charset,
+                                                default_file_name);
+
+  // TODO(evan): this code is totally wrong -- we should just generate
+  // Unicode filenames and do all this encoding switching at the end.
+  // However, I'm just shuffling wrong code around, at least not adding
+  // to it.
+#if defined(OS_WIN)
+  *generated_name = FilePath(new_name);
+#else
+  *generated_name = FilePath(
+      base::SysWideToNativeMB(UTF16ToWide(new_name)));
+#endif
 
   DCHECK(!generated_name->empty());
 
@@ -247,7 +290,7 @@ void GenerateSafeFileName(const std::string& mime_type, FilePath* file_name) {
   // Prepend "_" to the file name if it's a reserved name
   FilePath::StringType leaf_name = file_name->BaseName().value();
   DCHECK(!leaf_name.empty());
-  if (app::win::IsReservedName(leaf_name)) {
+  if (IsReservedName(leaf_name)) {
     leaf_name = FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
     *file_name = file_name->DirName();
     if (file_name->value() == FilePath::kCurrentDirectory) {
@@ -277,7 +320,8 @@ void OpenChromeExtension(Profile* profile,
       new CrxInstaller(service, new ExtensionInstallUI(profile)));
   installer->set_delete_source(true);
 
-  if (UserScript::HasUserScriptFileExtension(download_item.url())) {
+  if (UserScript::IsURLUserScript(download_item.url(),
+                                  download_item.mime_type())) {
     installer->InstallUserScript(download_item.full_path(),
                                  download_item.url());
     return;
@@ -336,9 +380,9 @@ void PaintDownloadProgress(gfx::Canvas* canvas,
 
 #if defined(TOOLKIT_VIEWS)
   // Mirror the positions if necessary.
-  int mirrored_x = containing_view->MirroredLeftPointForRect(background_bounds);
+  int mirrored_x = containing_view->GetMirroredXForRect(background_bounds);
   background_bounds.set_x(mirrored_x);
-  mirrored_x = containing_view->MirroredLeftPointForRect(foreground_bounds);
+  mirrored_x = containing_view->GetMirroredXForRect(foreground_bounds);
   foreground_bounds.set_x(mirrored_x);
 #endif
 
@@ -423,8 +467,7 @@ void PaintDownloadComplete(gfx::Canvas* canvas,
                             complete->width(), complete->height());
 #if defined(TOOLKIT_VIEWS)
   // Mirror the positions if necessary.
-  complete_bounds.set_x(
-      containing_view->MirroredLeftPointForRect(complete_bounds));
+  complete_bounds.set_x(containing_view->GetMirroredXForRect(complete_bounds));
 #endif
 
   // Start at full opacity, then loop back and forth five times before ending
@@ -463,7 +506,7 @@ int GetBigProgressIconOffset() {
 #if defined(TOOLKIT_VIEWS)
 // Download dragging
 void DragDownload(const DownloadItem* download,
-                  SkBitmap* icon,
+                  gfx::Image* icon,
                   gfx::NativeView view) {
   DCHECK(download);
 
@@ -472,11 +515,11 @@ void DragDownload(const DownloadItem* download,
 
   if (icon) {
     drag_utils::CreateDragImageForFile(
-        download->GetFileNameToReportUser(), icon, &data);
+        download->GetFileNameToReportUser(), *icon, &data);
   }
 
   const FilePath full_path = download->full_path();
-  data.SetFilename(full_path.ToWStringHack());
+  data.SetFilename(full_path);
 
   std::string mime_type = download->mime_type();
   if (mime_type.empty())
@@ -484,8 +527,8 @@ void DragDownload(const DownloadItem* download,
 
   // Add URL so that we can load supported files when dragged to TabContents.
   if (net::IsSupportedMimeType(mime_type)) {
-    data.SetURL(GURL(WideToUTF8(full_path.ToWStringHack())),
-                     download->GetFileNameToReportUser().ToWStringHack());
+    data.SetURL(net::FilePathToFileURL(full_path),
+                download->GetFileNameToReportUser().LossyDisplayName());
   }
 
 #if defined(OS_WIN)
@@ -499,7 +542,9 @@ void DragDownload(const DownloadItem* download,
   GtkWidget* root = gtk_widget_get_toplevel(view);
   if (!root)
     return;
-  views::WidgetGtk* widget = views::WidgetGtk::GetViewForNative(root);
+
+  views::WidgetGtk* widget = static_cast<views::WidgetGtk*>(
+      views::NativeWidget::GetNativeWidgetForNativeView(root));
   if (!widget)
     return;
 
@@ -509,7 +554,7 @@ void DragDownload(const DownloadItem* download,
 }
 #elif defined(USE_X11)
 void DragDownload(const DownloadItem* download,
-                  SkBitmap* icon,
+                  gfx::Image* icon,
                   gfx::NativeView view) {
   DownloadItemDrag::BeginDrag(download, icon);
 }
@@ -525,11 +570,10 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   file_value->SetString("date_string",
       base::TimeFormatShortDate(download->start_time()));
   file_value->SetInteger("id", id);
-  file_value->SetString("file_path",
-      WideToUTF16Hack(download->GetTargetFilePath().ToWStringHack()));
+  file_value->Set("file_path",
+                  Value::CreateFilePathValue(download->GetTargetFilePath()));
   // Keep file names as LTR.
-  string16 file_name = WideToUTF16Hack(
-      download->GetFileNameToReportUser().ToWStringHack());
+  string16 file_name = download->GetFileNameToReportUser().LossyDisplayName();
   file_name = base::i18n::GetDisplayStringInLTRDirectionality(file_name);
   file_value->SetString("file_name", file_name);
   file_value->SetString("url", download->url().spec());
@@ -538,6 +582,12 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   if (download->state() == DownloadItem::IN_PROGRESS) {
     if (download->safety_state() == DownloadItem::DANGEROUS) {
       file_value->SetString("state", "DANGEROUS");
+      DCHECK(download->danger_type() == DownloadItem::DANGEROUS_FILE ||
+             download->danger_type() == DownloadItem::DANGEROUS_URL);
+      const char* danger_type_value =
+          download->danger_type() == DownloadItem::DANGEROUS_FILE ?
+          "DANGEROUS_FILE" : "DANGEROUS_URL";
+      file_value->SetString("danger_type", danger_type_value);
     } else if (download->is_paused()) {
       file_value->SetString("state", "PAUSED");
     } else {
@@ -647,7 +697,7 @@ void UpdateAppIconDownloadProgress(int download_count,
     else if (!progress_known)
       taskbar->SetProgressState(frame, TBPF_INDETERMINATE);
     else
-      taskbar->SetProgressValue(frame, (int)(progress * 100), 100);
+      taskbar->SetProgressValue(frame, static_cast<int>(progress * 100), 100);
   }
 #endif
 }
@@ -709,6 +759,18 @@ void CancelDownloadRequest(ResourceDispatcherHost* rdh,
   rdh->CancelRequest(render_process_id, request_id, false);
 }
 
+void NotifyDownloadInitiated(int render_process_id, int render_view_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  RenderViewHost* rvh = RenderViewHost::FromID(render_process_id,
+                                               render_view_id);
+  if (!rvh)
+    return;
+
+  NotificationService::current()->Notify(NotificationType::DOWNLOAD_INITIATED,
+                                         Source<RenderViewHost>(rvh),
+                                         NotificationService::NoDetails());
+}
+
 int GetUniquePathNumberWithCrDownload(const FilePath& path) {
   if (!file_util::PathExists(path) &&
       !file_util::PathExists(GetCrDownloadPath(path)))
@@ -758,23 +820,20 @@ FilePath GetCrDownloadPath(const FilePath& suggested_path) {
 }
 
 // TODO(erikkay,phajdan.jr): This is apparently not being exercised in tests.
-bool IsDangerous(DownloadCreateInfo* info, Profile* profile) {
+bool IsDangerous(DownloadCreateInfo* info, Profile* profile, bool auto_open) {
   DownloadDangerLevel danger_level = GetFileDangerLevel(
       info->suggested_path.BaseName());
-
-  if (danger_level == Dangerous) {
+  if (danger_level == Dangerous)
+    return !(auto_open && info->has_user_gesture);
+  if (danger_level == AllowOnUserGesture && !info->has_user_gesture)
     return true;
-  } else if (danger_level == AllowOnUserGesture && !info->has_user_gesture) {
-    return true;
-  } else if (info->is_extension_install) {
+  if (info->is_extension_install) {
+    // Extensions that are not from the gallery are considered dangerous.
     ExtensionService* service = profile->GetExtensionService();
     if (!service ||
-        !service->IsDownloadFromGallery(info->url, info->referrer_url)) {
-      // Extensions that are not from the gallery are considered dangerous.
+        !service->IsDownloadFromGallery(info->url, info->referrer_url))
       return true;
-    }
   }
-
   return false;
 }
 

@@ -11,15 +11,15 @@
 #include "base/process_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/string_split.h"
-#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_plugin_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/plugin_messages.h"
-#include "chrome/common/resource_dispatcher.h"
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_proxy.h"
+#include "content/common/child_process.h"
+#include "content/common/resource_dispatcher.h"
 #include "net/base/data_url.h"
 #include "net/base/io_buffer.h"
 #include "net/base/upload_data.h"
@@ -87,9 +87,7 @@ class PluginRequestHandlerProxy
     return true;
   }
 
-  virtual void OnReceivedResponse(
-      const ResourceResponseInfo& info,
-      bool content_filtered) {
+  virtual void OnReceivedResponse(const ResourceResponseInfo& info) {
     response_headers_ = info.headers;
     plugin_->functions().response_funcs->start_completed(
         cprequest_.get(), CPERR_SUCCESS);
@@ -167,8 +165,6 @@ class PluginRequestHandlerProxy
     request_info.first_party_for_cookies =
         GURL(cprequest_->url); // TODO(jackson): policy url?
     request_info.referrer = GURL();  // TODO(mpcomplete): referrer?
-    request_info.frame_origin = "null";
-    request_info.main_frame_origin = "null";
     request_info.headers = extra_headers_;
     request_info.load_flags = load_flags_;
     request_info.requestor_pid = base::GetCurrentProcId();
@@ -428,6 +424,7 @@ int STDCALL CPB_GetBrowsingContextInfo(
     void* buf, uint32 buf_size) {
   CHECK(ChromePluginLib::IsPluginThread());
 
+#if defined(OS_WIN)
   switch (type) {
   case CPBROWSINGCONTEXT_DATA_DIR_PTR: {
     if (buf_size < sizeof(char*))
@@ -437,7 +434,7 @@ int STDCALL CPB_GetBrowsingContextInfo(
                     GetSwitchValuePath(switches::kPluginDataDir);
     DCHECK(!path.empty());
     std::string retval = WideToUTF8(
-        path.Append(chrome::kChromePluginDataDirname).ToWStringHack());
+        path.Append(chrome::kChromePluginDataDirname).value());
     *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, retval);
 
     return CPERR_SUCCESS;
@@ -451,6 +448,10 @@ int STDCALL CPB_GetBrowsingContextInfo(
     return CPERR_SUCCESS;
     }
   }
+#else
+  // TODO(aa): this code is only used by Gears, which we are removing.
+  NOTREACHED();
+#endif
 
   return CPERR_FAILURE;
 }

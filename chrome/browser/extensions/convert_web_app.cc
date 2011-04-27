@@ -25,9 +25,9 @@
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/web_apps.h"
-#include "gfx/codec/png_codec.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace keys = extension_manifest_keys;
 
@@ -168,7 +168,12 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   // Finally, create the extension object to represent the unpacked directory.
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
-      temp_dir.path(), Extension::INTERNAL, *root, false, &error);
+      temp_dir.path(),
+      Extension::INTERNAL,
+      *root,
+      false,  // Don't require a key.
+      true,  // Enable strict error checks.
+      &error);
   if (!extension) {
     LOG(ERROR) << error;
     return NULL;

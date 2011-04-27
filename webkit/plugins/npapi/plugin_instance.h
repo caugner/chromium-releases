@@ -17,12 +17,12 @@
 #include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/point.h"
-#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/nphostapi.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/rect.h"
 
 class MessageLoop;
 
@@ -355,13 +355,9 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
 // lifetime of the object, then NULL when it goes out of scope.
 class ScopedCurrentPluginEvent {
  public:
-  ScopedCurrentPluginEvent(PluginInstance* instance, NPCocoaEvent* event)
-      : instance_(instance) {
-    instance_->set_currently_handled_event(event);
-  }
-  ~ScopedCurrentPluginEvent() {
-    instance_->set_currently_handled_event(NULL);
-  }
+  ScopedCurrentPluginEvent(PluginInstance* instance, NPCocoaEvent* event);
+  ~ScopedCurrentPluginEvent();
+
  private:
   scoped_refptr<PluginInstance> instance_;
   DISALLOW_COPY_AND_ASSIGN(ScopedCurrentPluginEvent);

@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "gfx/size.h"
+#include "ui/gfx/size.h"
 #include "views/painter.h"
 #include "views/view.h"
 
@@ -38,7 +38,7 @@ class IconLabelBubbleView : public views::View {
   void SetImage(const SkBitmap& bitmap);
   void SetItemPadding(int padding) { item_padding_ = padding; }
 
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
 

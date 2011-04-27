@@ -7,11 +7,11 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tabs/side_tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
-#include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "views/background.h"
 #include "views/controls/button/image_button.h"
 
@@ -89,15 +89,11 @@ SideTabStrip::~SideTabStrip() {
 ////////////////////////////////////////////////////////////////////////////////
 // SideTabStrip, BaseTabStrip implementation:
 
-int SideTabStrip::GetPreferredHeight() {
-  return 0;
-}
-
 void SideTabStrip::SetBackgroundOffset(const gfx::Point& offset) {
 }
 
 bool SideTabStrip::IsPositionInWindowCaption(const gfx::Point& point) {
-  return GetViewForPoint(point) == this;
+  return GetEventHandlerForPoint(point) == this;
 }
 
 void SideTabStrip::StartHighlight(int model_index) {
@@ -135,19 +131,19 @@ void SideTabStrip::PaintChildren(gfx::Canvas* canvas) {
 
   // Paint the new tab and separator first so that any tabs animating appear on
   // top.
-  separator_->ProcessPaint(canvas);
-  newtab_button_->ProcessPaint(canvas);
+  separator_->Paint(canvas);
+  newtab_button_->Paint(canvas);
 
   for (int i = tab_count() - 1; i >= 0; --i) {
     BaseTab* tab = base_tab_at_tab_index(i);
     if (tab->dragging())
       dragging_tab = tab;
     else
-      tab->ProcessPaint(canvas);
+      tab->Paint(canvas);
   }
 
   if (dragging_tab)
-    dragging_tab->ProcessPaint(canvas);
+    dragging_tab->Paint(canvas);
 }
 
 BaseTab* SideTabStrip::CreateTab() {
@@ -155,7 +151,7 @@ BaseTab* SideTabStrip::CreateTab() {
 }
 
 void SideTabStrip::GenerateIdealBounds() {
-  gfx::Rect layout_rect = GetLocalBounds(false);
+  gfx::Rect layout_rect = GetContentsBounds();
   layout_rect.Inset(kTabStripInset, kTabStripInset);
 
   int y = layout_rect.y();
@@ -214,23 +210,6 @@ void SideTabStrip::StartInsertTabAnimation(int model_index, bool foreground) {
   AnimateToIdealBounds();
 }
 
-void SideTabStrip::StartMoveTabAnimation() {
-  PrepareForAnimation();
-
-  GenerateIdealBounds();
-  AnimateToIdealBounds();
-}
-
-void SideTabStrip::StopAnimating(bool layout) {
-  if (!IsAnimating())
-    return;
-
-  bounds_animator().Cancel();
-
-  if (layout)
-    DoLayout();
-}
-
 void SideTabStrip::AnimateToIdealBounds() {
   for (int i = 0; i < tab_count(); ++i) {
     BaseTab* tab = base_tab_at_tab_index(i);
@@ -246,7 +225,7 @@ void SideTabStrip::AnimateToIdealBounds() {
 void SideTabStrip::DoLayout() {
   BaseTabStrip::DoLayout();
 
-  newtab_button_->SetBounds(newtab_button_bounds_);
+  newtab_button_->SetBoundsRect(newtab_button_bounds_);
 
-  separator_->SetBounds(separator_bounds_);
+  separator_->SetBoundsRect(separator_bounds_);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -113,6 +113,8 @@ MockDirectorySetterUpper::MockDirectory::MockDirectory(
   init_kernel(name);
 }
 
+MockDirectorySetterUpper::MockDirectory::~MockDirectory() {}
+
 MockDirectorySetterUpper::Manager::Manager(
     const FilePath& root_path, syncable::Directory* dir) :
     syncable::DirectoryManager(root_path) {
@@ -122,6 +124,8 @@ MockDirectorySetterUpper::Manager::Manager(
 MockDirectorySetterUpper::MockDirectorySetterUpper()
     : directory_(new MockDirectory(name())) {
 }
+
+MockDirectorySetterUpper::~MockDirectorySetterUpper() {}
 
 void MockDirectorySetterUpper::SetUp() {
   reset_directory_manager(new Manager(FilePath(), directory_.get()));

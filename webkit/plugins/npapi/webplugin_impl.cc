@@ -10,7 +10,6 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
@@ -37,6 +36,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/gfx/rect.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/plugins/npapi/plugin_host.h"
@@ -666,6 +666,7 @@ bool WebPluginImpl::IsValidUrl(const GURL& url, Referrer referrer_flag) {
 WebPluginImpl::RoutingStatus WebPluginImpl::RouteToFrame(
     const char* url,
     bool is_javascript_url,
+    bool popups_allowed,
     const char* method,
     const char* target,
     const char* buf,
@@ -722,6 +723,7 @@ WebPluginImpl::RoutingStatus WebPluginImpl::RouteToFrame(
   request.setHTTPMethod(WebString::fromUTF8(method));
   request.setFirstPartyForCookies(
       webframe_->document().firstPartyForCookies());
+  request.setHasUserGesture(popups_allowed);
   if (len > 0) {
     if (!SetPostData(&request, buf, len)) {
       // Uhoh - we're in trouble.  There isn't a good way
@@ -1085,8 +1087,8 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
   // to the plugin's frame.
   bool is_javascript_url = StartsWithASCII(url, "javascript:", false);
   RoutingStatus routing_status = RouteToFrame(
-      url, is_javascript_url, method, target, buf, len, notify_id,
-      referrer_flag);
+      url, is_javascript_url, popups_allowed, method, target, buf, len,
+      notify_id, referrer_flag);
   if (routing_status == ROUTED)
     return;
 

@@ -9,14 +9,14 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #include "chrome/browser/ui/login/login_model.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
@@ -53,7 +53,7 @@ class LoginHandlerMac : public LoginHandler,
 
   // LoginHandler:
   virtual void BuildViewForPasswordManager(PasswordManager* manager,
-                                           std::wstring explanation) {
+                                           const string16& explanation) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     // Load nib here instead of in constructor.
@@ -64,7 +64,7 @@ class LoginHandlerMac : public LoginHandler,
 
     SetModel(manager);
 
-    [sheet_controller_ setExplanation:base::SysWideToNSString(explanation)];
+    [sheet_controller_ setExplanation:base::SysUTF16ToNSString(explanation)];
 
     // Scary thread safety note: This can potentially be called *after* SetAuth
     // or CancelAuth (say, if the request was cancelled before the UI thread got
@@ -92,8 +92,8 @@ class LoginHandlerMac : public LoginHandler,
     ReleaseSoon();
   }
 
-  void OnLoginPressed(const std::wstring& username,
-                      const std::wstring& password) {
+  void OnLoginPressed(const string16& username,
+                      const string16& password) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     SetAuth(username, password);
@@ -147,8 +147,9 @@ LoginHandler* LoginHandler::Create(net::AuthChallengeInfo* auth_info,
 - (IBAction)loginPressed:(id)sender {
   using base::SysNSStringToWide;
   [NSApp endSheet:[self window]];
-  handler_->OnLoginPressed(SysNSStringToWide([nameField_ stringValue]),
-                           SysNSStringToWide([passwordField_ stringValue]));
+  handler_->OnLoginPressed(
+      base::SysNSStringToUTF16([nameField_ stringValue]),
+      base::SysNSStringToUTF16([passwordField_ stringValue]));
 }
 
 - (IBAction)cancelPressed:(id)sender {

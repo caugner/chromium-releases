@@ -19,12 +19,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/socket_stream_dispatcher.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
+#include "content/common/socket_stream_dispatcher.h"
 #include "googleurl/src/url_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
@@ -240,14 +240,6 @@ WebSocketStreamHandleBridge* WebSocketStreamHandleBridge::Create(
   return dispatcher->CreateBridge(handle, delegate);
 }
 
-void NotifyCacheStats() {
-  // Update the browser about our cache
-  // NOTE: Since this can be called from the plugin process, we might not have
-  // a RenderThread.  Do nothing in that case.
-  if (RenderThread::current())
-    RenderThread::current()->InformHostOfCacheStatsLater();
-}
-
 void CloseCurrentConnections() {
   RenderThread::current()->CloseCurrentConnections();
 }
@@ -256,8 +248,8 @@ void SetCacheMode(bool enabled) {
   RenderThread::current()->SetCacheMode(enabled);
 }
 
-void ClearCache() {
-  RenderThread::current()->ClearCache();
+void ClearCache(bool preserve_ssl_host_info) {
+  RenderThread::current()->ClearCache(preserve_ssl_host_info);
 }
 
 std::string GetProductVersion() {

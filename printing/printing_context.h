@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/string16.h"
-#include "gfx/native_widget_types.h"
 #include "printing/print_settings.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace printing {
 
@@ -47,6 +47,10 @@ class PrintingContext {
   // default device settings.
   virtual Result UseDefaultSettings() = 0;
 
+  // Update print settings. As of now we are updating the page range settings.
+  // In the future, update other print job settings.
+  virtual Result UpdatePrintSettings(const PageRanges& ranges) = 0;
+
   // Initializes with predefined settings.
   virtual Result InitWithSettings(const PrintSettings& settings) = 0;
 
@@ -71,9 +75,6 @@ class PrintingContext {
   // Cancels printing. Can be used in a multi-threaded context. Takes effect
   // immediately.
   virtual void Cancel() = 0;
-
-  // Dismiss the Print... dialog box if shown.
-  virtual void DismissDialog() = 0;
 
   // Releases the native printing context.
   virtual void ReleaseContext() = 0;

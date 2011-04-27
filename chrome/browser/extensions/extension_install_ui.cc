@@ -8,64 +8,87 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/i18n/rtl.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
-#if defined(OS_MACOSX)
-#include "chrome/browser/ui/cocoa/extensions/extension_installed_bubble_bridge.h"
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/views/extensions/extension_installed_bubble.h"
-#endif
-
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/extensions/gtk_theme_installed_infobar_delegate.h"
-#include "chrome/browser/ui/gtk/extension_installed_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_provider.h"
 #endif
 
 // static
 const int ExtensionInstallUI::kTitleIds[NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_INSTALL_PROMPT_TITLE,
-  IDS_EXTENSION_UNINSTALL_PROMPT_TITLE
+  IDS_EXTENSION_UNINSTALL_PROMPT_TITLE,
+  IDS_EXTENSION_RE_ENABLE_PROMPT_TITLE
 };
 // static
 const int ExtensionInstallUI::kHeadingIds[NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_INSTALL_PROMPT_HEADING,
-  IDS_EXTENSION_UNINSTALL_PROMPT_HEADING
+  IDS_EXTENSION_UNINSTALL_PROMPT_HEADING,
+  IDS_EXTENSION_RE_ENABLE_PROMPT_HEADING
 };
 // static
 const int ExtensionInstallUI::kButtonIds[NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
-  IDS_EXTENSION_PROMPT_UNINSTALL_BUTTON
+  IDS_EXTENSION_PROMPT_UNINSTALL_BUTTON,
+  IDS_EXTENSION_PROMPT_RE_ENABLE_BUTTON
+};
+// static
+const int ExtensionInstallUI::kWarningIds[NUM_PROMPT_TYPES] = {
+  IDS_EXTENSION_PROMPT_WILL_HAVE_ACCESS_TO,
+  0,  // No warning label when uninstalling.
+  IDS_EXTENSION_PROMPT_WILL_NOW_HAVE_ACCESS_TO
 };
 
 namespace {
 
 // Size of extension icon in top left of dialog.
 const int kIconSize = 69;
+
+// Shows the application install animation on the new tab page for the app
+// with |app_id|. If a NTP already exists on the active |browser|, this will
+// select that tab and show the animation there. Otherwise, it will create
+// a new NTP.
+void ShowAppInstalledAnimation(Browser* browser, const std::string& app_id) {
+  // Select an already open NTP, if there is one. Existing NTPs will
+  // automatically show the install animation for any new apps.
+  for (int i = 0; i < browser->tab_count(); ++i) {
+    TabContents* tab_contents = browser->GetTabContentsAt(i);
+    GURL url = tab_contents->GetURL();
+    if (StartsWithASCII(url.spec(), chrome::kChromeUINewTabURL, false)) {
+      browser->SelectTabContentsAt(i, false);
+      return;
+    }
+  }
+
+  // If there isn't an NTP, open one and pass it the ID of the installed app.
+  std::string url = base::StringPrintf(
+      "%s/#app-id=%s", chrome::kChromeUINewTabURL, app_id.c_str());
+  browser->AddSelectedTabWithURL(GURL(url), PageTransition::TYPED);
+}
 
 }  // namespace
 
@@ -122,6 +145,15 @@ void ExtensionInstallUI::ConfirmUninstall(Delegate* delegate,
   ShowConfirmation(UNINSTALL_PROMPT);
 }
 
+void ExtensionInstallUI::ConfirmReEnable(Delegate* delegate,
+                                         const Extension* extension) {
+  DCHECK(ui_loop_ == MessageLoop::current());
+  extension_ = extension;
+  delegate_ = delegate;
+
+  ShowConfirmation(RE_ENABLE_PROMPT);
+}
+
 void ExtensionInstallUI::OnInstallSuccess(const Extension* extension,
                                           SkBitmap* icon) {
   extension_ = extension;
@@ -142,35 +174,11 @@ void ExtensionInstallUI::OnInstallSuccess(const Extension* extension,
   browser->window()->Show();
 
   if (extension->GetFullLaunchURL().is_valid()) {
-    std::string hash_params = "app-id=";
-    hash_params += extension->id();
-
-    std::string url(chrome::kChromeUINewTabURL);
-    url += "/#";
-    url += hash_params;
-    browser->AddSelectedTabWithURL(GURL(url), PageTransition::TYPED);
-
+    ShowAppInstalledAnimation(browser, extension->id());
     return;
   }
 
-#if defined(TOOLKIT_VIEWS)
-  ExtensionInstalledBubble::Show(extension, browser, icon_);
-#elif defined(OS_MACOSX)
-  if ((extension->browser_action()) || !extension->omnibox_keyword().empty() ||
-      (extension->page_action() &&
-      !extension->page_action()->default_icon_path().empty())) {
-    ExtensionInstalledBubbleCocoa::ShowExtensionInstalledBubble(
-        browser->window()->GetNativeHandle(),
-        extension, browser, icon_);
-  } else {
-    // If the extension is of type GENERIC, meaning it doesn't have a UI
-    // surface to display for this window, launch infobar instead of popup
-    // bubble, because we have no guaranteed wrench menu button to point to.
-    ShowGenericExtensionInstalledInfoBar(extension);
-  }
-#elif defined(TOOLKIT_GTK)
-  ExtensionInstalledBubbleGtk::Show(extension, browser, icon_);
-#endif  // TOOLKIT_VIEWS
+  browser::ShowExtensionInstalledBubble(extension, browser, icon_, profile);
 }
 
 void ExtensionInstallUI::OnInstallFailure(const std::string& error) {
@@ -204,6 +212,7 @@ void ExtensionInstallUI::OnImageLoaded(
   SetIcon(image);
 
   switch (prompt_type_) {
+    case RE_ENABLE_PROMPT:
     case INSTALL_PROMPT: {
       // TODO(jcivelli): http://crbug.com/44771 We should not show an install
       //                 dialog when installing an app from the gallery.
@@ -214,7 +223,7 @@ void ExtensionInstallUI::OnImageLoaded(
 
       std::vector<string16> warnings = extension_->GetPermissionMessages();
       ShowExtensionInstallUIPrompt2Impl(profile_, delegate_, extension_, &icon_,
-                                        warnings);
+                                        warnings, prompt_type_);
       break;
     }
     case UNINSTALL_PROMPT: {
@@ -248,7 +257,7 @@ void ExtensionInstallUI::ShowThemeInfoBar(const std::string& previous_theme_id,
 
   // First find any previous theme preview infobars.
   InfoBarDelegate* old_delegate = NULL;
-  for (int i = 0; i < tab_contents->infobar_delegate_count(); ++i) {
+  for (size_t i = 0; i < tab_contents->infobar_count(); ++i) {
     InfoBarDelegate* delegate = tab_contents->GetInfoBarDelegateAt(i);
     ThemeInstalledInfoBarDelegate* theme_infobar =
         delegate->AsThemePreviewInfobarDelegate();
@@ -283,30 +292,6 @@ void ExtensionInstallUI::ShowConfirmation(PromptType prompt_type) {
                      gfx::Size(kIconSize, kIconSize),
                      ImageLoadingTracker::DONT_CACHE);
 }
-
-#if defined(OS_MACOSX)
-void ExtensionInstallUI::ShowGenericExtensionInstalledInfoBar(
-    const Extension* new_extension) {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-  if (!browser)
-    return;
-
-  TabContents* tab_contents = browser->GetSelectedTabContents();
-  if (!tab_contents)
-    return;
-
-  string16 extension_name = UTF8ToUTF16(new_extension->name());
-  base::i18n::AdjustStringForLocaleDirection(&extension_name);
-  string16 msg =
-      l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
-                                 extension_name) +
-      UTF8ToUTF16(" ") +
-      l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_MANAGE_INFO_MAC);
-  InfoBarDelegate* delegate = new SimpleAlertInfoBarDelegate(tab_contents,
-      new SkBitmap(icon_), msg, true);
-  tab_contents->AddInfoBar(delegate);
-}
-#endif
 
 InfoBarDelegate* ExtensionInstallUI::GetNewThemeInstalledInfoBarDelegate(
     TabContents* tab_contents,

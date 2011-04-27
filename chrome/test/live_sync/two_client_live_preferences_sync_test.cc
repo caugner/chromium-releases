@@ -1,11 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/prefs/scoped_pref_update.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
+#include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/live_sync/live_preferences_sync_test.h"
 
+// TestScribe ID - 423959 (kHomePageIsNewTabPage).
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kHomePageIsNewTabPage) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -37,6 +40,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, Race) {
             GetPrefs(1)->GetString(prefs::kHomePage));
 }
 
+// TestScribe ID - 425635.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kPasswordManagerEnabled) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -57,6 +61,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
             GetPrefs(1)->GetBoolean(prefs::kPasswordManagerEnabled));
 }
 
+// TestScribe ID - 427426.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kKeepEverythingSynced) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -71,6 +76,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
             GetPrefs(1)->GetBoolean(prefs::kKeepEverythingSynced));
 }
 
+// TestScribe ID - 426093.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kSyncPreferences) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kSyncPreferences),
@@ -88,6 +94,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kSyncPreferences) {
             GetPrefs(1)->GetBoolean(prefs::kPasswordManagerEnabled));
 }
 
+// TestScribe ID - 425647.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, SignInDialog) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kSyncPreferences),
@@ -128,6 +135,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, SignInDialog) {
             GetPrefs(1)->GetBoolean(prefs::kSyncThemes));
 }
 
+// TestScribe ID - 423960.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kShowBookmarkBar) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kShowBookmarkBar),
@@ -145,6 +153,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kShowBookmarkBar) {
             GetPrefs(1)->GetBoolean(prefs::kShowBookmarkBar));
 }
 
+// TestScribe ID - 423962.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kCheckDefaultBrowser) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kCheckDefaultBrowser),
@@ -164,6 +173,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kCheckDefaultBrowser) {
             GetPrefs(1)->GetBoolean(prefs::kCheckDefaultBrowser));
 }
 
+// TestScribe ID - 423959 (kHomePage).
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kHomePage) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetString(prefs::kHomePage),
@@ -179,6 +189,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kHomePage) {
             GetPrefs(1)->GetString(prefs::kHomePage));
 }
 
+// TestScribe ID - 423959 (kShowHomeButton).
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kShowHomeButton) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kShowHomeButton),
@@ -196,6 +207,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kShowHomeButton) {
             GetPrefs(1)->GetBoolean(prefs::kShowHomeButton));
 }
 
+// TestScribe ID - 425641.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kEnableTranslate) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kEnableTranslate),
@@ -213,6 +225,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kEnableTranslate) {
             GetPrefs(1)->GetBoolean(prefs::kEnableTranslate));
 }
 
+// TestScribe ID - 425648.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kAutoFillEnabled) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kAutoFillEnabled),
@@ -230,6 +243,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kAutoFillEnabled) {
             GetPrefs(1)->GetBoolean(prefs::kAutoFillEnabled));
 }
 
+// TestScribe ID - 425666.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kURLsToRestoreOnStartup) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -263,7 +277,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
         Append(Value::CreateStringValue("http://www.google.com/"));
     url_list_client->
         Append(Value::CreateStringValue("http://www.flickr.com/"));
-    ScopedPrefUpdate update(GetPrefs(0), prefs::kURLsToRestoreOnStartup);
+    ScopedUserPrefUpdate update(GetPrefs(0), prefs::kURLsToRestoreOnStartup);
   }
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
@@ -281,6 +295,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
       Equals(GetPrefs(1)->GetMutableList(prefs::kURLsToRestoreOnStartup)));
 }
 
+// TestScribe ID - 423958.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kRestoreOnStartup) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetInteger(prefs::kRestoreOnStartup),
@@ -297,6 +312,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kRestoreOnStartup) {
             GetPrefs(1)->GetInteger(prefs::kRestoreOnStartup));
 }
 
+// TestScribe ID - 425644.
 #if defined(USE_NSS)
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, Security) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -341,6 +357,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, Security) {
 }
 #endif  // USE_NSS
 
+// TestScribe ID - 425639.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, Privacy) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kAlternateErrorPagesEnabled),
@@ -397,6 +414,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, Privacy) {
             GetPrefs(1)->GetBoolean(prefs::kSafeBrowsingEnabled));
 }
 
+// TestScribe ID - 426766.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, ClearData) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kDeleteBrowsingHistory),
@@ -469,6 +487,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, ClearData) {
             GetPrefs(1)->GetBoolean(prefs::kDeleteFormData));
 }
 
+// TestScribe ID - 425903.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kWebKitUsesUniversalDetector) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -489,6 +508,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
             GetPrefs(1)->GetBoolean(prefs::kWebKitUsesUniversalDetector));
 }
 
+// TestScribe ID - 425643.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kDefaultCharset) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_EQ(GetPrefs(0)->GetString(prefs::kDefaultCharset),
@@ -504,6 +524,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kDefaultCharset) {
             GetPrefs(1)->GetString(prefs::kDefaultCharset));
 }
 
+// TestScribe ID - 425675 (kBlockThirdPartyCookies).
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kBlockThirdPartyCookies) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -524,6 +545,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
             GetPrefs(1)->GetBoolean(prefs::kBlockThirdPartyCookies));
 }
 
+// TestScribe ID - 425675 (kClearSiteDataOnExit).
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kClearSiteDataOnExit) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -544,6 +566,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
             GetPrefs(1)->GetBoolean(prefs::kClearSiteDataOnExit));
 }
 
+// TestScribe ID - 425639.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        kSafeBrowsingEnabled) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -562,4 +585,165 @@ IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
             GetPrefs(0)->GetBoolean(prefs::kSafeBrowsingEnabled));
   ASSERT_EQ(GetVerifierPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled),
             GetPrefs(1)->GetBoolean(prefs::kSafeBrowsingEnabled));
+}
+
+// TestScribe ID - 433525.
+// The kAutoFillAuxiliaryProfilesEnabled preference key is currently only
+// synced on Mac and not on Windows or Linux.
+IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
+                       kAutoFillAuxiliaryProfilesEnabled) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled),
+            GetPrefs(1)->GetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled));
+
+  GetVerifierPrefs()->SetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled, 0);
+  GetPrefs(0)->SetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled, 1);
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+
+#if defined(OS_MACOSX)
+  ASSERT_NE(GetVerifierPrefs()->GetBoolean(
+                                prefs::kAutoFillAuxiliaryProfilesEnabled),
+            GetPrefs(1)->GetBoolean(
+                         prefs::kAutoFillAuxiliaryProfilesEnabled));
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled),
+            GetPrefs(1)->GetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled));
+#else
+  ASSERT_NE(GetPrefs(1)->GetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled),
+            GetPrefs(0)->GetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled));
+#endif  // OS_MACOSX
+}
+
+// TestScribe ID - 433564.
+// TODO(annapop): Enable after crbug.com/71510 is fixed.
+IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
+                       DISABLED_kCookiePromptExpanded) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kCookiePromptExpanded),
+            GetPrefs(1)->GetBoolean(prefs::kCookiePromptExpanded));
+
+  bool new_kCookiePromptExpanded = !GetPrefs(0)->GetBoolean(
+      prefs::kCookiePromptExpanded);
+  GetVerifierPrefs()->SetBoolean(prefs::kCookiePromptExpanded,
+      new_kCookiePromptExpanded);
+  GetPrefs(0)->SetBoolean(prefs::kCookiePromptExpanded,
+      new_kCookiePromptExpanded);
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+
+  ASSERT_EQ(GetVerifierPrefs()->GetBoolean(prefs::kCookiePromptExpanded),
+            GetPrefs(0)->GetBoolean(prefs::kCookiePromptExpanded));
+  ASSERT_EQ(GetVerifierPrefs()->GetBoolean(prefs::kCookiePromptExpanded),
+            GetPrefs(1)->GetBoolean(prefs::kCookiePromptExpanded));
+}
+
+// TestScribe ID - 425642.
+IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest, kPromptForDownload) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kPromptForDownload),
+            GetPrefs(1)->GetBoolean(prefs::kPromptForDownload));
+
+  bool new_kPromptForDownload = !GetVerifierPrefs()->GetBoolean(
+      prefs::kPromptForDownload);
+  GetVerifierPrefs()->SetBoolean(prefs::kPromptForDownload,
+      new_kPromptForDownload);
+  GetPrefs(0)->SetBoolean(prefs::kPromptForDownload,
+      new_kPromptForDownload);
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+
+  ASSERT_EQ(GetVerifierPrefs()->GetBoolean(prefs::kPromptForDownload),
+            GetPrefs(0)->GetBoolean(prefs::kPromptForDownload));
+  ASSERT_EQ(GetVerifierPrefs()->GetBoolean(prefs::kPromptForDownload),
+            GetPrefs(1)->GetBoolean(prefs::kPromptForDownload));
+}
+
+// TestScribe ID - 426767 (kPrefTranslateLanguageBlacklist).
+IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
+                       kPrefTranslateLanguageBlacklist) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kEnableTranslate),
+            GetPrefs(1)->GetBoolean(prefs::kEnableTranslate));
+
+  TranslatePrefs translate_client0_prefs(GetPrefs(0));
+  TranslatePrefs translate_client1_prefs(GetPrefs(1));
+  ASSERT_FALSE(translate_client0_prefs.IsLanguageBlacklisted("fr"));
+  translate_client0_prefs.BlacklistLanguage("fr");
+  ASSERT_TRUE(translate_client0_prefs.IsLanguageBlacklisted("fr"));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(translate_client1_prefs.IsLanguageBlacklisted("fr"));
+
+  translate_client0_prefs.RemoveLanguageFromBlacklist("fr");
+  ASSERT_FALSE(translate_client0_prefs.IsLanguageBlacklisted("fr"));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_FALSE(translate_client1_prefs.IsLanguageBlacklisted("fr"));
+}
+
+// TestScribe ID - 426767 (kPrefTranslateWhitelists).
+IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
+                       kPrefTranslateWhitelists) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kEnableTranslate),
+            GetPrefs(1)->GetBoolean(prefs::kEnableTranslate));
+
+  TranslatePrefs translate_client0_prefs(GetPrefs(0));
+  TranslatePrefs translate_client1_prefs(GetPrefs(1));
+  ASSERT_FALSE(translate_client0_prefs.IsLanguagePairWhitelisted("en", "bg"));
+  translate_client0_prefs.WhitelistLanguagePair("en", "bg");
+  ASSERT_TRUE(translate_client0_prefs.IsLanguagePairWhitelisted("en", "bg"));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(translate_client1_prefs.IsLanguagePairWhitelisted("en", "bg"));
+
+  translate_client0_prefs.RemoveLanguagePairFromWhitelist("en", "bg");
+  ASSERT_FALSE(translate_client0_prefs.IsLanguagePairWhitelisted("en", "bg"));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_FALSE(translate_client1_prefs.IsLanguagePairWhitelisted("en", "bg"));
+}
+
+// TestScribe ID - 426768.
+IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
+                       kPrefTranslateSiteBlacklist) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kEnableTranslate),
+            GetPrefs(1)->GetBoolean(prefs::kEnableTranslate));
+
+  GURL url("http://www.google.com");
+  std::string host(url.host());
+  TranslatePrefs translate_client0_prefs(GetPrefs(0));
+  TranslatePrefs translate_client1_prefs(GetPrefs(1));
+  ASSERT_FALSE(translate_client0_prefs.IsSiteBlacklisted(host));
+  translate_client0_prefs.BlacklistSite(host);
+  ASSERT_TRUE(translate_client0_prefs.IsSiteBlacklisted(host));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(translate_client1_prefs.IsSiteBlacklisted(host));
+
+  translate_client0_prefs.RemoveSiteFromBlacklist(host);
+  ASSERT_FALSE(translate_client0_prefs.IsSiteBlacklisted(host));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_FALSE(translate_client1_prefs.IsSiteBlacklisted(host));
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
+                       kExtensionsUIDeveloperMode) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_EQ(GetPrefs(0)->GetBoolean(prefs::kExtensionsUIDeveloperMode),
+            GetPrefs(1)->GetBoolean(prefs::kExtensionsUIDeveloperMode));
+
+  bool new_kExtensionsUIDeveloperMode = !GetPrefs(0)->GetBoolean(
+      prefs::kExtensionsUIDeveloperMode);
+  GetVerifierPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode,
+      new_kExtensionsUIDeveloperMode);
+  GetPrefs(0)->SetBoolean(prefs::kExtensionsUIDeveloperMode,
+      new_kExtensionsUIDeveloperMode);
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+
+  ASSERT_EQ(GetVerifierPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode),
+            GetPrefs(0)->GetBoolean(prefs::kExtensionsUIDeveloperMode));
+  ASSERT_EQ(GetVerifierPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode),
+            GetPrefs(1)->GetBoolean(prefs::kExtensionsUIDeveloperMode));
 }

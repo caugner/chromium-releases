@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,30 +20,30 @@
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/nss_decryptor.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/common/time_format.h"
 #include "chrome/common/sqlite_utils.h"
+#include "chrome/common/time_format.h"
 #include "grit/generated_resources.h"
 #include "webkit/glue/password_form.h"
 
-using base::Time;
-using importer::BOOKMARKS_HTML;
-using importer::FAVORITES;
-using importer::HISTORY;
-using importer::HOME_PAGE;
-using importer::PASSWORDS;
-using importer::ProfileInfo;
-using importer::SEARCH_ENGINES;
-using webkit_glue::PasswordForm;
+// Original definition is in http://mxr.mozilla.org/firefox/source/toolkit/
+//  components/places/public/nsINavBookmarksService.idl
+enum BookmarkItemType {
+  TYPE_BOOKMARK = 1,
+  TYPE_FOLDER = 2,
+  TYPE_SEPARATOR = 3,
+  TYPE_DYNAMIC_CONTAINER = 4
+};
 
 struct Firefox3Importer::BookmarkItem {
   int parent;
   int id;
   GURL url;
   std::wstring title;
-  int type;
+  BookmarkItemType type;
   std::string keyword;
   base::Time date_added;
   int64 favicon;
+  bool empty_folder;
 };
 
 Firefox3Importer::Firefox3Importer() {
@@ -104,10 +104,8 @@ void Firefox3Importer::ImportHistory() {
     return;
 
   sqlite3* sqlite;
-  if (sqlite3_open(WideToUTF8(file.ToWStringHack()).c_str(),
-                   &sqlite) != SQLITE_OK) {
+  if (sqlite_utils::OpenSqliteDb(file, &sqlite) != SQLITE_OK)
     return;
-  }
   sqlite_utils::scoped_sqlite_db_ptr db(sqlite);
 
   SQLStatement s;
@@ -138,7 +136,7 @@ void Firefox3Importer::ImportHistory() {
     row.set_visit_count(s.column_int(2));
     row.set_hidden(s.column_int(3) == 1);
     row.set_typed_count(s.column_int(4));
-    row.set_last_visit(Time::FromTimeT(s.column_int64(5)/1000000));
+    row.set_last_visit(base::Time::FromTimeT(s.column_int64(5)/1000000));
 
     rows.push_back(row);
   }
@@ -153,10 +151,8 @@ void Firefox3Importer::ImportBookmarks() {
     return;
 
   sqlite3* sqlite;
-  if (sqlite3_open(WideToUTF8(file.ToWStringHack()).c_str(),
-                   &sqlite) != SQLITE_OK) {
+  if (sqlite_utils::OpenSqliteDb(file, &sqlite) != SQLITE_OK)
     return;
-  }
   sqlite_utils::scoped_sqlite_db_ptr db(sqlite);
 
   // Get the bookmark folders that we are interested in.
@@ -180,7 +176,7 @@ void Firefox3Importer::ImportBookmarks() {
   GetTopBookmarkFolder(db.get(), unsorted_folder_id, &list);
   size_t count = list.size();
   for (size_t i = 0; i < count; ++i)
-    GetWholeBookmarkFolder(db.get(), &list, i);
+    GetWholeBookmarkFolder(db.get(), &list, i, NULL);
 
   std::vector<ProfileWriter::BookmarkEntry> bookmarks;
   std::vector<TemplateURL*> template_urls;
@@ -207,13 +203,21 @@ void Firefox3Importer::ImportBookmarks() {
   for (size_t i = 0; i < list.size(); ++i) {
     BookmarkItem* item = list[i];
 
-    // The type of bookmark items is 1.
-    if (item->type != 1)
+    if (item->type == TYPE_FOLDER) {
+      // Folders are added implicitly on adding children,
+      // so now we pass only empty folders to add them explicitly.
+      if (!item->empty_folder)
+        continue;
+    } else if (item->type == TYPE_BOOKMARK) {
+      // Import only valid bookmarks
+      if (!CanImportURL(item->url))
+        continue;
+    } else {
       continue;
+    }
 
     // Skip the default bookmarks and unwanted URLs.
-    if (!CanImportURL(item->url) ||
-        default_urls.find(item->url) != default_urls.end() ||
+    if (default_urls.find(item->url) != default_urls.end() ||
         post_keyword_ids.find(item->id) != post_keyword_ids.end())
       continue;
 
@@ -261,17 +265,20 @@ void Firefox3Importer::ImportBookmarks() {
     entry.url = item->url;
     entry.path = path;
     entry.in_toolbar = is_in_toolbar;
+    entry.is_folder = item->type == TYPE_FOLDER;
 
     bookmarks.push_back(entry);
 
-    if (item->favicon)
-      favicon_map[item->favicon].insert(item->url);
+    if (item->type == TYPE_BOOKMARK) {
+      if (item->favicon)
+        favicon_map[item->favicon].insert(item->url);
 
-    // This bookmark has a keyword, we import it to our TemplateURL model.
-    TemplateURL* t_url = Firefox2Importer::CreateTemplateURL(
-        item->title, UTF8ToWide(item->keyword), item->url);
-    if (t_url)
-      template_urls.push_back(t_url);
+      // This bookmark has a keyword, we import it to our TemplateURL model.
+      TemplateURL* t_url = Firefox2Importer::CreateTemplateURL(
+          item->title, UTF8ToWide(item->keyword), item->url);
+      if (t_url)
+        template_urls.push_back(t_url);
+    }
   }
 
   STLDeleteContainerPointers(list.begin(), list.end());
@@ -300,14 +307,12 @@ void Firefox3Importer::ImportBookmarks() {
 void Firefox3Importer::ImportPasswords() {
   // Initializes NSS3.
   NSSDecryptor decryptor;
-  if (!decryptor.Init(source_path_.ToWStringHack(),
-                      source_path_.ToWStringHack()) &&
-      !decryptor.Init(app_path_.ToWStringHack(),
-                      source_path_.ToWStringHack())) {
+  if (!decryptor.Init(source_path_, source_path_) &&
+      !decryptor.Init(app_path_, source_path_)) {
     return;
   }
 
-  std::vector<PasswordForm> forms;
+  std::vector<webkit_glue::PasswordForm> forms;
   FilePath source_path = source_path_;
   FilePath file = source_path.AppendASCII("signons.sqlite");
   if (file_util::PathExists(file)) {
@@ -356,10 +361,8 @@ void Firefox3Importer::GetSearchEnginesXMLFiles(
     return;
 
   sqlite3* sqlite;
-  if (sqlite3_open(WideToUTF8(file.ToWStringHack()).c_str(),
-                   &sqlite) != SQLITE_OK) {
+  if (sqlite_utils::OpenSqliteDb(file, &sqlite) != SQLITE_OK)
     return;
-  }
   sqlite_utils::scoped_sqlite_db_ptr db(sqlite);
 
   SQLStatement s;
@@ -488,14 +491,16 @@ void Firefox3Importer::GetTopBookmarkFolder(sqlite3* db, int folder_id,
     item->parent = -1;  // The top level folder has no parent.
     item->id = folder_id;
     item->title = s.column_wstring(0);
-    item->type = 2;
+    item->type = TYPE_FOLDER;
     item->favicon = 0;
+    item->empty_folder = true;
     list->push_back(item);
   }
 }
 
 void Firefox3Importer::GetWholeBookmarkFolder(sqlite3* db, BookmarkList* list,
-                                              size_t position) {
+                                              size_t position,
+                                              bool* empty_folder) {
   if (position >= list->size()) {
     NOTREACHED();
     return;
@@ -520,12 +525,15 @@ void Firefox3Importer::GetWholeBookmarkFolder(sqlite3* db, BookmarkList* list,
     item->id = s.column_int(0);
     item->url = GURL(s.column_string(1));
     item->title = s.column_wstring(2);
-    item->type = s.column_int(3);
+    item->type = static_cast<BookmarkItemType>(s.column_int(3));
     item->keyword = s.column_string(4);
-    item->date_added = Time::FromTimeT(s.column_int64(5)/1000000);
+    item->date_added = base::Time::FromTimeT(s.column_int64(5)/1000000);
     item->favicon = s.column_int64(6);
+    item->empty_folder = true;
 
     temp_list.push_back(item);
+    if (empty_folder != NULL)
+      *empty_folder = false;
   }
 
   // Appends all items to the list.
@@ -533,8 +541,8 @@ void Firefox3Importer::GetWholeBookmarkFolder(sqlite3* db, BookmarkList* list,
        i != temp_list.end(); ++i) {
     list->push_back(*i);
     // Recursive add bookmarks in sub-folders.
-    if ((*i)->type == 2)
-      GetWholeBookmarkFolder(db, list, list->size() - 1);
+    if ((*i)->type == TYPE_FOLDER)
+      GetWholeBookmarkFolder(db, list, list->size() - 1, &(*i)->empty_folder);
   }
 }
 

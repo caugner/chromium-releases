@@ -37,10 +37,6 @@ static bool IsRgb32(XImage* image) {
          (IndexOfLowestBit(image->blue_mask) == 0);
 }
 
-static uint32_t* GetRowStart(uint8* buffer_start, int stride, int cur_row) {
-  return reinterpret_cast<uint32_t*>(buffer_start + (cur_row * stride));
-}
-
 // Private Implementation pattern to avoid leaking the X11 types into the header
 // file.
 class CapturerLinuxPimpl {
@@ -72,6 +68,8 @@ class CapturerLinuxPimpl {
   Display* display_;
   GC gc_;
   Window root_window_;
+  int width_;
+  int height_;
 
   // XDamage information.
   Damage damage_handle_;
@@ -82,6 +80,13 @@ class CapturerLinuxPimpl {
   uint8* buffers_[CapturerLinux::kNumBuffers];
   int stride_;
   bool capture_fullscreen_;
+
+  // Invalid rects in the last capture. This is used to synchronize current with
+  // the previous buffer used.
+  InvalidRects last_invalid_rects_;
+
+  // Last capture buffer used.
+  uint8* last_buffer_;
 };
 
 CapturerLinux::CapturerLinux(MessageLoop* message_loop)
@@ -114,11 +119,14 @@ CapturerLinuxPimpl::CapturerLinuxPimpl(CapturerLinux* capturer)
       display_(NULL),
       gc_(NULL),
       root_window_(BadValue),
+      width_(0),
+      height_(0),
       damage_handle_(BadValue),
       damage_event_base_(-1),
       damage_error_base_(-1),
       stride_(0),
-      capture_fullscreen_(true) {
+      capture_fullscreen_(true),
+      last_buffer_(NULL) {
   for (int i = 0; i < CapturerLinux::kNumBuffers; i++) {
     buffers_[i] = NULL;
   }
@@ -178,22 +186,23 @@ bool CapturerLinuxPimpl::Init() {
   // Set up the dimensions of the catpure framebuffer.
   XWindowAttributes root_attr;
   XGetWindowAttributes(display_, root_window_, &root_attr);
-  capturer_->width_ = root_attr.width;
-  capturer_->height_ = root_attr.height;
-  stride_ = capturer_->width() * kBytesPerPixel;
-  VLOG(1) << "Initialized with Geometry: " << capturer_->width()
-          << "x" << capturer_->height();
+  width_ = root_attr.width;
+  height_ = root_attr.height;
+  stride_ = width_ * kBytesPerPixel;
+  VLOG(1) << "Initialized with Geometry: " << width_ << "x" << height_;
 
   // Allocate the screen buffers.
   for (int i = 0; i < CapturerLinux::kNumBuffers; i++) {
-    buffers_[i] =
-        new uint8[capturer_->width() * capturer_->height() * kBytesPerPixel];
+    buffers_[i] = new uint8[width_ * height_ * kBytesPerPixel];
   }
 
   return true;
 }
 
 void CapturerLinuxPimpl::CalculateInvalidRects() {
+  if (capturer_->IsCaptureFullScreen(width_, height_))
+    capture_fullscreen_ = true;
+
   // TODO(ajwong): The capture_fullscreen_ logic here is very ugly. Refactor.
 
   // Find the number of events that are outstanding "now."  We don't just loop
@@ -209,8 +218,13 @@ void CapturerLinuxPimpl::CalculateInvalidRects() {
         XDamageNotifyEvent *event = reinterpret_cast<XDamageNotifyEvent*>(&e);
         gfx::Rect damage_rect(event->area.x, event->area.y, event->area.width,
                               event->area.height);
+
+        // TODO(hclam): Perform more checks on the rect.
+        if (damage_rect.width() <= 0 && damage_rect.height() <= 0)
+          continue;
+
         invalid_rects.insert(damage_rect);
-        VLOG(3) << "Damage receved for rect at ("
+        VLOG(3) << "Damage received for rect at ("
                 << damage_rect.x() << "," << damage_rect.y() << ") size ("
                 << damage_rect.width() << "," << damage_rect.height() << ")";
       }
@@ -220,7 +234,8 @@ void CapturerLinuxPimpl::CalculateInvalidRects() {
   }
 
   if (capture_fullscreen_) {
-    capturer_->InvalidateFullScreen();
+    // TODO(hclam): Check the new dimension again.
+    capturer_->InvalidateFullScreen(width_, height_);
     capture_fullscreen_ = false;
   } else {
     capturer_->InvalidateRects(invalid_rects);
@@ -236,8 +251,24 @@ void CapturerLinuxPimpl::CaptureRects(
   planes.strides[0] = stride_;
 
   scoped_refptr<CaptureData> capture_data(
-      new CaptureData(planes, capturer_->width(), capturer_->height(),
-                      media::VideoFrame::RGB32));
+      new CaptureData(planes, width_, height_, media::VideoFrame::RGB32));
+
+  // Synchronize the current buffer with the last one since we do not capture
+  // the entire desktop. Note that encoder may be reading from the previous
+  // buffer at this time so thread access complaints are false positives.
+
+  // TODO(hclam): We can reduce the amount of copying here by subtracting
+  // |rects| from |last_invalid_rects_|.
+  for (InvalidRects::const_iterator it = last_invalid_rects_.begin();
+       last_buffer_ && it != last_invalid_rects_.end();
+       ++it) {
+    int offset = it->y() * stride_ + it->x() * kBytesPerPixel;
+    for (int i = 0; i < it->height(); ++i) {
+      memcpy(buffer + offset, last_buffer_ + offset,
+             it->width() * kBytesPerPixel);
+      offset += width_ * kBytesPerPixel;
+    }
+  }
 
   for (InvalidRects::const_iterator it = rects.begin();
        it != rects.end();
@@ -263,6 +294,9 @@ void CapturerLinuxPimpl::CaptureRects(
   XDamageSubtract(display_, damage_handle_, None, None);
 
   capture_data->mutable_dirty_rects() = rects;
+  last_invalid_rects_ = rects;
+  last_buffer_ = buffer;
+
   // TODO(ajwong): These completion signals back to the upper class are very
   // strange.  Fix it.
   capturer_->FinishCapture(capture_data, callback);
@@ -290,18 +324,14 @@ void CapturerLinuxPimpl::FastBlit(XImage* image, int dest_x, int dest_y,
   const int dst_stride = planes.strides[0];
   const int src_stride = image->bytes_per_line;
 
-  // TODO(ajwong): I think this can never happen anyways due to the way we size
-  // the buffer. Check to be certain and possibly remove check.
-  CHECK((dst_stride - dest_x) >= src_stride);
+  uint8* dst_pos = dst_buffer + dst_stride * dest_y;
+  dst_pos += dest_x * kBytesPerPixel;
 
-  // Flip the coordinate system to match the client.
-  for (int y = image->height - 1; y >= 0; y--) {
-    uint32_t* dst_pos = GetRowStart(dst_buffer, dst_stride, y + dest_y);
-    dst_pos += dest_x;
-
-    memcpy(dst_pos, src_pos, src_stride);
+  for (int y = 0; y < image->height; ++y) {
+    memcpy(dst_pos, src_pos, image->width * kBytesPerPixel);
 
     src_pos += src_stride;
+    dst_pos += dst_stride;
   }
 }
 
@@ -319,11 +349,13 @@ void CapturerLinuxPimpl::SlowBlit(XImage* image, int dest_x, int dest_y,
   unsigned int max_blue = image->blue_mask >> blue_shift;
   unsigned int max_green = image->green_mask >> green_shift;
 
+  // Produce an upside-down image.
+  uint8* dst_pos = dst_buffer + dst_stride * (height_ - dest_y - 1);
+  dst_pos += dest_x * kBytesPerPixel;
+  // TODO(jamiewalch): Optimize, perhaps using MMX code or by converting to
+  // YUV directly
   for (int y = 0; y < image->height; y++) {
-    // Flip the coordinate system to match the client.
-    int dst_row = image->height - y - 1;
-    uint32_t* dst_pos = GetRowStart(dst_buffer, dst_stride, dst_row + dest_y);
-    dst_pos += dest_x;
+    uint32_t* dst_pos_32 = reinterpret_cast<uint32_t*>(dst_pos);
     for (int x = 0; x < image->width; x++) {
       unsigned long pixel = XGetPixel(image, x, y);
       uint32_t r = (((pixel & image->red_mask) >> red_shift) * max_red) / 255;
@@ -333,9 +365,9 @@ void CapturerLinuxPimpl::SlowBlit(XImage* image, int dest_x, int dest_y,
           (((pixel & image->blue_mask) >> blue_shift) * max_green) / 255;
 
       // Write as 32-bit RGB.
-      *dst_pos = r << 16 | g << 8 | b;
-      dst_pos++;
+      dst_pos_32[x] = r << 16 | g << 8 | b;
     }
+    dst_pos -= dst_stride;
   }
 }
 

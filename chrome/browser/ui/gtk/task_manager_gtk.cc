@@ -25,13 +25,13 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/gtk_util.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/gtk_util.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "views/controls/menu/menu_2.h"
@@ -68,8 +68,15 @@ enum TaskManagerColumn {
   kTaskManagerWebCoreCssCache,
   kTaskManagerSqliteMemoryUsed,
   kTaskManagerGoatsTeleported,
+  // Columns below this point are not visible in the task manager.
+  kTaskManagerBackgroundColor,
   kTaskManagerColumnCount,
 };
+
+const TaskManagerColumn kTaskManagerLastVisibleColumn =
+    kTaskManagerGoatsTeleported;
+
+static const GdkColor kHighlightColor = GDK_COLOR_RGB(0xff, 0xfa, 0xcd);
 
 TaskManagerColumn TaskManagerResourceIDToColumnID(int id) {
   switch (id) {
@@ -165,13 +172,20 @@ void TreeViewInsertColumnWithPixbuf(GtkWidget* treeview, int resid) {
   GtkTreeViewColumn* column = gtk_tree_view_column_new();
   gtk_tree_view_column_set_title(column,
                                  l10n_util::GetStringUTF8(resid).c_str());
+  gtk_tree_view_set_tooltip_column(GTK_TREE_VIEW(treeview), colid);
   GtkCellRenderer* image_renderer = gtk_cell_renderer_pixbuf_new();
   gtk_tree_view_column_pack_start(column, image_renderer, FALSE);
   gtk_tree_view_column_add_attribute(column, image_renderer,
                                      "pixbuf", kTaskManagerIcon);
+  gtk_tree_view_column_add_attribute(column, image_renderer,
+                                     "cell-background-gdk",
+                                     kTaskManagerBackgroundColor);
   GtkCellRenderer* text_renderer = gtk_cell_renderer_text_new();
   gtk_tree_view_column_pack_start(column, text_renderer, TRUE);
   gtk_tree_view_column_add_attribute(column, text_renderer, "text", colid);
+  gtk_tree_view_column_add_attribute(column, text_renderer,
+                                     "cell-background-gdk",
+                                     kTaskManagerBackgroundColor);
   gtk_tree_view_column_set_resizable(column, TRUE);
   // This is temporary: we'll turn expanding off after getting the size.
   gtk_tree_view_column_set_expand(column, TRUE);
@@ -183,10 +197,12 @@ void TreeViewInsertColumnWithPixbuf(GtkWidget* treeview, int resid) {
 void TreeViewInsertColumnWithName(GtkWidget* treeview,
                                   TaskManagerColumn colid, const char* name) {
   GtkCellRenderer* renderer = gtk_cell_renderer_text_new();
-  gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(treeview), -1,
-                                              name, renderer,
-                                              "text", colid,
-                                              NULL);
+  gtk_tree_view_insert_column_with_attributes(
+      GTK_TREE_VIEW(treeview), -1,
+      name, renderer,
+      "text", colid,
+      "cell-background-gdk", kTaskManagerBackgroundColor,
+      NULL);
   GtkTreeViewColumn* column = gtk_tree_view_get_column(
       GTK_TREE_VIEW(treeview), TreeViewColumnIndexFromID(colid));
   gtk_tree_view_column_set_resizable(column, TRUE);
@@ -219,7 +235,7 @@ class TaskManagerGtk::ContextMenuController
   explicit ContextMenuController(TaskManagerGtk* task_manager)
       : task_manager_(task_manager) {
     menu_model_.reset(new ui::SimpleMenuModel(this));
-    for (int i = kTaskManagerPage; i < kTaskManagerColumnCount; i++) {
+    for (int i = kTaskManagerPage; i <= kTaskManagerLastVisibleColumn; i++) {
       menu_model_->AddCheckItemWithStringId(
           i, TaskManagerColumnIDToResourceID(i));
     }
@@ -232,15 +248,13 @@ class TaskManagerGtk::ContextMenuController
 
   virtual ~ContextMenuController() {}
 
+  void RunMenu(const gfx::Point& point, guint32 event_time) {
 #if defined(TOOLKIT_VIEWS)
-  void RunMenu(const gfx::Point& point) {
     menu_->RunContextMenuAt(point);
-  }
 #else
-  void RunMenu() {
-    menu_->PopupAsContext(gtk_get_current_event_time());
-  }
+    menu_->PopupAsContext(point, event_time);
 #endif
+  }
 
   void Cancel() {
     task_manager_ = NULL;
@@ -298,14 +312,15 @@ class TaskManagerGtk::ContextMenuController
   DISALLOW_COPY_AND_ASSIGN(ContextMenuController);
 };
 
-TaskManagerGtk::TaskManagerGtk()
+TaskManagerGtk::TaskManagerGtk(bool highlight_background_resources)
   : task_manager_(TaskManager::GetInstance()),
     model_(TaskManager::GetInstance()->model()),
     dialog_(NULL),
     treeview_(NULL),
     process_list_(NULL),
     process_count_(0),
-    ignore_selection_changed_(false) {
+    ignore_selection_changed_(false),
+    highlight_background_resources_(highlight_background_resources) {
   Init();
 }
 
@@ -394,13 +409,26 @@ void TaskManagerGtk::OnItemsRemoved(int start, int length) {
 ////////////////////////////////////////////////////////////////////////////////
 // TaskManagerGtk, public:
 
+void TaskManagerGtk::Close() {
+  // Blow away our dialog - this will cause TaskManagerGtk to free itself.
+  gtk_widget_destroy(dialog_);
+  DCHECK(!instance_);
+}
+
 // static
-void TaskManagerGtk::Show() {
+void TaskManagerGtk::Show(bool highlight_background_resources) {
+  if (instance_ &&
+      instance_->highlight_background_resources_ !=
+          highlight_background_resources) {
+    instance_->Close();
+    DCHECK(!instance_);
+  }
+
   if (instance_) {
     // If there's a Task manager window open already, just activate it.
     gtk_util::PresentWindow(instance_->dialog_, 0);
   } else {
-    instance_ = new TaskManagerGtk;
+    instance_ = new TaskManagerGtk(highlight_background_resources);
     instance_->model_->StartUpdating();
   }
 }
@@ -460,8 +488,15 @@ void TaskManagerGtk::Init() {
   destroy_handler_id_ = g_signal_connect(dialog_, "destroy",
                                          G_CALLBACK(OnDestroyThunk), this);
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
+  // GTK does menu on mouse-up while views does menu on mouse-down,
+  // so connect to different handlers.
+#if defined(TOOLKIT_VIEWS)
   g_signal_connect(dialog_, "button-release-event",
-                   G_CALLBACK(OnButtonReleaseEventThunk), this);
+                   G_CALLBACK(OnButtonEventThunk), this);
+#else
+  g_signal_connect(dialog_, "button-press-event",
+                   G_CALLBACK(OnButtonEventThunk), this);
+#endif
   gtk_widget_add_events(dialog_,
                         GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
@@ -478,6 +513,10 @@ void TaskManagerGtk::Init() {
   gtk_tree_view_set_headers_clickable(GTK_TREE_VIEW(treeview_), TRUE);
   g_signal_connect(treeview_, "row-activated",
                    G_CALLBACK(OnRowActivatedThunk), this);
+#if defined(TOOLKIT_GTK)
+  g_signal_connect(treeview_, "button-press-event",
+                   G_CALLBACK(OnButtonEventThunk), this);
+#endif
 
   // |selection| is owned by |treeview_|.
   GtkTreeSelection* selection = gtk_tree_view_get_selection(
@@ -543,7 +582,7 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
       GDK_TYPE_PIXBUF, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
       G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
       G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
-      G_TYPE_STRING);
+      G_TYPE_STRING, GDK_TYPE_COLOR);
 
   // Support sorting on all columns.
   process_list_sort_ = gtk_tree_model_sort_new_with_model(
@@ -726,6 +765,9 @@ void TaskManagerGtk::SetRowDataFromModel(int row, GtkTreeIter* iter) {
 
   std::string goats = GetModelText(
       row, IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN);
+
+  bool is_background = model_->IsBackgroundResource(row) &&
+      highlight_background_resources_;
   gtk_list_store_set(process_list_, iter,
                      kTaskManagerIcon, icon,
                      kTaskManagerPage, page.c_str(),
@@ -740,6 +782,8 @@ void TaskManagerGtk::SetRowDataFromModel(int row, GtkTreeIter* iter) {
                      kTaskManagerWebCoreCssCache, wk_css_cache.c_str(),
                      kTaskManagerSqliteMemoryUsed, sqlite_memory.c_str(),
                      kTaskManagerGoatsTeleported, goats.c_str(),
+                     kTaskManagerBackgroundColor,
+                     is_background ? &kHighlightColor : NULL,
                      -1);
   g_object_unref(icon);
 }
@@ -762,21 +806,13 @@ void TaskManagerGtk::KillSelectedProcesses() {
   g_list_free(paths);
 }
 
-#if defined(TOOLKIT_VIEWS)
-void TaskManagerGtk::ShowContextMenu(const gfx::Point& point) {
+void TaskManagerGtk::ShowContextMenu(const gfx::Point& point,
+                                     guint32 event_time) {
   if (!menu_controller_.get())
     menu_controller_.reset(new ContextMenuController(this));
 
-  menu_controller_->RunMenu(point);
+  menu_controller_->RunMenu(point, event_time);
 }
-#else
-void TaskManagerGtk::ShowContextMenu() {
-  if (!menu_controller_.get())
-    menu_controller_.reset(new ContextMenuController(this));
-
-  menu_controller_->RunMenu();
-}
-#endif
 
 void TaskManagerGtk::OnLinkActivated() {
   task_manager_->OpenAboutMemory();
@@ -821,7 +857,7 @@ void TaskManagerGtk::OnDestroy(GtkWidget* dialog) {
   delete this;
 }
 
-void TaskManagerGtk::OnResponse(GtkWidget* dialog, gint response_id) {
+void TaskManagerGtk::OnResponse(GtkWidget* dialog, int response_id) {
   if (response_id == GTK_RESPONSE_DELETE_EVENT) {
     // Store the dialog's size so we can restore it the next time it's opened.
     if (g_browser_process->local_state()) {
@@ -931,15 +967,14 @@ void TaskManagerGtk::OnRowActivated(GtkWidget* widget,
   task_manager_->ActivateProcess(row);
 }
 
-gboolean TaskManagerGtk::OnButtonReleaseEvent(GtkWidget* widget,
-                                              GdkEventButton* event) {
+gboolean TaskManagerGtk::OnButtonEvent(GtkWidget* widget,
+                                       GdkEventButton* event) {
+  // GTK does menu on mouse-up while views does menu on mouse-down,
+  // so this function can be called from either signal.
   if (event->button == 3) {
-#if defined(TOOLKIT_VIEWS)
-    gfx::Point pt(event->x_root, event->y_root);
-    ShowContextMenu(pt);
-#else
-    ShowContextMenu();
-#endif
+    ShowContextMenu(gfx::Point(event->x_root, event->y_root),
+                    event->time);
+    return TRUE;
   }
 
   return FALSE;

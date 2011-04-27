@@ -6,8 +6,8 @@
 
 #include <gdk/gdkkeysyms.h>
 
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "views/widget/widget_gtk.h"
 #include "views/controls/textfield/textfield.h"
 
@@ -37,15 +37,15 @@ NativeWebKeyboardEvent DropdownBarHost::GetKeyboardEvent(
   // Refactor and eliminate the dup code.
   NativeWebKeyboardEvent wke;
   wke.type = WebKit::WebInputEvent::KeyDown;
-  wke.windowsKeyCode = key_event.GetKeyCode();
+  wke.windowsKeyCode = key_event.key_code();
   wke.setKeyIdentifierFromWindowsKeyCode();
 
   wke.text[0] = wke.unmodifiedText[0] =
     static_cast<unsigned short>(gdk_keyval_to_unicode(
-          ui::GdkKeyCodeForWindowsKeyCode(key_event.GetKeyCode(),
+          ui::GdkKeyCodeForWindowsKeyCode(key_event.key_code(),
               key_event.IsShiftDown() ^ key_event.IsCapsLockDown())));
   return wke;
 #else
-  return NativeWebKeyboardEvent(key_event.native_event());
+  return NativeWebKeyboardEvent(&key_event.native_event()->key);
 #endif
 }

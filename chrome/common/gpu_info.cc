@@ -1,26 +1,31 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/gpu_info.h"
 
 GPUInfo::GPUInfo()
-    : progress_(kUninitialized),
+    : level_(kUninitialized),
       vendor_id_(0),
       device_id_(0),
       driver_vendor_(""),
       driver_version_(""),
+      driver_date_(""),
       pixel_shader_version_(0),
       vertex_shader_version_(0),
       gl_version_(0),
       gl_version_string_(""),
       gl_vendor_(""),
       gl_renderer_(""),
-      can_lose_context_(false) {
+      gl_extensions_(""),
+      can_lose_context_(false),
+      collection_error_(false) {
 }
 
-GPUInfo::Progress GPUInfo::progress() const {
-  return progress_;
+GPUInfo::~GPUInfo() {}
+
+GPUInfo::Level GPUInfo::level() const {
+  return level_;
 }
 
 base::TimeDelta GPUInfo::initialization_time() const {
@@ -41,6 +46,10 @@ std::string GPUInfo::driver_vendor() const {
 
 std::string GPUInfo::driver_version() const {
   return driver_version_;
+}
+
+std::string GPUInfo::driver_date() const {
+  return driver_date_;
 }
 
 uint32 GPUInfo::pixel_shader_version() const {
@@ -67,12 +76,20 @@ std::string GPUInfo::gl_renderer() const {
   return gl_renderer_;
 }
 
+std::string GPUInfo::gl_extensions() const {
+  return gl_extensions_;
+}
+
 bool GPUInfo::can_lose_context() const {
   return can_lose_context_;
 }
 
-void GPUInfo::SetProgress(Progress progress) {
-  progress_ = progress;
+bool GPUInfo::collection_error() const {
+  return collection_error_;
+}
+
+void GPUInfo::SetLevel(Level level) {
+  level_ = level;
 }
 
 void GPUInfo::SetInitializationTime(
@@ -86,9 +103,14 @@ void GPUInfo::SetVideoCardInfo(uint32 vendor_id, uint32 device_id) {
 }
 
 void GPUInfo::SetDriverInfo(const std::string& driver_vendor,
-                            const std::string& driver_version) {
-  driver_vendor_ = driver_vendor;
-  driver_version_ = driver_version;
+                            const std::string& driver_version,
+                            const std::string& driver_date) {
+  if (driver_vendor.length() > 0)
+    driver_vendor_ = driver_vendor;
+  if (driver_version.length() > 0)
+    driver_version_ = driver_version;
+  if (driver_date.length() > 0)
+    driver_date_ = driver_date;
 }
 
 void GPUInfo::SetShaderVersion(uint32 pixel_shader_version,
@@ -113,8 +135,16 @@ void GPUInfo::SetGLRenderer(const std::string& gl_renderer) {
   gl_renderer_ = gl_renderer;
 }
 
+void GPUInfo::SetGLExtensions(const std::string& gl_extensions) {
+  gl_extensions_ = gl_extensions;
+}
+
 void GPUInfo::SetCanLoseContext(bool can_lose_context) {
   can_lose_context_ = can_lose_context;
+}
+
+void GPUInfo::SetCollectionError(bool collection_error) {
+  collection_error_ = collection_error;
 }
 
 #if defined(OS_WIN)

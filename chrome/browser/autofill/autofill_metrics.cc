@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,22 +6,30 @@
 
 #include "base/metrics/histogram.h"
 
-AutoFillMetrics::AutoFillMetrics() {
+AutofillMetrics::AutofillMetrics() {
 }
 
-AutoFillMetrics::~AutoFillMetrics() {
+AutofillMetrics::~AutofillMetrics() {
 }
 
-void AutoFillMetrics::Log(ServerQueryMetric metric) const {
+void AutofillMetrics::Log(ServerQueryMetric metric) const {
   DCHECK(metric < NUM_SERVER_QUERY_METRICS);
 
   UMA_HISTOGRAM_ENUMERATION("AutoFill.ServerQueryResponse", metric,
                             NUM_SERVER_QUERY_METRICS);
 }
 
-void AutoFillMetrics::Log(QualityMetric metric) const {
+void AutofillMetrics::Log(QualityMetric metric,
+                          const std::string& experiment_id) const {
   DCHECK(metric < NUM_QUALITY_METRICS);
 
-  UMA_HISTOGRAM_ENUMERATION("AutoFill.Quality", metric,
-                            NUM_QUALITY_METRICS);
+  std::string histogram_name = "AutoFill.Quality";
+  if (!experiment_id.empty())
+    histogram_name += "_" + experiment_id;
+
+  UMA_HISTOGRAM_ENUMERATION(histogram_name, metric, NUM_QUALITY_METRICS);
+}
+
+void AutofillMetrics::LogProfileCount(size_t num_profiles) const {
+  UMA_HISTOGRAM_COUNTS("AutoFill.ProfileCount", num_profiles);
 }

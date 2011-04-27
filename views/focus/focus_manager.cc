@@ -54,7 +54,7 @@ void FocusManager::WidgetFocusManager::OnWidgetFocusEvent(
   if (!enabled_)
     return;
 
-  // Perform a safe iteration over the focus listeners, as the array of
+  // Perform a safe iteration over the focus listeners, as the array
   // may change during notification.
   WidgetFocusChangeListenerList local_listeners(focus_change_listeners_);
   WidgetFocusChangeListenerList::iterator iter(local_listeners.begin());
@@ -62,6 +62,10 @@ void FocusManager::WidgetFocusManager::OnWidgetFocusEvent(
     (*iter)->NativeFocusWillChange(focused_before, focused_now);
   }
 }
+
+FocusManager::WidgetFocusManager::WidgetFocusManager() : enabled_(true) {}
+
+FocusManager::WidgetFocusManager::~WidgetFocusManager() {}
 
 // static
 FocusManager::WidgetFocusManager*
@@ -120,14 +124,14 @@ bool FocusManager::OnKeyEvent(const KeyEvent& event) {
 #endif
 
   // Intercept arrow key messages to switch between grouped views.
-  ui::KeyboardCode key_code = event.GetKeyCode();
+  ui::KeyboardCode key_code = event.key_code();
   if (focused_view_ && focused_view_->GetGroup() != -1 &&
       (key_code == ui::VKEY_UP || key_code == ui::VKEY_DOWN ||
        key_code == ui::VKEY_LEFT || key_code == ui::VKEY_RIGHT)) {
     bool next = (key_code == ui::VKEY_RIGHT || key_code == ui::VKEY_DOWN);
     std::vector<View*> views;
-    focused_view_->GetParent()->GetViewsWithGroup(focused_view_->GetGroup(),
-                                                  &views);
+    focused_view_->parent()->GetViewsWithGroup(focused_view_->GetGroup(),
+                                               &views);
     std::vector<View*>::const_iterator iter = std::find(views.begin(),
                                                         views.end(),
                                                         focused_view_);
@@ -146,7 +150,7 @@ bool FocusManager::OnKeyEvent(const KeyEvent& event) {
   // Process keyboard accelerators.
   // If the key combination matches an accelerator, the accelerator is
   // triggered, otherwise the key event is processed as usual.
-  Accelerator accelerator(event.GetKeyCode(),
+  Accelerator accelerator(event.key_code(),
                           event.IsShiftDown(),
                           event.IsControlDown(),
                           event.IsAltDown());
@@ -168,27 +172,8 @@ void FocusManager::ValidateFocusedView() {
 // Tests whether a view is valid, whether it still belongs to the window
 // hierarchy of the FocusManager.
 bool FocusManager::ContainsView(View* view) {
-  DCHECK(view);
-  RootView* root_view = view->GetRootView();
-  if (!root_view)
-    return false;
-
-  Widget* widget = root_view->GetWidget();
-  if (!widget)
-    return false;
-
-  gfx::NativeView top_window = widget_->GetNativeView();
-  gfx::NativeView window = widget->GetNativeView();
-  while (window) {
-    if (window == top_window)
-      return true;
-#if defined(OS_WIN)
-    window = ::GetParent(window);
-#else
-    window = gtk_widget_get_parent(window);
-#endif
-  }
-  return false;
+  Widget* widget = view->GetWidget();
+  return widget ? widget->GetFocusManager() == this : false;
 }
 
 void FocusManager::AdvanceFocus(bool reverse) {
@@ -224,7 +209,7 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
         starting_view = original_starting_view;
         break;
       }
-      pane_search = pane_search->GetParent();
+      pane_search = pane_search->parent();
     }
 
     if (!focus_traversable) {
@@ -235,18 +220,20 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
 
         // Otherwise default to the root view.
         if (!focus_traversable) {
-          focus_traversable = original_starting_view->GetRootView();
+          focus_traversable =
+              original_starting_view->GetWidget()->GetFocusTraversable();
           starting_view = original_starting_view;
         }
       } else {
         // When you are going back, starting view's FocusTraversable
         // should not be used.
-        focus_traversable = original_starting_view->GetRootView();
+        focus_traversable =
+            original_starting_view->GetWidget()->GetFocusTraversable();
         starting_view = original_starting_view;
       }
     }
   } else {
-    focus_traversable = widget_->GetRootView();
+    focus_traversable = widget_->GetFocusTraversable();
   }
 
   // Traverse the FocusTraversable tree down to find the focusable view.
@@ -297,39 +284,23 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
 
 void FocusManager::SetFocusedViewWithReason(
     View* view, FocusChangeReason reason) {
-  focus_change_reason_ = reason;
-
   if (focused_view_ == view)
     return;
 
-  View* prev_focused_view = focused_view_;
-  if (focused_view_)
-    focused_view_->WillLoseFocus();
-
-  if (view)
-    view->WillGainFocus();
-
-  // Notified listeners that the focus changed.
+  // Update the reason for the focus change (since this is checked by
+  // some listeners), then notify all listeners.
+  focus_change_reason_ = reason;
   FocusChangeListenerList::const_iterator iter;
   for (iter = focus_change_listeners_.begin();
        iter != focus_change_listeners_.end(); ++iter) {
-    (*iter)->FocusWillChange(prev_focused_view, view);
+    (*iter)->FocusWillChange(focused_view_, view);
   }
 
+  if (focused_view_)
+    focused_view_->Blur();
   focused_view_ = view;
-
-  if (prev_focused_view)
-    prev_focused_view->SchedulePaint();  // Remove focus artifacts.
-
-  if (view) {
-    view->SchedulePaint();
-    view->Focus();
-    if (view == focused_view_) {
-      // Only tell the view it is focused if it's still our focused view. It's
-      // possible for Focus to remove/delete the view.
-      view->DidGainFocus();
-    }
-  }
+  if (focused_view_)
+    focused_view_->Focus();
 }
 
 void FocusManager::ClearFocus() {
@@ -509,8 +480,7 @@ AcceleratorTarget* FocusManager::GetCurrentTargetForAccelerator(
 
 // static
 bool FocusManager::IsTabTraversalKeyEvent(const KeyEvent& key_event) {
-  return key_event.GetKeyCode() == ui::VKEY_TAB &&
-         !key_event.IsControlDown();
+  return key_event.key_code() == ui::VKEY_TAB && !key_event.IsControlDown();
 }
 
 void FocusManager::ViewRemoved(View* parent, View* removed) {

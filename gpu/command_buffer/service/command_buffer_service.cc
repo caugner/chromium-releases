@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "base/callback.h"
+#include "base/process_util.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
 
 using ::base::SharedMemory;
@@ -20,50 +21,73 @@ CommandBufferService::CommandBufferService()
       token_(0),
       error_(error::kNoError) {
   // Element zero is always NULL.
-  registered_objects_.push_back(linked_ptr<SharedMemory>());
+  registered_objects_.push_back(Buffer());
 }
 
 CommandBufferService::~CommandBufferService() {
+  delete ring_buffer_.shared_memory;
+
+  for (size_t i = 0; i < registered_objects_.size(); ++i) {
+    if (registered_objects_[i].shared_memory)
+      delete registered_objects_[i].shared_memory;
+  }
 }
 
 bool CommandBufferService::Initialize(int32 size) {
   // Fail if already initialized.
-  if (ring_buffer_.get()) {
-    LOG(ERROR) << "CommandBufferService::Initialize "
-               << "failed because already initialized.";
+  if (ring_buffer_.shared_memory) {
+    LOG(ERROR) << "Failed because already initialized.";
     return false;
   }
 
   if (size <= 0 || size > kMaxCommandBufferSize) {
-    LOG(ERROR) << "CommandBufferService::Initialize "
-               << "because command buffer size was invalid.";
+    LOG(ERROR) << "Failed because command buffer size was invalid.";
     return false;
   }
 
   num_entries_ = size / sizeof(CommandBufferEntry);
 
-  ring_buffer_.reset(new SharedMemory);
-  if (ring_buffer_->CreateAndMapAnonymous(size)) {
+  SharedMemory shared_memory;
+  if (!shared_memory.CreateAnonymous(size)) {
+    LOG(ERROR) << "Failed to create shared memory for command buffer.";
     return true;
   }
 
-  num_entries_ = 0;
-  ring_buffer_.reset();
+  return Initialize(&shared_memory, size);
+}
 
-  LOG(ERROR) << "CommandBufferService::Initialize failed because ring buffer "
-             << "could not be created or mapped ";
+bool CommandBufferService::Initialize(base::SharedMemory* buffer, int32 size) {
+  // Fail if already initialized.
+  if (ring_buffer_.shared_memory) {
+    LOG(ERROR) << "Failed because already initialized.";
+    return false;
+  }
 
-  return false;
+  base::SharedMemoryHandle shared_memory_handle;
+  if (!buffer->ShareToProcess(base::GetCurrentProcessHandle(),
+                              &shared_memory_handle)) {
+    LOG(ERROR) << "Failed to duplicate command buffer shared memory handle.";
+    return false;
+  }
+
+  ring_buffer_.shared_memory = new base::SharedMemory(shared_memory_handle,
+                                                      false);
+  if (!ring_buffer_.shared_memory->Map(size)) {
+    LOG(ERROR) << "Failed because ring buffer could not be created or mapped ";
+    delete ring_buffer_.shared_memory;
+    ring_buffer_.shared_memory = NULL;
+    return false;
+  }
+
+  ring_buffer_.ptr = ring_buffer_.shared_memory->memory();
+  ring_buffer_.size = size;
+  num_entries_ = size / sizeof(CommandBufferEntry);
+
+  return true;
 }
 
 Buffer CommandBufferService::GetRingBuffer() {
-  Buffer buffer;
-  if (ring_buffer_.get()) {
-    buffer.ptr = ring_buffer_->memory();
-    buffer.size = ring_buffer_->created_size();
-    buffer.shared_memory = ring_buffer_.get();
-  }
-  return buffer;
+  return ring_buffer_;
 }
 
 CommandBufferService::State CommandBufferService::GetState() {
@@ -102,9 +126,26 @@ void CommandBufferService::SetGetOffset(int32 get_offset) {
 }
 
 int32 CommandBufferService::CreateTransferBuffer(size_t size) {
-  linked_ptr<SharedMemory> buffer(new SharedMemory);
-  if (!buffer->CreateAnonymous(size))
+  SharedMemory buffer;
+  if (!buffer.CreateAnonymous(size))
     return -1;
+
+  return RegisterTransferBuffer(&buffer, size);
+}
+
+int32 CommandBufferService::RegisterTransferBuffer(
+    base::SharedMemory* shared_memory, size_t size) {
+  // Duplicate the handle.
+  base::SharedMemoryHandle shared_memory_handle;
+  if (!shared_memory->ShareToProcess(base::GetCurrentProcessHandle(),
+                                     &shared_memory_handle)) {
+    return -1;
+  }
+
+  Buffer buffer;
+  buffer.ptr = NULL;
+  buffer.size = size;
+  buffer.shared_memory = new SharedMemory(shared_memory_handle, false);
 
   if (unused_registered_object_elements_.empty()) {
     // Check we haven't exceeded the range that fits in a 32-bit integer.
@@ -119,7 +160,7 @@ int32 CommandBufferService::CreateTransferBuffer(size_t size) {
   int32 handle = *unused_registered_object_elements_.begin();
   unused_registered_object_elements_.erase(
       unused_registered_object_elements_.begin());
-  DCHECK(!registered_objects_[handle].get());
+  DCHECK(!registered_objects_[handle].shared_memory);
   registered_objects_[handle] = buffer;
   return handle;
 }
@@ -131,13 +172,15 @@ void CommandBufferService::DestroyTransferBuffer(int32 handle) {
   if (static_cast<size_t>(handle) >= registered_objects_.size())
     return;
 
-  registered_objects_[handle].reset();
+  delete registered_objects_[handle].shared_memory;
+  registered_objects_[handle] = Buffer();
   unused_registered_object_elements_.insert(handle);
 
   // Remove all null objects from the end of the vector. This allows the vector
   // to shrink when, for example, all objects are unregistered. Note that this
   // loop never removes element zero, which is always NULL.
-  while (registered_objects_.size() > 1 && !registered_objects_.back().get()) {
+  while (registered_objects_.size() > 1 &&
+      !registered_objects_.back().shared_memory) {
     registered_objects_.pop_back();
     unused_registered_object_elements_.erase(
         static_cast<int32>(registered_objects_.size()));
@@ -151,19 +194,16 @@ Buffer CommandBufferService::GetTransferBuffer(int32 handle) {
   if (static_cast<size_t>(handle) >= registered_objects_.size())
     return Buffer();
 
-  base::SharedMemory* shared_memory = registered_objects_[handle].get();
-  if (!shared_memory)
-    return Buffer();
+   Buffer buffer = registered_objects_[handle];
+   if (!buffer.shared_memory)
+     return Buffer();
 
-  if (!shared_memory->memory()) {
-    if (!shared_memory->Map(shared_memory->created_size()))
+  if (!buffer.shared_memory->memory()) {
+    if (!buffer.shared_memory->Map(buffer.size))
       return Buffer();
   }
 
-  Buffer buffer;
-  buffer.ptr = shared_memory->memory();
-  buffer.size = shared_memory->created_size();
-  buffer.shared_memory = shared_memory;
+  buffer.ptr = buffer.shared_memory->memory();
   return buffer;
 }
 

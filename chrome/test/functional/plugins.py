@@ -91,6 +91,8 @@ class PluginsTest(pyauto.PyUITest):
   def testKillAndReloadAllPlugins(self):
     """Verify plugin processes and check if they can reload after killing."""
     for fname, plugin_name in self._ObtainPluginsList():
+      if plugin_name == 'Java':  # crbug.com/71223
+        continue
       url = self.GetFileURLForPath(
           os.path.join(self.DataDir(), 'plugin', fname))
       self.NavigateToURL(url)
@@ -130,8 +132,10 @@ class PluginsTest(pyauto.PyUITest):
       self.assertFalse([x for x in self.GetBrowserInfo()['child_processes']
                         if x['type'] == 'Plug-in' and
                         re.search(plugin_name, x['name'])])
-      if 'Shockwave Flash' == plugin_name:
+      if plugin_name == 'Shockwave Flash':
         continue  # cannot reload file:// flash URL - crbug.com/47249
+      if plugin_name == 'Java':
+        continue  # crbug.com/71223
       # Enable
       self._TogglePlugin(plugin_name)
       self.GetBrowserWindow(0).GetTab(0).Reload()
@@ -186,12 +190,9 @@ class PluginsTest(pyauto.PyUITest):
   def testBlockPluginException(self):
     """Verify that plugins can be blocked on a domain by adding
     an exception(s)."""
-    # We are using the same live site in order to detect if the web page
-    # is using shockwave flash process.
-    # On few test machines navigation takes more than the default time so
-    # setting 1 min of wait time here.
-    test_utils.CallFunctionWithNewTimeout(self, 1 * 60 * 1000,
-        lambda: self.NavigateToURL('http://vimeo.com'))
+    url = self.GetHttpURLForDataPath(os.path.join('plugin',
+                                                  'flash-clicktoplay.html'))
+    self.NavigateToURL(url)
     # Wait until Shockwave Flash plugin process loads.
     self.assertTrue(self.WaitUntil(
         lambda: self._GetPluginPID('Shockwave Flash') is not None),
@@ -201,9 +202,9 @@ class PluginsTest(pyauto.PyUITest):
         lambda: self._GetPluginPID('Shockwave Flash') is None),
         msg='Expected Shockwave Flash plugin to die after killing')
 
-    # Add an exception to block plugins on vimeo.com.
+    # Add an exception to block plugins on localhost.
     self.SetPrefs(pyauto.kContentSettingsPatterns,
-                 {'[*.]vimeo.com': {'plugins': 2}})
+                 {'[*.]127.0.0.1': {'plugins': 2}})
     self.GetBrowserWindow(0).GetTab(0).Reload()
     self.assertFalse(self._GetPluginPID('Shockwave Flash'),
                      msg='Shockwave Flash Plug-in not blocked.')

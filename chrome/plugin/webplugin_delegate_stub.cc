@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "chrome/plugin/plugin_channel.h"
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_proxy.h"
-#include "printing/native_metafile.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "skia/ext/platform_device.h"
@@ -23,9 +22,11 @@
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 #include "webkit/glue/webcursor.h"
 
-#if defined(ENABLE_GPU)
-#include "app/gfx/gl/gl_context.h"
-#endif
+#if defined(OS_WIN)
+#include "base/scoped_ptr.h"
+#include "printing/native_metafile_factory.h"
+#include "printing/native_metafile.h"
+#endif  // defined(OS_WIN)
 
 using WebKit::WebBindings;
 using WebKit::WebCursorInfo;
@@ -66,13 +67,6 @@ WebPluginDelegateStub::WebPluginDelegateStub(
 WebPluginDelegateStub::~WebPluginDelegateStub() {
   in_destructor_ = true;
   child_process_logging::SetActiveURL(page_url_);
-
-#if defined(ENABLE_GPU)
-  // Make sure there is no command buffer before destroying the window handle.
-  // The GPU service code might otherwise asynchronously perform an operation
-  // using the window handle.
-  command_buffer_stub_.reset();
-#endif
 
   if (channel_->in_send()) {
     // The delegate or an npobject is in the callstack, so don't delete it
@@ -139,10 +133,6 @@ bool WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
                         OnHandleURLRequestReply)
     IPC_MESSAGE_HANDLER(PluginMsg_HTTPRangeRequestReply,
                         OnHTTPRangeRequestReply)
-    IPC_MESSAGE_HANDLER(PluginMsg_CreateCommandBuffer,
-                        OnCreateCommandBuffer)
-    IPC_MESSAGE_HANDLER(PluginMsg_DestroyCommandBuffer,
-                        OnDestroyCommandBuffer)
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(PluginMsg_SetFakeAcceleratedSurfaceWindowHandle,
                         OnSetFakeAcceleratedSurfaceWindowHandle)
@@ -281,26 +271,27 @@ void WebPluginDelegateStub::OnDidPaint() {
 void WebPluginDelegateStub::OnPrint(base::SharedMemoryHandle* shared_memory,
                                     uint32* size) {
 #if defined(OS_WIN)
-  printing::NativeMetafile metafile;
-  if (!metafile.CreateDc(NULL, NULL)) {
+  scoped_ptr<printing::NativeMetafile> metafile(
+      printing::NativeMetafileFactory::CreateMetafile());
+  if (!metafile->CreateDc(NULL, NULL)) {
     NOTREACHED();
     return;
   }
-  HDC hdc = metafile.hdc();
+  HDC hdc = metafile->hdc();
   skia::PlatformDevice::InitializeDC(hdc);
   delegate_->Print(hdc);
-  if (!metafile.CloseDc()) {
+  if (!metafile->CloseDc()) {
     NOTREACHED();
     return;
   }
 
-  *size = metafile.GetDataSize();
+  *size = metafile->GetDataSize();
   DCHECK(*size);
   base::SharedMemory shared_buf;
   CreateSharedBuffer(*size, &shared_buf, shared_memory);
 
   // Retrieve a copy of the data.
-  bool success = metafile.GetData(shared_buf.memory(), *size);
+  bool success = metafile->GetData(shared_buf.memory(), *size);
   DCHECK(success);
 #else
   // TODO(port): plugin printing.
@@ -408,29 +399,6 @@ void WebPluginDelegateStub::OnDidManualLoadFail() {
 
 void WebPluginDelegateStub::OnInstallMissingPlugin() {
   delegate_->InstallMissingPlugin();
-}
-
-void WebPluginDelegateStub::OnCreateCommandBuffer(int* route_id) {
-  *route_id = 0;
-#if defined(ENABLE_GPU)
-  // Fail to create the command buffer if some GL implementation cannot be
-  // initialized.
-  if (!gfx::GLContext::InitializeOneOff())
-    return;
-
-  command_buffer_stub_.reset(new CommandBufferStub(
-      channel_,
-      instance_id_,
-      delegate_->windowed_handle()));
-
-  *route_id = command_buffer_stub_->route_id();
-#endif  // ENABLE_GPU
-}
-
-void WebPluginDelegateStub::OnDestroyCommandBuffer() {
-#if defined(ENABLE_GPU)
-  command_buffer_stub_.reset();
-#endif
 }
 
 void WebPluginDelegateStub::CreateSharedBuffer(

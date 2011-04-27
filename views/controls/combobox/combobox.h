@@ -63,12 +63,12 @@ class Combobox : public View {
   virtual void Layout();
   virtual void SetEnabled(bool enabled);
   virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e);
-  virtual void PaintFocusBorder(gfx::Canvas* canvas);
+  virtual void OnPaintFocusBorder(gfx::Canvas* canvas);
   virtual AccessibilityTypes::Role GetAccessibleRole() OVERRIDE;
   virtual string16 GetAccessibleValue() OVERRIDE;
 
  protected:
-  virtual void Focus();
+  virtual void OnFocus();
   virtual void ViewHierarchyChanged(bool is_add, View* parent,
                                     View* child);
   virtual std::string GetClassName() const;

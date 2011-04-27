@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,14 @@
 #include <setupapi.h>
 
 #include "base/basictypes.h"
+#include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/win/windows_version.h"
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
 #include "media/audio/win/audio_manager_win.h"
@@ -32,32 +37,30 @@
 DEFINE_GUID(AM_KSCATEGORY_AUDIO, 0x6994ad04, 0x93ef, 0x11d0,
             0xa3, 0xcc, 0x00, 0xa0, 0xc9, 0x22, 0x31, 0x96);
 
-namespace {
-
 // Maximum number of output streams that can be open simultaneously.
-const size_t kMaxOutputStreams = 50;
+static const size_t kMaxOutputStreams = 50;
 
 // Up to 8 channels can be passed to the driver.
 // This should work, given the right drivers, but graceful error handling is
 // needed.
-const int kWinMaxChannels = 8;
+static const int kWinMaxChannels = 8;
 
-const int kWinMaxInputChannels = 2;
+static const int kWinMaxInputChannels = 2;
 // We use 3 buffers for recording audio so that if a recording callback takes
 // some time to return we won't lose audio. More buffers while recording are
 // ok because they don't introduce any delay in recording, unlike in playback
 // where you first need to fill in that number of buffers before starting to
 // play.
-const int kNumInputBuffers = 3;
+static const int kNumInputBuffers = 3;
 
-int GetVersionPartAsInt(DWORDLONG num) {
+static int GetVersionPartAsInt(DWORDLONG num) {
   return static_cast<int>(num & 0xffff);
 }
 
 // Returns a string containing the given device's description and installed
 // driver version.
-string16 GetDeviceAndDriverInfo(HDEVINFO device_info,
-                                SP_DEVINFO_DATA* device_data) {
+static string16 GetDeviceAndDriverInfo(HDEVINFO device_info,
+                                       SP_DEVINFO_DATA* device_data) {
   // Save the old install params setting and set a flag for the
   // SetupDiBuildDriverInfoList below to return only the installed drivers.
   SP_DEVINSTALL_PARAMS old_device_install_params;
@@ -91,8 +94,6 @@ string16 GetDeviceAndDriverInfo(HDEVINFO device_info,
 
   return device_and_driver_info;
 }
-
-}  // namespace
 
 AudioManagerWin::AudioManagerWin()
     : num_output_streams_(0) {
@@ -227,6 +228,29 @@ string16 AudioManagerWin::GetAudioInputDeviceModel() {
   }
 
   return string16();
+}
+
+bool AudioManagerWin::CanShowAudioInputSettings() {
+  return true;
+}
+
+void AudioManagerWin::ShowAudioInputSettings() {
+  std::wstring program;
+  std::string argument;
+  if (base::win::GetVersion() <= base::win::VERSION_XP) {
+    program = L"sndvol32.exe";
+    argument = "-R";
+  } else {
+    program = L"control.exe";
+    argument = "mmsys.cpl,,1";
+  }
+
+  FilePath path;
+  PathService::Get(base::DIR_SYSTEM, &path);
+  path = path.Append(program);
+  CommandLine command_line(path);
+  command_line.AppendArg(argument);
+  base::LaunchApp(command_line, false, false, NULL);
 }
 
 // static

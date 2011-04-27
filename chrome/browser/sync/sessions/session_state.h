@@ -13,7 +13,10 @@
 #define CHROME_BROWSER_SYNC_SESSIONS_SESSION_STATE_H_
 #pragma once
 
+#include <map>
 #include <set>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -22,6 +25,8 @@
 #include "chrome/browser/sync/sessions/ordered_commit_set.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
+
+class DictionaryValue;
 
 namespace syncable {
 class DirectoryManager;
@@ -32,9 +37,54 @@ namespace sessions {
 
 class UpdateProgress;
 
+// A container that contains a set of datatypes with possible string payloads.
+typedef std::map<syncable::ModelType, std::string> TypePayloadMap;
+
+// Helper utils for building TypePayloadMaps.
+// Make a TypePayloadMap from all the types in a ModelTypeBitSet using a
+// default payload.
+TypePayloadMap MakeTypePayloadMapFromBitSet(
+    const syncable::ModelTypeBitSet& types,
+    const std::string& payload);
+
+// Make a TypePayloadMap for all the enabled types in a ModelSafeRoutingInfo
+// using a default payload.
+TypePayloadMap MakeTypePayloadMapFromRoutingInfo(
+    const ModelSafeRoutingInfo& routes,
+    const std::string& payload);
+
+// Caller takes ownership of the returned dictionary.
+DictionaryValue* TypePayloadMapToValue(const TypePayloadMap& type_payloads);
+
+// Coalesce |update| into |original|, overwriting only when |update| has
+// a non-empty payload.
+void CoalescePayloads(TypePayloadMap* original, const TypePayloadMap& update);
+
+// A container for the source of a sync session. This includes the update
+// source, the datatypes triggering the sync session, and possible session
+// specific payloads which should be sent to the server.
+struct SyncSourceInfo {
+  SyncSourceInfo();
+  SyncSourceInfo(
+      const TypePayloadMap& t);
+  SyncSourceInfo(
+      const sync_pb::GetUpdatesCallerInfo::GetUpdatesSource& u,
+      const TypePayloadMap& t);
+  ~SyncSourceInfo();
+
+  // Caller takes ownership of the returned dictionary.
+  DictionaryValue* ToValue() const;
+
+  sync_pb::GetUpdatesCallerInfo::GetUpdatesSource updates_source;
+  TypePayloadMap types;
+};
+
 // Data pertaining to the status of an active Syncer object.
 struct SyncerStatus {
   SyncerStatus();
+
+  // Caller takes ownership of the returned dictionary.
+  DictionaryValue* ToValue() const;
 
   // True when we get such an INVALID_STORE error from the server.
   bool invalid_store;
@@ -53,6 +103,10 @@ struct SyncerStatus {
 // Counters for various errors that can occur repeatedly during a sync session.
 struct ErrorCounters {
   ErrorCounters();
+
+  // Caller takes ownership of the returned dictionary.
+  DictionaryValue* ToValue() const;
+
   int num_conflicting_commits;
 
   // Number of commits hitting transient errors since the last successful
@@ -65,6 +119,11 @@ struct ErrorCounters {
   int consecutive_errors;
 };
 
+// Caller takes ownership of the returned dictionary.
+DictionaryValue* DownloadProgressMarkersToValue(
+    const std::string
+        (&download_progress_markers)[syncable::MODEL_TYPE_COUNT]);
+
 // An immutable snapshot of state from a SyncSession.  Convenient to use as
 // part of notifications as it is inherently thread-safe.
 struct SyncSessionSnapshot {
@@ -74,13 +133,18 @@ struct SyncSessionSnapshot {
       int64 num_server_changes_remaining,
       bool is_share_usable,
       const syncable::ModelTypeBitSet& initial_sync_ended,
-      std::string download_progress_markers[syncable::MODEL_TYPE_COUNT],
+      const std::string
+          (&download_progress_markers)[syncable::MODEL_TYPE_COUNT],
       bool more_to_sync,
       bool is_silenced,
       int64 unsynced_count,
       int num_conflicting_updates,
-      bool did_commit_items);
+      bool did_commit_items,
+      const SyncSourceInfo& source);
   ~SyncSessionSnapshot();
+
+  // Caller takes ownership of the returned dictionary.
+  DictionaryValue* ToValue() const;
 
   const SyncerStatus syncer_status;
   const ErrorCounters errors;
@@ -93,6 +157,7 @@ struct SyncSessionSnapshot {
   const int64 unsynced_count;
   const int num_conflicting_updates;
   const bool did_commit_items;
+  const SyncSourceInfo source;
 };
 
 // Tracks progress of conflicts and their resolution using conflict sets.

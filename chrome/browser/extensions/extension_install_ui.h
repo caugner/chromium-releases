@@ -12,8 +12,8 @@
 #include "base/string16.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/common/extensions/url_pattern.h"
-#include "gfx/native_widget_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/native_widget_types.h"
 
 class Extension;
 class MessageLoop;
@@ -27,6 +27,7 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
   enum PromptType {
     INSTALL_PROMPT = 0,
     UNINSTALL_PROMPT,
+    RE_ENABLE_PROMPT,
     NUM_PROMPT_TYPES
   };
 
@@ -34,6 +35,7 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
   static const int kTitleIds[NUM_PROMPT_TYPES];
   static const int kHeadingIds[NUM_PROMPT_TYPES];
   static const int kButtonIds[NUM_PROMPT_TYPES];
+  static const int kWarningIds[NUM_PROMPT_TYPES];
 
   class Delegate {
    public:
@@ -67,6 +69,12 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
   // on |delegate|.
   virtual void ConfirmUninstall(Delegate* delegate, const Extension* extension);
 
+  // This is called by the app handler launcher to verify whether the app
+  // should be re-enabled. This is declared virtual for testing.
+  //
+  // We *MUST* eventually call either Proceed() or Abort() on |delegate|.
+  virtual void ConfirmReEnable(Delegate* delegate, const Extension* extension);
+
   // Installation was successful. This is declared virtual for testing.
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon);
 
@@ -97,12 +105,6 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
   // 2) Handle the load icon response and show the UI (OnImageLoaded).
   void ShowConfirmation(PromptType prompt_type);
 
-#if defined(OS_MACOSX)
-  // When an extension is installed on Mac with neither browser action nor
-  // page action icons, show an infobar instead of a popup bubble.
-  void ShowGenericExtensionInstalledInfoBar(const Extension* new_extension);
-#endif
-
   // Returns the delegate to control the browser's info bar. This is
   // within its own function due to its platform-specific nature.
   static InfoBarDelegate* GetNewThemeInstalledInfoBarDelegate(
@@ -119,7 +121,8 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
   // this function are platform-specific.
   static void ShowExtensionInstallUIPrompt2Impl(
       Profile* profile, Delegate* delegate, const Extension* extension,
-      SkBitmap* icon, const std::vector<string16>& permissions);
+      SkBitmap* icon, const std::vector<string16>& permissions,
+      PromptType type);
 
   Profile* profile_;
   MessageLoop* ui_loop_;

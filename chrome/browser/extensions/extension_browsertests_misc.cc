@@ -16,9 +16,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/site_instance.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -26,6 +23,9 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/site_instance.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
@@ -755,9 +755,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
   EXPECT_TRUE(result);
 }
 
-// disabled by kerz to enable browser tests to go green
+#if defined(OS_CHROMEOS)
+// ChromeOS doesn't support NPAPI.
+#define MAYBE_PluginPrivate DISABLED_PluginPrivate
+#elif defined(OS_WIN) || defined(OS_LINUX)
+#define MAYBE_PluginPrivate PluginPrivate
+#else
+// TODO(mpcomplete): http://crbug.com/29900 need cross platform plugin support.
+#define MAYBE_PluginPrivate DISABLED_PluginPrivate
+#endif
+
 // Tests that private extension plugins are only visible to the extension.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DISABLED_PluginPrivate) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginPrivate) {
   FilePath extension_dir =
       test_data_dir_.AppendASCII("uitest").AppendASCII("plugins_private");
 

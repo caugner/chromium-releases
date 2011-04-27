@@ -89,8 +89,7 @@ UITestBase::UITestBase()
       clear_profile_(true),
       include_testing_id_(true),
       enable_file_cookies_(true),
-      profile_type_(ProxyLauncher::DEFAULT_THEME),
-      shutdown_type_(ProxyLauncher::WINDOW_CLOSE) {
+      profile_type_(ProxyLauncher::DEFAULT_THEME) {
   PathService::Get(chrome::DIR_APP, &browser_directory_);
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_);
 }
@@ -105,8 +104,7 @@ UITestBase::UITestBase(MessageLoop::Type msg_loop_type)
       clear_profile_(true),
       include_testing_id_(true),
       enable_file_cookies_(true),
-      profile_type_(ProxyLauncher::DEFAULT_THEME),
-      shutdown_type_(ProxyLauncher::WINDOW_CLOSE) {
+      profile_type_(ProxyLauncher::DEFAULT_THEME) {
   PathService::Get(chrome::DIR_APP, &browser_directory_);
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_);
 }
@@ -131,7 +129,8 @@ void UITestBase::SetUp() {
 }
 
 void UITestBase::TearDown() {
-  CloseBrowserAndServer();
+  if (launcher_.get())
+    launcher_->TerminateConnection();
 
   // Make sure that we didn't encounter any assertion failures
   logging::AssertionList assertions;
@@ -170,6 +169,10 @@ ProxyLauncher* UITestBase::CreateProxyLauncher() {
   return new AnonymousProxyLauncher(false);
 }
 
+bool UITestBase::ShouldFilterInet() {
+  return true;
+}
+
 void UITestBase::SetLaunchSwitches() {
   // We need cookies on file:// for things like the page cycler.
   if (enable_file_cookies_)
@@ -197,7 +200,7 @@ void UITestBase::ConnectToRunningBrowser() {
 
 void UITestBase::CloseBrowserAndServer() {
   if (launcher_.get())
-    launcher_->CloseBrowserAndServer(shutdown_type_);
+    launcher_->CloseBrowserAndServer();
 }
 
 void UITestBase::LaunchBrowser(const CommandLine& arguments,
@@ -217,11 +220,7 @@ bool UITestBase::LaunchAnotherBrowserBlockUntilClosed(
 #endif
 
 void UITestBase::QuitBrowser() {
-  launcher_->QuitBrowser(shutdown_type_);
-}
-
-void UITestBase::TerminateBrowser() {
-  launcher_->TerminateBrowser();
+  launcher_->QuitBrowser();
 }
 
 void UITestBase::CleanupAppProcesses() {
@@ -261,12 +260,6 @@ scoped_refptr<TabProxy> UITestBase::GetActiveTab() {
   scoped_refptr<TabProxy> tab_proxy = window_proxy->GetActiveTab();
   EXPECT_TRUE(tab_proxy.get());
   return tab_proxy;
-}
-
-void UITestBase::NavigateToURLAsync(const GURL& url) {
-  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
-  ASSERT_TRUE(tab_proxy.get());
-  ASSERT_TRUE(tab_proxy->NavigateToURLAsync(url));
 }
 
 void UITestBase::NavigateToURL(const GURL& url) {
@@ -605,8 +598,12 @@ void UITest::StopHttpServer() {
 #endif
 }
 
-int UITest::GetBrowserProcessCount() {
-  return GetRunningChromeProcesses(browser_process_id()).size();
+bool UITest::GetBrowserProcessCount(int* count) {
+  *count = 0;
+  if (!automation()->WaitForProcessLauncherThreadToGoIdle())
+    return false;
+  *count = GetRunningChromeProcesses(browser_process_id()).size();
+  return true;
 }
 
 static DictionaryValue* LoadDictionaryValueFromPath(const FilePath& path) {
@@ -815,6 +812,16 @@ bool UITest::WaitForFindWindowVisibilityChange(BrowserProxy* browser,
 
   ADD_FAILURE() << "Timeout reached in WaitForFindWindowVisibilityChange";
   return false;
+}
+
+void UITest::TerminateBrowser() {
+  launcher_->TerminateBrowser();
+}
+
+void UITest::NavigateToURLAsync(const GURL& url) {
+  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
+  ASSERT_TRUE(tab_proxy.get());
+  ASSERT_TRUE(tab_proxy->NavigateToURLAsync(url));
 }
 
 bool UITest::WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,

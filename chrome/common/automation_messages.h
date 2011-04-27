@@ -14,8 +14,9 @@
 #include "chrome/common/page_type.h"
 #include "chrome/common/security_style.h"
 #include "chrome/common/common_param_traits.h"
-#include "gfx/rect.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/upload_data.h"
+#include "ui/gfx/rect.h"
 
 struct AutomationMsg_Find_Params {
   // Unused value, which exists only for backwards compat.
@@ -41,7 +42,8 @@ struct AutomationURLResponse {
                         int64 content_length,
                         const base::Time& last_modified,
                         const std::string& redirect_url,
-                        int redirect_status);
+                        int redirect_status,
+                        const net::HostPortPair& host_socket_address);
   ~AutomationURLResponse();
 
   std::string mime_type;
@@ -50,6 +52,7 @@ struct AutomationURLResponse {
   base::Time last_modified;
   std::string redirect_url;
   int redirect_status;
+  net::HostPortPair socket_address;
 };
 
 struct ExternalTabSettings {

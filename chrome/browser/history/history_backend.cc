@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -376,7 +376,7 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
 
   // If a redirect chain is given, we expect the last item in that chain to be
   // the final URL.
-  DCHECK(request->redirects.size() == 0 ||
+  DCHECK(request->redirects.empty() ||
          request->redirects.back() == request->url);
 
   // Avoid duplicating times in the database, at least as long as pages are
@@ -550,7 +550,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   // Fill the in-memory database and send it back to the history service on the
   // main thread.
   InMemoryHistoryBackend* mem_backend = new InMemoryHistoryBackend;
-  if (mem_backend->Init(history_name, db_.get(), languages))
+  if (mem_backend->Init(history_name, history_dir_, db_.get(), languages))
     delegate_->SetInMemoryBackend(mem_backend);  // Takes ownership of pointer.
   else
     delete mem_backend;  // Error case, run without the in-memory DB.
@@ -721,6 +721,9 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
     // Re-enable this.
     // GetMostRecentRedirectsTo(url, &details->redirects);
     BroadcastNotifications(NotificationType::HISTORY_URL_VISITED, details);
+  } else {
+    VLOG(0) << "Failed to build visit insert statement:  "
+            << "url_id = " << url_id;
   }
 
   return std::make_pair(url_id, visit_id);
@@ -1203,10 +1206,18 @@ void HistoryBackend::QueryHistoryBasic(URLDatabase* url_db,
     const VisitRow visit = visits[i];
 
     // Add a result row for this visit, get the URL info from the DB.
-    if (!url_db->GetURLRow(visit.url_id, &url_result))
+    if (!url_db->GetURLRow(visit.url_id, &url_result)) {
+      VLOG(0) << "Failed to get id " << visit.url_id
+              << " from history.urls.";
       continue;  // DB out of sync and URL doesn't exist, try to recover.
-    if (!url_result.url().is_valid())
+    }
+
+    if (!url_result.url().is_valid()) {
+      VLOG(0) << "Got invalid URL from history.urls with id "
+              << visit.url_id << ":  "
+              << url_result.url().possibly_invalid_spec();
       continue;  // Don't report invalid URLs in case of corruption.
+    }
 
     // The archived database may be out of sync with respect to starring,
     // titles, last visit date, etc. Therefore, we query the main DB if the

@@ -20,6 +20,10 @@ namespace base {
   class Time;
 }
 
+namespace safe_browsing {
+class PrefixSet;
+}
+
 class BloomFilter;
 class GURL;
 class MessageLoop;
@@ -81,10 +85,14 @@ class SafeBrowsingDatabase {
                                  base::Time last_update) = 0;
 
   // Returns false if |url| is not in Download database. If it returns true,
-  // |prefix_hits| should contain the prefix for |url|.
+  // |prefix_hit| should contain the prefix for |url|.
   // This function could ONLY be accessed from creation thread.
   virtual bool ContainsDownloadUrl(const GURL& url,
-                                   std::vector<SBPrefix>* prefix_hits) = 0;
+                                   SBPrefix* prefix_hit) = 0;
+
+  // Returns false if |prefix| is not in Download database.
+  // This function could ONLY be accessed from creation thread.
+  virtual bool ContainsDownloadHashPrefix(const SBPrefix& prefix) = 0;
 
   // A database transaction should look like:
   //
@@ -184,8 +192,8 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
                                  std::vector<SBFullHashResult>* full_hits,
                                  base::Time last_update);
   virtual bool ContainsDownloadUrl(const GURL& url,
-                                   std::vector<SBPrefix>* prefix_hits);
-
+                                   SBPrefix* prefix_hit);
+  virtual bool ContainsDownloadHashPrefix(const SBPrefix& prefix);
   virtual bool UpdateStarted(std::vector<SBListChunkRanges>* lists);
   virtual void InsertChunks(const std::string& list_name,
                             const SBChunkList& chunks);
@@ -228,6 +236,15 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
 
   void UpdateDownloadStore();
   void UpdateBrowseStore();
+
+  // Helper function to compare addprefixes in download_store_ with prefix.
+  // The |list_bit| indicates which list (download url or download hash)
+  // to compare.
+  // Returns true if there is a match, |*prefix_hit| will contain the actual
+  // matching prefix.
+  bool MatchDownloadAddPrefixes(int list_bit,
+                                const SBPrefix& prefix,
+                                SBPrefix* prefix_hit);
 
   // Used to verify that various calls are made from the thread the
   // object was created on.
@@ -272,6 +289,13 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
   // Causes the update functions to fail with no side effects, until
   // the next call to |UpdateStarted()|.
   bool corruption_detected_;
+
+  // Set to true if any chunks are added or deleted during an update.
+  // Used to optimize away database update.
+  bool change_detected_;
+
+  // Used to check if a prefix was in the database.
+  scoped_ptr<safe_browsing::PrefixSet> prefix_set_;
 };
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_DATABASE_H_

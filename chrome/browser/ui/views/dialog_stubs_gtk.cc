@@ -9,7 +9,6 @@
 
 #include "base/logging.h"
 #include "chrome/browser/fonts_languages_window.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/gtk/about_chrome_dialog.h"
 #include "chrome/browser/ui/gtk/clear_browsing_data_dialog_gtk.h"
 #include "chrome/browser/ui/gtk/collected_cookies_gtk.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/ui/gtk/task_manager_gtk.h"
 #include "chrome/browser/ui/options/options_window.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "views/widget/widget.h"
 
 namespace browser {
@@ -31,7 +31,7 @@ void ShowClearBrowsingDataView(views::Widget* parent,
                                    profile);
 }
 
-void ShowImporterView(views::Widget* parent, Profile* profile) {
+void ShowImportDialogView(views::Widget* parent, Profile* profile) {
   // Import currently doesn't matter.
   NOTIMPLEMENTED();
 }
@@ -45,14 +45,11 @@ void ShowKeywordEditorView(Profile* profile) {
 }
 
 void ShowTaskManager() {
-  TaskManagerGtk::Show();
+  TaskManagerGtk::Show(false);
 }
 
 void ShowBackgroundPages() {
-  // TODO(atwilson): Add code to highlight background pages if we decide to
-  // expose this UI on a real platform (like chromeos).
-  // http://crbug.com/71490.
-  TaskManagerGtk::Show();
+  TaskManagerGtk::Show(true);
 }
 
 void EditSearchEngine(gfx::NativeWindow parent,

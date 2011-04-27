@@ -5,6 +5,7 @@
 #include "ppapi/proxy/serialized_structs.h"
 
 #include "ppapi/c/dev/ppb_font_dev.h"
+#include "ppapi/c/dev/pp_file_info_dev.h"
 #include "ppapi/c/pp_rect.h"
 
 namespace pp {
@@ -62,9 +63,12 @@ void SerializedFontDescription::SetToPPFontDescription(
   desc->word_spacing = word_spacing;
 }
 
+PPBFileRef_CreateInfo::PPBFileRef_CreateInfo()
+    : file_system_type(PP_FILESYSTEMTYPE_EXTERNAL) {
+}
+
 PPBFlash_DrawGlyphs_Params::PPBFlash_DrawGlyphs_Params()
     : instance(0),
-      pp_image_data(0),
       font_desc(),
       color(0) {
 }

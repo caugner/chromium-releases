@@ -33,6 +33,11 @@ class GLES2MockCommandBufferHelper : public CommandBuffer {
     return true;
   }
 
+  virtual bool Initialize(base::SharedMemory* buffer, int32 size) {
+    GPU_NOTREACHED();
+    return false;
+  }
+
   virtual Buffer GetRingBuffer() {
     return ring_buffer_buffer_;
   }
@@ -71,6 +76,12 @@ class GLES2MockCommandBufferHelper : public CommandBuffer {
   virtual Buffer GetTransferBuffer(int32 id) {
     GPU_DCHECK_EQ(id, kTransferBufferId);
     return transfer_buffer_buffer_;
+  }
+
+  virtual int32 RegisterTransferBuffer(base::SharedMemory* shared_memory,
+                                       size_t size) {
+    GPU_NOTREACHED();
+    return -1;
   }
 
   virtual void SetToken(int32 token) {

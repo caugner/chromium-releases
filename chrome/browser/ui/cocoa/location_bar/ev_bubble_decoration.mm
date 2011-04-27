@@ -8,8 +8,8 @@
 #include "base/sys_string_conversions.h"
 #import "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
-#include "gfx/font.h"
 #include "ui/base/text/text_elider.h"
+#include "ui/gfx/font.h"
 
 namespace {
 
@@ -59,6 +59,8 @@ EVBubbleDecoration::EVBubbleDecoration(
   NSColor* text_color = ColorWithRGBBytes(0x07, 0x95, 0x00);
   SetColors(border_color, background_color, text_color);
 }
+
+EVBubbleDecoration::~EVBubbleDecoration() {}
 
 void EVBubbleDecoration::SetFullLabel(NSString* label) {
   full_label_.reset([label retain]);
@@ -113,6 +115,14 @@ NSImage* EVBubbleDecoration::GetDragImage() {
   return location_icon_->GetDragImage();
 }
 
+NSRect EVBubbleDecoration::GetDragImageFrame(NSRect frame) {
+  return GetImageRectInFrame(frame);
+}
+
 bool EVBubbleDecoration::OnMousePressed(NSRect frame) {
   return location_icon_->OnMousePressed(frame);
+}
+
+bool EVBubbleDecoration::AcceptsMousePress() {
+  return true;
 }

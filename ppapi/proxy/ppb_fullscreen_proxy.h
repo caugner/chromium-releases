@@ -7,6 +7,7 @@
 
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_size.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/interface_proxy.h"
 
@@ -20,13 +21,13 @@ class PPB_Fullscreen_Proxy : public InterfaceProxy {
   PPB_Fullscreen_Proxy(Dispatcher* dispatcher, const void* target_interface);
   virtual ~PPB_Fullscreen_Proxy();
 
+  static const Info* GetInfo();
+
   const PPB_Fullscreen_Dev* ppb_fullscreen_target() const {
     return reinterpret_cast<const PPB_Fullscreen_Dev*>(target_interface());
   }
 
   // InterfaceProxy implementation.
-  virtual const void* GetSourceInterface() const;
-  virtual InterfaceID GetInterfaceId() const;
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
@@ -36,6 +37,9 @@ class PPB_Fullscreen_Proxy : public InterfaceProxy {
   void OnMsgSetFullscreen(PP_Instance instance,
                           PP_Bool fullscreen,
                           PP_Bool* result);
+  void OnMsgGetScreenSize(PP_Instance instance,
+                          PP_Bool* result,
+                          PP_Size* size);
 };
 
 }  // namespace proxy

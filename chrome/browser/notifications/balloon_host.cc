@@ -9,16 +9,17 @@
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/site_instance.h"
 #include "webkit/glue/webpreferences.h"
 
 BalloonHost::BalloonHost(Balloon* balloon)
@@ -26,7 +27,7 @@ BalloonHost::BalloonHost(Balloon* balloon)
       balloon_(balloon),
       initialized_(false),
       should_notify_on_disconnect_(false),
-      enable_dom_ui_(false) {
+      enable_web_ui_(false) {
   DCHECK(balloon_);
 
   // If the notification is for an extension URL, make sure to use the extension
@@ -69,7 +70,7 @@ const string16& BalloonHost::GetSource() const {
 WebPreferences BalloonHost::GetWebkitPrefs() {
   WebPreferences web_prefs =
       RenderViewHostDelegateHelper::GetWebkitPrefs(GetProfile(),
-                                                   enable_dom_ui_);
+                                                   enable_web_ui_);
   web_prefs.allow_scripts_to_close_windows = true;
   return web_prefs;
 }
@@ -128,7 +129,7 @@ RenderViewHostDelegate::View* BalloonHost::GetViewDelegate() {
   return this;
 }
 
-void BalloonHost::ProcessDOMUIMessage(
+void BalloonHost::ProcessWebUIMessage(
     const ViewHostMsg_DomMessage_Params& params) {
   if (extension_function_dispatcher_.get()) {
     extension_function_dispatcher_->HandleRequest(params);
@@ -139,17 +140,16 @@ void BalloonHost::ProcessDOMUIMessage(
 // open pages in new tabs.
 void BalloonHost::CreateNewWindow(
     int route_id,
-    WindowContainerType window_container_type,
-    const string16& frame_name) {
+    const ViewHostMsg_CreateWindow_Params& params) {
   delegate_view_helper_.CreateNewWindow(
       route_id,
       balloon_->profile(),
       site_instance_.get(),
-      DOMUIFactory::GetDOMUIType(balloon_->profile(),
+      WebUIFactory::GetWebUIType(balloon_->profile(),
           balloon_->notification().content_url()),
       this,
-      window_container_type,
-      frame_name);
+      params.window_container_type,
+      params.frame_name);
 }
 
 void BalloonHost::ShowCreatedWindow(int route_id,
@@ -201,8 +201,8 @@ void BalloonHost::Init() {
   if (extension_function_dispatcher_.get()) {
     rvh->AllowBindings(BindingsPolicy::EXTENSION);
     rvh->set_is_extension_process(true);
-  } else if (enable_dom_ui_) {
-    rvh->AllowBindings(BindingsPolicy::DOM_UI);
+  } else if (enable_web_ui_) {
+    rvh->AllowBindings(BindingsPolicy::WEB_UI);
   }
 
   // Do platform-specific initialization.
@@ -221,10 +221,10 @@ void BalloonHost::Init() {
   initialized_ = true;
 }
 
-void BalloonHost::EnableDOMUI() {
+void BalloonHost::EnableWebUI() {
   DCHECK(render_view_host_ == NULL) <<
-      "EnableDOMUI has to be called before a renderer is created.";
-  enable_dom_ui_ = true;
+      "EnableWebUI has to be called before a renderer is created.";
+  enable_web_ui_ = true;
 }
 
 void BalloonHost::UpdateInspectorSetting(const std::string& key,

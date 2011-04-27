@@ -9,8 +9,8 @@
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
-#include "gfx/native_widget_types.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/gfx/native_widget_types.h"
 
 typedef struct _GtkWidget GtkWidget;
 
@@ -22,7 +22,7 @@ class JSModalDialogGtk : public NativeAppModalDialog {
                    gfx::NativeWindow parent_window);
   virtual ~JSModalDialogGtk();
 
-  // Overridden from NativeAppModalDialog:
+  // NativeAppModalDialog:
   virtual int GetAppModalDialogButtons() const;
   virtual void ShowAppModalDialog();
   virtual void ActivateAppModalDialog();
@@ -31,7 +31,7 @@ class JSModalDialogGtk : public NativeAppModalDialog {
   virtual void CancelAppModalDialog();
 
  private:
-  CHROMEGTK_CALLBACK_1(JSModalDialogGtk, void, OnDialogResponse, int);
+  CHROMEGTK_CALLBACK_1(JSModalDialogGtk, void, OnResponse, int);
 
   scoped_ptr<JavaScriptAppModalDialog> dialog_;
   GtkWidget* gtk_dialog_;

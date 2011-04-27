@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "base/task.h"
-#include "gfx/point.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/gfx/point.h"
 
 class SkBitmap;
 
@@ -75,20 +75,17 @@ class MenuGtk {
                                   GtkWidget* menu,
                                   bool connect_to_activate);
 
-  // Displays the menu. |timestamp| is the time of activation. The popup is
-  // statically positioned at |widget|.
-  void Popup(GtkWidget* widget, gint button_type, guint32 timestamp);
+  // Displays the menu near a widget, as if the widget were a menu bar.
+  // Example: the wrench menu button.
+  // |button| is the mouse button that brought up the menu.
+  // |event_time| is the time from the GdkEvent.
+  void PopupForWidget(GtkWidget* widget, int button, guint32 event_time);
 
-  // Displays the menu using the button type and timestamp of |event|. The popup
-  // is statically positioned at |widget|.
-  void Popup(GtkWidget* widget, GdkEvent* event);
-
-  // Displays the menu as a context menu, i.e. at the current cursor location.
+  // Displays the menu as a context menu, i.e. at the cursor location.
+  // It is implicit that it was brought up using the right mouse button.
+  // |point| is the point where to put the menu.
   // |event_time| is the time of the event that triggered the menu's display.
-  void PopupAsContext(guint32 event_time);
-
-  // Displays the menu at the given coords. |point| is intentionally not const.
-  void PopupAsContextAt(guint32 event_time, gfx::Point point);
+  void PopupAsContext(const gfx::Point& point, guint32 event_time);
 
   // Displays the menu as a context menu for the passed status icon.
   void PopupAsContextForStatusIcon(guint32 event_time, guint32 button,
@@ -141,7 +138,7 @@ class MenuGtk {
   // Implementation of the above; called recursively.
   void BuildSubmenuFromModel(ui::MenuModel* model, GtkWidget* menu);
   // Builds a menu item with buttons in it from the data in the model.
-  GtkWidget* BuildButtomMenuItem(ui::ButtonMenuItemModel* model,
+  GtkWidget* BuildButtonMenuItem(ui::ButtonMenuItemModel* model,
                                  GtkWidget* menu);
 
   void ExecuteCommand(ui::MenuModel* model, int id);

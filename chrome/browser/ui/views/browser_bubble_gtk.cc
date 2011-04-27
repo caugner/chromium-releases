@@ -26,7 +26,7 @@ class BubbleWidget : public views::WidgetGtk {
         bubble_(bubble) {
   }
 
-  void Show(bool activate) {
+  void ShowAndActivate(bool activate) {
     // TODO: honor activate.
     views::WidgetGtk::Show();
   }
@@ -84,9 +84,6 @@ class BubbleWidget : public views::WidgetGtk {
 
 void BrowserBubble::InitPopup() {
   // TODO(port)
-  DCHECK(!drop_shadow_enabled_) <<
-    "Drop shadows not supported on GTK browser bubbles.";
-
   views::WidgetGtk* pop = new BubbleWidget(this);
   pop->SetOpacity(0xFF);
   pop->make_transient_to_parent();
@@ -115,7 +112,7 @@ void BrowserBubble::MovePopup(int x, int y, int w, int h) {
 void BrowserBubble::Show(bool activate) {
   if (visible_)
     return;
-  static_cast<BubbleWidget*>(popup_)->Show(activate);
+  static_cast<BubbleWidget*>(popup_)->ShowAndActivate(activate);
   visible_ = true;
 }
 

@@ -14,12 +14,12 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "gfx/gtk_util.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/gtk_util.h"
 
 namespace {
 
@@ -122,7 +122,7 @@ void PasswordsExceptionsPageGtk::SetExceptionList(
         COL_SITE,
         UTF16ToUTF8(net::FormatUrl(result[i]->origin, languages)).c_str(), -1);
   }
-  gtk_widget_set_sensitive(remove_all_button_, result.size() > 0);
+  gtk_widget_set_sensitive(remove_all_button_, !result.empty());
 }
 
 void PasswordsExceptionsPageGtk::OnRemoveButtonClicked(GtkWidget* widget) {
@@ -149,7 +149,7 @@ void PasswordsExceptionsPageGtk::OnRemoveButtonClicked(GtkWidget* widget) {
   delete exception_list_[index];
   exception_list_.erase(exception_list_.begin() + index);
 
-  gtk_widget_set_sensitive(remove_all_button_, exception_list_.size() > 0);
+  gtk_widget_set_sensitive(remove_all_button_, !exception_list_.empty());
 }
 
 void PasswordsExceptionsPageGtk::OnRemoveAllButtonClicked(GtkWidget* widget) {

@@ -18,6 +18,7 @@
 
 #include "base/basictypes.h"
 
+#include "courgette/memory_allocator.h"
 #include "courgette/region.h"
 
 namespace courgette {
@@ -147,8 +148,15 @@ class SinkStream {
   // Hints that the stream will grow by an additional |length| bytes.
   void Reserve(size_t length) { buffer_.reserve(length + buffer_.length()); }
 
+  // Finished with this stream and any storage it has.
+  void Retire();
+
  private:
-  std::string buffer_;  // Use a string to manage the stream's memory.
+  // Use a string to manage the stream's memory.
+  typedef std::basic_string<char,
+                            std::char_traits<char>,
+                            MemoryAllocator<char> > SinkBuffer;
+  SinkBuffer buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(SinkStream);
 };
@@ -187,6 +195,11 @@ class SourceStreamSet {
   DISALLOW_COPY_AND_ASSIGN(SourceStreamSet);
 };
 
+// A SinkStreamSet is a set of SinkStreams.  Data is collected by writing to the
+// component streams.  When data collection is complete, it is destructively
+// transferred, either by flattening into one stream (CopyTo), or transfering
+// data pairwise into another SinkStreamSet by calling that SinkStreamSet's
+// WriteSet method.
 class SinkStreamSet {
  public:
   SinkStreamSet();
@@ -199,8 +212,8 @@ class SinkStreamSet {
   // Returns a pointer to a substream.
   SinkStream* stream(size_t id) { return id < count_ ? &streams_[id] : NULL; }
 
-  // CopyTo serializes the streams in the SinkStreamSet into a single target
-  // stream or file.  The serialized format may be re-read by initializing a
+  // CopyTo serializes the streams in this SinkStreamSet into a single target
+  // stream.  The serialized format may be re-read by initializing a
   // SourceStreamSet with a buffer containing the data.
   bool CopyTo(SinkStream* combined_stream);
 

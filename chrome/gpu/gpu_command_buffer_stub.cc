@@ -7,11 +7,11 @@
 #include "base/process_util.h"
 #include "base/shared_memory.h"
 #include "build/build_config.h"
-#include "chrome/common/child_thread.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/gpu/gpu_channel.h"
 #include "chrome/gpu/gpu_command_buffer_stub.h"
 #include "chrome/gpu/gpu_thread.h"
+#include "content/common/child_thread.h"
 
 using gpu::Buffer;
 
@@ -80,17 +80,7 @@ static LRESULT CALLBACK CompositorWindowProc(
 
 bool GpuCommandBufferStub::CreateCompositorWindow() {
   DCHECK(handle_ != gfx::kNullPluginWindow);
-
-  // Ask the browser to create the the host window.
-  GpuThread* gpu_thread = channel_->gpu_thread();
-  gfx::PluginWindowHandle host_window_id = gfx::kNullPluginWindow;
-  gpu_thread->Send(new GpuHostMsg_GetCompositorHostWindow(
-      renderer_id_,
-      render_view_id_,
-      &host_window_id));
-  if (host_window_id == gfx::kNullPluginWindow)
-    return false;
-  HWND host_window = static_cast<HWND>(host_window_id);
+  HWND host_window = static_cast<HWND>(handle_);
 
   // Create the compositor window itself.
   DCHECK(host_window);
@@ -163,11 +153,11 @@ GpuCommandBufferStub::~GpuCommandBufferStub() {
     DestroyWindow(static_cast<HWND>(compositor_window_));
     compositor_window_ = NULL;
   }
-#elif defined(OS_LINUX)
-  GpuThread* gpu_thread = channel_->gpu_thread();
-  gpu_thread->Send(
-      new GpuHostMsg_ReleaseXID(handle_));
 #endif  // defined(OS_WIN)
+
+  GpuThread* gpu_thread = channel_->gpu_thread();
+  gpu_thread->Send(new GpuHostMsg_DestroyCommandBuffer(
+      handle_, renderer_id_, render_view_id_));
 }
 
 bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
@@ -180,6 +170,8 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_AsyncFlush, OnAsyncFlush);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_CreateTransferBuffer,
                         OnCreateTransferBuffer);
+    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_RegisterTransferBuffer,
+                        OnRegisterTransferBuffer);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_DestroyTransferBuffer,
                         OnDestroyTransferBuffer);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_GetTransferBuffer,
@@ -200,11 +192,12 @@ bool GpuCommandBufferStub::Send(IPC::Message* message) {
 }
 
 void GpuCommandBufferStub::OnInitialize(
+    base::SharedMemoryHandle ring_buffer,
     int32 size,
-    base::SharedMemoryHandle* ring_buffer) {
+    bool* result) {
   DCHECK(!command_buffer_.get());
 
-  *ring_buffer = base::SharedMemory::NULLHandle();
+  *result = false;
 
   command_buffer_.reset(new gpu::CommandBufferService);
 
@@ -223,53 +216,57 @@ void GpuCommandBufferStub::OnInitialize(
   gfx::PluginWindowHandle output_window_handle = handle_;
 #endif  // defined(OS_WIN)
 
-  // Initialize the CommandBufferService and GPUProcessor.
-  if (command_buffer_->Initialize(size)) {
-    Buffer buffer = command_buffer_->GetRingBuffer();
-    if (buffer.shared_memory) {
-      gpu::GPUProcessor* parent_processor =
-          parent_ ? parent_->processor_.get() : NULL;
-      processor_.reset(new gpu::GPUProcessor(command_buffer_.get(), NULL));
-      if (processor_->Initialize(
-          output_window_handle,
-          initial_size_,
-          allowed_extensions_.c_str(),
-          requested_attribs_,
-          parent_processor,
-          parent_texture_id_)) {
-        command_buffer_->SetPutOffsetChangeCallback(
-            NewCallback(processor_.get(),
-                        &gpu::GPUProcessor::ProcessCommands));
-        processor_->SetSwapBuffersCallback(
-            NewCallback(this, &GpuCommandBufferStub::OnSwapBuffers));
+#if defined(OS_WIN)
+  // Windows dups the shared memory handle it receives into the current process
+  // and closes it when this variable goes out of scope.
+  base::SharedMemory shared_memory(ring_buffer,
+                                   false,
+                                   channel_->renderer_process());
+#else
+  // POSIX receives a dup of the shared memory handle and closes the dup when
+  // this variable goes out of scope.
+  base::SharedMemory shared_memory(ring_buffer, false);
+#endif
 
-        // Assume service is responsible for duplicating the handle from the
-        // calling process.
-        buffer.shared_memory->ShareToProcess(channel_->renderer_handle(),
-                                             ring_buffer);
+  // Initialize the CommandBufferService and GPUProcessor.
+  if (command_buffer_->Initialize(&shared_memory, size)) {
+    gpu::GPUProcessor* parent_processor =
+        parent_ ? parent_->processor_.get() : NULL;
+    processor_.reset(new gpu::GPUProcessor(command_buffer_.get(), NULL));
+    if (processor_->Initialize(
+        output_window_handle,
+        initial_size_,
+        allowed_extensions_.c_str(),
+        requested_attribs_,
+        parent_processor,
+        parent_texture_id_)) {
+      command_buffer_->SetPutOffsetChangeCallback(
+          NewCallback(processor_.get(),
+                      &gpu::GPUProcessor::ProcessCommands));
+      processor_->SetSwapBuffersCallback(
+          NewCallback(this, &GpuCommandBufferStub::OnSwapBuffers));
+
 #if defined(OS_MACOSX)
-        if (handle_) {
-          // This context conceptually puts its output directly on the
-          // screen, rendered by the accelerated plugin layer in
-          // RenderWidgetHostViewMac. Set up a pathway to notify the
-          // browser process when its contents change.
-          processor_->SetSwapBuffersCallback(
-              NewCallback(this,
-                          &GpuCommandBufferStub::SwapBuffersCallback));
-        }
-#elif defined(OS_LINUX) || defined(OS_WIN)
-        if (handle_) {
-          // Set up a pathway for resizing the output window at the right time
-          // relative to other GL commands.
-          processor_->SetResizeCallback(
-              NewCallback(this,
-                          &GpuCommandBufferStub::ResizeCallback));
-        }
-#endif  // defined(OS_MACOSX)
-      } else {
-        processor_.reset();
-        command_buffer_.reset();
+      if (handle_) {
+        // This context conceptually puts its output directly on the
+        // screen, rendered by the accelerated plugin layer in
+        // RenderWidgetHostViewMac. Set up a pathway to notify the
+        // browser process when its contents change.
+        processor_->SetSwapBuffersCallback(
+            NewCallback(this,
+                        &GpuCommandBufferStub::SwapBuffersCallback));
       }
+#endif  // defined(OS_MACOSX)
+
+      // Set up a pathway for resizing the output window or framebuffer at the
+      // right time relative to other GL commands.
+      processor_->SetResizeCallback(
+          NewCallback(this, &GpuCommandBufferStub::ResizeCallback));
+
+      *result = true;
+    } else {
+      processor_.reset();
+      command_buffer_.reset();
     }
   }
 }
@@ -302,6 +299,25 @@ void GpuCommandBufferStub::OnCreateTransferBuffer(int32 size, int32* id) {
   *id = command_buffer_->CreateTransferBuffer(size);
 }
 
+void GpuCommandBufferStub::OnRegisterTransferBuffer(
+    base::SharedMemoryHandle transfer_buffer,
+    size_t size,
+    int32* id) {
+#if defined(OS_WIN)
+  // Windows dups the shared memory handle it receives into the current process
+  // and closes it when this variable goes out of scope.
+  base::SharedMemory shared_memory(transfer_buffer,
+                                   false,
+                                   channel_->renderer_process());
+#else
+  // POSIX receives a dup of the shared memory handle and closes the dup when
+  // this variable goes out of scope.
+  base::SharedMemory shared_memory(transfer_buffer, false);
+#endif
+
+  *id = command_buffer_->RegisterTransferBuffer(&shared_memory, size);
+}
+
 void GpuCommandBufferStub::OnDestroyTransferBuffer(int32 id) {
   command_buffer_->DestroyTransferBuffer(id);
 }
@@ -313,13 +329,17 @@ void GpuCommandBufferStub::OnGetTransferBuffer(
   *transfer_buffer = base::SharedMemoryHandle();
   *size = 0;
 
+  // Fail if the renderer process has not provided its process handle.
+  if (!channel_->renderer_process())
+    return;
+
   Buffer buffer = command_buffer_->GetTransferBuffer(id);
   if (buffer.shared_memory) {
     // Assume service is responsible for duplicating the handle to the calling
     // process.
-    buffer.shared_memory->ShareToProcess(channel_->renderer_handle(),
+    buffer.shared_memory->ShareToProcess(channel_->renderer_process(),
                                          transfer_buffer);
-    *size = buffer.shared_memory->created_size();
+    *size = buffer.size;
   }
 }
 
@@ -375,20 +395,22 @@ void GpuCommandBufferStub::AcceleratedSurfaceBuffersSwapped(
 #endif  // defined(OS_MACOSX)
 
 void GpuCommandBufferStub::ResizeCallback(gfx::Size size) {
-  if (handle_ == gfx::kNullPluginWindow)
-    return;
-
-#if defined(OS_LINUX)
-  GpuThread* gpu_thread = channel_->gpu_thread();
-  bool result = false;
-  gpu_thread->Send(
-      new GpuHostMsg_ResizeXID(handle_, size, &result));
+  if (handle_ == gfx::kNullPluginWindow) {
+    processor_->decoder()->ResizeOffscreenFrameBuffer(size);
+    processor_->decoder()->UpdateOffscreenFrameBufferSize();
+  } else {
+#if defined(OS_LINUX) && !defined(TOUCH_UI)
+    GpuThread* gpu_thread = channel_->gpu_thread();
+    bool result = false;
+    gpu_thread->Send(
+        new GpuHostMsg_ResizeXID(handle_, size, &result));
 #elif defined(OS_WIN)
-  HWND hwnd = static_cast<HWND>(compositor_window_);
-  UINT swp_flags = SWP_NOSENDCHANGING | SWP_NOOWNERZORDER | SWP_NOCOPYBITS |
-    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE;
-  SetWindowPos(hwnd, NULL, 0, 0, size.width(), size.height(), swp_flags);
+    HWND hwnd = static_cast<HWND>(compositor_window_);
+    UINT swp_flags = SWP_NOSENDCHANGING | SWP_NOOWNERZORDER | SWP_NOCOPYBITS |
+      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE;
+    SetWindowPos(hwnd, NULL, 0, 0, size.width(), size.height(), swp_flags);
 #endif  // defined(OS_LINUX)
+  }
 }
 
 #endif  // defined(ENABLE_GPU)

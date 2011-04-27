@@ -89,13 +89,9 @@ void PageActionImageView::ExecuteAction(int button,
     popup_ = ExtensionPopup::Show(
         page_action_->GetPopupUrl(current_tab_id_),
         browser,
-        browser->profile(),
-        browser->window()->GetNativeHandle(),
         screen_bounds,
         arrow_location,
-        true,  // Activate the popup window.
         inspect_with_devtools,
-        ExtensionPopup::BUBBLE_CHROME,
         this);  // ExtensionPopup::Observer
   } else {
     ExtensionService* service = profile_->GetExtensionService();
@@ -140,8 +136,7 @@ void PageActionImageView::OnMouseReleased(const views::MouseEvent& event,
 }
 
 bool PageActionImageView::OnKeyPressed(const views::KeyEvent& e) {
-  if (e.GetKeyCode() == ui::VKEY_SPACE ||
-      e.GetKeyCode() == ui::VKEY_RETURN) {
+  if (e.key_code() == ui::VKEY_SPACE || e.key_code() == ui::VKEY_RETURN) {
     ExecuteAction(1, false);
     return true;
   }
@@ -184,7 +179,7 @@ void PageActionImageView::OnImageLoaded(
   // During object construction (before the parent has been set) we are already
   // in a UpdatePageActions call, so we don't need to start another one (and
   // doing so causes crash described in http://crbug.com/57333).
-  if (GetParent())
+  if (parent())
     owner_->UpdatePageActions();
 }
 

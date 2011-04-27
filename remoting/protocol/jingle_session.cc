@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,13 @@
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/stream_socket_adapter.h"
 #include "remoting/protocol/jingle_session_manager.h"
+#include "remoting/protocol/socket_wrapper.h"
 #include "third_party/libjingle/source/talk/base/thread.h"
 #include "third_party/libjingle/source/talk/p2p/base/session.h"
 #include "third_party/libjingle/source/talk/session/tunnel/pseudotcpchannel.h"
 
 using cricket::BaseSession;
+using cricket::PseudoTcp;
 using cricket::PseudoTcpChannel;
 
 namespace remoting {
@@ -38,6 +40,12 @@ const char kEventChannelName[] = "event";
 const char kVideoChannelName[] = "video";
 const char kVideoRtpChannelName[] = "videortp";
 const char kVideoRtcpChannelName[] = "videortcp";
+
+// Settings to apply to PseudoTcp channels for Control, Input and Video.
+// Disable Nagle's algorithm, to reduce latency for small messages.
+// Reduce the ACK Delay to 10ms, to balance throughput/latency with overhead.
+const int kEnableNoDelay = true;
+const int kDelayedAckTimeoutMs = 10;
 
 // Helper method to create a SSL client socket.
 net::SSLClientSocket* CreateSSLClientSocket(
@@ -86,6 +94,7 @@ JingleSession::JingleSession(
       server_cert_(server_cert),
       state_(INITIALIZING),
       closed_(false),
+      closing_(false),
       cricket_session_(NULL),
       event_channel_(NULL),
       video_channel_(NULL),
@@ -113,19 +122,18 @@ void JingleSession::Init(cricket::Session* cricket_session) {
   cert_verifier_.reset(new net::CertVerifier());
   cricket_session_->SignalState.connect(
       this, &JingleSession::OnSessionState);
+  cricket_session_->SignalError.connect(
+      this, &JingleSession::OnSessionError);
 }
 
-void JingleSession::CloseInternal(Task* closed_task, int result) {
-  if (MessageLoop::current() != jingle_session_manager_->message_loop()) {
-    jingle_session_manager_->message_loop()->PostTask(
-        FROM_HERE, NewRunnableMethod(this, &JingleSession::CloseInternal,
-                                     closed_task, result));
-    return;
-  }
+void JingleSession::CloseInternal(int result, bool failed) {
+  DCHECK_EQ(jingle_session_manager_->message_loop(), MessageLoop::current());
 
-  if (!closed_) {
+  if (!closed_ && !closing_) {
+    closing_ = true;
+
     if (control_ssl_socket_.get())
-      control_ssl_socket_.reset();
+      control_ssl_socket_->Disconnect();
 
     if (control_channel_adapter_.get())
       control_channel_adapter_->Close(result);
@@ -136,7 +144,7 @@ void JingleSession::CloseInternal(Task* closed_task, int result) {
     }
 
     if (event_ssl_socket_.get())
-      event_ssl_socket_.reset();
+      event_ssl_socket_->Disconnect();
 
     if (event_channel_adapter_.get())
       event_channel_adapter_->Close(result);
@@ -147,7 +155,7 @@ void JingleSession::CloseInternal(Task* closed_task, int result) {
     }
 
     if (video_ssl_socket_.get())
-      video_ssl_socket_.reset();
+      video_ssl_socket_->Disconnect();
 
     if (video_channel_adapter_.get())
       video_channel_adapter_->Close(result);
@@ -165,16 +173,14 @@ void JingleSession::CloseInternal(Task* closed_task, int result) {
     if (cricket_session_)
       cricket_session_->Terminate();
 
-    SetState(CLOSED);
+    if (failed)
+      SetState(FAILED);
+    else
+      SetState(CLOSED);
 
     closed_ = true;
   }
   cert_verifier_.reset();
-
-  if (closed_task) {
-    closed_task->Run();
-    delete closed_task;
-  }
 }
 
 bool JingleSession::HasSession(cricket::Session* cricket_session) {
@@ -184,12 +190,13 @@ bool JingleSession::HasSession(cricket::Session* cricket_session) {
 cricket::Session* JingleSession::ReleaseSession() {
   DCHECK_EQ(jingle_session_manager_->message_loop(), MessageLoop::current());
 
-  SetState(CLOSED);
+  // Session may be destroyed only after it is closed.
+  DCHECK(closed_);
+
   cricket::Session* session = cricket_session_;
   if (cricket_session_)
     cricket_session_->SignalState.disconnect(this);
   cricket_session_ = NULL;
-  closed_ = true;
   return session;
 }
 
@@ -279,12 +286,28 @@ void JingleSession::set_receiver_token(const std::string& receiver_token) {
 }
 
 void JingleSession::Close(Task* closed_task) {
-  CloseInternal(closed_task, net::ERR_CONNECTION_CLOSED);
+  if (MessageLoop::current() != jingle_session_manager_->message_loop()) {
+    jingle_session_manager_->message_loop()->PostTask(
+        FROM_HERE, NewRunnableMethod(this, &JingleSession::Close, closed_task));
+    return;
+  }
+
+  CloseInternal(net::ERR_CONNECTION_CLOSED, false);
+
+  if (closed_task) {
+    closed_task->Run();
+    delete closed_task;
+  }
 }
 
 void JingleSession::OnSessionState(
     BaseSession* session, BaseSession::State state) {
   DCHECK_EQ(cricket_session_, session);
+
+  if (closed_) {
+    // Don't do anything if we already closed.
+    return;
+  }
 
   switch (state) {
     case cricket::Session::STATE_SENTINITIATE:
@@ -315,6 +338,15 @@ void JingleSession::OnSessionState(
   }
 }
 
+void JingleSession::OnSessionError(
+    BaseSession* session, BaseSession::Error error) {
+  DCHECK_EQ(cricket_session_, session);
+
+  if (error != cricket::Session::ERROR_NONE) {
+    CloseInternal(net::ERR_CONNECTION_ABORTED, true);
+  }
+}
+
 void JingleSession::OnInitiate() {
   jid_ = cricket_session_->remote_name();
 
@@ -341,6 +373,8 @@ void JingleSession::OnInitiate() {
   control_channel_ = new PseudoTcpChannel(
       jingle_session_manager_->jingle_thread(), cricket_session_);
   control_channel_->Connect(content_name, kControlChannelName);
+  control_channel_->SetOption(PseudoTcp::OPT_NODELAY, kEnableNoDelay);
+  control_channel_->SetOption(PseudoTcp::OPT_ACKDELAY, kDelayedAckTimeoutMs);
   control_channel_adapter_.reset(new StreamSocketAdapter(
       control_channel_->GetStream()));
 
@@ -348,6 +382,8 @@ void JingleSession::OnInitiate() {
   event_channel_ = new PseudoTcpChannel(
       jingle_session_manager_->jingle_thread(), cricket_session_);
   event_channel_->Connect(content_name, kEventChannelName);
+  event_channel_->SetOption(PseudoTcp::OPT_NODELAY, kEnableNoDelay);
+  event_channel_->SetOption(PseudoTcp::OPT_ACKDELAY, kDelayedAckTimeoutMs);
   event_channel_adapter_.reset(new StreamSocketAdapter(
       event_channel_->GetStream()));
 
@@ -356,23 +392,28 @@ void JingleSession::OnInitiate() {
   video_channel_ = new PseudoTcpChannel(
       jingle_session_manager_->jingle_thread(), cricket_session_);
   video_channel_->Connect(content_name, kVideoChannelName);
+  video_channel_->SetOption(PseudoTcp::OPT_NODELAY, kEnableNoDelay);
+  video_channel_->SetOption(PseudoTcp::OPT_ACKDELAY, kDelayedAckTimeoutMs);
   video_channel_adapter_.reset(new StreamSocketAdapter(
       video_channel_->GetStream()));
 
   if (!cricket_session_->initiator())
     jingle_session_manager_->AcceptConnection(this, cricket_session_);
 
-  SetState(CONNECTING);
+  if (!closed_) {
+    // Set state to CONNECTING if the session is being accepted.
+    SetState(CONNECTING);
+  }
 }
 
 bool JingleSession::EstablishSSLConnection(
-    net::ClientSocket* adapter, scoped_ptr<net::Socket>* ssl_socket) {
+    net::ClientSocket* adapter, scoped_ptr<SocketWrapper>* ssl_socket) {
   if (cricket_session_->initiator()) {
     // Create client SSL socket.
     net::SSLClientSocket* socket = CreateSSLClientSocket(adapter,
                                                          server_cert_,
                                                          cert_verifier_.get());
-    ssl_socket->reset(socket);
+    ssl_socket->reset(new SocketWrapper(socket));
 
     int ret = socket->Connect(connect_callback_.get());
     if (ret == net::ERR_IO_PENDING) {
@@ -387,7 +428,7 @@ bool JingleSession::EstablishSSLConnection(
     net::SSLConfig ssl_config;
     net::SSLServerSocket* socket = net::CreateSSLServerSocket(
         adapter, server_cert_, key_.get(), ssl_config);
-    ssl_socket->reset(socket);
+    ssl_socket->reset(new SocketWrapper(socket));
 
     int ret = socket->Accept(connect_callback_.get());
     if (ret == net::ERR_IO_PENDING) {
@@ -395,7 +436,7 @@ bool JingleSession::EstablishSSLConnection(
     } else if (ret != net::OK) {
       LOG(ERROR) << "Failed to establish SSL connection";
       cricket_session_->Terminate();
-      return true;
+      return false;
     }
   }
   // Reach here if net::OK is received.
@@ -450,44 +491,14 @@ void JingleSession::OnAccept() {
 }
 
 void JingleSession::OnTerminate() {
-  if (control_channel_adapter_.get())
-    control_channel_adapter_->Close(net::ERR_CONNECTION_ABORTED);
-  if (control_channel_) {
-    control_channel_->OnSessionTerminate(cricket_session_);
-    control_channel_ = NULL;
-  }
-
-  if (event_channel_adapter_.get())
-    event_channel_adapter_->Close(net::ERR_CONNECTION_ABORTED);
-  if (event_channel_) {
-    event_channel_->OnSessionTerminate(cricket_session_);
-    event_channel_ = NULL;
-  }
-
-  if (video_channel_adapter_.get())
-    video_channel_adapter_->Close(net::ERR_CONNECTION_ABORTED);
-  if (video_channel_) {
-    video_channel_->OnSessionTerminate(cricket_session_);
-    video_channel_ = NULL;
-  }
-
-  if (video_rtp_channel_.get())
-    video_rtp_channel_->Close(net::ERR_CONNECTION_ABORTED);
-  if (video_rtcp_channel_.get())
-    video_rtcp_channel_->Close(net::ERR_CONNECTION_ABORTED);
-
-  SetState(CLOSED);
-
-  closed_ = true;
+  CloseInternal(net::ERR_CONNECTION_ABORTED, false);
 }
 
 void JingleSession::OnSSLConnect(int result) {
   DCHECK(!closed_);
   if (result != net::OK) {
     LOG(ERROR) << "Error during SSL connection: " << result;
-    // TODO(hclam): Just setting the state is not enough. Need to invoke a
-    // callback to report failure.
-    CloseInternal(NULL, result);
+    CloseInternal(result, true);
     return;
   }
 
@@ -503,6 +514,9 @@ void JingleSession::OnSSLConnect(int result) {
 
 void JingleSession::SetState(State new_state) {
   if (new_state != state_) {
+    DCHECK_NE(state_, CLOSED);
+    DCHECK_NE(state_, FAILED);
+
     state_ = new_state;
     if (!closed_ && state_change_callback_.get())
       state_change_callback_->Run(new_state);

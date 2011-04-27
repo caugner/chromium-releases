@@ -4,9 +4,9 @@
 
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/canvas.h"
 #include "views/border.h"
 #include "views/controls/label.h"
 
@@ -208,12 +208,12 @@ TEST(LabelTest, MultiLineSizing) {
 
   // SizeToFit with unlimited width.
   label.SizeToFit(0);
-  int required_width = label.GetLocalBounds(true).width();
+  int required_width = label.GetLocalBounds().width();
   EXPECT_GT(required_width, kMinTextDimension);
 
   // SizeToFit with limited width.
   label.SizeToFit(required_width - 1);
-  int constrained_width = label.GetLocalBounds(true).width();
+  int constrained_width = label.GetLocalBounds().width();
 #if defined(OS_WIN)
   // Canvas::SizeStringInt (in app/gfx/canvas_linux.cc)
   // has to be fixed to return the size that fits to given width/height.
@@ -223,7 +223,7 @@ TEST(LabelTest, MultiLineSizing) {
 
   // Change the width back to the desire width.
   label.SizeToFit(required_width);
-  EXPECT_EQ(required_width, label.GetLocalBounds(true).width());
+  EXPECT_EQ(required_width, label.GetLocalBounds().width());
 
   // General tests for GetHeightForWidth.
   int required_height = label.GetHeightForWidth(required_width);
@@ -249,7 +249,7 @@ TEST(LabelTest, MultiLineSizing) {
 
   // SizeToFit and borders.
   label.SizeToFit(0);
-  int required_width_with_border = label.GetLocalBounds(true).width();
+  int required_width_with_border = label.GetLocalBounds().width();
   EXPECT_EQ(required_width_with_border, required_width + border.width());
 
   // GetHeightForWidth and borders.

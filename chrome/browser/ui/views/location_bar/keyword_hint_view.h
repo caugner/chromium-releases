@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "gfx/size.h"
+#include "ui/gfx/size.h"
 #include "views/view.h"
 
 namespace gfx {
@@ -36,10 +36,10 @@ class KeywordHintView : public views::View {
 
   void SetColor(const SkColor& color);
 
-  void SetKeyword(const std::wstring& keyword);
-  std::wstring keyword() const { return keyword_; }
+  void SetKeyword(const string16& keyword);
+  string16 keyword() const { return keyword_; }
 
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual gfx::Size GetPreferredSize();
   // The minimum size is just big enough to show the tab.
   virtual gfx::Size GetMinimumSize();
@@ -52,7 +52,7 @@ class KeywordHintView : public views::View {
   views::Label* trailing_label_;
 
   // The keyword.
-  std::wstring keyword_;
+  string16 keyword_;
 
   Profile* profile_;
 

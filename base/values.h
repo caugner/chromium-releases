@@ -31,12 +31,13 @@
 #include "base/string16.h"
 #include "build/build_config.h"
 
-class Value;
-class FundamentalValue;
-class StringValue;
 class BinaryValue;
 class DictionaryValue;
+class FilePath;
+class FundamentalValue;
 class ListValue;
+class StringValue;
+class Value;
 
 typedef std::vector<Value*> ValueVector;
 typedef std::map<std::string, Value*> ValueMap;
@@ -50,7 +51,7 @@ class Value {
     TYPE_NULL = 0,
     TYPE_BOOLEAN,
     TYPE_INTEGER,
-    TYPE_REAL,
+    TYPE_DOUBLE,
     TYPE_STRING,
     TYPE_BINARY,
     TYPE_DICTIONARY,
@@ -65,9 +66,10 @@ class Value {
   static Value* CreateNullValue();
   static FundamentalValue* CreateBooleanValue(bool in_value);
   static FundamentalValue* CreateIntegerValue(int in_value);
-  static FundamentalValue* CreateRealValue(double in_value);
+  static FundamentalValue* CreateDoubleValue(double in_value);
   static StringValue* CreateStringValue(const std::string& in_value);
   static StringValue* CreateStringValue(const string16& in_value);
+  static StringValue* CreateFilePathValue(const FilePath& in_value);
 
   // This one can return NULL if the input isn't valid.  If the return value
   // is non-null, the new object has taken ownership of the buffer pointer.
@@ -89,9 +91,10 @@ class Value {
   // returned;  otherwise, false is returned and |out_value| is unchanged.
   virtual bool GetAsBoolean(bool* out_value) const;
   virtual bool GetAsInteger(int* out_value) const;
-  virtual bool GetAsReal(double* out_value) const;
+  virtual bool GetAsDouble(double* out_value) const;
   virtual bool GetAsString(std::string* out_value) const;
   virtual bool GetAsString(string16* out_value) const;
+  virtual bool GetAsFilePath(FilePath* out_value) const;
   virtual bool GetAsList(ListValue** out_value);
 
   // This creates a deep copy of the entire Value tree, and returns a pointer
@@ -132,7 +135,7 @@ class FundamentalValue : public Value {
   // Subclassed methods
   virtual bool GetAsBoolean(bool* out_value) const;
   virtual bool GetAsInteger(int* out_value) const;
-  virtual bool GetAsReal(double* out_value) const;
+  virtual bool GetAsDouble(double* out_value) const;
   virtual FundamentalValue* DeepCopy() const;
   virtual bool Equals(const Value* other) const;
 
@@ -140,7 +143,7 @@ class FundamentalValue : public Value {
   union {
     bool boolean_value_;
     int integer_value_;
-    double real_value_;
+    double double_value_;
   };
 
   DISALLOW_COPY_AND_ASSIGN(FundamentalValue);
@@ -159,6 +162,7 @@ class StringValue : public Value {
   // Subclassed methods
   virtual bool GetAsString(std::string* out_value) const;
   virtual bool GetAsString(string16* out_value) const;
+  virtual bool GetAsFilePath(FilePath* out_value) const;
   virtual StringValue* DeepCopy() const;
   virtual bool Equals(const Value* other) const;
 
@@ -237,7 +241,7 @@ class DictionaryValue : public Value {
   // value at that path, even if it has a different type.
   void SetBoolean(const std::string& path, bool in_value);
   void SetInteger(const std::string& path, int in_value);
-  void SetReal(const std::string& path, double in_value);
+  void SetDouble(const std::string& path, double in_value);
   void SetString(const std::string& path, const std::string& in_value);
   void SetString(const std::string& path, const string16& in_value);
 
@@ -259,7 +263,7 @@ class DictionaryValue : public Value {
   // the end of the path can be returned in the form specified.
   bool GetBoolean(const std::string& path, bool* out_value) const;
   bool GetInteger(const std::string& path, int* out_value) const;
-  bool GetReal(const std::string& path, double* out_value) const;
+  bool GetDouble(const std::string& path, double* out_value) const;
   bool GetString(const std::string& path, std::string* out_value) const;
   bool GetString(const std::string& path, string16* out_value) const;
   bool GetStringASCII(const std::string& path, std::string* out_value) const;
@@ -274,7 +278,7 @@ class DictionaryValue : public Value {
                                Value** out_value) const;
   bool GetIntegerWithoutPathExpansion(const std::string& key,
                                       int* out_value) const;
-  bool GetRealWithoutPathExpansion(const std::string& key,
+  bool GetDoubleWithoutPathExpansion(const std::string& key,
                                    double* out_value) const;
   bool GetStringWithoutPathExpansion(const std::string& key,
                                      std::string* out_value) const;
@@ -377,7 +381,7 @@ class ListValue : public Value {
   // in the specified form.
   bool GetBoolean(size_t index, bool* out_value) const;
   bool GetInteger(size_t index, int* out_value) const;
-  bool GetReal(size_t index, double* out_value) const;
+  bool GetDouble(size_t index, double* out_value) const;
   bool GetString(size_t index, std::string* out_value) const;
   bool GetString(size_t index, string16* out_value) const;
   bool GetBinary(size_t index, BinaryValue** out_value) const;

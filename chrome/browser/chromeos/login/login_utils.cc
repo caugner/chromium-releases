@@ -15,10 +15,10 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
@@ -51,6 +51,7 @@
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_store.h"
 #include "net/proxy/proxy_config_service.h"
@@ -70,6 +71,9 @@ const char kGuestModeLoggingLevel[] = "1";
 
 // Format of command line switch.
 const char kSwitchFormatString[] = " --%s=\"%s\"";
+
+// User name which is used in the Guest session.
+const char kGuestUserName[] = "";
 
 // Resets the proxy configuration service for the default request context.
 class ResetDefaultProxyConfigServiceTask : public Task {
@@ -152,9 +156,15 @@ class LoginUtilsImpl : public LoginUtils {
   // Gets the current background view.
   virtual chromeos::BackgroundView* GetBackgroundView();
 
+ protected:
+  virtual std::string GetOffTheRecordCommandLine(
+      const GURL& start_url,
+      const CommandLine& base_command_line,
+      CommandLine *command_line);
+
  private:
   // Check user's profile for kApplicationLocale setting.
-  void RespectLocalePreference(PrefService* pref);
+  void RespectLocalePreference(Profile* pref);
 
   // Indicates if DoBrowserLaunch will actually launch the browser or not.
   bool browser_launch_enabled_;
@@ -221,9 +231,15 @@ void LoginUtilsImpl::CompleteLogin(
   logging::RedirectChromeLogging(*(CommandLine::ForCurrentProcess()));
   btl->AddLoginTimeMarker("LoggingRedirected", false);
 
-  // The default profile will have been changed because the ProfileManager
-  // will process the notification that the UserManager sends out.
-  Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
+  Profile* profile = NULL;
+  {
+    // Loading user profile causes us to do blocking IO on UI thread.
+    // Temporarily allow it until we fix http://crosbug.com/11104
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    // The default profile will have been changed because the ProfileManager
+    // will process the notification that the UserManager sends out.
+    profile = profile_manager->GetDefaultProfile(user_data_dir);
+  }
   btl->AddLoginTimeMarker("UserProfileGotten", false);
 
   // Change the proxy configuration service of the default request context to
@@ -285,9 +301,6 @@ void LoginUtilsImpl::CompleteLogin(
                                                           true);
   btl->AddLoginTimeMarker("SyncStarted", false);
 
-  // Attempt to take ownership; this will fail if device is already owned.
-  OwnershipService::GetSharedInstance()->StartTakeOwnershipAttempt(
-      UserManager::Get()->logged_in_user().email());
   // Own TPM device if, for any reason, it has not been done in EULA
   // wizard screen.
   if (CrosLibrary::Get()->EnsureLoaded()) {
@@ -302,14 +315,14 @@ void LoginUtilsImpl::CompleteLogin(
   }
   btl->AddLoginTimeMarker("TPMOwned", false);
 
-  RespectLocalePreference(profile->GetPrefs());
+  RespectLocalePreference(profile);
 
   if (first_login) {
     SetFirstLoginPrefs(profile->GetPrefs());
   }
 
   // Enable/disable plugins based on user preferences.
-  PluginUpdater::GetInstance()->DisablePluginGroupsFromPrefs(profile);
+  PluginUpdater::GetInstance()->UpdatePluginGroupsStateFromPrefs(profile);
   btl->AddLoginTimeMarker("PluginsStateUpdated", false);
 
   // We suck. This is a hack since we do not have the enterprise feature
@@ -321,6 +334,7 @@ void LoginUtilsImpl::CompleteLogin(
     pref_service->SetBoolean(prefs::kEnableScreenLock, true);
   }
 
+  profile->OnLogin();
   DoBrowserLaunch(profile);
 }
 
@@ -347,53 +361,27 @@ void LoginUtilsImpl::FetchTokens(
   }
 }
 
-void LoginUtilsImpl::RespectLocalePreference(PrefService* prefs) {
+void LoginUtilsImpl::RespectLocalePreference(Profile* profile) {
+  DCHECK(profile != NULL);
+  PrefService* prefs = profile->GetPrefs();
   DCHECK(prefs != NULL);
-  std::string pref_locale_override =
-      prefs->GetString(prefs::kApplicationLocaleOverride);
-  if (!pref_locale_override.empty()) {
-    LanguageSwitchMenu::SwitchLanguage(pref_locale_override);
-    return;
-  }
-
   if (g_browser_process == NULL)
     return;
-  std::string cur_locale = g_browser_process->GetApplicationLocale();
 
   std::string pref_locale = prefs->GetString(prefs::kApplicationLocale);
-  if (!pref_locale.empty()) {
-    if (prefs->GetString(prefs::kApplicationLocaleAccepted) == pref_locale) {
-      // If locale is accepted then we do not want to show LocaleChange
-      // notification.  This notification is triggered by different values of
-      // kApplicationLocaleBackup and kApplicationLocale preferences,
-      // so make them identical.
-      prefs->SetString(prefs::kApplicationLocaleBackup, pref_locale);
-    } else {
-      std::string pref_locale_backup =
-          prefs->GetString(prefs::kApplicationLocaleBackup);
-      if (pref_locale_backup != cur_locale) {
-        if (pref_locale_backup == pref_locale || pref_locale_backup.empty()) {
-          prefs->SetString(prefs::kApplicationLocaleBackup, cur_locale);
-        }
-      }
-    }
-    LanguageSwitchMenu::SwitchLanguage(pref_locale);
-    return;
-  }
-  // Profile synchronization takes time and is not completed at that moment
-  // at first login.  So we initialize locale preference in steps:
-  // (1) first save it to temporary backup;
-  // (2) on next login we assume that synchronization is already completed
-  //     and we may finalize initialization.
-  std::string pref_locale_backup =
-      prefs->GetString(prefs::kApplicationLocaleBackup);
-  prefs->SetString(prefs::kApplicationLocaleBackup, cur_locale);
-  prefs->ScheduleSavePersistentPrefs();
-  if (!pref_locale_backup.empty()) {
-    prefs->SetString(prefs::kApplicationLocale, pref_locale_backup);
-    prefs->ScheduleSavePersistentPrefs();
-    LanguageSwitchMenu::SwitchLanguage(pref_locale_backup);
-  }
+  if (pref_locale.empty())
+    pref_locale = prefs->GetString(prefs::kApplicationLocaleBackup);
+  if (pref_locale.empty())
+    pref_locale = g_browser_process->GetApplicationLocale();
+  DCHECK(!pref_locale.empty());
+  profile->ChangeAppLocale(pref_locale, Profile::APP_LOCALE_CHANGED_VIA_LOGIN);
+  // Here we don't enable keyboard layouts. Input methods are set up when
+  // the user first logs in. Then the user may customize the input methods.
+  // Hence changing input methods here, just because the user's UI language
+  // is different from the login screen UI language, is not desirable. Note
+  // that input method preferences are synced, so users can use their
+  // farovite input methods as soon as the preferences are synced.
+  LanguageSwitchMenu::SwitchLanguage(pref_locale);
 }
 
 void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
@@ -404,94 +392,112 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
   if (CrosLibrary::Get()->EnsureLoaded()) {
     // For guest session we ask session manager to restart Chrome with --bwsi
     // flag. We keep only some of the arguments of this process.
-    static const char* kForwardSwitches[] = {
-        switches::kEnableLogging,
-        switches::kUserDataDir,
-        switches::kScrollPixels,
-        switches::kEnableGView,
-        switches::kNoFirstRun,
-        switches::kLoginProfile,
-        switches::kCompressSystemFeedback,
-        switches::kDisableSeccompSandbox,
-#if defined(HAVE_XINPUT2)
-        switches::kTouchDevices,
-#endif
-    };
-    const CommandLine& browser_command_line =
-        *CommandLine::ForCurrentProcess();
+    const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
     CommandLine command_line(browser_command_line.GetProgram());
-    command_line.CopySwitchesFrom(browser_command_line,
-                                  kForwardSwitches,
-                                  arraysize(kForwardSwitches));
-    command_line.AppendSwitch(switches::kGuestSession);
-    command_line.AppendSwitch(switches::kIncognito);
-    command_line.AppendSwitchASCII(switches::kLoggingLevel,
-                                   kGuestModeLoggingLevel);
-    command_line.AppendSwitchASCII(
-        switches::kLoginUser,
-        UserManager::Get()->logged_in_user().email());
-
-    if (start_url.is_valid())
-      command_line.AppendArg(start_url.spec());
-
-    // Override the value of the homepage that is set in first run mode.
-    // TODO(altimofeev): extend action of the |kNoFirstRun| to cover this case.
-    command_line.AppendSwitchASCII(
-        switches::kHomePage,
-        GURL(chrome::kChromeUINewTabURL).spec());
-
-    std::string cmd_line_str = command_line.command_line_string();
-    // Special workaround for the arguments that should be quoted.
-    // Copying switches won't be needed when Guest mode won't need restart
-    // http://crosbug.com/6924
-    if (browser_command_line.HasSwitch(switches::kRegisterPepperPlugins)) {
-      cmd_line_str += base::StringPrintf(
-          kSwitchFormatString,
-          switches::kRegisterPepperPlugins,
-          browser_command_line.GetSwitchValueNative(
-              switches::kRegisterPepperPlugins).c_str());
-    }
+    std::string cmd_line_str =
+        GetOffTheRecordCommandLine(start_url,
+                                   browser_command_line,
+                                   &command_line);
 
     CrosLibrary::Get()->GetLoginLibrary()->RestartJob(getpid(), cmd_line_str);
   }
 }
 
+std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
+    const GURL& start_url,
+    const CommandLine& base_command_line,
+    CommandLine* command_line) {
+  static const char* kForwardSwitches[] = {
+      switches::kEnableLogging,
+      switches::kUserDataDir,
+      switches::kScrollPixels,
+      switches::kEnableGView,
+      switches::kNoFirstRun,
+      switches::kLoginProfile,
+      switches::kCompressSystemFeedback,
+      switches::kDisableSeccompSandbox,
+#if defined(HAVE_XINPUT2)
+      switches::kTouchDevices,
+#endif
+  };
+  command_line->CopySwitchesFrom(base_command_line,
+                                 kForwardSwitches,
+                                 arraysize(kForwardSwitches));
+  command_line->AppendSwitch(switches::kGuestSession);
+  command_line->AppendSwitch(switches::kIncognito);
+  command_line->AppendSwitchASCII(switches::kLoggingLevel,
+                                 kGuestModeLoggingLevel);
+
+  command_line->AppendSwitchASCII(switches::kLoginUser, kGuestUserName);
+
+  if (start_url.is_valid())
+    command_line->AppendArg(start_url.spec());
+
+  // Override the value of the homepage that is set in first run mode.
+  // TODO(altimofeev): extend action of the |kNoFirstRun| to cover this case.
+  command_line->AppendSwitchASCII(
+      switches::kHomePage,
+      GURL(chrome::kChromeUINewTabURL).spec());
+
+  std::string cmd_line_str = command_line->command_line_string();
+  // Special workaround for the arguments that should be quoted.
+  // Copying switches won't be needed when Guest mode won't need restart
+  // http://crosbug.com/6924
+  if (base_command_line.HasSwitch(switches::kRegisterPepperPlugins)) {
+    cmd_line_str += base::StringPrintf(
+        kSwitchFormatString,
+        switches::kRegisterPepperPlugins,
+        base_command_line.GetSwitchValueNative(
+            switches::kRegisterPepperPlugins).c_str());
+  }
+
+  return cmd_line_str;
+}
+
 void LoginUtilsImpl::SetFirstLoginPrefs(PrefService* prefs) {
   VLOG(1) << "Setting first login prefs";
   BootTimesLoader* btl = BootTimesLoader::Get();
+  std::string locale = g_browser_process->GetApplicationLocale();
 
-  static const char kFallbackInputMethodLocale[] = "en-US";
-  std::string locale(g_browser_process->GetApplicationLocale());
-  // Add input methods based on the application locale when the user first
-  // logs in. For instance, if the user chooses Japanese as the UI
-  // language at the first login, we'll add input methods associated with
-  // Japanese, such as mozc.
-  if (locale != kFallbackInputMethodLocale) {
-    StringPrefMember language_preload_engines;
-    language_preload_engines.Init(prefs::kLanguagePreloadEngines,
-                                  prefs, NULL);
-    StringPrefMember language_preferred_languages;
-    language_preferred_languages.Init(prefs::kLanguagePreferredLanguages,
-                                      prefs, NULL);
+  // First, we'll set kLanguagePreloadEngines.
+  InputMethodLibrary* library = CrosLibrary::Get()->GetInputMethodLibrary();
+  std::vector<std::string> input_method_ids;
+  input_method::GetFirstLoginInputMethodIds(locale,
+                                            library->current_input_method(),
+                                            &input_method_ids);
+  // Save the input methods in the user's preferences.
+  StringPrefMember language_preload_engines;
+  language_preload_engines.Init(prefs::kLanguagePreloadEngines,
+                                prefs, NULL);
+  language_preload_engines.SetValue(JoinString(input_method_ids, ','));
+  btl->AddLoginTimeMarker("IMEStarted", false);
 
-    std::string preload_engines(language_preload_engines.GetValue());
-    std::vector<std::string> input_method_ids;
-    input_method::GetInputMethodIdsFromLanguageCode(
-        locale, input_method::kAllInputMethods, &input_method_ids);
-    if (!input_method_ids.empty()) {
-      if (!preload_engines.empty())
-        preload_engines += ',';
-      preload_engines += input_method_ids[0];
+  // Second, we'll set kLanguagePreferredLanguages.
+  std::vector<std::string> language_codes;
+  // The current locale should be on the top.
+  language_codes.push_back(locale);
+
+  // Add input method IDs based on the input methods, as there may be
+  // input methods that are unrelated to the current locale. Example: the
+  // hardware keyboard layout xkb:us::eng is used for logging in, but the
+  // UI language is set to French. In this case, we should set "fr,en"
+  // to the preferred languages preference.
+  std::vector<std::string> candidates;
+  input_method::GetLanguageCodesFromInputMethodIds(
+      input_method_ids, &candidates);
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    const std::string& candidate = candidates[i];
+    // Skip if it's already in language_codes.
+    if (std::count(language_codes.begin(), language_codes.end(),
+                   candidate) == 0) {
+      language_codes.push_back(candidate);
     }
-    language_preload_engines.SetValue(preload_engines);
-
-    // Add the UI language to the preferred languages the user first logs in.
-    std::string preferred_languages(locale);
-    preferred_languages += ",";
-    preferred_languages += kFallbackInputMethodLocale;
-    language_preferred_languages.SetValue(preferred_languages);
-    btl->AddLoginTimeMarker("IMEStarted", false);
   }
+  // Save the preferred languages in the user's preferences.
+  StringPrefMember language_preferred_languages;
+  language_preferred_languages.Init(prefs::kLanguagePreferredLanguages,
+                                    prefs, NULL);
+  language_preferred_languages.SetValue(JoinString(language_codes, ','));
 }
 
 Authenticator* LoginUtilsImpl::CreateAuthenticator(
@@ -524,7 +530,7 @@ class WarmingObserver : public NetworkLibrary::NetworkManagerObserver {
   void OnNetworkManagerChanged(NetworkLibrary* netlib) {
     if (netlib->Connected()) {
       const int kConnectionsNeeded = 1;
-      chrome_browser_net::Preconnect::PreconnectOnUIThread(
+      chrome_browser_net::PreconnectOnUIThread(
           GURL(GaiaAuthFetcher::kClientLoginUrl),
           chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
           kConnectionsNeeded);
@@ -539,7 +545,7 @@ void LoginUtilsImpl::PrewarmAuthentication() {
     NetworkLibrary *network = CrosLibrary::Get()->GetNetworkLibrary();
     if (network->Connected()) {
       const int kConnectionsNeeded = 1;
-      chrome_browser_net::Preconnect::PreconnectOnUIThread(
+      chrome_browser_net::PreconnectOnUIThread(
           GURL(GaiaAuthFetcher::kClientLoginUrl),
           chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
           kConnectionsNeeded);

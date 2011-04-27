@@ -17,12 +17,12 @@
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/notification_type.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 
 namespace keys = extension_processes_api_constants;
 
@@ -35,10 +35,10 @@ DictionaryValue* CreateProcessValue(int process_id,
   DictionaryValue* result = new DictionaryValue();
   result->SetInteger(keys::kIdKey, process_id);
   result->SetString(keys::kTypeKey, type);
-  result->SetReal(keys::kCpuKey, cpu);
-  result->SetReal(keys::kNetworkKey, static_cast<double>(net));
-  result->SetReal(keys::kPrivateMemoryKey, static_cast<double>(pr_mem));
-  result->SetReal(keys::kSharedMemoryKey, static_cast<double>(sh_mem));
+  result->SetDouble(keys::kCpuKey, cpu);
+  result->SetDouble(keys::kNetworkKey, static_cast<double>(net));
+  result->SetDouble(keys::kPrivateMemoryKey, static_cast<double>(pr_mem));
+  result->SetDouble(keys::kSharedMemoryKey, static_cast<double>(sh_mem));
   return result;
 }
 

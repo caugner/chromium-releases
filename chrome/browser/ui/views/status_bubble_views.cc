@@ -11,8 +11,6 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/point.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -24,6 +22,8 @@
 #include "ui/base/animation/linear_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/point.h"
 #include "views/controls/label.h"
 #include "views/controls/scrollbar/native_scroll_bar.h"
 #include "views/screen.h"
@@ -151,7 +151,7 @@ class StatusBubbleViews::StatusView : public views::Label,
   void AnimateToState(double state);
   void AnimationEnded(const Animation* animation);
 
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
   BubbleStage stage_;
   BubbleStyle style_;
@@ -335,7 +335,7 @@ void StatusBubbleViews::StatusView::SetStyle(BubbleStyle style) {
   }
 }
 
-void StatusBubbleViews::StatusView::Paint(gfx::Canvas* canvas) {
+void StatusBubbleViews::StatusView::OnPaint(gfx::Canvas* canvas) {
   SkPaint paint;
   paint.setStyle(SkPaint::kFill_Style);
   paint.setFlags(SkPaint::kAntiAlias_Flag);
@@ -343,8 +343,7 @@ void StatusBubbleViews::StatusView::Paint(gfx::Canvas* canvas) {
       theme_provider_->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
   paint.setColor(toolbar_color);
 
-  gfx::Rect popup_bounds;
-  popup_->GetBounds(&popup_bounds, true);
+  gfx::Rect popup_bounds = popup_->GetWindowScreenBounds();
 
   // Figure out how to round the bubble's four corners.
   SkScalar rad[8];
@@ -437,7 +436,7 @@ void StatusBubbleViews::StatusView::Paint(gfx::Canvas* canvas) {
                         kShadowThickness,
                         std::max(0, text_width),
                         std::max(0, text_height));
-  body_bounds.set_x(MirroredLeftPointForRect(body_bounds));
+  body_bounds.set_x(GetMirroredXForRect(body_bounds));
   SkColor text_color =
       theme_provider_->GetColor(BrowserThemeProvider::COLOR_TAB_TEXT);
 
@@ -593,7 +592,7 @@ gfx::Size StatusBubbleViews::GetPreferredSize() {
 
 void StatusBubbleViews::SetBounds(int x, int y, int w, int h) {
   original_position_.SetPoint(x, y);
-  position_.SetPoint(base_view_->MirroredXWithWidthInsideView(x, w), y);
+  position_.SetPoint(base_view_->GetMirroredXWithWidthInView(x, w), y);
   size_.SetSize(w, h);
   Reposition();
 }
@@ -644,12 +643,11 @@ void StatusBubbleViews::SetURL(const GURL& url, const string16& languages) {
   }
 
   // Set Elided Text corresponding to the GURL object.
-  gfx::Rect popup_bounds;
-  popup_->GetBounds(&popup_bounds, true);
+  gfx::Rect popup_bounds = popup_->GetWindowScreenBounds();
   int text_width = static_cast<int>(popup_bounds.width() -
       (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding - 1);
   url_text_ = ui::ElideUrl(url, view_->Label::font(),
-      text_width, UTF16ToWideHack(languages));
+      text_width, UTF16ToUTF8(languages));
 
   std::wstring original_url_text =
       UTF16ToWideHack(net::FormatUrl(url, UTF16ToUTF8(languages)));
@@ -707,7 +705,7 @@ void StatusBubbleViews::AvoidMouse(const gfx::Point& location) {
   gfx::Point top_left;
   views::View::ConvertPointToScreen(base_view_, &top_left);
   // Border included.
-  int window_width = base_view_->GetLocalBounds(true).width();
+  int window_width = base_view_->GetLocalBounds().width();
 
   // Get the cursor position relative to the popup.
   gfx::Point relative_location = location;
@@ -800,11 +798,10 @@ bool StatusBubbleViews::IsFrameVisible() {
 void StatusBubbleViews::ExpandBubble() {
   // Elide URL to maximum possible size, then check actual length (it may
   // still be too long to fit) before expanding bubble.
-  gfx::Rect popup_bounds;
-  popup_->GetBounds(&popup_bounds, true);
+  gfx::Rect popup_bounds = popup_->GetWindowScreenBounds();
   int max_status_bubble_width = GetMaxStatusBubbleWidth();
   url_text_ = ui::ElideUrl(url_, view_->Label::font(),
-      max_status_bubble_width, UTF16ToWideHack(languages_));
+      max_status_bubble_width, UTF16ToUTF8(languages_));
   int expanded_bubble_width =std::max(GetStandardStatusBubbleWidth(),
       std::min(view_->Label::font().GetStringWidth(url_text_) +
                    (kShadowThickness * 2) + kTextPositionX +

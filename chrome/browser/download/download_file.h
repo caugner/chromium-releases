@@ -27,10 +27,6 @@ class DownloadFile : public BaseFile {
                DownloadManager* download_manager);
   virtual ~DownloadFile();
 
-  // Deletes its .crdownload intermediate file.
-  // Marked virtual for testing.
-  virtual void DeleteCrDownload();
-
   // Cancels the download request associated with this file.
   void CancelDownloadRequest(ResourceDispatcherHost* rdh);
 

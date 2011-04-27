@@ -11,7 +11,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/database_util.h"
-#include "chrome/common/file_system/webfilesystem_impl.h"
 #include "chrome/common/file_utilities_messages.h"
 #include "chrome/common/mime_registry_messages.h"
 #include "chrome/common/render_messages.h"
@@ -27,6 +26,7 @@
 #include "chrome/renderer/visitedlink_slave.h"
 #include "chrome/renderer/webgraphicscontext3d_command_buffer_impl.h"
 #include "chrome/renderer/websharedworkerrepository_impl.h"
+#include "content/common/file_system/webfilesystem_impl.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBlobRegistry.h"
@@ -115,7 +115,9 @@ class RendererWebKitClientImpl::SandboxSupport
   virtual bool loadFont(NSFont* srcFont, ATSFontContainerRef* out);
 #elif defined(OS_LINUX)
   virtual WebKit::WebString getFontFamilyForCharacters(
-      const WebKit::WebUChar* characters, size_t numCharacters);
+      const WebKit::WebUChar* characters,
+      size_t numCharacters,
+      const char* preferred_locale);
   virtual void getRenderStyleForStrike(
       const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out);
 
@@ -311,6 +313,15 @@ void RendererWebKitClientImpl::createIDBKeysFromSerializedValuesAndKeyPath(
   keys_out.swap(keys);
 }
 
+WebSerializedScriptValue
+RendererWebKitClientImpl::injectIDBKeyIntoSerializedValue(const WebIDBKey& key,
+    const WebSerializedScriptValue& value,
+    const WebString& keyPath) {
+  DCHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
+  return WebIDBKey::injectIDBKeyIntoSerializedValue(
+      key, value, WebIDBKeyPath::create(keyPath));
+}
+
 //------------------------------------------------------------------------------
 
 WebFileSystem* RendererWebKitClientImpl::fileSystem() {
@@ -422,7 +433,9 @@ bool RendererWebKitClientImpl::SandboxSupport::ensureFontLoaded(HFONT font) {
 #elif defined(OS_LINUX)
 
 WebString RendererWebKitClientImpl::SandboxSupport::getFontFamilyForCharacters(
-    const WebKit::WebUChar* characters, size_t num_characters) {
+    const WebKit::WebUChar* characters,
+    size_t num_characters,
+    const char* preferred_locale) {
   base::AutoLock lock(unicode_font_families_mutex_);
   const std::string key(reinterpret_cast<const char*>(characters),
                         num_characters * sizeof(characters[0]));
@@ -433,7 +446,8 @@ WebString RendererWebKitClientImpl::SandboxSupport::getFontFamilyForCharacters(
 
   const std::string family_name =
       renderer_sandbox_support::getFontFamilyForCharacters(characters,
-                                                           num_characters);
+                                                           num_characters,
+                                                           preferred_locale);
   unicode_font_families_.insert(make_pair(key, family_name));
   return WebString::fromUTF8(family_name);
 }

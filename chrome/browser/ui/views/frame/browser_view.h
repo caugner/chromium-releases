@@ -24,8 +24,8 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
 #include "chrome/common/notification_registrar.h"
-#include "gfx/native_widget_types.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/gfx/native_widget_types.h"
 #include "views/controls/single_split_view.h"
 #include "views/window/client_view.h"
 #include "views/window/window_delegate.h"
@@ -40,7 +40,6 @@
 // view: http://dev.chromium.org/developers/design-documents/browser-window
 
 class AccessiblePaneView;
-class AccessibleViewHelper;
 class BookmarkBarView;
 class Browser;
 class BrowserBubble;
@@ -172,7 +171,7 @@ class BrowserView : public BrowserBubbleHost,
   bool ShouldShowOffTheRecordAvatar() const;
 
   // Handle the specified |accelerator| being pressed.
-  bool AcceleratorPressed(const views::Accelerator& accelerator);
+  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
 
   // Provides the containing frame with the accelerator for the specified
   // command id. This can be used to provide menu item shortcut hints etc.
@@ -229,7 +228,7 @@ class BrowserView : public BrowserBubbleHost,
   bool IsPositionInWindowCaption(const gfx::Point& point);
 
   // Returns whether the fullscreen bubble is visible or not.
-  bool IsFullscreenBubbleVisible() const;
+  virtual bool IsFullscreenBubbleVisible() const;
 
   // Invoked from the frame when the full screen state changes. This is only
   // used on Linux.
@@ -260,6 +259,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
   virtual gfx::Rect GetRestoredBounds() const;
+  virtual gfx::Rect GetBounds() const;
   virtual bool IsMaximized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
@@ -286,7 +286,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
   virtual void ToggleBookmarkBar();
-  virtual views::Window* ShowAboutChromeDialog();
+  virtual void ShowAboutChromeDialog();
   virtual void ShowUpdateChromeDialog();
   virtual void ShowTaskManager();
   virtual void ShowBackgroundPages();
@@ -329,8 +329,6 @@ class BrowserView : public BrowserBubbleHost,
   virtual void ShowInstant(TabContents* preview_contents);
   virtual void HideInstant(bool instant_is_active);
   virtual gfx::Rect GetInstantBounds();
-  virtual gfx::Rect GrabWindowSnapshot(std::vector<unsigned char>*
-                                       png_representation);
 
 #if defined(OS_CHROMEOS)
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window);
@@ -350,7 +348,7 @@ class BrowserView : public BrowserBubbleHost,
 
   // Overridden from TabStripModelObserver:
   virtual void TabDetachedAt(TabContentsWrapper* contents, int index);
-  virtual void TabDeselectedAt(TabContentsWrapper* contents, int index);
+  virtual void TabDeselected(TabContentsWrapper* contents);
   virtual void TabSelectedAt(TabContentsWrapper* old_contents,
                              TabContentsWrapper* new_contents,
                              int index,
@@ -391,7 +389,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual views::ClientView* CreateClientView(views::Window* window);
 
   // Overridden from views::ClientView:
-  virtual bool CanClose() const;
+  virtual bool CanClose();
   virtual int NonClientHitTest(const gfx::Point& point);
   virtual gfx::Size GetMinimumSize();
 
@@ -418,6 +416,7 @@ class BrowserView : public BrowserBubbleHost,
   // Overridden from views::View:
   virtual std::string GetClassName() const;
   virtual void Layout();
+  virtual void PaintChildren(gfx::Canvas* canvas);
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
                                     views::View* child);
@@ -439,11 +438,18 @@ class BrowserView : public BrowserBubbleHost,
 
  private:
   friend class BrowserViewLayout;
+  FRIEND_TEST_ALL_PREFIXES(BrowserViewsAccessibilityTest,
+                           TestAboutChromeViewAccObj);
 
 #if defined(OS_WIN)
   // Creates the system menu.
   void InitSystemMenu();
 #endif
+
+  // Get the X value, in this BrowserView's coordinate system, where
+  // the points of the infobar arrows should be anchored.  This is the
+  // center of the omnibox location icon.
+  int GetInfoBarArrowCenterX() const;
 
   // Returns the BrowserViewLayout.
   BrowserViewLayout* GetBrowserViewLayout() const;
@@ -526,6 +532,9 @@ class BrowserView : public BrowserBubbleHost,
 
   // Exposes resize corner size to BrowserViewLayout.
   gfx::Size GetResizeCornerSize() const;
+
+  // Shows the about chrome modal dialog and returns the Window object.
+  views::Window* DoShowAboutChromeDialog();
 
   // Last focused view that issued a tab traversal.
   int last_focused_view_storage_id_;
@@ -671,9 +680,10 @@ class BrowserView : public BrowserBubbleHost,
 
   UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
 
-  scoped_ptr<AccessibleViewHelper> accessible_view_helper_;
-
   NotificationRegistrar registrar_;
+
+  // Used to measure the loading spinner animation rate.
+  base::TimeTicks last_animation_time_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

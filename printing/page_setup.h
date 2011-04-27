@@ -5,7 +5,7 @@
 #ifndef PRINTING_PAGE_SETUP_H_
 #define PRINTING_PAGE_SETUP_H_
 
-#include "gfx/rect.h"
+#include "ui/gfx/rect.h"
 
 namespace printing {
 
@@ -35,6 +35,7 @@ class PageMargins {
 class PageSetup {
  public:
   PageSetup();
+  ~PageSetup();
 
   void Clear();
 

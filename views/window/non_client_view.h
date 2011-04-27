@@ -48,12 +48,12 @@ class NonClientFrameView : public View {
   // Returns true if this FrameView should always use the custom frame,
   // regardless of the system settings. An example is the Constrained Window,
   // which is a child window and must always provide its own frame.
-  virtual bool AlwaysUseCustomFrame() const { return false; }
+  virtual bool AlwaysUseCustomFrame() const;
 
   // Like AlwaysUseCustomFrame, returns true if this FrameView should always use
   // the native frame, regardless of theme settings. An example is popup/app
   // windows, which we do not ever want to show themed.
-  virtual bool AlwaysUseNativeFrame() const { return false; }
+  virtual bool AlwaysUseNativeFrame() const;
 
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const = 0;
@@ -73,8 +73,7 @@ class NonClientFrameView : public View {
   virtual AccessibilityTypes::Role GetAccessibleRole();
 
  protected:
-  virtual void DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current);
+  virtual void OnBoundsChanged();
 
   NonClientFrameView() : paint_as_active_(false) {}
 
@@ -152,7 +151,7 @@ class NonClientView : public View {
 
   // Returns true if the ClientView determines that the containing window can be
   // closed, false otherwise.
-  bool CanClose() const;
+  bool CanClose();
 
   // Called by the containing Window when it is closed.
   void WindowClosing();
@@ -215,7 +214,7 @@ class NonClientView : public View {
  protected:
   // NonClientView, View overrides:
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
-  virtual views::View* GetViewForPoint(const gfx::Point& point);
+  virtual views::View* GetEventHandlerForPoint(const gfx::Point& point);
 
  private:
   // The frame that hosts this NonClientView.

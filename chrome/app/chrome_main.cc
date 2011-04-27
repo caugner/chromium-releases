@@ -1,6 +1,8 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "chrome/app/chrome_main.h"
 
 #include "app/app_paths.h"
 #include "app/app_switches.h"
@@ -22,18 +24,18 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/diagnostics/diagnostics_main.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
-#include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
+#include "chrome/common/profiling.h"
 #include "chrome/common/sandbox_init_wrapper.h"
 #include "chrome/common/set_process_title.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/render_process_host.h"
 #include "ipc/ipc_switches.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -41,10 +43,8 @@
 
 #if defined(OS_WIN)
 #include <algorithm>
-#include <atlbase.h>
-#include <atlapp.h>
 #include <malloc.h>
-#include <new.h>
+#include "base/win/registry.h"
 #include "sandbox/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
 #endif
@@ -64,7 +64,6 @@
 #if defined(OS_POSIX)
 #include <locale.h>
 #include <signal.h>
-#include "base/global_descriptors_posix.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -78,10 +77,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ui/base/x/x11_util.h"
-#endif
-
-#if defined(USE_TCMALLOC)
-#include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
 #endif
 
 extern int BrowserMain(const MainFunctionParams&);
@@ -128,60 +123,6 @@ bool LoadMemoryProfiler() {
   return prof_module != NULL;
 }
 
-CAppModule _Module;
-
-#pragma optimize("", off)
-// Handlers for invalid parameter and pure call. They generate a breakpoint to
-// tell breakpad that it needs to dump the process.
-void InvalidParameter(const wchar_t* expression, const wchar_t* function,
-                      const wchar_t* file, unsigned int line,
-                      uintptr_t reserved) {
-  __debugbreak();
-  _exit(1);
-}
-
-void PureCall() {
-  __debugbreak();
-  _exit(1);
-}
-
-#pragma warning(push)
-// Disables warning 4748 which is: "/GS can not protect parameters and local
-// variables from local buffer overrun because optimizations are disabled in
-// function."  GetStats() will not overflow the passed-in buffer and this
-// function never returns.
-#pragma warning(disable : 4748)
-void OnNoMemory() {
-#if defined(USE_TCMALLOC)
-  // Try to get some information on the stack to make the crash easier to
-  // diagnose from a minidump, being very careful not to do anything that might
-  // try to heap allocate.
-  char buf[32*1024];
-  MallocExtension::instance()->GetStats(buf, sizeof(buf));
-#endif
-  // Kill the process. This is important for security, since WebKit doesn't
-  // NULL-check many memory allocations. If a malloc fails, returns NULL, and
-  // the buffer is then used, it provides a handy mapping of memory starting at
-  // address 0 for an attacker to utilize.
-  __debugbreak();
-  _exit(1);
-}
-#pragma warning(pop)
-
-// Handlers to silently dump the current process when there is an assert in
-// chrome.
-void ChromeAssert(const std::string& str) {
-  // Get the breakpad pointer from chrome.exe
-  typedef void (__cdecl *DumpProcessFunction)();
-  DumpProcessFunction DumpProcess = reinterpret_cast<DumpProcessFunction>(
-      ::GetProcAddress(::GetModuleHandle(chrome::kBrowserProcessExecutableName),
-                       "DumpProcess"));
-  if (DumpProcess)
-    DumpProcess();
-}
-
-#pragma optimize("", on)
-
 // Early versions of Chrome incorrectly registered a chromehtml: URL handler,
 // which gives us nothing but trouble. Avoid launching chrome this way since
 // some apps fail to properly escape arguments.
@@ -194,96 +135,7 @@ bool HasDeprecatedArguments(const std::wstring& command_line) {
   return (pos != std::wstring::npos);
 }
 
-// Register the invalid param handler and pure call handler to be able to
-// notify breakpad when it happens.
-void RegisterInvalidParamHandler() {
-  _set_invalid_parameter_handler(InvalidParameter);
-  _set_purecall_handler(PureCall);
-  // Gather allocation failure.
-  std::set_new_handler(&OnNoMemory);
-  // Also enable the new handler for malloc() based failures.
-  _set_new_mode(1);
-}
-
 #endif  // defined(OS_WIN)
-
-
-#if defined(OS_POSIX)
-// Setup signal-handling state: resanitize most signals, ignore SIGPIPE.
-void SetupSignalHandlers() {
-  // Sanitise our signal handling state. Signals that were ignored by our
-  // parent will also be ignored by us. We also inherit our parent's sigmask.
-  sigset_t empty_signal_set;
-  CHECK(0 == sigemptyset(&empty_signal_set));
-  CHECK(0 == sigprocmask(SIG_SETMASK, &empty_signal_set, NULL));
-
-  struct sigaction sigact;
-  memset(&sigact, 0, sizeof(sigact));
-  sigact.sa_handler = SIG_DFL;
-  static const int signals_to_reset[] =
-      {SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV,
-       SIGALRM, SIGTERM, SIGCHLD, SIGBUS, SIGTRAP};  // SIGPIPE is set below.
-  for (unsigned i = 0; i < arraysize(signals_to_reset); i++) {
-    CHECK(0 == sigaction(signals_to_reset[i], &sigact, NULL));
-  }
-
-  // Always ignore SIGPIPE.  We check the return value of write().
-  CHECK(signal(SIGPIPE, SIG_IGN) != SIG_ERR);
-}
-#endif  // OS_POSIX
-
-// Perform low-level initialization that occurs before we even consider
-// the command line; for example, make us abort if we run out of memory.
-void LowLevelInit() {
-#if defined(OS_WIN)
-  RegisterInvalidParamHandler();
-#endif
-
-#if defined(OS_MACOSX)
-  // TODO(mark): Some of these things ought to be handled in
-  // chrome_exe_main_mac.mm.  Under the current architecture, nothing
-  // in chrome_exe_main can rely directly on chrome_dll code on the
-  // Mac, though, so until some of this code is refactored to avoid
-  // such a dependency, it lives here.  See also the TODO(mark)
-  // at InitCrashReporter() and DestructCrashReporter().
-  base::EnableTerminationOnHeapCorruption();
-  base::EnableTerminationOnOutOfMemory();
-#endif  // OS_MACOSX
-
-#if defined(OS_POSIX)
-  // Set C library locale to make sure CommandLine can parse argument values
-  // in correct encoding.
-  setlocale(LC_ALL, "");
-
-  SetupSignalHandlers();
-
-  base::GlobalDescriptors* g_fds = base::GlobalDescriptors::GetInstance();
-  g_fds->Set(kPrimaryIPCChannel,
-             kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
-#if defined(OS_LINUX)
-  g_fds->Set(kCrashDumpSignal,
-             kCrashDumpSignal + base::GlobalDescriptors::kBaseDescriptor);
-#endif
-#endif  // OS_POSIX
-}
-
-// Perform last-second shutdown work.  Partner of LowLevelInit().
-void LowLevelShutdown() {
-#if defined(OS_WIN)
-#ifdef _CRTDBG_MAP_ALLOC
-  _CrtDumpMemoryLeaks();
-#endif  // _CRTDBG_MAP_ALLOC
-
-  _Module.Term();
-#endif
-
-  logging::CleanupChromeLogging();
-
-#if defined(OS_MACOSX) && defined(GOOGLE_CHROME_BUILD)
-  // TODO(mark): See the TODO(mark) at InitCrashReporter.
-  DestructCrashReporter();
-#endif  // OS_MACOSX && GOOGLE_CHROME_BUILD
-}
 
 #if defined(OS_LINUX)
 static void AdjustLinuxOOMScore(const std::string& process_type) {
@@ -338,18 +190,6 @@ void SetupCRT(const CommandLine& command_line) {
     _CrtSetReportMode(_CRT_ASSERT, 0);
   }
 #endif
-
-  // Enable the low fragmentation heap for the CRT heap. The heap is not changed
-  // if the process is run under the debugger is enabled or if certain gflags
-  // are set.
-  if (command_line.HasSwitch(switches::kUseLowFragHeapCrt) &&
-      (command_line.GetSwitchValueASCII(switches::kUseLowFragHeapCrt)
-       != "false")) {
-    void* crt_heap = reinterpret_cast<void*>(_get_heap_handle());
-    ULONG enable_lfh = 2;
-    HeapSetInformation(crt_heap, HeapCompatibilityInformation,
-                       &enable_lfh, sizeof(enable_lfh));
-  }
 #endif
 }
 
@@ -371,6 +211,17 @@ void CommonSubprocessInit() {
   PostThreadMessage(GetCurrentThreadId(), WM_NULL, 0, 0);
   MSG msg;
   PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
+#endif
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  // Various things break when you're using a locale where the decimal
+  // separator isn't a period.  See e.g. bugs 22782 and 39964.  For
+  // all processes except the browser process (where we call system
+  // APIs that may rely on the correct locale for formatting numbers
+  // when presenting them to the user), reset the locale for numeric
+  // formatting.
+  // Note that this is not correct for plugin processes -- they can
+  // surface UI -- but it's likely they get this wrong too so why not.
+  setlocale(LC_NUMERIC, "C");
 #endif
 }
 
@@ -417,7 +268,7 @@ void SetMacProcessName(const std::string& process_type) {
   }
   if (name_id) {
     NSString* app_name = l10n_util::GetNSString(name_id);
-    base::mac::SetProcessName(reinterpret_cast<CFStringRef>(app_name));
+    base::mac::SetProcessName(base::mac::NSToCFCast(app_name));
   }
 }
 
@@ -608,10 +459,17 @@ int RunNamedProcessTypeMain(const std::string& process_type,
 DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
                                  sandbox::SandboxInterfaceInfo* sandbox_info,
                                  TCHAR* command_line_unused) {
+  // argc/argv are ignored on Windows; see command_line.h for details.
+  int argc = 0;
+  char** argv = NULL;
 #elif defined(OS_POSIX)
 int ChromeMain(int argc, char** argv) {
+  // There is no HINSTANCE on non-Windows.
+  void* instance = NULL;
 #endif
-  LowLevelInit();
+  // LowLevelInit performs startup initialization before we
+  // e.g. allocate any memory.  It must be the first call on startup.
+  chrome_main::LowLevelInit(instance);
 
   // The exit manager is in charge of calling the dtors of singleton objects.
   base::AtExitManager exit_manager;
@@ -626,14 +484,10 @@ int ChromeMain(int argc, char** argv) {
   chromeos::BootTimesLoader::Get()->SaveChromeMainStats();
 #endif
 
-  // Initialize the command line.
-#if defined(OS_WIN)
-  CommandLine::Init(0, NULL);
-#else
   CommandLine::Init(argc, argv);
-#endif
-
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  Profiling::ProcessStarted();
 
 #if defined(OS_POSIX)
   if (HandleVersionSwitches(command_line))
@@ -663,39 +517,23 @@ int ChromeMain(int argc, char** argv) {
     return 1;
 #endif
 
-  if (command_line.HasSwitch(switches::kEnableNaCl)) {
-    // NaCl currently requires two flags to run
-    CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
-    singleton_command_line->AppendSwitch(switches::kInternalNaCl);
-    singleton_command_line->AppendSwitch(switches::kEnableGPUPlugin);
-  }
-
-#if defined(OS_CHROMEOS)
-  if (command_line.HasSwitch(switches::kGuestSession)) {
-    // Disable sync and extensions if we're in "browse without sign-in" mode.
-    CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
-    singleton_command_line->AppendSwitch(switches::kDisableSync);
-    singleton_command_line->AppendSwitch(switches::kDisableExtensions);
-    browser_defaults::bookmarks_enabled = false;
-  }
-#endif
-
   base::ProcessId browser_pid = base::GetCurrentProcId();
   if (SubprocessIsBrowserChild(process_type)) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
     std::string channel_name =
         command_line.GetSwitchValueASCII(switches::kProcessChannelID);
 
     int browser_pid_int;
     base::StringToInt(channel_name, &browser_pid_int);
     browser_pid = static_cast<base::ProcessId>(browser_pid_int);
-    DCHECK_NE(browser_pid, 0u);
-#elif defined(OS_MACOSX)
-    browser_pid = base::GetCurrentProcId();
-    SendTaskPortToParentProcess();
+    DCHECK_NE(browser_pid_int, 0);
 #elif defined(OS_POSIX)
     // On linux, we're in the zygote here; so we need the parent process' id.
     browser_pid = base::GetParentProcessId(base::GetCurrentProcId());
+#endif
+
+#if defined(OS_MACOSX)
+    SendTaskPortToParentProcess();
 #endif
 
 #if defined(OS_POSIX)
@@ -726,8 +564,9 @@ int ChromeMain(int argc, char** argv) {
   chrome::RegisterPathProvider();
 
   // Notice a user data directory override if any
-  const FilePath user_data_dir =
+  FilePath user_data_dir =
       command_line.GetSwitchValuePath(switches::kUserDataDir);
+  chrome_main::CheckUserDataDirPolicy(&user_data_dir);
   if (!user_data_dir.empty())
     CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
 
@@ -765,7 +604,6 @@ int ChromeMain(int argc, char** argv) {
     }
   }
 
-#if defined(OS_MACOSX)
   // Mac Chrome is packaged with a main app bundle and a helper app bundle.
   // The main app bundle should only be used for the browser process, so it
   // should never see a --type switch (switches::kProcessType).  Likewise,
@@ -783,11 +621,10 @@ int ChromeMain(int argc, char** argv) {
     CHECK(!command_line.HasSwitch(switches::kProcessType))
         << "Main application forbids --type, saw \"" << process_type << "\".";
   }
-#endif  // defined(OS_MACOSX)
 
   if (IsCrashReporterEnabled())
     InitCrashProcessInfo();
-#endif  // OS_MACOSX
+#endif  // defined(OS_MACOSX)
 
   InitializeStatsTable(browser_pid, command_line);
 
@@ -800,10 +637,6 @@ int ChromeMain(int argc, char** argv) {
   // Enable Message Loop related state asap.
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
     MessageLoop::EnableHistogrammer(true);
-
-#if defined(OS_WIN)
-  _Module.Init(NULL, instance);
-#endif
 
   bool single_process =
 #if defined (GOOGLE_CHROME_BUILD)
@@ -839,15 +672,6 @@ int ChromeMain(int argc, char** argv) {
   // happen before we process any URLs with the affected schemes, and must be
   // done in all processes that work with these URLs (i.e. including renderers).
   chrome::RegisterChromeSchemes();
-
-#ifdef NDEBUG
-  if (command_line.HasSwitch(switches::kSilentDumpOnDCHECK) &&
-      command_line.HasSwitch(switches::kEnableDCHECK)) {
-#if defined(OS_WIN)
-    logging::SetLogReportHandler(ChromeAssert);
-#endif
-  }
-#endif  // NDEBUG
 
   if (SubprocessNeedsResourceBundle(process_type)) {
     // Initialize ResourceBundle which handles files loaded from external
@@ -927,7 +751,9 @@ int ChromeMain(int argc, char** argv) {
   if (SubprocessNeedsResourceBundle(process_type))
     ResourceBundle::CleanupSharedInstance();
 
-  LowLevelShutdown();
+  logging::CleanupChromeLogging();
+
+  chrome_main::LowLevelShutdown();
 
   return exit_code;
 }

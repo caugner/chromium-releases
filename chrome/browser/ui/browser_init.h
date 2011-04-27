@@ -107,7 +107,9 @@ class BrowserInit {
     // false on failure. process_startup is true if Chrome is just
     // starting up. If process_startup is false, it indicates Chrome was
     // already running and the user wants to launch another instance.
-    bool Launch(Profile* profile, bool process_startup);
+    bool Launch(Profile* profile,
+                const std::vector<GURL>& urls_to_open,
+                bool process_startup);
 
     // Convenience for OpenTabsInBrowser that converts |urls| into a set of
     // Tabs.
@@ -138,6 +140,10 @@ class BrowserInit {
     // returns false to specify default processing.
     bool OpenApplicationWindow(Profile* profile);
 
+    // If IsAppLaunch is true and the user set a pref indicating that the app
+    // should open in a tab, do so.
+    bool OpenApplicationTab(Profile* profile);
+
     // Invoked from OpenURLsInBrowser to handle processing of urls. This may
     // do any of the following:
     // . Invoke ProcessStartupURLs if |process_startup| is true.
@@ -159,6 +165,9 @@ class BrowserInit {
     // new browser.
     bool ProcessStartupURLs(const std::vector<GURL>& urls_to_open);
 
+    // Adds any startup infobars to the selected tab of the given browser.
+    void AddInfoBarsIfNecessary(Browser* browser);
+
     // If the last session didn't exit cleanly and tab is a web contents tab,
     // an infobar is added allowing the user to restore the last session.
     void AddCrashedInfoBarIfNecessary(TabContents* tab);
@@ -167,9 +176,10 @@ class BrowserInit {
     // politely nag the user about it.
     void AddBadFlagsInfoBarIfNecessary(TabContents* tab);
 
-    // Returns the list of URLs to open from the command line. The returned
-    // vector is empty if the user didn't specify any URLs on the command line.
-    std::vector<GURL> GetURLsFromCommandLine(Profile* profile);
+    // If DNS based certificate checking has been enabled then we show a
+    // warning infobar.
+    void AddDNSCertProvenanceCheckingWarningInfoBarIfNecessary(
+        TabContents* tab);
 
     // Adds additional startup URLs to the specified vector.
     void AddStartupURLs(std::vector<GURL>* startup_urls) const;
@@ -186,6 +196,13 @@ class BrowserInit {
   };
 
  private:
+  // Returns the list of URLs to open from the command line. The returned
+  // vector is empty if the user didn't specify any URLs on the command line.
+  static std::vector<GURL> GetURLsFromCommandLine(
+      const CommandLine& command_line,
+      const FilePath& cur_dir,
+      Profile* profile);
+
   static bool ProcessCmdLineImpl(const CommandLine& command_line,
                                  const FilePath& cur_dir, bool process_startup,
                                  Profile* profile, int* return_code,

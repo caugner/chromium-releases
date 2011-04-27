@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/gtk_theme_provider.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/common/notification_service.h"
+#include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -205,7 +205,6 @@ void FirstRunBubble::InitializeLabels(int width_resource) {
     // |content_| unsized so that it'll expand as needed to hold the other
     // widgets -- the buttons may be wider than |width| on high-DPI displays.
     gtk_util::SetLabelWidth(labels_[i], width);
-    gtk_misc_set_alignment(GTK_MISC(labels_[i]), 0, 0.5);
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,15 @@
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/printer_query.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_source.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
+#include "printing/native_metafile_factory.h"
 #include "printing/native_metafile.h"
 #include "printing/printed_document.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -25,11 +27,15 @@ using base::TimeDelta;
 
 namespace printing {
 
-PrintViewManager::PrintViewManager(TabContents& owner)
-    : waiting_to_print_(false),
+PrintViewManager::PrintViewManager(TabContents* tab_contents)
+    : TabContentsObserver(tab_contents),
+      number_pages_(0),
+      waiting_to_print_(false),
       printing_succeeded_(false),
-      inside_inner_message_loop_(false),
-      owner_(owner) {
+      inside_inner_message_loop_(false) {
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  expecting_first_page_ = true;
+#endif
 }
 
 PrintViewManager::~PrintViewManager() {
@@ -45,7 +51,7 @@ bool PrintViewManager::OnRenderViewGone(RenderViewHost* render_view_host) {
   if (!print_job_.get())
     return true;
 
-  if (render_view_host != owner_.render_view_host())
+  if (render_view_host != tab_contents()->render_view_host())
     return false;
 
   scoped_refptr<PrintedDocument> document(print_job_->document());
@@ -59,22 +65,24 @@ bool PrintViewManager::OnRenderViewGone(RenderViewHost* render_view_host) {
 }
 
 string16 PrintViewManager::RenderSourceName() {
-  string16 name(owner_.GetTitle());
+  string16 name(tab_contents()->GetTitle());
   if (name.empty())
     name = l10n_util::GetStringUTF16(IDS_DEFAULT_PRINT_DOCUMENT_TITLE);
   return name;
 }
 
 GURL PrintViewManager::RenderSourceUrl() {
-  NavigationEntry* entry = owner_.controller().GetActiveEntry();
+  NavigationEntry* entry = tab_contents()->controller().GetActiveEntry();
   if (entry)
     return entry->virtual_url();
   else
     return GURL();
 }
 
-void PrintViewManager::DidGetPrintedPagesCount(int cookie, int number_pages) {
+void PrintViewManager::OnDidGetPrintedPagesCount(int cookie, int number_pages) {
   DCHECK_GT(cookie, 0);
+  DCHECK_GT(number_pages, 0);
+  number_pages_ = number_pages;
   if (!OpportunisticallyCreatePrintJob(cookie))
     return;
 
@@ -84,14 +92,9 @@ void PrintViewManager::DidGetPrintedPagesCount(int cookie, int number_pages) {
     // spurious message can happen if one of the processes is overloaded.
     return;
   }
-
-  // Time to inform our print job. Make sure it is for the right document.
-  if (!document->page_count()) {
-    document->set_page_count(number_pages);
-  }
 }
 
-void PrintViewManager::DidPrintPage(
+void PrintViewManager::OnDidPrintPage(
     const ViewHostMsg_DidPrintPage_Params& params) {
   if (!OpportunisticallyCreatePrintJob(params.document_cookie))
     return;
@@ -110,26 +113,34 @@ void PrintViewManager::DidPrintPage(
   if (params.data_size && params.data_size >= 350*1024*1024) {
     NOTREACHED() << "size:" << params.data_size;
     TerminatePrintJob(true);
-    owner_.Stop();
+    tab_contents()->Stop();
     return;
   }
 #endif
 
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  const bool metafile_must_be_valid = true;
+#elif defined(OS_POSIX)
+  const bool metafile_must_be_valid = expecting_first_page_;
+  expecting_first_page_ = false;
+#endif
+
   base::SharedMemory shared_buf(params.metafile_data_handle, true);
-  if (!shared_buf.Map(params.data_size)) {
-    NOTREACHED() << "couldn't map";
-    owner_.Stop();
-    return;
+  if (metafile_must_be_valid) {
+    if (!shared_buf.Map(params.data_size)) {
+      NOTREACHED() << "couldn't map";
+      tab_contents()->Stop();
+      return;
+    }
   }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  NOTIMPLEMENTED() << " this printing code doesn't quite work yet.";
-#else
-  scoped_ptr<NativeMetafile> metafile(new NativeMetafile());
-  if (!metafile->Init(shared_buf.memory(), params.data_size)) {
-    NOTREACHED() << "Invalid metafile header";
-    owner_.Stop();
-    return;
+  scoped_ptr<NativeMetafile> metafile(NativeMetafileFactory::CreateMetafile());
+  if (metafile_must_be_valid) {
+    if (!metafile->Init(shared_buf.memory(), params.data_size)) {
+      NOTREACHED() << "Invalid metafile header";
+      tab_contents()->Stop();
+      return;
+    }
   }
 
   // Update the rendered document. It will send notifications to the listener.
@@ -139,8 +150,19 @@ void PrintViewManager::DidPrintPage(
                     params.page_size,
                     params.content_area,
                     params.has_visible_overlays);
-#endif
+
   ShouldQuitFromInnerMessageLoop();
+}
+
+bool PrintViewManager::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(PrintViewManager, message)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidGetPrintedPagesCount,
+                        OnDidGetPrintedPagesCount)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidPrintPage, OnDidPrintPage)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void PrintViewManager::Observe(NotificationType type,
@@ -207,8 +229,9 @@ bool PrintViewManager::RenderAllMissingPagesNow() {
   }
 
   // We can't print if there is no renderer.
-  if (!owner_.render_view_host() ||
-      !owner_.render_view_host()->IsRenderViewLive()) {
+  if (!tab_contents() ||
+      !tab_contents()->render_view_host() ||
+      !tab_contents()->render_view_host()->IsRenderViewLive()) {
     waiting_to_print_ = false;
     return false;
   }
@@ -265,8 +288,8 @@ bool PrintViewManager::CreateNewPrintJob(PrintJobWorkerOwner* job) {
   DisconnectFromCurrentPrintJob();
 
   // We can't print if there is no renderer.
-  if (!owner_.render_view_host() ||
-      !owner_.render_view_host()->IsRenderViewLive()) {
+  if (!tab_contents()->render_view_host() ||
+      !tab_contents()->render_view_host()->IsRenderViewLive()) {
     return false;
   }
 
@@ -278,7 +301,7 @@ bool PrintViewManager::CreateNewPrintJob(PrintJobWorkerOwner* job) {
     return false;
 
   print_job_ = new PrintJob();
-  print_job_->Initialize(job, this);
+  print_job_->Initialize(job, this, number_pages_);
   registrar_.Add(this, NotificationType::PRINT_JOB_EVENT,
                  Source<PrintJob>(print_job_.get()));
   printing_succeeded_ = false;
@@ -301,12 +324,15 @@ void PrintViewManager::DisconnectFromCurrentPrintJob() {
     // DO NOT wait for the job to finish.
     ReleasePrintJob();
   }
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  expecting_first_page_ = true;
+#endif
 }
 
 void PrintViewManager::PrintingDone(bool success) {
-  if (print_job_.get()) {
-    owner_.PrintingDone(print_job_->cookie(), success);
-  }
+  if (!print_job_.get() || !tab_contents())
+    return;
+  tab_contents()->PrintingDone(print_job_->cookie(), success);
 }
 
 void PrintViewManager::TerminatePrintJob(bool cancel) {

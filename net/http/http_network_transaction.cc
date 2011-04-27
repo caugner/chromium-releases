@@ -24,6 +24,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/base/network_delegate.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/upload_data_stream.h"
@@ -41,7 +42,7 @@
 #include "net/http/http_response_body_drainer.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
-#include "net/http/http_stream_request.h"
+#include "net/http/http_stream_factory.h"
 #include "net/http/http_util.h"
 #include "net/http/url_security_manager.h"
 #include "net/socket/client_socket_factory.h"
@@ -74,6 +75,19 @@ void ProcessAlternateProtocol(HttpStreamFactory* factory,
   factory->ProcessAlternateProtocol(alternate_protocols,
                                     alternate_protocol_str,
                                     http_host_port_pair);
+}
+
+// Returns true if |error| is a client certificate authentication error.
+bool IsClientCertificateError(int error) {
+  switch (error) {
+    case ERR_BAD_SSL_CLIENT_AUTH_CERT:
+    case ERR_SSL_CLIENT_AUTH_PRIVATE_KEY_ACCESS_DENIED:
+    case ERR_SSL_CLIENT_AUTH_CERT_NO_PRIVATE_KEY:
+    case ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED:
+      return true;
+    default:
+      return false;
+  }
 }
 
 }  // namespace
@@ -345,11 +359,15 @@ uint64 HttpNetworkTransaction::GetUploadProgress() const {
   return stream_->GetUploadProgress();
 }
 
-void HttpNetworkTransaction::OnStreamReady(HttpStream* stream) {
+void HttpNetworkTransaction::OnStreamReady(const SSLConfig& used_ssl_config,
+                                           const ProxyInfo& used_proxy_info,
+                                           HttpStream* stream) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK(stream_request_.get());
 
   stream_.reset(stream);
+  ssl_config_ = used_ssl_config;
+  proxy_info_ = used_proxy_info;
   response_.was_alternate_protocol_available =
       stream_request_->was_alternate_protocol_available();
   response_.was_npn_negotiated = stream_request_->was_npn_negotiated();
@@ -359,23 +377,28 @@ void HttpNetworkTransaction::OnStreamReady(HttpStream* stream) {
   OnIOComplete(OK);
 }
 
-void HttpNetworkTransaction::OnStreamFailed(int result) {
+void HttpNetworkTransaction::OnStreamFailed(int result,
+                                            const SSLConfig& used_ssl_config) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK_NE(OK, result);
   DCHECK(stream_request_.get());
   DCHECK(!stream_.get());
+  ssl_config_ = used_ssl_config;
 
   OnIOComplete(result);
 }
 
-void HttpNetworkTransaction::OnCertificateError(int result,
-                                                const SSLInfo& ssl_info) {
+void HttpNetworkTransaction::OnCertificateError(
+    int result,
+    const SSLConfig& used_ssl_config,
+    const SSLInfo& ssl_info) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK_NE(OK, result);
   DCHECK(stream_request_.get());
   DCHECK(!stream_.get());
 
   response_.ssl_info = ssl_info;
+  ssl_config_ = used_ssl_config;
 
   // TODO(mbelshe):  For now, we're going to pass the error through, and that
   // will close the stream_request in all cases.  This means that we're always
@@ -388,6 +411,8 @@ void HttpNetworkTransaction::OnCertificateError(int result,
 
 void HttpNetworkTransaction::OnNeedsProxyAuth(
     const HttpResponseInfo& proxy_response,
+    const SSLConfig& used_ssl_config,
+    const ProxyInfo& used_proxy_info,
     HttpAuthController* auth_controller) {
   DCHECK(stream_request_.get());
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
@@ -396,6 +421,8 @@ void HttpNetworkTransaction::OnNeedsProxyAuth(
   response_.headers = proxy_response.headers;
   response_.auth_challenge = proxy_response.auth_challenge;
   headers_valid_ = true;
+  ssl_config_ = used_ssl_config;
+  proxy_info_ = used_proxy_info;
 
   auth_controllers_[HttpAuth::AUTH_PROXY] = auth_controller;
   pending_auth_target_ = HttpAuth::AUTH_PROXY;
@@ -404,20 +431,26 @@ void HttpNetworkTransaction::OnNeedsProxyAuth(
 }
 
 void HttpNetworkTransaction::OnNeedsClientAuth(
+    const SSLConfig& used_ssl_config,
     SSLCertRequestInfo* cert_info) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
 
+  ssl_config_ = used_ssl_config;
   response_.cert_request_info = cert_info;
   OnIOComplete(ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
 }
 
 void HttpNetworkTransaction::OnHttpsProxyTunnelResponse(
     const HttpResponseInfo& response_info,
+    const SSLConfig& used_ssl_config,
+    const ProxyInfo& used_proxy_info,
     HttpStream* stream) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
 
   headers_valid_ = true;
   response_ = response_info;
+  ssl_config_ = used_ssl_config;
+  proxy_info_ = used_proxy_info;
   stream_.reset(stream);
   stream_request_.reset();  // we're done with the stream request
   OnIOComplete(ERR_HTTPS_PROXY_TUNNEL_RESPONSE);
@@ -486,7 +519,8 @@ int HttpNetworkTransaction::DoLoop(int result) {
         break;
       case STATE_SEND_REQUEST_COMPLETE:
         rv = DoSendRequestComplete(rv);
-        net_log_.EndEvent(NetLog::TYPE_HTTP_TRANSACTION_SEND_REQUEST, NULL);
+        net_log_.EndEventWithNetErrorCode(
+            NetLog::TYPE_HTTP_TRANSACTION_SEND_REQUEST, rv);
         break;
       case STATE_READ_HEADERS:
         DCHECK_EQ(OK, rv);
@@ -495,7 +529,8 @@ int HttpNetworkTransaction::DoLoop(int result) {
         break;
       case STATE_READ_HEADERS_COMPLETE:
         rv = DoReadHeadersComplete(rv);
-        net_log_.EndEvent(NetLog::TYPE_HTTP_TRANSACTION_READ_HEADERS, NULL);
+        net_log_.EndEventWithNetErrorCode(
+            NetLog::TYPE_HTTP_TRANSACTION_READ_HEADERS, rv);
         break;
       case STATE_READ_BODY:
         DCHECK_EQ(OK, rv);
@@ -504,7 +539,8 @@ int HttpNetworkTransaction::DoLoop(int result) {
         break;
       case STATE_READ_BODY_COMPLETE:
         rv = DoReadBodyComplete(rv);
-        net_log_.EndEvent(NetLog::TYPE_HTTP_TRANSACTION_READ_BODY, NULL);
+        net_log_.EndEventWithNetErrorCode(
+            NetLog::TYPE_HTTP_TRANSACTION_READ_BODY, rv);
         break;
       case STATE_DRAIN_BODY_FOR_AUTH_RESTART:
         DCHECK_EQ(OK, rv);
@@ -514,8 +550,8 @@ int HttpNetworkTransaction::DoLoop(int result) {
         break;
       case STATE_DRAIN_BODY_FOR_AUTH_RESTART_COMPLETE:
         rv = DoDrainBodyForAuthRestartComplete(rv);
-        net_log_.EndEvent(
-            NetLog::TYPE_HTTP_TRANSACTION_DRAIN_BODY_FOR_AUTH_RESTART, NULL);
+        net_log_.EndEventWithNetErrorCode(
+            NetLog::TYPE_HTTP_TRANSACTION_DRAIN_BODY_FOR_AUTH_RESTART, rv);
         break;
       default:
         NOTREACHED() << "bad state";
@@ -532,10 +568,8 @@ int HttpNetworkTransaction::DoCreateStream() {
 
   stream_request_.reset(
       session_->http_stream_factory()->RequestStream(
-          request_,
-          &ssl_config_,
-          &proxy_info_,
-          session_,
+          *request_,
+          ssl_config_,
           this,
           net_log_));
   DCHECK(stream_request_.get());
@@ -592,7 +626,7 @@ int HttpNetworkTransaction::DoGenerateProxyAuthToken() {
     auth_controllers_[target] =
         new HttpAuthController(target,
                                AuthURL(target),
-                               session_->auth_cache(),
+                               session_->http_auth_cache(),
                                session_->http_auth_handler_factory());
   return auth_controllers_[target]->MaybeGenerateAuthToken(request_,
                                                            &io_callback_,
@@ -613,7 +647,7 @@ int HttpNetworkTransaction::DoGenerateServerAuthToken() {
     auth_controllers_[target] =
         new HttpAuthController(target,
                                AuthURL(target),
-                               session_->auth_cache(),
+                               session_->http_auth_cache(),
                                session_->http_auth_handler_factory());
   if (!ShouldApplyServerAuth())
     return OK;
@@ -651,7 +685,7 @@ int HttpNetworkTransaction::DoSendRequest() {
                                   &request_headers_);
 
     if (session_->network_delegate())
-      session_->network_delegate()->OnSendHttpRequest(&request_headers_);
+      session_->network_delegate()->NotifySendHttpRequest(&request_headers_);
   }
 
   headers_valid_ = false;
@@ -1018,8 +1052,7 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
 int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
   DCHECK(request_);
   if (ssl_config_.send_client_cert &&
-      (error == ERR_SSL_PROTOCOL_ERROR ||
-       error == ERR_BAD_SSL_CLIENT_AUTH_CERT)) {
+      (error == ERR_SSL_PROTOCOL_ERROR || IsClientCertificateError(error))) {
     session_->ssl_client_auth_cache()->Remove(
         GetHostAndPort(request_->url));
   }
@@ -1218,22 +1251,6 @@ std::string HttpNetworkTransaction::DescribeState(State state) {
   }
   return description;
 }
-
-// TODO(gavinp): re-adjust this once SPDY v3 has three priority bits,
-// eliminating the need for this folding.
-int ConvertRequestPriorityToSpdyPriority(const RequestPriority priority) {
-  DCHECK(HIGHEST <= priority && priority < NUM_PRIORITIES);
-  switch (priority) {
-    case LOWEST:
-      return SPDY_PRIORITY_LOWEST-1;
-    case IDLE:
-      return SPDY_PRIORITY_LOWEST;
-    default:
-      return priority;
-  }
-}
-
-
 
 #undef STATE_CASE
 

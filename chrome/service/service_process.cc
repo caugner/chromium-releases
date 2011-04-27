@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/environment.h"
+#include "base/i18n/rtl.h"
 #include "base/path_service.h"
 #include "base/singleton.h"
 #include "base/string16.h"
@@ -16,18 +18,31 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/env_vars.h"
 #include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_process_util.h"
 #include "chrome/service/cloud_print/cloud_print_proxy.h"
+#include "chrome/service/net/service_url_request_context.h"
 #include "chrome/service/service_ipc_server.h"
 #include "chrome/service/service_process_prefs.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
+#include "media/base/media.h"
 #include "net/base/network_change_notifier.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
+#if defined(TOOLKIT_USES_GTK)
+#include "ui/gfx/gtk_util.h"
+#endif
+
 #if defined(ENABLE_REMOTING)
 #include "chrome/service/remoting/chromoting_host_manager.h"
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
+#endif  // defined(OS_MACOSX)
 #endif  // defined(ENABLED_REMOTING)
 
 ServiceProcess* g_service_process = NULL;
@@ -63,6 +78,41 @@ void ServiceIOThread::CleanUp() {
   URLFetcher::CancelAll();
 }
 
+// Prepares the localized strings that are going to be displayed to
+// the user if the service process dies. These strings are stored in the
+// environment block so they are accessible in the early stages of the
+// chrome executable's lifetime.
+void PrepareRestartOnCrashEnviroment(
+    const CommandLine &parsed_command_line) {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  // Clear this var so child processes don't show the dialog by default.
+  env->UnSetVar(env_vars::kShowRestart);
+
+  // For non-interactive tests we don't restart on crash.
+  if (env->HasVar(env_vars::kHeadless))
+    return;
+
+  // If the known command-line test options are used we don't create the
+  // environment block which means we don't get the restart dialog.
+  if (parsed_command_line.HasSwitch(switches::kNoErrorDialogs))
+    return;
+
+  // The encoding we use for the info is "title|context|direction" where
+  // direction is either env_vars::kRtlLocale or env_vars::kLtrLocale depending
+  // on the current locale.
+  string16 dlg_strings(l10n_util::GetStringUTF16(IDS_CRASH_RECOVERY_TITLE));
+  dlg_strings.push_back('|');
+  string16 adjusted_string(
+      l10n_util::GetStringUTF16(IDS_SERVICE_CRASH_RECOVERY_CONTENT));
+  base::i18n::AdjustStringForLocaleDirection(&adjusted_string);
+  dlg_strings.append(adjusted_string);
+  dlg_strings.push_back('|');
+  dlg_strings.append(ASCIIToUTF16(
+      base::i18n::IsRTL() ? env_vars::kRtlLocale : env_vars::kLtrLocale));
+
+  env->SetVar(env_vars::kRestartInfo, UTF16ToUTF8(dlg_strings));
+}
+
 }  // namespace
 
 ServiceProcess::ServiceProcess()
@@ -74,8 +124,11 @@ ServiceProcess::ServiceProcess()
   g_service_process = this;
 }
 
-bool ServiceProcess::Initialize(MessageLoop* message_loop,
+bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
                                 const CommandLine& command_line) {
+#if defined(TOOLKIT_USES_GTK)
+  gfx::GtkInitFromCommandLine(command_line);
+#endif
   main_message_loop_ = message_loop;
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   base::Thread::Options options;
@@ -88,6 +141,8 @@ bool ServiceProcess::Initialize(MessageLoop* message_loop,
     Teardown();
     return false;
   }
+
+  request_context_getter_ = new ServiceURLRequestContextGetter();
 
   // See if we have been suppiled an LSID in the command line. This LSID will
   // override the credentials we use for Cloud Print.
@@ -116,11 +171,28 @@ bool ServiceProcess::Initialize(MessageLoop* message_loop,
   }
   ResourceBundle::InitSharedInstance(locale);
 
+  PrepareRestartOnCrashEnviroment(command_line);
+
 #if defined(ENABLE_REMOTING)
+  // Load media codecs, required by the Chromoting host
+  bool initialized_media_library = false;
+#if defined(OS_MACOSX)
+  FilePath bundle_path = base::mac::MainAppBundlePath();
+
+  initialized_media_library =
+     media::InitializeMediaLibrary(bundle_path.Append("Libraries"));
+#else
+  FilePath module_path;
+  initialized_media_library =
+      PathService::Get(base::DIR_MODULE, &module_path) &&
+      media::InitializeMediaLibrary(module_path);
+#endif
+
   // Initialize chromoting host manager.
   remoting_host_manager_ = new remoting::ChromotingHostManager(this);
-  remoting_host_manager_->Initialize(file_thread_->message_loop_proxy());
-#endif
+  remoting_host_manager_->Initialize(message_loop,
+                                     file_thread_->message_loop_proxy());
+#endif // ENABLE_REMOTING
 
   // Enable Cloud Print if needed. First check the command-line.
   bool cloud_print_proxy_enabled =
@@ -136,13 +208,16 @@ bool ServiceProcess::Initialize(MessageLoop* message_loop,
   }
 
   VLOG(1) << "Starting Service Process IPC Server";
-  ipc_server_.reset(new ServiceIPCServer(GetServiceProcessChannelName()));
+  ServiceProcessState* state = ServiceProcessState::GetInstance();
+  ipc_server_.reset(new ServiceIPCServer(state->GetServiceProcessChannel()));
   ipc_server_->Init();
 
   // After the IPC server has started we signal that the service process is
   // ready.
-  ServiceProcessState::GetInstance()->SignalReady(
-      NewRunnableMethod(this, &ServiceProcess::Shutdown));
+  if (!state->SignalReady(io_thread_->message_loop_proxy(),
+                          NewRunnableMethod(this, &ServiceProcess::Shutdown))) {
+    return false;
+  }
 
   // See if we need to stay running.
   ScheduleShutdownCheck();
@@ -152,10 +227,6 @@ bool ServiceProcess::Initialize(MessageLoop* message_loop,
 bool ServiceProcess::Teardown() {
   service_prefs_.reset();
   cloud_print_proxy_.reset();
-
-#if defined(ENABLE_REMOTING)
-  remoting_host_manager_->Teardown();
-#endif
 
   ipc_server_.reset();
   // Signal this event before shutting down the service process. That way all
@@ -171,9 +242,26 @@ bool ServiceProcess::Teardown() {
   return true;
 }
 
+#if defined(ENABLE_REMOTING)
+static void QuitMessageLoop(MessageLoop* message_loop) {
+  message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+}
+#endif
+
+// This method is called when a shutdown command is received from IPC channel
+// or there was an error in the IPC channel.
 void ServiceProcess::Shutdown() {
+#if defined(ENABLE_REMOTING)
+  // During shutdown of remoting host it has some left over operations on
+  // the UI thread. So we let the teardown to proceed asynchronously
+  if (remoting_host_manager_.get()) {
+    remoting_host_manager_->Teardown(
+        NewRunnableFunction(&QuitMessageLoop, main_message_loop_));
+  }
+#else
   // Quit the main message loop.
   main_message_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+#endif
 }
 
 bool ServiceProcess::HandleClientDisconnect() {
@@ -213,17 +301,25 @@ void ServiceProcess::OnCloudPrintProxyDisabled(bool persist_state) {
   OnServiceDisabled();
 }
 
-void ServiceProcess::OnRemotingHostEnabled() {
+void ServiceProcess::OnChromotingHostEnabled() {
   OnServiceEnabled();
 }
 
-void ServiceProcess::OnRemotingHostDisabled() {
+void ServiceProcess::OnChromotingHostDisabled() {
   OnServiceDisabled();
+}
+
+ServiceURLRequestContextGetter*
+ServiceProcess::GetServiceURLRequestContextGetter() {
+  DCHECK(request_context_getter_.get());
+  return request_context_getter_.get();
 }
 
 void ServiceProcess::OnServiceEnabled() {
   enabled_services_++;
-  if (1 == enabled_services_) {
+  if ((1 == enabled_services_) &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNoServiceAutorun)) {
     ServiceProcessState::GetInstance()->AddToAutoRun();
   }
 }

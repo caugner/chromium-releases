@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/basictypes.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
 
 struct PPB_URLRequestInfo;
@@ -23,25 +24,25 @@ class PPB_URLRequestInfo_Proxy : public InterfaceProxy {
                            const void* target_interface);
   virtual ~PPB_URLRequestInfo_Proxy();
 
+  static const Info* GetInfo();
+
   const PPB_URLRequestInfo* ppb_url_request_info_target() const {
     return static_cast<const PPB_URLRequestInfo*>(target_interface());
   }
 
   // InterfaceProxy implementation.
-  virtual const void* GetSourceInterface() const;
-  virtual InterfaceID GetInterfaceId() const;
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
   // Message handlers.
-  void OnMsgCreate(PP_Instance instance, PP_Resource* result);
-  void OnMsgSetProperty(PP_Resource request,
+  void OnMsgCreate(PP_Instance instance, HostResource* result);
+  void OnMsgSetProperty(HostResource request,
                         int32_t property,
                         SerializedVarReceiveInput value);
-  void OnMsgAppendDataToBody(PP_Resource request,
+  void OnMsgAppendDataToBody(HostResource request,
                              const std::string& data);
-  void OnMsgAppendFileToBody(PP_Resource request,
-                             PP_Resource file_ref,
+  void OnMsgAppendFileToBody(HostResource request,
+                             HostResource file_ref,
                              int64_t start_offset,
                              int64_t number_of_bytes,
                              double expected_last_modified_time);

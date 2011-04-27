@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,14 @@
 #include <windowsx.h>
 #include <limits>
 
-#include "app/win/win_util.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "gfx/font.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/gfx/font.h"
 #include "views/screen.h"
 #include "views/view.h"
+#include "views/widget/monitor_win.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 
@@ -146,7 +146,8 @@ LRESULT TooltipManagerWin::OnNotify(int w_param,
         if (last_view_out_of_sync_) {
           // View under the mouse is out of sync, determine it now.
           RootView* root_view = widget_->GetRootView();
-          last_tooltip_view_ = root_view->GetViewForPoint(last_mouse_pos_);
+          last_tooltip_view_ =
+              root_view->GetEventHandlerForPoint(last_mouse_pos_);
           last_view_out_of_sync_ = false;
         }
         // Tooltip control is asking for the tooltip to display.
@@ -228,7 +229,7 @@ bool TooltipManagerWin::SetTooltipPosition(int text_x, int text_y) {
   // doesn't, return false so that windows positions the tooltip at the
   // default location.
   gfx::Rect monitor_bounds =
-      app::win::GetMonitorBoundsForRect(gfx::Rect(bounds.left,bounds.right,
+      views::GetMonitorBoundsForRect(gfx::Rect(bounds.left,bounds.right,
                                                   0, 0));
   if (!monitor_bounds.Contains(gfx::Rect(bounds))) {
     return false;
@@ -268,7 +269,7 @@ int TooltipManagerWin::CalcTooltipHeight() {
 
 void TooltipManagerWin::UpdateTooltip(const gfx::Point& mouse_pos) {
   RootView* root_view = widget_->GetRootView();
-  View* view = root_view->GetViewForPoint(mouse_pos);
+  View* view = root_view->GetEventHandlerForPoint(mouse_pos);
   if (view != last_tooltip_view_) {
     // NOTE: This *must* be sent regardless of the visibility of the tooltip.
     // It triggers Windows to ask for the tooltip again.
@@ -356,7 +357,7 @@ void TooltipManagerWin::ShowKeyboardTooltip(View* focused_view) {
                       screen_point.y() + focused_bounds.height() +
                       line_count * tooltip_height_ };
   gfx::Rect monitor_bounds =
-      app::win::GetMonitorBoundsForRect(gfx::Rect(rect_bounds));
+      views::GetMonitorBoundsForRect(gfx::Rect(rect_bounds));
   rect_bounds = gfx::Rect(rect_bounds).AdjustToFit(monitor_bounds).ToRECT();
   ::SetWindowPos(keyboard_tooltip_hwnd_, NULL, rect_bounds.left,
                  rect_bounds.top, 0, 0,

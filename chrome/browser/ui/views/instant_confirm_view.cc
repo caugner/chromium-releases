@@ -15,9 +15,8 @@
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/controls/label.h"
-#include "views/grid_layout.h"
-#include "views/layout_manager.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/window/window.h"
 
 InstantConfirmView::InstantConfirmView(Profile* profile) : profile_(profile) {

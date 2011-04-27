@@ -12,6 +12,7 @@
 #include "chrome/browser/chromeos/status/status_area_host.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "views/controls/button/menu_button.h"
 #include "views/widget/widget_gtk.h"
 
 namespace chromeos {
@@ -55,14 +56,11 @@ string16 KeyboardSwitchMenu::GetCurrentKeyboardName() const {
     if (IsItemCheckedAt(i))
       return GetLabelAt(i);
   }
-  VLOG(1) << "The input method menu is not ready yet.  Show a language name "
-             "that matches the hardware keyboard layout";
-  KeyboardLibrary *library = CrosLibrary::Get()->GetKeyboardLibrary();
-  const std::string keyboard_layout_id =
-      library->GetHardwareKeyboardLayoutName();
-  const std::string language_code =
-      input_method::GetLanguageCodeFromInputMethodId(keyboard_layout_id);
-  return input_method::GetLanguageDisplayNameFromCode(language_code);
+  VLOG(1) << "The input method menu is not ready yet. Show the display "
+          << "name of the current input method";
+  InputMethodLibrary* library = CrosLibrary::Get()->GetInputMethodLibrary();
+  return UTF8ToUTF16(input_method::GetInputMethodDisplayNameFromId(
+      library->current_input_method().id));
 }
 
 }  // namespace chromeos

@@ -3,15 +3,16 @@
 // found in the LICENSE file.
 
 #include <string>
+
 #include "base/message_loop.h"
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
-#include "chrome/browser/plugin_service.h"
 #include "chrome/common/chrome_paths.h"
+#include "content/browser/plugin_service.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_test_job.h"
-#include "net/url_request/url_request_unittest.h"
+#include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/plugins/plugin_list.h"
 

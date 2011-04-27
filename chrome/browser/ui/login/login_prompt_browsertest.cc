@@ -6,14 +6,15 @@
 #include <list>
 #include <map>
 
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "net/base/auth.h"
 
 namespace {
@@ -56,7 +57,8 @@ void LoginPromptBrowserTest::SetAuthFor(LoginHandler* handler) {
   EXPECT_TRUE(auth_map_.end() != i);
   if (i != auth_map_.end()) {
     const AuthInfo& info = i->second;
-    handler->SetAuth(info.username_, info.password_);
+    handler->SetAuth(WideToUTF16Hack(info.username_),
+                     WideToUTF16Hack(info.password_));
   }
 }
 
@@ -271,7 +273,14 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmCancellation) {
 
 // Similar to the MultipleRealmCancellation test above, but tests
 // whether supplying credentials work as exepcted.
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmConfirmation) {
+#if defined(OS_WIN)
+// See http://crbug.com/70960
+#define MAYBE_MultipleRealmConfirmation DISABLED_MultipleRealmConfirmation
+#else
+#define MAYBE_MultipleRealmConfirmation MultipleRealmConfirmation
+#endif
+IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
+                       MAYBE_MultipleRealmConfirmation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kMultiRealmTestPage);
 
@@ -324,7 +333,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmConfirmation) {
 // there are multiple authenticated resources.
 // Marked as flaky.  See http://crbug.com/69266 and http://crbug.com/68860
 // TODO(asanka): Remove logging when timeout issues are resolved.
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, FLAKY_IncorrectConfirmation) {
+IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, DISABLED_IncorrectConfirmation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kSingleRealmTestPage);
 
@@ -357,7 +366,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, FLAKY_IncorrectConfirmation) {
     LoginHandler* handler = *observer.handlers_.begin();
 
     ASSERT_TRUE(handler);
-    handler->SetAuth(bad_username_, bad_password_);
+    handler->SetAuth(WideToUTF16Hack(bad_username_),
+                     WideToUTF16Hack(bad_password_));
     LOG(INFO) << "Waiting for initial AUTH_SUPPLIED";
     auth_supplied_waiter.Wait();
 

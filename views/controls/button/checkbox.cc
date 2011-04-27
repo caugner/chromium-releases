@@ -5,7 +5,7 @@
 #include "views/controls/button/checkbox.h"
 
 #include "base/logging.h"
-#include "gfx/canvas.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/label.h"
 
 namespace views {
@@ -117,17 +117,8 @@ void Checkbox::SetEnabled(bool enabled) {
     label_->SetEnabled(enabled);
 }
 
-void Checkbox::PaintFocusBorder(gfx::Canvas* canvas) {
+void Checkbox::OnPaintFocusBorder(gfx::Canvas* canvas) {
   // Our focus border is rendered by the label, so we don't do anything here.
-}
-
-View* Checkbox::GetViewForPoint(const gfx::Point& point) {
-  return GetViewForPoint(point, false);
-}
-
-View* Checkbox::GetViewForPoint(const gfx::Point& point,
-                                bool can_create_floating) {
-  return GetLocalBounds(true).Contains(point) ? this : NULL;
 }
 
 void Checkbox::OnMouseEntered(const MouseEvent& e) {
@@ -159,11 +150,11 @@ bool Checkbox::OnMouseDragged(const MouseEvent& e) {
   return false;
 }
 
-void Checkbox::WillGainFocus() {
+void Checkbox::OnFocus() {
   label_->set_paint_as_focused(true);
 }
 
-void Checkbox::WillLoseFocus() {
+void Checkbox::OnBlur() {
   label_->set_paint_as_focused(false);
 }
 

@@ -19,13 +19,13 @@ class Viewport : public View {
   virtual ~Viewport() {}
 
   virtual void ScrollRectToVisible(const gfx::Rect& rect) {
-    if (!GetChildViewCount() || !GetParent())
+    if (!has_children() || !parent())
       return;
 
     View* contents = GetChildViewAt(0);
     gfx::Rect scroll_rect(rect);
     scroll_rect.Offset(-contents->x(), -contents->y());
-    static_cast<ScrollView*>(GetParent())->ScrollContentsRegionToBeVisible(
+    static_cast<ScrollView*>(parent())->ScrollContentsRegionToBeVisible(
         scroll_rect);
   }
 
@@ -46,17 +46,14 @@ ScrollView::ScrollView(ScrollBar* horizontal_scrollbar,
 
 ScrollView::~ScrollView() {
   // If scrollbars are currently not used, delete them
-  if (!horiz_sb_->GetParent()) {
+  if (!horiz_sb_->parent())
     delete horiz_sb_;
-  }
 
-  if (!vert_sb_->GetParent()) {
+  if (!vert_sb_->parent())
     delete vert_sb_;
-  }
 
-  if (resize_corner_ && !resize_corner_->GetParent()) {
+  if (resize_corner_ && !resize_corner_->parent())
     delete resize_corner_;
-  }
 }
 
 void ScrollView::SetContents(View* a_view) {
@@ -147,7 +144,7 @@ void ScrollView::Layout() {
   // override this default behavior, the inner view has to calculate the
   // available space, used ComputeScrollBarsVisibility() to use the same
   // calculation that is done here and sets its bound to fit within.
-  gfx::Rect viewport_bounds = GetLocalBounds(true);
+  gfx::Rect viewport_bounds = GetLocalBounds();
   // Realign it to 0 so it can be used as-is for SetBounds().
   viewport_bounds.set_origin(gfx::Point(0, 0));
   // viewport_size is the total client space available.
@@ -163,7 +160,7 @@ void ScrollView::Layout() {
   int vert_sb_width = GetScrollBarWidth();
   viewport_bounds.set_width(viewport_bounds.width() - vert_sb_width);
   // Update the bounds right now so the inner views can fit in it.
-  viewport_->SetBounds(viewport_bounds);
+  viewport_->SetBoundsRect(viewport_bounds);
 
   // Give contents_ a chance to update its bounds if it depends on the
   // viewport.
@@ -220,7 +217,7 @@ void ScrollView::Layout() {
   }
 
   // Update to the real client size with the visible scrollbars.
-  viewport_->SetBounds(viewport_bounds);
+  viewport_->SetBoundsRect(viewport_bounds);
   if (should_layout_contents && contents_)
     contents_->Layout();
 
@@ -349,7 +346,7 @@ void ScrollView::ScrollToPosition(ScrollBar* source, int position) {
       else if (position > max_pos)
         position = max_pos;
       contents_->SetX(-position);
-      contents_->SchedulePaint(contents_->GetVisibleBounds(), true);
+      contents_->SchedulePaintInRect(contents_->GetVisibleBounds());
     }
   } else if (source == vert_sb_ && vert_sb_->IsVisible()) {
     int vh = viewport_->height();
@@ -362,7 +359,7 @@ void ScrollView::ScrollToPosition(ScrollBar* source, int position) {
       else if (position > max_pos)
         position = max_pos;
       contents_->SetY(-position);
-      contents_->SchedulePaint(contents_->GetVisibleBounds(), true);
+      contents_->SchedulePaintInRect(contents_->GetVisibleBounds());
     }
   }
 }
@@ -384,16 +381,6 @@ int ScrollView::GetScrollIncrement(ScrollBar* source, bool is_page,
   if (is_page)
     return is_horizontal ? viewport_->width() : viewport_->height();
   return is_horizontal ? viewport_->width() / 5 : viewport_->height() / 5;
-}
-
-void ScrollView::ViewHierarchyChanged(bool is_add, View *parent, View *child) {
-  if (is_add) {
-    RootView* rv = GetRootView();
-    if (rv) {
-      rv->SetDefaultKeyboardHandler(this);
-      rv->SetFocusOnMousePressed(true);
-    }
-  }
 }
 
 bool ScrollView::OnKeyPressed(const KeyEvent& event) {
@@ -449,7 +436,7 @@ int VariableRowHeightScrollHelper::GetPageScrollIncrement(
     return 0;
   // y coordinate is most likely negative.
   int y = abs(scroll_view->GetContents()->y());
-  int vis_height = scroll_view->GetContents()->GetParent()->height();
+  int vis_height = scroll_view->GetContents()->parent()->height();
   if (is_positive) {
     // Align the bottom most row to the top of the view.
     int bottom = std::min(scroll_view->GetContents()->height() - 1,

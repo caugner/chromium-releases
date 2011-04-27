@@ -56,7 +56,7 @@ void BrowserRootView::OnDragEntered(const views::DropTargetEvent& event) {
   if (ShouldForwardToTabStrip(event)) {
     forwarding_to_tab_strip_ = true;
     scoped_ptr<views::DropTargetEvent> mapped_event(
-        MapEventToTabStrip(event, event.GetData()));
+        MapEventToTabStrip(event, event.data()));
     tabstrip()->OnDragEntered(*mapped_event.get());
   }
 }
@@ -64,7 +64,7 @@ void BrowserRootView::OnDragEntered(const views::DropTargetEvent& event) {
 int BrowserRootView::OnDragUpdated(const views::DropTargetEvent& event) {
   if (ShouldForwardToTabStrip(event)) {
     scoped_ptr<views::DropTargetEvent> mapped_event(
-        MapEventToTabStrip(event, event.GetData()));
+        MapEventToTabStrip(event, event.data()));
     if (!forwarding_to_tab_strip_) {
       tabstrip()->OnDragEntered(*mapped_event.get());
       forwarding_to_tab_strip_ = true;
@@ -92,17 +92,17 @@ int BrowserRootView::OnPerformDrop(const views::DropTargetEvent& event) {
   // do this as the TabStrip doesn't know about the autocomplete edit and needs
   // to know about it to handle 'paste and go'.
   GURL url;
-  std::wstring title;
+  string16 title;
   ui::OSExchangeData mapped_data;
-  if (!event.GetData().GetURLAndTitle(&url, &title) || !url.is_valid()) {
+  if (!event.data().GetURLAndTitle(&url, &title) || !url.is_valid()) {
     // The url isn't valid. Use the paste and go url.
-    if (GetPasteAndGoURL(event.GetData(), &url))
-      mapped_data.SetURL(url, std::wstring());
+    if (GetPasteAndGoURL(event.data(), &url))
+      mapped_data.SetURL(url, string16());
     // else case: couldn't extract a url or 'paste and go' url. This ends up
     // passing through an ui::OSExchangeData with nothing in it. We need to do
     // this so that the tab strip cleans up properly.
   } else {
-    mapped_data.SetURL(url, std::wstring());
+    mapped_data.SetURL(url, string16());
   }
   forwarding_to_tab_strip_ = false;
   scoped_ptr<views::DropTargetEvent> mapped_event(
@@ -129,7 +129,7 @@ views::DropTargetEvent* BrowserRootView::MapEventToTabStrip(
   ConvertPointToView(this, tabstrip(), &tab_strip_loc);
   return new views::DropTargetEvent(data, tab_strip_loc.x(),
                                     tab_strip_loc.y(),
-                                    event.GetSourceOperations());
+                                    event.source_operations());
 }
 
 BaseTabStrip* BrowserRootView::tabstrip() const {
@@ -141,13 +141,13 @@ bool BrowserRootView::GetPasteAndGoURL(const ui::OSExchangeData& data,
   if (!data.HasString())
     return false;
 
-  std::wstring text;
+  string16 text;
   if (!data.GetString(&text) || text.empty())
     return false;
 
   AutocompleteMatch match;
   browser_view_->browser()->profile()->GetAutocompleteClassifier()->Classify(
-      text, std::wstring(), false, &match, NULL);
+      text, string16(), false, &match, NULL);
   if (!match.destination_url.is_valid())
     return false;
 

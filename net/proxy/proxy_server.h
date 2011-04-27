@@ -42,7 +42,7 @@ class ProxyServer {
 
   bool is_valid() const { return scheme_ != SCHEME_INVALID; }
 
-  // Gets the proxy's scheme (i.e. SOCKS4, SOCKS5, HTTP}
+  // Gets the proxy's scheme (i.e. SOCKS4, SOCKS5, HTTP)
   Scheme scheme() const { return scheme_; }
 
   // Returns true if this ProxyServer is actually just a DIRECT connection.
@@ -128,6 +128,12 @@ class ProxyServer {
   // scheme. Returns -1 if unknown.
   static int GetDefaultPortForScheme(Scheme scheme);
 
+  // Parses the proxy scheme from a URL-like representation, to a
+  // ProxyServer::Scheme. This corresponds with the values used in
+  // ProxyServer::ToURI(). If no type could be matched, returns SCHEME_INVALID.
+  // |scheme| can be one of http, https, socks, socks4, socks5, direct.
+  static Scheme GetSchemeFromURI(const std::string& scheme);
+
   bool operator==(const ProxyServer& other) const {
     return scheme_ == other.scheme_ &&
            host_port_pair_.Equals(other.host_port_pair_);
@@ -151,6 +157,8 @@ class ProxyServer {
   Scheme scheme_;
   HostPortPair host_port_pair_;
 };
+
+typedef std::pair<HostPortPair, ProxyServer> HostPortProxyPair;
 
 }  // namespace net
 

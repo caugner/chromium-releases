@@ -5,10 +5,10 @@
 #include "views/controls/native/native_view_host.h"
 
 #include "base/logging.h"
-#include "gfx/canvas.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/native/native_view_host_wrapper.h"
 #include "views/controls/native/native_view_host_views.h"
-#include "views/widget/root_view.h"
+#include "views/widget/native_widget.h"
 #include "views/widget/widget.h"
 
 namespace views {
@@ -33,10 +33,6 @@ NativeViewHost::NativeViewHost()
       views_view_(NULL),
       fast_resize_(false),
       focus_view_(NULL) {
-  // The native widget is placed relative to the root. As such, we need to
-  // know when the position of any ancestor changes, or our visibility relative
-  // to other views changed as it'll effect our position relative to the root.
-  SetNotifyWhenVisibleBoundsInRootChanges(true);
 }
 
 NativeViewHost::~NativeViewHost() {
@@ -121,7 +117,7 @@ void NativeViewHost::Layout() {
     gfx::Insets insets = GetInsets();
     gfx::Point top_left(insets.left(), insets.top());
     ConvertPointToWidget(this, &top_left);
-    gfx::Rect local_bounds = GetLocalBounds(false);
+    gfx::Rect local_bounds = GetContentsBounds();
     native_wrapper_->ShowWidget(top_left.x(), top_left.y(),
                                 local_bounds.width(),
                                 local_bounds.height());
@@ -130,7 +126,7 @@ void NativeViewHost::Layout() {
   }
 }
 
-void NativeViewHost::Paint(gfx::Canvas* canvas) {
+void NativeViewHost::OnPaint(gfx::Canvas* canvas) {
   // Paint background if there is one. NativeViewHost needs to paint
   // a background when it is hosted in a TabbedPane. For Gtk implementation,
   // NativeTabbedPaneGtk uses a WidgetGtk as page container and because
@@ -139,7 +135,7 @@ void NativeViewHost::Paint(gfx::Canvas* canvas) {
   // cleared. For Windows case, it appears okay to not paint background because
   // we don't have a container window in-between. However if you want to use
   // customized background, then this becomes necessary.
-  PaintBackground(canvas);
+  OnPaintBackground(canvas);
 
   // The area behind our window is black, so during a fast resize (where our
   // content doesn't draw over the full size of our native view, and the native
@@ -156,7 +152,14 @@ void NativeViewHost::VisibilityChanged(View* starting_from, bool is_visible) {
   Layout();
 }
 
-void NativeViewHost::VisibleBoundsInRootChanged() {
+bool NativeViewHost::NeedsNotificationWhenVisibleBoundsChange() const {
+  // The native widget is placed relative to the root. As such, we need to
+  // know when the position of any ancestor changes, or our visibility relative
+  // to other views changed as it'll effect our position relative to the root.
+  return true;
+}
+
+void NativeViewHost::OnVisibleBoundsChanged() {
   Layout();
 }
 
@@ -175,8 +178,9 @@ std::string NativeViewHost::GetClassName() const {
   return kViewClassName;
 }
 
-void NativeViewHost::Focus() {
+void NativeViewHost::OnFocus() {
   native_wrapper_->SetFocus();
+  NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS);
 }
 
 bool NativeViewHost::ContainsNativeView(gfx::NativeView native_view) const {
@@ -185,12 +189,12 @@ bool NativeViewHost::ContainsNativeView(gfx::NativeView native_view) const {
   if (!native_view_)
     return false;
 
-  views::Widget* native_widget =
-      views::Widget::GetWidgetFromNativeView(native_view_);
-  views::RootView* root_view =
-      native_widget ? native_widget->GetRootView() : NULL;
-  if (root_view && root_view->ContainsNativeView(native_view))
+  views::NativeWidget* native_widget =
+      views::NativeWidget::GetNativeWidgetForNativeView(native_view_);
+  if (native_widget &&
+      native_widget->GetWidget()->ContainsNativeView(native_view)) {
     return true;
+  }
 
   return View::ContainsNativeView(native_view);
 }

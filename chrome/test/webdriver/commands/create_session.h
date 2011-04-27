@@ -13,6 +13,8 @@
 
 namespace webdriver {
 
+class Response;
+
 // Create a new session which is a new instance of the chrome browser with no
 // page loaded.  A new session ID is passed back to the user which is used for
 // all future commands that are sent to control this new instance.  The
@@ -21,12 +23,11 @@ namespace webdriver {
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol#/session
 class CreateSession : public Command {
  public:
-  inline CreateSession(const std::vector<std::string>& path_segments,
-                       const DictionaryValue* const parameters)
-      : Command(path_segments, parameters) {}
-  virtual ~CreateSession() {}
+  CreateSession(const std::vector<std::string>& path_segments,
+                const DictionaryValue* const parameters);
+  virtual ~CreateSession();
 
-  virtual bool DoesPost() { return true; }
+  virtual bool DoesPost();
   virtual void ExecutePost(Response* const response);
 
  private:

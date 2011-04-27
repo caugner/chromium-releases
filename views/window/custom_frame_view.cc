@@ -1,17 +1,17 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/window/custom_frame_view.h"
 
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
-#include "gfx/font.h"
-#include "gfx/path.h"
 #include "grit/app_resources.h"
 #include "grit/app_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/path.h"
 #include "views/window/client_view.h"
 #include "views/window/window_shape.h"
 #include "views/window/window_delegate.h"
@@ -21,7 +21,7 @@
 #endif
 
 #if defined(OS_WIN)
-#include "app/win/win_util.h"
+#include "views/window/window_win.h"
 #endif
 
 namespace views {
@@ -113,11 +113,10 @@ CustomFrameView::CustomFrameView(Window* frame)
                              rb.GetBitmapNamed(IDR_MINIMIZE_P));
   AddChildView(minimize_button_);
 
-  views::WindowDelegate* d = frame_->GetDelegate();
-  should_show_minmax_buttons_ = d->CanMaximize();
-  should_show_client_edge_ = d->ShouldShowClientEdge();
+  should_show_minmax_buttons_ = frame_->window_delegate()->CanMaximize();
+  should_show_client_edge_ = frame_->window_delegate()->ShouldShowClientEdge();
 
-  if (d->ShouldShowWindowIcon()) {
+  if (frame_->window_delegate()->ShouldShowWindowIcon()) {
     window_icon_ = new ImageButton(this);
     AddChildView(window_icon_);
   }
@@ -148,7 +147,7 @@ int CustomFrameView::NonClientHitTest(const gfx::Point& point) {
   if (!bounds().Contains(point))
     return HTNOWHERE;
 
-  int frame_component = frame_->GetClientView()->NonClientHitTest(point);
+  int frame_component = frame_->client_view()->NonClientHitTest(point);
 
   // See if we're in the sysmenu region.  (We check the ClientView first to be
   // consistent with OpaqueBrowserFrameView; it's not really necessary here.)
@@ -157,7 +156,7 @@ int CustomFrameView::NonClientHitTest(const gfx::Point& point) {
   // of Fitts' Law.
   if (frame_->IsMaximized())
     sysmenu_rect.SetRect(0, 0, sysmenu_rect.right(), sysmenu_rect.bottom());
-  sysmenu_rect.set_x(MirroredLeftPointForRect(sysmenu_rect));
+  sysmenu_rect.set_x(GetMirroredXForRect(sysmenu_rect));
   if (sysmenu_rect.Contains(point))
     return (frame_component == HTCLIENT) ? HTCLIENT : HTSYSMENU;
 
@@ -165,24 +164,20 @@ int CustomFrameView::NonClientHitTest(const gfx::Point& point) {
     return frame_component;
 
   // Then see if the point is within any of the window controls.
-  if (close_button_->GetBounds(APPLY_MIRRORING_TRANSFORMATION).Contains(point))
+  if (close_button_->GetMirroredBounds().Contains(point))
     return HTCLOSE;
-  if (restore_button_->GetBounds(APPLY_MIRRORING_TRANSFORMATION).Contains(
-      point))
+  if (restore_button_->GetMirroredBounds().Contains(point))
     return HTMAXBUTTON;
-  if (maximize_button_->GetBounds(APPLY_MIRRORING_TRANSFORMATION).Contains(
-      point))
+  if (maximize_button_->GetMirroredBounds().Contains(point))
     return HTMAXBUTTON;
-  if (minimize_button_->GetBounds(APPLY_MIRRORING_TRANSFORMATION).Contains(
-      point))
+  if (minimize_button_->GetMirroredBounds().Contains(point))
     return HTMINBUTTON;
-  if (window_icon_ &&
-      window_icon_->GetBounds(APPLY_MIRRORING_TRANSFORMATION).Contains(point))
+  if (window_icon_ && window_icon_->GetMirroredBounds().Contains(point))
     return HTSYSMENU;
 
   int window_component = GetHTComponentForFrame(point, FrameBorderThickness(),
       NonClientBorderThickness(), kResizeAreaCornerSize, kResizeAreaCornerSize,
-      frame_->GetDelegate()->CanResize());
+      frame_->window_delegate()->CanResize());
   // Fall back to the caption if no other component matches.
   return (window_component == HTNOWHERE) ? HTCAPTION : window_component;
 }
@@ -210,7 +205,7 @@ void CustomFrameView::ResetWindowControls() {
 ///////////////////////////////////////////////////////////////////////////////
 // CustomFrameView, View overrides:
 
-void CustomFrameView::Paint(gfx::Canvas* canvas) {
+void CustomFrameView::OnPaint(gfx::Canvas* canvas) {
   if (frame_->IsMaximized())
     PaintMaximizedFrameBorder(canvas);
   else
@@ -227,9 +222,9 @@ void CustomFrameView::Layout() {
 }
 
 gfx::Size CustomFrameView::GetPreferredSize() {
-  gfx::Size pref = frame_->GetClientView()->GetPreferredSize();
+  gfx::Size pref = frame_->client_view()->GetPreferredSize();
   gfx::Rect bounds(0, 0, pref.width(), pref.height());
-  return frame_->GetNonClientView()->GetWindowBoundsForClientBounds(
+  return frame_->non_client_view()->GetWindowBoundsForClientBounds(
       bounds).size();
 }
 
@@ -401,11 +396,11 @@ void CustomFrameView::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
   int edge_height = titlebar_bottom->height() -
                     ShouldShowClientEdge() ? kClientEdgeThickness : 0;
   canvas->TileImageInt(*titlebar_bottom, 0,
-      frame_->GetClientView()->y() - edge_height, width(), edge_height);
+      frame_->client_view()->y() - edge_height, width(), edge_height);
 }
 
 void CustomFrameView::PaintTitleBar(gfx::Canvas* canvas) {
-  WindowDelegate* d = frame_->GetDelegate();
+  WindowDelegate* d = frame_->window_delegate();
 
   // It seems like in some conditions we can be asked to paint after the window
   // that contains us is WM_DESTROYed. At this point, our delegate is NULL. The
@@ -414,13 +409,13 @@ void CustomFrameView::PaintTitleBar(gfx::Canvas* canvas) {
     return;
 
   canvas->DrawStringInt(WideToUTF16Hack(d->GetWindowTitle()), *title_font_,
-                        SK_ColorWHITE, MirroredLeftPointForRect(title_bounds_),
+                        SK_ColorWHITE, GetMirroredXForRect(title_bounds_),
                         title_bounds_.y(), title_bounds_.width(),
                         title_bounds_.height());
 }
 
 void CustomFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
-  gfx::Rect client_area_bounds = frame_->GetClientView()->bounds();
+  gfx::Rect client_area_bounds = frame_->client_view()->bounds();
   int client_area_top = client_area_bounds.y();
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -538,12 +533,11 @@ void CustomFrameView::LayoutTitleBar() {
   // The window title is based on the calculated icon position, even when there
   // is no icon.
   gfx::Rect icon_bounds(IconBounds());
-  views::WindowDelegate* d = frame_->GetDelegate();
-  if (d->ShouldShowWindowIcon())
-    window_icon_->SetBounds(icon_bounds);
+  if (frame_->window_delegate()->ShouldShowWindowIcon())
+    window_icon_->SetBoundsRect(icon_bounds);
 
   // Size the title.
-  int title_x = d->ShouldShowWindowIcon() ?
+  int title_x = frame_->window_delegate()->ShouldShowWindowIcon() ?
       icon_bounds.right() + kIconTitleSpacing : icon_bounds.x();
   int title_height = title_font_->GetHeight();
   // We bias the title position so that when the difference between the icon and
@@ -571,7 +565,7 @@ void CustomFrameView::InitClass() {
   static bool initialized = false;
   if (!initialized) {
 #if defined(OS_WIN)
-    title_font_ = new gfx::Font(app::win::GetWindowTitleFont());
+    title_font_ = new gfx::Font(WindowWin::GetWindowTitleFont());
 #elif defined(OS_LINUX)
     // TODO(ben): need to resolve what font this is.
     title_font_ = new gfx::Font();

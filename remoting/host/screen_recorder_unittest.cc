@@ -4,15 +4,18 @@
 
 #include "base/message_loop.h"
 #include "base/task.h"
-#include "remoting/base/mock_objects.h"
-#include "remoting/host/mock_objects.h"
+#include "remoting/base/base_mock_objects.h"
+#include "remoting/host/host_mock_objects.h"
 #include "remoting/host/screen_recorder.h"
 #include "remoting/proto/video.pb.h"
-#include "remoting/protocol/mock_objects.h"
+#include "remoting/protocol/protocol_mock_objects.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::remoting::protocol::MockConnectionToClient;
+using ::remoting::protocol::MockConnectionToClientEventHandler;
+using ::remoting::protocol::MockHostStub;
+using ::remoting::protocol::MockInputStub;
 using ::remoting::protocol::MockVideoStub;
 
 using ::testing::_;
@@ -76,20 +79,26 @@ class ScreenRecorderTest : public testing::Test {
 
   virtual void SetUp() {
     // Capturer and Encoder are owned by ScreenRecorder.
-    capturer_ = new MockCapturer();
     encoder_ = new MockEncoder();
-    connection_ = new MockConnectionToClient();
+
+    connection_ = new MockConnectionToClient(&message_loop_, &handler_,
+                                             &host_stub_, &input_stub_);
+
     record_ = new ScreenRecorder(
         &message_loop_, &message_loop_, &message_loop_,
-        capturer_, encoder_);
+        &capturer_, encoder_);
   }
 
  protected:
   scoped_refptr<ScreenRecorder> record_;
+
+  MockConnectionToClientEventHandler handler_;
+  MockHostStub host_stub_;
+  MockInputStub input_stub_;
   scoped_refptr<MockConnectionToClient> connection_;
 
   // The following mock objects are owned by ScreenRecorder.
-  MockCapturer* capturer_;
+  MockCapturer capturer_;
   MockEncoder* encoder_;
   MessageLoop message_loop_;
  private:
@@ -108,11 +117,12 @@ TEST_F(ScreenRecorderTest, OneRecordCycle) {
   }
   scoped_refptr<CaptureData> data(new CaptureData(planes, kWidth,
                                                   kHeight, kFormat));
-  EXPECT_CALL(*capturer_, width()).WillRepeatedly(Return(kWidth));
-  EXPECT_CALL(*capturer_, height()).WillRepeatedly(Return(kHeight));
+  EXPECT_CALL(capturer_, width()).WillRepeatedly(Return(kWidth));
+  EXPECT_CALL(capturer_, height()).WillRepeatedly(Return(kHeight));
+  EXPECT_CALL(capturer_, InvalidateFullScreen());
 
   // First the capturer is called.
-  EXPECT_CALL(*capturer_, CaptureInvalidRects(NotNull()))
+  EXPECT_CALL(capturer_, CaptureInvalidRects(NotNull()))
       .WillOnce(RunCallback(update_rects, data));
 
   // Expect the encoder be called.
@@ -158,11 +168,12 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
   }
   scoped_refptr<CaptureData> data(new CaptureData(planes, kWidth,
                                                   kHeight, kFormat));
-  EXPECT_CALL(*capturer_, width()).WillRepeatedly(Return(kWidth));
-  EXPECT_CALL(*capturer_, height()).WillRepeatedly(Return(kHeight));
+  EXPECT_CALL(capturer_, width()).WillRepeatedly(Return(kWidth));
+  EXPECT_CALL(capturer_, height()).WillRepeatedly(Return(kHeight));
+  EXPECT_CALL(capturer_, InvalidateFullScreen());
 
   // First the capturer is called.
-  EXPECT_CALL(*capturer_, CaptureInvalidRects(NotNull()))
+  EXPECT_CALL(capturer_, CaptureInvalidRects(NotNull()))
       .WillRepeatedly(RunCallback(update_rects, data));
 
   // Expect the encoder be called.
@@ -195,7 +206,9 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
   message_loop_.Run();
 }
 
-// TODO(hclam): Add test for double buffering.
-// TODO(hclam): Add test for multiple captures.
+TEST_F(ScreenRecorderTest, StopWithoutStart) {
+  record_->Stop(NewRunnableFunction(&QuitMessageLoop, &message_loop_));
+  message_loop_.Run();
+}
 
 }  // namespace remoting

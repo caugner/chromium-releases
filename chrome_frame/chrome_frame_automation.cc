@@ -21,6 +21,7 @@
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/client_util.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -1009,9 +1010,8 @@ void ChromeFrameAutomationClient::SetEnableExtensionAutomation(
   // automation, only to set it.  Also, we want to avoid resetting extension
   // automation that some other automation client has set up.  Therefore only
   // send the message if we are going to enable automation of some functions.
-  if (functions_enabled.size() > 0) {
+  if (!functions_enabled.empty())
     tab_->SetEnableExtensionAutomation(functions_enabled);
-  }
 }
 
 // Invoked in launch background thread.
@@ -1438,14 +1438,15 @@ void ChromeFrameAutomationClient::OnUnload(bool* should_unload) {
 void ChromeFrameAutomationClient::OnResponseStarted(int request_id,
     const char* mime_type,  const char* headers, int size,
     base::Time last_modified, const std::string& redirect_url,
-    int redirect_status) {
+    int redirect_status, const net::HostPortPair& socket_address) {
   const AutomationURLResponse response(
       mime_type,
       headers ? headers : "",
       size,
       last_modified,
       redirect_url,
-      redirect_status);
+      redirect_status,
+      socket_address);
 
   automation_server_->Send(new AutomationMsg_RequestStarted(
       tab_->handle(), request_id, response));

@@ -9,6 +9,7 @@
 
 #include "base/logging.h"
 #include "base/singleton.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
@@ -187,7 +188,6 @@ bool ShouldWrapSink(IInternetProtocolSink* sink, const wchar_t* url) {
 bool IsCFRequest(IBindCtx* pbc) {
   ScopedComPtr<BindContextInfo> info;
   BindContextInfo::FromBindContext(pbc, info.Receive());
-  DCHECK(info);
   if (info && info->chrome_request())
     return true;
 

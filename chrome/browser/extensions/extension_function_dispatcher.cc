@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,12 @@
 #include <map>
 
 #include "base/process_util.h"
-#include "base/singleton.h"
 #include "base/ref_counted.h"
+#include "base/singleton.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/dom_ui/chrome_url_data_manager.h"
-#include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
-#include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/extensions/execute_code_in_tab_function.h"
 #include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/extensions/extension_bookmark_manager_api.h"
@@ -24,44 +21,48 @@
 #include "chrome/browser/extensions/extension_clipboard_api.h"
 #include "chrome/browser/extensions/extension_context_menu_api.h"
 #include "chrome/browser/extensions/extension_cookies_api.h"
-#include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_history_api.h"
-#include "chrome/browser/extensions/extension_idle_api.h"
 #include "chrome/browser/extensions/extension_i18n_api.h"
+#include "chrome/browser/extensions/extension_idle_api.h"
 #include "chrome/browser/extensions/extension_infobar_module.h"
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/extensions/extension_input_api.h"
-#endif
 #include "chrome/browser/extensions/extension_management_api.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_metrics_module.h"
 #include "chrome/browser/extensions/extension_module.h"
 #include "chrome/browser/extensions/extension_omnibox_api.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
-#include "chrome/browser/extensions/extension_popup_api.h"
+#include "chrome/browser/extensions/extension_preference_api.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_processes_api.h"
 #include "chrome/browser/extensions/extension_proxy_api.h"
 #include "chrome/browser/extensions/extension_rlz_module.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sidebar_api.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/extensions/extension_tts_api.h"
+#include "chrome/browser/extensions/extension_web_ui.h"
+#include "chrome/browser/extensions/extension_webrequest_api.h"
 #include "chrome/browser/extensions/extension_webstore_private_api.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
+#if defined(TOOLKIT_VIEWS)
+#include "chrome/browser/extensions/extension_input_api.h"
+#endif
 
 // FactoryRegistry -------------------------------------------------------------
 
@@ -192,9 +193,6 @@ void FactoryRegistry::ResetFunctions() {
   // I18N.
   RegisterFunction<GetAcceptLanguagesFunction>();
 
-  // Popup API.
-  RegisterFunction<PopupShowFunction>();
-
   // Processes.
   RegisterFunction<GetProcessIdForTabFunction>();
 
@@ -261,7 +259,8 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<OmniboxSetDefaultSuggestionFunction>();
 
   // Proxies.
-  RegisterFunction<UseCustomProxySettingsFunction>();
+  RegisterFunction<SetProxySettingsFunction>();
+  RegisterFunction<GetProxySettingsFunction>();
 
   // Sidebar.
   RegisterFunction<CollapseSidebarFunction>();
@@ -296,6 +295,14 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<PromptBrowserLoginFunction>();
   RegisterFunction<BeginInstallFunction>();
   RegisterFunction<CompleteInstallFunction>();
+
+  // WebRequest.
+  RegisterFunction<WebRequestAddEventListener>();
+
+  // Preferences.
+  RegisterFunction<GetPreferenceFunction>();
+  RegisterFunction<SetPreferenceFunction>();
+  RegisterFunction<ClearPreferenceFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -386,15 +393,11 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
                                 render_view_host->process()->id());
 
   // If the extension has permission to load chrome://favicon/ resources we need
-  // to make sure that the DOMUIFavIconSource is registered with the
+  // to make sure that the FavIconSource is registered with the
   // ChromeURLDataManager.
   if (extension->HasHostPermission(GURL(chrome::kChromeUIFavIconURL))) {
-    DOMUIFavIconSource* favicon_source = new DOMUIFavIconSource(profile_);
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(ChromeURLDataManager::GetInstance(),
-                          &ChromeURLDataManager::AddDataSource,
-                          make_scoped_refptr(favicon_source)));
+    FavIconSource* favicon_source = new FavIconSource(profile_);
+    profile_->GetChromeURLDataManager()->AddDataSource(favicon_source);
   }
 
   // Update the extension permissions. Doing this each time we create an EFD

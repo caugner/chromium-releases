@@ -62,14 +62,20 @@ WebPreferences::WebPreferences()
       allow_file_access_from_file_urls(false),
       webaudio_enabled(false),
       experimental_webgl_enabled(false),
+      gl_multisampling_enabled(true),
       show_composited_layer_borders(false),
+      show_composited_layer_tree(false),
+      show_fps_counter(false),
+      asynchronous_spell_checking_enabled(true),
       accelerated_compositing_enabled(false),
+      composite_to_texture_enabled(false),
       accelerated_layers_enabled(false),
       accelerated_video_enabled(false),
       accelerated_2d_canvas_enabled(false),
       accelerated_plugins_enabled(false),
       memory_info_enabled(false),
-      interactive_form_validation_enabled(true) {
+      interactive_form_validation_enabled(true),
+      fullscreen_enabled(false) {
 }
 
 WebPreferences::~WebPreferences() {
@@ -152,12 +158,25 @@ void WebPreferences::Apply(WebView* web_view) const {
       WebRuntimeFeatures::isWebGLEnabled() && experimental_webgl_enabled;
   settings->setExperimentalWebGLEnabled(enable_webgl);
 
+  // Disable GL multisampling if requested on command line.
+  settings->setOpenGLMultisamplingEnabled(gl_multisampling_enabled);
+
   // Display colored borders around composited render layers if requested
   // on command line.
   settings->setShowDebugBorders(show_composited_layer_borders);
 
+  // Display an FPS indicator if requested on the command line.
+  settings->setShowFPSCounter(show_fps_counter);
+
+  // Display the current compositor tree as overlay if requested on
+  // the command line
+  settings->setShowPlatformLayerTree(show_composited_layer_tree);
+
   // Enable gpu-accelerated compositing if requested on the command line.
   settings->setAcceleratedCompositingEnabled(accelerated_compositing_enabled);
+
+  // Enable composite to offscreen texture if requested on the command line.
+  settings->setCompositeToTextureEnabled(composite_to_texture_enabled);
 
   // Enable gpu-accelerated 2d canvas if requested on the command line.
   settings->setAccelerated2dCanvasEnabled(accelerated_2d_canvas_enabled);
@@ -182,6 +201,9 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Enable memory info reporting to page if requested on the command line.
   settings->setMemoryInfoEnabled(memory_info_enabled);
 
+  settings->setAsynchronousSpellCheckingEnabled(
+      asynchronous_spell_checking_enabled);
+
   for (WebInspectorPreferences::const_iterator it = inspector_settings.begin();
        it != inspector_settings.end(); ++it)
     web_view->setInspectorSetting(WebString::fromUTF8(it->first),
@@ -193,4 +215,6 @@ void WebPreferences::Apply(WebView* web_view) const {
 
   settings->setInteractiveFormValidationEnabled(
       interactive_form_validation_enabled);
+
+  settings->setFullScreenEnabled(fullscreen_enabled);
 }

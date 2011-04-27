@@ -5,15 +5,15 @@
 #include "views/controls/button/menu_button.h"
 
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "grit/app_resources.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/button/button.h"
 #include "views/controls/menu/view_menu_delegate.h"
-#include "views/event.h"
+#include "views/events/event.h"
 #include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
@@ -81,14 +81,14 @@ gfx::Size MenuButton::GetPreferredSize() {
   return prefsize;
 }
 
-void MenuButton::Paint(gfx::Canvas* canvas, bool for_drag) {
-  TextButton::Paint(canvas, for_drag);
+void MenuButton::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
+  TextButton::PaintButton(canvas, mode);
 
   if (show_menu_marker_) {
     gfx::Insets insets = GetInsets();
 
     // We can not use the views' mirroring infrastructure for mirroring a
-    // MenuButton control (see TextButton::Paint() for a detailed explanation
+    // MenuButton control (see TextButton::OnPaint() for a detailed explanation
     // regarding why we can not flip the canvas). Therefore, we need to
     // manually mirror the position of the down arrow.
     gfx::Rect arrow_bounds(width() - insets.right() -
@@ -96,7 +96,7 @@ void MenuButton::Paint(gfx::Canvas* canvas, bool for_drag) {
                            height() / 2 - menu_marker_->height() / 2,
                            menu_marker_->width(),
                            menu_marker_->height());
-    arrow_bounds.set_x(MirroredLeftPointForRect(arrow_bounds));
+    arrow_bounds.set_x(GetMirroredXForRect(arrow_bounds));
     canvas->DrawBitmapInt(*menu_marker_, arrow_bounds.x(), arrow_bounds.y());
   }
 }
@@ -126,7 +126,7 @@ bool MenuButton::Activate() {
   // after the menu closes.
   PaintNow();
   if (menu_delegate_) {
-    gfx::Rect lb = GetLocalBounds(true);
+    gfx::Rect lb = GetLocalBounds();
 
     // The position of the menu depends on whether or not the locale is
     // right-to-left.
@@ -220,14 +220,18 @@ void MenuButton::OnMouseReleased(const MouseEvent& e,
 }
 
 bool MenuButton::OnKeyPressed(const KeyEvent& e) {
-  if (e.GetKeyCode() == ui::VKEY_SPACE ||
-      e.GetKeyCode() == ui::VKEY_RETURN ||
-      e.GetKeyCode() == ui::VKEY_UP ||
-      e.GetKeyCode() == ui::VKEY_DOWN) {
-    bool result = Activate();
-    if (GetFocusManager()->GetFocusedView() == NULL)
-      RequestFocus();
-    return result;
+  switch (e.key_code()) {
+    case ui::VKEY_SPACE:
+    case ui::VKEY_RETURN:
+    case ui::VKEY_UP:
+    case ui::VKEY_DOWN: {
+      bool result = Activate();
+      if (GetFocusManager()->GetFocusedView() == NULL)
+        RequestFocus();
+      return result;
+    }
+    default:
+      break;
   }
   return false;
 }

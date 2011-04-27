@@ -60,6 +60,7 @@ extern const wchar_t kSafariImageName[];
 extern const char kChromeImageName[];
 extern const wchar_t kChromeLauncher[];
 extern const int kChromeFrameLongNavigationTimeoutInSeconds;
+extern const int kChromeFrameVeryLongNavigationTimeoutInSeconds;
 
 // Temporarily impersonate the current thread to low integrity for the lifetime
 // of the object. Destructor will automatically revert integrity level.
@@ -327,6 +328,9 @@ class ScopedVirtualizeHklmAndHkcu {
 // KillProcesses. Takes in the wait flag as a parameter.
 bool KillProcesses(const std::wstring& executable_name, int exit_code,
                    bool wait);
+
+// Returns the type of test bed, PER_USER or SYSTEM_LEVEL.
+ScopedChromeFrameRegistrar::RegistrationType GetTestBedType();
 
 }  // namespace chrome_frame_test
 

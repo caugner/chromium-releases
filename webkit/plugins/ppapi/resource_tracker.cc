@@ -46,6 +46,18 @@ namespace ppapi {
 static base::LazyInstance<ResourceTracker> g_resource_tracker(
     base::LINKER_INITIALIZED);
 
+struct ResourceTracker::InstanceData {
+  InstanceData() : instance(0) {}
+
+  // Non-owning pointer to the instance object. When a PluginInstance is
+  // destroyed, it will notify us and we'll delete all associated data.
+  PluginInstance* instance;
+
+  // Resources and object vars associated with the instance.
+  ResourceSet resources;
+  VarSet object_vars;
+};
+
 scoped_refptr<Resource> ResourceTracker::GetResource(PP_Resource res) const {
   DLOG_IF(ERROR, !CheckIdType(res, PP_ID_TYPE_RESOURCE))
       << res << " is not a PP_Resource.";
@@ -147,6 +159,64 @@ bool ResourceTracker::UnrefResource(PP_Resource res) {
   }
 }
 
+void ResourceTracker::CleanupInstanceData(PP_Instance instance,
+                                          bool delete_instance) {
+  DLOG_IF(ERROR, !CheckIdType(instance, PP_ID_TYPE_INSTANCE))
+      << instance << " is not a PP_Instance.";
+  InstanceMap::iterator found = instance_map_.find(instance);
+  if (found == instance_map_.end()) {
+    NOTREACHED();
+    return;
+  }
+  InstanceData& data = found->second;
+
+  // Force release all plugin references to resources associated with the
+  // deleted instance.
+  ResourceSet::iterator cur_res = data.resources.begin();
+  while (cur_res != data.resources.end()) {
+    ResourceMap::iterator found_resource = live_resources_.find(*cur_res);
+    if (found_resource == live_resources_.end()) {
+      NOTREACHED();
+    } else {
+      Resource* resource = found_resource->second.first;
+
+      // Must delete from the resource set first since the resource's instance
+      // pointer will get zeroed out in LastPluginRefWasDeleted.
+      resource->LastPluginRefWasDeleted(true);
+      live_resources_.erase(*cur_res);
+    }
+
+    // Iterators to a set are stable so we can iterate the set while the items
+    // are being deleted as long as we're careful not to delete the item we're
+    // holding an iterator to.
+    ResourceSet::iterator current = cur_res++;
+    data.resources.erase(current);
+  }
+  DCHECK(data.resources.empty());
+
+  // Force delete all var references.
+  VarSet::iterator cur_var = data.object_vars.begin();
+  while (cur_var != data.object_vars.end()) {
+    VarSet::iterator current = cur_var++;
+
+    // Tell the corresponding ObjectVar that the instance is gone.
+    PP_Var object_pp_var;
+    object_pp_var.type = PP_VARTYPE_OBJECT;
+    object_pp_var.value.as_id = *current;
+    scoped_refptr<ObjectVar> object_var(ObjectVar::FromPPVar(object_pp_var));
+    if (object_var.get())
+      object_var->InstanceDeleted();
+
+    // Clear the object from the var mapping and the live instance object list.
+    live_vars_.erase(*current);
+    data.object_vars.erase(*current);
+  }
+  DCHECK(data.object_vars.empty());
+
+  if (delete_instance)
+    instance_map_.erase(found);
+}
+
 uint32 ResourceTracker::GetLiveObjectsForInstance(
     PP_Instance instance) const {
   InstanceMap::const_iterator found = instance_map_.find(instance);
@@ -216,59 +286,11 @@ PP_Instance ResourceTracker::AddInstance(PluginInstance* instance) {
 }
 
 void ResourceTracker::InstanceDeleted(PP_Instance instance) {
-  DLOG_IF(ERROR, !CheckIdType(instance, PP_ID_TYPE_INSTANCE))
-      << instance << " is not a PP_Instance.";
-  InstanceMap::iterator found = instance_map_.find(instance);
-  if (found == instance_map_.end()) {
-    NOTREACHED();
-    return;
-  }
-  InstanceData& data = found->second;
+  CleanupInstanceData(instance, true);
+}
 
-  // Force release all plugin references to resources associated with the
-  // deleted instance.
-  ResourceSet::iterator cur_res = data.resources.begin();
-  while (cur_res != data.resources.end()) {
-    ResourceMap::iterator found_resource = live_resources_.find(*cur_res);
-    if (found_resource == live_resources_.end()) {
-      NOTREACHED();
-    } else {
-      Resource* resource = found_resource->second.first;
-
-      // Must delete from the resource set first since the resource's instance
-      // pointer will get zeroed out in LastPluginRefWasDeleted.
-      resource->LastPluginRefWasDeleted(true);
-      live_resources_.erase(*cur_res);
-    }
-
-    // Iterators to a set are stable so we can iterate the set while the items
-    // are being deleted as long as we're careful not to delete the item we're
-    // holding an iterator to.
-    ResourceSet::iterator current = cur_res++;
-    data.resources.erase(current);
-  }
-  DCHECK(data.resources.empty());
-
-  // Force delete all var references.
-  VarSet::iterator cur_var = data.object_vars.begin();
-  while (cur_var != data.object_vars.end()) {
-    VarSet::iterator current = cur_var++;
-
-    // Tell the corresponding ObjectVar that the instance is gone.
-    PP_Var object_pp_var;
-    object_pp_var.type = PP_VARTYPE_OBJECT;
-    object_pp_var.value.as_id = *current;
-    scoped_refptr<ObjectVar> object_var(ObjectVar::FromPPVar(object_pp_var));
-    if (object_var.get())
-      object_var->InstanceDeleted();
-
-    // Clear the object from the var mapping and the live instance object list.
-    live_vars_.erase(*current);
-    data.object_vars.erase(*current);
-  }
-  DCHECK(data.object_vars.empty());
-
-  instance_map_.erase(found);
+void ResourceTracker::InstanceCrashed(PP_Instance instance) {
+  CleanupInstanceData(instance, false);
 }
 
 PluginInstance* ResourceTracker::GetInstance(PP_Instance instance) {

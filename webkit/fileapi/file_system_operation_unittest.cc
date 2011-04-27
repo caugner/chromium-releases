@@ -23,6 +23,12 @@ static bool FileExists(FilePath path) {
 
 class MockDispatcher;
 
+// Test class for FileSystemOperation.  Note that this just tests low-level
+// operations but doesn't test OpenFileSystem or any additional checks
+// that require FileSystemContext (e.g. sandboxed paths, unlimited_storage
+// quota handling etc).
+// See SimpleFileSystem for more complete test environment for sandboxed
+// FileSystem.
 class FileSystemOperationTest : public testing::Test {
  public:
   FileSystemOperationTest()
@@ -93,7 +99,8 @@ class MockDispatcher : public FileSystemCallbackDispatcher {
 FileSystemOperation* FileSystemOperationTest::operation() {
   return new FileSystemOperation(
       new MockDispatcher(this),
-      base::MessageLoopProxy::CreateForCurrentThread());
+      base::MessageLoopProxy::CreateForCurrentThread(),
+      NULL);
 }
 
 TEST_F(FileSystemOperationTest, TestMoveFailureSrcDoesntExist) {
@@ -561,6 +568,20 @@ TEST_F(FileSystemOperationTest, TestExistsAndMetadataSuccess) {
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_FALSE(info().is_directory);
+}
+
+TEST_F(FileSystemOperationTest, TestTypeMismatchErrors) {
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  operation()->FileExists(dir.path());
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_FILE, status());
+
+  FilePath file;
+  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(dir.path(), &file));
+  operation()->DirectoryExists(file);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY, status());
 }
 
 TEST_F(FileSystemOperationTest, TestReadDirFailure) {

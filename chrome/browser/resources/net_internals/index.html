@@ -14,6 +14,7 @@ found in the LICENSE file.
     <script src="dataview.js"></script>
     <script src="httpcacheview.js"></script>
     <script src="testview.js"></script>
+    <script src="hstsview.js"></script>
     <script src="main.js"></script>
     <script src="dnsview.js"></script>
     <script src="eventsview.js"></script>
@@ -44,6 +45,7 @@ found in the LICENSE file.
         <!-- Tab is only shown on Windows -->
         <li><a href="#serviceProviders" id=serviceProvidersTab style="display: none;">SPIs</a></li>
         <li><a href="#tests" id=testTab>Tests</a></li>
+        <li><a href="#hsts" id=hstsTab>HSTS</a></li>
       </ul>
       <div style="clear: both;"></div>
     </div>
@@ -147,6 +149,15 @@ found in the LICENSE file.
       </p>
     </div>
     <div id=spdyTabContent>
+      <h4>SPDY Status</h4>
+      <ul>
+        <li>SPDY Enabled: <span id=spdyEnabledSpan>????</span></li>
+        <li>Use Alternate Protocol: <span id=spdyUseAlternateProtocolSpan>????</span></li>
+        <li>Force SPDY Always: <span id=spdyForceAlwaysSpan>????</span></li>
+        <li>Force SPDY Over SSL: <span id=spdyForceOverSslSpan>????</span></li>
+        <li>Next Protocols: <span id=spdyNextProtocolsSpan>????</span></li>
+      </ul>
+
       <h4>SPDY sessions</h4>
         <!-- Only one of these two are shown -->
         <span id=spdySessionNoneSpan>None</span>
@@ -157,6 +168,11 @@ found in the LICENSE file.
         <div id=spdySessionDiv>
         </div>
       </p>
+
+      <h4>Alternate Protocol Mappings</h4>
+      <p />
+        <div id=spdyAlternateProtocolMappingsDiv>
+        </div>
     </div>
     <div id=httpCacheTabContent>
       <h4>Entries</h4>
@@ -202,23 +218,41 @@ found in the LICENSE file.
     <table width=100%>
     <tr>
     <td valign=top>
-      <h2>Dump data</h2>
-      <div style="margin: 8px">
-        <p><input id=securityStrippingCheckbox type=checkbox checked=yes>
-           Strip private information (cookies and credentials).
-        </p>
-        <p>
-          <a href="javascript:displayHelpForBugDump()">
-            Help: How to get data for bug reports?
-          </a>
-        </p>
-        <button id=exportToText class=bigButton>Dump to text</button>
+      <div id=dataViewDumpDataDiv>
+        <h2>Dump data</h2>
+        <div style="margin: 8px">
+          <p><input id=securityStrippingCheckbox type=checkbox checked=yes>
+             Strip private information (cookies and credentials).
+          </p>
+          <p>
+            <a href="javascript:displayHelpForBugDump()">
+              Help: How to get data for bug reports?
+            </a>
+          </p>
+          <button id=exportToText class=bigButton>Dump to text</button>
+        </div>
+      </div>
+      <div id=dataViewLoadDataDiv>
+        <h2>Load data</h2>
+        <div style="margin: 8px">
+          <p><input type=button value="Load log from file" id=dataViewLoadLogFile /></p>
+          <p>Only works with log files created with "--log-net-log=file_name".</p>
+          <p>Once a log is loaded, this page will stop collecting data, and will
+             only start gathering data again when the page is
+             <a href="javascript:history.go(0);">reloaded</a>.<BR>
+          </p>
+        </div>
       </div>
     </td>
 
     <td align=right valign=top>
-      <div class="capturingBox">
-        <b>Capturing all events...</b>
+      <div class="capturingBox" id=dataViewCapturingBox>
+        <span id=dataViewCapturingTextSpan>
+          <b>Capturing all events...</b>
+        </span>
+        <span id=dataViewLoggingTextSpan style="display: none;">
+          <b>Viewing loaded log file.</b>
+        </span>
         <table style="margin: 8px">
           <tr>
             <td>Passively captured:</td>
@@ -245,7 +279,7 @@ found in the LICENSE file.
 <!-- START OF HELP TEXT -->
 <script>
 function displayHelpForBugDump() {
-  // We can't access the popups loaded from DOMUI pages, so we instead populate
+  // We can't access the popups loaded from WebUI pages, so we instead populate
   // its contents using a data:URL. YUCK!
   // TODO(eroman): do something less hacky, like exposing a new URL.
   var helpContents =
@@ -315,6 +349,49 @@ function displayHelpForBugDump() {
         <input type=submit value="Start tests" />
       </form>
       <div id=testSummary></div>
+    </div>
+
+    <!-- HSTS tab -->
+    <div id=hstsTabContent>
+      <p>
+        HSTS is HTTPS Strict Transport Security: a way for sites to elect to
+        always use HTTPS. See <a href="http://dev.chromium.org/sts">
+        http://dev.chromium.org/sts</a>.</p>
+
+        <!-- This UI allows a user to query and update the browser's list of
+             HSTS domains. -->
+
+      <h4>Add domain</h4>
+
+      <p>Input a domain name to add it to the HSTS set:</p>
+      <form id=hstsAddForm>
+        Domain: <input type=text id=hstsAddInput type="url"
+                 placeholder="example.com"/><br/>
+        Include subdomains: <input type="checkbox" id=hstsCheckInput />
+        <input type=submit value="Add" />
+      </form>
+
+      <h4>Delete domain</h4>
+
+      <p>
+        Input a domain name to delete it from the HSTS set
+        (<i>you cannot delete preloaded entries</i>):
+      </p>
+      <form id=hstsDeleteForm>
+        Domain: <input type=text id=hstsDeleteInput type="url"
+                 placeholder="example.com"/>
+        <input type=submit value="Delete" />
+      </form>
+
+      <h4>Query domain</h4>
+
+      <p>Input a domain name to query the current HSTS set:</p>
+      <form id=hstsQueryForm>
+        Domain: <input type=text id=hstsQueryInput type="url"
+                 placeholder="example.com"/>
+        <input type=submit value="Query" />
+      </form>
+      <div style="margin-top: 1em; margin-left: 2em;" id=hstsQueryOutput></div>
     </div>
 
     <!-- ================= Events view =================== -->

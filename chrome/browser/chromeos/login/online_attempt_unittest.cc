@@ -6,7 +6,6 @@
 
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/login/auth_attempt_state.h"
 #include "chrome/browser/chromeos/login/online_attempt.h"
@@ -16,6 +15,7 @@
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher_unittest.h"
 #include "chrome/test/testing_profile.h"
+#include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -91,8 +91,7 @@ class OnlineAttemptTest : public ::testing::Test {
         BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask());
   }
 
-  static void RunThreadTest(OnlineAttempt* attempt, Profile* profile) {
-    attempt->Initiate(profile);
+  static void RunThreadTest() {
     MessageLoop::current()->RunAllPending();
   }
 
@@ -134,10 +133,10 @@ TEST_F(OnlineAttemptTest, LoginCancelRetry) {
   MockFactory<GotCanceledFetcher> factory;
   URLFetcher::set_factory(&factory);
 
+  attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest,
-                          attempt_, &profile));
+      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest));
 
   MessageLoop::current()->Run();
 
@@ -161,10 +160,10 @@ TEST_F(OnlineAttemptTest, LoginTimeout) {
   MockFactory<ExpectCanceledFetcher> factory;
   URLFetcher::set_factory(&factory);
 
+  attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest,
-                          attempt_, &profile));
+      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest));
 
   // Post a task to cancel the login attempt.
   CancelLogin(attempt_.get());
@@ -192,10 +191,10 @@ TEST_F(OnlineAttemptTest, HostedLoginRejected) {
 
   TestAttemptState local_state("", "", "", "", "", true);
   attempt_ = new OnlineAttempt(&local_state, resolver_.get());
+  attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest,
-                          attempt_, &profile));
+      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest));
 
   MessageLoop::current()->Run();
 
@@ -218,10 +217,10 @@ TEST_F(OnlineAttemptTest, FullLogin) {
 
   TestAttemptState local_state("", "", "", "", "", true);
   attempt_ = new OnlineAttempt(&local_state, resolver_.get());
+  attempt_->Initiate(&profile);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest,
-                          attempt_, &profile));
+      NewRunnableFunction(&OnlineAttemptTest::RunThreadTest));
 
   MessageLoop::current()->Run();
 

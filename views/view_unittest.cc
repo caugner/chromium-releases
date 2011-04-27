@@ -6,16 +6,16 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/path.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/path.h"
 #include "views/background.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/scroll_view.h"
 #include "views/controls/textfield/textfield.h"
-#include "views/event.h"
+#include "views/events/event.h"
 #include "views/focus/accelerator_handler.h"
 #include "views/focus/view_storage.h"
 #include "views/test/views_test_base.h"
@@ -58,6 +58,8 @@ class ViewTest : public ViewsTestBase {
   }
 };
 
+/*
+
 // Paints the RootView.
 void PaintRootView(views::RootView* root, bool empty_paint) {
   if (!empty_paint) {
@@ -69,11 +71,10 @@ void PaintRootView(views::RootView* root, bool empty_paint) {
     gfx::CanvasSkia canvas(paint_rect.width(), paint_rect.height(), true);
     canvas.TranslateInt(-paint_rect.x(), -paint_rect.y());
     canvas.ClipRectInt(0, 0, paint_rect.width(), paint_rect.height());
-    root->ProcessPaint(&canvas);
+    root->Paint(&canvas);
   }
 }
 
-/*
 typedef CWinTraits<WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS> CVTWTraits;
 
 // A trivial window implementation that tracks whether or not it has been
@@ -147,8 +148,7 @@ class TestView : public View {
     accelerator_count_map_.clear();
   }
 
-  virtual void DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current);
+  virtual void OnBoundsChanged();
   virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child);
   virtual bool OnMousePressed(const MouseEvent& event);
   virtual bool OnMouseDragged(const MouseEvent& event);
@@ -159,9 +159,8 @@ class TestView : public View {
   virtual void Paint(gfx::Canvas* canvas);
   virtual bool AcceleratorPressed(const Accelerator& accelerator);
 
-  // DidChangeBounds test
+  // OnBoundsChanged test
   bool did_change_bounds_;
-  gfx::Rect previous_bounds_;
   gfx::Rect new_bounds_;
 
   // AddRemoveNotifications test
@@ -216,28 +215,25 @@ class MockGestureManager : public GestureManager {
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
-// DidChangeBounds
+// OnBoundsChanged
 ////////////////////////////////////////////////////////////////////////////////
 
-void TestView::DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current) {
+void TestView::OnBoundsChanged() {
   did_change_bounds_ = true;
-  previous_bounds_ = previous;
-  new_bounds_ = current;
+  new_bounds_ = bounds();
 }
 
-TEST_F(ViewTest, DidChangeBounds) {
+TEST_F(ViewTest, OnBoundsChanged) {
   TestView* v = new TestView();
 
   gfx::Rect prev_rect(0, 0, 200, 200);
   gfx::Rect new_rect(100, 100, 250, 250);
 
-  v->SetBounds(prev_rect);
+  v->SetBoundsRect(prev_rect);
   v->Reset();
 
-  v->SetBounds(new_rect);
+  v->SetBoundsRect(new_rect);
   EXPECT_EQ(v->did_change_bounds_, true);
-  EXPECT_EQ(v->previous_bounds_, prev_rect);
   EXPECT_EQ(v->new_bounds_, new_rect);
 
   EXPECT_EQ(v->bounds(), gfx::Rect(new_rect));
@@ -331,19 +327,19 @@ TEST_F(ViewTest, AddRemoveNotifications) {
 ////////////////////////////////////////////////////////////////////////////////
 
 bool TestView::OnMousePressed(const MouseEvent& event) {
-  last_mouse_event_type_ = event.GetType();
+  last_mouse_event_type_ = event.type();
   location_.SetPoint(event.x(), event.y());
   return true;
 }
 
 bool TestView::OnMouseDragged(const MouseEvent& event) {
-  last_mouse_event_type_ = event.GetType();
+  last_mouse_event_type_ = event.type();
   location_.SetPoint(event.x(), event.y());
   return true;
 }
 
 void TestView::OnMouseReleased(const MouseEvent& event, bool canceled) {
-  last_mouse_event_type_ = event.GetType();
+  last_mouse_event_type_ = event.type();
   location_.SetPoint(event.x(), event.y());
 }
 
@@ -369,12 +365,12 @@ TEST_F(ViewTest, MouseEvent) {
   v1->Reset();
   v2->Reset();
 
-  MouseEvent pressed(Event::ET_MOUSE_PRESSED,
+  MouseEvent pressed(ui::ET_MOUSE_PRESSED,
                      110,
                      120,
-                     Event::EF_LEFT_BUTTON_DOWN);
+                     ui::EF_LEFT_BUTTON_DOWN);
   root->OnMousePressed(pressed);
-  EXPECT_EQ(v2->last_mouse_event_type_, Event::ET_MOUSE_PRESSED);
+  EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_PRESSED);
   EXPECT_EQ(v2->location_.x(), 10);
   EXPECT_EQ(v2->location_.y(), 20);
   // Make sure v1 did not receive the event
@@ -383,12 +379,12 @@ TEST_F(ViewTest, MouseEvent) {
   // Drag event out of bounds. Should still go to v2
   v1->Reset();
   v2->Reset();
-  MouseEvent dragged(Event::ET_MOUSE_DRAGGED,
+  MouseEvent dragged(ui::ET_MOUSE_DRAGGED,
                      50,
                      40,
-                     Event::EF_LEFT_BUTTON_DOWN);
+                     ui::EF_LEFT_BUTTON_DOWN);
   root->OnMouseDragged(dragged);
-  EXPECT_EQ(v2->last_mouse_event_type_, Event::ET_MOUSE_DRAGGED);
+  EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_DRAGGED);
   EXPECT_EQ(v2->location_.x(), -50);
   EXPECT_EQ(v2->location_.y(), -60);
   // Make sure v1 did not receive the event
@@ -397,9 +393,9 @@ TEST_F(ViewTest, MouseEvent) {
   // Releasted event out of bounds. Should still go to v2
   v1->Reset();
   v2->Reset();
-  MouseEvent released(Event::ET_MOUSE_RELEASED, 0, 0, 0);
+  MouseEvent released(ui::ET_MOUSE_RELEASED, 0, 0, 0);
   root->OnMouseDragged(released);
-  EXPECT_EQ(v2->last_mouse_event_type_, Event::ET_MOUSE_RELEASED);
+  EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_RELEASED);
   EXPECT_EQ(v2->location_.x(), -100);
   EXPECT_EQ(v2->location_.y(), -100);
   // Make sure v1 did not receive the event
@@ -420,7 +416,7 @@ bool MockGestureManager::ProcessTouchEventForGesture(
     dispatched_synthetic_event_ = false;
     return false;
   }
-  last_touch_event_ =  event.GetType();
+  last_touch_event_ =  event.type();
   last_view_ = source;
   previously_handled_flag_ = status != View::TOUCH_STATUS_UNKNOWN;
   dispatched_synthetic_event_ = true;
@@ -431,15 +427,15 @@ MockGestureManager::MockGestureManager() {
 }
 
 View::TouchStatus TestView::OnTouchEvent(const TouchEvent& event) {
-  last_touch_event_type_ = event.GetType();
+  last_touch_event_type_ = event.type();
   location_.SetPoint(event.x(), event.y());
   if (!in_touch_sequence_) {
-    if (event.GetType() == Event::ET_TOUCH_PRESSED) {
+    if (event.type() == ui::ET_TOUCH_PRESSED) {
       in_touch_sequence_ = true;
       return TOUCH_STATUS_START;
     }
   } else {
-    if (event.GetType() == Event::ET_TOUCH_RELEASED) {
+    if (event.type() == ui::ET_TOUCH_RELEASED) {
       in_touch_sequence_ = false;
       return TOUCH_STATUS_END;
     }
@@ -479,7 +475,7 @@ TEST_F(ViewTest, TouchEvent) {
   v2->Reset();
   gm->Reset();
 
-  TouchEvent unhandled(Event::ET_TOUCH_MOVED,
+  TouchEvent unhandled(ui::ET_TOUCH_MOVED,
                        400,
                        400,
                        0, /* no flags */
@@ -490,7 +486,7 @@ TEST_F(ViewTest, TouchEvent) {
   EXPECT_EQ(v2->last_touch_event_type_, 0);
 
   EXPECT_EQ(gm->previously_handled_flag_, false);
-  EXPECT_EQ(gm->last_touch_event_, Event::ET_TOUCH_MOVED);
+  EXPECT_EQ(gm->last_touch_event_, ui::ET_TOUCH_MOVED);
   EXPECT_EQ(gm->last_view_, root);
   EXPECT_EQ(gm->dispatched_synthetic_event_, true);
 
@@ -499,7 +495,7 @@ TEST_F(ViewTest, TouchEvent) {
   v2->Reset();
   gm->Reset();
 
-  TouchEvent pressed(Event::ET_TOUCH_PRESSED,
+  TouchEvent pressed(ui::ET_TOUCH_PRESSED,
                      110,
                      120,
                      0, /* no flags */
@@ -507,7 +503,7 @@ TEST_F(ViewTest, TouchEvent) {
   v2->last_touch_event_was_handled_ = true;
   root->OnTouchEvent(pressed);
 
-  EXPECT_EQ(v2->last_touch_event_type_, Event::ET_TOUCH_PRESSED);
+  EXPECT_EQ(v2->last_touch_event_type_, ui::ET_TOUCH_PRESSED);
   EXPECT_EQ(v2->location_.x(), 10);
   EXPECT_EQ(v2->location_.y(), 20);
   // Make sure v1 did not receive the event
@@ -521,13 +517,13 @@ TEST_F(ViewTest, TouchEvent) {
   // Drag event out of bounds. Should still go to v2
   v1->Reset();
   v2->Reset();
-  TouchEvent dragged(Event::ET_TOUCH_MOVED,
+  TouchEvent dragged(ui::ET_TOUCH_MOVED,
                      50,
                      40,
                      0, /* no flags */
                      0  /* first finger touch */);
   root->OnTouchEvent(dragged);
-  EXPECT_EQ(v2->last_touch_event_type_, Event::ET_TOUCH_MOVED);
+  EXPECT_EQ(v2->last_touch_event_type_, ui::ET_TOUCH_MOVED);
   EXPECT_EQ(v2->location_.x(), -50);
   EXPECT_EQ(v2->location_.y(), -60);
   // Make sure v1 did not receive the event
@@ -540,10 +536,10 @@ TEST_F(ViewTest, TouchEvent) {
   // Released event out of bounds. Should still go to v2
   v1->Reset();
   v2->Reset();
-  TouchEvent released(Event::ET_TOUCH_RELEASED, 0, 0, 0, 0 /* first finger */);
+  TouchEvent released(ui::ET_TOUCH_RELEASED, 0, 0, 0, 0 /* first finger */);
   v2->last_touch_event_was_handled_ = true;
   root->OnTouchEvent(released);
-  EXPECT_EQ(v2->last_touch_event_type_, Event::ET_TOUCH_RELEASED);
+  EXPECT_EQ(v2->last_touch_event_type_, ui::ET_TOUCH_RELEASED);
   EXPECT_EQ(v2->location_.x(), -100);
   EXPECT_EQ(v2->location_.y(), -100);
   // Make sure v1 did not receive the event
@@ -610,7 +606,7 @@ TEST_F(ViewTest, DISABLED_Painting) {
   v2->Reset();
   v3->Reset();
   v4->Reset();
-  v3->SchedulePaint(gfx::Rect(10, 10, 10, 10), false);
+  v3->SchedulePaintInRect(gfx::Rect(10, 10, 10, 10));
   PaintRootView(root, empty_paint);
 
   SkRect tmp_rect;
@@ -776,12 +772,12 @@ TEST_F(ViewTest, HitTestMasks) {
 
   gfx::Rect v1_bounds = gfx::Rect(0, 0, 100, 100);
   HitTestView* v1 = new HitTestView(false);
-  v1->SetBounds(v1_bounds);
+  v1->SetBoundsRect(v1_bounds);
   root_view->AddChildView(v1);
 
   gfx::Rect v2_bounds = gfx::Rect(105, 0, 100, 100);
   HitTestView* v2 = new HitTestView(true);
-  v2->SetBounds(v2_bounds);
+  v2->SetBoundsRect(v2_bounds);
   root_view->AddChildView(v2);
 
   gfx::Point v1_centerpoint = v1_bounds.CenterPoint();
@@ -796,11 +792,11 @@ TEST_F(ViewTest, HitTestMasks) {
   EXPECT_TRUE(v1->HitTest(ConvertPointToView(v1, v1_origin)));
   EXPECT_FALSE(v2->HitTest(ConvertPointToView(v2, v2_origin)));
 
-  // Test GetViewForPoint
-  EXPECT_EQ(v1, root_view->GetViewForPoint(v1_centerpoint));
-  EXPECT_EQ(v2, root_view->GetViewForPoint(v2_centerpoint));
-  EXPECT_EQ(v1, root_view->GetViewForPoint(v1_origin));
-  EXPECT_EQ(root_view, root_view->GetViewForPoint(v2_origin));
+  // Test GetEventHandlerForPoint
+  EXPECT_EQ(v1, root_view->GetEventHandlerForPoint(v1_centerpoint));
+  EXPECT_EQ(v2, root_view->GetEventHandlerForPoint(v2_centerpoint));
+  EXPECT_EQ(v1, root_view->GetEventHandlerForPoint(v1_origin));
+  EXPECT_EQ(root_view, root_view->GetEventHandlerForPoint(v2_origin));
 }
 
 TEST_F(ViewTest, Textfield) {
@@ -1028,6 +1024,37 @@ TEST_F(ViewTest, ActivateAccelerator) {
 #endif
 
 #if defined(OS_WIN)
+TEST_F(ViewTest, HiddenViewWithAccelerator) {
+  views::Accelerator return_accelerator(ui::VKEY_RETURN, false, false, false);
+  TestView* view = new TestView();
+  view->Reset();
+  view->AddAccelerator(return_accelerator);
+  EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 0);
+
+  WidgetWin window;
+  window.Init(NULL, gfx::Rect(0, 0, 100, 100));
+  window.set_delete_on_destroy(false);
+  window.set_window_style(WS_OVERLAPPEDWINDOW);
+  RootView* root = window.GetRootView();
+  root->AddChildView(view);
+
+  views::FocusManager* focus_manager =
+      views::FocusManager::GetFocusManagerForNativeView(window.GetNativeView());
+  ASSERT_TRUE(focus_manager);
+
+  view->SetVisible(false);
+  EXPECT_EQ(NULL,
+            focus_manager->GetCurrentTargetForAccelerator(return_accelerator));
+
+  view->SetVisible(true);
+  EXPECT_EQ(view,
+            focus_manager->GetCurrentTargetForAccelerator(return_accelerator));
+
+  window.CloseNow();
+}
+#endif
+
+#if defined(OS_WIN)
 ////////////////////////////////////////////////////////////////////////////////
 // Mouse-wheel message rerouting
 ////////////////////////////////////////////////////////////////////////////////
@@ -1097,7 +1124,12 @@ class SimpleWindowDelegate : public WindowDelegate {
 // under the mouse.
 // TODO(jcampan): http://crbug.com/10572 Disabled as it fails on the Vista build
 //                bot.
-TEST_F(ViewTest, FAILS_RerouteMouseWheelTest) {
+// Note that this fails for a variety of reasons:
+// - focused view is apparently reset across window activations and never
+//   properly restored
+// - this test depends on you not having any other window visible open under the
+//   area that it opens the test windows. --beng
+TEST_F(ViewTest, DISABLED_RerouteMouseWheelTest) {
   TestViewWithControls* view_with_controls = new TestViewWithControls();
   views::Window* window1 =
       views::Window::CreateChromeWindow(
@@ -1238,13 +1270,13 @@ class DefaultButtonTest : public ViewTest {
     focus_manager_ = test_dialog_->contents_->GetFocusManager();
     ASSERT_TRUE(focus_manager_ != NULL);
     client_view_ =
-        static_cast<views::DialogClientView*>(window->GetClientView());
+        static_cast<views::DialogClientView*>(window->client_view());
     ok_button_ = client_view_->ok_button();
     cancel_button_ = client_view_->cancel_button();
   }
 
   void SimularePressingEnterAndCheckDefaultButton(ButtonID button_id) {
-    KeyEvent event(Event::ET_KEY_PRESSED, ui::VKEY_RETURN, 0, 0, 0);
+    KeyEvent event(ui::ET_KEY_PRESSED, ui::VKEY_RETURN, 0);
     focus_manager_->OnKeyEvent(event);
     switch (button_id) {
       case OK:
@@ -1407,33 +1439,22 @@ class TestChangeNativeViewHierarchy {
     view_test_->RunPendingMessages();
   }
 
-  void CheckEnumeratingRootViews() {
-    std::vector<RootView*> enumerated_root_views;
-#if defined(OS_WIN)
-    views::Widget::FindAllRootViews(host_->GetNativeView(),
-                                    &enumerated_root_views);
-#else
-    // host_->GetNativeView() returns gfx::NativeView which is GtkWidget on
-    // systems other than Windows and views::Widget::FindAllRootViews()
-    // requires GtkWindow.
-    if (host_->GetWindow()) {
-      views::Widget::FindAllRootViews(host_->GetWindow()->GetNativeWindow(),
-                                      &enumerated_root_views);
-    } else {
+  void CheckEnumeratingNativeWidgets() {
+    if (!host_->GetWindow())
       return;
-    }
-#endif
-    EXPECT_EQ(TestNativeViewHierarchy::kTotalViews + 1,
-              enumerated_root_views.size());
+    NativeWidget::NativeWidgets widgets;
+    NativeWidget::GetAllNativeWidgets(host_->GetNativeView(), &widgets);
+    EXPECT_EQ(TestNativeViewHierarchy::kTotalViews + 1, widgets.size());
     // Unfortunately there is no guarantee the sequence of views here so always
     // go through all of them.
-    for (std::vector<RootView*>::iterator i = enumerated_root_views.begin();
-         i != enumerated_root_views.end(); ++i) {
-      if (host_->GetRootView() == *i)
+    for (NativeWidget::NativeWidgets::iterator i = widgets.begin();
+         i != widgets.end(); ++i) {
+      RootView* root_view = (*i)->GetWidget()->GetRootView();
+      if (host_->GetRootView() == root_view)
         continue;
       size_t j;
       for (j = 0; j < TestNativeViewHierarchy::kTotalViews; ++j)
-        if (root_views_[j] == *i)
+        if (root_views_[j] == root_view)
           break;
       // EXPECT_LT/GT/GE() fails to compile with class-defined constants
       // with gcc, with error
@@ -1477,7 +1498,7 @@ TEST_F(ViewTest, ChangeNativeViewHierarchyFindRoots) {
   // TODO(georgey): Fix the test for Linux
 #if defined(OS_WIN)
   TestChangeNativeViewHierarchy test(this);
-  test.CheckEnumeratingRootViews();
+  test.CheckEnumeratingNativeWidgets();
 #endif
 }
 
@@ -1488,3 +1509,272 @@ TEST_F(ViewTest, ChangeNativeViewHierarchyChangeHierarchy) {
   test.CheckChangingHierarhy();
 #endif
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Transformations
+////////////////////////////////////////////////////////////////////////////////
+
+class TransformPaintView : public TestView {
+ public:
+  TransformPaintView() {}
+  virtual ~TransformPaintView() {}
+
+  void ClearScheduledPaintRect() {
+    scheduled_paint_rect_ = gfx::Rect();
+  }
+
+  gfx::Rect scheduled_paint_rect() const { return scheduled_paint_rect_; }
+
+  // Overridden from View:
+  virtual void SchedulePaintInRect(const gfx::Rect& rect) {
+    gfx::Rect xrect = ConvertRectToParent(rect);
+    scheduled_paint_rect_ = scheduled_paint_rect_.Union(xrect);
+  }
+
+ private:
+  gfx::Rect scheduled_paint_rect_;
+
+  DISALLOW_COPY_AND_ASSIGN(TransformPaintView);
+};
+
+TEST_F(ViewTest, TransformPaint) {
+  TransformPaintView* v1 = new TransformPaintView();
+  v1->SetBounds(0, 0, 500, 300);
+
+  TestView* v2 = new TestView();
+  v2->SetBounds(100, 100, 200, 100);
+
+  Widget* widget = CreateWidget();
+#if defined(OS_WIN)
+  WidgetWin* window_win = static_cast<WidgetWin*>(widget);
+  window_win->set_window_style(WS_OVERLAPPEDWINDOW);
+  window_win->Init(NULL, gfx::Rect(50, 50, 650, 650));
+#endif
+  widget->Show();
+  RootView* root = widget->GetRootView();
+
+  root->AddChildView(v1);
+  v1->AddChildView(v2);
+
+  // At this moment, |v2| occupies (100, 100) to (300, 200) in |root|.
+  v1->ClearScheduledPaintRect();
+  v2->SchedulePaint();
+
+  EXPECT_EQ(gfx::Rect(100, 100, 200, 100), v1->scheduled_paint_rect());
+
+  // Rotate |v1| counter-clockwise.
+  v1->SetRotation(-90.0);
+  v1->SetTranslateY(500);
+
+  // |v2| now occupies (100, 200) to (200, 400) in |root|.
+
+  v1->ClearScheduledPaintRect();
+  v2->SchedulePaint();
+
+  EXPECT_EQ(gfx::Rect(100, 200, 100, 200), v1->scheduled_paint_rect());
+
+  widget->CloseNow();
+}
+
+TEST_F(ViewTest, TransformEvent) {
+  TestView* v1 = new TestView();
+  v1->SetBounds(0, 0, 500, 300);
+
+  TestView* v2 = new TestView();
+  v2->SetBounds(100, 100, 200, 100);
+
+  Widget* widget = CreateWidget();
+#if defined(OS_WIN)
+  WidgetWin* window_win = static_cast<WidgetWin*>(widget);
+  window_win->set_window_style(WS_OVERLAPPEDWINDOW);
+  window_win->Init(NULL, gfx::Rect(50, 50, 650, 650));
+#endif
+  RootView* root = widget->GetRootView();
+
+  root->AddChildView(v1);
+  v1->AddChildView(v2);
+
+  // At this moment, |v2| occupies (100, 100) to (300, 200) in |root|.
+
+  // Rotate |v1| counter-clockwise.
+  v1->SetRotation(-90.0);
+  v1->SetTranslateY(500);
+
+  // |v2| now occupies (100, 200) to (200, 400) in |root|.
+  v1->Reset();
+  v2->Reset();
+
+  MouseEvent pressed(ui::ET_MOUSE_PRESSED,
+                     110, 210,
+                     ui::EF_LEFT_BUTTON_DOWN);
+  root->OnMousePressed(pressed);
+  EXPECT_EQ(0, v1->last_mouse_event_type_);
+  EXPECT_EQ(ui::ET_MOUSE_PRESSED, v2->last_mouse_event_type_);
+  EXPECT_EQ(190, v2->location_.x());
+  EXPECT_EQ(10, v2->location_.y());
+
+  MouseEvent released(ui::ET_MOUSE_RELEASED, 0, 0, 0);
+  root->OnMouseReleased(released, false);
+
+  // Now rotate |v2| inside |v1| clockwise.
+  v2->SetRotation(90.0);
+  v2->SetTranslateX(100);
+
+  // Now, |v2| occupies (100, 100) to (200, 300) in |v1|, and (100, 300) to
+  // (300, 400) in |root|.
+
+  v1->Reset();
+  v2->Reset();
+
+  MouseEvent p2(ui::ET_MOUSE_PRESSED,
+                110, 320,
+                ui::EF_LEFT_BUTTON_DOWN);
+  root->OnMousePressed(p2);
+  EXPECT_EQ(0, v1->last_mouse_event_type_);
+  EXPECT_EQ(ui::ET_MOUSE_PRESSED, v2->last_mouse_event_type_);
+  EXPECT_EQ(10, v2->location_.x());
+  EXPECT_EQ(20, v2->location_.y());
+
+  root->OnMouseReleased(released, false);
+
+  v1->ResetTransform();
+  v2->ResetTransform();
+
+  TestView* v3 = new TestView();
+  v3->SetBounds(10, 10, 20, 30);
+  v2->AddChildView(v3);
+
+  // Rotate |v3| clockwise with respect to |v2|.
+  v3->SetRotation(90.0);
+  v3->SetTranslateX(30);
+
+  // Scale |v2| with respect to |v1| along both axis.
+  v2->SetScale(0.8f, 0.5f);
+
+  // |v3| occupies (108, 105) to (132, 115) in |root|.
+
+  v1->Reset();
+  v2->Reset();
+  v3->Reset();
+
+  MouseEvent p3(ui::ET_MOUSE_PRESSED,
+                112, 110,
+                ui::EF_LEFT_BUTTON_DOWN);
+  root->OnMousePressed(p3);
+
+  EXPECT_EQ(ui::ET_MOUSE_PRESSED, v3->last_mouse_event_type_);
+  EXPECT_EQ(10, v3->location_.x());
+  EXPECT_EQ(25, v3->location_.y());
+
+  root->OnMouseReleased(released, false);
+
+  v1->ResetTransform();
+  v2->ResetTransform();
+  v3->ResetTransform();
+
+  v1->Reset();
+  v2->Reset();
+  v3->Reset();
+
+  // Rotate |v3| clockwise with respect to |v2|, and scale it along both axis.
+  v3->SetRotation(90.0);
+  v3->SetTranslateX(30);
+  // Rotation sets some scaling transformation. Using SetScale would overwrite
+  // that and pollute the rotation. So combine the scaling with the existing
+  // transforamtion.
+  v3->ConcatScale(0.8f, 0.5f);
+
+  // Translate |v2| with respect to |v1|.
+  v2->SetTranslate(10, 10);
+
+  // |v3| now occupies (120, 120) to (144, 130) in |root|.
+
+  MouseEvent p4(ui::ET_MOUSE_PRESSED,
+                124, 125,
+                ui::EF_LEFT_BUTTON_DOWN);
+  root->OnMousePressed(p4);
+
+  EXPECT_EQ(ui::ET_MOUSE_PRESSED, v3->last_mouse_event_type_);
+  EXPECT_EQ(10, v3->location_.x());
+  EXPECT_EQ(25, v3->location_.y());
+
+  root->OnMouseReleased(released, false);
+
+  widget->CloseNow();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// OnVisibleBoundsChanged()
+
+class VisibleBoundsView : public View {
+ public:
+  VisibleBoundsView() : received_notification_(false) {}
+  virtual ~VisibleBoundsView() {}
+
+  bool received_notification() const { return received_notification_; }
+  void set_received_notification(bool received) {
+    received_notification_ = received;
+  }
+
+ private:
+  // Overridden from View:
+  virtual bool NeedsNotificationWhenVisibleBoundsChange() const {
+     return true;
+  }
+  virtual void OnVisibleBoundsChanged() {
+    received_notification_ = true;
+  }
+
+  bool received_notification_;
+
+  DISALLOW_COPY_AND_ASSIGN(VisibleBoundsView);
+};
+
+#if defined(OS_WIN)
+// TODO(beng): This can be cross platform when widget construction/init is.
+TEST_F(ViewTest, OnVisibleBoundsChanged) {
+  gfx::Rect viewport_bounds(0, 0, 100, 100);
+
+  scoped_ptr<Widget> widget(CreateWidget());
+  WidgetWin* widget_win = static_cast<WidgetWin*>(widget.get());
+  widget_win->set_delete_on_destroy(false);
+  widget_win->set_window_style(WS_OVERLAPPEDWINDOW);
+  widget_win->Init(NULL, viewport_bounds);
+  widget->GetRootView()->SetBoundsRect(viewport_bounds);
+
+  View* viewport = new View;
+  widget->GetRootView()->SetContentsView(viewport);
+  View* contents = new View;
+  viewport->AddChildView(contents);
+  viewport->SetBoundsRect(viewport_bounds);
+  contents->SetBounds(0, 0, 100, 200);
+
+  // Create a view that cares about visible bounds notifications, and position
+  // it just outside the visible bounds of the viewport.
+  VisibleBoundsView* child = new VisibleBoundsView;
+  contents->AddChildView(child);
+  child->SetBounds(10, 110, 50, 50);
+
+  // The child bound should be fully clipped.
+  EXPECT_TRUE(child->GetVisibleBounds().IsEmpty());
+
+  // Now scroll the contents, but not enough to make the child visible.
+  contents->SetY(contents->y() - 1);
+
+  // We should have received the notification since the visible bounds may have
+  // changed (even though they didn't).
+  EXPECT_TRUE(child->received_notification());
+  EXPECT_TRUE(child->GetVisibleBounds().IsEmpty());
+  child->set_received_notification(false);
+
+  // Now scroll the contents, this time by enough to make the child visible by
+  // one pixel.
+  contents->SetY(contents->y() - 10);
+  EXPECT_TRUE(child->received_notification());
+  EXPECT_EQ(1, child->GetVisibleBounds().height());
+  child->set_received_notification(false);
+
+  widget->CloseNow();
+}
+
+#endif

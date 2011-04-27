@@ -19,6 +19,7 @@ typedef enum {
   PP_RESOURCESTRING_PDFGETPASSWORD = 0,
   PP_RESOURCESTRING_PDFLOADING = 1,
   PP_RESOURCESTRING_PDFLOAD_FAILED = 2,
+  PP_RESOURCESTRING_PDFPROGRESSLOADING = 3,
 } PP_ResourceString;
 
 typedef enum {
@@ -45,6 +46,17 @@ typedef enum {
   PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_8 = 20,
   PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_9 = 21,
   PP_RESOURCEIMAGE_PDF_BUTTON_THUMBNAIL_NUM_BACKGROUND = 22,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_0 = 23,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_1 = 24,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_2 = 25,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_3 = 26,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_4 = 27,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_5 = 28,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_6 = 29,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_7 = 30,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_8 = 31,
+  PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_BACKGROUND = 32,
+  PP_RESOURCEIMAGE_PDF_PAGE_DROPSHADOW = 33,
 } PP_ResourceImage;
 
 typedef enum {
@@ -82,8 +94,8 @@ struct PP_PrivateFindResult {
 
 struct PPB_PDF {
   // Returns a localized string.
-  PP_Var (*GetLocalizedString)(PP_Instance instance,
-                               PP_ResourceString string_id);
+  struct PP_Var (*GetLocalizedString)(PP_Instance instance,
+                                      PP_ResourceString string_id);
 
   // Returns a resource image.
   PP_Resource (*GetResourceImage)(PP_Instance instance,
@@ -95,7 +107,7 @@ struct PPB_PDF {
   // Currently Linux-only.
   PP_Resource (*GetFontFileWithFallback)(
       PP_Instance instance,
-      const PP_FontDescription_Dev* description,
+      const struct PP_FontDescription_Dev* description,
       PP_PrivateFontCharset charset);
 
   // Given a resource previously returned by GetFontFileWithFallback, returns
@@ -112,7 +124,7 @@ struct PPB_PDF {
      const unsigned short* string,
      const unsigned short* term,
      bool case_sensitive,
-     PP_PrivateFindResult** results,
+     struct PP_PrivateFindResult** results,
      int* count);
 
   // Since WebFrame doesn't know about PPAPI requests, it'll think the page has
@@ -129,7 +141,7 @@ struct PPB_PDF {
   void (*HistogramPDFPageCount)(int count);
 
   // Notifies the browser that the given action has been performed.
-  void (*UserMetricsRecordAction)(PP_Var action);
+  void (*UserMetricsRecordAction)(struct PP_Var action);
 
   // Notifies the browser that the PDF has an unsupported feature.
   void (*HasUnsupportedFeature)(PP_Instance instance);

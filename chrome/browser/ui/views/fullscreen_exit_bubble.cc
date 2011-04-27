@@ -6,12 +6,12 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "gfx/canvas_skia.h"
 #include "grit/generated_resources.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
 #include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/window/window.h"
@@ -39,7 +39,7 @@ class FullscreenExitBubble::FullscreenExitView : public views::View {
 
   // views::View
   virtual void Layout();
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
   // Clickable hint text to show in the bubble.
   views::Link link_;
@@ -83,7 +83,7 @@ void FullscreenExitBubble::FullscreenExitView::Layout() {
                   link_preferred_size.width(), link_preferred_size.height());
 }
 
-void FullscreenExitBubble::FullscreenExitView::Paint(gfx::Canvas* canvas) {
+void FullscreenExitBubble::FullscreenExitView::OnPaint(gfx::Canvas* canvas) {
   // Create a round-bottomed rect to fill the whole View.
   SkRect rect;
   SkScalar padding = SkIntToScalar(kPaddingPixels);
@@ -114,9 +114,9 @@ class FullscreenExitBubble::FullscreenExitPopup : public views::WidgetWin {
   virtual ~FullscreenExitPopup() {}
 
   // views::WidgetWin:
-  virtual LRESULT OnMouseActivate(HWND window,
-                                  UINT hittest_code,
-                                  UINT message) {
+  virtual LRESULT OnMouseActivate(UINT message,
+                                  WPARAM w_param,
+                                  LPARAM l_param) OVERRIDE {
     // Prevent the popup from being activated, so it won't steal focus from the
     // rest of the browser, and doesn't cause problems with the FocusManager's
     // "RestoreFocusedView()" functionality.

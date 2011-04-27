@@ -12,10 +12,10 @@
 #include "chrome/browser/ui/gtk/translate/after_translate_infobar_gtk.h"
 #include "chrome/browser/ui/gtk/translate/before_translate_infobar_gtk.h"
 #include "chrome/browser/ui/gtk/translate/translate_message_infobar_gtk.h"
-#include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/canvas.h"
 
 namespace {
 
@@ -134,14 +134,15 @@ GtkWidget* TranslateInfoBarBase::CreateLabel(const std::string& text) {
   return label;
 }
 
-GtkWidget* TranslateInfoBarBase::CreateLanguageCombobox(int selected_language,
-                                                        int exclude_language) {
+GtkWidget* TranslateInfoBarBase::CreateLanguageCombobox(
+    size_t selected_language,
+    size_t exclude_language) {
   GtkListStore* model = gtk_list_store_new(LANGUAGE_COMBO_COLUMN_COUNT,
                                            G_TYPE_INT, G_TYPE_STRING);
   bool set_selection = false;
   GtkTreeIter selected_iter;
   TranslateInfoBarDelegate* delegate = GetDelegate();
-  for (int i = 0; i < delegate->GetLanguageCount(); ++i) {
+  for (size_t i = 0; i < delegate->GetLanguageCount(); ++i) {
     if (i == exclude_language)
       continue;
     GtkTreeIter tree_iter;
@@ -171,7 +172,7 @@ GtkWidget* TranslateInfoBarBase::CreateLanguageCombobox(int selected_language,
 }
 
 // static
-int TranslateInfoBarBase::GetLanguageComboboxActiveId(GtkComboBox* combo) {
+size_t TranslateInfoBarBase::GetLanguageComboboxActiveId(GtkComboBox* combo) {
   GtkTreeIter iter;
   if (!gtk_combo_box_get_active_iter(combo, &iter))
     return 0;
@@ -180,7 +181,7 @@ int TranslateInfoBarBase::GetLanguageComboboxActiveId(GtkComboBox* combo) {
   gtk_tree_model_get(gtk_combo_box_get_model(combo), &iter,
                      LANGUAGE_COMBO_COLUMN_ID, &id,
                      -1);
-  return id;
+  return static_cast<size_t>(id);
 }
 
 TranslateInfoBarDelegate* TranslateInfoBarBase::GetDelegate() const {
@@ -213,7 +214,7 @@ void TranslateInfoBarBase::OnOptionsClicked(GtkWidget* sender) {
     options_menu_model_.reset(new OptionsMenuModel(GetDelegate()));
     options_menu_menu_.reset(new MenuGtk(NULL, options_menu_model_.get()));
   }
-  options_menu_menu_->Popup(sender, 1, gtk_get_current_event_time());
+  options_menu_menu_->PopupForWidget(sender, 1, gtk_get_current_event_time());
 }
 
 // TranslateInfoBarDelegate specific method:
@@ -234,8 +235,5 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar() {
       NOTREACHED();
   }
   infobar->Init();
-  // Set |infobar_view_| so that the model can notify the infobar when it
-  // changes.
-  infobar_view_ = infobar;
   return infobar;
 }

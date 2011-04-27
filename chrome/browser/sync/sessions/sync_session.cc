@@ -24,6 +24,34 @@ SyncSession::SyncSession(SyncSessionContext* context, Delegate* delegate,
 
 SyncSession::~SyncSession() {}
 
+void SyncSession::Coalesce(const SyncSession& session) {
+  if (context_ != session.context() || delegate_ != session.delegate_) {
+    NOTREACHED();
+    return;
+  }
+
+  // When we coalesce sessions, the sync update source gets overwritten with the
+  // most recent, while the type/payload map gets merged.
+  CoalescePayloads(&source_.types, session.source_.types);
+  source_.updates_source = session.source_.updates_source;
+
+  std::vector<ModelSafeWorker*> temp;
+  std::set_union(workers_.begin(), workers_.end(),
+                 session.workers_.begin(), session.workers_.end(),
+                 std::back_inserter(temp));
+  workers_.swap(temp);
+
+  ModelSafeRoutingInfo temp_r;
+  std::set_union(routing_info_.begin(), routing_info_.end(),
+      session.routing_info_.begin(), session.routing_info_.end(),
+      std::insert_iterator<ModelSafeRoutingInfo>(temp_r, temp_r.begin()));
+  routing_info_.swap(temp_r);
+}
+
+void SyncSession::ResetTransientState() {
+  status_controller_.reset(new StatusController(routing_info_));
+}
+
 SyncSessionSnapshot SyncSession::TakeSnapshot() const {
   syncable::ScopedDirLookup dir(context_->directory_manager(),
                                 context_->account_name());
@@ -55,14 +83,15 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
       delegate_->IsSyncingCurrentlySilenced(),
       status_controller_->unsynced_handles().size(),
       status_controller_->TotalNumConflictingItems(),
-      status_controller_->did_commit_items());
+      status_controller_->did_commit_items(),
+      source_);
 }
 
 SyncSourceInfo SyncSession::TestAndSetSource() {
   SyncSourceInfo old_source = source_;
   source_ = SyncSourceInfo(
       sync_pb::GetUpdatesCallerInfo::SYNC_CYCLE_CONTINUATION,
-      source_.second);
+      source_.types);
   return old_source;
 }
 

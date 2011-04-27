@@ -12,20 +12,21 @@
 #include "base/path_service.h"
 #include "base/singleton.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_job.h"
-#include "net/url_request/url_request_unittest.h"
+#include "net/url_request/url_request_test_util.h"
 
 namespace {
 
@@ -198,7 +199,10 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
         test_data_directory_.AppendASCII("printing/cloud_print_uitest.pdf");
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(&PrintDialogCloud::CreateDialogImpl, path_to_pdf));
+        NewRunnableFunction(&PrintDialogCloud::CreateDialogImpl,
+                            path_to_pdf,
+                            string16(),
+                            true));
   }
 
   bool handler_added_;
@@ -246,9 +250,9 @@ IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, DISABLED_DialogGrabbed) {
   ASSERT_TRUE(browser()->GetSelectedTabContents());
   ASSERT_TRUE(browser()->GetSelectedTabContents()->render_view_host());
 
-  std::wstring window_print(L"window.print()");
+  string16 window_print = ASCIIToUTF16("window.print()");
   browser()->GetSelectedTabContents()->render_view_host()->
-      ExecuteJavascriptInWebFrame(std::wstring(), window_print);
+      ExecuteJavascriptInWebFrame(string16(), window_print);
 
   ui_test_utils::RunMessageLoop();
 

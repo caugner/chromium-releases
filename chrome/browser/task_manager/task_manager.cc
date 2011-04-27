@@ -14,18 +14,18 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/task_manager/task_manager_resource_providers.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -122,7 +122,7 @@ void TaskManagerModel::RemoveObserver(TaskManagerModelObserver* observer) {
 
 string16 TaskManagerModel::GetResourceTitle(int index) const {
   CHECK_LT(index, ResourceCount());
-  return WideToUTF16Hack(resources_[index]->GetTitle());
+  return resources_[index]->GetTitle();
 }
 
 int64 TaskManagerModel::GetNetworkUsage(int index) const {
@@ -149,13 +149,13 @@ double TaskManagerModel::GetCPUUsage(int index) const {
 
 string16 TaskManagerModel::GetResourceCPUUsage(int index) const {
   CHECK_LT(index, ResourceCount());
-  return WideToUTF16Hack(StringPrintf(
+  return UTF8ToUTF16(StringPrintf(
 #if defined(OS_MACOSX)
       // Activity Monitor shows %cpu with one decimal digit -- be
       // consistent with that.
-      L"%.1f",
+      "%.1f",
 #else
-      L"%.0f",
+      "%.0f",
 #endif
       GetCPUUsage(resources_[index])));
 }
@@ -839,7 +839,7 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
   TaskManager::Resource* resource = NULL;
   for (ResourceProviderList::iterator iter = providers_.begin();
        iter != providers_.end(); ++iter) {
-    resource = (*iter)->GetResource(param.origin_child_id,
+    resource = (*iter)->GetResource(param.origin_pid,
                                     param.render_process_host_child_id,
                                     param.routing_id);
     if (resource)
@@ -851,9 +851,8 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
     // tab that started a download was closed, or the request may have had
     // no originating resource associated with it in the first place.
     // We attribute orphaned/unaccounted activity to the Browser process.
-    int browser_pid = base::GetCurrentProcId();
-    CHECK(param.origin_child_id != browser_pid);
-    param.origin_child_id = browser_pid;
+    CHECK(param.origin_pid || (param.render_process_host_child_id != -1));
+    param.origin_pid = 0;
     param.render_process_host_child_id = param.routing_id = -1;
     BytesRead(param);
     return;
@@ -904,15 +903,18 @@ void TaskManagerModel::OnBytesRead(net::URLRequestJob* job, const char* buf,
                                                &render_process_host_child_id,
                                                &routing_id);
 
+  // Get the origin PID of the request's originator.  This will only be set for
+  // plugins - for renderer or browser initiated requests it will be zero.
+  int origin_pid =
+      chrome_browser_net::GetOriginPIDForRequest(job->request());
+
   // This happens in the IO thread, post it to the UI thread.
-  int origin_child_id =
-      chrome_browser_net::GetOriginProcessUniqueIDForRequest(job->request());
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(
           this,
           &TaskManagerModel::BytesRead,
-          BytesReadParam(origin_child_id,
+          BytesReadParam(origin_pid,
           render_process_host_child_id,
           routing_id, byte_count)));
 }

@@ -142,8 +142,8 @@ cr.define('options', function() {
    * @constructor
    */
   function CertificateManager(model) {
-    OptionsPage.call(this, 'certificateManager',
-                     localStrings.getString('certificateManagerPage'),
+    OptionsPage.call(this, 'certificates',
+                     templateData.certificateManagerPageTabTitle,
                      'certificateManagerPage');
   }
 

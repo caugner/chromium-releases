@@ -7,8 +7,8 @@
 #include "base/i18n/rtl.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/search_engines/edit_search_engine_controller.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/ui/search_engines/edit_search_engine_controller.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
@@ -18,8 +18,8 @@
 #include "views/controls/label.h"
 #include "views/controls/image_view.h"
 #include "views/controls/table/table_view.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/window/window.h"
 
 using views::GridLayout;
@@ -142,9 +142,9 @@ void EditSearchEngineDialog::Init() {
 
   UpdateImageViews();
 
-  const int related_x = kRelatedControlHorizontalSpacing;
-  const int related_y = kRelatedControlVerticalSpacing;
-  const int unrelated_y = kUnrelatedControlVerticalSpacing;
+  const int related_x = views::kRelatedControlHorizontalSpacing;
+  const int related_y = views::kRelatedControlVerticalSpacing;
+  const int unrelated_y = views::kUnrelatedControlVerticalSpacing;
 
   // View and GridLayout take care of deleting GridLayout for us.
   GridLayout* layout = GridLayout::CreatePanel(this);

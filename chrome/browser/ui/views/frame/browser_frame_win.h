@@ -32,14 +32,14 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
 
   // This initialization function must be called after construction, it is
   // separate to avoid recursive calling of the frame from its constructor.
-  void Init();
+  void InitBrowserFrame();
 
   BrowserView* browser_view() const { return browser_view_; }
 
   // BrowserFrame implementation.
   virtual views::Window* GetWindow();
   virtual int GetMinimizeButtonOffset() const;
-  virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const;
+  virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const;
   virtual int GetHorizontalTabStripVerticalOffset(bool restored) const;
   virtual void UpdateThrobber(bool running);
   virtual ui::ThemeProvider* GetThemeProviderForFrame() const;
@@ -49,23 +49,25 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
 
  protected:
   // Overridden from views::WindowWin:
-  virtual gfx::Insets GetClientAreaInsets() const;
-  virtual bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator);
-  virtual void OnEndSession(BOOL ending, UINT logoff);
-  virtual void OnEnterSizeMove();
-  virtual void OnExitSizeMove();
-  virtual void OnInitMenuPopup(HMENU menu, UINT position, BOOL is_system_menu);
-  virtual LRESULT OnMouseActivate(HWND window,
-                                  UINT hittest_code,
-                                  UINT message);
-  virtual void OnMove(const CPoint& point);
-  virtual void OnMoving(UINT param, LPRECT new_bounds);
-  virtual LRESULT OnNCActivate(BOOL active);
-  virtual LRESULT OnNCHitTest(const CPoint& pt);
-  virtual void OnWindowPosChanged(WINDOWPOS* window_pos);
-  virtual ui::ThemeProvider* GetThemeProvider() const;
-  virtual ui::ThemeProvider* GetDefaultThemeProvider() const;
-  virtual void OnScreenReaderDetected();
+  virtual gfx::Insets GetClientAreaInsets() const OVERRIDE;
+  virtual bool GetAccelerator(int cmd_id,
+                              ui::Accelerator* accelerator) OVERRIDE;
+  virtual void OnEndSession(BOOL ending, UINT logoff) OVERRIDE;
+  virtual void OnEnterSizeMove() OVERRIDE;
+  virtual void OnExitSizeMove() OVERRIDE;
+  virtual void OnInitMenuPopup(HMENU menu,
+                               UINT position,
+                               BOOL is_system_menu) OVERRIDE;
+  virtual LRESULT OnMouseActivate(UINT message,
+                                  WPARAM w_param,
+                                  LPARAM l_param) OVERRIDE;
+  virtual void OnMove(const CPoint& point) OVERRIDE;
+  virtual void OnMoving(UINT param, LPRECT new_bounds) OVERRIDE;
+  virtual LRESULT OnNCActivate(BOOL active) OVERRIDE;
+  virtual LRESULT OnNCHitTest(const CPoint& pt) OVERRIDE;
+  virtual void OnWindowPosChanged(WINDOWPOS* window_pos) OVERRIDE;
+  virtual ui::ThemeProvider* GetThemeProvider() const OVERRIDE;
+  virtual void OnScreenReaderDetected() OVERRIDE;
 
   // Overridden from views::Window:
   virtual int GetShowState() const;

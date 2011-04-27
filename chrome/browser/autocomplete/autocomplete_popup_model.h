@@ -8,17 +8,14 @@
 
 #include "base/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
+#include "chrome/browser/autocomplete/autocomplete_edit.h"
 
-class AutocompleteEditModel;
 class AutocompleteEditView;
+class AutocompletePopupView;
 class Profile;
 class SkBitmap;
 
-class AutocompletePopupView;
-
-class AutocompletePopupModel : public NotificationObserver {
+class AutocompletePopupModel {
  public:
   AutocompletePopupModel(AutocompletePopupView* popup_view,
                          AutocompleteEditModel* edit_model,
@@ -26,18 +23,10 @@ class AutocompletePopupModel : public NotificationObserver {
   ~AutocompletePopupModel();
 
   // Invoked when the profile has changed.
-  void SetProfile(Profile* profile);
+  void set_profile(Profile* profile) { profile_ = profile; }
 
-  // Starts a new query running.  These parameters are passed through to the
-  // autocomplete controller; see comments there.
-  void StartAutocomplete(const std::wstring& text,
-                         const std::wstring& desired_tld,
-                         bool prevent_inline_autocomplete,
-                         bool prefer_keyword,
-                         bool allow_exact_keyword_match);
-
-  // Closes the window and cancels any pending asynchronous queries.
-  void StopAutocomplete();
+  // TODO(sky): see about removing this.
+  Profile* profile() const { return profile_; }
 
   // Returns true if the popup is currently open.
   bool IsOpen() const;
@@ -46,11 +35,11 @@ class AutocompletePopupModel : public NotificationObserver {
 
   // Returns the AutocompleteController used by this popup.
   AutocompleteController* autocomplete_controller() const {
-    return controller_.get();
+    return edit_model_->autocomplete_controller();
   }
 
   const AutocompleteResult& result() const {
-    return controller_->result();
+    return autocomplete_controller()->result();
   }
 
   size_t hovered_line() const {
@@ -70,27 +59,16 @@ class AutocompletePopupModel : public NotificationObserver {
   // new temporary text.  |line| will be clamped to the range of valid lines.
   // |reset_to_default| is true when the selection is being reset back to the
   // default match, and thus there is no temporary text (and no
-  // |manually_selected_match_|).
+  // |manually_selected_match_|). If |force| is true then the selected line will
+  // be updated forcibly even if the |line| is same as the current selected
+  // line.
   // NOTE: This assumes the popup is open, and thus both old and new values for
   // the selected line should not be kNoMatch.
-  void SetSelectedLine(size_t line, bool reset_to_default);
+  void SetSelectedLine(size_t line, bool reset_to_default, bool force);
 
   // Called when the user hits escape after arrowing around the popup.  This
   // will change the selected line back to the default match and redraw.
   void ResetToDefaultMatch();
-
-  // Copies the selected match into |match|.  If an update is in progress,
-  // "selected" means "default in the latest matches".  If there are no matches,
-  // does not update |match|.
-  //
-  // If |alternate_nav_url| is non-NULL, it will be set to the alternate
-  // navigation URL for |url| if one exists, or left unchanged otherwise.  See
-  // comments on AutocompleteResult::GetAlternateNavURL().
-  //
-  // TODO(pkasting): When manually_selected_match_ moves to the controller, this
-  // can move too.
-  void InfoForCurrentSelection(AutocompleteMatch* match,
-                               GURL* alternate_nav_url) const;
 
   // Gets the selected keyword or keyword hint for the given match.  Returns
   // true if |keyword| represents a keyword hint, or false if |keyword|
@@ -98,16 +76,7 @@ class AutocompletePopupModel : public NotificationObserver {
   // possibly to the empty string], and you cannot have both a selected keyword
   // and a keyword hint simultaneously.)
   bool GetKeywordForMatch(const AutocompleteMatch& match,
-                          std::wstring* keyword) const;
-
-  // Calls through to SearchProvider::FinalizeInstantQuery.
-  void FinalizeInstantQuery(const std::wstring& input_text,
-                            const std::wstring& suggest_text);
-
-  // Returns a pointer to a heap-allocated AutocompleteLog containing the
-  // current input text, selected match, and result set.  The caller is
-  // responsible for deleting the object.
-  AutocompleteLog* GetAutocompleteLog();
+                          string16* keyword) const;
 
   // Immediately updates and opens the popup if necessary, then moves the
   // current selection down (|count| > 0) or up (|count| < 0), clamping to the
@@ -124,24 +93,23 @@ class AutocompletePopupModel : public NotificationObserver {
   // use a standard style icon.
   const SkBitmap* GetSpecialIconForMatch(const AutocompleteMatch& match) const;
 
-  Profile* profile() const { return profile_; }
+  // The match the user has manually chosen, if any.
+  const AutocompleteResult::Selection& manually_selected_match() const {
+    return manually_selected_match_;
+  }
+
+  // Invoked from the edit model any time the result set of the controller
+  // changes.
+  void OnResultChanged();
 
   // The token value for selected_line_, hover_line_ and functions dealing with
   // a "line number" that indicates "no line".
   static const size_t kNoMatch = -1;
 
  private:
-  // NotificationObserver
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
   AutocompletePopupView* view_;
 
   AutocompleteEditModel* edit_model_;
-  scoped_ptr<AutocompleteController> controller_;
-
-  NotificationRegistrar registrar_;
 
   // Profile for current tab.
   Profile* profile_;

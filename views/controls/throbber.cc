@@ -5,10 +5,10 @@
 #include "views/controls/throbber.h"
 
 #include "base/time.h"
-#include "gfx/canvas.h"
 #include "grit/app_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -70,7 +70,7 @@ gfx::Size Throbber::GetPreferredSize() {
   return gfx::Size(frames_->height(), frames_->height());
 }
 
-void Throbber::Paint(gfx::Canvas* canvas) {
+void Throbber::OnPaint(gfx::Canvas* canvas) {
   if (!running_ && !paint_while_stopped_)
     return;
 
@@ -103,6 +103,8 @@ SmoothedThrobber::SmoothedThrobber(int frame_time_ms)
       start_delay_ms_(kStartDelay),
       stop_delay_ms_(kStopDelay) {
 }
+
+SmoothedThrobber::~SmoothedThrobber() {}
 
 void SmoothedThrobber::Start() {
   stop_timer_.Stop();
@@ -146,10 +148,10 @@ void CheckmarkThrobber::SetChecked(bool checked) {
   }
 }
 
-void CheckmarkThrobber::Paint(gfx::Canvas* canvas) {
+void CheckmarkThrobber::OnPaint(gfx::Canvas* canvas) {
   if (running_) {
     // Let the throbber throb...
-    Throbber::Paint(canvas);
+    Throbber::OnPaint(canvas);
     return;
   }
   // Otherwise we paint our tick mark or nothing depending on our state.

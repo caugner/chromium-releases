@@ -563,7 +563,7 @@ int SSLClientSocketMac::Connect(CompletionCallback* callback) {
 
   int rv = InitializeSSLContext();
   if (rv != OK) {
-    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
+    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_SSL_CONNECT, rv);
     return rv;
   }
 
@@ -572,7 +572,7 @@ int SSLClientSocketMac::Connect(CompletionCallback* callback) {
   if (rv == ERR_IO_PENDING) {
     user_connect_callback_ = callback;
   } else {
-    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
+    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_SSL_CONNECT, rv);
   }
   return rv;
 }
@@ -616,6 +616,10 @@ bool SSLClientSocketMac::IsConnectedAndIdle() const {
 
 int SSLClientSocketMac::GetPeerAddress(AddressList* address) const {
   return transport_->socket()->GetPeerAddress(address);
+}
+
+const BoundNetLog& SSLClientSocketMac::NetLog() const {
+  return net_log_;
 }
 
 void SSLClientSocketMac::SetSubresourceSpeculation() {
@@ -906,7 +910,7 @@ void SSLClientSocketMac::OnHandshakeIOComplete(int result) {
       DoReadCallback(rv);
       return;
     }
-    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
+    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_SSL_CONNECT, rv);
     DoConnectCallback(rv);
   }
 }

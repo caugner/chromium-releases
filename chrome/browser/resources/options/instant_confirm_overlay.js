@@ -1,13 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
-
   var OptionsPage = options.OptionsPage;
 
   function InstantConfirmOverlay() {
-    OptionsPage.call(this, 'instantConfirmOverlay',
+    OptionsPage.call(this, 'instantConfirm',
                      templateData.instantConfirmTitle,
                      'instantConfirmOverlay');
   };
@@ -22,13 +21,11 @@ cr.define('options', function() {
       OptionsPage.prototype.initializePage.call(this);
 
       $('instantConfirmCancel').onclick = function() {
-        OptionsPage.clearOverlays();
+        OptionsPage.closeOverlay();
       };
       $('instantConfirmOk').onclick = function() {
-        OptionsPage.clearOverlays();
-        var instantDialogShown = $('instantDialogShown');
-        Preferences.setBooleanPref(instantDialogShown.pref, true,
-                                   instantDialogShown.metric);
+        OptionsPage.closeOverlay();
+        Preferences.setBooleanPref('instant.confirm_dialog_shown', true);
         var instantEnabledCheckbox = $('instantEnableCheckbox');
         Preferences.setBooleanPref(instantEnableCheckbox.pref, true,
                                    instantEnableCheckbox.metric);
@@ -40,5 +37,4 @@ cr.define('options', function() {
   return {
     InstantConfirmOverlay: InstantConfirmOverlay
   };
-
 });

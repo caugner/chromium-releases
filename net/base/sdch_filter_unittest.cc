@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,13 @@
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "net/base/filter.h"
-#include "net/base/filter_unittest.h"
 #include "net/base/io_buffer.h"
+#include "net/base/mock_filter_context.h"
 #include "net/base/sdch_filter.h"
 #include "net/url_request/url_request_http_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace net {
 
 //------------------------------------------------------------------------------
 // Provide sample data and compression results with a sample VCDIFF dictionary.
@@ -825,10 +827,10 @@ static std::string gzip_compress(const std::string &input) {
   zlib_stream.avail_out -= sizeof(kGZipHeader);
 
   // Do deflate
-  code = MOZ_Z_deflate(&zlib_stream, Z_FINISH);
+  code = deflate(&zlib_stream, Z_FINISH);
   gzip_compressed_length -= zlib_stream.avail_out;
   std::string compressed(gzip_compressed.get(), gzip_compressed_length);
-  MOZ_Z_deflateEnd(&zlib_stream);
+  deflateEnd(&zlib_stream);
   return compressed;
 }
 
@@ -1404,3 +1406,5 @@ TEST_F(SdchFilterTest, LatencyTestControls) {
   EXPECT_FALSE(sdch_manager_->AllowLatencyExperiment(url));
   EXPECT_FALSE(sdch_manager_->AllowLatencyExperiment(url2));
 }
+
+}  // namespace net

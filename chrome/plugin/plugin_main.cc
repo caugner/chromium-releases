@@ -13,15 +13,14 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/threading/platform_thread.h"
-#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/default_plugin.h"
-#include "chrome/common/gpu_plugin.h"
 #include "chrome/common/hi_res_timer_manager.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/plugin/plugin_thread.h"
+#include "content/common/child_process.h"
 #include "ui/base/system_monitor/system_monitor.h"
 
 #if defined(OS_WIN)
@@ -66,6 +65,18 @@ extern "C" DWORD __declspec(dllexport) __stdcall DelayedLowerToken(void* ts) {
 bool IsPluginBuiltInFlash(const CommandLine& cmd_line) {
   FilePath path =  cmd_line.GetSwitchValuePath(switches::kPluginPath);
   return (path.BaseName() == FilePath(L"gcswf32.dll"));
+}
+
+// Before we lock down the flash sandbox, we need to activate
+// the IME machinery. After lock down it seems it is unable
+// to start. Note that we leak the IME context on purpose.
+int PreloadIMEForFlash() {
+  HIMC imc = ::ImmCreateContext();
+  if (!imc)
+    return 0;
+  if (::ImmGetOpenStatus(imc))
+    return 1;
+  return 2;
 }
 
 #endif
@@ -133,6 +144,8 @@ int PluginMain(const MainFunctionParams& parameters) {
       // start elevated and it will call DelayedLowerToken(0) when it's ready.
       if (IsPluginBuiltInFlash(parsed_command_line)) {
         DVLOG(1) << "Sandboxing flash";
+        if (!PreloadIMEForFlash())
+          DVLOG(1) << "IME preload failed";
         DelayedLowerToken(target_services);
       } else {
         target_services->LowerToken();
@@ -160,7 +173,6 @@ int PluginMain(const MainFunctionParams& parameters) {
 #endif
 
     chrome::RegisterInternalDefaultPlugin();
-    chrome::RegisterInternalGPUPlugin();
 
     MessageLoop::current()->Run();
   }

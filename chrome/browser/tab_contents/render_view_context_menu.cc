@@ -19,7 +19,6 @@
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/download/download_manager.h"
@@ -33,13 +32,10 @@
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/spellcheck_host.h"
 #include "chrome/browser/spellchecker_platform_engine.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -47,7 +43,10 @@
 #include "chrome/common/content_restriction.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "gfx/favicon_size.h"
+#include "content/browser/child_process_security_policy.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request.h"
@@ -55,10 +54,103 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/favicon_size.h"
 #include "webkit/glue/webmenuitem.h"
 
 using WebKit::WebContextMenuData;
 using WebKit::WebMediaPlayerAction;
+
+namespace {
+
+bool IsCustomItemEnabled(const std::vector<WebMenuItem>& items, int id) {
+  DCHECK(id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
+         id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST);
+  for (size_t i = 0; i < items.size(); ++i) {
+    int action_id = IDC_CONTENT_CONTEXT_CUSTOM_FIRST + items[i].action;
+    if (action_id == id)
+      return items[i].enabled;
+    if (items[i].type == WebMenuItem::SUBMENU) {
+      if (IsCustomItemEnabled(items[i].submenu, id))
+        return true;
+    }
+  }
+  return false;
+}
+
+bool IsCustomItemChecked(const std::vector<WebMenuItem>& items, int id) {
+  DCHECK(id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
+         id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST);
+  for (size_t i = 0; i < items.size(); ++i) {
+    int action_id = IDC_CONTENT_CONTEXT_CUSTOM_FIRST + items[i].action;
+    if (action_id == id)
+      return items[i].checked;
+    if (items[i].type == WebMenuItem::SUBMENU) {
+      if (IsCustomItemChecked(items[i].submenu, id))
+        return true;
+    }
+  }
+  return false;
+}
+
+const size_t kMaxCustomMenuDepth = 5;
+const size_t kMaxCustomMenuTotalItems = 1000;
+
+void AddCustomItemsToMenu(const std::vector<WebMenuItem>& items,
+                          size_t depth,
+                          size_t* total_items,
+                          ui::SimpleMenuModel::Delegate* delegate,
+                          ui::SimpleMenuModel* menu_model) {
+  if (depth > kMaxCustomMenuDepth) {
+    LOG(ERROR) << "Custom menu too deeply nested.";
+    return;
+  }
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (IDC_CONTENT_CONTEXT_CUSTOM_FIRST + items[i].action >=
+        IDC_CONTENT_CONTEXT_CUSTOM_LAST) {
+      LOG(ERROR) << "Custom menu action value too big.";
+      return;
+    }
+    if (*total_items >= kMaxCustomMenuTotalItems) {
+      LOG(ERROR) << "Custom menu too large (too many items).";
+      return;
+    }
+    (*total_items)++;
+    switch (items[i].type) {
+      case WebMenuItem::OPTION:
+        menu_model->AddItem(
+            items[i].action + IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
+            items[i].label);
+        break;
+      case WebMenuItem::CHECKABLE_OPTION:
+        menu_model->AddCheckItem(
+            items[i].action + IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
+            items[i].label);
+        break;
+      case WebMenuItem::GROUP:
+        // TODO(viettrungluu): I don't know what this is supposed to do.
+        NOTREACHED();
+        break;
+      case WebMenuItem::SEPARATOR:
+        menu_model->AddSeparator();
+        break;
+      case WebMenuItem::SUBMENU: {
+        ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(delegate);
+        AddCustomItemsToMenu(items[i].submenu, depth + 1, total_items, delegate,
+                             submenu);
+        menu_model->AddSubMenu(
+            items[i].action + IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
+            items[i].label,
+            submenu);
+        break;
+      }
+      default:
+        NOTREACHED();
+        break;
+    }
+  }
+}
+
+}  // namespace
 
 // static
 const size_t RenderViewContextMenu::kMaxExtensionItemTitleLength = 75;
@@ -270,7 +362,7 @@ void RenderViewContextMenu::RecursivelyAppendExtensionItems(
       ExtensionMenuItem::List children =
           GetRelevantExtensionItems(item->children(), params_,
                                     profile_, can_cross_incognito);
-      if (children.size() == 0) {
+      if (children.empty()) {
         menu_model->AddItem(menu_id, title);
       } else {
         ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(this);
@@ -358,7 +450,9 @@ void RenderViewContextMenu::InitMenu() {
   bool has_selection = !params_.selection_text.empty();
 
   if (AppendCustomItems()) {
-    AppendDeveloperItems();
+    // Don't add items for Pepper menu.
+    if (!params_.custom_context.is_pepper_menu)
+      AppendDeveloperItems();
     return;
   }
 
@@ -369,15 +463,21 @@ void RenderViewContextMenu::InitMenu() {
       !has_link &&
       !params_.is_editable &&
       !has_selection) {
-    // If context is in subframe, show subframe options instead.
-    if (!params_.frame_url.is_empty()) {
-      is_devtools = IsDevToolsURL(params_.frame_url);
-      if (!is_devtools && !IsInternalResourcesURL(params_.frame_url))
-        AppendFrameItems();
-    } else if (!params_.page_url.is_empty()) {
+    if (!params_.page_url.is_empty()) {
       is_devtools = IsDevToolsURL(params_.page_url);
-      if (!is_devtools && !IsInternalResourcesURL(params_.page_url))
+      if (!is_devtools && !IsInternalResourcesURL(params_.page_url)) {
         AppendPageItems();
+        // Merge in frame items if we clicked within a frame that needs them.
+        if (!params_.frame_url.is_empty()) {
+          is_devtools = IsDevToolsURL(params_.frame_url);
+          if (!is_devtools && !IsInternalResourcesURL(params_.frame_url)) {
+            menu_model_.AddSeparator();
+            AppendFrameItems();
+          }
+        }
+      }
+    } else {
+      DCHECK(params_.frame_url.is_empty());
     }
   }
 
@@ -424,23 +524,10 @@ void RenderViewContextMenu::LookUpInDictionary() {
 }
 
 bool RenderViewContextMenu::AppendCustomItems() {
-  std::vector<WebMenuItem>& custom_items = params_.custom_items;
-  for (size_t i = 0; i < custom_items.size(); ++i) {
-    DCHECK(IDC_CONTENT_CONTEXT_CUSTOM_FIRST + custom_items[i].action <
-        IDC_CONTENT_CONTEXT_CUSTOM_LAST);
-    if (custom_items[i].type == WebMenuItem::SEPARATOR) {
-      menu_model_.AddSeparator();
-    } else if (custom_items[i].type == WebMenuItem::CHECKABLE_OPTION) {
-      menu_model_.AddCheckItem(
-          custom_items[i].action + IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
-          custom_items[i].label);
-    } else {
-      menu_model_.AddItem(
-          custom_items[i].action + IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
-          custom_items[i].label);
-    }
-  }
-  return custom_items.size() > 0;
+  size_t total_items = 0;
+  AddCustomItemsToMenu(params_.custom_items, 0, &total_items, this,
+                       &menu_model_);
+  return total_items > 0;
 }
 
 void RenderViewContextMenu::AppendDeveloperItems() {
@@ -562,12 +649,8 @@ void RenderViewContextMenu::AppendPageItems() {
 }
 
 void RenderViewContextMenu::AppendFrameItems() {
-  menu_model_.AddItemWithStringId(IDC_BACK, IDS_CONTENT_CONTEXT_BACK);
-  menu_model_.AddItemWithStringId(IDC_FORWARD, IDS_CONTENT_CONTEXT_FORWARD);
-  menu_model_.AddSeparator();
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_RELOADFRAME,
                                   IDS_CONTENT_CONTEXT_RELOADFRAME);
-  menu_model_.AddSeparator();
   // These two menu items have yet to be implemented.
   // http://code.google.com/p/chromium/issues/detail?id=11827
   //   IDS_CONTENT_CONTEXT_SAVEFRAMEAS
@@ -592,8 +675,7 @@ void RenderViewContextMenu::AppendSearchProvider() {
 
   AutocompleteMatch match;
   profile_->GetAutocompleteClassifier()->Classify(
-      UTF16ToWideHack(params_.selection_text),
-      std::wstring(), false, &match, NULL);
+      params_.selection_text, string16(), false, &match, NULL);
   selection_navigation_url_ = match.destination_url;
   if (!selection_navigation_url_.is_valid())
     return;
@@ -633,12 +715,12 @@ void RenderViewContextMenu::AppendEditableItems() {
     menu_model_.AddItem(IDC_SPELLCHECK_SUGGESTION_0 + static_cast<int>(i),
                         params_.dictionary_suggestions[i]);
   }
-  if (params_.dictionary_suggestions.size() > 0)
+  if (!params_.dictionary_suggestions.empty())
     menu_model_.AddSeparator();
 
   // If word is misspelled, give option for "Add to dictionary"
   if (!params_.misspelled_word.empty()) {
-    if (params_.dictionary_suggestions.size() == 0) {
+    if (params_.dictionary_suggestions.empty()) {
       menu_model_.AddItem(0,
           l10n_util::GetStringUTF16(
               IDS_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS));
@@ -774,28 +856,10 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     return profile_->GetPrefs()->GetBoolean(prefs::kEnableSpellCheck);
   }
 
-  // Process custom actions range.
-  if ((id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST) &&
-      (id < IDC_CONTENT_CONTEXT_CUSTOM_LAST)) {
-    unsigned action = id - IDC_CONTENT_CONTEXT_CUSTOM_FIRST;
-    for (size_t i = 0; i < params_.custom_items.size(); ++i) {
-      if (params_.custom_items[i].action == action)
-        return params_.custom_items[i].enabled;
-    }
-    NOTREACHED();
-    return false;
-  }
-
-  // Custom WebKit items.
+  // Custom items.
   if (id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
       id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST) {
-    const std::vector<WebMenuItem>& custom_items = params_.custom_items;
-    for (size_t i = 0; i < custom_items.size(); ++i) {
-      int action_id = IDC_CONTENT_CONTEXT_CUSTOM_FIRST + custom_items[i].action;
-      if (action_id == id)
-        return custom_items[i].enabled;
-    }
-    return true;
+    return IsCustomItemEnabled(params_.custom_items, id);
   }
 
   // Extension items.
@@ -944,7 +1008,8 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return !!(params_.edit_flags & WebContextMenuData::CanSelectAll);
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
-      return !profile_->IsOffTheRecord() && params_.link_url.is_valid();
+      return !profile_->IsOffTheRecord() && params_.link_url.is_valid() &&
+             profile_->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled);
 
     case IDC_SPELLCHECK_ADD_TO_DICTIONARY:
       return !params_.misspelled_word.empty();
@@ -1020,16 +1085,10 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
             WebContextMenuData::MediaControls) != 0;
   }
 
-  // Custom WebKit items.
+  // Custom items.
   if (id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
       id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST) {
-    const std::vector<WebMenuItem>& custom_items = params_.custom_items;
-    for (size_t i = 0; i < custom_items.size(); ++i) {
-      int action_id = IDC_CONTENT_CONTEXT_CUSTOM_FIRST + custom_items[i].action;
-      if (action_id == id)
-        return custom_items[i].checked;
-    }
-    return false;
+    return IsCustomItemChecked(params_.custom_items, id);
   }
 
   // Extension items.
@@ -1090,11 +1149,11 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
   }
 
   // Process custom actions range.
-  if ((id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST) &&
-      (id < IDC_CONTENT_CONTEXT_CUSTOM_LAST)) {
+  if (id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
+      id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST) {
     unsigned action = id - IDC_CONTENT_CONTEXT_CUSTOM_FIRST;
-    source_tab_contents_->render_view_host()->
-        PerformCustomContextMenuAction(action);
+    source_tab_contents_->render_view_host()->PerformCustomContextMenuAction(
+        params_.custom_context, action);
     return;
   }
 
@@ -1399,7 +1458,8 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
 }
 
 void RenderViewContextMenu::MenuClosed() {
-  source_tab_contents_->render_view_host()->ContextMenuClosed();
+  source_tab_contents_->render_view_host()->ContextMenuClosed(
+      params_.custom_context);
 }
 
 bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {

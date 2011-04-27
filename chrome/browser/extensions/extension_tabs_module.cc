@@ -19,12 +19,6 @@
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/backing_store.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -33,12 +27,19 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "gfx/codec/jpeg_codec.h"
-#include "gfx/codec/png_codec.h"
+#include "content/browser/renderer_host/backing_store.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace keys = extension_tabs_module_constants;
 
@@ -153,7 +154,11 @@ DictionaryValue* ExtensionTabUtil::CreateWindowValue(const Browser* browser,
   result->SetBoolean(keys::kIncognitoKey,
                      browser->profile()->IsOffTheRecord());
   result->SetBoolean(keys::kFocusedKey, browser->window()->IsActive());
-  gfx::Rect bounds = browser->window()->GetRestoredBounds();
+  gfx::Rect bounds;
+  if (browser->window()->IsMaximized() || browser->window()->IsFullscreen())
+    bounds = browser->window()->GetBounds();
+  else
+    bounds = browser->window()->GetRestoredBounds();
 
   result->SetInteger(keys::kLeftKey, bounds.x());
   result->SetInteger(keys::kTopKey, bounds.y());
@@ -353,6 +358,15 @@ bool CreateWindowFunction::RunImpl() {
     }
   }
 
+  // Don't let the extension crash the browser or renderers.
+  GURL browser_crash(chrome::kAboutBrowserCrash);
+  GURL renderer_crash(chrome::kAboutCrashURL);
+  if (std::find(urls.begin(), urls.end(), browser_crash) != urls.end() ||
+      std::find(urls.begin(), urls.end(), renderer_crash) != urls.end()) {
+    error_ = keys::kNoCrashBrowserError;
+    return false;
+  }
+
   // Look for optional tab id.
   if (args) {
     int tab_id;
@@ -434,6 +448,11 @@ bool CreateWindowFunction::RunImpl() {
     if (args->HasKey(keys::kIncognitoKey)) {
       EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kIncognitoKey,
                                                    &incognito));
+      if (!profile_->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled)) {
+        error_ = keys::kIncognitoModeIsDisabled;
+        return false;
+      }
+
       if (incognito)
         window_profile = window_profile->GetOffTheRecordProfile();
     }
@@ -459,7 +478,7 @@ bool CreateWindowFunction::RunImpl() {
     TabStripModel* target_tab_strip = new_window->tabstrip_model();
     target_tab_strip->InsertTabContentsAt(urls.size(), contents,
                                           TabStripModel::ADD_NONE);
-  } else if (urls.size() == 0) {
+  } else if (urls.empty()) {
     new_window->NewTab();
   }
   new_window->SelectNumberedTab(0);
@@ -494,6 +513,7 @@ bool UpdateWindowFunction::RunImpl() {
   }
 
   gfx::Rect bounds = browser->window()->GetRestoredBounds();
+  bool set_bounds = false;
   // Any part of the bounds can optionally be set by the caller.
   int bounds_val;
   if (update_props->HasKey(keys::kLeftKey)) {
@@ -501,6 +521,7 @@ bool UpdateWindowFunction::RunImpl() {
         keys::kLeftKey,
         &bounds_val));
     bounds.set_x(bounds_val);
+    set_bounds = true;
   }
 
   if (update_props->HasKey(keys::kTopKey)) {
@@ -508,6 +529,7 @@ bool UpdateWindowFunction::RunImpl() {
         keys::kTopKey,
         &bounds_val));
     bounds.set_y(bounds_val);
+    set_bounds = true;
   }
 
   if (update_props->HasKey(keys::kWidthKey)) {
@@ -515,6 +537,7 @@ bool UpdateWindowFunction::RunImpl() {
         keys::kWidthKey,
         &bounds_val));
     bounds.set_width(bounds_val);
+    set_bounds = true;
   }
 
   if (update_props->HasKey(keys::kHeightKey)) {
@@ -522,8 +545,10 @@ bool UpdateWindowFunction::RunImpl() {
         keys::kHeightKey,
         &bounds_val));
     bounds.set_height(bounds_val);
+    set_bounds = true;
   }
-  browser->window()->SetBounds(bounds);
+  if (set_bounds)
+    browser->window()->SetBounds(bounds);
 
   bool selected_val = false;
   if (update_props->HasKey(keys::kFocusedKey)) {
@@ -650,6 +675,13 @@ bool CreateTabFunction::RunImpl() {
     }
   }
 
+  // Don't let extensions crash the browser or renderers.
+  if (url == GURL(chrome::kAboutBrowserCrash) ||
+      url == GURL(chrome::kAboutCrashURL)) {
+    error_ = keys::kNoCrashBrowserError;
+    return false;
+  }
+
   // Default to foreground for the new tab. The presence of 'selected' property
   // will override this default.
   bool selected = true;
@@ -772,6 +804,13 @@ bool UpdateTabFunction::RunImpl() {
       return false;
     }
 
+    // Don't let the extension crash the browser or renderers.
+    if (url == GURL(chrome::kAboutBrowserCrash) ||
+        url == GURL(chrome::kAboutCrashURL)) {
+      error_ = keys::kNoCrashBrowserError;
+      return false;
+    }
+
     // JavaScript URLs can do the same kinds of things as cross-origin XHR, so
     // we need to check host permissions before allowing them.
     if (url.SchemeIs(chrome::kJavaScriptScheme)) {
@@ -870,6 +909,11 @@ bool MoveTabFunction::RunImpl() {
 
     if (target_browser->type() != Browser::TYPE_NORMAL) {
       error_ = keys::kCanOnlyMoveTabsWithinNormalWindowsError;
+      return false;
+    }
+
+    if (target_browser->profile() != source_browser->profile()) {
+      error_ = keys::kCanOnlyMoveTabsWithinSameProfileError;
       return false;
     }
 
@@ -993,6 +1037,13 @@ bool CaptureVisibleTabFunction::RunImpl() {
     error_ = keys::kInternalVisibleTabCaptureError;
     return false;
   }
+
+  // captureVisibleTab() can return an image containing sensitive information
+  // that the browser would otherwise protect.  Ensure the extension has
+  // permission to do this.
+  if (!GetExtension()->CanCaptureVisiblePage(tab_contents->GetURL(), &error_))
+    return false;
+
   RenderViewHost* render_view_host = tab_contents->render_view_host();
 
   // If a backing store is cached for the tab we want to capture,

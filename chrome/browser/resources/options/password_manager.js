@@ -1,11 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 cr.define('options', function() {
   const OptionsPage = options.OptionsPage;
   const ArrayDataModel = cr.ui.ArrayDataModel;
-  const ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
 
   /////////////////////////////////////////////////////////////////////////////
   // PasswordManager class:
@@ -17,8 +16,8 @@ cr.define('options', function() {
   function PasswordManager() {
     this.activeNavTab = null;
     OptionsPage.call(this,
-                     'passwordManager',
-                     templateData.passwordsTitle,
+                     'passwords',
+                     templateData.passwordsPageTabTitle,
                      'password-manager');
   }
 
@@ -50,6 +49,11 @@ cr.define('options', function() {
     },
 
     /** @inheritDoc */
+    canShowPage: function() {
+      return !PersonalOptions.disablePasswordManagement();
+    },
+
+    /** @inheritDoc */
     didShowPage: function() {
       // Updating the password lists may cause a blocking platform dialog pop up
       // (Mac, Linux), so we delay this operation until the page is shown.
@@ -63,7 +67,6 @@ cr.define('options', function() {
     createSavedPasswordsList_: function() {
       this.savedPasswordsList_ = $('saved-passwords-list');
       options.passwordManager.PasswordsList.decorate(this.savedPasswordsList_);
-      this.savedPasswordsList_.selectionModel = new ListSingleSelectionModel;
       this.savedPasswordsList_.autoExpands = true;
     },
 
@@ -75,8 +78,6 @@ cr.define('options', function() {
       this.passwordExceptionsList_ = $('password-exceptions-list');
       options.passwordManager.PasswordExceptionsList.decorate(
           this.passwordExceptionsList_);
-      this.passwordExceptionsList_.selectionModel =
-          new ListSingleSelectionModel;
       this.passwordExceptionsList_.autoExpands = true;
     },
 

@@ -13,9 +13,6 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/pinned_tab_codec.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
@@ -34,6 +31,9 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/mock_host_resolver.h"
@@ -47,13 +47,13 @@
 
 namespace {
 
-const std::string BEFORE_UNLOAD_HTML =
+const char* kBeforeUnloadHTML =
     "<html><head><title>beforeunload</title></head><body>"
     "<script>window.onbeforeunload=function(e){return 'foo'}</script>"
     "</body></html>";
 
-const std::wstring OPEN_NEW_BEFOREUNLOAD_PAGE =
-    L"w=window.open(); w.onbeforeunload=function(e){return 'foo'};";
+const char* kOpenNewBeforeUnloadPage =
+    "w=window.open(); w.onbeforeunload=function(e){return 'foo'};";
 
 const FilePath::CharType* kTitle1File = FILE_PATH_LITERAL("title1.html");
 const FilePath::CharType* kTitle2File = FILE_PATH_LITERAL("title2.html");
@@ -211,8 +211,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
   EXPECT_EQ(0, browser()->selected_index());
   TabContents* second_tab = browser()->GetTabContentsAt(1);
   ASSERT_TRUE(second_tab);
-  second_tab->render_view_host()->ExecuteJavascriptInWebFrame(L"",
-      L"alert('Activate!');");
+  second_tab->render_view_host()->ExecuteJavascriptInWebFrame(
+      string16(),
+      ASCIIToUTF16("alert('Activate!');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->CloseModalDialog();
   EXPECT_EQ(2, browser()->tab_count());
@@ -246,7 +247,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ThirtyFourTabs) {
 // Test for crbug.com/22004.  Reloading a page with a before unload handler and
 // then canceling the dialog should not leave the throbber spinning.
 IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
-  GURL url("data:text/html," + BEFORE_UNLOAD_HTML);
+  GURL url(std::string("data:text/html,") + kBeforeUnloadHTML);
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Navigate to another page, but click cancel in the dialog.  Make sure that
@@ -258,7 +259,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
 
   // Clear the beforeunload handler so the test can easily exit.
   browser()->GetSelectedTabContents()->render_view_host()->
-      ExecuteJavascriptInWebFrame(L"", L"onbeforeunload=null;");
+      ExecuteJavascriptInWebFrame(string16(),
+                                  ASCIIToUTF16("onbeforeunload=null;"));
 }
 
 // Crashy on mac.  http://crbug.com/38522
@@ -274,13 +276,15 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
 // two beforeunload dialogs shown.
 IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_SingleBeforeUnloadAfterWindowClose) {
   browser()->GetSelectedTabContents()->render_view_host()->
-      ExecuteJavascriptInWebFrame(L"", OPEN_NEW_BEFOREUNLOAD_PAGE);
+      ExecuteJavascriptInWebFrame(string16(),
+                                  ASCIIToUTF16(kOpenNewBeforeUnloadPage));
 
   // Close the new window with JavaScript, which should show a single
   // beforeunload dialog.  Then show another alert, to make it easy to verify
   // that a second beforeunload dialog isn't shown.
   browser()->GetTabContentsAt(0)->render_view_host()->
-      ExecuteJavascriptInWebFrame(L"", L"w.close(); alert('bar');");
+      ExecuteJavascriptInWebFrame(string16(),
+                                  ASCIIToUTF16("w.close(); alert('bar');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->native_dialog()->AcceptAppModalDialog();
 
@@ -376,7 +380,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutInvalid) {
 }
 
 // Change a tab into an application window.
-IN_PROC_BROWSER_TEST_F(BrowserTest, ConvertTabToAppShortcut) {
+// DISABLED: http://crbug.com/72310
+IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   ASSERT_TRUE(test_server()->Start());
   GURL http_url(test_server()->GetURL(""));
   ASSERT_TRUE(http_url.SchemeIs(chrome::kHttpScheme));
@@ -631,16 +636,22 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   ASSERT_TRUE(new_browser);
   ASSERT_TRUE(new_browser != browser());
 
-  // We should get back an additional tab for the app.
-  ASSERT_EQ(2, new_browser->tab_count());
+  // We should get back an additional tab for the app, and another for the
+  // default home page.
+  ASSERT_EQ(3, new_browser->tab_count());
 
   // Make sure the state matches.
   TabStripModel* new_model = new_browser->tabstrip_model();
   EXPECT_TRUE(new_model->IsAppTab(0));
   EXPECT_FALSE(new_model->IsAppTab(1));
+  EXPECT_FALSE(new_model->IsAppTab(2));
 
   EXPECT_TRUE(new_model->IsTabPinned(0));
   EXPECT_TRUE(new_model->IsTabPinned(1));
+  EXPECT_FALSE(new_model->IsTabPinned(2));
+
+  EXPECT_EQ(browser()->GetHomePage(),
+      new_model->GetTabContentsAt(2)->tab_contents()->GetURL());
 
   EXPECT_TRUE(
       new_model->GetTabContentsAt(0)->tab_contents()->extension_app() ==

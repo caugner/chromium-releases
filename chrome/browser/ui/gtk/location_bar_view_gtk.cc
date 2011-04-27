@@ -31,10 +31,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/gtk/bookmark_bubble_gtk.h"
-#include "chrome/browser/ui/gtk/bookmark_utils_gtk.h"
+#include "chrome/browser/ui/gtk/bookmarks/bookmark_bubble_gtk.h"
+#include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/content_setting_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/extension_popup_gtk.h"
@@ -49,18 +48,19 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas_skia_paint.h"
-#include "gfx/font.h"
-#include "gfx/gtk_util.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/gtk_util.h"
 #include "webkit/glue/window_open_disposition.h"
 
 namespace {
@@ -105,6 +105,22 @@ const GdkColor kHintTextColor = GDK_COLOR_RGB(0x75, 0x75, 0x75);
 // Size of the rounding of the "Search site for:" box.
 const int kCornerSize = 3;
 
+// The time, in ms, that the content setting label is fully displayed, for the
+// cases where we animate it into and out of view.
+const int kContentSettingImageDisplayTime = 3200;
+// The time, in ms, of the animation (open and close).
+const int kContentSettingImageAnimationTime = 150;
+
+// Color of border of content setting area (icon/label).
+const GdkColor kContentSettingBorderColor = GDK_COLOR_RGB(0xe9, 0xb9, 0x66);
+// Colors for the background gradient.
+const double kContentSettingTopColor[] = { 0xff / 255.0,
+                                           0xf8 / 255.0,
+                                           0xd4 / 255.0 };
+const double kContentSettingBottomColor[] = { 0xff / 255.0,
+                                              0xe6 / 255.0,
+                                              0xaf / 255.0 };
+
 // If widget is visible, increment the int pointed to by count.
 // Suitible for use with gtk_container_foreach.
 void CountVisibleWidgets(GtkWidget* widget, gpointer count) {
@@ -130,6 +146,7 @@ LocationBarViewGtk::LocationBarViewGtk(Browser* browser)
       drag_icon_(NULL),
       enable_location_drag_(false),
       security_info_label_(NULL),
+      tab_to_search_alignment_(NULL),
       tab_to_search_box_(NULL),
       tab_to_search_full_label_(NULL),
       tab_to_search_partial_label_(NULL),
@@ -149,8 +166,7 @@ LocationBarViewGtk::LocationBarViewGtk(Browser* browser)
       hbox_width_(0),
       entry_box_width_(0),
       show_selected_keyword_(false),
-      show_keyword_hint_(false),
-      update_instant_(true) {
+      show_keyword_hint_(false) {
 }
 
 LocationBarViewGtk::~LocationBarViewGtk() {
@@ -225,12 +241,18 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
   gtk_util::ActAsRoundedWindow(tab_to_search_box_, kKeywordBorderColor,
                                kCornerSize,
                                gtk_util::ROUNDED_ALL, gtk_util::BORDER_ALL);
+
+  // Put the event box in an alignment to get the padding correct.
+  tab_to_search_alignment_ = gtk_alignment_new(0, 0, 1, 1);
+  gtk_container_add(GTK_CONTAINER(tab_to_search_alignment_),
+                    tab_to_search_box_);
+  gtk_box_pack_start(GTK_BOX(entry_box_), tab_to_search_alignment_,
+                     FALSE, FALSE, 0);
+
   // Show all children widgets of |tab_to_search_box_| initially, except
   // |tab_to_search_partial_label_|.
   gtk_widget_show_all(tab_to_search_box_);
-  gtk_widget_hide(tab_to_search_box_);
   gtk_widget_hide(tab_to_search_partial_label_);
-  gtk_box_pack_start(GTK_BOX(entry_box_), tab_to_search_box_, FALSE, FALSE, 0);
 
   location_entry_alignment_ = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_container_add(GTK_CONTAINER(location_entry_alignment_),
@@ -346,12 +368,13 @@ void LocationBarViewGtk::BuildSiteTypeArea() {
 
   // Put the event box in an alignment to get the padding correct.
   site_type_alignment_ = gtk_alignment_new(0, 0, 1, 1);
-  gtk_alignment_set_padding(GTK_ALIGNMENT(site_type_alignment_),
-                            1, 1, 0, 0);
   gtk_container_add(GTK_CONTAINER(site_type_alignment_),
                     site_type_event_box_);
   gtk_box_pack_start(GTK_BOX(hbox_.get()), site_type_alignment_,
                      FALSE, FALSE, 0);
+
+  gtk_widget_set_tooltip_text(location_icon_image_,
+      l10n_util::GetStringUTF8(IDS_TOOLTIP_LOCATION_ICON).c_str());
 
   g_signal_connect(site_type_event_box_, "button-release-event",
                    G_CALLBACK(&OnIconReleasedThunk), this);
@@ -436,43 +459,6 @@ void LocationBarViewGtk::Update(const TabContents* contents) {
   }
 }
 
-void LocationBarViewGtk::OnAutocompleteWillClosePopup() {
-  if (!update_instant_)
-    return;
-
-  InstantController* instant = browser_->instant();
-  if (instant && !instant->commit_on_mouse_up())
-    instant->DestroyPreviewContents();
-}
-
-void LocationBarViewGtk::OnAutocompleteLosingFocus(
-    gfx::NativeView view_gaining_focus) {
-  SetSuggestedText(string16());
-
-  InstantController* instant = browser_->instant();
-  if (instant)
-    instant->OnAutocompleteLostFocus(view_gaining_focus);
-}
-
-void LocationBarViewGtk::OnAutocompleteWillAccept() {
-  update_instant_ = false;
-}
-
-bool LocationBarViewGtk::OnCommitSuggestedText(
-    const std::wstring& typed_text) {
-  return browser_->instant() && location_entry_->CommitInstantSuggestion();
-}
-
-bool LocationBarViewGtk::AcceptCurrentInstantPreview() {
-  return InstantController::CommitIfCurrent(browser_->instant());
-}
-
-void LocationBarViewGtk::OnPopupBoundsChanged(const gfx::Rect& bounds) {
-  InstantController* instant = browser_->instant();
-  if (instant)
-    instant->SetOmniboxBounds(bounds);
-}
-
 void LocationBarViewGtk::OnAutocompleteAccept(const GURL& url,
     WindowOpenDisposition disposition,
     PageTransition::Type transition,
@@ -503,17 +489,12 @@ void LocationBarViewGtk::OnAutocompleteAccept(const GURL& url,
       }
     }
   }
-
-  if (browser_->instant() && !location_entry_->model()->popup_model()->IsOpen())
-    browser_->instant()->DestroyPreviewContents();
-
-  update_instant_ = true;
 }
 
 void LocationBarViewGtk::OnChanged() {
   UpdateSiteTypeArea();
 
-  const std::wstring keyword(location_entry_->model()->keyword());
+  const string16 keyword(location_entry_->model()->keyword());
   const bool is_keyword_hint = location_entry_->model()->is_keyword_hint();
   show_selected_keyword_ = !keyword.empty() && !is_keyword_hint;
   show_keyword_hint_ = !keyword.empty() && is_keyword_hint;
@@ -525,30 +506,6 @@ void LocationBarViewGtk::OnChanged() {
     SetKeywordHintLabel(keyword);
 
   AdjustChildrenVisibility();
-
-  InstantController* instant = browser_->instant();
-  string16 suggested_text;
-  if (update_instant_ && instant && GetTabContents()) {
-    if (location_entry_->model()->user_input_in_progress() &&
-        location_entry_->model()->popup_model()->IsOpen()) {
-      instant->Update(
-          browser_->GetSelectedTabContentsWrapper(),
-          location_entry_->model()->CurrentMatch(),
-          WideToUTF16(location_entry_->GetText()),
-          location_entry_->model()->UseVerbatimInstant(),
-          &suggested_text);
-      if (!instant->MightSupportInstant()) {
-        location_entry_->model()->FinalizeInstantQuery(std::wstring(),
-                                                       std::wstring());
-      }
-    } else {
-      instant->DestroyPreviewContents();
-      location_entry_->model()->FinalizeInstantQuery(std::wstring(),
-                                                     std::wstring());
-    }
-  }
-
-  SetSuggestedText(suggested_text);
 }
 
 void LocationBarViewGtk::OnSelectionBoundsChanged() {
@@ -606,8 +563,16 @@ SkBitmap LocationBarViewGtk::GetFavIcon() const {
   return GetTabContents()->GetFavIcon();
 }
 
-std::wstring LocationBarViewGtk::GetTitle() const {
-  return UTF16ToWideHack(GetTabContents()->GetTitle());
+string16 LocationBarViewGtk::GetTitle() const {
+  return GetTabContents()->GetTitle();
+}
+
+InstantController* LocationBarViewGtk::GetInstant() {
+  return browser_->instant();
+}
+
+TabContentsWrapper* LocationBarViewGtk::GetTabContentsWrapper() {
+  return browser_->GetSelectedTabContentsWrapper();
 }
 
 void LocationBarViewGtk::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
@@ -619,20 +584,7 @@ void LocationBarViewGtk::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
 }
 
 void LocationBarViewGtk::SetSuggestedText(const string16& text) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kInstantAutocompleteImmediately)) {
-    // This method is internally invoked to reset suggest text, so we only do
-    // anything if the text isn't empty.
-    // TODO: if we keep autocomplete, make it so this isn't invoked with empty
-    // text.
-    if (!text.empty()) {
-      location_entry_->model()->FinalizeInstantQuery(
-          location_entry_->GetText(),
-          UTF16ToWide(text));
-    }
-  } else {
-    location_entry_->SetInstantSuggestion(text);
-  }
+  location_entry_->model()->SetSuggestedText(text);
 }
 
 std::wstring LocationBarViewGtk::GetInputString() const {
@@ -826,6 +778,10 @@ void LocationBarViewGtk::Observe(NotificationType type,
 
     gtk_alignment_set_padding(GTK_ALIGNMENT(location_entry_alignment_),
                               0, 0, 0, 0);
+    gtk_alignment_set_padding(GTK_ALIGNMENT(tab_to_search_alignment_),
+                              1, 1, 1, 0);
+    gtk_alignment_set_padding(GTK_ALIGNMENT(site_type_alignment_),
+                              1, 1, 1, 0);
   } else {
     gtk_widget_modify_bg(tab_to_search_box_, GTK_STATE_NORMAL,
                          &kKeywordBackgroundColor);
@@ -851,18 +807,15 @@ void LocationBarViewGtk::Observe(NotificationType type,
     gtk_util::ForceFontSizePixels(tab_to_search_hint_trailing_label_,
         browser_defaults::kAutocompleteEditFontPixelSize);
 
-    if (popup_window_mode_) {
-      gtk_alignment_set_padding(GTK_ALIGNMENT(location_entry_alignment_),
-                                kTopMargin + kBorderThickness,
-                                kBottomMargin + kBorderThickness,
-                                kBorderThickness,
-                                kBorderThickness);
-    } else {
-      gtk_alignment_set_padding(GTK_ALIGNMENT(location_entry_alignment_),
-                                kTopMargin + kBorderThickness,
-                                kBottomMargin + kBorderThickness,
-                                0, 0);
-    }
+    const int top_bottom = popup_window_mode_ ? kBorderThickness : 0;
+    gtk_alignment_set_padding(GTK_ALIGNMENT(location_entry_alignment_),
+                              kTopMargin + kBorderThickness,
+                              kBottomMargin + kBorderThickness,
+                              top_bottom, top_bottom);
+    gtk_alignment_set_padding(GTK_ALIGNMENT(tab_to_search_alignment_),
+                              1, 1, 0, 0);
+    gtk_alignment_set_padding(GTK_ALIGNMENT(site_type_alignment_),
+                              1, 1, 0, 0);
   }
 
   UpdateStarIcon();
@@ -895,7 +848,8 @@ gboolean LocationBarViewGtk::HandleExpose(GtkWidget* widget,
 }
 
 void LocationBarViewGtk::UpdateSiteTypeArea() {
-  // The icon is always visible except when the |tab_to_search_box_| is visible.
+  // The icon is always visible except when the |tab_to_search_alignment_| is
+  // visible.
   if (!location_entry_->model()->keyword().empty() &&
       !location_entry_->model()->is_keyword_hint()) {
     gtk_widget_hide(site_type_area());
@@ -940,6 +894,15 @@ void LocationBarViewGtk::UpdateSiteTypeArea() {
     gtk_widget_hide(GTK_WIDGET(security_info_label_));
   }
 
+  if (location_entry()->IsEditingOrEmpty()) {
+    // Do not show the tooltip if the user has been editing the location
+    // bar, or the location bar is at the NTP.
+    gtk_widget_set_tooltip_text(location_icon_image_, "");
+  } else {
+    gtk_widget_set_tooltip_text(location_icon_image_,
+        l10n_util::GetStringUTF8(IDS_TOOLTIP_LOCATION_ICON).c_str());
+  }
+
   gtk_widget_show(site_type_area());
 
   SetSiteTypeDragSource();
@@ -971,7 +934,7 @@ void LocationBarViewGtk::UpdateEVCertificateLabelSize() {
   pango_font_metrics_unref(metrics);
 }
 
-void LocationBarViewGtk::SetKeywordLabel(const std::wstring& keyword) {
+void LocationBarViewGtk::SetKeywordLabel(const string16& keyword) {
   if (keyword.empty())
     return;
 
@@ -981,7 +944,7 @@ void LocationBarViewGtk::SetKeywordLabel(const std::wstring& keyword) {
 
   bool is_extension_keyword;
   const string16 short_name = profile_->GetTemplateURLModel()->
-      GetKeywordShortName(WideToUTF16Hack(keyword), &is_extension_keyword);
+      GetKeywordShortName(keyword, &is_extension_keyword);
   int message_id = is_extension_keyword ?
       IDS_OMNIBOX_EXTENSION_KEYWORD_TEXT : IDS_OMNIBOX_KEYWORD_TEXT;
   string16 full_name = l10n_util::GetStringFUTF16(message_id,
@@ -1000,8 +963,7 @@ void LocationBarViewGtk::SetKeywordLabel(const std::wstring& keyword) {
 
     if (is_extension_keyword) {
       const TemplateURL* template_url =
-          profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(
-              WideToUTF16Hack(keyword));
+          profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(keyword);
       const SkBitmap& bitmap = profile_->GetExtensionService()->
           GetOmniboxIcon(template_url->GetExtensionId());
       GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&bitmap);
@@ -1015,7 +977,7 @@ void LocationBarViewGtk::SetKeywordLabel(const std::wstring& keyword) {
   }
 }
 
-void LocationBarViewGtk::SetKeywordHintLabel(const std::wstring& keyword) {
+void LocationBarViewGtk::SetKeywordHintLabel(const string16& keyword) {
   if (keyword.empty())
     return;
 
@@ -1025,7 +987,7 @@ void LocationBarViewGtk::SetKeywordHintLabel(const std::wstring& keyword) {
 
   bool is_extension_keyword;
   const string16 short_name = profile_->GetTemplateURLModel()->
-      GetKeywordShortName(WideToUTF16Hack(keyword), &is_extension_keyword);
+      GetKeywordShortName(keyword, &is_extension_keyword);
   int message_id = is_extension_keyword ?
       IDS_OMNIBOX_EXTENSION_KEYWORD_HINT : IDS_OMNIBOX_KEYWORD_HINT;
   std::vector<size_t> content_param_offsets;
@@ -1129,7 +1091,7 @@ void LocationBarViewGtk::OnIconDragBegin(GtkWidget* sender,
   if (!pixbuf)
     return;
   drag_icon_ = bookmark_utils::GetDragRepresentation(pixbuf,
-      WideToUTF16(GetTitle()), theme_provider_);
+      GetTitle(), theme_provider_);
   g_object_unref(pixbuf);
   gtk_drag_set_icon_widget(context, drag_icon_, 0, 0);
 }
@@ -1196,10 +1158,10 @@ void LocationBarViewGtk::AdjustChildrenVisibility() {
   int text_width = location_entry_->TextWidth();
   int available_width = entry_box_width_ - text_width - kInnerPadding;
 
-  // Only one of |tab_to_search_box_| and |tab_to_search_hint_| can be visible
-  // at the same time.
-  if (!show_selected_keyword_ && GTK_WIDGET_VISIBLE(tab_to_search_box_))
-    gtk_widget_hide(tab_to_search_box_);
+  // Only one of |tab_to_search_alignment_| and |tab_to_search_hint_| can be
+  // visible at the same time.
+  if (!show_selected_keyword_ && GTK_WIDGET_VISIBLE(tab_to_search_alignment_))
+    gtk_widget_hide(tab_to_search_alignment_);
   else if (!show_keyword_hint_ && GTK_WIDGET_VISIBLE(tab_to_search_hint_))
     gtk_widget_hide(tab_to_search_hint_);
 
@@ -1220,15 +1182,15 @@ void LocationBarViewGtk::AdjustChildrenVisibility() {
     }
 
     if (partial_box_width >= entry_box_width_ - kInnerPadding) {
-      gtk_widget_hide(tab_to_search_box_);
+      gtk_widget_hide(tab_to_search_alignment_);
     } else if (full_box_width >= available_width) {
       gtk_widget_hide(tab_to_search_full_label_);
       gtk_widget_show(tab_to_search_partial_label_);
-      gtk_widget_show(tab_to_search_box_);
+      gtk_widget_show(tab_to_search_alignment_);
     } else if (full_box_width < available_width) {
       gtk_widget_hide(tab_to_search_partial_label_);
       gtk_widget_show(tab_to_search_full_label_);
-      gtk_widget_show(tab_to_search_box_);
+      gtk_widget_show(tab_to_search_alignment_);
     }
   } else if (show_keyword_hint_) {
     GtkRequisition leading, icon, trailing;
@@ -1260,24 +1222,46 @@ LocationBarViewGtk::ContentSettingImageViewGtk::ContentSettingImageViewGtk(
     : content_setting_image_model_(
           ContentSettingImageModel::CreateContentSettingImageModel(
               content_type)),
+      alignment_(gtk_alignment_new(0, 0, 1, 1)),
+      event_box_(gtk_event_box_new()),
+      hbox_(gtk_hbox_new(FALSE, kInnerPadding)),
+      image_(gtk_image_new()),
+      label_(gtk_label_new(NULL)),
       parent_(parent),
       profile_(profile),
-      info_bubble_(NULL) {
-  event_box_.Own(gtk_event_box_new());
+      info_bubble_(NULL),
+      animation_(this),
+      method_factory_(this) {
+  gtk_alignment_set_padding(GTK_ALIGNMENT(alignment_.get()), 1, 1, 0, 0);
+  gtk_container_add(GTK_CONTAINER(alignment_.get()), event_box_.get());
 
   // Make the event box not visible so it does not paint a background.
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_.get()), FALSE);
   g_signal_connect(event_box_.get(), "button-press-event",
                    G_CALLBACK(&OnButtonPressedThunk), this);
+  g_signal_connect(event_box_.get(), "expose-event",
+                   G_CALLBACK(&OnExposeThunk), this);
 
-  image_.Own(gtk_image_new());
-  gtk_container_add(GTK_CONTAINER(event_box_.get()), image_.get());
+  gtk_widget_set_no_show_all(label_.get(), TRUE);
+  gtk_label_set_line_wrap(GTK_LABEL(label_.get()), FALSE);
+
+  gtk_box_pack_start(GTK_BOX(hbox_), image_.get(), FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(hbox_), label_.get(), FALSE, FALSE, 0);
+
+  // The +1 accounts for the pixel that is devoted to drawing the border.
+  gtk_container_set_border_width(GTK_CONTAINER(hbox_), kHboxBorder + 1);
+
+  gtk_container_add(GTK_CONTAINER(event_box_.get()), hbox_);
   gtk_widget_hide(widget());
+
+  animation_.SetSlideDuration(kContentSettingImageAnimationTime);
 }
 
 LocationBarViewGtk::ContentSettingImageViewGtk::~ContentSettingImageViewGtk() {
   image_.Destroy();
+  label_.Destroy();
   event_box_.Destroy();
+  alignment_.Destroy();
 
   if (info_bubble_)
     info_bubble_->Close();
@@ -1286,24 +1270,99 @@ LocationBarViewGtk::ContentSettingImageViewGtk::~ContentSettingImageViewGtk() {
 void LocationBarViewGtk::ContentSettingImageViewGtk::UpdateFromTabContents(
     TabContents* tab_contents) {
   content_setting_image_model_->UpdateFromTabContents(tab_contents);
-  if (content_setting_image_model_->is_visible()) {
-    gtk_image_set_from_pixbuf(GTK_IMAGE(image_.get()),
-          GtkThemeProvider::GetFrom(profile_)->GetPixbufNamed(
-              content_setting_image_model_->get_icon()));
-
-    gtk_widget_set_tooltip_text(widget(),
-        content_setting_image_model_->get_tooltip().c_str());
-    gtk_widget_show(widget());
-  } else {
+  if (!content_setting_image_model_->is_visible()) {
     gtk_widget_hide(widget());
+    return;
   }
+
+  gtk_image_set_from_pixbuf(GTK_IMAGE(image_.get()),
+      GtkThemeProvider::GetFrom(profile_)->GetPixbufNamed(
+          content_setting_image_model_->get_icon()));
+
+  gtk_widget_set_tooltip_text(widget(),
+      content_setting_image_model_->get_tooltip().c_str());
+  gtk_widget_show_all(widget());
+
+  TabSpecificContentSettings* content_settings = tab_contents ?
+      tab_contents->GetTabSpecificContentSettings() : NULL;
+  if (!content_settings || content_settings->IsBlockageIndicated(
+      content_setting_image_model_->get_content_settings_type()))
+    return;
+
+  // The content blockage was not yet indicated to the user. Start indication
+  // animation and clear "not yet shown" flag.
+  content_settings->SetBlockageHasBeenIndicated(
+      content_setting_image_model_->get_content_settings_type());
+
+  int label_string_id =
+      content_setting_image_model_->explanatory_string_id();
+  // Check if the animation is enabled and if the string for animation is
+  // available. If there's no string for the content type, we don't animate.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableBlockContentAnimation) || !label_string_id)
+    return;
+
+  gtk_label_set_text(GTK_LABEL(label_.get()),
+      l10n_util::GetStringUTF8(label_string_id).c_str());
+  StartAnimating();
+}
+
+void LocationBarViewGtk::ContentSettingImageViewGtk::StartAnimating() {
+  if (animation_.IsShowing() || animation_.IsClosing())
+    return;
+
+  gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_.get()), TRUE);
+  gtk_util::ActAsRoundedWindow(event_box_.get(), kContentSettingBorderColor,
+                               kCornerSize,
+                               gtk_util::ROUNDED_ALL, gtk_util::BORDER_ALL);
+
+  gtk_widget_set_size_request(label_.get(), -1, -1);
+  gtk_widget_size_request(label_.get(), &label_req_);
+  gtk_widget_set_size_request(label_.get(), 0, -1);
+  gtk_widget_show(label_.get());
+
+  animation_.Show();
+}
+
+void LocationBarViewGtk::ContentSettingImageViewGtk::CloseAnimation() {
+  animation_.Hide();
+}
+
+void LocationBarViewGtk::ContentSettingImageViewGtk::AnimationProgressed(
+    const ui::Animation* animation) {
+  gtk_widget_set_size_request(
+      label_.get(),
+      animation->GetCurrentValue() * label_req_.width,
+      -1);
+}
+
+void LocationBarViewGtk::ContentSettingImageViewGtk::AnimationEnded(
+    const ui::Animation* animation) {
+  if (animation_.IsShowing()) {
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        method_factory_.NewRunnableMethod(
+            &ContentSettingImageViewGtk::CloseAnimation),
+        kContentSettingImageDisplayTime);
+  } else {
+    gtk_widget_hide(label_.get());
+    gtk_util::StopActingAsRoundedWindow(event_box_.get());
+    gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_.get()), FALSE);
+  }
+}
+
+void LocationBarViewGtk::ContentSettingImageViewGtk::AnimationCanceled(
+    const ui::Animation* animation) {
 }
 
 gboolean LocationBarViewGtk::ContentSettingImageViewGtk::OnButtonPressed(
     GtkWidget* sender, GdkEvent* event) {
   TabContents* tab_contents = parent_->GetTabContents();
   if (!tab_contents)
-    return true;
+    return TRUE;
+  const ContentSettingsType content_settings_type =
+      content_setting_image_model_->get_content_settings_type();
+  if (content_settings_type == CONTENT_SETTINGS_TYPE_PRERENDER)
+    return TRUE;
   GURL url = tab_contents->GetURL();
   std::wstring display_host;
   net::AppendFormattedHost(url,
@@ -1314,10 +1373,38 @@ gboolean LocationBarViewGtk::ContentSettingImageViewGtk::OnButtonPressed(
   info_bubble_ = new ContentSettingBubbleGtk(
       sender, this,
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          tab_contents, profile_,
-          content_setting_image_model_->get_content_settings_type()),
+          tab_contents, profile_, content_settings_type),
       profile_, tab_contents);
   return TRUE;
+}
+
+gboolean LocationBarViewGtk::ContentSettingImageViewGtk::OnExpose(
+    GtkWidget* sender, GdkEventExpose* event) {
+  if (!(animation_.IsShowing() || animation_.IsClosing()))
+    return FALSE;
+
+  const int height = sender->allocation.height;
+
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
+  gdk_cairo_rectangle(cr, &event->area);
+  cairo_clip(cr);
+
+  cairo_pattern_t* pattern = cairo_pattern_create_linear(0, 0, 0, height);
+
+  cairo_pattern_add_color_stop_rgb(pattern, 0.0,
+                                   kContentSettingTopColor[0],
+                                   kContentSettingTopColor[1],
+                                   kContentSettingTopColor[2]);
+  cairo_pattern_add_color_stop_rgb(pattern, 1.0,
+                                   kContentSettingBottomColor[0],
+                                   kContentSettingBottomColor[1],
+                                   kContentSettingBottomColor[2]);
+  cairo_set_source(cr, pattern);
+  cairo_paint(cr);
+  cairo_pattern_destroy(pattern);
+  cairo_destroy(cr);
+
+  return FALSE;
 }
 
 void LocationBarViewGtk::ContentSettingImageViewGtk::InfoBubbleClosing(
@@ -1481,8 +1568,8 @@ void LocationBarViewGtk::PageActionViewGtk::OnImageLoaded(
 }
 
 void LocationBarViewGtk::PageActionViewGtk::TestActivatePageAction() {
-  GdkEvent event;
-  event.button.button = 1;
+  GdkEventButton event = {};
+  event.button = 1;
   OnButtonPressed(widget(), &event);
 }
 
@@ -1505,8 +1592,8 @@ bool LocationBarViewGtk::PageActionViewGtk::ShowPopup(bool devtools) {
 
 gboolean LocationBarViewGtk::PageActionViewGtk::OnButtonPressed(
     GtkWidget* sender,
-    GdkEvent* event) {
-  if (event->button.button != 3) {
+    GdkEventButton* event) {
+  if (event->button != 3) {
     if (!ShowPopup(false)) {
       ExtensionService* service = profile_->GetExtensionService();
       service->browser_event_router()->PageActionExecuted(
@@ -1515,7 +1602,7 @@ gboolean LocationBarViewGtk::PageActionViewGtk::OnButtonPressed(
           page_action_->id(),
           current_tab_id_,
           current_url_.spec(),
-          event->button.button);
+          event->button);
     }
   } else {
     const Extension* extension = profile_->GetExtensionService()->
@@ -1526,7 +1613,7 @@ gboolean LocationBarViewGtk::PageActionViewGtk::OnButtonPressed(
           new ExtensionContextMenuModel(extension, owner_->browser_, this);
       context_menu_.reset(
           new MenuGtk(NULL, context_menu_model_.get()));
-      context_menu_->Popup(sender, event);
+      context_menu_->PopupForWidget(sender, event->button, event->time);
     }
   }
 

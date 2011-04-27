@@ -10,15 +10,17 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/string16.h"
 #include "chrome/browser/ui/cocoa/location_bar/bubble_decoration.h"
 
 class SelectedKeywordDecoration : public BubbleDecoration {
  public:
   SelectedKeywordDecoration(NSFont* font);
+  virtual ~SelectedKeywordDecoration();
 
   // Calculates appropriate full and partial label strings based on
   // inputs.
-  void SetKeyword(const std::wstring& keyword, bool is_extension_keyword);
+  void SetKeyword(const string16& keyword, bool is_extension_keyword);
 
   // Determines what combination of labels and image will best fit
   // within |width|, makes those current for |BubbleDecoration|, and

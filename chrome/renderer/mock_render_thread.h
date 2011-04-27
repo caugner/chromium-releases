@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,8 +56,8 @@ class MockRenderThread : public RenderThreadBase {
   virtual void WidgetHidden() { }
   virtual void WidgetRestored() { }
 
-  virtual bool IsExtensionProcess() const { return is_extension_process_; }
-  virtual bool IsIncognitoProcess() const { return false; }
+  virtual bool IsExtensionProcess() const;
+  virtual bool IsIncognitoProcess() const;
   void SetExtensionProcess(bool value) { is_extension_process_ = value; }
 
   //////////////////////////////////////////////////////////////////////////
@@ -103,12 +103,10 @@ class MockRenderThread : public RenderThreadBase {
                           base::SharedMemoryHandle* browser_handle);
 #endif
 
-#if defined(OS_POSIX)
   void OnAllocateSharedMemoryBuffer(uint32 buffer_size,
                                     base::SharedMemoryHandle* handle);
-#endif
 
-#if defined(OS_LINUX)
+#if defined(OS_CHROMEOS)
   void OnAllocateTempFileForPrinting(base::FileDescriptor* renderer_fd,
                                      int* browser_fd);
   void OnTempFileForPrintingWritten(int browser_fd);

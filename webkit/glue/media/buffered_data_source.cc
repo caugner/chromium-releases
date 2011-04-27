@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,26 +10,22 @@
 
 using WebKit::WebFrame;
 
-namespace {
+namespace webkit_glue {
 
 // Defines how long we should wait for more data before we declare a connection
 // timeout and start a new request.
 // TODO(hclam): Set it to 5s, calibrate this value later.
-const int kTimeoutMilliseconds = 5000;
+static const int kTimeoutMilliseconds = 5000;
 
 // Defines how many times we should try to read from a buffered resource loader
 // before we declare a read error. After each failure of read from a buffered
 // resource loader, a new one is created to be read.
-const int kReadTrials = 3;
+static const int kReadTrials = 3;
 
 // BufferedDataSource has an intermediate buffer, this value governs the initial
 // size of that buffer. It is set to 32KB because this is a typical read size
 // of FFmpeg.
-const int kInitialReadBufferSize = 32768;
-
-} // namespace
-
-namespace webkit_glue {
+static const int kInitialReadBufferSize = 32768;
 
 BufferedDataSource::BufferedDataSource(
     MessageLoop* render_loop,
@@ -38,7 +34,6 @@ BufferedDataSource::BufferedDataSource(
       loaded_(false),
       streaming_(false),
       frame_(frame),
-      single_origin_(true),
       loader_(NULL),
       network_activity_(false),
       initialize_callback_(NULL),
@@ -173,7 +168,7 @@ bool BufferedDataSource::IsStreaming() {
 
 bool BufferedDataSource::HasSingleOrigin() {
   DCHECK(MessageLoop::current() == render_loop_);
-  return single_origin_;
+  return loader_.get() ? loader_->HasSingleOrigin() : true;
 }
 
 void BufferedDataSource::Abort() {
@@ -406,9 +401,6 @@ void BufferedDataSource::HttpInitialStartCallback(int error) {
   DCHECK(MessageLoop::current() == render_loop_);
   DCHECK(loader_.get());
 
-  // Check if the request ended up at a different origin via redirect.
-  single_origin_ = url_.GetOrigin() == loader_->url().GetOrigin();
-
   int64 instance_size = loader_->instance_size();
   bool partial_response = loader_->partial_response();
   bool success = error == net::OK;
@@ -474,9 +466,6 @@ void BufferedDataSource::HttpInitialStartCallback(int error) {
 void BufferedDataSource::NonHttpInitialStartCallback(int error) {
   DCHECK(MessageLoop::current() == render_loop_);
   DCHECK(loader_.get());
-
-  // Check if the request ended up at a different origin via redirect.
-  single_origin_ = url_.GetOrigin() == loader_->url().GetOrigin();
 
   int64 instance_size = loader_->instance_size();
   bool success = error == net::OK && instance_size != kPositionNotSpecified;

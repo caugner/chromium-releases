@@ -15,15 +15,17 @@
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view_mac.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image.h"
+#include "ui/gfx/rect.h"
 
 // Focus-handling between |field_| and |model_| is a bit subtle.
 // Other platforms detect change of focus, which is inconvenient
@@ -205,6 +207,14 @@ AutocompleteEditViewMac::~AutocompleteEditViewMac() {
   [field_ setObserver:NULL];
 }
 
+AutocompleteEditModel* AutocompleteEditViewMac::model() {
+  return model_.get();
+}
+
+const AutocompleteEditModel* AutocompleteEditViewMac::model() const {
+  return model_.get();
+}
+
 void AutocompleteEditViewMac::SaveStateToTab(TabContents* tab) {
   DCHECK(tab);
 
@@ -216,7 +226,7 @@ void AutocompleteEditViewMac::SaveStateToTab(TabContents* tab) {
   } else {
     // If we are not focussed, there is no selection.  Manufacture
     // something reasonable in case it starts to matter in the future.
-    range = NSMakeRange(0, [[field_ stringValue] length]);
+    range = NSMakeRange(0, GetTextLength());
   }
 
   AutocompleteEditViewMacState state(model_->GetStateForTabSwitch(),
@@ -232,7 +242,7 @@ void AutocompleteEditViewMac::Update(
   // this is.  Maybe this method should be refactored into more
   // specific cases.
   const bool user_visible =
-      model_->UpdatePermanentText(toolbar_model_->GetText());
+      model_->UpdatePermanentText(WideToUTF16Hack(toolbar_model_->GetText()));
 
   if (tab_for_state_restoring) {
     RevertAll();
@@ -279,7 +289,7 @@ void AutocompleteEditViewMac::OpenURL(const GURL& url,
                                       PageTransition::Type transition,
                                       const GURL& alternate_nav_url,
                                       size_t selected_line,
-                                      const std::wstring& keyword) {
+                                      const string16& keyword) {
   // TODO(shess): Why is the caller passing an invalid url in the
   // first place?  Make sure that case isn't being dropped on the
   // floor.
@@ -291,13 +301,12 @@ void AutocompleteEditViewMac::OpenURL(const GURL& url,
                   selected_line, keyword);
 }
 
-std::wstring AutocompleteEditViewMac::GetText() const {
-  return base::SysNSStringToWide(GetNonSuggestTextSubstring());
+string16 AutocompleteEditViewMac::GetText() const {
+  return base::SysNSStringToUTF16(GetNonSuggestTextSubstring());
 }
 
 bool AutocompleteEditViewMac::IsEditingOrEmpty() const {
-  return model_->user_input_in_progress() ||
-      ([[field_ stringValue] length] == 0);
+  return model_->user_input_in_progress() || !GetTextLength();
 }
 
 int AutocompleteEditViewMac::GetIcon() const {
@@ -306,12 +315,12 @@ int AutocompleteEditViewMac::GetIcon() const {
       toolbar_model_->GetIcon();
 }
 
-void AutocompleteEditViewMac::SetUserText(const std::wstring& text) {
+void AutocompleteEditViewMac::SetUserText(const string16& text) {
   SetUserText(text, text, true);
 }
 
-void AutocompleteEditViewMac::SetUserText(const std::wstring& text,
-                                          const std::wstring& display_text,
+void AutocompleteEditViewMac::SetUserText(const string16& text,
+                                          const string16& display_text,
                                           bool update_popup) {
   model_->SetUserText(text);
   // TODO(shess): TODO below from gtk.
@@ -320,11 +329,10 @@ void AutocompleteEditViewMac::SetUserText(const std::wstring& text,
   if (update_popup) {
     UpdatePopup();
   }
-  controller_->OnChanged();
+  model_->OnChanged();
 }
 
 NSRange AutocompleteEditViewMac::GetSelectedRange() const {
-  DCHECK([field_ currentEditor]);
   return [[field_ currentEditor] selectedRange];
 }
 
@@ -351,7 +359,7 @@ void AutocompleteEditViewMac::SetSelectedRange(const NSRange range) {
   }
 }
 
-void AutocompleteEditViewMac::SetWindowTextAndCaretPos(const std::wstring& text,
+void AutocompleteEditViewMac::SetWindowTextAndCaretPos(const string16& text,
                                                        size_t caret_pos) {
   DCHECK_LE(caret_pos, text.size());
   SetTextAndSelectedRange(text, NSMakeRange(caret_pos, caret_pos));
@@ -361,10 +369,10 @@ void AutocompleteEditViewMac::SetForcedQuery() {
   // We need to do this first, else |SetSelectedRange()| won't work.
   FocusLocation(true);
 
-  const std::wstring current_text(GetText());
-  const size_t start = current_text.find_first_not_of(kWhitespaceWide);
-  if (start == std::wstring::npos || (current_text[start] != '?')) {
-    SetUserText(L"?");
+  const string16 current_text(GetText());
+  const size_t start = current_text.find_first_not_of(kWhitespaceUTF16);
+  if (start == string16::npos || (current_text[start] != '?')) {
+    SetUserText(ASCIIToUTF16("?"));
   } else {
     NSRange range = NSMakeRange(start + 1, current_text.size() - start - 1);
     [[field_ currentEditor] setSelectedRange:range];
@@ -374,7 +382,7 @@ void AutocompleteEditViewMac::SetForcedQuery() {
 bool AutocompleteEditViewMac::IsSelectAll() {
   if (![field_ currentEditor])
     return true;
-  const NSRange all_range = NSMakeRange(0, GetText().length());
+  const NSRange all_range = NSMakeRange(0, GetTextLength());
   return NSEqualRanges(all_range, GetSelectedRange());
 }
 
@@ -382,8 +390,8 @@ bool AutocompleteEditViewMac::DeleteAtEndPressed() {
   return delete_at_end_pressed_;
 }
 
-void AutocompleteEditViewMac::GetSelectionBounds(std::wstring::size_type* start,
-                                                 std::wstring::size_type* end) {
+void AutocompleteEditViewMac::GetSelectionBounds(string16::size_type* start,
+                                                 string16::size_type* end) {
   if (![field_ currentEditor]) {
     *start = *end = 0;
     return;
@@ -401,13 +409,13 @@ void AutocompleteEditViewMac::SelectAll(bool reversed) {
 
   // TODO(shess): Verify that we should be stealing focus at this
   // point.
-  SetSelectedRange(NSMakeRange(0, GetText().length()));
+  SetSelectedRange(NSMakeRange(0, GetTextLength()));
 }
 
 void AutocompleteEditViewMac::RevertAll() {
   ClosePopup();
   model_->Revert();
-  controller_->OnChanged();
+  model_->OnChanged();
   [field_ clearUndoChain];
 }
 
@@ -435,37 +443,21 @@ void AutocompleteEditViewMac::UpdatePopup() {
 }
 
 void AutocompleteEditViewMac::ClosePopup() {
-  if (popup_view_->GetModel()->IsOpen())
-    controller_->OnAutocompleteWillClosePopup();
-
-  popup_view_->GetModel()->StopAutocomplete();
+  model_->StopAutocomplete();
 }
 
 void AutocompleteEditViewMac::SetFocus() {
 }
 
-bool AutocompleteEditViewMac::CommitSuggestText() {
-  if (suggest_text_length_ == 0)
-    return false;
-
-  std::wstring input_text(GetText());
-  suggest_text_length_ = 0;
-  std::wstring text(GetText());
-  // Call SetText() to force a redraw and move the cursor to the end.
-  SetText(text);
-  model()->FinalizeInstantQuery(input_text, text.substr(input_text.size()));
-  return true;
-}
-
-void AutocompleteEditViewMac::SetText(const std::wstring& display_text) {
+void AutocompleteEditViewMac::SetText(const string16& display_text) {
   // If we are setting the text directly, there cannot be any suggest text.
   suggest_text_length_ = 0;
   SetTextInternal(display_text);
 }
 
 void AutocompleteEditViewMac::SetTextInternal(
-    const std::wstring& display_text) {
-  NSString* ss = base::SysWideToNSString(display_text);
+    const string16& display_text) {
+  NSString* ss = base::SysUTF16ToNSString(display_text);
   NSMutableAttributedString* as =
       [[[NSMutableAttributedString alloc] initWithString:ss] autorelease];
 
@@ -474,7 +466,7 @@ void AutocompleteEditViewMac::SetTextInternal(
   [field_ setAttributedStringValue:as];
 
   // TODO(shess): This may be an appropriate place to call:
-  //   controller_->OnChanged();
+  //   model_->OnChanged();
   // In the current implementation, this tells LocationBarViewMac to
   // mess around with |model_| and update |field_|.  Unfortunately,
   // when I look at our peer implementations, it's not entirely clear
@@ -491,7 +483,7 @@ void AutocompleteEditViewMac::SetTextInternal(
 }
 
 void AutocompleteEditViewMac::SetTextAndSelectedRange(
-    const std::wstring& display_text, const NSRange range) {
+    const string16& display_text, const NSRange range) {
   SetText(display_text);
   SetSelectedRange(range);
 }
@@ -505,6 +497,16 @@ NSString* AutocompleteEditViewMac::GetNonSuggestTextSubstring() const {
     text = [text substringToIndex:(length - suggest_text_length_)];
   }
   return text;
+}
+
+NSString* AutocompleteEditViewMac::GetSuggestTextSubstring() const {
+  if (suggest_text_length_ == 0)
+    return nil;
+
+  NSString* text = [field_ stringValue];
+  NSUInteger length = [text length];
+  DCHECK_LE(suggest_text_length_, length);
+  return [text substringFromIndex:(length - suggest_text_length_)];
 }
 
 void AutocompleteEditViewMac::EmphasizeURLComponents() {
@@ -528,7 +530,7 @@ void AutocompleteEditViewMac::EmphasizeURLComponents() {
 }
 
 void AutocompleteEditViewMac::ApplyTextAttributes(
-    const std::wstring& display_text, NSMutableAttributedString* as) {
+    const string16& display_text, NSMutableAttributedString* as) {
   [as addAttribute:NSFontAttributeName value:GetFieldFont()
              range:NSMakeRange(0, [as length])];
 
@@ -588,13 +590,13 @@ void AutocompleteEditViewMac::ApplyTextAttributes(
 }
 
 void AutocompleteEditViewMac::OnTemporaryTextMaybeChanged(
-    const std::wstring& display_text, bool save_original_selection) {
+    const string16& display_text, bool save_original_selection) {
   if (save_original_selection)
     saved_temporary_selection_ = GetSelectedRange();
 
   suggest_text_length_ = 0;
   SetWindowTextAndCaretPos(display_text, display_text.size());
-  controller_->OnChanged();
+  model_->OnChanged();
   [field_ clearUndoChain];
 }
 
@@ -606,7 +608,7 @@ void AutocompleteEditViewMac::OnStartingIME() {
 }
 
 bool AutocompleteEditViewMac::OnInlineAutocompleteTextMaybeChanged(
-    const std::wstring& display_text, size_t user_text_length) {
+    const string16& display_text, size_t user_text_length) {
   // TODO(shess): Make sure that this actually works.  The round trip
   // to native form and back may mean that it's the same but not the
   // same.
@@ -617,7 +619,7 @@ bool AutocompleteEditViewMac::OnInlineAutocompleteTextMaybeChanged(
   const NSRange range =
       NSMakeRange(user_text_length, display_text.size() - user_text_length);
   SetTextAndSelectedRange(display_text, range);
-  controller_->OnChanged();
+  model_->OnChanged();
   [field_ clearUndoChain];
 
   return true;
@@ -645,7 +647,7 @@ bool AutocompleteEditViewMac::OnAfterPossibleChange() {
   DCHECK(IsFirstResponder());
 
   const NSRange new_selection(GetSelectedRange());
-  const std::wstring new_text(GetText());
+  const string16 new_text(GetText());
   const size_t length = new_text.length();
 
   const bool selection_differs =
@@ -685,7 +687,7 @@ bool AutocompleteEditViewMac::OnAfterPossibleChange() {
   // fails for us in case you copy the URL and paste the identical URL
   // back (we'll lose the styling).
   EmphasizeURLComponents();
-  controller_->OnChanged();
+  model_->OnChanged();
 
   delete_was_pressed_ = false;
 
@@ -715,12 +717,17 @@ void AutocompleteEditViewMac::SetInstantSuggestion(
 
   if (needs_update) {
     NSRange current_range = GetSelectedRange();
-    SetTextInternal(base::SysNSStringToWide(text));
+    SetTextInternal(base::SysNSStringToUTF16(text));
     if (NSMaxRange(current_range) <= [text length] - suggest_text_length_)
       SetSelectedRange(current_range);
     else
       SetSelectedRange(NSMakeRange([text length] - suggest_text_length_, 0));
   }
+}
+
+string16 AutocompleteEditViewMac::GetInstantSuggestion() const {
+  return suggest_text_length_ ?
+      base::SysNSStringToUTF16(GetSuggestTextSubstring()) : string16();
 }
 
 int AutocompleteEditViewMac::TextWidth() const {
@@ -736,7 +743,9 @@ bool AutocompleteEditViewMac::IsImeComposing() const {
 void AutocompleteEditViewMac::OnDidBeginEditing() {
   // We should only arrive here when the field is focussed.
   DCHECK([field_ currentEditor]);
+}
 
+void AutocompleteEditViewMac::OnBeforeChange() {
   // Capture the current state.
   OnBeforePossibleChange();
 }
@@ -744,9 +753,6 @@ void AutocompleteEditViewMac::OnDidBeginEditing() {
 void AutocompleteEditViewMac::OnDidChange() {
   // Figure out what changed and notify the model_.
   OnAfterPossibleChange();
-
-  // Then capture the new state.
-  OnBeforePossibleChange();
 }
 
 void AutocompleteEditViewMac::OnDidEndEditing() {
@@ -785,12 +791,8 @@ bool AutocompleteEditViewMac::OnDoCommandBySelector(SEL cmd) {
   if (cmd == @selector(moveRight:)) {
     // Only commit suggested text if the cursor is all the way to the right and
     // there is no selection.
-    NSRange range = GetSelectedRange();
-    if (range.length == 0 &&
-        suggest_text_length_ > 0 &&
-        (range.location + suggest_text_length_ ==
-         [[field_ stringValue] length])) {
-      controller_->OnCommitSuggestedText(GetText());
+    if (suggest_text_length_ > 0 && IsCaretAtEnd()) {
+      model_->CommitSuggestedText(true);
       return true;
     }
   }
@@ -815,11 +817,19 @@ bool AutocompleteEditViewMac::OnDoCommandBySelector(SEL cmd) {
       return model_->AcceptKeyword();
 
     if (suggest_text_length_ > 0) {
-      controller_->OnCommitSuggestedText(GetText());
+      model_->CommitSuggestedText(true);
       return true;
     }
 
-    if (controller_->AcceptCurrentInstantPreview())
+    if (!IsCaretAtEnd()) {
+      PlaceCaretAt(GetTextLength());
+      // OnDidChange() will not be triggered when setting selected range in this
+      // method, so we need to call it explicitly.
+      OnDidChange();
+      return true;
+    }
+
+    if (model_->AcceptCurrentInstantPreview())
       return true;
   }
 
@@ -866,17 +876,13 @@ bool AutocompleteEditViewMac::OnDoCommandBySelector(SEL cmd) {
   if (cmd == @selector(deleteForward:)) {
     const NSUInteger modifiers = [[NSApp currentEvent] modifierFlags];
     if ((modifiers & NSShiftKeyMask) != 0) {
-      if (popup_view_->IsOpen()) {
-        popup_view_->GetModel()->TryDeletingCurrentItem();
+      if (model_->popup_model()->IsOpen()) {
+        model_->popup_model()->TryDeletingCurrentItem();
         return true;
       }
     }
   }
 
-  // Capture the state before the operation changes the content.
-  // TODO(shess): Determine if this is always redundent WRT the call
-  // in -controlTextDidChange:.
-  OnBeforePossibleChange();
   return false;
 }
 
@@ -887,7 +893,7 @@ void AutocompleteEditViewMac::OnSetFocus(bool control_down) {
 
 void AutocompleteEditViewMac::OnKillFocus() {
   // Tell the model to reset itself.
-  controller_->OnAutocompleteLosingFocus(NULL);
+  model_->OnWillKillFocus(NULL);
   model_->OnKillFocus();
   controller_->OnKillFocus();
 }
@@ -901,7 +907,7 @@ void AutocompleteEditViewMac::CopyToPasteboard(NSPasteboard* pb) {
   DCHECK(CanCopy());
 
   const NSRange selection = GetSelectedRange();
-  std::wstring text = base::SysNSStringToWide(
+  string16 text = base::SysNSStringToUTF16(
       [[field_ stringValue] substringWithRange:selection]);
 
   GURL url;
@@ -909,7 +915,7 @@ void AutocompleteEditViewMac::CopyToPasteboard(NSPasteboard* pb) {
   model_->AdjustTextForCopy(selection.location, IsSelectAll(), &text, &url,
                             &write_url);
 
-  NSString* nstext = base::SysWideToNSString(text);
+  NSString* nstext = base::SysUTF16ToNSString(text);
   [pb declareTypes:[NSArray arrayWithObject:NSStringPboardType] owner:nil];
   [pb setString:nstext forType:NSStringPboardType];
 
@@ -923,11 +929,11 @@ void AutocompleteEditViewMac::OnPaste() {
   // This code currently expects |field_| to be focussed.
   DCHECK([field_ currentEditor]);
 
-  std::wstring text = GetClipboardText(g_browser_process->clipboard());
+  string16 text = GetClipboardText(g_browser_process->clipboard());
   if (text.empty()) {
     return;
   }
-  NSString* s = base::SysWideToNSString(text);
+  NSString* s = base::SysUTF16ToNSString(text);
 
   // -shouldChangeTextInRange:* and -didChangeText are documented in
   // NSTextView as things you need to do if you write additional
@@ -981,7 +987,7 @@ void AutocompleteEditViewMac::OnFrameChanged() {
   model_->PopupBoundsChangedTo(popup_view_->GetTargetBounds());
 
   // Give controller a chance to rearrange decorations.
-  controller_->OnChanged();
+  model_->OnChanged();
 }
 
 bool AutocompleteEditViewMac::OnBackspacePressed() {
@@ -1048,7 +1054,7 @@ void AutocompleteEditViewMac::FocusLocation(bool select_all) {
 
 // TODO(shess): Copied from autocomplete_edit_view_win.cc.  Could this
 // be pushed into the model?
-std::wstring AutocompleteEditViewMac::GetClipboardText(
+string16 AutocompleteEditViewMac::GetClipboardText(
     ui::Clipboard* clipboard) {
   // autocomplete_edit_view_win.cc assumes this can never happen, we
   // will too.
@@ -1065,7 +1071,7 @@ std::wstring AutocompleteEditViewMac::GetClipboardText(
     // lines in terminals, email programs, etc., and so linebreaks indicate
     // completely bogus whitespace that would just cause the input to be
     // invalid.
-    return CollapseWhitespace(UTF16ToWide(text16), true);
+    return CollapseWhitespace(text16, true);
   }
 
   // Try bookmark format.
@@ -1082,15 +1088,31 @@ std::wstring AutocompleteEditViewMac::GetClipboardText(
     // pass resulting url string through GURL to normalize
     GURL url(url_str);
     if (url.is_valid()) {
-      return UTF8ToWide(url.spec());
+      return UTF8ToUTF16(url.spec());
     }
   }
 
-  return std::wstring();
+  return string16();
 }
 
 // static
 NSFont* AutocompleteEditViewMac::GetFieldFont() {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   return rb.GetFont(ResourceBundle::BaseFont).GetNativeFont();
+}
+
+NSUInteger AutocompleteEditViewMac::GetTextLength() const {
+  return ([field_ currentEditor] ?
+          [[[field_ currentEditor] string] length] :
+          [[field_ stringValue] length]) - suggest_text_length_;
+}
+
+void AutocompleteEditViewMac::PlaceCaretAt(NSUInteger pos) {
+  DCHECK(pos <= GetTextLength());
+  SetSelectedRange(NSMakeRange(pos, pos));
+}
+
+bool AutocompleteEditViewMac::IsCaretAtEnd() const {
+  const NSRange selection = GetSelectedRange();
+  return selection.length == 0 && selection.location == GetTextLength();
 }

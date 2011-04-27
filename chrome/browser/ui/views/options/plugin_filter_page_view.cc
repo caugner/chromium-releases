@@ -9,8 +9,8 @@
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 
 PluginFilterPageView::PluginFilterPageView(Profile* profile)
     : ContentFilterPageView(profile, CONTENT_SETTINGS_TYPE_PLUGINS) {
@@ -29,7 +29,7 @@ void PluginFilterPageView::InitControlLayout() {
 
   GridLayout* layout = static_cast<GridLayout*>(GetLayoutManager());
   const int single_column_set_id = 0;
-  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   views::Link* plugins_page_link = new views::Link(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_PLUGIN_SELECTIVE_DISABLE)));

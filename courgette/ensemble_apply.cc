@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 
 #include "courgette/crc.h"
 #include "courgette/image_info.h"
@@ -63,6 +64,7 @@ class EnsemblePatchApplication {
 
   uint32 source_checksum_;
   uint32 target_checksum_;
+  uint32 final_patch_input_size_prediction_;
 
   std::vector<TransformationPatcher*> patchers_;
 
@@ -73,7 +75,8 @@ class EnsemblePatchApplication {
 };
 
 EnsemblePatchApplication::EnsemblePatchApplication()
-    : source_checksum_(0), target_checksum_(0) {
+    : source_checksum_(0), target_checksum_(0),
+      final_patch_input_size_prediction_(0) {
 }
 
 EnsemblePatchApplication::~EnsemblePatchApplication() {
@@ -101,6 +104,9 @@ Status EnsemblePatchApplication::ReadHeader(SourceStream* header_stream) {
     return C_BAD_ENSEMBLE_HEADER;
 
   if (!header_stream->ReadVarint32(&target_checksum_))
+    return C_BAD_ENSEMBLE_HEADER;
+
+  if (!header_stream->ReadVarint32(&final_patch_input_size_prediction_))
     return C_BAD_ENSEMBLE_HEADER;
 
   return C_OK;
@@ -214,6 +220,8 @@ Status EnsemblePatchApplication::TransformDown(
     SinkStream* basic_elements) {
   // Construct blob of original input followed by reformed elements.
 
+  basic_elements->Reserve(final_patch_input_size_prediction_);
+
   // The original input:
   basic_elements->Write(base_region_.start(), base_region_.length());
 
@@ -231,6 +239,9 @@ Status EnsemblePatchApplication::TransformDown(
 
   if (!transformed_elements->Empty())
     return C_STREAM_NOT_CONSUMED;
+  // We have totally consumed transformed_elements, so can free the
+  // storage to which it referred.
+  corrected_elements_storage_.Retire();
 
   return C_OK;
 }
@@ -353,42 +364,32 @@ Status ApplyEnsemblePatch(SourceStream* base,
 Status ApplyEnsemblePatch(const FilePath::CharType* old_file_name,
                           const FilePath::CharType* patch_file_name,
                           const FilePath::CharType* new_file_name) {
-  Status status;
-
   // First read enough of the patch file to validate the header is well-formed.
   // A few varint32 numbers should fit in 100.
   FilePath patch_file_path(patch_file_name);
-  const int BIG_ENOUGH_FOR_HEADER = 100;
-  char buffer[BIG_ENOUGH_FOR_HEADER];
-  int read_count =
-      file_util::ReadFile(patch_file_path, buffer, sizeof(buffer));
-  if (read_count < 0)
+  file_util::MemoryMappedFile patch_file;
+  if (!patch_file.Initialize(patch_file_path))
     return C_READ_OPEN_ERROR;
 
   // 'Dry-run' the first step of the patch process to validate format of header.
   SourceStream patch_header_stream;
-  patch_header_stream.Init(buffer, read_count);
+  patch_header_stream.Init(patch_file.data(), patch_file.length());
   EnsemblePatchApplication patch_process;
-  status = patch_process.ReadHeader(&patch_header_stream);
+  Status status = patch_process.ReadHeader(&patch_header_stream);
   if (status != C_OK)
     return status;
 
-  // Header smells good so read the whole patch file for real.
-  std::string patch_file_buffer;
-  if (!file_util::ReadFileToString(patch_file_path, &patch_file_buffer))
-    return C_READ_ERROR;
-
   // Read the old_file.
   FilePath old_file_path(old_file_name);
-  std::string old_file_buffer;
-  if (!file_util::ReadFileToString(old_file_path, &old_file_buffer))
+  file_util::MemoryMappedFile old_file;
+  if (!old_file.Initialize(old_file_path))
     return C_READ_ERROR;
 
   // Apply patch on streams.
   SourceStream old_source_stream;
   SourceStream patch_source_stream;
-  old_source_stream.Init(old_file_buffer);
-  patch_source_stream.Init(patch_file_buffer);
+  old_source_stream.Init(old_file.data(), old_file.length());
+  patch_source_stream.Init(patch_file.data(), patch_file.length());
   SinkStream new_sink_stream;
   status = ApplyEnsemblePatch(&old_source_stream, &patch_source_stream,
                               &new_sink_stream);

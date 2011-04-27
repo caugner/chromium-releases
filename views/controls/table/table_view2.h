@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
-#include "gfx/rect.h"
+#include "ui/gfx/rect.h"
 #include "views/controls/table/table_view.h"
 #include "views/controls/table/native_table_wrapper.h"
 #include "views/view.h"
@@ -195,11 +195,9 @@ class TableView2 : public View, public TableModelObserver {
     return vertical_lines_;
   }
 
-  virtual void DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current);
   virtual void Layout();
 
-  virtual void PaintFocusBorder(gfx::Canvas* canvas);
+  virtual void OnPaintFocusBorder(gfx::Canvas* canvas);
 
   // Used by tests.
   virtual gfx::NativeView GetTestingHandle();

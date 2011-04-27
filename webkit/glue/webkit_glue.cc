@@ -15,6 +15,7 @@
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string_piece.h"
+#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
@@ -80,8 +81,13 @@ void SetJavaScriptFlags(const std::string& str) {
 #endif
 }
 
-void EnableWebCoreNotImplementedLogging() {
-  WebKit::enableLogChannel("NotYetImplemented");
+void EnableWebCoreLogChannels(const std::string& channels) {
+  if (channels.empty())
+    return;
+  StringTokenizer t(channels, ", ");
+  while (t.GetNext()) {
+    WebKit::enableLogChannel(t.token().c_str());
+  }
 }
 
 string16 DumpDocumentText(WebFrame* web_frame) {
@@ -240,21 +246,6 @@ string16 DumpHistoryState(const std::string& history_state, int indent,
                       is_current));
 }
 
-void ResetBeforeTestRun(WebView* view) {
-  WebFrame* web_frame = view->mainFrame();
-
-  // Reset the main frame name since tests always expect it to be empty.  It
-  // is normally not reset between page loads (even in IE and FF).
-  if (web_frame)
-    web_frame->setName(WebString());
-
-#if defined(OS_WIN)
-  // Reset the last click information so the clicks generated from previous
-  // test aren't inherited (otherwise can mistake single/double/triple clicks)
-  WebKit::WebInputEventFactory::resetLastClickState();
-#endif
-}
-
 #ifndef NDEBUG
 // The log macro was having problems due to collisions with WTF, so we just
 // code here what that would have inlined.
@@ -323,10 +314,11 @@ WebKit::WebFileError PlatformFileErrorToWebFileError(
       return WebKit::WebFileErrorNotFound;
     case base::PLATFORM_FILE_ERROR_INVALID_OPERATION:
     case base::PLATFORM_FILE_ERROR_EXISTS:
-    case base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY:
-    case base::PLATFORM_FILE_ERROR_NOT_A_FILE:
     case base::PLATFORM_FILE_ERROR_NOT_EMPTY:
       return WebKit::WebFileErrorInvalidModification;
+    case base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY:
+    case base::PLATFORM_FILE_ERROR_NOT_A_FILE:
+      return WebKit::WebFileErrorTypeMismatch;
     case base::PLATFORM_FILE_ERROR_ACCESS_DENIED:
       return WebKit::WebFileErrorNoModificationAllowed;
     case base::PLATFORM_FILE_ERROR_FAILED:

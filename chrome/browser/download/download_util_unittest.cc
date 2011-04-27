@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/download/download_util.h"
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <locale.h>
 #endif
 
 #include "base/string_util.h"
-#include "chrome/browser/download/download_util.h"
+#include "base/test/test_file_util.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -42,17 +44,29 @@ const struct {
    "text/plain",
    L"my_download.txt"},
 
-  // Disposition has relative paths, remove them
+  // Disposition has relative paths, remove directory separators
   {"filename=../../../../././../a_file_name.txt",
    "http://www.evil.com/my_download.txt",
    "text/plain",
-   L"a_file_name.txt"},
+   L"_.._.._.._._._.._a_file_name.txt"},
 
-  // Disposition has parent directories, remove them
+  // Disposition has parent directories, remove directory separators
   {"filename=dir1/dir2/a_file_name.txt",
    "http://www.evil.com/my_download.txt",
    "text/plain",
-   L"a_file_name.txt"},
+   L"dir1_dir2_a_file_name.txt"},
+
+  // Disposition has relative paths, remove directory separators
+  {"filename=..\\..\\..\\..\\.\\.\\..\\a_file_name.txt",
+   "http://www.evil.com/my_download.txt",
+   "text/plain",
+   L"_.._.._.._._._.._a_file_name.txt"},
+
+  // Disposition has parent directories, remove directory separators
+  {"filename=dir1\\dir2\\a_file_name.txt",
+   "http://www.evil.com/my_download.txt",
+   "text/plain",
+   L"dir1_dir2_a_file_name.txt"},
 
   // No useful information in disposition or URL, use default
   {"", "http://www.truncated.com/path/", "text/plain",
@@ -183,16 +197,12 @@ const struct {
   {"filename=../foo.txt",
    "http://www.evil.com/../foo.txt",
    "text/plain",
-   L"foo.txt"},
+   L"_foo.txt"},
 
   {"filename=..\\foo.txt",
    "http://www.evil.com/..\\foo.txt",
    "text/plain",
-#if defined(OS_WIN)
-   L"foo.txt"
-#else
-   L"\\foo.txt"
-#endif
+   L"_foo.txt"
   },
 
   {"filename=.hidden",
@@ -437,7 +447,8 @@ TEST(DownloadUtilTest, GenerateFileName) {
   std::string locale = setlocale(LC_CTYPE, NULL);
   StringToLowerASCII(&locale);
   EXPECT_NE(std::string::npos, locale.find("utf-8"))
-      << "Your locale must be set to UTF-8 for this test to pass!";
+      << "Your locale (" << locale << ") must be set to UTF-8 "
+      << "for this test to pass!";
 #endif
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kGenerateFileNameTestCases); ++i) {
@@ -448,7 +459,7 @@ TEST(DownloadUtilTest, GenerateFileName) {
                                     kGenerateFileNameTestCases[i].mime_type,
                                     &generated_name);
     EXPECT_EQ(kGenerateFileNameTestCases[i].expected_name,
-              generated_name.ToWStringHack()) << i;
+              file_util::FilePathAsWString(generated_name)) << i;
   }
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kGenerateFileNameTestCases); ++i) {
@@ -459,7 +470,7 @@ TEST(DownloadUtilTest, GenerateFileName) {
                                     kGenerateFileNameTestCases[i].mime_type,
                                     &generated_name);
     EXPECT_EQ(kGenerateFileNameTestCases[i].expected_name,
-              generated_name.ToWStringHack()) << i;
+              file_util::FilePathAsWString(generated_name)) << i;
   }
 
   // A couple of cases with raw 8bit characters in C-D.
@@ -470,7 +481,7 @@ TEST(DownloadUtilTest, GenerateFileName) {
                                     "iso-8859-1",
                                     "image/png",
                                     &generated_name);
-    EXPECT_EQ(L"caf\u00e9.png", generated_name.ToWStringHack());
+    EXPECT_EQ(L"caf\u00e9.png", file_util::FilePathAsWString(generated_name));
   }
 
   {
@@ -480,7 +491,7 @@ TEST(DownloadUtilTest, GenerateFileName) {
                                     "windows-1253",
                                     "image/png",
                                     &generated_name);
-    EXPECT_EQ(L"caf\u03b5.png", generated_name.ToWStringHack());
+    EXPECT_EQ(L"caf\u03b5.png", file_util::FilePathAsWString(generated_name));
   }
 }
 

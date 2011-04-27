@@ -6,68 +6,56 @@
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_TRANSLATE_INFOBAR_BASE_H_
 #pragma once
 
+#include "chrome/browser/translate/languages_menu_model.h"
 #include "chrome/browser/translate/translate_infobar_view.h"
-#include "chrome/browser/ui/views/infobars/infobars.h"
+#include "chrome/browser/ui/views/infobars/infobar_background.h"
+#include "chrome/browser/ui/views/infobars/infobar_view.h"
 
 class TranslateInfoBarDelegate;
 
 namespace views {
 class MenuButton;
-class ViewMenuDelegate;
 }
 
 // This class contains some of the base functionality that translate infobars
 // use.
 class TranslateInfoBarBase : public TranslateInfoBarView,
-                             public InfoBar {
+                             public InfoBarView {
  public:
   explicit TranslateInfoBarBase(TranslateInfoBarDelegate* delegate);
   virtual ~TranslateInfoBarBase();
 
-  // TranslateInfoBarView implementation:
-  virtual void OriginalLanguageChanged() {}
-  virtual void TargetLanguageChanged() {}
-
-  // Overridden from views::View:
-  virtual void Layout();
-  virtual void PaintBackground(gfx::Canvas* canvas);
-
  protected:
-  // Overridden from ui::AnimationDelegate:
-  virtual void AnimationProgressed(const ui::Animation* animation);
+  static const int kButtonInLabelSpacing;
 
-  // Creates a label with the appropriate font and color for the translate
-  // infobars.
-  views::Label* CreateLabel(const string16& text);
+  // InfoBarView:
+  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
 
-  // Creates a menu-button with a custom appearance for the translate infobars.
-  views::MenuButton* CreateMenuButton(const string16& text,
-                                      bool normal_has_border,
-                                      views::ViewMenuDelegate* menu_delegate);
-
-  // Returns the location at which the menu triggered by |menu_button| should be
-  // positioned.
-  gfx::Point DetermineMenuPosition(views::MenuButton* menu_button);
+  // Sets the text of the provided language menu button to reflect the current
+  // value from the delegate.
+  void UpdateLanguageButtonText(views::MenuButton* button,
+                                LanguagesMenuModel::LanguageType language);
 
   // Convenience to retrieve the TranslateInfoBarDelegate for this infobar.
-  TranslateInfoBarDelegate* GetDelegate() const;
-
-  // The translate icon.
-  views::ImageView* icon_;
-
-  InfoBarBackground normal_background_;
-  InfoBarBackground error_background_;
-  scoped_ptr<ui::SlideAnimation> background_color_animation_;
+  TranslateInfoBarDelegate* GetDelegate();
 
  private:
+  // InfoBarView:
+  virtual void OnPaintBackground(gfx::Canvas* canvas);
+  virtual void AnimationProgressed(const ui::Animation* animation);
+
   // Returns the background that should be displayed when not animating.
-  const InfoBarBackground& GetBackground() const;
+  const views::Background& GetBackground();
 
   // Paints |background| to |canvas| with the opacity level based on
   // |animation_value|.
   void FadeBackground(gfx::Canvas* canvas,
                       double animation_value,
-                      const InfoBarBackground& background);
+                      const views::Background& background);
+
+  InfoBarBackground normal_background_;
+  InfoBarBackground error_background_;
+  scoped_ptr<ui::SlideAnimation> background_color_animation_;
 
   DISALLOW_COPY_AND_ASSIGN(TranslateInfoBarBase);
 };

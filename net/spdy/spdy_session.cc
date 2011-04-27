@@ -23,7 +23,9 @@
 #include "net/http/http_network_session.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_frame_builder.h"
+#include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_protocol.h"
+#include "net/spdy/spdy_session_pool.h"
 #include "net/spdy/spdy_settings_storage.h"
 #include "net/spdy/spdy_stream.h"
 
@@ -257,10 +259,12 @@ SpdySession::SpdySession(const HostPortProxyPair& host_port_proxy_pair,
 }
 
 SpdySession::~SpdySession() {
-  state_ = CLOSED;
+  if (state_ != CLOSED) {
+    state_ = CLOSED;
 
-  // Cleanup all the streams.
-  CloseAllStreams(net::ERR_ABORTED);
+    // Cleanup all the streams.
+    CloseAllStreams(net::ERR_ABORTED);
+  }
 
   if (connection_->is_initialized()) {
     // With Spdy we can't recycle sockets.
@@ -632,7 +636,7 @@ void SpdySession::OnWriteComplete(int result) {
         // size.
         if (result > 0) {
           result = in_flight_write_.buffer()->size();
-          DCHECK_GT(result, static_cast<int>(spdy::SpdyFrame::size()));
+          DCHECK_GE(result, static_cast<int>(spdy::SpdyFrame::size()));
           result -= static_cast<int>(spdy::SpdyFrame::size());
         }
 

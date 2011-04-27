@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "gfx/canvas_skia.h"
+#include "ui/gfx/canvas_skia.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_2.h"
 
@@ -58,8 +58,7 @@ bool BrowserActionOverflowMenuController::RunMenu(gfx::NativeWindow window,
                                                   bool for_drop) {
   for_drop_ = for_drop;
 
-  gfx::Rect bounds = menu_button_->GetBounds(
-      views::View::IGNORE_MIRRORING_TRANSFORMATION);
+  gfx::Rect bounds = menu_button_->bounds();
   gfx::Point screen_loc;
   views::View::ConvertPointToScreen(menu_button_, &screen_loc);
   bounds.set_x(screen_loc.x());
@@ -149,7 +148,7 @@ int BrowserActionOverflowMenuController::GetDropOperation(
   // (because we don't shrink the BrowserActionContainer when you do this).
   if ((item->GetCommand() == 0) && (*position == DROP_BEFORE)) {
     BrowserActionDragData drop_data;
-    if (!drop_data.Read(event.GetData()))
+    if (!drop_data.Read(event.data()))
       return ui::DragDropTypes::DRAG_NONE;
 
     if (drop_data.index() < owner_->VisibleBrowserActions())
@@ -164,7 +163,7 @@ int BrowserActionOverflowMenuController::OnPerformDrop(
     DropPosition position,
     const views::DropTargetEvent& event) {
   BrowserActionDragData drop_data;
-  if (!drop_data.Read(event.GetData()))
+  if (!drop_data.Read(event.data()))
     return ui::DragDropTypes::DRAG_NONE;
 
   size_t drop_index;

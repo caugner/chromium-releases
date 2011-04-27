@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/proxy/host_dispatcher.h"
+#include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
 
@@ -57,18 +58,26 @@ void DidChangeFocus(PP_Instance instance, PP_Bool has_focus) {
 PP_Bool HandleInputEvent(PP_Instance instance,
                          const PP_InputEvent* event) {
   PP_Bool result = PP_FALSE;
-  HostDispatcher::GetForInstance(instance)->Send(
-      new PpapiMsg_PPPInstance_HandleInputEvent(INTERFACE_ID_PPP_INSTANCE,
-                                                instance, *event, &result));
+  IPC::Message* msg = new PpapiMsg_PPPInstance_HandleInputEvent(
+      INTERFACE_ID_PPP_INSTANCE, instance, *event, &result);
+  // Make this message not unblock, to avoid re-entrancy problems when the
+  // plugin does a synchronous call to the renderer. This will force any
+  // synchronous calls from the plugin to complete before processing this
+  // message. We avoid deadlock by never un-setting the unblock flag on messages
+  // from the plugin to the renderer.
+  msg->set_unblock(false);
+  HostDispatcher::GetForInstance(instance)->Send(msg);
   return result;
 }
 
 PP_Bool HandleDocumentLoad(PP_Instance instance,
                            PP_Resource url_loader) {
   PP_Bool result = PP_FALSE;
+  HostResource serialized_loader;
+  serialized_loader.SetHostResource(instance, url_loader);
   HostDispatcher::GetForInstance(instance)->Send(
       new PpapiMsg_PPPInstance_HandleDocumentLoad(INTERFACE_ID_PPP_INSTANCE,
-                                                  instance, url_loader,
+                                                  instance, serialized_loader,
                                                   &result));
   return result;
 }
@@ -91,6 +100,11 @@ static const PPP_Instance instance_interface = {
   &GetInstanceObject
 };
 
+InterfaceProxy* CreateInstanceProxy(Dispatcher* dispatcher,
+                                    const void* target_interface) {
+  return new PPP_Instance_Proxy(dispatcher, target_interface);
+}
+
 }  // namespace
 
 PPP_Instance_Proxy::PPP_Instance_Proxy(Dispatcher* dispatcher,
@@ -101,12 +115,16 @@ PPP_Instance_Proxy::PPP_Instance_Proxy(Dispatcher* dispatcher,
 PPP_Instance_Proxy::~PPP_Instance_Proxy() {
 }
 
-const void* PPP_Instance_Proxy::GetSourceInterface() const {
-  return &instance_interface;
-}
-
-InterfaceID PPP_Instance_Proxy::GetInterfaceId() const {
-  return INTERFACE_ID_PPP_INSTANCE;
+// static
+const InterfaceProxy::Info* PPP_Instance_Proxy::GetInfo() {
+  static const Info info = {
+    &instance_interface,
+    PPP_INSTANCE_INTERFACE,
+    INTERFACE_ID_PPP_INSTANCE,
+    false,
+    &CreateInstanceProxy,
+  };
+  return &info;
 }
 
 bool PPP_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -140,6 +158,13 @@ void PPP_Instance_Proxy::OnMsgDidCreate(
   if (argn.size() != argv.size())
     return;
 
+  // Set up the routing associating this new instance with the dispatcher we
+  // just got the message from. This must be done before calling into the
+  // plugin so it can in turn call PPAPI functions.
+  PluginDispatcher* plugin_dispatcher =
+      static_cast<PluginDispatcher*>(dispatcher());
+  plugin_dispatcher->DidCreateInstance(instance);
+
   // Make sure the arrays always have at least one element so we can take the
   // address below.
   std::vector<const char*> argn_array(
@@ -155,16 +180,28 @@ void PPP_Instance_Proxy::OnMsgDidCreate(
   *result = ppp_instance_target()->DidCreate(instance,
                                              static_cast<uint32_t>(argn.size()),
                                              &argn_array[0], &argv_array[0]);
-  DCHECK(*result);
+  if (!*result) {
+    // In the failure to create case, this plugin instance will be torn down
+    // without further notification, so we also need to undo the routing.
+    plugin_dispatcher->DidDestroyInstance(instance);
+  }
 }
 
 void PPP_Instance_Proxy::OnMsgDidDestroy(PP_Instance instance) {
   ppp_instance_target()->DidDestroy(instance);
+  static_cast<PluginDispatcher*>(dispatcher())->DidDestroyInstance(instance);
 }
 
 void PPP_Instance_Proxy::OnMsgDidChangeView(PP_Instance instance,
                                             const PP_Rect& position,
                                             const PP_Rect& clip) {
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return;
+  InstanceData* data = dispatcher->GetInstanceData(instance);
+  if (!data)
+    return;
+  data->position = position;
   ppp_instance_target()->DidChangeView(instance, &position, &clip);
 }
 
@@ -180,11 +217,12 @@ void PPP_Instance_Proxy::OnMsgHandleInputEvent(PP_Instance instance,
 }
 
 void PPP_Instance_Proxy::OnMsgHandleDocumentLoad(PP_Instance instance,
-                                                 PP_Resource url_loader,
+                                                 const HostResource& url_loader,
                                                  PP_Bool* result) {
-  PPB_URLLoader_Proxy::TrackPluginResource(instance, url_loader);
+  PP_Resource plugin_loader =
+      PPB_URLLoader_Proxy::TrackPluginResource(url_loader);
   *result = ppp_instance_target()->HandleDocumentLoad(
-      instance, url_loader);
+      instance, plugin_loader);
 }
 
 void PPP_Instance_Proxy::OnMsgGetInstanceObject(

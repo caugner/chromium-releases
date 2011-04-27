@@ -13,7 +13,7 @@
         '../base/base.gyp:*',
         '../chrome/browser/sync/tools/sync_tools.gyp:*',
         '../chrome/chrome.gyp:*',
-        '../gfx/gfx.gyp:*',
+        '../ui/gfx/gfx.gyp:*',
         '../gpu/gpu.gyp:*',
         '../gpu/demos/demos.gyp:*',
         '../ipc/ipc.gyp:*',
@@ -104,7 +104,6 @@
           'dependencies': [
             '../breakpad/breakpad.gyp:*',
             '../chrome/app/locales/locales.gyp:*',
-            '../ceee/ceee.gyp:*',
             '../chrome_frame/chrome_frame.gyp:*',
             '../courgette/courgette.gyp:*',
             '../gears/gears.gyp:*',
@@ -142,7 +141,7 @@
           ],
         }],
       ],
-    },
+    }, # target_name: All
     {
       'target_name': 'chromium_builder_tests',
       'type': 'none',
@@ -158,7 +157,7 @@
         '../chrome/chrome.gyp:sync_unit_tests',
         '../chrome/chrome.gyp:ui_tests',
         '../chrome/chrome.gyp:unit_tests',
-        '../gfx/gfx.gyp:gfx_unittests',
+        '../ui/gfx/gfx.gyp:gfx_unittests',
         '../gpu/gpu.gyp:gpu_unittests',
         '../ipc/ipc.gyp:ipc_tests',
         '../jingle/jingle.gyp:notifier_unit_tests',
@@ -197,7 +196,20 @@
            ],
         }],
       ],
-    },
+    }, # target_name: chromium_builder_tests
+    {
+      'target_name': 'chromium_builder_perf',
+      'type': 'none',
+      'dependencies': [
+        '../chrome/chrome.gyp:memory_test',
+        '../chrome/chrome.gyp:page_cycler_tests',
+        '../chrome/chrome.gyp:plugin_tests',
+        '../chrome/chrome.gyp:startup_tests',
+        '../chrome/chrome.gyp:tab_switching_test',
+        '../chrome/chrome.gyp:ui_tests', # needed for dromaeo, sunspider, v8
+        '../chrome/chrome.gyp:url_fetch_test',
+      ],
+    }, # target_name: chromium_builder_perf
     {
       'target_name': 'chromium_gpu_builder',
       'type': 'none',
@@ -205,7 +217,21 @@
         '../chrome/chrome.gyp:gpu_tests',
         '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:DumpRenderTree',
       ],
-    }
+    }, # target_name: chromium_gpu_builder
+    {
+      'target_name': 'chromium_builder_qa',
+      'type': 'none',
+      'dependencies': [
+        '../chrome/chrome.gyp:chromedriver',
+      ],
+      'conditions': [
+        ['OS=="mac" or OS=="win" or (OS=="linux" and target_arch==python_arch)', {
+          'dependencies': [
+            '../chrome/chrome.gyp:pyautolib',
+          ],
+        }], # 'OS=="mac" or OS=="win" or (OS=="linux" and target_arch==python_arch)'
+      ],
+    }, # target_name: chromium_builder_qa
   ],
   'conditions': [
     ['OS=="mac"', {
@@ -236,7 +262,7 @@
             '../chrome/chrome.gyp:sync_unit_tests',
             '../chrome/chrome.gyp:ui_tests',
             '../chrome/chrome.gyp:unit_tests',
-            '../gfx/gfx.gyp:gfx_unittests',
+            '../ui/gfx/gfx.gyp:gfx_unittests',
             '../gpu/gpu.gyp:gpu_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:notifier_unit_tests',
@@ -266,7 +292,7 @@
             '../chrome/chrome.gyp:ui_tests',
             '../chrome/chrome.gyp:unit_tests',
             '../chrome/chrome.gyp:url_fetch_test',
-            '../gfx/gfx.gyp:gfx_unittests',
+            '../ui/gfx/gfx.gyp:gfx_unittests',
             '../gpu/gpu.gyp:gpu_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:notifier_unit_tests',
@@ -308,6 +334,7 @@
             '../chrome/chrome.gyp:sync_unit_tests',
             '../chrome/chrome.gyp:unit_tests',
             '../chrome/chrome.gyp:ui_tests',
+            '../ui/gfx/gfx.gyp:gfx_unittests',
             '../jingle/jingle.gyp:notifier_unit_tests',
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
           ],
@@ -351,7 +378,7 @@
             '../chrome_frame/chrome_frame.gyp:chrome_frame_unittests',
             '../chrome_frame/chrome_frame.gyp:npchrome_frame',
             '../courgette/courgette.gyp:courgette_unittests',
-            '../gfx/gfx.gyp:gfx_unittests',
+            '../ui/gfx/gfx.gyp:gfx_unittests',
             '../gpu/gpu.gyp:gpu_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:notifier_unit_tests',
@@ -399,6 +426,7 @@
               'type': 'none',
               'dependencies': [
                 '../chrome/app/locales/locales.gyp:*',
+                '../chrome/chrome.gyp:chromedriver',
                 '../chrome/chrome.gyp:crash_service',
                 '../chrome/chrome.gyp:page_cycler_tests',
                 '../chrome/chrome.gyp:policy_templates',
@@ -410,6 +438,7 @@
                 '../chrome_frame/chrome_frame.gyp:chrome_frame_unittests',
                 '../chrome_frame/chrome_frame.gyp:npchrome_frame',
                 '../courgette/courgette.gyp:courgette',
+                '../courgette/courgette.gyp:courgette64',
                 '../third_party/adobe/flash/flash_player.gyp:flash_player',
                 '../webkit/webkit.gyp:test_shell',
               ],
@@ -438,6 +467,7 @@
           'dependencies': [
             '../app/app.gyp:app_unittests',
             '../base/base.gyp:base_unittests',
+            '../chrome/browser/chromeos/input_method/candidate_window.gyp:candidate_window',
             '../chrome/chrome.gyp:browser_tests',
             '../chrome/chrome.gyp:chrome',
             '../chrome/chrome.gyp:interactive_ui_tests',
@@ -450,7 +480,7 @@
             '../chrome/chrome.gyp:ui_tests',
             '../chrome/chrome.gyp:unit_tests',
             '../chrome/chrome.gyp:url_fetch_test',
-            '../gfx/gfx.gyp:gfx_unittests',
+            '../ui/gfx/gfx.gyp:gfx_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:notifier_unit_tests',
             '../media/media.gyp:ffmpeg_tests',
@@ -460,8 +490,8 @@
             '../printing/printing.gyp:printing_unittests',
             '../remoting/remoting.gyp:remoting_unittests',
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
+            '../views/views.gyp:views_unittests',
             'temp_gyp/googleurl.gyp:googleurl_unittests',
-            '../chrome/browser/chromeos/input_method/candidate_window.gyp:candidate_window',
           ],
         },
       ],  # targets

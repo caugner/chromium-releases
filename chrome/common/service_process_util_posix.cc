@@ -2,82 +2,132 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/common/service_process_util.h"
+#include "chrome/common/service_process_util_posix.h"
 
-#include "base/file_util.h"
-#include "base/logging.h"
-#include "base/path_service.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_version_info.h"
+#include "base/basictypes.h"
+#include "base/message_loop_proxy.h"
 
 namespace {
-
-// Gets the name of the lock file for service process.
-FilePath GetServiceProcessLockFilePath() {
-  FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  chrome::VersionInfo version_info;
-  std::string lock_file_name = version_info.Version() + "Service Process Lock";
-  return user_data_dir.Append(lock_file_name);
+int g_signal_socket = -1;
 }
 
-}  // namespace
+ServiceProcessShutdownMonitor::ServiceProcessShutdownMonitor(
+    Task* shutdown_task)
+    : shutdown_task_(shutdown_task) {
+}
 
-bool ForceServiceProcessShutdown(const std::string& version) {
+ServiceProcessShutdownMonitor::~ServiceProcessShutdownMonitor() {
+}
+
+void ServiceProcessShutdownMonitor::OnFileCanReadWithoutBlocking(int fd) {
+  if (shutdown_task_.get()) {
+    int buffer;
+    int length = read(fd, &buffer, sizeof(buffer));
+    if ((length == sizeof(buffer)) && (buffer == kShutDownMessage)) {
+      shutdown_task_->Run();
+      shutdown_task_.reset();
+    } else if (length > 0) {
+      LOG(ERROR) << "Unexpected read: " << buffer;
+    } else if (length == 0) {
+      LOG(ERROR) << "Unexpected fd close";
+    } else if (length < 0) {
+      PLOG(ERROR) << "read";
+    }
+  }
+}
+
+void ServiceProcessShutdownMonitor::OnFileCanWriteWithoutBlocking(int fd) {
   NOTIMPLEMENTED();
-  return false;
 }
 
-bool CheckServiceProcessReady() {
-  const FilePath path = GetServiceProcessLockFilePath();
-  return file_util::PathExists(path);
+// "Forced" Shutdowns on POSIX are done via signals. The magic signal for
+// a shutdown is SIGTERM. "write" is a signal safe function. PLOG(ERROR) is
+// not, but we don't ever expect it to be called.
+static void SigTermHandler(int sig, siginfo_t* info, void* uap) {
+  // TODO(dmaclach): add security here to make sure that we are being shut
+  //                 down by an appropriate process.
+  int message = ServiceProcessShutdownMonitor::kShutDownMessage;
+  if (write(g_signal_socket, &message, sizeof(message)) < 0) {
+    PLOG(ERROR) << "write";
+  }
 }
 
-struct ServiceProcessState::StateData {
-  // No state yet for Posix.
-};
+ServiceProcessState::StateData::StateData() {}
 
-bool ServiceProcessState::TakeSingletonLock() {
-  // TODO(sanjeevr): Implement singleton mechanism for POSIX.
-  NOTIMPLEMENTED();
+void ServiceProcessState::StateData::SignalReady() {
+  CHECK(MessageLoopForIO::current()->WatchFileDescriptor(
+      sockets_[0], true, MessageLoopForIO::WATCH_READ,
+      &watcher_, shut_down_monitor_.get()));
+  g_signal_socket = sockets_[1];
+
+  // Set up signal handler for SIGTERM.
+  struct sigaction action;
+  action.sa_sigaction = SigTermHandler;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = SA_SIGINFO;
+  if (sigaction(SIGTERM, &action, &old_action_) == 0) {
+    // If the old_action is not default, somebody else has installed a
+    // a competing handler. Our handler is going to override it so it
+    // won't be called. If this occurs it needs to be fixed.
+    DCHECK_EQ(old_action_.sa_handler, SIG_DFL);
+    set_action_ = true;
+#if defined(OS_LINUX)
+    initializing_lock_.reset();
+#endif  // OS_LINUX
+  } else {
+    PLOG(ERROR) << "sigaction";
+  }
+}
+
+ServiceProcessState::StateData::~StateData() {}
+
+bool ServiceProcessState::InitializeState() {
+  CHECK(!state_);
+  state_ = new StateData;
+  state_->AddRef();
+  state_->sockets_[0] = -1;
+  state_->sockets_[1] = -1;
+  state_->set_action_ = false;
   return true;
 }
 
-void ServiceProcessState::SignalReady(Task* shutdown_task) {
-  // TODO(hclam): Implement better mechanism for these platform.
-  // Also we need to save shutdown task. For now we just delete the shutdown
-  // task because we have not way to listen for shutdown requests.
-  delete shutdown_task;
-  const FilePath path = GetServiceProcessLockFilePath();
-  FILE* file = file_util::OpenFile(path, "wb+");
-  if (!file)
-    return;
-  VLOG(1) << "Created Service Process lock file: " << path.value();
-  file_util::TruncateFile(file) && file_util::CloseFile(file);
-}
+bool ServiceProcessState::SignalReady(
+    base::MessageLoopProxy* message_loop_proxy, Task* shutdown_task) {
+  CHECK(state_);
+  CHECK_EQ(g_signal_socket, -1);
 
-void ServiceProcessState::SignalStopped() {
-  const FilePath path = GetServiceProcessLockFilePath();
-  file_util::Delete(path, false);
-  shared_mem_service_data_.reset();
-}
-
-bool ServiceProcessState::AddToAutoRun() {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-bool ServiceProcessState::RemoveFromAutoRun() {
-  NOTIMPLEMENTED();
-  return false;
+#if defined(OS_LINUX)
+  state_->running_lock_.reset(TakeServiceRunningLock(true));
+  if (state_->running_lock_.get() == NULL) {
+    return false;
+  }
+#endif // OS_LINUX
+  state_->shut_down_monitor_.reset(
+      new ServiceProcessShutdownMonitor(shutdown_task));
+  if (pipe(state_->sockets_) < 0) {
+    PLOG(ERROR) << "pipe";
+    return false;
+  }
+  message_loop_proxy->PostTask(FROM_HERE,
+      NewRunnableMethod(state_, &ServiceProcessState::StateData::SignalReady));
+  return true;
 }
 
 void ServiceProcessState::TearDownState() {
+  g_signal_socket = -1;
+  if (state_) {
+    if (state_->sockets_[0] != -1) {
+      close(state_->sockets_[0]);
+    }
+    if (state_->sockets_[1] != -1) {
+      close(state_->sockets_[1]);
+    }
+    if (state_->set_action_) {
+      if (sigaction(SIGTERM, &state_->old_action_, NULL) < 0) {
+        PLOG(ERROR) << "sigaction";
+      }
+    }
+    state_->Release();
+    state_ = NULL;
+  }
 }
-
-bool ServiceProcessState::ShouldHandleOtherVersion() {
-  // On POSIX, the shared memory is a file in disk. We may have a stale file
-  // lying around from a previous run. So the check is not reliable.
-  return false;
-}
-

@@ -18,12 +18,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
-#include "gfx/point.h"
-#include "gfx/rect.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/rect.h"
 
 class GtkThemeProvider;
 class InfoBubbleGtk;

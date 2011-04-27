@@ -1357,6 +1357,9 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   // The value currently in attrib_0.
   VertexAttribManager::VertexAttribInfo::Vec4 attrib_0_value_;
 
+  // Whether or not the attrib_0 buffer holds the attrib_0_value.
+  bool attrib_0_buffer_matches_value_;
+
   // The size of attrib 0.
   GLsizei attrib_0_size_;
 
@@ -1736,6 +1739,7 @@ GLES2DecoderImpl::GLES2DecoderImpl(ContextGroup* group)
       pack_alignment_(4),
       unpack_alignment_(4),
       attrib_0_buffer_id_(0),
+      attrib_0_buffer_matches_value_(true),
       attrib_0_size_(0),
       fixed_attrib_buffer_id_(0),
       fixed_attrib_buffer_size_(0),
@@ -2242,6 +2246,13 @@ bool GLES2DecoderImpl::UpdateOffscreenFrameBufferSize() {
     return true;
 
   offscreen_size_ = pending_offscreen_size_;
+  int w = offscreen_size_.width();
+  int h = offscreen_size_.height();
+  if (w < 0 || h < 0 || h >= (INT_MAX / 4) / (w ? w : 1)) {
+    LOG(ERROR) << "GLES2DecoderImpl::UpdateOffscreenFrameBufferSize failed "
+               << "to allocate storage due to excessive dimensions.";
+    return false;
+  }
 
   // Reallocate the offscreen target buffers.
   DCHECK(offscreen_target_color_format_);
@@ -3985,7 +3996,8 @@ bool GLES2DecoderImpl::SimulateAttrib0(GLuint max_vertex_accessed) {
   const VertexAttribManager::VertexAttribInfo* info =
       vertex_attrib_manager_.GetVertexAttribInfo(0);
   // If it's enabled or it's not used then we don't need to do anything.
-  if (info->enabled() || !current_program_->GetAttribInfoByLocation(0)) {
+  bool attrib_0_used = current_program_->GetAttribInfoByLocation(0) != NULL;
+  if (info->enabled() && attrib_0_used) {
     return false;
   }
 
@@ -3998,20 +4010,20 @@ bool GLES2DecoderImpl::SimulateAttrib0(GLuint max_vertex_accessed) {
   // This is required to emulate GLES2 on GL.
   GLsizei num_vertices = max_vertex_accessed + 1;
   GLsizei size_needed = num_vertices * sizeof(Vec4);  // NOLINT
-  if (size_needed > attrib_0_size_ ||
-      info->value().v[0] != attrib_0_value_.v[0] ||
-      info->value().v[1] != attrib_0_value_.v[1] ||
-      info->value().v[2] != attrib_0_value_.v[2] ||
-      info->value().v[3] != attrib_0_value_.v[3]) {
-    scoped_array<Vec4> temp(new Vec4[num_vertices]);
-    for (GLsizei ii = 0; ii < num_vertices; ++ii) {
-      temp[ii] = info->value();
-    }
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        size_needed,
-        &temp[0].v[0],
-        GL_DYNAMIC_DRAW);
+  if (size_needed > attrib_0_size_) {
+    glBufferData(GL_ARRAY_BUFFER, size_needed, NULL, GL_DYNAMIC_DRAW);
+    // TODO(gman): check for error here?
+    attrib_0_buffer_matches_value_ = false;
+  }
+  if (attrib_0_used &&
+      (!attrib_0_buffer_matches_value_ ||
+       (info->value().v[0] != attrib_0_value_.v[0] ||
+        info->value().v[1] != attrib_0_value_.v[1] ||
+        info->value().v[2] != attrib_0_value_.v[2] ||
+        info->value().v[3] != attrib_0_value_.v[3]))) {
+    std::vector<Vec4> temp(num_vertices, info->value());
+    glBufferSubData(GL_ARRAY_BUFFER, 0, size_needed, &temp[0].v[0]);
+    attrib_0_buffer_matches_value_ = true;
     attrib_0_value_ = info->value();
     attrib_0_size_ = size_needed;
   }
@@ -4221,7 +4233,7 @@ error::Error GLES2DecoderImpl::ShaderSourceHelper(
   }
   // Note: We don't actually call glShaderSource here. We wait until
   // the call to glCompileShader.
-  info->Update(std::string(data, data + data_size));
+  info->Update(std::string(data, data + data_size).c_str());
   return error::kNoError;
 }
 
@@ -4266,7 +4278,7 @@ void GLES2DecoderImpl::DoCompileShader(GLuint client_id) {
   }
   // Translate GL ES 2.0 shader to Desktop GL shader and pass that to
   // glShaderSource and then glCompileShader.
-  const char* shader_src = info->source().c_str();
+  const char* shader_src = info->source() ? info->source()->c_str() : "";
   ShaderTranslator* translator = NULL;
   if (use_shader_translator_) {
     translator = info->shader_type() == GL_VERTEX_SHADER ?
@@ -4298,7 +4310,7 @@ void GLES2DecoderImpl::DoCompileShader(GLuint client_id) {
     glGetShaderInfoLog(info->service_id(), max_len, &len, temp.get());
     DCHECK(max_len == 0 || len < max_len);
     DCHECK(len ==0 || temp[len] == '\0');
-    info->SetStatus(false, std::string(temp.get(), len), NULL);
+    info->SetStatus(false, std::string(temp.get(), len).c_str(), NULL);
   }
 };
 
@@ -4311,13 +4323,13 @@ void GLES2DecoderImpl::DoGetShaderiv(
   }
   switch (pname) {
     case GL_SHADER_SOURCE_LENGTH:
-      *params = info->source().size() + 1;
+      *params = info->source() ? info->source()->size() + 1 : 0;
       return;
     case GL_COMPILE_STATUS:
       *params = info->IsValid();
       return;
     case GL_INFO_LOG_LENGTH:
-      *params = info->log_info().size() + 1;
+      *params = info->log_info() ? info->log_info()->size() + 1 : 0;
       return;
     default:
       break;
@@ -4332,11 +4344,11 @@ error::Error GLES2DecoderImpl::HandleGetShaderSource(
   Bucket* bucket = CreateBucket(bucket_id);
   ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
       shader, "glGetShaderSource");
-  if (!info) {
+  if (!info || !info->source()) {
     bucket->SetSize(0);
     return error::kNoError;
   }
-  bucket->SetFromString(info->source().c_str());
+  bucket->SetFromString(info->source()->c_str());
   return error::kNoError;
 }
 
@@ -4347,10 +4359,11 @@ error::Error GLES2DecoderImpl::HandleGetProgramInfoLog(
   Bucket* bucket = CreateBucket(bucket_id);
   ProgramManager::ProgramInfo* info = GetProgramInfoNotShader(
       program, "glGetProgramInfoLog");
-  if (!info) {
+  if (!info || !info->log_info()) {
+    bucket->SetSize(0);
     return error::kNoError;
   }
-  bucket->SetFromString(info->log_info().c_str());
+  bucket->SetFromString(info->log_info()->c_str());
   return error::kNoError;
 }
 
@@ -4361,11 +4374,11 @@ error::Error GLES2DecoderImpl::HandleGetShaderInfoLog(
   Bucket* bucket = CreateBucket(bucket_id);
   ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
       shader, "glGetShaderInfoLog");
-  if (!info) {
+  if (!info || !info->log_info()) {
     bucket->SetSize(0);
     return error::kNoError;
   }
-  bucket->SetFromString(info->log_info().c_str());
+  bucket->SetFromString(info->log_info()->c_str());
   return error::kNoError;
 }
 
@@ -5431,10 +5444,21 @@ void GLES2DecoderImpl::DoCompressedTexSubImage2D(
     return;
   }
   GLenum type = 0;
-  GLenum dummy = 0;
-  if (!info->GetLevelType(target, level, &type, &dummy) ||
-      !info->ValidForTexture(
-          target, level, xoffset, yoffset, width, height, format, type)) {
+  GLenum internal_format = 0;
+  if (!info->GetLevelType(target, level, &type, &internal_format)) {
+    SetGLError(
+        GL_INVALID_OPERATION,
+        "glCompressdTexSubImage2D: level does not exist.");
+    return;
+  }
+  if (internal_format != format) {
+    SetGLError(
+        GL_INVALID_OPERATION,
+        "glCompressdTexSubImage2D: format does not match internal format.");
+    return;
+  }
+  if (!info->ValidForTexture(
+      target, level, xoffset, yoffset, width, height, format, type)) {
     SetGLError(GL_INVALID_VALUE,
                "glCompressdTexSubImage2D: bad dimensions.");
     return;
@@ -5630,6 +5654,25 @@ void GLES2DecoderImpl::DoTexSubImage2D(
                "glTexSubImage2D: unknown texture for target");
     return;
   }
+  GLenum current_type = 0;
+  GLenum internal_format = 0;
+  if (!info->GetLevelType(target, level, &current_type, &internal_format)) {
+    SetGLError(
+        GL_INVALID_OPERATION,
+        "glTexSubImage2D: level does not exist.");
+    return;
+  }
+  if (format != internal_format) {
+    SetGLError(GL_INVALID_OPERATION,
+               "glTexSubImage2D: format does not match internal format.");
+    return;
+  }
+  if (type != current_type) {
+    SetGLError(GL_INVALID_OPERATION,
+               "glTexSubImage2D: type does not match type of texture.");
+    return;
+  }
+
   if (!info->ValidForTexture(
           target, level, xoffset, yoffset, width, height, format, type)) {
     SetGLError(GL_INVALID_VALUE,
@@ -5984,7 +6027,7 @@ error::Error GLES2DecoderImpl::HandleSwapBuffers(
       if (swap_buffers_callback_.get()) {
         swap_buffers_callback_->Run();
       }
-      return error::kNoError;
+      return error::kThrottle;
     } else {
       ScopedFrameBufferBinder binder(this,
                                      offscreen_target_frame_buffer_->id());
@@ -6006,7 +6049,7 @@ error::Error GLES2DecoderImpl::HandleSwapBuffers(
       if (swap_buffers_callback_.get()) {
         swap_buffers_callback_->Run();
       }
-      return error::kNoError;
+      return error::kThrottle;
     }
   } else {
     if (!context_->SwapBuffers()) {
@@ -6019,7 +6062,14 @@ error::Error GLES2DecoderImpl::HandleSwapBuffers(
     swap_buffers_callback_->Run();
   }
 
-  return error::kNoError;
+  // Do not throttle SwapBuffers by returning kThrottle. The intent of
+  // throttling the offscreen command buffers to a fixed number of frames
+  // ahead is to prevent them from rendering faster than they can be
+  // presented, not to limit the rate at which we present.
+  //
+  // This does not hold for ANGLE, possibly because all the GL contexts in a
+  // share group are actually one D3D device. Found by trial and error.
+  return IsAngle() ? error::kThrottle : error::kNoError;
 }
 
 error::Error GLES2DecoderImpl::HandleCommandBufferEnableCHROMIUM(

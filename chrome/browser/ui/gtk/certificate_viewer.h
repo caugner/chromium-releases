@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_UI_GTK_CERTIFICATE_VIEWER_H_
 #pragma once
 
-#include "chrome/browser/certificate_viewer.h"
-#include "gfx/native_widget_types.h"
+#include "content/browser/certificate_viewer.h"
 #include "net/base/x509_certificate.h"
+#include "ui/gfx/native_widget_types.h"
 
 void ShowCertificateViewer(gfx::NativeWindow parent,
                            net::X509Certificate::OSCertHandle);

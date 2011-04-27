@@ -3,16 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/message_loop_proxy.h"
-#include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "net/http/http_response_headers.h"
 #include "net/test/test_server.h"
+#include "net/url_request/url_request_test_util.h"
 #include "net/url_request/url_request_throttler_manager.h"
-#include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(USE_NSS)
@@ -501,7 +501,12 @@ TEST_F(URLFetcherTest, SameThreadsTest) {
   MessageLoop::current()->Run();
 }
 
+#if defined(OS_MACOSX)
+// SIGSEGV on Mac: http://crbug.com/60426
+TEST_F(URLFetcherTest, DISABLED_DifferentThreadsTest) {
+#else
 TEST_F(URLFetcherTest, DifferentThreadsTest) {
+#endif
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
@@ -518,7 +523,12 @@ TEST_F(URLFetcherTest, DifferentThreadsTest) {
   MessageLoop::current()->Run();
 }
 
+#if defined(OS_MACOSX)
+// SIGSEGV on Mac: http://crbug.com/60426
+TEST_F(URLFetcherPostTest, DISABLED_Basic) {
+#else
 TEST_F(URLFetcherPostTest, Basic) {
+#endif
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
@@ -602,7 +612,12 @@ TEST_F(URLFetcherProtectTestPassedThrough, ServerUnavailablePropagateResponse) {
   net::URLRequestThrottlerManager::GetInstance()->EraseEntryForTests(url);
 }
 
+#if defined(OS_MACOSX)
+// SIGSEGV on Mac: http://crbug.com/60426
+TEST_F(URLFetcherBadHTTPSTest, DISABLED_BadHTTPSTest) {
+#else
 TEST_F(URLFetcherBadHTTPSTest, BadHTTPSTest) {
+#endif
   net::TestServer::HTTPSOptions https_options(
       net::TestServer::HTTPSOptions::CERT_EXPIRED);
   net::TestServer test_server(https_options, FilePath(kDocRoot));
@@ -612,7 +627,12 @@ TEST_F(URLFetcherBadHTTPSTest, BadHTTPSTest) {
   MessageLoop::current()->Run();
 }
 
+#if defined(OS_MACOSX)
+// SIGSEGV on Mac: http://crbug.com/60426
+TEST_F(URLFetcherCancelTest, DISABLED_ReleasesContext) {
+#else
 TEST_F(URLFetcherCancelTest, ReleasesContext) {
+#endif
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 

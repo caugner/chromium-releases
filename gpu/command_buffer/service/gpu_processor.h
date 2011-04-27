@@ -5,6 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GPU_PROCESSOR_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GPU_PROCESSOR_H_
 
+#include <queue>
 #include <vector>
 
 #include "app/surface/transport_dib.h"
@@ -13,12 +14,12 @@
 #include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/task.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/size.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/cmd_parser.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/size.h"
 
 #if defined(OS_MACOSX)
 #include "app/surface/accelerated_surface_mac.h"
@@ -137,6 +138,9 @@ class GPUProcessor : public CommandBufferEngine {
 
   scoped_ptr<gles2::GLES2Decoder> decoder_;
   scoped_ptr<CommandParser> parser_;
+
+  size_t num_throttle_fences_;
+  std::queue<unsigned> throttle_fences_;
 
 #if defined(OS_MACOSX)
   scoped_ptr<AcceleratedSurface> surface_;

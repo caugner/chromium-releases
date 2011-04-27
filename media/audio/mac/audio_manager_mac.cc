@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,27 +8,26 @@
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
 #include "media/audio/mac/audio_input_mac.h"
+#include "media/audio/mac/audio_low_latency_output_mac.h"
 #include "media/audio/mac/audio_manager_mac.h"
 #include "media/audio/mac/audio_output_mac.h"
 #include "media/base/limits.h"
 
-namespace {
-
-const int kMaxInputChannels = 2;
+static const int kMaxInputChannels = 2;
 
 // Maximum number of output streams that can be open simultaneously.
-const size_t kMaxOutputStreams = 50;
+static const size_t kMaxOutputStreams = 50;
 
 // By experiment the maximum number of audio streams allowed in Leopard
 // is 18. But we put a slightly smaller number just to be safe.
-const size_t kMaxOutputStreamsLeopard = 15;
+static const size_t kMaxOutputStreamsLeopard = 15;
 
 // Initialized to ether |kMaxOutputStreams| or |kMaxOutputStreamsLeopard|.
-size_t g_max_output_streams = 0;
+static size_t g_max_output_streams = 0;
 
 // Returns the number of audio streams allowed. This is a practical limit to
 // prevent failure caused by too many audio streams opened.
-size_t GetMaxAudioOutputStreamsAllowed() {
+static size_t GetMaxAudioOutputStreamsAllowed() {
   if (g_max_output_streams == 0) {
     // We are hitting a bug in Leopard where too many audio streams will cause
     // a deadlock in the AudioQueue API when starting the stream. Unfortunately
@@ -49,7 +48,7 @@ size_t GetMaxAudioOutputStreamsAllowed() {
   return g_max_output_streams;
 }
 
-bool HasAudioHardware(AudioObjectPropertySelector selector) {
+static bool HasAudioHardware(AudioObjectPropertySelector selector) {
   AudioDeviceID output_device_id = kAudioObjectUnknown;
   const AudioObjectPropertyAddress property_address = {
     selector,
@@ -66,7 +65,6 @@ bool HasAudioHardware(AudioObjectPropertySelector selector) {
   return err == kAudioHardwareNoError &&
       output_device_id != kAudioObjectUnknown;
 }
-}  // namespace
 
 AudioManagerMac::AudioManagerMac()
     : num_output_streams_(0) {
@@ -85,11 +83,8 @@ bool AudioManagerMac::HasAudioInputDevices() {
 
 AudioOutputStream* AudioManagerMac::MakeAudioOutputStream(
     AudioParameters params) {
-  if (params.format == AudioParameters::AUDIO_MOCK) {
-    return FakeAudioOutputStream::MakeFakeStream(params);
-  } else if (params.format != AudioParameters::AUDIO_PCM_LINEAR) {
+  if (!params.IsValid())
     return NULL;
-  }
 
   // Limit the number of audio streams opened. This is to prevent using
   // excessive resources for a large number of audio streams. More
@@ -99,8 +94,16 @@ AudioOutputStream* AudioManagerMac::MakeAudioOutputStream(
     return NULL;
   }
 
-  num_output_streams_++;
-  return new PCMQueueOutAudioOutputStream(this, params);
+  if (params.format == AudioParameters::AUDIO_MOCK) {
+    return FakeAudioOutputStream::MakeFakeStream(params);
+  } else if (params.format == AudioParameters::AUDIO_PCM_LINEAR) {
+    num_output_streams_++;
+    return new PCMQueueOutAudioOutputStream(this, params);
+  } else if (params.format == AudioParameters::AUDIO_PCM_LOW_LATENCY) {
+    num_output_streams_++;
+    return new AUAudioOutputStream(this, params);
+  }
+  return NULL;
 }
 
 AudioInputStream* AudioManagerMac::MakeAudioInputStream(
@@ -125,8 +128,7 @@ void AudioManagerMac::UnMuteAll() {
 }
 
 // Called by the stream when it has been released by calling Close().
-void AudioManagerMac::ReleaseOutputStream(
-    PCMQueueOutAudioOutputStream* stream) {
+void AudioManagerMac::ReleaseOutputStream(AudioOutputStream* stream) {
   DCHECK(stream);
   num_output_streams_--;
   delete stream;

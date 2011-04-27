@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,13 @@
 #define CHROME_BROWSER_CHROMEOS_LOGIN_USER_IMAGE_SCREEN_H_
 #pragma once
 
+#include "base/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/chromeos/login/camera.h"
 #include "chrome/browser/chromeos/login/user_image_view.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace chromeos {
@@ -64,7 +65,7 @@ class UserImageScreen: public ViewScreen<UserImageView>,
   int camera_init_failure_counter_;
 
   // Thread for camera to work on.
-  base::Thread camera_thread_;
+  scoped_ptr<base::Thread> camera_thread_;
 
   NotificationRegistrar registrar_;
 

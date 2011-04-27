@@ -26,16 +26,8 @@ namespace gles2 {
 
 class GLES2DecoderTestBase : public testing::Test {
  public:
-  GLES2DecoderTestBase()
-      : client_buffer_id_(100),
-        client_framebuffer_id_(101),
-        client_program_id_(102),
-        client_renderbuffer_id_(103),
-        client_shader_id_(104),
-        client_texture_id_(106),
-        client_element_buffer_id_(107) {
-    memset(immediate_buffer_, 0xEE, sizeof(immediate_buffer_));
-  }
+  GLES2DecoderTestBase();
+  virtual ~GLES2DecoderTestBase();
 
  protected:
   static const GLint kMaxTextureSize = 2048;
@@ -293,7 +285,7 @@ class GLES2DecoderTestBase : public testing::Test {
     virtual ~MockCommandBufferEngine() {
     }
 
-    Buffer GetSharedMemoryBuffer(int32 shm_id) {
+    virtual Buffer GetSharedMemoryBuffer(int32 shm_id) {
       return shm_id == kSharedMemoryId ? valid_buffer_ : invalid_buffer_;
     }
 
@@ -301,7 +293,7 @@ class GLES2DecoderTestBase : public testing::Test {
       memset(data_.get(), kInitialMemoryValue, kSharedBufferSize);
     }
 
-    void set_token(int32 token) {
+    virtual void set_token(int32 token) {
       DCHECK(false);
     }
 

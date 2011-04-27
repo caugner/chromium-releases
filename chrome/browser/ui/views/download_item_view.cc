@@ -18,14 +18,15 @@
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/views/download_shelf_view.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/color_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/image.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/menu/menu_2.h"
 #include "views/widget/root_view.h"
@@ -211,7 +212,8 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   dangerous_mode_body_image_set_ = dangerous_mode_body_image_set;
 
   LoadIcon();
-  tooltip_text_ = download_->GetFileNameToReportUser().ToWStringHack();
+  tooltip_text_ =
+      UTF16ToWide(download_->GetFileNameToReportUser().LossyDisplayName());
 
   font_ = ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
   box_height_ = std::max<int>(2 * kVerticalPadding + font_.GetHeight() +
@@ -244,8 +246,6 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     tooltip_text_.clear();
     body_state_ = DANGEROUS;
     drop_down_state_ = DANGEROUS;
-
-    warning_icon_ = rb.GetBitmapNamed(IDR_WARNING);
     save_button_ = new views::NativeButton(this,
         UTF16ToWide(l10n_util::GetStringUTF16(
             download->is_extension_install() ?
@@ -262,19 +262,20 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     // Extract the file extension (if any).
     FilePath filename(download->target_name());
 #if defined(OS_LINUX)
-    std::wstring extension = base::SysNativeMBToWide(filename.Extension());
+    string16 extension = WideToUTF16(base::SysNativeMBToWide(
+        filename.Extension()));
 #else
-    std::wstring extension = filename.Extension();
+    string16 extension = filename.Extension();
 #endif
 
     // Remove leading '.'
     if (extension.length() > 0)
       extension = extension.substr(1);
 #if defined(OS_LINUX)
-    std::wstring rootname =
-        base::SysNativeMBToWide(filename.RemoveExtension().value());
+    string16 rootname = WideToUTF16(base::SysNativeMBToWide(
+        filename.RemoveExtension().value()));
 #else
-    std::wstring rootname = filename.RemoveExtension().value();
+    string16 rootname = filename.RemoveExtension().value();
 #endif
 
     // Elide giant extensions (this shouldn't currently be hit, but might
@@ -282,21 +283,33 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     if (extension.length() > kFileNameMaxLength / 2)
       ui::ElideString(extension, kFileNameMaxLength / 2, &extension);
 
-    // The dangerous download label text is different for an extension file.
-    if (download->is_extension_install()) {
-      dangerous_download_label_ = new views::Label(UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION)));
+    // The dangerous download label text and icon are different
+    // under different cases.
+    string16 dangerous_label;
+    if (download->danger_type() == DownloadItem::DANGEROUS_URL) {
+      // Safebrowsing shows the download URL leads to malicious file.
+      warning_icon_ = rb.GetBitmapNamed(IDR_SAFEBROWSING_WARNING);
+      dangerous_label =
+          l10n_util::GetStringUTF16(IDS_PROMPT_UNSAFE_DOWNLOAD_URL);
     } else {
-      ui::ElideString(rootname,
-                      kFileNameMaxLength - extension.length(),
-                      &rootname);
-      std::wstring filename = rootname + L"." + extension;
-      filename = UTF16ToWide(base::i18n::GetDisplayStringInLTRDirectionality(
-          WideToUTF16(filename)));
-      dangerous_download_label_ = new views::Label(UTF16ToWide(
-          l10n_util::GetStringFUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD,
-                                     WideToUTF16(filename))));
+      // The download file has dangerous file type (e.g.: an executable).
+      DCHECK(download->danger_type() == DownloadItem::DANGEROUS_FILE);
+      warning_icon_ = rb.GetBitmapNamed(IDR_WARNING);
+      if (download->is_extension_install()) {
+        dangerous_label =
+            l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
+      } else {
+        ui::ElideString(rootname,
+                        kFileNameMaxLength - extension.length(),
+                        &rootname);
+        string16 filename = rootname + ASCIIToUTF16(".") + extension;
+        filename = base::i18n::GetDisplayStringInLTRDirectionality(filename);
+        dangerous_label =
+            l10n_util::GetStringFUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD, filename);
+      }
     }
+
+    dangerous_download_label_ = new views::Label(UTF16ToWide(dangerous_label));
     dangerous_download_label_->SetMultiLine(true);
     dangerous_download_label_->SetHorizontalAlignment(
         views::Label::ALIGN_LEFT);
@@ -393,7 +406,7 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
   // We use the parent's (DownloadShelfView's) SchedulePaint, since there
   // are spaces between each DownloadItemView that the parent is responsible
   // for painting.
-  GetParent()->SchedulePaint();
+  parent()->SchedulePaint();
 }
 
 void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
@@ -452,7 +465,7 @@ void DownloadItemView::ButtonPressed(
 
 // Load an icon for the file type we're downloading, and animate any in progress
 // download state.
-void DownloadItemView::Paint(gfx::Canvas* canvas) {
+void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
   BodyImageSet* body_image_set = NULL;
   switch (body_state_) {
     case NORMAL:
@@ -498,7 +511,7 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
   // Draw status before button image to effectively lighten text.
   if (!IsDangerousMode()) {
     if (show_status_text_) {
-      int mirrored_x = MirroredXWithWidthInsideView(
+      int mirrored_x = GetMirroredXWithWidthInView(
           download_util::kSmallProgressIconSize, kTextWidth);
       // Add font_.height() to compensate for title, which is drawn later.
       int y = box_y_ + kVerticalPadding + font_.GetHeight() +
@@ -625,7 +638,7 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
                                             filename_string);
     }
 
-    int mirrored_x = MirroredXWithWidthInsideView(
+    int mirrored_x = GetMirroredXWithWidthInView(
         download_util::kSmallProgressIconSize, kTextWidth);
     SkColor file_name_color = GetThemeProvider()->GetColor(
         BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
@@ -640,10 +653,15 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
                           mirrored_x, y, kTextWidth, font_.GetHeight());
   }
 
-  // Paint the icon.
+  // Load the icon.
   IconManager* im = g_browser_process->icon_manager();
-  SkBitmap* icon = IsDangerousMode() ? warning_icon_ :
-      im->LookupIcon(download_->GetUserVerifiedFilePath(), IconLoader::SMALL);
+  gfx::Image* image = im->LookupIcon(download_->GetUserVerifiedFilePath(),
+                                     IconLoader::SMALL);
+  const SkBitmap* icon = NULL;
+  if (IsDangerousMode())
+    icon = warning_icon_;
+  else if (image)
+    icon = *image;
 
   // We count on the fact that the icon manager will cache the icons and if one
   // is available, it will be cached here. We *don't* want to request the icon
@@ -667,7 +685,7 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
     }
 
     // Draw the icon image.
-    int mirrored_x = MirroredXWithWidthInsideView(
+    int mirrored_x = GetMirroredXWithWidthInView(
         download_util::kSmallProgressIconOffset, icon->width());
     if (IsEnabled()) {
       canvas->DrawBitmapInt(*icon, mirrored_x,
@@ -737,7 +755,8 @@ void DownloadItemView::ClearDangerousMode() {
 
   // We need to load the icon now that the download_ has the real path.
   LoadIcon();
-  tooltip_text_ = download_->GetFileNameToReportUser().ToWStringHack();
+  tooltip_text_ =
+      UTF16ToWide(download_->GetFileNameToReportUser().LossyDisplayName());
 
   // Force the shelf to layout again as our size has changed.
   parent_->Layout();
@@ -855,8 +874,8 @@ bool DownloadItemView::OnMouseDragged(const views::MouseEvent& event) {
   if (dragging_) {
     if (download_->state() == DownloadItem::COMPLETE) {
       IconManager* im = g_browser_process->icon_manager();
-      SkBitmap* icon = im->LookupIcon(download_->GetUserVerifiedFilePath(),
-                                      IconLoader::SMALL);
+      gfx::Image* icon = im->LookupIcon(download_->GetUserVerifiedFilePath(),
+                                        IconLoader::SMALL);
       if (icon) {
         views::Widget* widget = GetWidget();
         download_util::DragDownload(download_, icon,
@@ -876,8 +895,7 @@ bool DownloadItemView::OnKeyPressed(const views::KeyEvent& e) {
   if (IsDangerousMode())
     return true;
 
-  if (e.GetKeyCode() == ui::VKEY_SPACE ||
-      e.GetKeyCode() == ui::VKEY_RETURN) {
+  if (e.key_code() == ui::VKEY_SPACE || e.key_code() == ui::VKEY_RETURN) {
     OpenDownload();
     return true;
   }
@@ -959,9 +977,9 @@ void DownloadItemView::OpenDownload() {
 }
 
 void DownloadItemView::OnExtractIconComplete(IconManager::Handle handle,
-                                             SkBitmap* icon_bitmap) {
+                                             gfx::Image* icon_bitmap) {
   if (icon_bitmap)
-    GetParent()->SchedulePaint();
+    parent()->SchedulePaint();
 }
 
 void DownloadItemView::LoadIcon() {
@@ -1069,7 +1087,7 @@ void DownloadItemView::UpdateAccessibleName() {
     new_name = WideToUTF16Hack(dangerous_download_label_->GetText());
   } else {
     new_name = WideToUTF16Hack(status_text_) + char16(' ') +
-        WideToUTF16Hack(download_->GetFileNameToReportUser().ToWStringHack());
+        download_->GetFileNameToReportUser().LossyDisplayName();
   }
 
   // If the name has changed, call SetAccessibleName and notify

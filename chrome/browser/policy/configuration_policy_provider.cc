@@ -5,6 +5,7 @@
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
 #include "base/values.h"
+#include "chrome/browser/policy/policy_map.h"
 
 namespace policy {
 
@@ -17,7 +18,11 @@ ConfigurationPolicyProvider::ConfigurationPolicyProvider(
 
 ConfigurationPolicyProvider::~ConfigurationPolicyProvider() {}
 
-void ConfigurationPolicyProvider::DecodePolicyValueTree(
+bool ConfigurationPolicyProvider::IsInitializationComplete() const {
+  return true;
+}
+
+void ConfigurationPolicyProvider::ApplyPolicyValueTree(
     const DictionaryValue* policies,
     ConfigurationPolicyStoreInterface* store) {
   const PolicyDefinitionList* policy_list(policy_definition_list());
@@ -30,6 +35,18 @@ void ConfigurationPolicyProvider::DecodePolicyValueTree(
 
   // TODO(mnissler): Handle preference overrides once |ConfigurationPolicyStore|
   // supports it.
+}
+
+void ConfigurationPolicyProvider::ApplyPolicyMap(
+    const PolicyMap* policies,
+    ConfigurationPolicyStoreInterface* store) {
+  const PolicyDefinitionList* policy_list(policy_definition_list());
+  for (const PolicyDefinitionList::Entry* i = policy_list->begin;
+       i != policy_list->end; ++i) {
+    const Value* value = policies->Get(i->policy_type);
+    if (value && value->IsType(i->value_type))
+      store->Apply(i->policy_type, value->DeepCopy());
+  }
 }
 
 // Class ConfigurationPolicyObserverRegistrar.

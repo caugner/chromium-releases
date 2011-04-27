@@ -62,9 +62,6 @@ class PluginList {
   // by a command line switch.
   static bool DebugPluginLoading();
 
-  virtual const PluginGroupDefinition* GetPluginGroupDefinitions();
-  virtual size_t GetPluginGroupDefinitionsSize();
-
   // Returns true iff the plugin list has been loaded already.
   bool PluginsLoaded();
 
@@ -114,11 +111,10 @@ class PluginList {
                       WebPluginInfo* info,
                       const PluginEntryPoints** entry_points);
 
-  // In Windows and Pepper plugins, the mime types are passed as a specially
-  // formatted list of strings.  This function parses those strings into
-  // a WebPluginMimeType vector.
-  // TODO(evan): make Pepper pass around formatted data and move this code
-  // into plugin_list_win.
+  // In Windows plugins, the mime types are passed as a specially formatted list
+  // of strings. This function parses those strings into a WebPluginMimeType
+  // vector.
+  // TODO(evan): move this code into plugin_list_win.
   static bool ParseMimeTypes(const std::string& mime_types,
                              const std::string& file_extensions,
                              const string16& mime_type_descriptions,
@@ -213,8 +209,9 @@ class PluginList {
   virtual ~PluginList();
 
  protected:
-  // Constructors are private for singletons
-  PluginList();
+  // This constructor is used in unit tests to override the platform-dependent
+  // real-world plugin group definitions with custom ones.
+  PluginList(const PluginGroupDefinition* definitions, size_t num_definitions);
 
   // Adds the given WebPluginInfo to its corresponding group, creating it if
   // necessary, and returns the group.
@@ -222,12 +219,13 @@ class PluginList {
   PluginGroup* AddToPluginGroups(const WebPluginInfo& web_plugin_info,
                                  ScopedVector<PluginGroup>* plugin_groups);
 
-  // Holds the currently available plugin groups.
-  ScopedVector<PluginGroup> plugin_groups_;
-
  private:
   friend class PluginListTest;
+  friend struct base::DefaultLazyInstanceTraits<PluginList>;
   FRIEND_TEST_ALL_PREFIXES(PluginGroupTest, PluginGroupDefinition);
+
+  // Constructors are private for singletons
+  PluginList();
 
   // Creates PluginGroups for the static group definitions, and adds them to
   // the list of PluginGroups.
@@ -321,6 +319,13 @@ class PluginList {
   // If set to true outdated plugins are disabled in the end of LoadPlugins.
   bool disable_outdated_plugins_;
 
+  // Hardcoded plugin group definitions.
+  const PluginGroupDefinition* const group_definitions_;
+  const size_t num_group_definitions_;
+
+  // Holds the currently available plugin groups.
+  ScopedVector<PluginGroup> plugin_groups_;
+
   // The set of plugins that have been scheduled for disabling once they get
   // loaded. This list is used in LoadPlugins and pruned after it. Contains
   // plugins that were either disabled by the user (prefs are loaded before
@@ -336,8 +341,6 @@ class PluginList {
   // Need synchronization for the above members since this object can be
   // accessed on multiple threads.
   base::Lock lock_;
-
-  friend struct base::DefaultLazyInstanceTraits<PluginList>;
 
   DISALLOW_COPY_AND_ASSIGN(PluginList);
 };

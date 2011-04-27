@@ -25,6 +25,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -92,6 +93,34 @@ class DevmodeObserver : public NotificationObserver {
   PrefChangeRegistrar registrar_;
 };
 
+class ProfileObserverBridge : public NotificationObserver {
+ public:
+  ProfileObserverBridge(ExtensionActionContextMenu* owner,
+                        const Profile* profile)
+      : owner_(owner),
+        profile_(profile) {
+    registrar_.Add(this, NotificationType::PROFILE_DESTROYED,
+                   Source<Profile>(profile));
+  }
+
+  ~ProfileObserverBridge() {}
+
+  // Overridden from NotificationObserver
+  void Observe(NotificationType type,
+               const NotificationSource& source,
+               const NotificationDetails& details) {
+    if (type == NotificationType::PROFILE_DESTROYED &&
+        source == Source<Profile>(profile_)) {
+      [owner_ invalidateProfile];
+    }
+  }
+
+ private:
+  ExtensionActionContextMenu* owner_;
+  const Profile* profile_;
+  NotificationRegistrar registrar_;
+};
+
 }  // namespace extension_action_context_menu
 
 @interface ExtensionActionContextMenu(Private)
@@ -109,8 +138,9 @@ enum {
   kExtensionContextOptions = 2,
   kExtensionContextDisable = 3,
   kExtensionContextUninstall = 4,
-  kExtensionContextManage = 6,
-  kExtensionContextInspect = 7
+  kExtensionContextHide = 5,
+  kExtensionContextManage = 7,
+  kExtensionContextInspect = 8
 };
 
 int CurrentTabId() {
@@ -139,6 +169,7 @@ int CurrentTabId() {
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_OPTIONS),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_DISABLE),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_UNINSTALL),
+        l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_HIDE_BUTTON),
         [NSMenuItem separatorItem],
         l10n_util::GetNSStringWithFixup(IDS_MANAGE_EXTENSIONS),
         nil];
@@ -163,6 +194,16 @@ int CurrentTabId() {
         } else {
           [itemObj setTarget:self];
         }
+
+        // Only browser actions can have their button hidden. Page actions
+        // should never show the "Hide" menu item.
+        if ([itemObj tag] == kExtensionContextHide &&
+            !extension->browser_action()) {
+          [itemObj setTarget:nil];  // Item is disabled.
+          [itemObj setHidden:YES];  // Item is hidden.
+        } else {
+          [itemObj setTarget:self];
+        }
       }
     }
 
@@ -177,6 +218,9 @@ int CurrentTabId() {
     PrefService* service = profile_->GetPrefs();
     observer_.reset(
         new extension_action_context_menu::DevmodeObserver(self, service));
+    profile_observer_.reset(
+        new extension_action_context_menu::ProfileObserverBridge(self,
+                                                                 profile));
 
     [self updateInspectorItem];
     return self;
@@ -226,6 +270,11 @@ int CurrentTabId() {
       uninstaller_.reset(new AsyncUninstaller(extension_, profile_));
       break;
     }
+    case kExtensionContextHide: {
+      ExtensionService* extension_service = profile_->GetExtensionService();
+      extension_service->SetBrowserActionVisibility(extension_, false);
+      break;
+    }
     case kExtensionContextManage: {
       browser->OpenURL(GURL(chrome::kChromeUIExtensionsURL), GURL(),
                        NEW_FOREGROUND_TAB, PageTransition::LINK);
@@ -273,6 +322,11 @@ int CurrentTabId() {
     return action_ && action_->HasPopup(CurrentTabId());
   }
   return YES;
+}
+
+- (void)invalidateProfile {
+  observer_.reset();
+  profile_ = NULL;
 }
 
 @end

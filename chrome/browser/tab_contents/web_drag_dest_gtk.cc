@@ -9,11 +9,11 @@
 #include "base/file_path.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/ui/gtk/bookmark_utils_gtk.h"
+#include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 
@@ -232,7 +232,7 @@ void WebDragDestGtk::OnDragDataReceived(
             gtk_util::ScreenPoint(widget_),
             gtk_util::GdkDragActionToWebDragOp(context->actions));
 
-    // This is non-null if tab_contents_ is showing an ExtensionDOMUI with
+    // This is non-null if tab_contents_ is showing an ExtensionWebUI with
     // support for (at the moment experimental) drag and drop extensions.
     if (tab_contents_->GetBookmarkDragDelegate()) {
       tab_contents_->GetBookmarkDragDelegate()->OnDragEnter(
@@ -268,7 +268,7 @@ gboolean WebDragDestGtk::OnDragDrop(GtkWidget* sender, GdkDragContext* context,
       DragTargetDrop(gtk_util::ClientPoint(widget_),
                      gtk_util::ScreenPoint(widget_));
 
-  // This is non-null if tab_contents_ is showing an ExtensionDOMUI with
+  // This is non-null if tab_contents_ is showing an ExtensionWebUI with
   // support for (at the moment experimental) drag and drop extensions.
   if (tab_contents_->GetBookmarkDragDelegate())
     tab_contents_->GetBookmarkDragDelegate()->OnDrop(bookmark_drag_data_);

@@ -16,6 +16,7 @@ extern "C" {
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/nss_util.h"
+#include "base/test/mock_chrome_application_mac.h"
 #include "base/time.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -111,6 +112,7 @@ class ProtocolTestClient
   void DestroyConnection(scoped_refptr<ProtocolTestConnection> connection);
 
   std::string host_jid_;
+  scoped_ptr<SignalStrategy> signal_strategy_;
   scoped_refptr<JingleClient> client_;
   scoped_refptr<JingleSessionManager> session_manager_;
   ConnectionsList connections_;
@@ -224,8 +226,12 @@ void ProtocolTestClient::Run(const std::string& username,
                              const std::string& host_jid) {
   remoting::JingleThread jingle_thread;
   jingle_thread.Start();
-  client_ = new JingleClient(&jingle_thread);
-  client_->Init(username, auth_token, kChromotingTokenServiceName, this);
+  signal_strategy_.reset(
+      new XmppSignalStrategy(&jingle_thread, username, auth_token,
+                             kChromotingTokenServiceName));
+  client_ = new JingleClient(&jingle_thread, signal_strategy_.get(),
+                             NULL, this);
+  client_->Init();
 
   session_manager_ = new JingleSessionManager(&jingle_thread);
 
@@ -279,7 +285,7 @@ void ProtocolTestClient::OnStateChange(
 
     session_manager_->Init(
         client_->GetFullJid(), client_->session_manager(),
-        NewCallback(this, &ProtocolTestClient::OnNewSession));
+        NewCallback(this, &ProtocolTestClient::OnNewSession), NULL, NULL);
     session_manager_->set_allow_local_ips(true);
 
     if (host_jid_ != "") {
@@ -353,6 +359,10 @@ int main(int argc, char** argv) {
 
   base::EnsureNSPRInit();
   base::EnsureNSSInit();
+
+#if defined(OS_MACOSX)
+  mock_cr_app::RegisterMockCrApp();
+#endif  // OS_MACOSX
 
   std::string host_jid(cmd_line->GetSwitchValueASCII("host_jid"));
 

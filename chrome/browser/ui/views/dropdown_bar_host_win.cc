@@ -4,11 +4,11 @@
 
 #include "chrome/browser/ui/views/dropdown_bar_host.h"
 
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "views/controls/scrollbar/native_scroll_bar.h"
 #include "views/widget/widget_win.h"
@@ -17,9 +17,9 @@ NativeWebKeyboardEvent DropdownBarHost::GetKeyboardEvent(
      const TabContents* contents,
      const views::KeyEvent& key_event) {
   HWND hwnd = contents->GetContentNativeView();
-  WORD key = WindowsKeyCodeForKeyboardCode(key_event.GetKeyCode());
+  WORD key = WindowsKeyCodeForKeyboardCode(key_event.key_code());
 
-  return NativeWebKeyboardEvent(hwnd, key_event.message(), key, 0);
+  return NativeWebKeyboardEvent(hwnd, key_event.native_event().message, key, 0);
 }
 
 views::Widget* DropdownBarHost::CreateHost() {
@@ -35,8 +35,7 @@ views::Widget* DropdownBarHost::CreateHost() {
 
 void DropdownBarHost::SetWidgetPositionNative(const gfx::Rect& new_pos,
                                               bool no_redraw) {
-  gfx::Rect window_rect;
-  host_->GetBounds(&window_rect, true);
+  gfx::Rect window_rect = host_->GetWindowScreenBounds();
   DWORD swp_flags = SWP_NOOWNERZORDER;
   if (!window_rect.IsEmpty())
     swp_flags |= SWP_NOSIZE;

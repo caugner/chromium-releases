@@ -9,14 +9,14 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 
 class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
  protected:
@@ -28,20 +28,20 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
     return browser()->profile()->GetExtensionProcessManager();
   }
 
-  ConfirmInfoBarDelegate* GetInfoBarDelegate(int index) {
+  ConfirmInfoBarDelegate* GetInfoBarDelegate(size_t index) {
     TabContents* current_tab = browser()->GetSelectedTabContents();
-    EXPECT_LT(index, current_tab->infobar_delegate_count());
+    EXPECT_LT(index, current_tab->infobar_count());
     return current_tab->GetInfoBarDelegateAt(index)->AsConfirmInfoBarDelegate();
   }
 
-  void AcceptInfoBar(int index) {
+  void AcceptInfoBar(size_t index) {
     ConfirmInfoBarDelegate* infobar = GetInfoBarDelegate(index);
     ASSERT_TRUE(infobar);
     infobar->Accept();
     WaitForExtensionLoad();
   }
 
-  void CancelInfoBar(int index) {
+  void CancelInfoBar(size_t index) {
     ConfirmInfoBarDelegate* infobar = GetInfoBarDelegate(index);
     ASSERT_TRUE(infobar);
     infobar->Cancel();
@@ -157,7 +157,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, ReloadIndependently) {
 
   // The infobar should automatically hide after the extension is successfully
   // reloaded.
-  ASSERT_EQ(0, current_tab->infobar_delegate_count());
+  ASSERT_EQ(0U, current_tab->infobar_count());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
@@ -169,14 +169,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   TabContents* original_tab = browser()->GetSelectedTabContents();
   ASSERT_TRUE(original_tab);
-  ASSERT_EQ(1, original_tab->infobar_delegate_count());
+  ASSERT_EQ(1U, original_tab->infobar_count());
 
   // Open a new tab so the info bar will not be in the current tab.
   browser()->NewTab();
   TabContents* new_current_tab = browser()->GetSelectedTabContents();
   ASSERT_TRUE(new_current_tab);
   ASSERT_NE(new_current_tab, original_tab);
-  ASSERT_EQ(0, new_current_tab->infobar_delegate_count());
+  ASSERT_EQ(0U, new_current_tab->infobar_count());
 
   ReloadExtension(first_extension_id_);
 
@@ -185,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   // The infobar should automatically hide after the extension is successfully
   // reloaded.
-  ASSERT_EQ(0, original_tab->infobar_delegate_count());
+  ASSERT_EQ(0U, original_tab->infobar_count());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
@@ -197,13 +197,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   TabContents* current_tab = browser()->GetSelectedTabContents();
   ASSERT_TRUE(current_tab);
-  ASSERT_EQ(1, current_tab->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab->infobar_count());
 
   // Navigate to another page.
   ui_test_utils::NavigateToURL(browser(),
       ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
                                 FilePath(FILE_PATH_LITERAL("title1.html"))));
-  ASSERT_EQ(1, current_tab->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab->infobar_count());
 
   ReloadExtension(first_extension_id_);
 
@@ -212,7 +212,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   // The infobar should automatically hide after the extension is successfully
   // reloaded.
-  ASSERT_EQ(0, current_tab->infobar_delegate_count());
+  ASSERT_EQ(0U, current_tab->infobar_count());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
@@ -228,11 +228,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   TabContents* current_tab = browser()->GetSelectedTabContents();
   ASSERT_TRUE(current_tab);
-  ASSERT_EQ(1, current_tab->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab->infobar_count());
 
   TabContents* current_tab2 = browser2->GetSelectedTabContents();
   ASSERT_TRUE(current_tab2);
-  ASSERT_EQ(1, current_tab2->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab2->infobar_count());
 
   ReloadExtension(first_extension_id_);
 
@@ -241,8 +241,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   // Both infobars should automatically hide after the extension is successfully
   // reloaded.
-  ASSERT_EQ(0, current_tab->infobar_delegate_count());
-  ASSERT_EQ(0, current_tab2->infobar_delegate_count());
+  ASSERT_EQ(0U, current_tab->infobar_count());
+  ASSERT_EQ(0U, current_tab2->infobar_count());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
@@ -258,11 +258,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   TabContents* current_tab = browser()->GetSelectedTabContents();
   ASSERT_TRUE(current_tab);
-  ASSERT_EQ(1, current_tab->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab->infobar_count());
 
   TabContents* current_tab2 = browser2->GetSelectedTabContents();
   ASSERT_TRUE(current_tab2);
-  ASSERT_EQ(1, current_tab2->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab2->infobar_count());
 
   // Move second window into first browser so there will be multiple tabs
   // with the info bar for the same extension in one browser.
@@ -270,7 +270,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
       browser2->tabstrip_model()->DetachTabContentsAt(0);
   browser()->tabstrip_model()->AppendTabContents(contents, true);
   current_tab2 = browser()->GetSelectedTabContents();
-  ASSERT_EQ(1, current_tab2->infobar_delegate_count());
+  ASSERT_EQ(1U, current_tab2->infobar_count());
   ASSERT_NE(current_tab2, current_tab);
 
   ReloadExtension(first_extension_id_);
@@ -280,10 +280,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 
   // Both infobars should automatically hide after the extension is successfully
   // reloaded.
-  ASSERT_EQ(0, current_tab2->infobar_delegate_count());
+  ASSERT_EQ(0U, current_tab2->infobar_count());
   browser()->SelectPreviousTab();
   ASSERT_EQ(current_tab, browser()->GetSelectedTabContents());
-  ASSERT_EQ(0, current_tab->infobar_delegate_count());
+  ASSERT_EQ(0U, current_tab->infobar_count());
 }
 
 // Make sure that when we don't do anything about the crashed extension
@@ -407,8 +407,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
   CheckExtensionConsistency(size_before);
 }
 
+// Marked as flaky due to http://crbug.com/75134
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
-                       TwoExtensionsReloadIndependently) {
+                       FLAKY_TwoExtensionsReloadIndependently) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -422,10 +423,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
     TabContents* current_tab = browser()->GetSelectedTabContents();
     ASSERT_TRUE(current_tab);
     // At the beginning we should have one infobar displayed for each extension.
-    ASSERT_EQ(2, current_tab->infobar_delegate_count());
+    ASSERT_EQ(2U, current_tab->infobar_count());
     ReloadExtension(first_extension_id_);
     // One of the infobars should hide after the extension is reloaded.
-    ASSERT_EQ(1, current_tab->infobar_delegate_count());
+    ASSERT_EQ(1U, current_tab->infobar_count());
     CheckExtensionConsistency(size_before);
   }
 
@@ -435,6 +436,26 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
     CheckExtensionConsistency(size_before);
     CheckExtensionConsistency(size_before + 1);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, CrashAndUninstall) {
+  const size_t size_before = GetExtensionService()->extensions()->size();
+  const size_t crash_size_before =
+      GetExtensionService()->terminated_extensions()->size();
+  LoadTestExtension();
+  LoadSecondExtension();
+  CrashExtension(size_before);
+  ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
+  ASSERT_EQ(crash_size_before + 1,
+            GetExtensionService()->terminated_extensions()->size());
+
+  UninstallExtension(first_extension_id_);
+
+  SCOPED_TRACE("after uninstalling");
+  ASSERT_EQ(size_before + 1, GetExtensionService()->extensions()->size());
+  ASSERT_EQ(crash_size_before,
+            GetExtensionService()->terminated_extensions()->size());
+  ASSERT_EQ(0U, browser()->GetSelectedTabContents()->infobar_count());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, CrashAndUnloadAll) {

@@ -13,16 +13,17 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
 
 // URL where to fetch OEM services customization manifest from.
-// TODO(denisromanov): Change this to real URL when it becomes available.
 const char kServicesCustomizationManifestUrl[] =
-    "file:///mnt/partner_partition/etc/chromeos/services_manifest.json";
+    "file:///opt/oem/etc/services_manifest.json";
 
 // Name of local state option that tracks if services customization has been
 // applied.
@@ -36,8 +37,9 @@ const int kRetriesDelayInSec = 2;
 
 }  // namespace
 
-namespace chromeos {
+DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::ApplyServicesCustomization);
 
+namespace chromeos {
 
 // static
 void ApplyServicesCustomization::StartIfNeeded() {
@@ -79,18 +81,14 @@ bool ApplyServicesCustomization::Init() {
   }
 
   if (url_.SchemeIsFile()) {
-    std::string manifest;
-    if (file_util::ReadFileToString(FilePath(url_.path()), &manifest)) {
-      Apply(manifest);
-    } else {
-      LOG(ERROR) << "Failed to load services customization manifest from: "
-                 << url_.path();
-    }
-
-    return false;
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+        NewRunnableMethod(this,
+            &ApplyServicesCustomization::ReadFileInBackground,
+            FilePath(url_.path())));
+  } else {
+    StartFileFetch();
   }
 
-  StartFileFetch();
   return true;
 }
 
@@ -125,7 +123,29 @@ void ApplyServicesCustomization::OnURLFetchComplete(
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
+void ApplyServicesCustomization::ReadFileInBackground(const FilePath& file) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  std::string manifest;
+  if (file_util::ReadFileToString(file, &manifest)) {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+        NewRunnableMethod(
+            this, &ApplyServicesCustomization::ApplyAndDelete, manifest));
+  } else {
+    VLOG(1) << "Failed to load services customization manifest from: "
+            << file.value();
+    BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, this);
+  }
+}
+
+void ApplyServicesCustomization::ApplyAndDelete(const std::string& manifest) {
+  Apply(manifest);
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+}
+
 void ApplyServicesCustomization::Apply(const std::string& manifest) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   chromeos::ServicesCustomizationDocument customization;
   if (!customization.LoadManifestFromString(manifest)) {
     LOG(ERROR) << "Failed to partner parse services customizations manifest";
@@ -133,17 +153,22 @@ void ApplyServicesCustomization::Apply(const std::string& manifest) {
   }
 
   VLOG(1) << "Partner services customizations manifest loaded successfully";
-  if (!customization.initial_start_page_url().empty()) {
-    // Append partner's start page url to command line so it gets opened
-    // on browser startup.
-    CommandLine::ForCurrentProcess()->AppendArg(
-        customization.initial_start_page_url());
-    VLOG(1) << "initial_start_page_url: "
-            << customization.initial_start_page_url();
+  std::string locale = g_browser_process->GetApplicationLocale();
+  std::string initial_start_page = customization.GetInitialStartPage(locale);
+  if (!initial_start_page.empty()) {
+    VLOG(1) << "initial_start_page_url: " << initial_start_page;
+    ExistingUserController* current_controller =
+        ExistingUserController::current_controller();
+    if (current_controller) {
+      current_controller->set_initial_start_page(initial_start_page);
+    } else {
+      // Exit here to don't safe that manifest was applied.
+      return;
+    }
   }
   // TODO(dpolukhin): apply customized apps, exts and support page.
 
   SetApplied(true);
 }
 
-}
+}  // namespace chromeos

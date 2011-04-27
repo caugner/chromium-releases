@@ -132,6 +132,16 @@ class URLFetcher {
   void set_upload_data(const std::string& upload_content_type,
                        const std::string& upload_content);
 
+  // Indicates that the POST data is sent via chunked transfer encoding.
+  // This may only be called before calling Start().
+  // Use AppendChunkToUpload() to give the data chunks after calling Start().
+  void set_chunked_upload(const std::string& upload_content_type);
+
+  // Adds the given bytes to a request's POST data transmitted using chunked
+  // transfer encoding.
+  // This method should be called ONLY after calling Start().
+  virtual void AppendChunkToUpload(const std::string& data, bool is_last_chunk);
+
   // Set one or more load flags as defined in net/base/load_flags.h.  Must be
   // called before the request is started.
   void set_load_flags(int load_flags);

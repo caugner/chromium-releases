@@ -10,7 +10,7 @@
 #include "base/hash_tables.h"
 #include "base/lazy_instance.h"
 #include "base/string_number_conversions.h"
-#include "chrome/common/child_process.h"
+#include "content/common/child_process.h"
 #include "ipc/ipc_sync_message.h"
 
 #if defined(OS_POSIX)
@@ -44,7 +44,7 @@ PluginChannelBase* PluginChannelBase::GetChannel(
 
   if (!channel->channel_valid()) {
     channel->channel_handle_ = channel_handle;
-    if (mode == IPC::Channel::MODE_SERVER) {
+    if (mode & IPC::Channel::MODE_SERVER_FLAG) {
       channel->channel_handle_.name.append(".");
       channel->channel_handle_.name.append(base::IntToString(next_pipe_id++));
     }

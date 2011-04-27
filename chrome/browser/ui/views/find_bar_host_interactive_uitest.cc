@@ -5,7 +5,6 @@
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -14,6 +13,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "net/test/test_server.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "views/focus/focus_manager.h"
@@ -100,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   browser()->Find();
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
                                            VIEW_ID_FIND_IN_PAGE_TEXT_FIELD));
-  ui_test_utils::FindInPage(browser()->GetSelectedTabContents(),
+  ui_test_utils::FindInPage(browser()->GetSelectedTabContentsWrapper(),
                             ASCIIToUTF16("a"), true, false, NULL);
   browser()->GetFindBarController()->EndFindSession(
       FindBarController::kKeepSelection);
@@ -135,7 +135,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
       browser()->GetFindBarController()->find_bar()->GetFindBarTesting();
 
   // Search for 'a'.
-  ui_test_utils::FindInPage(browser()->GetSelectedTabContents(),
+  ui_test_utils::FindInPage(browser()->GetSelectedTabContentsWrapper(),
                             ASCIIToUTF16("a"), true, false, NULL);
   EXPECT_TRUE(ASCIIToUTF16("a") == find_bar->GetFindSelectedText());
 
@@ -149,7 +149,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
                                            VIEW_ID_FIND_IN_PAGE_TEXT_FIELD));
 
   // Search for 'b'.
-  ui_test_utils::FindInPage(browser()->GetSelectedTabContents(),
+  ui_test_utils::FindInPage(browser()->GetSelectedTabContentsWrapper(),
                             ASCIIToUTF16("b"), true, false, NULL);
   EXPECT_TRUE(ASCIIToUTF16("b") == find_bar->GetFindSelectedText());
 

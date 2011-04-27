@@ -33,7 +33,7 @@
 #include "grit/generated_resources.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/page_zoom.h"
@@ -44,6 +44,7 @@
 #include "chrome_frame/buggy_bho_handling.h"
 #include "chrome_frame/crash_reporting/crash_metrics.h"
 #include "chrome_frame/utils.h"
+#include "content/browser/tab_contents/tab_contents.h"
 
 DEFINE_GUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0,
             0x46);
@@ -60,14 +61,15 @@ const DWORD kIEEncodingIdArray[] = {
 };
 
 ChromeActiveDocument::ChromeActiveDocument()
-    : first_navigation_(true),
+    : navigation_info_(new NavigationInfo()),
+      first_navigation_(true),
       is_automation_client_reused_(false),
       popup_allowed_(false),
       accelerator_table_(NULL) {
   TRACE_EVENT_BEGIN("chromeframe.createactivedocument", this, "");
 
   url_fetcher_->set_frame_busting(false);
-  memset(&navigation_info_, 0, sizeof(navigation_info_));
+  memset(navigation_info_.get(), 0, sizeof(NavigationInfo));
 }
 
 HRESULT ChromeActiveDocument::FinalConstruct() {
@@ -246,8 +248,19 @@ STDMETHODIMP ChromeActiveDocument::Load(BOOL fully_avalable,
   ScopedComPtr<BindContextInfo> info;
   BindContextInfo::FromBindContext(bind_context, info.Receive());
   DCHECK(info);
-  if (info && !info->url().empty()) {
-    url = info->url();
+  if (info && !info->GetUrl().empty()) {
+    url = info->GetUrl();
+    if (mgr) {
+      // If the original URL contains an anchor, then the URL queried
+      // from the protocol sink wrapper does not contain the anchor. To
+      // workaround this we retrieve the anchor from the navigation manager
+      // and append it to the url retrieved from the protocol sink wrapper.
+      GURL url_for_anchor(mgr->url());
+      if (url_for_anchor.has_ref()) {
+        url += L"#";
+        url += UTF8ToWide(url_for_anchor.ref());
+      }
+    }
   } else {
     // If the original URL contains an anchor, then the URL queried
     // from the moniker does not contain the anchor. To workaround
@@ -431,7 +444,7 @@ STDMETHODIMP ChromeActiveDocument::SaveHistory(IStream* stream) {
   LARGE_INTEGER offset = {0};
   ULARGE_INTEGER new_pos = {0};
   DWORD written = 0;
-  std::wstring url = UTF8ToWide(navigation_info_.url.spec());
+  std::wstring url = UTF8ToWide(navigation_info_->url.spec());
   return stream->Write(url.c_str(), (url.length() + 1) * sizeof(wchar_t),
                        &written);
 }
@@ -439,7 +452,7 @@ STDMETHODIMP ChromeActiveDocument::SaveHistory(IStream* stream) {
 STDMETHODIMP ChromeActiveDocument::SetPositionCookie(DWORD position_cookie) {
   if (automation_client_.get()) {
     int index = static_cast<int>(position_cookie);
-    navigation_info_.navigation_index = index;
+    navigation_info_->navigation_index = index;
     automation_client_->NavigateToIndex(index);
   } else {
     DLOG(WARNING) << "Invalid automation client instance";
@@ -451,7 +464,7 @@ STDMETHODIMP ChromeActiveDocument::GetPositionCookie(DWORD* position_cookie) {
   if (!position_cookie)
     return E_INVALIDARG;
 
-  *position_cookie = navigation_info_.navigation_index;
+  *position_cookie = navigation_info_->navigation_index;
   return S_OK;
 }
 
@@ -582,7 +595,7 @@ HRESULT ChromeActiveDocument::ActiveXDocActivate(LONG verb) {
         ::ShowWindow(m_hWnd, SW_SHOW);
         SetFocus();
       } else {
-        m_hWnd = Create(parent_window, position_rect, 0, 0, WS_EX_CLIENTEDGE);
+        m_hWnd = Create(parent_window, position_rect);
         if (!IsWindow()) {
           // This might happen if the automation server couldn't be
           // instantiated.  If so, a NOTREACHED() will have already been hit.
@@ -710,12 +723,14 @@ void ChromeActiveDocument::OnCloseTab() {
 void ChromeActiveDocument::UpdateNavigationState(
     const NavigationInfo& new_navigation_info, int flags) {
   HRESULT hr = S_OK;
-  bool is_title_changed = (navigation_info_.title != new_navigation_info.title);
+  bool is_title_changed =
+      (navigation_info_->title != new_navigation_info.title);
   bool is_ssl_state_changed =
-      (navigation_info_.security_style != new_navigation_info.security_style) ||
-      (navigation_info_.displayed_insecure_content !=
+      (navigation_info_->security_style !=
+          new_navigation_info.security_style) ||
+      (navigation_info_->displayed_insecure_content !=
           new_navigation_info.displayed_insecure_content) ||
-      (navigation_info_.ran_insecure_content !=
+      (navigation_info_->ran_insecure_content !=
           new_navigation_info.ran_insecure_content);
 
   if (is_ssl_state_changed) {
@@ -732,6 +747,19 @@ void ChromeActiveDocument::UpdateNavigationState(
     base::win::ScopedVariant secure_lock_status(lock_status);
     IEExec(&CGID_ShellDocView, INTERNAL_CMDID_SET_SSL_LOCK,
            OLECMDEXECOPT_DODEFAULT, secure_lock_status.AsInput(), NULL);
+  }
+
+  // A number of poorly written bho's crash in their event sink callbacks if
+  // chrome frame is the currently loaded document. This is because they expect
+  // chrome frame to implement interfaces like IHTMLDocument, etc. We patch the
+  // event sink's of these bho's and don't invoke the event sink if chrome
+  // frame is the currently loaded document.
+  if (GetConfigBool(true, kEnableBuggyBhoIntercept)) {
+    ScopedComPtr<IWebBrowser2> wb2;
+    DoQueryService(SID_SWebBrowserApp, m_spClientSite, wb2.Receive());
+    if (wb2 && buggy_bho::BuggyBhoTls::GetInstance()) {
+      buggy_bho::BuggyBhoTls::GetInstance()->PatchBuggyBHOs(wb2);
+    }
   }
 
   // Ideally all navigations should come to Chrome Frame so that we can call
@@ -763,15 +791,6 @@ void ChromeActiveDocument::UpdateNavigationState(
   if (is_internal_navigation) {
     ScopedComPtr<IDocObjectService> doc_object_svc;
     ScopedComPtr<IWebBrowserEventsService> web_browser_events_svc;
-
-    buggy_bho::BuggyBhoTls bad_bho_tls;
-    if (GetConfigBool(true, kEnableBuggyBhoIntercept)) {
-      ScopedComPtr<IWebBrowser2> wb2;
-      DoQueryService(SID_SWebBrowserApp, m_spClientSite, wb2.Receive());
-      if (wb2) {
-        buggy_bho::BuggyBhoTls::PatchBuggyBHOs(wb2);
-      }
-    }
 
     DoQueryService(__uuidof(web_browser_events_svc), m_spClientSite,
                    web_browser_events_svc.Receive());
@@ -834,7 +853,7 @@ void ChromeActiveDocument::UpdateNavigationState(
   // finalized the travel log. This is because IE will ask for information
   // such as navigation index when the travel log is finalized and we need
   // supply the old index and not the new one.
-  navigation_info_ = new_navigation_info;
+  *navigation_info_ = new_navigation_info;
   // Update the IE zone here. Ideally we would like to do it when the active
   // document is activated. However that does not work at times as the frame we
   // get there is not the actual frame which handles the command.
@@ -852,9 +871,9 @@ void ChromeActiveDocument::OnFindInPage() {
 }
 
 void ChromeActiveDocument::OnViewSource() {
-  DCHECK(navigation_info_.url.is_valid());
+  DCHECK(navigation_info_->url.is_valid());
   HostNavigate(GURL(chrome::kViewSourceScheme + std::string(":") +
-      navigation_info_.url.spec()), GURL(), NEW_WINDOW);
+      navigation_info_->url.spec()), GURL(), NEW_WINDOW);
 }
 
 void ChromeActiveDocument::OnDetermineSecurityZone(const GUID* cmd_group_guid,
@@ -1125,10 +1144,10 @@ HRESULT ChromeActiveDocument::OnRefreshPage(const GUID* cmd_group_guid,
     ResetUrlRequestManager();
     url_fetcher_->set_frame_busting(false);
     // And now launch the current URL again.  This starts a new server process.
-    DCHECK(navigation_info_.url.is_valid());
+    DCHECK(navigation_info_->url.is_valid());
     ChromeFrameUrl cf_url;
-    cf_url.Parse(UTF8ToWide(navigation_info_.url.spec()));
-    LaunchUrl(cf_url, navigation_info_.referrer.spec());
+    cf_url.Parse(UTF8ToWide(navigation_info_->url.spec()));
+    LaunchUrl(cf_url, navigation_info_->referrer.spec());
   }
 
   return S_OK;
@@ -1383,16 +1402,16 @@ bool ChromeActiveDocument::IsNewNavigation(
     return false;
 
   if (new_navigation_info.navigation_index ==
-      navigation_info_.navigation_index)
+      navigation_info_->navigation_index)
     return false;
 
-  if (new_navigation_info.navigation_type != navigation_info_.navigation_type)
+  if (new_navigation_info.navigation_type != navigation_info_->navigation_type)
     return true;
 
-  if (new_navigation_info.url != navigation_info_.url)
+  if (new_navigation_info.url != navigation_info_->url)
     return true;
 
-  if (new_navigation_info.referrer != navigation_info_.referrer)
+  if (new_navigation_info.referrer != navigation_info_->referrer)
     return true;
 
   return false;

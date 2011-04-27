@@ -59,18 +59,29 @@ class ServerNotifierThread
   virtual void SendNotification(const OutgoingNotificationData& data);
 
   // ChromeInvalidationClient::Listener implementation.
-  virtual void OnInvalidate(syncable::ModelType model_type);
+  // We pass on two pieces of information to observers through the
+  // IncomingNotificationData.
+  // - the model type being invalidated, through IncomingNotificationData's
+  //       service_url.
+  // - the invalidation payload for that model type, through
+  //       IncomingNotificationData's service_specific_data.
+  virtual void OnInvalidate(syncable::ModelType model_type,
+                            const std::string& payload);
   virtual void OnInvalidateAll();
 
   // StateWriter implementation.
   virtual void WriteState(const std::string& state);
+
+  virtual void UpdateEnabledTypes(const syncable::ModelTypeSet& types);
 
  private:
   // Posted to the worker thread by ListenForUpdates().
   void DoListenForUpdates();
 
   // Posted to the worker thread by SubscribeForUpdates().
-  void RegisterTypesAndSignalSubscribed();
+  void RegisterTypes();
+
+  void SignalSubscribed();
 
   // Posted to the worker thread by Logout().
   void StopInvalidationListener();
@@ -82,6 +93,10 @@ class ServerNotifierThread
   // |state_writers_|.
   StateWriter* state_writer_;
   scoped_ptr<ChromeInvalidationClient> chrome_invalidation_client_;
+
+  syncable::ModelTypeSet registered_types_;
+
+  void SetRegisteredTypes(syncable::ModelTypeSet types);
 };
 
 }  // namespace sync_notifier

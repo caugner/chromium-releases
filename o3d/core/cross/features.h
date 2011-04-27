@@ -82,6 +82,15 @@ class Features {
     return init_status_;
   }
 
+  Renderer::RenderMode render_mode() const {
+    return render_mode_;
+  }
+
+  // For use by SuppressRenderModeAuto() in main_mac.mm.
+  void set_render_mode(Renderer::RenderMode render_mode) {
+    render_mode_ = render_mode;
+  }
+
  private:
   // Parses the features strings.
   // Parameters:
@@ -99,6 +108,7 @@ class Features {
   bool not_anti_aliased_;
   bool flip_textures_;
   Renderer::InitStatus init_status_;
+  Renderer::RenderMode render_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(Features);
 };

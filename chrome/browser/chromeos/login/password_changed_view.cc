@@ -6,6 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
+#include "chrome/browser/chromeos/login/textfield_with_margin.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -14,8 +15,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/radio_button.h"
 #include "views/controls/label.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/window/window.h"
 
 using views::Button;
@@ -75,7 +76,6 @@ void PasswordChangedView::ViewHierarchyChanged(bool is_add,
                                                views::View* child) {
   if (is_add && child == this) {
     Init();
-    WizardAccessibilityHelper::GetInstance()->MaybeEnableAccessibility(this);
   }
 }
 
@@ -110,7 +110,7 @@ void PasswordChangedView::Init() {
   delta_sync_radio_->set_listener(this);
   delta_sync_radio_->SetMultiLine(true);
 
-  old_password_field_ = new Textfield(Textfield::STYLE_PASSWORD);
+  old_password_field_ = new TextfieldWithMargin(Textfield::STYLE_PASSWORD);
   old_password_field_->set_text_to_display_when_empty(
       l10n_util::GetStringUTF16(IDS_LOGIN_PREVIOUS_PASSWORD));
   old_password_field_->set_default_width_in_chars(kPasswordFieldWidthChars);
@@ -124,30 +124,31 @@ void PasswordChangedView::Init() {
   column_set->AddColumn(GridLayout::LEADING, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
   column_set = layout->AddColumnSet(1);
-  column_set->AddPaddingColumn(0, kUnrelatedControlLargeHorizontalSpacing);
+  column_set->AddPaddingColumn(
+      0, views::kUnrelatedControlLargeHorizontalSpacing);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, 0);
   layout->AddView(title_label_);
-  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   layout->StartRow(0, 0);
   layout->AddView(description_label_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, 0);
   layout->AddView(full_sync_radio_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, 0);
   layout->AddView(delta_sync_radio_);
-  layout->AddPaddingRow(0, kRelatedControlSmallVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
 
   layout->StartRow(0, 1);
   layout->AddView(
       old_password_field_, 1, 1, GridLayout::LEADING, GridLayout::CENTER);
-  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   layout->StartRow(0, 0);
   layout->AddView(old_password_field_);

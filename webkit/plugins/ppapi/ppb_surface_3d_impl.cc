@@ -4,10 +4,15 @@
 
 #include "webkit/plugins/ppapi/ppb_surface_3d_impl.h"
 
+#include "base/message_loop.h"
+#include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ppapi/c/dev/ppb_graphics_3d_dev.h"
+#include "ppapi/c/dev/ppp_graphics_3d_dev.h"
 #include "webkit/plugins/ppapi/common.h"
+#include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
+#include "webkit/plugins/ppapi/ppb_context_3d_impl.h"
 
 namespace webkit {
 namespace ppapi {
@@ -94,51 +99,54 @@ bool PPB_Surface3D_Impl::BindToInstance(bool bind) {
 }
 
 bool PPB_Surface3D_Impl::BindToContext(
-    PluginDelegate::PlatformContext3D* context) {
+    PPB_Context3D_Impl* context) {
   if (context == context_)
     return true;
 
   // Unbind from the current context.
   if (context_) {
-    context_->SetSwapBuffersCallback(NULL);
+    context_->platform_context()->SetSwapBuffersCallback(NULL);
   }
   if (context) {
     // Resize the backing texture to the size of the instance when it is bound.
     // TODO(alokp): This should be the responsibility of plugins.
-    context->ResizeBackingTexture(instance()->position().size());
+    gpu::gles2::GLES2Implementation* impl = context->gles2_impl();
+    if (impl) {
+      const gfx::Size& size = instance()->position().size();
+      impl->ResizeCHROMIUM(size.width(), size.height());
+    }
 
-    // This is a temporary hack. The SwapBuffers is issued to force the resize
-    // to take place before any subsequent rendering. This might lead to a
-    // partially rendered frame being displayed. It is also not thread safe
-    // since the SwapBuffers is written to the command buffer and that command
-    // buffer might be written to by another thread.
-    // TODO(apatrick): Figure out the semantics of binding and resizing.
-    context->SwapBuffers();
-
-    context->SetSwapBuffersCallback(
+    context->platform_context()->SetSwapBuffersCallback(
         NewCallback(this, &PPB_Surface3D_Impl::OnSwapBuffers));
   }
   context_ = context;
   return true;
 }
 
-bool PPB_Surface3D_Impl::SwapBuffers(PP_CompletionCallback callback) {
+int32_t PPB_Surface3D_Impl::SwapBuffers(PP_CompletionCallback callback) {
   if (!context_)
-    return false;
+    return PP_ERROR_FAILED;
 
   if (swap_callback_.func) {
     // Already a pending SwapBuffers that hasn't returned yet.
-    return false;
+    return PP_ERROR_INPROGRESS;
+  }
+
+  if (!callback.func) {
+    // Blocking SwapBuffers isn't supported (since we have to be on the main
+    // thread).
+    return PP_ERROR_BADARGUMENT;
   }
 
   swap_callback_ = callback;
-  return context_->SwapBuffers();
+  gpu::gles2::GLES2Implementation* impl = context_->gles2_impl();
+  if (impl) {
+    context_->gles2_impl()->SwapBuffers();
+  }
+  return PP_ERROR_WOULDBLOCK;
 }
 
 void PPB_Surface3D_Impl::ViewInitiatedPaint() {
-  if (swap_callback_.func) {
-    swap_initiated_ = true;
-  }
 }
 
 void PPB_Surface3D_Impl::ViewFlushedPaint() {
@@ -154,12 +162,40 @@ void PPB_Surface3D_Impl::ViewFlushedPaint() {
 }
 
 unsigned int PPB_Surface3D_Impl::GetBackingTextureId() {
-  return context_ ? context_->GetBackingTextureId() : 0;
+  return context_ ? context_->platform_context()->GetBackingTextureId() : 0;
 }
 
 void PPB_Surface3D_Impl::OnSwapBuffers() {
-  if (bound_to_instance_)
+  if (bound_to_instance_) {
     instance()->CommitBackingTexture();
+    swap_initiated_ = true;
+  } else if (swap_callback_.func) {
+    // If we're off-screen, no need to trigger compositing so run the callback
+    // immediately.
+    PP_CompletionCallback callback = PP_BlockUntilComplete();
+    std::swap(callback, swap_callback_);
+    swap_initiated_ = false;
+    PP_RunCompletionCallback(&callback, PP_OK);
+  }
+}
+
+void PPB_Surface3D_Impl::OnContextLost() {
+  if (bound_to_instance_)
+    instance()->BindGraphics(0);
+
+  // Send context lost to plugin. This may have been caused by a PPAPI call, so
+  // avoid re-entering.
+  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
+      this, &PPB_Surface3D_Impl::SendContextLost));
+}
+
+void PPB_Surface3D_Impl::SendContextLost() {
+  const PPP_Graphics3D_Dev* ppp_graphics_3d =
+      static_cast<const PPP_Graphics3D_Dev*>(
+          instance()->module()->GetPluginInterface(
+              PPP_GRAPHICS_3D_DEV_INTERFACE));
+  if (ppp_graphics_3d)
+    ppp_graphics_3d->Graphics3DContextLost(instance()->pp_instance());
 }
 
 }  // namespace ppapi

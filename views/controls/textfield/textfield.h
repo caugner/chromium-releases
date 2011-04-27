@@ -16,16 +16,16 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
-#include "gfx/font.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/font.h"
 #include "views/view.h"
 
 #if !defined(OS_LINUX)
 #include "base/logging.h"
 #endif
 #ifdef UNIT_TEST
-#include "gfx/native_widget_types.h"
+#include "ui/gfx/native_widget_types.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #endif
 
@@ -257,28 +257,30 @@ class Textfield : public View {
 #endif
 
   // Overridden from View:
-  virtual void Layout();
-  virtual gfx::Size GetPreferredSize();
-  virtual bool IsFocusable() const;
-  virtual void AboutToRequestFocusFromTabTraversal(bool reverse);
-  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e);
-  virtual void SetEnabled(bool enabled);
-  virtual void PaintFocusBorder(gfx::Canvas* canvas);
-  virtual bool OnKeyPressed(const views::KeyEvent& e);
-  virtual bool OnKeyReleased(const views::KeyEvent& e);
-  virtual void WillGainFocus();
-  virtual void DidGainFocus();
-  virtual void WillLoseFocus();
-
-  // Accessibility accessors, overridden from View:
+  virtual void Layout() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual bool IsFocusable() const OVERRIDE;
+  virtual void AboutToRequestFocusFromTabTraversal(bool reverse) OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e) OVERRIDE;
+  virtual void SetEnabled(bool enabled) OVERRIDE;
+  virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
+  virtual bool OnKeyPressed(const views::KeyEvent& e) OVERRIDE;
+  virtual bool OnKeyReleased(const views::KeyEvent& e) OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
   virtual AccessibilityTypes::Role GetAccessibleRole() OVERRIDE;
   virtual AccessibilityTypes::State GetAccessibleState() OVERRIDE;
   virtual string16 GetAccessibleValue() OVERRIDE;
 
+  // TODO(dmazzoni): Remove this when refactoring views accessibility code.
+  // http://crbug.com/74988
+  void GetSelectionBounds(int* start_index, int* end_index);
+
  protected:
-  virtual void Focus();
-  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
-  virtual std::string GetClassName() const;
+  virtual void ViewHierarchyChanged(bool is_add, View* parent,
+                                    View* child) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
   // The object that actually implements the native text field.
   NativeTextfieldWrapper* native_wrapper_;

@@ -5,6 +5,8 @@
 // Syncer unit tests. Unfortunately a lot of these tests
 // are outdated and need to be reworked and updated.
 
+#include <algorithm>
+#include <limits>
 #include <list>
 #include <map>
 #include <set>
@@ -24,7 +26,9 @@
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
+#include "chrome/browser/sync/sessions/sync_session_context.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/common/deprecated/event_sys-inl.h"
 #include "chrome/test/sync/engine/mock_connection_manager.h"
@@ -150,8 +154,11 @@ class SyncerTest : public testing::Test,
     std::vector<ModelSafeWorker*> workers;
     GetModelSafeRoutingInfo(&info);
     GetWorkers(&workers);
-    return new SyncSession(context_.get(), this, sessions::SyncSourceInfo(),
-                           info, workers);
+    sessions::TypePayloadMap types =
+        sessions::MakeTypePayloadMapFromRoutingInfo(info, std::string());
+    return new SyncSession(context_.get(), this,
+        sessions::SyncSourceInfo(sync_pb::GetUpdatesCallerInfo::UNKNOWN, types),
+        info, workers);
   }
 
   bool SyncShareAsDelegate() {
@@ -712,7 +719,7 @@ TEST_F(SyncerTest, TestCommitListOrderingThreeItemsTall) {
 }
 
 TEST_F(SyncerTest, TestCommitListOrderingThreeItemsTallLimitedSize) {
-  syncer_->set_max_commit_batch_size(2);
+  context_->set_max_commit_batch_size(2);
   CommitOrderingTest items[] = {
     {1, ids_.FromNumber(-2001), ids_.FromNumber(-2000)},
     {0, ids_.FromNumber(-2000), ids_.FromNumber(0)},
@@ -765,7 +772,7 @@ TEST_F(SyncerTest, TestCommitListOrderingTwoLongDeletedItemWithUnroll) {
 }
 
 TEST_F(SyncerTest, TestCommitListOrdering3LongDeletedItemsWithSizeLimit) {
-  syncer_->set_max_commit_batch_size(2);
+  context_->set_max_commit_batch_size(2);
   CommitOrderingTest items[] = {
     {0, ids_.FromNumber(1000), ids_.FromNumber(0), {DELETED, OLD_MTIME}},
     {1, ids_.FromNumber(1001), ids_.FromNumber(0), {DELETED, OLD_MTIME}},
@@ -3561,6 +3568,23 @@ TEST_F(SyncerTest, MergingExistingItems) {
   SyncRepeatedlyToTriggerConflictResolution(session_.get());
 }
 
+TEST_F(SyncerTest, OneBajillionUpdates) {
+  ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
+  CHECK(dir.good());
+  int one_bajillion = 4000;
+
+  syncable::Id parent_id = ids_.MakeServer("Parent");
+  mock_server_->AddUpdateDirectory(parent_id, ids_.root(), "foo", 1, 1);
+
+  for (int i = 1; i <= one_bajillion; ++i) {
+    syncable::Id item_id = ids_.FromNumber(i);
+    mock_server_->AddUpdateDirectory(item_id, parent_id, "dude", 1, 1);
+  }
+
+  syncer_->SyncShare(session_.get());
+  EXPECT_FALSE(session_->status_controller()->syncer_status().syncer_stuck);
+}
+
 // In this test a long changelog contains a child at the start of the changelog
 // and a parent at the end. While these updates are in progress the client would
 // appear stuck.
@@ -4976,12 +5000,12 @@ class SyncerPositionUpdateTest : public SyncerTest {
       Id id = i->second;
       Entry entry_with_id(&trans, GET_BY_ID, id);
       EXPECT_TRUE(entry_with_id.good());
-      EXPECT_TRUE(entry_with_id.Get(PREV_ID) == prev_id);
-      EXPECT_TRUE(entry_with_id.Get(SERVER_POSITION_IN_PARENT) == i->first);
+      EXPECT_EQ(prev_id, entry_with_id.Get(PREV_ID));
+      EXPECT_EQ(i->first, entry_with_id.Get(SERVER_POSITION_IN_PARENT));
       if (next == position_map_.end()) {
-        EXPECT_TRUE(entry_with_id.Get(NEXT_ID).IsRoot());
+        EXPECT_EQ(Id(), entry_with_id.Get(NEXT_ID));
       } else {
-        EXPECT_TRUE(entry_with_id.Get(NEXT_ID) == next->second);
+        EXPECT_EQ(next->second, entry_with_id.Get(NEXT_ID));
         next++;
       }
       prev_id = id;

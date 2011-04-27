@@ -187,6 +187,9 @@ void PopulateURLResponse(
   response->setWasAlternateProtocolAvailable(
       info.was_alternate_protocol_available);
   response->setWasFetchedViaProxy(info.was_fetched_via_proxy);
+  response->setRemoteIPAddress(
+      WebString::fromUTF8(info.socket_address.host()));
+  response->setRemotePort(info.socket_address.port());
   response->setConnectionID(info.connection_id);
   response->setConnectionReused(info.connection_reused);
   response->setDownloadFilePath(FilePathToWebString(info.download_file_path));
@@ -244,8 +247,8 @@ void PopulateURLResponse(
   // pass it to GetSuggestedFilename.
   std::string value;
   if (headers->EnumerateHeader(NULL, "content-disposition", &value)) {
-    response->setSuggestedFileName(FilePathToWebString(
-        net::GetSuggestedFilename(url, value, "", FilePath())));
+    response->setSuggestedFileName(
+        net::GetSuggestedFilename(url, value, "", string16()));
   }
 
   Time time_val;
@@ -289,8 +292,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
       const ResourceResponseInfo& info,
       bool* has_new_first_party_for_cookies,
       GURL* new_first_party_for_cookies);
-  virtual void OnReceivedResponse(
-      const ResourceResponseInfo& info, bool content_filtered);
+  virtual void OnReceivedResponse(const ResourceResponseInfo& info);
   virtual void OnDownloadedData(int len);
   virtual void OnReceivedData(const char* data, int len);
   virtual void OnReceivedCachedMetadata(const char* data, int len);
@@ -403,12 +405,6 @@ void WebURLLoaderImpl::Context::Start(
   if (!request.allowStoredCredentials())
     load_flags |= net::LOAD_DO_NOT_SEND_AUTH_DATA;
 
-  // TODO(jcampan): in the non out-of-process plugin case the request does not
-  // have a requestor_pid. Find a better place to set this.
-  int requestor_pid = request.requestorProcessID();
-  if (requestor_pid == 0)
-    requestor_pid = base::GetCurrentProcId();
-
   HeaderFlattener flattener(load_flags);
   request.visitHTTPHeaderFields(&flattener);
 
@@ -429,7 +425,10 @@ void WebURLLoaderImpl::Context::Start(
   request_info.main_frame_origin = main_frame_origin;
   request_info.headers = flattener.GetBuffer();
   request_info.load_flags = load_flags;
-  request_info.requestor_pid = requestor_pid;
+  // requestor_pid only needs to be non-zero if the request originates outside
+  // the render process, so we can use requestorProcessID even for requests
+  // from in-process plugins.
+  request_info.requestor_pid = request.requestorProcessID();
   request_info.request_type = FromTargetType(request.targetType());
   request_info.appcache_host_id = request.appCacheHostID();
   request_info.routing_id = request.requestorID();
@@ -534,15 +533,13 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
 }
 
 void WebURLLoaderImpl::Context::OnReceivedResponse(
-    const ResourceResponseInfo& info,
-    bool content_filtered) {
+    const ResourceResponseInfo& info) {
   if (!client_)
     return;
 
   WebURLResponse response;
   response.initialize();
   PopulateURLResponse(request_.url(), info, &response);
-  response.setIsContentFiltered(content_filtered);
 
   bool show_raw_listing = (GURL(request_.url()).query() == "raw");
 
@@ -694,7 +691,7 @@ void WebURLLoaderImpl::Context::HandleDataURL() {
   std::string data;
 
   if (GetInfoFromDataURL(request_.url(), &info, &data, &status)) {
-    OnReceivedResponse(info, false);
+    OnReceivedResponse(info);
     if (!data.empty())
       OnReceivedData(data.data(), data.size());
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
 
 struct PPB_CursorControl_Dev;
@@ -22,20 +23,20 @@ class PPB_CursorControl_Proxy : public InterfaceProxy {
   PPB_CursorControl_Proxy(Dispatcher* dispatcher, const void* target_interface);
   virtual ~PPB_CursorControl_Proxy();
 
+  static const Info* GetInfo();
+
   const PPB_CursorControl_Dev* ppb_cursor_control_target() const {
     return reinterpret_cast<const PPB_CursorControl_Dev*>(target_interface());
   }
 
   // InterfaceProxy implementation.
-  virtual const void* GetSourceInterface() const;
-  virtual InterfaceID GetInterfaceId() const;
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
   // Message handlers.
   void OnMsgSetCursor(PP_Instance instance,
                       int32_t type,
-                      PP_Resource custom_image,
+                      HostResource custom_image,
                       const PP_Point& hot_spot,
                       PP_Bool* result);
   void OnMsgLockCursor(PP_Instance instance,

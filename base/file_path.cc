@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+
 #include "base/file_path.h"
 
 #if defined(OS_WIN)
@@ -247,9 +249,8 @@ bool FilePath::AppendRelativePath(const FilePath& child,
   GetComponents(&parent_components);
   child.GetComponents(&child_components);
 
-  if (parent_components.size() >= child_components.size())
-    return false;
-  if (parent_components.size() == 0)
+  if (parent_components.empty() ||
+      parent_components.size() >= child_components.size())
     return false;
 
   std::vector<StringType>::const_iterator parent_comp =
@@ -511,10 +512,20 @@ bool FilePath::ReferencesParent() const {
 }
 
 #if defined(OS_POSIX)
-
 // See file_path.h for a discussion of the encoding of paths on POSIX
-// platforms.  These *Hack() functions are not quite correct, but they're
-// only temporary while we fix the remainder of the code.
+// platforms.  These encoding conversion functions are not quite correct.
+
+string16 FilePath::LossyDisplayName() const {
+  return WideToUTF16(base::SysNativeMBToWide(path_));
+}
+
+std::string FilePath::MaybeAsASCII() const {
+  if (IsStringASCII(path_))
+    return path_;
+  return "";
+}
+
+// The *Hack functions are temporary while we fix the remainder of the code.
 // Remember to remove the #includes at the top when you remove these.
 
 // static
@@ -525,6 +536,16 @@ std::wstring FilePath::ToWStringHack() const {
   return base::SysNativeMBToWide(path_);
 }
 #elif defined(OS_WIN)
+string16 FilePath::LossyDisplayName() const {
+  return path_;
+}
+
+std::string FilePath::MaybeAsASCII() const {
+  if (IsStringASCII(path_))
+    return WideToASCII(path_);
+  return "";
+}
+
 // static
 FilePath FilePath::FromWStringHack(const std::wstring& wstring) {
   return FilePath(wstring);

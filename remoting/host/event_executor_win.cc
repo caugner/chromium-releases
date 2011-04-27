@@ -18,7 +18,7 @@ using protocol::MouseEvent;
 using protocol::KeyEvent;
 
 EventExecutorWin::EventExecutorWin(
-    MessageLoop* message_loop, Capturer* capturer)
+    MessageLoopForUI* message_loop, Capturer* capturer)
     : message_loop_(message_loop),
       capturer_(capturer) {
 }
@@ -61,6 +61,8 @@ void EventExecutorWin::HandleKey(const KeyEvent* event) {
   int scan_code = MapVirtualKeyEx(key, MAPVK_VK_TO_VSC_EX, hkl);
 
   INPUT input;
+  memset(&input, 0, sizeof(input));
+
   input.type = INPUT_KEYBOARD;
   input.ki.time = 0;
   input.ki.wVk = key;
@@ -80,7 +82,7 @@ void EventExecutorWin::HandleKey(const KeyEvent* event) {
   SendInput(1, &input, sizeof(INPUT));
 }
 
-protocol::InputStub* CreateEventExecutor(MessageLoop* message_loop,
+protocol::InputStub* CreateEventExecutor(MessageLoopForUI* message_loop,
                                          Capturer* capturer) {
   return new EventExecutorWin(message_loop, capturer);
 }
@@ -95,10 +97,14 @@ void EventExecutorWin::HandleMouse(const MouseEvent* event) {
     INPUT input;
     input.type = INPUT_MOUSE;
     input.mi.time = 0;
-    input.mi.dx = static_cast<int>((x * 65535) / capturer_->width());
-    input.mi.dy = static_cast<int>((y * 65535) / capturer_->height());
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(INPUT));
+    int screen_width = capturer_->width_most_recent();
+    int screen_height = capturer_->height_most_recent();
+    if ((screen_width > 0) && (screen_height > 0)) {
+      input.mi.dx = static_cast<int>((x * 65535) / screen_width);
+      input.mi.dy = static_cast<int>((y * 65535) / screen_height);
+      input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+      SendInput(1, &input, sizeof(INPUT));
+    }
   }
 
   if (event->has_wheel_offset_x() && event->has_wheel_offset_y()) {

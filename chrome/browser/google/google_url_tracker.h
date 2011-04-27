@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -37,7 +37,7 @@ class TemplateURL;
 // RequestServerCheck().
 class GoogleURLTracker : public URLFetcher::Delegate,
                          public NotificationObserver,
-                         public net::NetworkChangeNotifier::Observer {
+                         public net::NetworkChangeNotifier::IPAddressObserver {
  public:
   // Only the main browser process loop should call this, when setting up
   // g_browser_process->google_url_tracker_.  No code other than the
@@ -118,7 +118,7 @@ class GoogleURLTracker : public URLFetcher::Delegate,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // NetworkChangeNotifier::Observer
+  // NetworkChangeNotifier::IPAddressObserver
   virtual void OnIPAddressChanged();
 
   void SearchCommitted();
@@ -171,7 +171,7 @@ class GoogleURLTrackerInfoBarDelegate : public ConfirmInfoBarDelegate {
                                   GoogleURLTracker* google_url_tracker,
                                   const GURL& new_google_url);
 
-  // ConfirmInfoBarDelegate
+  // ConfirmInfoBarDelegate:
   virtual bool Accept();
   virtual bool Cancel();
   virtual void InfoBarClosed();
@@ -183,9 +183,8 @@ class GoogleURLTrackerInfoBarDelegate : public ConfirmInfoBarDelegate {
   const GURL new_google_url_;
 
  private:
-  // ConfirmInfoBarDelegate
+  // ConfirmInfoBarDelegate:
   virtual string16 GetMessageText() const;
-  virtual int GetButtons() const;
   virtual string16 GetButtonLabel(InfoBarButton button) const;
 
   DISALLOW_COPY_AND_ASSIGN(GoogleURLTrackerInfoBarDelegate);

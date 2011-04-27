@@ -7,8 +7,6 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/window_sizer.h"
@@ -17,11 +15,11 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
-#include "gfx/codec/png_codec.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "net/test/test_server.h"
 #include "ui/base/clipboard/clipboard.h"
-
-extern base::hash_map<std::string, int> g_test_timeout_overrides;
+#include "ui/gfx/codec/png_codec.h"
 
 namespace {
 
@@ -29,19 +27,6 @@ namespace {
 // than the test pdf document.
 static const int kBrowserWidth = 1000;
 static const int kBrowserHeight = 600;
-static const int kLoadingTestTimeoutMs = 60000;
-
-// The loading test is really a collection of tests, each one being a different
-// PDF file.  But it would be busy work to add a different test for each file.
-// Since we run them all in one test, we want a bigger timeout.
-class IncreaseLoadingTimeout {
- public:
-  IncreaseLoadingTimeout() {
-    g_test_timeout_overrides["PDFBrowserTest.Loading"] = kLoadingTestTimeoutMs;
-  }
-};
-
-IncreaseLoadingTimeout g_increase_loading_timeout;
 
 class PDFBrowserTest : public InProcessBrowserTest,
                        public NotificationObserver {
@@ -117,7 +102,7 @@ class PDFBrowserTest : public InProcessBrowserTest,
     string16 query = UTF8ToUTF16(
         std::string("xyzxyz" + base::IntToString(next_dummy_search_value_++)));
     ASSERT_EQ(0, ui_test_utils::FindInPage(
-        browser()->GetSelectedTabContents(), query, true, false, NULL));
+        browser()->GetSelectedTabContentsWrapper(), query, true, false, NULL));
   }
 
  private:
@@ -210,7 +195,6 @@ class PDFBrowserTest : public InProcessBrowserTest,
 // Tests basic PDF rendering.  This can be broken depending on bad merges with
 // the vendor, so it's important that we have basic sanity checking.
 IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Basic) {
-
   ASSERT_NO_FATAL_FAILURE(Load());
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
   ASSERT_NO_FATAL_FAILURE(VerifySnapshot("pdf_browsertest.png"));
@@ -244,8 +228,8 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FindAndCopy) {
   ASSERT_NO_FATAL_FAILURE(Load());
   // Verifies that find in page works.
   ASSERT_EQ(3, ui_test_utils::FindInPage(
-      browser()->GetSelectedTabContents(), UTF8ToUTF16("adipiscing"), true,
-      false, NULL));
+      browser()->GetSelectedTabContentsWrapper(), UTF8ToUTF16("adipiscing"),
+      true, false, NULL));
 
   // Verify that copying selected text works.
   ui::Clipboard clipboard;
@@ -267,7 +251,8 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FindAndCopy) {
 // Tests that loading async pdfs works correctly (i.e. document fully loads).
 // This also loads all documents that used to crash, to ensure we don't have
 // regressions.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Loading) {
+// Flaky as per http://crbug.com/74548.
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
   ASSERT_TRUE(pdf_test_server()->Start());
 
   NavigationController* controller =
@@ -286,7 +271,8 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Loading) {
   for (FilePath file_path = file_enumerator.Next();
        !file_path.empty();
        file_path = file_enumerator.Next()) {
-    std::string filename = WideToASCII(file_path.BaseName().ToWStringHack());
+    std::string filename = file_path.BaseName().MaybeAsASCII();
+    ASSERT_FALSE(filename.empty());
 
 #if defined(OS_MACOSX) || defined(OS_LINUX)
     if (filename == "sample.pdf")
@@ -319,6 +305,22 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Loading) {
       ui_test_utils::WaitForLoadStop(controller);
     }
   }
+}
+
+// Flaky as per http://crbug.com/74549.
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_OnLoadAndReload) {
+  ASSERT_TRUE(pdf_test_server()->Start());
+
+  GURL url = pdf_test_server()->GetURL("files/onload_reload.html");
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
+      browser()->GetSelectedTabContents()->render_view_host(),
+      std::wstring(),
+      L"reloadPDF();"));
+
+  ASSERT_TRUE(ui_test_utils::WaitForNavigationInCurrentTab(browser()));
+  ASSERT_EQ("success", browser()->GetSelectedTabContents()->GetURL().query());
 }
 
 }  // namespace

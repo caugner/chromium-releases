@@ -23,13 +23,13 @@
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/icon_manager.h"
-#include "gfx/font.h"
+#include "content/browser/cancelable_request.h"
 #include "ui/base/animation/animation_delegate.h"
-#include "views/event.h"
+#include "ui/gfx/font.h"
+#include "views/events/event.h"
 #include "views/controls/button/button.h"
 #include "views/view.h"
 
@@ -37,6 +37,10 @@ class BaseDownloadItemModel;
 class DownloadShelfView;
 class SkBitmap;
 class DownloadShelfContextMenuWin;
+
+namespace gfx {
+class Image;
+}
 
 namespace ui {
 class SlideAnimation;
@@ -58,29 +62,32 @@ class DownloadItemView : public views::ButtonListener,
   virtual ~DownloadItemView();
 
   // DownloadObserver method
-  virtual void OnDownloadUpdated(DownloadItem* download);
-  virtual void OnDownloadFileCompleted(DownloadItem* download) { }
-  virtual void OnDownloadOpened(DownloadItem* download);
+  virtual void OnDownloadUpdated(DownloadItem* download) OVERRIDE;
+  virtual void OnDownloadFileCompleted(DownloadItem* download) OVERRIDE { }
+  virtual void OnDownloadOpened(DownloadItem* download) OVERRIDE;
 
   // View overrides
-  virtual void Layout();
-  virtual void Paint(gfx::Canvas* canvas);
-  virtual gfx::Size GetPreferredSize();
-  virtual void OnMouseExited(const views::MouseEvent& event);
-  virtual void OnMouseMoved(const views::MouseEvent& event);
-  virtual bool OnMousePressed(const views::MouseEvent& event);
-  virtual void OnMouseReleased(const views::MouseEvent& event, bool canceled);
-  virtual bool OnMouseDragged(const views::MouseEvent& event);
-  virtual bool OnKeyPressed(const views::KeyEvent& e);
-  virtual void ShowContextMenu(const gfx::Point& p, bool is_mouse_gesture);
-  virtual AccessibilityTypes::Role GetAccessibleRole();
-  virtual AccessibilityTypes::State GetAccessibleState();
+  virtual void Layout() OVERRIDE;
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const views::MouseEvent& event,
+                               bool canceled) OVERRIDE;
+  virtual bool OnMouseDragged(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const views::KeyEvent& e) OVERRIDE;
+  virtual void ShowContextMenu(const gfx::Point& p,
+                               bool is_mouse_gesture) OVERRIDE;
+  virtual AccessibilityTypes::Role GetAccessibleRole() OVERRIDE;
+  virtual AccessibilityTypes::State GetAccessibleState() OVERRIDE;
 
   // ButtonListener implementation.
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
   // ui::AnimationDelegate implementation.
-  virtual void AnimationProgressed(const ui::Animation* animation);
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   // Timer callback for handling animations
   void UpdateDownloadProgress();
@@ -88,7 +95,7 @@ class DownloadItemView : public views::ButtonListener,
   void StopDownloadProgress();
 
   // IconManager::Client interface.
-  void OnExtractIconComplete(IconManager::Handle handle, SkBitmap* icon_bitmap);
+  void OnExtractIconComplete(IconManager::Handle handle, gfx::Image* icon);
 
   // Returns the DownloadItem model object belonging to this item.
   DownloadItem* download() const { return download_; }
@@ -179,7 +186,7 @@ class DownloadItemView : public views::ButtonListener,
   DropDownImageSet pushed_drop_down_image_set_;
 
   // The warning icon showns for dangerous downloads.
-  SkBitmap* warning_icon_;
+  const SkBitmap* warning_icon_;
 
   // The model we query for display information
   DownloadItem* download_;

@@ -69,6 +69,7 @@
           },
           'dependencies': [
             '<@(chromium_dependencies)',
+            'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'conditions': [
             ['OS=="win"', {
@@ -93,6 +94,7 @@
                 'app/chrome_dll.rc',
                 'app/chrome_dll_resource.h',
                 'app/chrome_main.cc',
+                'app/chrome_main_win.cc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
 
                 '../webkit/glue/resources/aliasb.cur',
@@ -173,8 +175,10 @@
               'sources': [
                 'app/chrome_command_ids.h',
                 'app/chrome_dll_resource.h',
-                'app/chrome_main_app_mode_mac.mm',
                 'app/chrome_main.cc',
+                'app/chrome_main_app_mode_mac.mm',
+                'app/chrome_main_mac.mm',
+                'app/chrome_main_posix.cc',
               ],
               'include_dirs': [
                 '<(grit_out_dir)',
@@ -209,7 +213,6 @@
                 'app/nibs/CollectedCookies.xib',
                 'app/nibs/Cookies.xib',
                 'app/nibs/CookieDetailsView.xib',
-                'app/nibs/ConfirmQuitPanel.xib',
                 'app/nibs/ContentBlockedCookies.xib',
                 'app/nibs/ContentBlockedImages.xib',
                 'app/nibs/ContentBlockedJavaScript.xib',
@@ -505,6 +508,7 @@
                   ],
                   'dependencies': [
                     '../breakpad/breakpad.gyp:breakpad',
+                    'app/policy/cloud_policy_codegen.gyp:policy',
                   ],
                 }, {  # else: mac_breakpad!=1
                   # No Breakpad, put in the stubs.
@@ -574,6 +578,10 @@
             'app/chrome_command_ids.h',
             'app/chrome_dll_resource.h',
             'app/chrome_main.cc',
+            'app/chrome_main_win.cc',
+            # Parsing is needed for the UserDataDir policy which is read much
+            # earlier than the initialization of the policy/pref system. 
+            'browser/policy/policy_path_parser_win.cc',
             'browser/renderer_host/render_process_host_dummy.cc',
             'common/googleurl_dummy.cc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
@@ -595,6 +603,18 @@
             # Stub entry points for process types that are not supported
             # by NaCl Win64 executable
             'app/dummy_main_functions.cc',
+
+            # TODO(bradnelson): once automatic generation of 64 bit targets on
+            # Windows is ready, take this out and add a dependency on
+            # content_common.gypi and common.gypi in nacl_win64_dependencies
+            # and get rid of the common_constants.gypi which was added as a hack
+            # to avoid making common compile on 64 bit on Windows.
+            '../content/common/child_process.cc',
+            '../content/common/child_thread.cc',
+            '../content/common/content_switches.cc',
+            '../content/common/notification_details.cc',
+            '../content/common/notification_service.cc',
+            '../content/common/notification_source.cc',
           ],
           'msvs_settings': {
             'VCLinkerTool': {

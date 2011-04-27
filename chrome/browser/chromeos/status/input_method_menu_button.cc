@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,35 @@ const int kFontSizeDelta = 0;
 const int kFontSizeDelta = 1;
 #endif
 
+// A class which implements interfaces of chromeos::InputMethodMenu. This class
+// is just for avoiding multiple inheritance.
+class MenuImpl : public chromeos::InputMethodMenu {
+ public:
+  MenuImpl(chromeos::InputMethodMenuButton* button,
+           PrefService* pref_service,
+           chromeos::StatusAreaHost::ScreenMode screen_mode)
+      : InputMethodMenu(pref_service, screen_mode, false), button_(button) {}
+
+ private:
+  // InputMethodMenu implementation.
+  virtual void UpdateUI(const std::string& input_method_id,
+                        const std::wstring& name,
+                        const std::wstring& tooltip,
+                        size_t num_active_input_methods) {
+    button_->UpdateUI(input_method_id, name, tooltip, num_active_input_methods);
+  }
+  virtual bool ShouldSupportConfigUI() {
+    return button_->ShouldSupportConfigUI();
+  }
+  virtual void OpenConfigUI() {
+    button_->OpenConfigUI();
+  }
+  // The UI (views button) to which this class delegates all requests.
+  chromeos::InputMethodMenuButton* button_;
+
+  DISALLOW_COPY_AND_ASSIGN(MenuImpl);
+};
+
 }  // namespace
 
 namespace chromeos {
@@ -41,9 +70,7 @@ namespace chromeos {
 
 InputMethodMenuButton::InputMethodMenuButton(StatusAreaHost* host)
     : StatusAreaButton(this),
-      InputMethodMenu(GetPrefService(host),
-                      host->GetScreenMode(),
-                      false /* for_out_of_box_experience_dialog */),
+      menu_(new MenuImpl(this, GetPrefService(host), host->GetScreenMode())),
       host_(host) {
   set_border(NULL);
   set_use_menu_button_paint(true);
@@ -54,16 +81,7 @@ InputMethodMenuButton::InputMethodMenuButton(StatusAreaHost* host)
   SetShowMultipleIconStates(false);
   set_alignment(TextButton::ALIGN_CENTER);
 
-  chromeos::KeyboardLibrary* keyboard_library =
-      chromeos::CrosLibrary::Get()->GetKeyboardLibrary();
-  const std::string hardware_keyboard_id =  // e.g. "xkb:us::eng"
-      keyboard_library->GetHardwareKeyboardLayoutName();
-
-  // Draw the default indicator "US". The default indicator "US" is used when
-  // |pref_service| is not available (for example, unit tests) or |pref_service|
-  // is available, but Chrome preferences are not available (for example,
-  // initial OS boot).
-  InputMethodMenuButton::UpdateUI(hardware_keyboard_id, L"US", L"", 1);
+  UpdateUIFromCurrentInputMethod();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -79,27 +97,18 @@ gfx::Size InputMethodMenuButton::GetPreferredSize() {
 
 void InputMethodMenuButton::OnLocaleChanged() {
   input_method::OnLocaleChanged();
-
-  chromeos::InputMethodLibrary* input_method_library =
-      chromeos::CrosLibrary::Get()->GetInputMethodLibrary();
-  const InputMethodDescriptor& input_method =
-      input_method_library->current_input_method();
-
-  // In general, we should not call an input method API in the input method
-  // button classes (status/input_menu_button*.cc) for performance reasons (see
-  // http://crosbug.com/8284). However, since OnLocaleChanged is called only in
-  // OOBE/Login screen which does not have two or more Chrome windows, it's okay
-  // to call GetNumActiveInputMethods here.
-  const size_t num_active_input_methods =
-      input_method_library->GetNumActiveInputMethods();
-
-  UpdateUIFromInputMethod(input_method, num_active_input_methods);
+  UpdateUIFromCurrentInputMethod();
   Layout();
   SchedulePaint();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// InputMethodMenu::InputMethodMenuHost implementation:
+// views::ViewMenuDelegate implementation:
+
+void InputMethodMenuButton::RunMenu(views::View* unused_source,
+                                    const gfx::Point& pt) {
+  menu_->RunMenu(unused_source, pt);
+}
 
 void InputMethodMenuButton::UpdateUI(const std::string& input_method_id,
                                      const std::wstring& name,
@@ -125,11 +134,23 @@ void InputMethodMenuButton::UpdateUI(const std::string& input_method_id,
 }
 
 void InputMethodMenuButton::OpenConfigUI() {
-  host_->OpenButtonOptions(this);  // ask browser to open the DOMUI page.
+  host_->OpenButtonOptions(this);  // ask browser to open the WebUI page.
 }
 
 bool InputMethodMenuButton::ShouldSupportConfigUI() {
   return host_->ShouldOpenButtonOptions(this);
+}
+
+void InputMethodMenuButton::UpdateUIFromCurrentInputMethod() {
+  chromeos::InputMethodLibrary* input_method_library =
+      chromeos::CrosLibrary::Get()->GetInputMethodLibrary();
+  const InputMethodDescriptor& input_method =
+      input_method_library->current_input_method();
+  const std::wstring name = InputMethodMenu::GetTextForIndicator(input_method);
+  const std::wstring tooltip = InputMethodMenu::GetTextForMenu(input_method);
+  const size_t num_active_input_methods =
+      input_method_library->GetNumActiveInputMethods();
+  UpdateUI(input_method.id, name, tooltip, num_active_input_methods);
 }
 
 }  // namespace chromeos

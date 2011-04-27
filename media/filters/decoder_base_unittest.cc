@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include "media/base/mock_callback.h"
 #include "media/base/mock_filters.h"
 #include "media/base/mock_task.h"
+#include "media/base/pipeline.h"
 #include "media/filters/decoder_base.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::_;
+using ::testing::AnyNumber;
 using ::testing::NotNull;
 using ::testing::StrictMock;
 using ::testing::WithArg;
@@ -20,16 +22,12 @@ namespace media {
 
 class GTEST_TEST_CLASS_NAME_(DecoderBaseTest, FlowControl);
 
-}  // namespace media
-
-namespace {
-
-class MockDecoderOutput : public media::StreamSample {
+class MockDecoderOutput : public StreamSample {
  public:
   MOCK_CONST_METHOD0(IsEndOfStream, bool());
 };
 
-class MockBuffer : public media::Buffer {
+class MockBuffer : public Buffer {
  public:
   MockBuffer() {}
   virtual ~MockBuffer() {}
@@ -40,7 +38,7 @@ class MockBuffer : public media::Buffer {
   DISALLOW_COPY_AND_ASSIGN(MockBuffer);
 };
 
-class MockDecoder : public media::Filter {
+class MockDecoder : public Filter {
  public:
   typedef Callback1<scoped_refptr<MockDecoderOutput> >::Type
       ConsumeAudioSamplesCallback;
@@ -59,34 +57,30 @@ class MockDecoderCallback {
   MOCK_METHOD1(OnReadComplete, void(scoped_refptr<MockDecoderOutput> output));
 };
 
-class MockDecoderImpl : public media::DecoderBase<
+class MockDecoderImpl : public DecoderBase<
   MockDecoder, MockDecoderOutput> {
  public:
   explicit MockDecoderImpl(MessageLoop* message_loop)
-      : media::DecoderBase<MockDecoder, MockDecoderOutput>(message_loop) {
-    media_format_.SetAsString(media::MediaFormat::kMimeType, "mock");
+      : DecoderBase<MockDecoder, MockDecoderOutput>(message_loop) {
+    media_format_.SetAsString(MediaFormat::kMimeType, "mock");
   }
 
   virtual ~MockDecoderImpl() {}
 
   // DecoderBase Implementations.
   MOCK_METHOD3(DoInitialize,
-               void(media::DemuxerStream* demuxer_stream,
+               void(DemuxerStream* demuxer_stream,
                     bool* success,
                     Task* done_cb));
   MOCK_METHOD1(DoStop, void(Task* done_cb));
   MOCK_METHOD2(DoSeek, void(base::TimeDelta time, Task* done_cb));
-  MOCK_METHOD1(DoDecode, void(media::Buffer* input));
+  MOCK_METHOD1(DoDecode, void(Buffer* input));
 
  private:
-  FRIEND_TEST(media::DecoderBaseTest, FlowControl);
+  FRIEND_TEST(DecoderBaseTest, FlowControl);
 
   DISALLOW_COPY_AND_ASSIGN(MockDecoderImpl);
 };
-
-}  // namespace
-
-namespace media {
 
 ACTION(Initialize) {
   AutoTaskRunner done_runner(arg2);
@@ -103,7 +97,7 @@ ACTION(CompleteDemuxRequest) {
   delete arg0;
 }
 
-// Test the flow control of decoder base by the following sequnce of actions:
+// Test the flow control of decoder base by the following sequence of actions:
 // - Read() -> DecoderStream
 //   \ Read() -> DemuxerStream
 // - Read() -> DecoderBase
@@ -123,11 +117,16 @@ TEST(DecoderBaseTest, FlowControl) {
   decoder->set_consume_audio_samples_callback(
       NewCallback(&read_callback, &MockDecoderCallback::OnReadComplete));
   scoped_refptr<MockDemuxerStream> demuxer_stream(new MockDemuxerStream());
+  MockStatisticsCallback stats_callback_object;
+  EXPECT_CALL(stats_callback_object, OnStatistics(_))
+      .Times(AnyNumber());
 
-  // Initailize.
+  // Initialize.
   EXPECT_CALL(*decoder, DoInitialize(NotNull(), NotNull(), NotNull()))
       .WillOnce(Initialize());
-  decoder->Initialize(demuxer_stream.get(), NewExpectedCallback());
+  decoder->Initialize(demuxer_stream.get(), NewExpectedCallback(),
+                      NewCallback(&stats_callback_object,
+                                  &MockStatisticsCallback::OnStatistics));
   message_loop.RunAllPending();
 
   // Read.
@@ -145,9 +144,10 @@ TEST(DecoderBaseTest, FlowControl) {
 
   // Fulfill the decode request.
   EXPECT_CALL(read_callback, OnReadComplete(_)).Times(2);
+  PipelineStatistics statistics;
   for (size_t i = 0; i < decode_requests.size(); ++i) {
     decoder->EnqueueResult(new MockDecoderOutput());
-    decoder->OnDecodeComplete();
+    decoder->OnDecodeComplete(statistics);
   }
   decode_requests.clear();
   message_loop.RunAllPending();

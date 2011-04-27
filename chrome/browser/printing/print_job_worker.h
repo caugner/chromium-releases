@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,11 @@
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/threading/thread.h"
-#include "gfx/native_widget_types.h"
 #include "printing/page_number.h"
 #include "printing/printing_context.h"
+#include "ui/gfx/native_widget_types.h"
+
+class DictionaryValue;
 
 namespace printing {
 
@@ -42,6 +44,10 @@ class PrintJobWorker : public base::Thread {
                    bool has_selection,
                    bool use_overlays);
 
+  // Set the new print settings. This function takes ownership of |new_settings|
+  // and frees it.
+  void SetSettings(const DictionaryValue* const new_settings);
+
   // Starts the printing loop. Every pages are printed as soon as the data is
   // available. Makes sure the new_document is the right one.
   void StartPrinting(PrintedDocument* new_document);
@@ -56,9 +62,6 @@ class PrintJobWorker : public base::Thread {
 
   // This is the only function that can be called in a thread.
   void Cancel();
-
-  // Cancels the Print... dialog box if shown, noop otherwise.
-  void DismissDialog();
 
  protected:
   // Retrieves the context for testing only.
@@ -94,6 +97,9 @@ class PrintJobWorker : public base::Thread {
   // object that the print settings are set.  This is needed in order to bounce
   // back into the IO thread for GetSettingsDone().
   void GetSettingsWithUIDone(PrintingContext::Result result);
+
+  // Called on the UI thread to update the print settings.
+  void UpdatePrintSettings(const DictionaryValue* const new_settings);
 
   // Reports settings back to owner_.
   void GetSettingsDone(PrintingContext::Result result);

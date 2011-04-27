@@ -9,44 +9,36 @@
 #include <algorithm>
 #include <sstream>
 
+#include "base/basictypes.h"
+#include "base/format_macros.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/rand_util.h"
 #include "base/scoped_ptr.h"
-
-#include "third_party/webdriver/atoms.h"
+#include "base/stringprintf.h"
 
 namespace webdriver {
 
-std::wstring build_atom(const wchar_t* const atom[], const size_t& size) {
-  const size_t len = size / sizeof(atom[0]);
-  std::wstring ret = L"";
-  for (size_t i = 0; i < len; ++i) {
-    if (atom[i] != NULL)
-      ret.append(std::wstring(atom[i]));
-  }
-  return ret;
-}
-
-std::wstring print_valuetype(Value::ValueType e) {
+std::string print_valuetype(Value::ValueType e) {
   switch (e) {
     case Value::TYPE_NULL:
-      return L"NULL ";
+      return "NULL ";
     case Value::TYPE_BOOLEAN:
-      return L"BOOL";
+      return "BOOL";
     case Value::TYPE_INTEGER:
-      return L"INT";
-    case Value::TYPE_REAL:
-      return L"REAL";
+      return "INT";
+    case Value::TYPE_DOUBLE:
+      return "DOUBLE";
     case Value::TYPE_STRING:
-      return L"STRING";
+      return "STRING";
     case Value::TYPE_BINARY:
-      return L"BIN";
+      return "BIN";
     case Value::TYPE_DICTIONARY:
-      return L"DICT";
+      return "DICT";
     case Value::TYPE_LIST:
-      return L"LIST";
+      return "LIST";
     default:
-      return L"ERROR";
+      return "ERROR";
   }
 }
 
@@ -82,5 +74,10 @@ bool ParseJSONDictionary(const std::string& json, DictionaryValue** dict,
   return true;
 }
 
-}  // namespace webdriver
+std::string GenerateRandomID() {
+  uint64 msb = base::RandUint64();
+  uint64 lsb = base::RandUint64();
+  return base::StringPrintf("%016" PRIx64 "%016" PRIx64, msb, lsb);
+}
 
+}  // namespace webdriver

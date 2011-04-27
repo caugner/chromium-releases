@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,18 +12,20 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/builtin_provider.h"
+#include "chrome/browser/autocomplete/history_contents_provider.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/autocomplete/history_contents_provider.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/dom_ui/history_ui.h"
 #include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/history_ui.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
@@ -51,13 +53,14 @@ AutocompleteInput::AutocompleteInput()
     synchronous_only_(false) {
 }
 
-AutocompleteInput::AutocompleteInput(const std::wstring& text,
-                                     const std::wstring& desired_tld,
+AutocompleteInput::AutocompleteInput(const string16& text,
+                                     const string16& desired_tld,
                                      bool prevent_inline_autocomplete,
                                      bool prefer_keyword,
                                      bool allow_exact_keyword_match,
                                      bool synchronous_only)
-    : desired_tld_(desired_tld),
+    : original_text_(text),
+      desired_tld_(desired_tld),
       initial_prevent_inline_autocomplete_(prevent_inline_autocomplete),
       prevent_inline_autocomplete_(prevent_inline_autocomplete),
       prefer_keyword_(prefer_keyword),
@@ -88,7 +91,7 @@ AutocompleteInput::~AutocompleteInput() {
 
 // static
 void AutocompleteInput::RemoveForcedQueryStringIfNecessary(Type type,
-                                                           std::wstring* text) {
+                                                           string16* text) {
   if (type == FORCED_QUERY && !text->empty() && (*text)[0] == L'?')
     text->erase(0, 1);
 }
@@ -111,13 +114,13 @@ std::string AutocompleteInput::TypeToString(Type type) {
 
 // static
 AutocompleteInput::Type AutocompleteInput::Parse(
-    const std::wstring& text,
-    const std::wstring& desired_tld,
+    const string16& text,
+    const string16& desired_tld,
     url_parse::Parsed* parts,
-    std::wstring* scheme,
+    string16* scheme,
     GURL* canonicalized_url) {
-  const size_t first_non_white = text.find_first_not_of(kWhitespaceWide, 0);
-  if (first_non_white == std::wstring::npos)
+  const size_t first_non_white = text.find_first_not_of(kWhitespaceUTF16, 0);
+  if (first_non_white == string16::npos)
     return INVALID;  // All whitespace.
 
   if (text.at(first_non_white) == L'?') {
@@ -133,15 +136,15 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   url_parse::Parsed local_parts;
   if (!parts)
     parts = &local_parts;
-  const std::wstring parsed_scheme(URLFixerUpper::SegmentURL(text, parts));
+  const string16 parsed_scheme(URLFixerUpper::SegmentURL(text, parts));
   if (scheme)
     *scheme = parsed_scheme;
   if (canonicalized_url) {
-    *canonicalized_url = URLFixerUpper::FixupURL(WideToUTF8(text),
-                                                 WideToUTF8(desired_tld));
+    *canonicalized_url = URLFixerUpper::FixupURL(UTF16ToUTF8(text),
+                                                 UTF16ToUTF8(desired_tld));
   }
 
-  if (parsed_scheme == L"file") {
+  if (LowerCaseEqualsASCII(parsed_scheme, chrome::kFileScheme)) {
     // A user might or might not type a scheme when entering a file URL.  In
     // either case, |parsed_scheme| will tell us that this is a file URL, but
     // |parts->scheme| might be empty, e.g. if the user typed "C:\foo".
@@ -155,9 +158,10 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   // (e.g. "ftp" or "view-source") but I'll wait to spend the effort on that
   // until I run into some cases that really need it.
   if (parts->scheme.is_nonempty() &&
-      (parsed_scheme != L"http") && (parsed_scheme != L"https")) {
+      !LowerCaseEqualsASCII(parsed_scheme, chrome::kHttpScheme) &&
+      !LowerCaseEqualsASCII(parsed_scheme, chrome::kHttpsScheme)) {
     // See if we know how to handle the URL internally.
-    if (net::URLRequest::IsHandledProtocol(WideToASCII(parsed_scheme)))
+    if (net::URLRequest::IsHandledProtocol(UTF16ToASCII(parsed_scheme)))
       return URL;
 
     // There are also some schemes that we convert to other things before they
@@ -175,7 +179,9 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     // "blocked" by the external protocol handler because we don't want pages to
     // open them, but users still can.
     // TODO(viettrungluu): get rid of conversion.
-    switch (ExternalProtocolHandler::GetBlockState(WideToUTF8(parsed_scheme))) {
+    ExternalProtocolHandler::BlockState block_state =
+        ExternalProtocolHandler::GetBlockState(UTF16ToUTF8(parsed_scheme));
+    switch (block_state) {
       case ExternalProtocolHandler::DONT_BLOCK:
         return URL;
 
@@ -187,14 +193,16 @@ AutocompleteInput::Type AutocompleteInput::Parse(
       default: {
         // We don't know about this scheme.  It might be that the user typed a
         // URL of the form "username:password@foo.com".
-        const std::wstring http_scheme_prefix = L"http://";
+        const string16 http_scheme_prefix =
+            ASCIIToUTF16(std::string(chrome::kHttpScheme) +
+                         chrome::kStandardSchemeSeparator);
         url_parse::Parsed http_parts;
-        std::wstring http_scheme;
+        string16 http_scheme;
         GURL http_canonicalized_url;
         Type http_type = Parse(http_scheme_prefix + text, desired_tld,
                                &http_parts, &http_scheme,
                                &http_canonicalized_url);
-        DCHECK_EQ("http", WideToUTF8(http_scheme));
+        DCHECK_EQ(std::string(chrome::kHttpScheme), UTF16ToUTF8(http_scheme));
 
         if ((http_type == URL || http_type == REQUESTED_URL) &&
             http_parts.username.is_nonempty() &&
@@ -246,18 +254,19 @@ AutocompleteInput::Type AutocompleteInput::Parse(
 
   // Likewise, the RCDS can reject certain obviously-invalid hosts.  (We also
   // use the registry length later below.)
-  const std::wstring host(text.substr(parts->host.begin, parts->host.len));
+  const string16 host(text.substr(parts->host.begin, parts->host.len));
   const size_t registry_length =
-      net::RegistryControlledDomainService::GetRegistryLength(host, false);
-  if (registry_length == std::wstring::npos) {
+      net::RegistryControlledDomainService::GetRegistryLength(UTF16ToUTF8(host),
+                                                              false);
+  if (registry_length == std::string::npos) {
     // Try to append the desired_tld.
     if (!desired_tld.empty()) {
-      std::wstring host_with_tld(host);
+      string16 host_with_tld(host);
       if (host[host.length() - 1] != '.')
         host_with_tld += '.';
       host_with_tld += desired_tld;
       if (net::RegistryControlledDomainService::GetRegistryLength(
-          host_with_tld, false) != std::wstring::npos)
+          UTF16ToUTF8(host_with_tld), false) != std::string::npos)
         return REQUESTED_URL;  // Something like "99999999999" that looks like a
                                // bad IP address, but becomes valid on attaching
                                // a TLD.
@@ -271,10 +280,11 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   // unlikely that a user would be trying to type those in for anything other
   // than a search query.
   url_canon::CanonHostInfo host_info;
-  const std::string canonicalized_host(net::CanonicalizeHost(host, &host_info));
+  const std::string canonicalized_host(net::CanonicalizeHost(UTF16ToUTF8(host),
+                                                             &host_info));
   if ((host_info.family == url_canon::CanonHostInfo::NEUTRAL) &&
       !net::IsCanonicalizedHostCompliant(canonicalized_host,
-                                         WideToUTF8(desired_tld))) {
+                                         UTF16ToUTF8(desired_tld))) {
     // Invalid hostname.  There are several possible cases:
     // * Our checker is too strict and the user pasted in a real-world URL
     //   that's "invalid" but resolves.  To catch these, we return UNKNOWN when
@@ -294,7 +304,7 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     //   TLD
     // These are rare, though probably possible in intranets.
     return (parts->scheme.is_nonempty() ||
-           ((registry_length != 0) && (host.find(' ') == std::wstring::npos))) ?
+           ((registry_length != 0) && (host.find(' ') == string16::npos))) ?
         UNKNOWN : QUERY;
   }
 
@@ -306,8 +316,8 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   // below.
   if (parts->port.is_nonempty()) {
     int port;
-    if (!base::StringToInt(WideToUTF8(
-            text.substr(parts->port.begin, parts->port.len)), &port) ||
+    if (!base::StringToInt(text.substr(parts->port.begin, parts->port.len),
+                           &port) ||
         (port < 0) || (port > 65535))
       return QUERY;
   }
@@ -356,7 +366,7 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     // since that's the common case.
     return ((registry_length == 0) &&
             (text.substr(parts->path.begin, parts->path.len).find(' ') !=
-                std::wstring::npos)) ? UNKNOWN : URL;
+                string16::npos)) ? UNKNOWN : URL;
   }
 
   // If we reach here with a username, our input looks like "user@host".
@@ -392,12 +402,12 @@ AutocompleteInput::Type AutocompleteInput::Parse(
 
 // static
 void AutocompleteInput::ParseForEmphasizeComponents(
-    const std::wstring& text,
-    const std::wstring& desired_tld,
+    const string16& text,
+    const string16& desired_tld,
     url_parse::Component* scheme,
     url_parse::Component* host) {
   url_parse::Parsed parts;
-  std::wstring scheme_str;
+  string16 scheme_str;
   Parse(text, desired_tld, &parts, &scheme_str, NULL);
 
   *scheme = parts.scheme;
@@ -409,7 +419,7 @@ void AutocompleteInput::ParseForEmphasizeComponents(
   if (LowerCaseEqualsASCII(scheme_str, chrome::kViewSourceScheme) &&
       (static_cast<int>(text.length()) > after_scheme_and_colon)) {
     // Obtain the URL prefixed by view-source and parse it.
-    std::wstring real_url(text.substr(after_scheme_and_colon));
+    string16 real_url(text.substr(after_scheme_and_colon));
     url_parse::Parsed real_parts;
     AutocompleteInput::Parse(real_url, desired_tld, &real_parts, NULL, NULL);
     if (real_parts.scheme.is_nonempty() || real_parts.host.is_nonempty()) {
@@ -432,15 +442,15 @@ void AutocompleteInput::ParseForEmphasizeComponents(
 }
 
 // static
-std::wstring AutocompleteInput::FormattedStringWithEquivalentMeaning(
+string16 AutocompleteInput::FormattedStringWithEquivalentMeaning(
     const GURL& url,
-    const std::wstring& formatted_url) {
+    const string16& formatted_url) {
   if (!net::CanStripTrailingSlash(url))
     return formatted_url;
-  const std::wstring url_with_path(formatted_url + L"/");
-  return (AutocompleteInput::Parse(formatted_url, std::wstring(), NULL, NULL,
+  const string16 url_with_path(formatted_url + char16('/'));
+  return (AutocompleteInput::Parse(formatted_url, string16(), NULL, NULL,
                                    NULL) ==
-          AutocompleteInput::Parse(url_with_path, std::wstring(), NULL, NULL,
+          AutocompleteInput::Parse(url_with_path, string16(), NULL, NULL,
                                    NULL)) ?
       formatted_url : url_with_path;
 }
@@ -501,8 +511,8 @@ AutocompleteProvider::~AutocompleteProvider() {
 }
 
 // static
-bool AutocompleteProvider::HasHTTPScheme(const std::wstring& input) {
-  std::string utf8_input(WideToUTF8(input));
+bool AutocompleteProvider::HasHTTPScheme(const string16& input) {
+  std::string utf8_input(UTF16ToUTF8(input));
   url_parse::Component scheme;
   if (url_util::FindAndCompareScheme(utf8_input, chrome::kViewSourceScheme,
                                      &scheme))
@@ -524,16 +534,16 @@ void AutocompleteProvider::UpdateStarredStateOfMatches() {
     i->starred = bookmark_model->IsBookmarked(GURL(i->destination_url));
 }
 
-std::wstring AutocompleteProvider::StringForURLDisplay(const GURL& url,
-                                                       bool check_accept_lang,
-                                                       bool trim_http) const {
+string16 AutocompleteProvider::StringForURLDisplay(const GURL& url,
+                                                   bool check_accept_lang,
+                                                   bool trim_http) const {
   std::string languages = (check_accept_lang && profile_) ?
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages) : std::string();
-  return UTF16ToWideHack(net::FormatUrl(
+  return net::FormatUrl(
       url,
       languages,
       net::kFormatUrlOmitAll & ~(trim_http ? 0 : net::kFormatUrlOmitHTTP),
-      UnescapeRule::SPACES, NULL, NULL, NULL));
+      UnescapeRule::SPACES, NULL, NULL, NULL);
 }
 
 // AutocompleteResult ---------------------------------------------------------
@@ -572,6 +582,45 @@ void AutocompleteResult::CopyFrom(const AutocompleteResult& rhs) {
   alternate_nav_url_ = rhs.alternate_nav_url_;
 }
 
+void AutocompleteResult::CopyOldMatches(const AutocompleteInput& input,
+                                        const AutocompleteResult& old_matches) {
+  if (old_matches.empty())
+    return;
+
+  if (empty()) {
+    // If we've got no matches we can copy everything from the last result.
+    CopyFrom(old_matches);
+    for (ACMatches::iterator i = begin(); i != end(); ++i)
+      i->from_previous = true;
+    return;
+  }
+
+  // In hopes of providing a stable popup we try to keep the number of matches
+  // per provider consistent. Other schemes (such as blindly copying the most
+  // relevant matches) typically result in many successive 'What You Typed'
+  // results filling all the matches, which looks awful.
+  //
+  // Instead of starting with the current matches and then adding old matches
+  // until we hit our overall limit, we copy enough old matches so that each
+  // provider has at least as many as before, and then use SortAndCull() to
+  // clamp globally. This way, old high-relevance matches will starve new
+  // low-relevance matches, under the assumption that the new matches will
+  // ultimately be similar.  If the assumption holds, this prevents seeing the
+  // new low-relevance match appear and then quickly get pushed off the bottom;
+  // if it doesn't, then once the providers are done and we expire the old
+  // matches, the new ones will all become visible, so we won't have lost
+  // anything permanently.
+  ProviderToMatches matches_per_provider, old_matches_per_provider;
+  BuildProviderToMatches(&matches_per_provider);
+  old_matches.BuildProviderToMatches(&old_matches_per_provider);
+  for (ProviderToMatches::const_iterator i = old_matches_per_provider.begin();
+       i != old_matches_per_provider.end(); ++i) {
+    MergeMatchesByProvider(i->second, matches_per_provider[i->first]);
+  }
+
+  SortAndCull(input);
+}
+
 void AutocompleteResult::AppendMatches(const ACMatches& matches) {
   std::copy(matches.begin(), matches.end(), std::back_inserter(matches_));
   default_match_ = end();
@@ -598,11 +647,10 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input) {
                              &AutocompleteMatch::DestinationsEqual),
                  matches_.end());
 
-  // Sort the results.
+  // Sort and trim to the most relevant kMaxMatches matches.
   const size_t num_matches = std::min(kMaxMatches, matches_.size());
   std::partial_sort(matches_.begin(), matches_.begin() + num_matches,
                     matches_.end(), &AutocompleteMatch::MoreRelevant);
-  // Remove matches so that we have at most kMaxMatches.
   matches_.resize(num_matches);
 
   default_match_ = begin();
@@ -616,6 +664,14 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input) {
       (default_match_->transition != PageTransition::KEYWORD) &&
       (input.canonicalized_url() != default_match_->destination_url))
     alternate_nav_url_ = input.canonicalized_url();
+}
+
+bool AutocompleteResult::HasCopiedMatches() const {
+  for (ACMatches::const_iterator i = begin(); i != end(); ++i) {
+    if (i->from_previous)
+      return true;
+  }
+  return false;
 }
 
 size_t AutocompleteResult::size() const {
@@ -653,6 +709,16 @@ void AutocompleteResult::Reset() {
   default_match_ = end();
 }
 
+void AutocompleteResult::Swap(AutocompleteResult* other) {
+  const size_t default_match_offset = default_match_ - begin();
+  const size_t other_default_match_offset =
+      other->default_match_ - other->begin();
+  matches_.swap(other->matches_);
+  default_match_ = begin() + other_default_match_offset;
+  other->default_match_ = other->begin() + default_match_offset;
+  alternate_nav_url_.Swap(&(other->alternate_nav_url_));
+}
+
 #ifndef NDEBUG
 void AutocompleteResult::Validate() const {
   for (const_iterator i(begin()); i != end(); ++i)
@@ -660,31 +726,77 @@ void AutocompleteResult::Validate() const {
 }
 #endif
 
+void AutocompleteResult::BuildProviderToMatches(
+    ProviderToMatches* provider_to_matches) const {
+  for (ACMatches::const_iterator i = begin(); i != end(); ++i)
+    (*provider_to_matches)[i->provider].push_back(*i);
+}
+
+// static
+bool AutocompleteResult::HasMatchByDestination(const AutocompleteMatch& match,
+                                               const ACMatches& matches) {
+  for (ACMatches::const_iterator i = matches.begin(); i != matches.end(); ++i) {
+    if (i->destination_url == match.destination_url)
+      return true;
+  }
+  return false;
+}
+
+void AutocompleteResult::MergeMatchesByProvider(const ACMatches& old_matches,
+                                                const ACMatches& new_matches) {
+  if (new_matches.size() >= old_matches.size())
+    return;
+
+  size_t delta = old_matches.size() - new_matches.size();
+  const int max_relevance = (new_matches.empty() ?
+      matches_.front().relevance : new_matches[0].relevance) - 1;
+  // Because the goal is a visibly-stable popup, rather than one that preserves
+  // the highest-relevance matches, we copy in the lowest-relevance matches
+  // first. This means that within each provider's "group" of matches, any
+  // synchronous matches (which tend to have the highest scores) will
+  // "overwrite" the initial matches from that provider's previous results,
+  // minimally disturbing the rest of the matches.
+  for (ACMatches::const_reverse_iterator i = old_matches.rbegin();
+       i != old_matches.rend() && delta > 0; ++i) {
+    if (!HasMatchByDestination(*i, new_matches)) {
+      AutocompleteMatch match = *i;
+      match.relevance = std::min(max_relevance, match.relevance);
+      match.from_previous = true;
+      AddMatch(match);
+      delta--;
+    }
+  }
+}
+
 // AutocompleteController -----------------------------------------------------
 
 const int AutocompleteController::kNoItemSelected = -1;
 
-namespace {
-// The time we'll wait between sending updates to our observers (balances
-// flicker against lag).
-const int kUpdateDelayMs = 350;
-};
+// Amount of time (in ms) between when the user stops typing and when we remove
+// any copied entries. We do this from the time the user stopped typing as some
+// providers (such as SearchProvider) wait for the user to stop typing before
+// they initiate a query.
+static const int kExpireTimeMS = 500;
 
-AutocompleteController::AutocompleteController(Profile* profile)
-    : updated_latest_result_(false),
-      delay_interval_has_passed_(false),
-      have_committed_during_this_query_(false),
-      done_(true) {
+AutocompleteController::AutocompleteController(
+    Profile* profile,
+    AutocompleteControllerDelegate* delegate)
+    : delegate_(delegate),
+      done_(true),
+      in_start_(false) {
   search_provider_ = new SearchProvider(this, profile);
   providers_.push_back(search_provider_);
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableHistoryQuickProvider))
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableHistoryQuickProvider) &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableHistoryQuickProvider))
     providers_.push_back(new HistoryQuickProvider(this, profile));
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableHistoryURLProvider))
     providers_.push_back(new HistoryURLProvider(this, profile));
   providers_.push_back(new KeywordProvider(this, profile));
   providers_.push_back(new HistoryContentsProvider(this, profile));
+  providers_.push_back(new BuiltinProvider(this, profile));
   for (ACProviders::iterator i(providers_.begin()); i != providers_.end(); ++i)
     (*i)->AddRef();
 }
@@ -713,13 +825,13 @@ void AutocompleteController::SetProfile(Profile* profile) {
                    // different profile.
 }
 
-void AutocompleteController::Start(const std::wstring& text,
-                                   const std::wstring& desired_tld,
+void AutocompleteController::Start(const string16& text,
+                                   const string16& desired_tld,
                                    bool prevent_inline_autocomplete,
                                    bool prefer_keyword,
                                    bool allow_exact_keyword_match,
                                    bool synchronous_only) {
-  const std::wstring old_input_text(input_.text());
+  const string16 old_input_text(input_.text());
   const bool old_synchronous_only = input_.synchronous_only();
   input_ = AutocompleteInput(text, desired_tld, prevent_inline_autocomplete,
       prefer_keyword, allow_exact_keyword_match, synchronous_only);
@@ -736,36 +848,22 @@ void AutocompleteController::Start(const std::wstring& text,
   const bool minimal_changes = (input_.text() == old_input_text) &&
       (input_.synchronous_only() == old_synchronous_only);
 
-  // If we're interrupting an old query, and committing its result won't shrink
-  // the visible set (which would probably re-expand soon, thus looking very
-  // flickery), then go ahead and commit what we've got, in order to feel more
-  // responsive when the user is typing rapidly.  In this case it's important
-  // that we don't update the edit, as the user has already changed its contents
-  // and anything we might do with it (e.g. inline autocomplete) likely no
-  // longer applies.
-  if (!minimal_changes && !done_ && (latest_result_.size() >= result_.size()))
-    CommitResult(false);
-
-  // If the timer is already running, it could fire shortly after starting this
-  // query, when we're likely to only have the synchronous results back, thus
-  // almost certainly causing flicker.  Reset it, except when we haven't
-  // committed anything for the past query, in which case the user is typing
-  // quickly and we need to keep running the timer lest we lag too far behind.
-  if (have_committed_during_this_query_) {
-    update_delay_timer_.Stop();
-    delay_interval_has_passed_ = false;
-  }
+  expire_timer_.Stop();
 
   // Start the new query.
-  have_committed_during_this_query_ = false;
+  in_start_ = true;
   for (ACProviders::iterator i(providers_.begin()); i != providers_.end();
        ++i) {
     (*i)->Start(input_, minimal_changes);
     if (synchronous_only)
       DCHECK((*i)->done());
   }
+  in_start_ = false;
   CheckIfDone();
-  UpdateLatestResult(true);
+  UpdateResult(true);
+
+  if (!done_)
+    StartExpireTimer();
 }
 
 void AutocompleteController::Stop(bool clear_result) {
@@ -774,115 +872,95 @@ void AutocompleteController::Stop(bool clear_result) {
     (*i)->Stop();
   }
 
-  update_delay_timer_.Stop();
-  updated_latest_result_ = false;
-  delay_interval_has_passed_ = false;
+  expire_timer_.Stop();
   done_ = true;
   if (clear_result && !result_.empty()) {
     result_.Reset();
-    NotificationService::current()->Notify(
-        NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
-        Source<AutocompleteController>(this),
-        Details<const AutocompleteResult>(&result_));
-    // NOTE: We don't notify AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED since
-    // we're trying to only clear the popup, not touch the edit... this is all
-    // a mess and should be cleaned up :(
+    // NOTE: We pass in false since we're trying to only clear the popup, not
+    // touch the edit... this is all a mess and should be cleaned up :(
+    NotifyChanged(false);
   }
-  latest_result_.CopyFrom(result_);
 }
 
 void AutocompleteController::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(match.deletable);
   match.provider->DeleteMatch(match);  // This may synchronously call back to
                                        // OnProviderUpdate().
-  CommitResult(true);  // Ensure any new result gets committed immediately.  If
-                       // it was committed already or hasn't been modified, this
-                       // is harmless.
+  // If DeleteMatch resulted in a callback to OnProviderUpdate and we're
+  // not done, we might attempt to redisplay the deleted match. Make sure
+  // we aren't displaying it by removing any old entries.
+  ExpireCopiedEntries();
 }
 
-void AutocompleteController::CommitIfQueryHasNeverBeenCommitted() {
-  if (!have_committed_during_this_query_)
-    CommitResult(true);
+void AutocompleteController::ExpireCopiedEntries() {
+  // Clear out the results. This ensures no results from the previous result set
+  // are copied over.
+  result_.Reset();
+  // We allow matches from the previous result set to starve out matches from
+  // the new result set. This means in order to expire matches we have to query
+  // the providers again.
+  UpdateResult(false);
 }
 
 void AutocompleteController::OnProviderUpdate(bool updated_matches) {
   CheckIfDone();
-  if (updated_matches || done_)
-    UpdateLatestResult(false);
+  // Multiple providers may provide synchronous results, so we only update the
+  // results if we're not in Start().
+  if (!in_start_ && (updated_matches || done_))
+    UpdateResult(false);
 }
 
-void AutocompleteController::UpdateLatestResult(bool is_synchronous_pass) {
-  // Add all providers' matches.
-  latest_result_.Reset();
+void AutocompleteController::UpdateResult(bool is_synchronous_pass) {
+  AutocompleteResult last_result;
+  last_result.Swap(&result_);
+
   for (ACProviders::const_iterator i(providers_.begin()); i != providers_.end();
        ++i)
-    latest_result_.AppendMatches((*i)->matches());
-  updated_latest_result_ = true;
+    result_.AppendMatches((*i)->matches());
 
   // Sort the matches and trim to a small number of "best" matches.
-  latest_result_.SortAndCull(input_);
+  result_.SortAndCull(input_);
 
+  // Need to validate before invoking CopyOldMatches as the old matches are not
+  // valid against the current input.
 #ifndef NDEBUG
-  latest_result_.Validate();
+  result_.Validate();
 #endif
 
-  if (is_synchronous_pass) {
-    if (!update_delay_timer_.IsRunning()) {
-      update_delay_timer_.Start(
-          TimeDelta::FromMilliseconds(kUpdateDelayMs),
-          this, &AutocompleteController::DelayTimerFired);
-    }
-
-    NotificationService::current()->Notify(
-        NotificationType::AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED,
-        Source<AutocompleteController>(this),
-        Details<const AutocompleteResult>(&latest_result_));
+  if (!done_) {
+    // This conditional needs to match the conditional in Start that invokes
+    // StartExpireTimer.
+    result_.CopyOldMatches(input_, last_result);
   }
 
-  // If nothing is visible, commit immediately so that the first character the
-  // user types produces an instant response.  If the query has finished and we
-  // haven't ever committed a result set, commit immediately to minimize lag.
-  // Otherwise, only commit when it's been at least one delay interval since the
-  // last commit, to minimize flicker.
-  if (result_.empty() || (done_ && !have_committed_during_this_query_) ||
-      delay_interval_has_passed_)
-    CommitResult(true);
+  bool notify_default_match = is_synchronous_pass;
+  if (!is_synchronous_pass) {
+    const bool last_default_was_valid =
+        last_result.default_match() != last_result.end();
+    const bool default_is_valid = result_.default_match() != result_.end();
+    // We've gotten async results. Send notification that the default match
+    // updated if fill_into_edit differs. We don't check the URL as that may
+    // change for the default match even though the fill into edit hasn't
+    // changed (see SearchProvider for one case of this).
+    notify_default_match =
+        (last_default_was_valid != default_is_valid) ||
+        (default_is_valid &&
+         (result_.default_match()->fill_into_edit !=
+          last_result.default_match()->fill_into_edit));
+  }
+
+  NotifyChanged(notify_default_match);
 }
 
-void AutocompleteController::DelayTimerFired() {
-  delay_interval_has_passed_ = true;
-  CommitResult(true);
-}
-
-void AutocompleteController::CommitResult(bool notify_default_match) {
+void AutocompleteController::NotifyChanged(bool notify_default_match) {
+  if (delegate_)
+    delegate_->OnResultChanged(notify_default_match);
   if (done_) {
-    update_delay_timer_.Stop();
-    delay_interval_has_passed_ = false;
-  }
-
-  // Don't send update notifications when nothing's actually changed.
-  if (!updated_latest_result_)
-    return;
-
-  updated_latest_result_ = false;
-  delay_interval_has_passed_ = false;
-  have_committed_during_this_query_ = true;
-  result_.CopyFrom(latest_result_);
-  NotificationService::current()->Notify(
-      NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
-      Source<AutocompleteController>(this),
-      Details<const AutocompleteResult>(&result_));
-  if (notify_default_match) {
-    // This notification must be sent after the other so the popup has time to
-    // update its state before the edit calls into it.
-    // TODO(pkasting): Eliminate this ordering requirement.
     NotificationService::current()->Notify(
-        NotificationType::AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED,
+        NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_READY,
         Source<AutocompleteController>(this),
-        Details<const AutocompleteResult>(&result_));
+        NotificationService::NoDetails());
   }
-  if (!done_)
-    update_delay_timer_.Reset();
 }
 
 void AutocompleteController::CheckIfDone() {
@@ -894,4 +972,10 @@ void AutocompleteController::CheckIfDone() {
     }
   }
   done_ = true;
+}
+
+void AutocompleteController::StartExpireTimer() {
+  if (result_.HasCopiedMatches())
+    expire_timer_.Start(base::TimeDelta::FromMilliseconds(kExpireTimeMS),
+                        this, &AutocompleteController::ExpireCopiedEntries);
 }

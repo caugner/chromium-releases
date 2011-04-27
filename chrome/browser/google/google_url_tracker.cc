@@ -14,11 +14,11 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
@@ -73,15 +73,11 @@ string16 GoogleURLTrackerInfoBarDelegate::GetMessageText() const {
                                     UTF8ToUTF16(new_google_url_.spec()));
 }
 
-int GoogleURLTrackerInfoBarDelegate::GetButtons() const {
-  return BUTTON_OK | BUTTON_CANCEL;
-}
-
 string16 GoogleURLTrackerInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
   return l10n_util::GetStringUTF16((button == BUTTON_OK) ?
-                                   IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL :
-                                   IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL);
+      IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL :
+      IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL);
 }
 
 
@@ -109,7 +105,7 @@ GoogleURLTracker::GoogleURLTracker()
   registrar_.Add(this, NotificationType::DEFAULT_REQUEST_CONTEXT_AVAILABLE,
                  NotificationService::AllSources());
 
-  net::NetworkChangeNotifier::AddObserver(this);
+  net::NetworkChangeNotifier::AddIPAddressObserver(this);
 
   MessageLoop::current()->PostTask(FROM_HERE,
                                    runnable_method_factory_.NewRunnableMethod(
@@ -118,7 +114,7 @@ GoogleURLTracker::GoogleURLTracker()
 
 GoogleURLTracker::~GoogleURLTracker() {
   runnable_method_factory_.RevokeAll();
-  net::NetworkChangeNotifier::RemoveObserver(this);
+  net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
 }
 
 // static

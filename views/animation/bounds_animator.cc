@@ -39,7 +39,7 @@ BoundsAnimator::~BoundsAnimator() {
 
 void BoundsAnimator::AnimateViewTo(View* view, const gfx::Rect& target) {
   DCHECK(view);
-  DCHECK_EQ(view->GetParent(), parent_);
+  DCHECK_EQ(view->parent(), parent_);
 
   Data existing_data;
 
@@ -215,7 +215,7 @@ void BoundsAnimator::AnimationProgressed(const Animation* animation) {
     else
       repaint_bounds_ = repaint_bounds_.Union(total_bounds);
 
-    view->SetBounds(new_bounds);
+    view->SetBoundsRect(new_bounds);
   }
 
   if (data.delegate)
@@ -234,9 +234,9 @@ void BoundsAnimator::AnimationContainerProgressed(
     AnimationContainer* container) {
   if (!repaint_bounds_.IsEmpty()) {
     // Adjust for rtl.
-    repaint_bounds_.set_x(parent_->MirroredXWithWidthInsideView(
+    repaint_bounds_.set_x(parent_->GetMirroredXWithWidthInView(
         repaint_bounds_.x(), repaint_bounds_.width()));
-    parent_->SchedulePaint(repaint_bounds_, false);
+    parent_->SchedulePaintInRect(repaint_bounds_);
     repaint_bounds_.SetRect(0, 0, 0, 0);
   }
 

@@ -9,8 +9,8 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
-#include "gfx/rect.h"
 #include "remoting/base/types.h"
+#include "ui/gfx/rect.h"
 
 namespace remoting {
 
@@ -27,6 +27,11 @@ class Differ {
   Differ(int width, int height, int bytes_per_pixel, int stride);
   ~Differ();
 
+  int width() { return width_; }
+  int height() { return height_; }
+  int bytes_per_pixel() { return bytes_per_pixel_; }
+  int bytes_per_row() { return bytes_per_row_; }
+
   // Given the previous and current screen buffer, calculate the set of
   // rectangles that enclose all the changed pixels in the new screen.
   void CalcDirtyRects(const void* prev_buffer, const void* curr_buffer,
@@ -34,12 +39,6 @@ class Differ {
 
   // Identify all of the blocks that contain changed pixels.
   void MarkDirtyBlocks(const void* prev_buffer, const void* curr_buffer);
-
-  // Diff a small block of image and return non-zero if there is a diff.
-  // Currently, this just returns 0 or 1, but this may change in the future
-  // to return the number of pixels changed.
-  DiffInfo DiffBlock(const uint8* prev_buffer, const uint8* curr_buffer,
-                     int stride);
 
   // Diff a small block of image and return non-zero if there is a diff.
   // This checks only the part of the block specified by the width and

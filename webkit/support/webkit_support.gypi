@@ -11,7 +11,7 @@
       'target_name': 'webkit_support',
       'type': '<(library)',
       'dependencies': [
-        '<(DEPTH)/gfx/gfx.gyp:gfx',
+        '<(DEPTH)/ui/gfx/gfx.gyp:gfx',
         '<(DEPTH)/media/media.gyp:media',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gtest.gyp:gtest',
@@ -40,6 +40,7 @@
         'platform_support_win.cc',
         'test_webkit_client.cc',
         'test_webkit_client.h',
+        'test_webplugin_page_delegate.cc',
         'test_webplugin_page_delegate.h',
         'webkit_support.cc',
         'webkit_support.h',

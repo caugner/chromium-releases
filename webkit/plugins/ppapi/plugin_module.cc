@@ -15,6 +15,7 @@
 #include "ppapi/c/dev/ppb_buffer_dev.h"
 #include "ppapi/c/dev/ppb_char_set_dev.h"
 #include "ppapi/c/dev/ppb_context_3d_dev.h"
+#include "ppapi/c/dev/ppb_context_3d_trusted_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppb_directory_reader_dev.h"
 #include "ppapi/c/dev/ppb_file_io_dev.h"
@@ -49,7 +50,12 @@
 #include "ppapi/c/ppp.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/c/private/ppb_flash_clipboard.h"
+#include "ppapi/c/private/ppb_flash_file.h"
+#include "ppapi/c/private/ppb_flash_menu.h"
+#include "ppapi/c/private/ppb_flash_net_connector.h"
 #include "ppapi/c/private/ppb_pdf.h"
+#include "ppapi/c/private/ppb_proxy_private.h"
 #include "ppapi/c/private/ppb_nacl_private.h"
 #include "ppapi/c/trusted/ppb_image_data_trusted.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
@@ -65,12 +71,17 @@
 #include "webkit/plugins/ppapi/ppb_file_io_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_ref_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_system_impl.h"
+#include "webkit/plugins/ppapi/ppb_flash_clipboard_impl.h"
+#include "webkit/plugins/ppapi/ppb_flash_file_impl.h"
 #include "webkit/plugins/ppapi/ppb_flash_impl.h"
+#include "webkit/plugins/ppapi/ppb_flash_menu_impl.h"
+#include "webkit/plugins/ppapi/ppb_flash_net_connector_impl.h"
 #include "webkit/plugins/ppapi/ppb_font_impl.h"
 #include "webkit/plugins/ppapi/ppb_graphics_2d_impl.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
 #include "webkit/plugins/ppapi/ppb_nacl_private_impl.h"
 #include "webkit/plugins/ppapi/ppb_pdf_impl.h"
+#include "webkit/plugins/ppapi/ppb_proxy_impl.h"
 #include "webkit/plugins/ppapi/ppb_scrollbar_impl.h"
 #include "webkit/plugins/ppapi/ppb_transport_impl.h"
 #include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
@@ -180,14 +191,14 @@ PP_Bool ReadImageData(PP_Resource device_context_2d,
   return BoolToPPBool(context->ReadImageData(image, top_left));
 }
 
-void RunMessageLoop() {
+void RunMessageLoop(PP_Instance instance) {
   bool old_state = MessageLoop::current()->NestableTasksAllowed();
   MessageLoop::current()->SetNestableTasksAllowed(true);
   MessageLoop::current()->Run();
   MessageLoop::current()->SetNestableTasksAllowed(old_state);
 }
 
-void QuitMessageLoop() {
+void QuitMessageLoop(PP_Instance instance) {
   MessageLoop::current()->QuitNow();
 }
 
@@ -241,6 +252,14 @@ const void* GetInterface(const char* name) {
     return PluginInstance::GetFindInterface();
   if (strcmp(name, PPB_FLASH_INTERFACE) == 0)
     return PPB_Flash_Impl::GetInterface();
+  if (strcmp(name, PPB_FLASH_CLIPBOARD_INTERFACE) == 0)
+    return PPB_Flash_Clipboard_Impl::GetInterface();
+  if (strcmp(name, PPB_FLASH_FILE_FILEREF_INTERFACE) == 0)
+    return PPB_Flash_File_FileRef_Impl::GetInterface();
+  if (strcmp(name, PPB_FLASH_FILE_MODULELOCAL_INTERFACE) == 0)
+    return PPB_Flash_File_ModuleLocal_Impl::GetInterface();
+  if (strcmp(name, PPB_FLASH_MENU_INTERFACE) == 0)
+    return PPB_Flash_Menu_Impl::GetInterface();
   if (strcmp(name, PPB_FONT_DEV_INTERFACE) == 0)
     return PPB_Font_Impl::GetInterface();
   if (strcmp(name, PPB_FULLSCREEN_DEV_INTERFACE) == 0)
@@ -255,6 +274,8 @@ const void* GetInterface(const char* name) {
     return PluginInstance::GetInterface();
   if (strcmp(name, PPB_PDF_INTERFACE) == 0)
     return PPB_PDF_Impl::GetInterface();
+  if (strcmp(name, PPB_PROXY_PRIVATE_INTERFACE) == 0)
+    return PPB_Proxy_Impl::GetInterface();
   if (strcmp(name, PPB_SCROLLBAR_DEV_INTERFACE) == 0)
     return PPB_Scrollbar_Impl::GetInterface();
   if (strcmp(name, PPB_TRANSPORT_DEV_INTERFACE) == 0)
@@ -268,7 +289,7 @@ const void* GetInterface(const char* name) {
   if (strcmp(name, PPB_URLRESPONSEINFO_INTERFACE) == 0)
     return PPB_URLResponseInfo_Impl::GetInterface();
   if (strcmp(name, PPB_URLUTIL_DEV_INTERFACE) == 0)
-    return PPB_UrlUtil_Impl::GetInterface();
+    return PPB_URLUtil_Impl::GetInterface();
   if (strcmp(name, PPB_VAR_DEPRECATED_INTERFACE) == 0)
     return Var::GetDeprecatedInterface();
   if (strcmp(name, PPB_VAR_INTERFACE) == 0)
@@ -287,6 +308,8 @@ const void* GetInterface(const char* name) {
       return PPB_Graphics3D_Impl::GetInterface();
     if (strcmp(name, PPB_CONTEXT_3D_DEV_INTERFACE) == 0)
       return PPB_Context3D_Impl::GetInterface();
+    if (strcmp(name, PPB_CONTEXT_3D_TRUSTED_DEV_INTERFACE) == 0)
+      return PPB_Context3D_Impl::GetTrustedInterface();
     if (strcmp(name, PPB_GLES_CHROMIUM_TEXTURE_MAPPING_DEV_INTERFACE) == 0)
       return PPB_GLESChromiumTextureMapping_Impl::GetInterface();
     if (strcmp(name, PPB_OPENGLES2_DEV_INTERFACE) == 0)
@@ -353,10 +376,13 @@ PluginModule::EntryPoints::EntryPoints()
 
 // PluginModule ----------------------------------------------------------------
 
-PluginModule::PluginModule(PluginDelegate::ModuleLifetime* lifetime_delegate)
+PluginModule::PluginModule(const std::string& name,
+                           PluginDelegate::ModuleLifetime* lifetime_delegate)
     : lifetime_delegate_(lifetime_delegate),
       callback_tracker_(new CallbackTracker),
-      library_(NULL) {
+      is_crashed_(false),
+      library_(NULL),
+      name_(name) {
   pp_module_ = ResourceTracker::Get()->AddModule(this);
   GetMainThreadMessageLoop();  // Initialize the main thread message loop.
   GetLivePluginSet()->insert(this);
@@ -378,7 +404,11 @@ PluginModule::~PluginModule() {
     base::UnloadNativeLibrary(library_);
 
   ResourceTracker::Get()->ModuleDeleted(pp_module_);
-  lifetime_delegate_->PluginModuleDestroyed(this);
+
+  // When the plugin crashes, we immediately tell the lifetime delegate that
+  // we're gone, so we don't want to tell it again.
+  if (!is_crashed_)
+    lifetime_delegate_->PluginModuleDead(this);
 }
 
 bool PluginModule::InitAsInternalPlugin(const EntryPoints& entry_points) {
@@ -461,6 +491,18 @@ void PluginModule::InstanceDeleted(PluginInstance* instance) {
 
 scoped_refptr<CallbackTracker> PluginModule::GetCallbackTracker() {
   return callback_tracker_;
+}
+
+void PluginModule::PluginCrashed() {
+  DCHECK(!is_crashed_);  // Should only get one notification.
+  is_crashed_ = true;
+
+  // Notify all instances that they crashed.
+  for (PluginInstanceSet::iterator i = instances_.begin();
+       i != instances_.end(); ++i)
+    (*i)->InstanceCrashed();
+
+  lifetime_delegate_->PluginModuleDead(this);
 }
 
 bool PluginModule::InitializeModule() {

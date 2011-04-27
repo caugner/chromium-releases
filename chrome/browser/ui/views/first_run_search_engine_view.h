@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "chrome/browser/search_engines/template_url_model_observer.h"
-#include "gfx/size.h"
+#include "ui/gfx/size.h"
 #include "views/controls/button/native_button.h"
 #include "views/view.h"
 #include "views/window/window_delegate.h"
@@ -105,7 +105,7 @@ class FirstRunSearchEngineView
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // Override from View so we can draw the gray background at dialog top.
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
   // Overridden from TemplateURLModelObserver. When the search engines have
   // loaded from the profile, we can populate the logos in the dialog box

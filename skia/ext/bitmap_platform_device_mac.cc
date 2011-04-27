@@ -201,6 +201,10 @@ BitmapPlatformDevice::~BitmapPlatformDevice() {
   data_->unref();
 }
 
+SkDeviceFactory* BitmapPlatformDevice::getDeviceFactory() {
+  return SkNEW(BitmapPlatformDeviceFactory);
+}
+
 BitmapPlatformDevice& BitmapPlatformDevice::operator=(
     const BitmapPlatformDevice& other) {
   data_ = other.data_;
@@ -214,7 +218,8 @@ CGContextRef BitmapPlatformDevice::GetBitmapContext() {
 }
 
 void BitmapPlatformDevice::setMatrixClip(const SkMatrix& transform,
-                                         const SkRegion& region) {
+                                         const SkRegion& region,
+                                         const SkClipStack&) {
   data_->SetMatrixClip(transform, region);
 }
 
@@ -247,6 +252,10 @@ void BitmapPlatformDevice::DrawToContext(CGContextRef context, int x, int y,
 
   if (created_dc)
     data_->ReleaseBitmapContext();
+}
+
+bool BitmapPlatformDevice::IsVectorial() {
+  return false;
 }
 
 // Returns the color value at the specified location.

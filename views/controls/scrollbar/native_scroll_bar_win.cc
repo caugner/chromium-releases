@@ -216,7 +216,7 @@ NativeScrollBarWin::~NativeScrollBarWin() {
 // NativeScrollBarWin, View overrides:
 
 void NativeScrollBarWin::Layout() {
-  SetBounds(native_scroll_bar_->GetLocalBounds(true));
+  SetBoundsRect(native_scroll_bar_->GetLocalBounds());
   NativeControlWin::Layout();
 }
 
@@ -230,7 +230,7 @@ bool NativeScrollBarWin::OnKeyPressed(const KeyEvent& event) {
   if (!sb_container_.get())
     return false;
   int code = -1;
-  switch (event.GetKeyCode()) {
+  switch (event.key_code()) {
     case ui::VKEY_UP:
       if (!native_scroll_bar_->IsHorizontal())
         code = SB_LINEUP;
@@ -272,7 +272,7 @@ bool NativeScrollBarWin::OnKeyPressed(const KeyEvent& event) {
 bool NativeScrollBarWin::OnMouseWheel(const MouseWheelEvent& e) {
   if (!sb_container_.get())
     return false;
-  sb_container_->ScrollWithOffset(e.GetOffset());
+  sb_container_->ScrollWithOffset(e.offset());
   return true;
 }
 

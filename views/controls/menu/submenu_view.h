@@ -53,16 +53,15 @@ class SubmenuView : public View {
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
 
-  // View method. Overriden to schedule a paint. We do this so that when
+  // View method. Overridden to schedule a paint. We do this so that when
   // scrolling occurs, everything is repainted correctly.
-  virtual void DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current);
+  virtual void OnBoundsChanged();
 
   // Override from View.
   virtual AccessibilityTypes::Role GetAccessibleRole();
 
   // Painting.
-  void PaintChildren(gfx::Canvas* canvas);
+  virtual void PaintChildren(gfx::Canvas* canvas);
 
   // Drag and drop methods. These are forwarded to the MenuController.
   virtual bool GetDropFormats(

@@ -32,6 +32,10 @@ void PyUITestSuiteBase::Initialize(const FilePath& browser_dir) {
   UITestSuite::Initialize();
 }
 
+void PyUITestSuiteBase::SetCrSourceRoot(const FilePath& path) {
+  PathService::Override(base::DIR_SOURCE_ROOT, path);
+}
+
 // PyUITestBase
 PyUITestBase::PyUITestBase(bool clear_profile, std::wstring homepage)
     : UITestBase() {
@@ -59,6 +63,12 @@ MessageLoop* PyUITestBase::GetSharedMessageLoop(
 
 void PyUITestBase::Initialize(const FilePath& browser_dir) {
   UITestBase::SetBrowserDirectory(browser_dir);
+}
+
+ProxyLauncher* PyUITestBase::CreateProxyLauncher() {
+  if (named_channel_id_.empty())
+    return new AnonymousProxyLauncher(false);
+  return new NamedProxyLauncher(named_channel_id_, false, false);
 }
 
 void PyUITestBase::SetUp() {
@@ -309,13 +319,17 @@ scoped_refptr<BrowserProxy> PyUITestBase::GetBrowserWindow(int window_index) {
 }
 
 std::string PyUITestBase::_SendJSONRequest(int window_index,
-                                           std::string& request) {
-  scoped_refptr<BrowserProxy> browser_proxy =
-      automation()->GetBrowserWindow(window_index);
-  EXPECT_TRUE(browser_proxy.get());
+                                           const std::string& request) {
   std::string response;
-  if (browser_proxy.get()) {
-    EXPECT_TRUE(browser_proxy->SendJSONRequest(request, &response));
+  if (window_index < 0) {  // Do not need to target a browser window.
+    EXPECT_TRUE(automation()->SendJSONRequest(request, &response));
+  } else {
+    scoped_refptr<BrowserProxy> browser_proxy =
+        automation()->GetBrowserWindow(window_index);
+    EXPECT_TRUE(browser_proxy.get());
+    if (browser_proxy.get()) {
+      EXPECT_TRUE(browser_proxy->SendJSONRequest(request, &response));
+    }
   }
   return response;
 }

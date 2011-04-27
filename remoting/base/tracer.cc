@@ -72,11 +72,11 @@ class OutputLogger {
       TraceBuffer* buffer = NULL;
       {
         base::AutoLock l(lock_);
-        if (buffers_.size() == 0) {
+        if (buffers_.empty()) {
           wake_.Wait();
         }
         // Check again since we might have woken for a stop signal.
-        if (buffers_.size() != 0) {
+        if (!buffers_.empty()) {
           buffer = buffers_.back();
           buffers_.pop_back();
         }

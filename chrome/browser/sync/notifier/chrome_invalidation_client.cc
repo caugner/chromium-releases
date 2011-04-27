@@ -75,7 +75,6 @@ void ChromeInvalidationClient::Start(
   ChangeBaseTask(base_task);
   registration_manager_.reset(
       new RegistrationManager(invalidation_client_.get()));
-  RegisterTypes();
 }
 
 void ChromeInvalidationClient::ChangeBaseTask(
@@ -103,19 +102,11 @@ void ChromeInvalidationClient::Stop() {
   listener_ = NULL;
 }
 
-void ChromeInvalidationClient::RegisterTypes() {
+void ChromeInvalidationClient::RegisterTypes(
+    const syncable::ModelTypeSet& types) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
 
-  // TODO(akalin): Make this configurable instead of listening to
-  // notifications for all possible types.
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    registration_manager_->RegisterType(syncable::ModelTypeFromInt(i));
-  }
-  // TODO(akalin): This is a hack to make new sync data types work
-  // with server-issued notifications.  Remove this when it's not
-  // needed anymore.
-  registration_manager_->RegisterType(syncable::UNSPECIFIED);
+  registration_manager_->SetRegisteredTypes(types);
 }
 
 void ChromeInvalidationClient::Invalidate(
@@ -126,14 +117,12 @@ void ChromeInvalidationClient::Invalidate(
   VLOG(1) << "Invalidate: " << InvalidationToString(invalidation);
   syncable::ModelType model_type;
   if (ObjectIdToRealModelType(invalidation.object_id(), &model_type)) {
-    // TODO(akalin): This is a hack to make new sync data types work
-    // with server-issued notifications.  Remove this when it's not
-    // needed anymore.
-    if (model_type == syncable::UNSPECIFIED) {
-      listener_->OnInvalidateAll();
-    } else {
-      listener_->OnInvalidate(model_type);
-    }
+    std::string payload;
+    // payload() CHECK()'s has_payload(), so we must check it ourselves first.
+    if (invalidation.has_payload())
+      payload = invalidation.payload();
+
+    listener_->OnInvalidate(model_type, payload);
   } else {
     LOG(WARNING) << "Could not get invalidation model type; "
                  << "invalidating everything";

@@ -45,7 +45,6 @@ HRESULT BindContextInfo::FromBindContext(IBindCtx* bind_context,
   if (context) {
     ScopedComPtr<IBindContextInfoInternal> internal;
     hr = internal.QueryFrom(context);
-    DCHECK(SUCCEEDED(hr));
     if (SUCCEEDED(hr)) {
       hr = internal->GetCppObject(reinterpret_cast<void**>(info));
       DCHECK_EQ(hr, S_OK);
@@ -77,5 +76,12 @@ void BindContextInfo::SetToSwitch(IStream* cache) {
     cache_ = cache;
     RewindStream(cache_);
   }
+}
+
+std::wstring BindContextInfo::GetUrl() {
+  if (has_prot_data()) {
+    return prot_data_->url();
+  }
+  return std::wstring();
 }
 

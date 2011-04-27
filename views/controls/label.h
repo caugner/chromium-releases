@@ -7,9 +7,9 @@
 #pragma once
 
 #include "base/gtest_prod_util.h"
-#include "gfx/font.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/font.h"
 #include "views/view.h"
 
 namespace views {
@@ -66,18 +66,17 @@ class Label : public View {
   virtual int GetHeightForWidth(int w);
 
   // Overriden to dirty our text bounds if we're multi-line.
-  virtual void DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current);
+  virtual void OnBoundsChanged();
 
   // Returns views/Label.
-  virtual std::string GetClassName() const { return kViewClassName; }
+  virtual std::string GetClassName() const;
 
   // Overridden to paint
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
 
   // If the mouse is over the label, and a mouse over background has been
   // specified, its used. Otherwise super's implementation is invoked.
-  virtual void PaintBackground(gfx::Canvas* canvas);
+  virtual void OnPaintBackground(gfx::Canvas* canvas);
 
   // Set the font.
   void SetFont(const gfx::Font& font);
@@ -98,10 +97,10 @@ class Label : public View {
   const GURL GetURL() const;
 
   // Set the color
-  virtual void SetColor(const SkColor& color) { color_ = color; }
+  virtual void SetColor(const SkColor& color);
 
   // Return a reference to the currently used color.
-  virtual SkColor GetColor() const { return color_; }
+  virtual SkColor GetColor() const;
 
   // Set horizontal alignment. If the locale is RTL, and the RTL alignment
   // setting is set as USE_UI_ALIGNMENT, the alignment is flipped around.
@@ -157,9 +156,9 @@ class Label : public View {
 
   // Mouse enter/exit are overridden to render mouse over background color.
   // These invoke SetContainsMouse as necessary.
-  virtual void OnMouseMoved(const MouseEvent& e);
-  virtual void OnMouseEntered(const MouseEvent& event);
-  virtual void OnMouseExited(const MouseEvent& event);
+  virtual void OnMouseMoved(const MouseEvent& e) OVERRIDE;
+  virtual void OnMouseEntered(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
 
   // The background color to use when the mouse is over the label. Label
   // takes ownership of the Background.

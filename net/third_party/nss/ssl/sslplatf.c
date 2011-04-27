@@ -127,7 +127,11 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
 
     buf->data = NULL;
     if (!CryptGetUserKey(key->hCryptProv, key->dwKeySpec, &hKey)) {
-        PORT_SetError(SEC_ERROR_INVALID_KEY);
+        if (GetLastError() == NTE_NO_KEY) {
+            PORT_SetError(SEC_ERROR_NO_KEY);
+        } else {
+            PORT_SetError(SEC_ERROR_INVALID_KEY);
+        }
         goto done;
     }
 
@@ -156,31 +160,31 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
             hashItem.len  = sizeof(hash->sha);
             break;
         default:
-            PORT_SetError(SEC_ERROR_UNSUPPORTED_KEYALG);
+            PORT_SetError(SEC_ERROR_INVALID_KEY);
             goto done;
     }
     PRINT_BUF(60, (NULL, "hash(es) to be signed", hashItem.data, hashItem.len));
 
     if (!CryptCreateHash(key->hCryptProv, hashAlg, 0, 0, &hHash)) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;    
     }
     argLen = sizeof(hashLen);
     if (!CryptGetHashParam(hHash, HP_HASHSIZE, (BYTE*)&hashLen, &argLen, 0)) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
     if (hashLen != hashItem.len) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
     if (!CryptSetHashParam(hHash, HP_HASHVAL, (BYTE*)hashItem.data, 0)) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
     if (!CryptSignHash(hHash, key->dwKeySpec, NULL, 0,
                        NULL, &signatureLen) || signatureLen == 0) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
     buf->data = (unsigned char *)PORT_Alloc(signatureLen);
@@ -189,7 +193,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
 
     if (!CryptSignHash(hHash, key->dwKeySpec, NULL, 0,
                        (BYTE*)buf->data, &signatureLen)) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
     buf->len = signatureLen;
@@ -211,10 +215,11 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
         } else if (derSig.data) {
             PORT_Free(derSig.data);
         }
+    } else {
+        rv = SECSuccess;
     }
 
     PRINT_BUF(60, (NULL, "signed hashes", buf->data, buf->len));
-    rv = SECSuccess;
 done:
     if (hHash)
         CryptDestroyHash(hHash);
@@ -263,7 +268,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
 
     status = SecKeyGetCSSMKey(key, &cssmKey);
     if (status != noErr || !cssmKey) {
-        PORT_SetError(SEC_ERROR_INVALID_KEY);
+        PORT_SetError(SEC_ERROR_NO_KEY);
         goto done;
     }
 
@@ -310,7 +315,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
     status = SecKeyGetCredentials(key, CSSM_ACL_AUTHORIZATION_SIGN,
                                   kSecCredentialTypeDefault, &cssmCreds);
     if (status != noErr) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
 
@@ -320,7 +325,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
     cssmRv = CSSM_CSP_CreateSignatureContext(cspHandle, sigAlg, cssmCreds,
                                              cssmKey, &cssmSignature);
     if (cssmRv) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
 
@@ -333,7 +338,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
         blindingAttr.Attribute.Uint32 = 1;
         cssmRv = CSSM_UpdateContextAttributes(cssmSignature, 1, &blindingAttr);
         if (cssmRv) {
-            ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+            PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
             goto done;
         }
     }
@@ -341,7 +346,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
     cssmRv = CSSM_SignData(cssmSignature, &hashData, 1, CSSM_ALGID_NONE,
                            &signatureData);
     if (cssmRv) {
-        ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
+        PORT_SetError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
     buf->len = signatureData.Length;
@@ -357,10 +362,11 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
         } else if (derSig.data) {
             PORT_Free(derSig.data);
         }
+    } else {
+        rv = SECSuccess;
     }
 
     PRINT_BUF(60, (NULL, "signed hashes", buf->data, buf->len));
-    rv = SECSuccess;
 done:
     /* cspHandle, cssmKey, and cssmCreds are owned by the SecKeyRef and
      * should not be freed. When the PlatformKey is freed, they will be

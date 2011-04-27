@@ -10,9 +10,9 @@
 #include "base/task.h"
 #include "chrome/browser/ui/gtk/extension_view_gtk.h"
 #include "chrome/browser/ui/gtk/info_bubble_gtk.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
-#include "gfx/rect.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
+#include "ui/gfx/rect.h"
 
 class Browser;
 class ExtensionHost;

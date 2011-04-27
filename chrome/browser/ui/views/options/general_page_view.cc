@@ -12,15 +12,15 @@
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
-#include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_model_observer.h"
@@ -28,6 +28,7 @@
 #include "chrome/browser/ui/views/keyword_editor_view.h"
 #include "chrome/browser/ui/views/options/managed_prefs_banner_view.h"
 #include "chrome/browser/ui/views/options/options_group_view.h"
+#include "chrome/browser/ui/webui/new_tab_ui.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -40,8 +41,8 @@
 #include "views/controls/label.h"
 #include "views/controls/table/table_view.h"
 #include "views/controls/textfield/textfield.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 
 namespace {
 
@@ -353,23 +354,23 @@ void GeneralPageView::InitControlLayout() {
   layout->StartRow(0, single_column_view_set_id);
   InitStartupGroup();
   layout->AddView(startup_group_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, single_column_view_set_id);
   InitHomepageGroup();
   layout->AddView(homepage_group_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, single_column_view_set_id);
   InitDefaultSearchGroup();
   layout->AddView(default_search_group_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
 #if !defined(OS_CHROMEOS)
   layout->StartRow(0, single_column_view_set_id);
   InitDefaultBrowserGroup();
   layout->AddView(default_browser_group_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 #endif
 
   // Register pref observers that update the controls when a pref changes.
@@ -382,6 +383,9 @@ void GeneralPageView::InitControlLayout() {
       profile()->GetPrefs(), this);
   homepage_.Init(prefs::kHomePage, profile()->GetPrefs(), this);
   show_home_button_.Init(prefs::kShowHomeButton, profile()->GetPrefs(), this);
+  default_browser_policy_.Init(prefs::kDefaultBrowserSettingEnabled,
+                               g_browser_process->local_state(),
+                               this);
 }
 
 void GeneralPageView::NotifyPrefChanged(const std::string* pref_name) {
@@ -446,6 +450,15 @@ void GeneralPageView::NotifyPrefChanged(const std::string* pref_name) {
 
   if (!pref_name || *pref_name == prefs::kInstantEnabled)
     instant_checkbox_->SetChecked(prefs->GetBoolean(prefs::kInstantEnabled));
+
+  if (!pref_name || *pref_name == prefs::kDefaultBrowserSettingEnabled) {
+    // If the option is managed the UI is uncondionally disabled otherwise we
+    // restart the standard button enabling logic.
+    if (default_browser_policy_.IsManaged())
+      default_browser_use_as_default_button_->SetEnabled(false);
+    else
+      default_browser_worker_->StartCheckDefaultBrowser();
+  }
 }
 
 void GeneralPageView::HighlightGroup(OptionsGroup highlight_group) {
@@ -463,7 +476,9 @@ void GeneralPageView::LinkActivated(views::Link* source, int event_flags) {
 
 void GeneralPageView::SetDefaultBrowserUIState(
     ShellIntegration::DefaultBrowserUIState state) {
-  bool button_enabled = state == ShellIntegration::STATE_NOT_DEFAULT;
+  bool button_enabled =
+      (state == ShellIntegration::STATE_NOT_DEFAULT) &&
+      !default_browser_policy_.IsManaged();
   default_browser_use_as_default_button_->SetEnabled(button_enabled);
   default_browser_use_as_default_button_->SetNeedElevation(true);
   if (state == ShellIntegration::STATE_IS_DEFAULT) {
@@ -547,20 +562,20 @@ void GeneralPageView::InitStartupGroup() {
   column_set = layout->AddColumnSet(double_column_view_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(startup_homepage_radio_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(startup_last_session_radio_, 1, 1,
                   GridLayout::FILL, GridLayout::LEADING);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(startup_custom_radio_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, double_column_view_set_id);
   layout->AddView(startup_custom_pages_table_, 1, 1,
@@ -576,11 +591,11 @@ void GeneralPageView::InitStartupGroup() {
   button_stack_layout->StartRow(0, single_column_view_set_id);
   button_stack_layout->AddView(startup_add_custom_page_button_,
                                1, 1, GridLayout::FILL, GridLayout::CENTER);
-  button_stack_layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  button_stack_layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   button_stack_layout->StartRow(0, single_column_view_set_id);
   button_stack_layout->AddView(startup_remove_custom_page_button_,
                                1, 1, GridLayout::FILL, GridLayout::CENTER);
-  button_stack_layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  button_stack_layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   button_stack_layout->StartRow(0, single_column_view_set_id);
   button_stack_layout->AddView(startup_use_current_page_button_,
                                1, 1, GridLayout::FILL, GridLayout::CENTER);
@@ -627,18 +642,18 @@ void GeneralPageView::InitHomepageGroup() {
   column_set = layout->AddColumnSet(double_column_view_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(homepage_use_newtab_radio_, 1, 1,
                   GridLayout::FILL, GridLayout::LEADING);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   layout->StartRow(0, double_column_view_set_id);
   layout->AddView(homepage_use_url_radio_);
   layout->AddView(homepage_use_url_textfield_);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(homepage_show_home_button_checkbox_, 1, 1,
                   GridLayout::FILL, GridLayout::LEADING);
@@ -683,7 +698,7 @@ void GeneralPageView::InitDefaultSearchGroup() {
   ColumnSet* column_set = layout->AddColumnSet(double_column_view_set_id);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
 
@@ -698,14 +713,14 @@ void GeneralPageView::InitDefaultSearchGroup() {
   column_set->AddPaddingColumn(0, views::Checkbox::GetTextIndent() + 3);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, double_column_view_set_id);
   layout->AddView(default_search_engine_combobox_);
   layout->AddView(default_search_manage_engines_button_);
-  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   layout->StartRow(0, checkbox_column_view_set_id);
   layout->AddView(instant_checkbox_);
@@ -749,7 +764,7 @@ void GeneralPageView::InitDefaultBrowserGroup() {
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(default_browser_status_label_, 1, 1,
                   GridLayout::FILL, GridLayout::LEADING);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(default_browser_use_as_default_button_);
 

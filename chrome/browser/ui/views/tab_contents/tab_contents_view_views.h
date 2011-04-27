@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
-#include "chrome/browser/tab_contents/tab_contents_view.h"
-#include "gfx/size.h"
+#include "content/browser/tab_contents/tab_contents_view.h"
+#include "ui/gfx/size.h"
 #include "views/view.h"
 
 class ConstrainedWindowGtk;
@@ -62,10 +62,8 @@ class TabContentsViewViews : public TabContentsView, public views::View {
   virtual void GetViewBounds(gfx::Rect* out) const;
 
   // views::View implementation
-  virtual void DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current);
-
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnBoundsChanged();
+  virtual void OnPaint(gfx::Canvas* canvas);
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);

@@ -282,8 +282,13 @@ void MetricsLog::WritePluginList(
     // Plugin name and filename are hashed for the privacy of those
     // testing unreleased new extensions.
     WriteAttribute("name", CreateBase64Hash(UTF16ToUTF8(iter->name)));
-    WriteAttribute("filename",
-        CreateBase64Hash(WideToUTF8(iter->path.BaseName().ToWStringHack())));
+    std::string filename_bytes =
+#if defined(OS_WIN)
+        UTF16ToUTF8(iter->path.BaseName().value());
+#else
+        iter->path.BaseName().value();
+#endif
+    WriteAttribute("filename", CreateBase64Hash(filename_bytes));
     WriteAttribute("version", UTF16ToUTF8(iter->version));
   }
 }
@@ -333,12 +338,15 @@ void MetricsLog::RecordEnvironment(
 
   {
     OPEN_ELEMENT_FOR_SCOPE("gpu");
-    WriteIntAttribute(
-        "vendorid",
-        GpuProcessHostUIShim::GetInstance()->gpu_info().vendor_id());
-    WriteIntAttribute(
-        "deviceid",
-        GpuProcessHostUIShim::GetInstance()->gpu_info().device_id());
+    GpuProcessHostUIShim* ui_shim = GpuProcessHostUIShim::GetForRenderer(0);
+    if (ui_shim) {
+      WriteIntAttribute(
+          "vendorid",
+          ui_shim->gpu_info().vendor_id());
+      WriteIntAttribute(
+          "deviceid",
+          ui_shim->gpu_info().device_id());
+    }
   }
 
   {

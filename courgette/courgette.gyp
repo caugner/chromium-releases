@@ -30,6 +30,8 @@
       'ensemble_create.cc',
       'image_info.cc',
       'image_info.h',
+      'memory_allocator.cc',
+      'memory_allocator.h',
       'region.h',
       'simple_delta.cc',
       'simple_delta.h',
@@ -63,6 +65,11 @@
         'courgette_lib',
         '../base/base.gyp:base',
       ],
+      'msvs_settings': {
+        'VCLinkerTool': {
+          'LargeAddressAware': 2,
+        },
+      },
     },
     {
       'target_name': 'courgette_minimal_tool',

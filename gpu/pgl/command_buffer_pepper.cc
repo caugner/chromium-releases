@@ -27,6 +27,11 @@ bool CommandBufferPepper::Initialize(int32 size) {
   return false;
 }
 
+bool CommandBufferPepper::Initialize(base::SharedMemory* buffer, int32 size) {
+  GPU_NOTREACHED();
+  return false;
+}
+
 Buffer CommandBufferPepper::GetRingBuffer() {
   Buffer buffer;
 #if defined(ENABLE_NEW_NPDEVICE_API)
@@ -140,6 +145,14 @@ int32 CommandBufferPepper::CreateTransferBuffer(size_t size) {
     return -1;
 
   return static_cast<int32>(id);
+}
+
+int32 CommandBufferPepper::RegisterTransferBuffer(
+    base::SharedMemory* shared_memory,
+    size_t size) {
+  // Not implemented by proxy.
+  GPU_NOTREACHED();
+  return -1;
 }
 
 void CommandBufferPepper::DestroyTransferBuffer(int32 id) {

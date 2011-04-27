@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+
 #include "chrome_frame/test_utils.h"
 
 #include <atlbase.h>
@@ -17,13 +19,13 @@
 #include "base/win/scoped_handle.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 const wchar_t kChromeFrameDllName[] = L"npchrome_frame.dll";
 const wchar_t kChromeLauncherExeName[] = L"chrome_launcher.exe";
 
-// Statics
-FilePath ScopedChromeFrameRegistrar::GetChromeFrameBuildPath() {
+FilePath GetChromeFrameBuildPath() {
   FilePath build_path;
   PathService::Get(chrome::DIR_APP, &build_path);
 
@@ -43,29 +45,43 @@ FilePath ScopedChromeFrameRegistrar::GetChromeFrameBuildPath() {
   return dll_path;
 }
 
+// static
 void ScopedChromeFrameRegistrar::RegisterDefaults() {
   FilePath dll_path = GetChromeFrameBuildPath();
-  RegisterAtPath(dll_path.value());
+  RegisterAtPath(dll_path.value(), chrome_frame_test::GetTestBedType());
 }
 
+// static
 void ScopedChromeFrameRegistrar::RegisterAtPath(
-    const std::wstring& path) {
+    const std::wstring& path, RegistrationType registration_type) {
 
   ASSERT_FALSE(path.empty());
   HMODULE dll_handle = LoadLibrary(path.c_str());
   ASSERT_TRUE(dll_handle != NULL);
 
   typedef HRESULT (STDAPICALLTYPE* DllRegisterServerFn)();
-  DllRegisterServerFn register_server =
-      reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
-          dll_handle, "DllRegisterServer"));
+  DllRegisterServerFn register_server = NULL;
 
+  if (registration_type == PER_USER) {
+      register_server = reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
+          dll_handle, "DllRegisterUserServer"));
+  } else {
+      register_server = reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
+          dll_handle, "DllRegisterServer"));
+  }
   ASSERT_TRUE(register_server != NULL);
   EXPECT_HRESULT_SUCCEEDED((*register_server)());
 
-  DllRegisterServerFn register_npapi_server =
-      reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
-          dll_handle, "RegisterNPAPIPlugin"));
+  DllRegisterServerFn register_npapi_server = NULL;
+  if (registration_type == PER_USER) {
+    register_npapi_server =
+        reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
+            dll_handle, "RegisterNPAPIUserPlugin"));
+  } else {
+    register_npapi_server =
+        reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
+            dll_handle, "RegisterNPAPIPlugin"));
+  }
 
   if (register_npapi_server != NULL)
     EXPECT_HRESULT_SUCCEEDED((*register_npapi_server)());
@@ -73,24 +89,36 @@ void ScopedChromeFrameRegistrar::RegisterAtPath(
   ASSERT_TRUE(FreeLibrary(dll_handle));
 }
 
+// static
 void ScopedChromeFrameRegistrar::UnregisterAtPath(
-    const std::wstring& path) {
+    const std::wstring& path, RegistrationType registration_type) {
 
   ASSERT_FALSE(path.empty());
   HMODULE dll_handle = LoadLibrary(path.c_str());
   ASSERT_TRUE(dll_handle != NULL);
 
   typedef HRESULT (STDAPICALLTYPE* DllUnregisterServerFn)();
-  DllUnregisterServerFn unregister_server =
-      reinterpret_cast<DllUnregisterServerFn>(GetProcAddress(
-          dll_handle, "DllUnregisterServer"));
-
+  DllUnregisterServerFn unregister_server = NULL;
+  if (registration_type == PER_USER) {
+    unregister_server = reinterpret_cast<DllUnregisterServerFn>
+        (GetProcAddress(dll_handle, "DllUnregisterUserServer"));
+  } else {
+    unregister_server = reinterpret_cast<DllUnregisterServerFn>
+        (GetProcAddress(dll_handle, "DllUnregisterServer"));
+  }
   ASSERT_TRUE(unregister_server != NULL);
   EXPECT_HRESULT_SUCCEEDED((*unregister_server)());
 
-  DllUnregisterServerFn unregister_npapi_server =
-      reinterpret_cast<DllUnregisterServerFn>(GetProcAddress(
-          dll_handle, "UnregisterNPAPIPlugin"));
+  DllUnregisterServerFn unregister_npapi_server = NULL;
+  if (registration_type == PER_USER) {
+    unregister_npapi_server =
+        reinterpret_cast<DllUnregisterServerFn>(GetProcAddress(
+            dll_handle, "UnregisterNPAPIUserPlugin"));
+  } else {
+    unregister_npapi_server =
+        reinterpret_cast<DllUnregisterServerFn>(GetProcAddress(
+            dll_handle, "UnregisterNPAPIPlugin"));
+  }
 
   if (unregister_npapi_server != NULL)
     EXPECT_HRESULT_SUCCEEDED((*unregister_npapi_server)());
@@ -118,12 +146,15 @@ FilePath ScopedChromeFrameRegistrar::GetReferenceChromeFrameDllPath() {
 // Non-statics
 
 ScopedChromeFrameRegistrar::ScopedChromeFrameRegistrar(
-    const std::wstring& path) {
+    const std::wstring& path, RegistrationType registration_type)
+    : registration_type_(registration_type) {
   original_dll_path_ = path;
   RegisterChromeFrameAtPath(original_dll_path_);
 }
 
-ScopedChromeFrameRegistrar::ScopedChromeFrameRegistrar() {
+ScopedChromeFrameRegistrar::ScopedChromeFrameRegistrar(
+    RegistrationType registration_type)
+    : registration_type_(registration_type) {
   original_dll_path_ = GetChromeFrameBuildPath().value();
   RegisterChromeFrameAtPath(original_dll_path_);
 }
@@ -131,12 +162,15 @@ ScopedChromeFrameRegistrar::ScopedChromeFrameRegistrar() {
 ScopedChromeFrameRegistrar::~ScopedChromeFrameRegistrar() {
   if (FilePath(original_dll_path_) != FilePath(new_chrome_frame_dll_path_)) {
     RegisterChromeFrameAtPath(original_dll_path_);
+  } else if (registration_type_ == PER_USER) {
+    UnregisterAtPath(new_chrome_frame_dll_path_, registration_type_);
+    chrome_frame_test::KillProcesses(L"chrome_frame_helper.exe", 0, false);
   }
 }
 
 void ScopedChromeFrameRegistrar::RegisterChromeFrameAtPath(
     const std::wstring& path) {
-  RegisterAtPath(path);
+  RegisterAtPath(path, registration_type_);
   new_chrome_frame_dll_path_ = path;
 }
 

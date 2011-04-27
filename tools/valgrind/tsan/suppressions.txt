@@ -76,6 +76,7 @@
   bug_64075b
   ThreadSanitizer:Race
   fun:disk_cache::EntryImpl::UpdateSize*
+  ...
   fun:disk_cache::EntryImpl::WriteDataImpl*
 }
 
@@ -103,6 +104,47 @@
   fun:UserScriptMaster::ScriptReloader::RunScan*
 }
 
+{
+  bug_71695
+  ThreadSanitizer:Race
+  ...
+  fun:ServiceProcessState::TearDownState*
+  fun:ServiceProcessState::SignalStopped*
+}
+
+{
+  bug_72169a
+  ThreadSanitizer:Race
+  fun:base::Thread::ThreadMain*
+}
+
+{
+  bug_72169b
+  ThreadSanitizer:Race
+  fun:base::Thread::message_loop*
+  ...
+  fun:*::InotifyReader::OnInotifyEvent*
+}
+
+{
+  bug_72548
+  ThreadSanitizer:Race
+  ...
+  fun:JSC::Yarr::Interpreter::*Disjunction*
+  fun:JSC::Yarr::Interpreter::interpret*
+  fun:JSC::Yarr::interpret*
+}
+
+{
+  bug_72913
+  ThreadSanitizer:Race
+  ...
+  fun:ObserverListBase*
+  fun:sync_api::SyncManager::SyncInternal::*
+  fun:sync_api::SyncManager::*
+  fun:browser_sync::*
+}
+
 ############################
 # Benign races
 {
@@ -127,6 +169,14 @@
   ...
   fun:base::Histogram::*
   fun:HistogramSynchronizer::DeserializeHistogramList*
+}
+
+{
+  bug_71634
+  ThreadSanitizer:Race
+  fun:gdk_x_error
+  ...
+  fun:ui::GetWindowGeometry*
 }
 
 ############################
@@ -211,6 +261,20 @@
   fun:talk_base::ThreadManager::~ThreadManager()
   fun:__tcf_0
   fun:exit
+}
+
+{
+  bug_70938
+  ThreadSanitizer:Race
+  ...
+  obj:*libdbus*
+}
+
+{
+  Nvidia GL driver destroys an invalid lock
+  ThreadSanitizer:InvalidLock
+  fun:pthread_mutex_destroy
+  obj:*nvidia*/libGL.so.*
 }
 
 ############################
@@ -311,20 +375,20 @@
   Two writes, same value (ICU gGlobalMutex, gMutexesInUse)
   ThreadSanitizer:Race
   ...
-  fun:umtx_init_4_2
+  fun:umtx_init_46
 }
 
 {
   Two writes, same value (ICU gHeapInUse)
   ThreadSanitizer:Race
-  fun:uprv_malloc_4_2
+  fun:uprv_malloc_46
 }
 
 # Reading a pointer to a mutex being initialized in a concurrent thread.
 {
-  A benign race in umtx_lock_4_2
+  A benign race in umtx_lock_46
   ThreadSanitizer:Race
-  fun:umtx_lock_4_2
+  fun:umtx_lock_46
 }
 
 ############################
@@ -420,19 +484,29 @@
   fun:vfprintf
 }
 
-# gethostbyname2_r is thread-safe, however ThreadSanitizer reports races inside it and
-# (sometimes) in __nss_* functions below it.
-# This may be related to
-# https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/59449
 {
-  Race reports below thread-safe gethostbyname2_r
+  fun:timegm
   ThreadSanitizer:Race
   ...
-  fun:gethostbyname2_r*
+  fun:timegm
 }
 
 {
   Benign race in nss (PR_EnterMonitor)
   ThreadSanitizer:Race
   fun:PR_EnterMonitor
+}
+
+############################
+# TSan false positives
+{
+  tsanbug_62a
+  ThreadSanitizer:Race
+  fun:__memset_sse2
+}
+
+{
+  tsanbug_62b
+  ThreadSanitizer:Race
+  fun:__GI_memcpy
 }

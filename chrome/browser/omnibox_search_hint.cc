@@ -19,14 +19,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -93,6 +93,7 @@ HintInfoBar::HintInfoBar(OmniboxSearchHint* omnibox_hint)
       method_factory_.NewRunnableMethod(&HintInfoBar::AllowExpiry),
       8000);  // 8 seconds.
 }
+
 HintInfoBar::~HintInfoBar() {
 }
 
@@ -132,6 +133,7 @@ int HintInfoBar::GetButtons() const {
 }
 
 string16 HintInfoBar::GetButtonLabel(InfoBarButton button) const {
+  DCHECK_EQ(BUTTON_OK, button);
   return l10n_util::GetStringUTF16(
       IDS_OMNIBOX_SEARCH_HINT_INFOBAR_BUTTON_LABEL);
 }
@@ -208,8 +210,8 @@ void OmniboxSearchHint::ShowEnteringQuery() {
       GetLocationBar();
   AutocompleteEditView*  edit_view = location_bar->location_entry();
   location_bar->FocusLocation(true);
-  edit_view->SetUserText(UTF16ToWideHack(
-      l10n_util::GetStringUTF16(IDS_OMNIBOX_SEARCH_HINT_OMNIBOX_TEXT)));
+  edit_view->SetUserText(
+      l10n_util::GetStringUTF16(IDS_OMNIBOX_SEARCH_HINT_OMNIBOX_TEXT));
   edit_view->SelectAll(false);
   // Entering text in the autocomplete edit view triggers the suggestion popup
   // that we don't want to show in this case.

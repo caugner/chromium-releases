@@ -14,8 +14,8 @@
 #include "ui/base/text/text_elider.h"
 #include "views/background.h"
 #include "views/controls/button/native_button.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 
 using views::ColumnSet;
 using views::GridLayout;
@@ -52,8 +52,8 @@ void ExceptionsTableModel::OnPasswordStoreRequestDone(
   pending_login_query_ = NULL;
 
   STLDeleteElements<PasswordRows>(&saved_signons_);
-  std::wstring languages =
-      UTF8ToWide(profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
+  std::string languages = profile_->GetPrefs()->GetString(
+      prefs::kAcceptLanguages);
   for (size_t i = 0; i < result.size(); ++i) {
     saved_signons_.push_back(new PasswordRow(
         ui::SortedDisplayURL(result[i]->origin, languages), result[i]));
@@ -138,7 +138,7 @@ void ExceptionsPageView::InitControlLayout() {
   ColumnSet* column_set = layout->AddColumnSet(top_column_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
 
@@ -148,11 +148,11 @@ void ExceptionsPageView::InitControlLayout() {
                   GridLayout::FILL);
   layout->AddView(&remove_button_);
   layout->StartRowWithPadding(0, top_column_set_id, 0,
-                              kRelatedControlVerticalSpacing);
+                              views::kRelatedControlVerticalSpacing);
   layout->SkipColumns(1);
   layout->AddView(&remove_all_button_);
   layout->StartRowWithPadding(0, top_column_set_id, 0,
-                              kRelatedControlVerticalSpacing);
+                              views::kRelatedControlVerticalSpacing);
 
   layout->SkipColumns(1);
   layout->AddView(&show_button_);

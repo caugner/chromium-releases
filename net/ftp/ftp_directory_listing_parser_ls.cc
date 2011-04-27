@@ -39,10 +39,13 @@ bool LooksLikeUnixPermissionsListing(const string16& text) {
       text[0] != '-')
     return false;
 
+  // Do not check the rest of the string. Some servers fail to properly
+  // separate this column from the next column (number of links), resulting
+  // in additional characters at the end. Also, sometimes there is a "+"
+  // sign at the end indicating the file has ACLs set.
   return (LooksLikeUnixPermission(text.substr(1, 3)) &&
           LooksLikeUnixPermission(text.substr(4, 3)) &&
-          LooksLikeUnixPermission(text.substr(7, 3)) &&
-          (text.substr(10).empty() || text.substr(10) == ASCIIToUTF16("+")));
+          LooksLikeUnixPermission(text.substr(7, 3)));
 }
 
 bool LooksLikePermissionDeniedError(const string16& text) {
@@ -99,8 +102,7 @@ namespace net {
 
 FtpDirectoryListingParserLs::FtpDirectoryListingParserLs(
     const base::Time& current_time)
-    : received_nonempty_line_(false),
-      received_total_line_(false),
+    : received_total_line_(false),
       current_time_(current_time) {
 }
 
@@ -111,13 +113,8 @@ FtpServerType FtpDirectoryListingParserLs::GetServerType() const {
 }
 
 bool FtpDirectoryListingParserLs::ConsumeLine(const string16& line) {
-  if (line.empty() && !received_nonempty_line_) {
-    // Allow empty lines only at the beginning of the listing. For example VMS
-    // systems in Unix emulation mode add an empty line before the first listing
-    // entry.
+  if (line.empty())
     return true;
-  }
-  received_nonempty_line_ = true;
 
   std::vector<string16> columns;
   base::SplitString(CollapseWhitespace(line, false), ' ', &columns);

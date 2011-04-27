@@ -16,16 +16,18 @@
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/net/url_request_context_getter.h"
+#include "chrome/common/net/test_url_fetcher_factory.h"
 #include "chrome/test/testing_browser_process.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/network_change_notifier.h"
@@ -126,6 +128,8 @@ LiveSyncTest::LiveSyncTest(TestType test_type)
   }
 }
 
+LiveSyncTest::~LiveSyncTest() {}
+
 void LiveSyncTest::SetUp() {
   CommandLine* cl = CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kPasswordFileForTest)) {
@@ -173,6 +177,16 @@ void LiveSyncTest::SetUpCommandLine(CommandLine* cl) {
   // Disable non-essential access of external network resources.
   if (!cl->HasSwitch(switches::kDisableBackgroundNetworking))
     cl->AppendSwitch(switches::kDisableBackgroundNetworking);
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+  // Use a basic non-encrypted password store on Linux while running tests.
+  // See http://code.google.com/p/chromium/wiki/LinuxPasswordStorage.
+  if (!cl->HasSwitch(switches::kPasswordStore))
+    cl->AppendSwitchASCII(switches::kPasswordStore, "basic");
+  // TODO(mdm): Remove this once password sync is enabled on Linux.
+  if (!cl->HasSwitch(switches::kEnableSyncPasswords))
+    cl->AppendSwitch(switches::kEnableSyncPasswords);
+#endif
 }
 
 // static

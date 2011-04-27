@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,9 @@
 #include "chrome/browser/instant/instant_loader_delegate.h"
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/common/page_transition_types.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
 
 struct AutocompleteMatch;
 class InstantDelegate;
@@ -44,27 +44,6 @@ class TemplateURL;
 // being invoked on the delegate.
 class InstantController : public InstantLoaderDelegate {
  public:
-  // Variations of instant support.
-  // TODO(sky): nuke these when we decide the default behavior.
-  enum Type {
-    // NOTE: these values are persisted to prefs. Don't change them!
-
-    FIRST_TYPE = 0,
-
-    // Search results are shown for the best guess of what we think the user was
-    // planning on typing.
-    PREDICTIVE_TYPE = 0,
-
-    // Search results are shown for exactly what was typed.
-    VERBATIM_TYPE,
-
-    // Variant of predictive that does not auto-complete after a delay.
-    PREDICTIVE_NO_AUTO_COMPLETE_TYPE,
-
-    LAST_TYPE = PREDICTIVE_NO_AUTO_COMPLETE_TYPE
-  };
-
-
   // Amount of time to wait before starting the instant animation.
   static const int kAutoCommitPauseTimeMS = 1000;
   // Duration of the instant animation in which the colors change.
@@ -79,11 +58,8 @@ class InstantController : public InstantLoaderDelegate {
   // Records instant metrics.
   static void RecordMetrics(Profile* profile);
 
-  // Returns true if either type of instant is enabled.
+  // Returns true if instant is enabled.
   static bool IsEnabled(Profile* profile);
-
-  // Returns true if the specified type of instant is enabled.
-  static bool IsEnabled(Profile* profile, Type type);
 
   // Enables instant.
   static void Enable(Profile* profile);
@@ -116,6 +92,9 @@ class InstantController : public InstantLoaderDelegate {
   // Destroys the preview TabContents. Does nothing if the preview TabContents
   // has not been created.
   void DestroyPreviewContents();
+
+  // Destroys the current loaders but remains active.
+  void DestroyPreviewContentsAndLeaveActive();
 
   // Returns true if we're showing the last URL passed to |Update|. If this is
   // false a commit does not result in committing the last url passed to update.
@@ -164,7 +143,7 @@ class InstantController : public InstantLoaderDelegate {
 
   // Returns true if the preview TabContents is ready to be displayed. In some
   // situations this may return false yet GetPreviewContents() returns non-NULL.
-  bool is_displayable() const { return is_displayable_; }
+  bool is_displayable() const { return displayable_loader_ != NULL; }
 
   // Returns the transition type of the last AutocompleteMatch passed to Update.
   PageTransition::Type last_transition_type() const {
@@ -188,23 +167,29 @@ class InstantController : public InstantLoaderDelegate {
   // (until the search provider loads, then both return true).
   bool MightSupportInstant();
 
+  // Returns the URL currently being loaded or shown if everything has finished
+  // loading.
+  GURL GetCurrentURL();
+
   // InstantLoaderDelegate
-  virtual void ShowInstantLoader(InstantLoader* loader);
+  virtual void ShowInstantLoader(InstantLoader* loader) OVERRIDE;
   virtual void SetSuggestedTextFor(InstantLoader* loader,
-                                   const string16& text);
-  virtual gfx::Rect GetInstantBounds();
-  virtual bool ShouldCommitInstantOnMouseUp();
-  virtual void CommitInstantLoader(InstantLoader* loader);
-  virtual void InstantLoaderDoesntSupportInstant(InstantLoader* loader);
-  virtual void AddToBlacklist(InstantLoader* loader, const GURL& url);
+                                   const string16& text) OVERRIDE;
+  virtual gfx::Rect GetInstantBounds() OVERRIDE;
+  virtual bool ShouldCommitInstantOnMouseUp() OVERRIDE;
+  virtual void CommitInstantLoader(InstantLoader* loader) OVERRIDE;
+  virtual void InstantLoaderDoesntSupportInstant(
+      InstantLoader* loader) OVERRIDE;
+  virtual void AddToBlacklist(InstantLoader* loader,
+                              const GURL& url) OVERRIDE;
 
  private:
   friend class InstantTest;
 
   typedef std::set<std::string> HostBlacklist;
 
-  // Destroys the current loaders but remains actives.
-  void DestroyAndLeaveActive();
+  // Updates |displayable_loader_| and if necessary notifies the delegate.
+  void UpdateDisplayableLoader();
 
   // Returns the TabContents of the pending loader (or NULL). This is only used
   // for testing.
@@ -257,14 +242,6 @@ class InstantController : public InstantLoaderDelegate {
   // NULL if there is no TemplateURL for |match|.
   const TemplateURL* GetTemplateURL(const AutocompleteMatch& match);
 
-  // If instant is enabled for the specified profile the type of instant is set
-  // in |type| and true is returned. Otherwise returns false.
-  static bool GetType(Profile* profile, Type* type);
-
-  // Returns a string description for the currently enabled type. This is used
-  // for histograms.
-  static std::string GetTypeString(Profile* profile);
-
   InstantDelegate* delegate_;
 
   // The TabContents last passed to |Update|.
@@ -273,9 +250,8 @@ class InstantController : public InstantLoaderDelegate {
   // See description above getter for details.
   bool is_active_;
 
-  // Has notification been sent out that the preview TabContents is ready to be
-  // shown?
-  bool is_displayable_;
+  // The loader that is ready to be displayed.
+  InstantLoader* displayable_loader_;
 
   // See description above setter.
   gfx::Rect omnibox_bounds_;
@@ -294,6 +270,7 @@ class InstantController : public InstantLoaderDelegate {
   // reset/commit.
   std::set<TemplateURLID> blacklisted_ids_;
 
+  // Timer used to delay calls to |UpdateLoader|.
   base::OneShotTimer<InstantController> update_timer_;
 
   // Used by ScheduleForDestroy; see it for details.
@@ -301,8 +278,6 @@ class InstantController : public InstantLoaderDelegate {
 
   // URL last pased to ScheduleUpdate.
   GURL scheduled_url_;
-
-  Type type_;
 
   // List of InstantLoaders to destroy. See ScheduleForDestroy for details.
   ScopedVector<InstantLoader> loaders_to_destroy_;

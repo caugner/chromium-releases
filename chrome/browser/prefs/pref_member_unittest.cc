@@ -3,26 +3,66 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/prefs/pref_member.h"
+
+#include "base/message_loop.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/test/testing_pref_service.h"
+#include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
-static const char kBoolPref[] = "bool";
-static const char kIntPref[] = "int";
-static const char kRealPref[] = "real";
-static const char kStringPref[] = "string";
+const char kBoolPref[] = "bool";
+const char kIntPref[] = "int";
+const char kDoublePref[] = "double";
+const char kStringPref[] = "string";
 
 void RegisterTestPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(kBoolPref, false);
   prefs->RegisterIntegerPref(kIntPref, 0);
-  prefs->RegisterRealPref(kRealPref, 0.0);
+  prefs->RegisterDoublePref(kDoublePref, 0.0);
   prefs->RegisterStringPref(kStringPref, "default");
 }
+
+class GetPrefValueCallback
+    : public base::RefCountedThreadSafe<GetPrefValueCallback> {
+ public:
+  GetPrefValueCallback() : value_(false) {}
+
+  void Init(const char* pref_name, PrefService* prefs) {
+    pref_.Init(pref_name, prefs, NULL);
+    pref_.MoveToThread(BrowserThread::IO);
+  }
+
+  bool FetchValue() {
+    if (!BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        NewRunnableMethod(this,
+                          &GetPrefValueCallback::GetPrefValueOnIOThread))) {
+      return false;
+    }
+    MessageLoop::current()->Run();
+    return true;
+  }
+
+  bool value() { return value_; }
+
+ private:
+  friend class base::RefCountedThreadSafe<GetPrefValueCallback>;
+  ~GetPrefValueCallback() {}
+
+  void GetPrefValueOnIOThread() {
+    value_ = pref_.GetValue();
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            new MessageLoop::QuitTask());
+  }
+
+  BooleanPrefMember pref_;
+  bool value_;
+};
 
 class PrefMemberTestClass : public NotificationObserver {
  public:
@@ -98,26 +138,26 @@ TEST(PrefMemberTest, BasicGetAndSet) {
   EXPECT_EQ(2, integer.GetValue());
   EXPECT_EQ(2, *integer);
 
-  // Test real (double)
-  RealPrefMember real;
-  real.Init(kRealPref, &prefs, NULL);
+  // Test double
+  DoublePrefMember double_member;
+  double_member.Init(kDoublePref, &prefs, NULL);
 
   // Check the defaults
-  EXPECT_EQ(0.0, prefs.GetReal(kRealPref));
-  EXPECT_EQ(0.0, real.GetValue());
-  EXPECT_EQ(0.0, *real);
+  EXPECT_EQ(0.0, prefs.GetDouble(kDoublePref));
+  EXPECT_EQ(0.0, double_member.GetValue());
+  EXPECT_EQ(0.0, *double_member);
 
   // Try changing through the member variable.
-  real.SetValue(1.0);
-  EXPECT_EQ(1.0, real.GetValue());
-  EXPECT_EQ(1.0, prefs.GetReal(kRealPref));
-  EXPECT_EQ(1.0, *real);
+  double_member.SetValue(1.0);
+  EXPECT_EQ(1.0, double_member.GetValue());
+  EXPECT_EQ(1.0, prefs.GetDouble(kDoublePref));
+  EXPECT_EQ(1.0, *double_member);
 
   // Try changing back through the pref.
-  prefs.SetReal(kRealPref, 3.0);
-  EXPECT_EQ(3.0, prefs.GetReal(kRealPref));
-  EXPECT_EQ(3.0, real.GetValue());
-  EXPECT_EQ(3.0, *real);
+  prefs.SetDouble(kDoublePref, 3.0);
+  EXPECT_EQ(3.0, prefs.GetDouble(kDoublePref));
+  EXPECT_EQ(3.0, double_member.GetValue());
+  EXPECT_EQ(3.0, *double_member);
 
   // Test string
   StringPrefMember string;
@@ -142,14 +182,14 @@ TEST(PrefMemberTest, BasicGetAndSet) {
 }
 
 TEST(PrefMemberTest, TwoPrefs) {
-  // Make sure two RealPrefMembers stay in sync.
+  // Make sure two DoublePrefMembers stay in sync.
   TestingPrefService prefs;
   RegisterTestPrefs(&prefs);
 
-  RealPrefMember pref1;
-  pref1.Init(kRealPref, &prefs, NULL);
-  RealPrefMember pref2;
-  pref2.Init(kRealPref, &prefs, NULL);
+  DoublePrefMember pref1;
+  pref1.Init(kDoublePref, &prefs, NULL);
+  DoublePrefMember pref2;
+  pref2.Init(kDoublePref, &prefs, NULL);
 
   pref1.SetValue(2.3);
   EXPECT_EQ(2.3, *pref2);
@@ -157,7 +197,7 @@ TEST(PrefMemberTest, TwoPrefs) {
   pref2.SetValue(3.5);
   EXPECT_EQ(3.5, *pref1);
 
-  prefs.SetReal(kRealPref, 4.2);
+  prefs.SetDouble(kDoublePref, 4.2);
   EXPECT_EQ(4.2, *pref1);
   EXPECT_EQ(4.2, *pref2);
 }
@@ -192,4 +232,25 @@ TEST(PrefMemberTest, Observer) {
 TEST(PrefMemberTest, NoInit) {
   // Make sure not calling Init on a PrefMember doesn't cause problems.
   IntegerPrefMember pref;
+}
+
+// Flakily triggers an assertion, http://crbug.com/74386.
+TEST(PrefMemberTest, DISABLED_MoveToThread) {
+  MessageLoop message_loop;
+  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  BrowserThread io_thread(BrowserThread::IO);
+  ASSERT_TRUE(io_thread.Start());
+  TestingPrefService prefs;
+  RegisterTestPrefs(&prefs);
+  scoped_refptr<GetPrefValueCallback> callback =
+      make_scoped_refptr(new GetPrefValueCallback());
+  callback->Init(kBoolPref, &prefs);
+
+  ASSERT_TRUE(callback->FetchValue());
+  EXPECT_FALSE(callback->value());
+
+  prefs.SetBoolean(kBoolPref, true);
+
+  ASSERT_TRUE(callback->FetchValue());
+  EXPECT_TRUE(callback->value());
 }

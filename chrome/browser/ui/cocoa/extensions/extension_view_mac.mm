@@ -5,8 +5,8 @@
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 
 #include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
+#include "content/browser/renderer_host/render_view_host.h"
 
 // The minimum/maximum dimensions of the popup.
 const CGFloat ExtensionViewMac::kMinWidth = 25.0;
@@ -60,6 +60,9 @@ void ExtensionViewMac::UpdatePreferredSize(const gfx::Size& new_size) {
   NSRect frame = [view frame];
   frame.size.width = new_size.width();
   frame.size.height = new_size.height();
+
+  // |new_size| is in pixels. Convert to view units.
+  frame.size = [view convertSize:frame.size fromView:nil];
 
   // On first display of some extensions, this function is called with zero
   // width after the correct size has been set. Bail if zero is seen, assuming

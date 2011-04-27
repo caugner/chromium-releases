@@ -10,10 +10,10 @@
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "net/base/mock_host_resolver.h"
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoNoScript) {
@@ -108,16 +108,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Incognito) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-// Hangs flakily on mac and linux: http://crbug.com/53991
-#if defined(OS_MACOSX) || defined(OS_LINUX)
-#define MAYBE_IncognitoSplitMode DISABLED_IncognitoSplitMode
-#else
-#define MAYBE_IncognitoSplitMode IncognitoSplitMode
-#endif
-
 // Tests that the APIs in an incognito-enabled split-mode extension work
 // properly.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_IncognitoSplitMode) {
+// Hangs flakily on mac, linux, win: http://crbug.com/53991
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_IncognitoSplitMode) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(StartTestServer());
 

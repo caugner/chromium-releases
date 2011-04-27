@@ -10,11 +10,12 @@
 
 #include "base/scoped_nsobject.h"
 #include "base/scoped_ptr.h"
-#import "chrome/browser/ui/cocoa/tab_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #import "third_party/GTM/AppKit/GTMWindowSheetController.h"
 
+@class CrTrackingArea;
 @class NewTabButton;
 @class TabContentsController;
 @class TabView;
@@ -71,7 +72,7 @@ class ToolbarModel;
   NewTabButton* newTabButton_;  // weak, obtained from the nib.
 
   // Tracks the newTabButton_ for rollovers.
-  scoped_nsobject<NSTrackingArea> newTabTrackingArea_;
+  scoped_nsobject<CrTrackingArea> newTabTrackingArea_;
   scoped_ptr<TabStripModelObserverBridge> bridge_;
   Browser* browser_;  // weak
   TabStripModel* tabStripModel_;  // weak
@@ -123,7 +124,7 @@ class ToolbarModel;
   float availableResizeWidth_;
   // A tracking area that's the size of the tab strip used to be notified
   // when the mouse moves in the tab strip
-  scoped_nsobject<NSTrackingArea> trackingArea_;
+  scoped_nsobject<CrTrackingArea> trackingArea_;
   TabView* hoveredTab_;  // weak. Tab that the mouse is hovering over
 
   // Array of subviews which are permanent (and which should never be removed),

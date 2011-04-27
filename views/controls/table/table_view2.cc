@@ -291,11 +291,6 @@ void TableView2::ResetColumnSizes() {
   }
 }
 
-void TableView2::DidChangeBounds(const gfx::Rect& previous,
-                                 const gfx::Rect& current) {
-  Layout();
-}
-
 void TableView2::Layout() {
   if (native_wrapper_) {
     native_wrapper_->GetView()->SetBounds(0, 0, width(), height());
@@ -303,9 +298,9 @@ void TableView2::Layout() {
   }
 }
 
-void TableView2::PaintFocusBorder(gfx::Canvas* canvas) {
+void TableView2::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (NativeViewHost::kRenderNativeControlFocus)
-    View::PaintFocusBorder(canvas);
+    View::OnPaintFocusBorder(canvas);
 }
 
 size_t TableView2::GetVisibleColumnCount() {

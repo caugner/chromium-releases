@@ -296,7 +296,7 @@ class ChromeFrameStartupTest : public ChromeFramePerfTestBase {
     chrome_frame_dll_ = dir_app_.Append(FILE_PATH_LITERAL("servers"));
     chrome_frame_dll_ = chrome_frame_dll_.Append(
         FilePath::FromWStringHack(kChromeFrameDllName));
-    icu_dll_ = dir_app_.Append(FILE_PATH_LITERAL("icudt42.dll"));
+    icu_dll_ = dir_app_.Append(FILE_PATH_LITERAL("icudt46.dll"));
     gears_dll_ = dir_app_.Append(FILE_PATH_LITERAL("gears.dll"));
     avcodec52_dll_ = dir_app_.Append(FILE_PATH_LITERAL("avcodec-52.dll"));
     avformat52_dll_ = dir_app_.Append(FILE_PATH_LITERAL("avformat-52.dll"));
@@ -389,7 +389,8 @@ class ChromeFrameStartupTestActiveX : public ChromeFrameStartupTest {
  public:
   virtual void SetUp() {
     // Register the Chrome Frame DLL in the build directory.
-    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar);
+    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar(
+        ScopedChromeFrameRegistrar::SYSTEM_LEVEL));
 
     ChromeFrameStartupTest::SetUp();
   }
@@ -457,7 +458,8 @@ class ChromeFrameStartupTestActiveXReference
   // override the browser directory to use the reference build instead.
   virtual void SetUp() {
     // Register the reference build Chrome Frame DLL.
-    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar);
+    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar(
+        ScopedChromeFrameRegistrar::SYSTEM_LEVEL));
     chrome_frame_registrar_->RegisterReferenceChromeFrameBuild();
 
     ChromeFrameStartupTest::SetUp();
@@ -567,7 +569,8 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
 
   virtual void SetUp() {
     // Register the Chrome Frame DLL in the build directory.
-    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar);
+    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar(
+        ScopedChromeFrameRegistrar::SYSTEM_LEVEL));
   }
 
   void RunTest(const char* test_name, char* urls[], int total_urls) {
@@ -748,7 +751,8 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
 class ChromeFrameMemoryTestReference : public ChromeFrameMemoryTest {
  public:
   virtual void SetUp() {
-    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar);
+    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar(
+        ScopedChromeFrameRegistrar::SYSTEM_LEVEL));
     chrome_frame_registrar_->RegisterReferenceChromeFrameBuild();
   }
 
@@ -872,7 +876,8 @@ class ChromeFrameCreationTestReference : public ChromeFrameCreationTest {
  public:
   // override the browser directory to use the reference build instead.
   virtual void SetUp() {
-    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar);
+    chrome_frame_registrar_.reset(new ScopedChromeFrameRegistrar(
+        ScopedChromeFrameRegistrar::SYSTEM_LEVEL));
     chrome_frame_registrar_->RegisterReferenceChromeFrameBuild();
     ChromeFrameStartupTest::SetUp();
   }

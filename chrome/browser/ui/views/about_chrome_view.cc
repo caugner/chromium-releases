@@ -22,23 +22,22 @@
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/ui/views/accessible_view_helper.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "gfx/canvas.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/controls/throbber.h"
-#include "views/standard_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/view_text_utils.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
@@ -296,13 +295,13 @@ void AboutChromeView::Init() {
 
   // Add up the height of the various elements on the page.
   int height = about_background_logo->height() +
-               kRelatedControlVerticalSpacing +
-               // Copyright line.
-               font.GetHeight() +
-               // Main label.
-               dummy_text.GetHeightForWidth(
-                   dialog_dimensions_.width() - (2 * kPanelHorizMargin)) +
-               kRelatedControlVerticalSpacing;
+      views::kRelatedControlVerticalSpacing +
+      // Copyright line.
+      font.GetHeight() +
+      // Main label.
+      dummy_text.GetHeightForWidth(
+          dialog_dimensions_.width() - (2 * views::kPanelHorizMargin)) +
+          views::kRelatedControlVerticalSpacing;
 
 #if defined(GOOGLE_CHROME_BUILD)
   std::vector<size_t> url_offsets;
@@ -321,7 +320,7 @@ void AboutChromeView::Init() {
   terms_of_service_url_->SetController(this);
 
   // Add the Terms of Service line and some whitespace.
-  height += font.GetHeight() + kRelatedControlVerticalSpacing;
+  height += font.GetHeight() + views::kRelatedControlVerticalSpacing;
 #endif
 
   // Use whichever is greater (the calculated height or the specified minimum
@@ -348,15 +347,16 @@ void AboutChromeView::Layout() {
 
   // First label goes to the top left corner.
   sz = about_title_label_->GetPreferredSize();
-  about_title_label_->SetBounds(kPanelHorizMargin, kPanelVertMargin,
-                                sz.width(), sz.height());
+  about_title_label_->SetBounds(
+      views::kPanelHorizMargin, views::kPanelVertMargin,
+      sz.width(), sz.height());
 
   // Then we have the version number right below it.
   sz = version_label_->GetPreferredSize();
-  version_label_->SetBounds(kPanelHorizMargin,
+  version_label_->SetBounds(views::kPanelHorizMargin,
                             about_title_label_->y() +
                                 about_title_label_->height() +
-                                kRelatedControlVerticalSpacing,
+                                views::kRelatedControlVerticalSpacing,
                             kVersionFieldWidth,
                             sz.height());
 
@@ -364,27 +364,27 @@ void AboutChromeView::Layout() {
   // Then we have the version number right below it.
   sz = os_version_label_->GetPreferredSize();
   os_version_label_->SetBounds(
-      kPanelHorizMargin,
+      views::kPanelHorizMargin,
       version_label_->y() +
           version_label_->height() +
-          kRelatedControlVerticalSpacing,
+          views::kRelatedControlVerticalSpacing,
       kVersionFieldWidth,
       sz.height());
 #endif
 
   // For the width of the main text label we want to use up the whole panel
   // width and remaining height, minus a little margin on each side.
-  int y_pos = background_image_height + kRelatedControlVerticalSpacing;
-  sz.set_width(panel_size.width() - 2 * kPanelHorizMargin);
+  int y_pos = background_image_height + views::kRelatedControlVerticalSpacing;
+  sz.set_width(panel_size.width() - 2 * views::kPanelHorizMargin);
 
   // Draw the text right below the background image.
-  copyright_label_->SetBounds(kPanelHorizMargin,
+  copyright_label_->SetBounds(views::kPanelHorizMargin,
                               y_pos,
                               sz.width(),
                               sz.height());
 
   // Then the main_text_label.
-  main_text_label_->SetBounds(kPanelHorizMargin,
+  main_text_label_->SetBounds(views::kPanelHorizMargin,
                               copyright_label_->y() +
                                   copyright_label_->height(),
                               sz.width(),
@@ -392,12 +392,12 @@ void AboutChromeView::Layout() {
 
   // Get the y-coordinate of our parent so we can position the text left of the
   // buttons at the bottom.
-  gfx::Rect parent_bounds = GetParent()->GetLocalBounds(false);
+  gfx::Rect parent_bounds = parent()->GetContentsBounds();
 
   sz = throbber_->GetPreferredSize();
-  int throbber_topleft_x = kPanelHorizMargin;
-  int throbber_topleft_y = parent_bounds.bottom() - sz.height() -
-                           kButtonVEdgeMargin - 3;
+  int throbber_topleft_x = views::kPanelHorizMargin;
+  int throbber_topleft_y =
+      parent_bounds.bottom() - sz.height() - views::kButtonVEdgeMargin - 3;
   throbber_->SetBounds(throbber_topleft_x, throbber_topleft_y,
                        sz.width(), sz.height());
 
@@ -421,21 +421,17 @@ void AboutChromeView::Layout() {
   // variable length messages.
   sz = update_label_.GetPreferredSize();
   int update_label_x = throbber_->x() + throbber_->width() +
-                       kRelatedControlHorizontalSpacing;
+                       views::kRelatedControlHorizontalSpacing;
   update_label_.SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   update_label_.SetBounds(update_label_x,
                           throbber_topleft_y + 1,
                           parent_bounds.width() - update_label_x,
                           sz.height());
-
-  if (!accessible_view_helper_.get())
-    accessible_view_helper_.reset(
-        new AccessibleViewHelper(GetParent(), profile_));
 }
 
 
-void AboutChromeView::Paint(gfx::Canvas* canvas) {
-  views::View::Paint(canvas);
+void AboutChromeView::OnPaint(gfx::Canvas* canvas) {
+  views::View::OnPaint(canvas);
 
   // Draw the background image color (and the separator) across the dialog.
   // This will become the background for the logo image at the top of the
@@ -477,7 +473,7 @@ void AboutChromeView::Paint(gfx::Canvas* canvas) {
 #if defined(GOOGLE_CHROME_BUILD)
   // Insert a line break and some whitespace.
   position.set_width(0);
-  position.Enlarge(0, font.GetHeight() + kRelatedControlVerticalSpacing);
+  position.Enlarge(0, font.GetHeight() + views::kRelatedControlVerticalSpacing);
 
   // And now the Terms of Service and position the TOS url.
   view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
@@ -538,11 +534,9 @@ void AboutChromeView::ViewHierarchyChanged(bool is_add,
       // for Vista is another option.
       int service_pack_major = 0, service_pack_minor = 0;
       base::win::GetServicePackLevel(&service_pack_major, &service_pack_minor);
-      if (base::win::UserAccountControlIsEnabled() ||
-          base::win::GetVersion() == base::win::VERSION_XP ||
-          (base::win::GetVersion() == base::win::VERSION_VISTA &&
-           service_pack_major >= 1) ||
-          base::win::GetVersion() > base::win::VERSION_VISTA) {
+      if (!(base::win::GetVersion() == base::win::VERSION_VISTA &&
+            (service_pack_major == 0) &&
+            !base::win::UserAccountControlIsEnabled())) {
         UpdateStatus(UPGRADE_CHECK_STARTED, GOOGLE_UPDATE_NO_ERROR);
         // CheckForUpdate(false, ...) means don't upgrade yet.
         google_updater_->CheckForUpdate(false, window());
@@ -568,7 +562,7 @@ void AboutChromeView::ViewHierarchyChanged(bool is_add,
 std::wstring AboutChromeView::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_RESTART_AND_UPDATE));
+    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_RELAUNCH_AND_UPDATE));
   } else if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL) {
     if (restart_button_visible_)
       return UTF16ToWide(l10n_util::GetStringUTF16(IDS_NOT_NOW));
@@ -801,7 +795,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       restart_button_visible_ = true;
       const std::wstring& update_string =
           UTF16ToWide(l10n_util::GetStringFUTF16(
-              IDS_UPGRADE_SUCCESSFUL_RESTART,
+              IDS_UPGRADE_SUCCESSFUL_RELAUNCH,
               l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
       update_label_.SetText(update_string);
       show_success_indicator = true;
@@ -811,8 +805,13 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Error"),
                                 profile_);
       restart_button_visible_ = false;
-      update_label_.SetText(UTF16ToWide(
-          l10n_util::GetStringFUTF16Int(IDS_UPGRADE_ERROR, error_code)));
+      if (error_code != GOOGLE_UPDATE_DISABLED_BY_POLICY) {
+        update_label_.SetText(UTF16ToWide(
+            l10n_util::GetStringFUTF16Int(IDS_UPGRADE_ERROR, error_code)));
+      } else {
+        update_label_.SetText(UTF16ToWide(
+            l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY)));
+      }
       show_timeout_indicator = true;
       break;
     default:
@@ -830,8 +829,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
     throbber_->Stop();
 
   // We have updated controls on the parent, so we need to update its layout.
-  View* parent = GetParent();
-  parent->Layout();
+  parent()->Layout();
 
   // Check button may have appeared/disappeared. We cannot call this during
   // ViewHierarchyChanged because the |window()| pointer hasn't been set yet.

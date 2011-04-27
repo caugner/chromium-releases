@@ -16,12 +16,12 @@
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/tabs/tab_strip_model_observer.h"
-#include "chrome/browser/ui/gtk/infobar_arrow_model.h"
-#include "chrome/common/notification_registrar.h"
-#include "gfx/rect.h"
+#include "chrome/browser/ui/gtk/infobars/infobar_arrow_model.h"
+#include "content/common/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/rect.h"
 
 class BookmarkBarGtk;
 class Browser;
@@ -68,6 +68,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
   virtual gfx::Rect GetRestoredBounds() const;
+  virtual gfx::Rect GetBounds() const;
   virtual bool IsMaximized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
@@ -89,7 +90,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
   virtual void ToggleBookmarkBar();
-  virtual views::Window* ShowAboutChromeDialog();
+  virtual void ShowAboutChromeDialog();
   virtual void ShowUpdateChromeDialog();
   virtual void ShowTaskManager();
   virtual void ShowBackgroundPages();
@@ -132,9 +133,6 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void HideInstant(bool instant_is_active);
   virtual gfx::Rect GetInstantBounds();
 
-  virtual gfx::Rect GrabWindowSnapshot(
-      std::vector<unsigned char>* png_representation);
-
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
@@ -158,9 +156,7 @@ class BrowserWindowGtk : public BrowserWindow,
 
   void UpdateDevToolsForContents(TabContents* contents);
 
-  void OnBoundsChanged(const gfx::Rect& bounds);
   void OnDebouncedBoundsChanged();
-  void OnStateChanged(GdkWindowState state, GdkWindowState changed_mask);
 
   // Request the underlying window to unmaximize.  Also tries to work around
   // a window manager "feature" that can prevent this in some edge cases.
@@ -289,6 +285,13 @@ class BrowserWindowGtk : public BrowserWindow,
   // position to the WM.
   void SetBoundsImpl(const gfx::Rect& bounds, bool exterior, bool move);
 
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnConfigure,
+                       GdkEventConfigure*);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnWindowState,
+                       GdkEventWindowState*);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnMainWindowDeleteEvent,
+                       GdkEvent*);
+  CHROMEGTK_CALLBACK_0(BrowserWindowGtk, void, OnMainWindowDestroy);
   // Callback for when the custom frame alignment needs to be redrawn.
   // The content area includes the toolbar and web page but not the tab strip.
   CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnCustomFrameExpose,

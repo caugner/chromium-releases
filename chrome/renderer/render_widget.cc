@@ -16,8 +16,6 @@
 #include "chrome/common/render_messages_params.h"
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
-#include "gfx/point.h"
-#include "gfx/size.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
@@ -28,6 +26,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/size.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
@@ -484,44 +484,57 @@ void RenderWidget::PaintDebugBorder(const gfx::Rect& rect,
 
 void RenderWidget::AnimationCallback() {
   animation_task_posted_ = false;
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Renderer4.AnimationDelayTime", 0, 0, 16, 17);
+  if (!animation_update_pending_)
+    return;
+  if (!animation_floor_time_.is_null()) {
+    // Record when we fired (according to base::Time::Now()) relative to when
+    // we posted the task to quantify how much the base::Time/base::TimeTicks
+    // skew is affecting animations.
+    base::TimeDelta animation_callback_delay = base::Time::Now() -
+        (animation_floor_time_ - base::TimeDelta::FromMilliseconds(16));
+    UMA_HISTOGRAM_CUSTOM_TIMES("Renderer4.AnimationCallbackDelayTime",
+                               animation_callback_delay,
+                               base::TimeDelta::FromMilliseconds(0),
+                               base::TimeDelta::FromMilliseconds(30),
+                               25);
+  }
   CallDoDeferredUpdate();
 }
 
 void RenderWidget::AnimateIfNeeded() {
-  if (animation_update_pending_) {
-    base::Time now = base::Time::Now();
-    if (now >= animation_floor_time_) {
-      animation_floor_time_ = now + base::TimeDelta::FromMilliseconds(16);
-      // Set a timer to call us back after 16ms (targetting 60FPS) before
-      // running animation callbacks so that if a callback requests another
-      // we'll be sure to run it at the proper time.
-      MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
-          this, &RenderWidget::AnimationCallback), 16);
-      animation_task_posted_ = true;
-      animation_update_pending_ = false;
-      // Explicitly pump the WebCore Timer queue to avoid starvation on OS X.
-      // See crbug.com/71735.
-      // TODO(jamesr) Remove this call once crbug.com/72007 is fixed.
-      RenderThread::current()->GetWebKitClientImpl()->DoTimeout();
-      webwidget_->animate();
-    } else if (!animation_task_posted_) {
-      // This code uses base::Time::Now() to calculate the floor and next fire
-      // time because javascript's Date object uses base::Time::Now().  The
-      // message loop uses base::TimeTicks, which on windows can have a
-      // different granularity than base::Time.
-      // The upshot of all this is that this function might be called before
-      // base::Time::Now() has advanced past the animation_floor_time_.  To
-      // avoid exposing this delay to javascript, we keep posting delayed
-      // tasks until we observe base::Time::Now() advancing far enough.
-      int64 delay = (animation_floor_time_ - now).InMillisecondsRoundedUp();
-      UMA_HISTOGRAM_CUSTOM_COUNTS("Renderer4.AnimationDelayTime",
-                                  static_cast<int>(delay), 0, 16, 17);
-      animation_task_posted_ = true;
-      MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
-          this, &RenderWidget::AnimationCallback), delay);
-    }
+  if (!animation_update_pending_)
+    return;
+  base::Time now = base::Time::Now();
+  if (now >= animation_floor_time_) {
+    animation_floor_time_ = now + base::TimeDelta::FromMilliseconds(16);
+    // Set a timer to call us back after 16ms (targetting 60FPS) before
+    // running animation callbacks so that if a callback requests another
+    // we'll be sure to run it at the proper time.
+    MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
+        this, &RenderWidget::AnimationCallback), 16);
+    animation_task_posted_ = true;
+    animation_update_pending_ = false;
+    // Explicitly pump the WebCore Timer queue to avoid starvation on OS X.
+    // See crbug.com/71735.
+    // TODO(jamesr) Remove this call once crbug.com/72007 is fixed.
+    RenderThread::current()->GetWebKitClientImpl()->DoTimeout();
+    webwidget_->animate();
+    return;
   }
+  if (animation_task_posted_)
+    return;
+  // This code uses base::Time::Now() to calculate the floor and next fire
+  // time because javascript's Date object uses base::Time::Now().  The
+  // message loop uses base::TimeTicks, which on windows can have a
+  // different granularity than base::Time.
+  // The upshot of all this is that this function might be called before
+  // base::Time::Now() has advanced past the animation_floor_time_.  To
+  // avoid exposing this delay to javascript, we keep posting delayed
+  // tasks until base::Time::Now() has advanced far enough.
+  int64 delay = (animation_floor_time_ - now).InMillisecondsRoundedUp();
+  animation_task_posted_ = true;
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      NewRunnableMethod(this, &RenderWidget::AnimationCallback), delay);
 }
 
 void RenderWidget::CallDoDeferredUpdate() {
@@ -982,9 +995,9 @@ webkit::ppapi::PluginInstance* RenderWidget::GetBitmapForOptimizedPluginPaint(
   return NULL;
 }
 
-gfx::Size RenderWidget::GetScrollOffset() {
+gfx::Point RenderWidget::GetScrollOffset() {
   // Bare RenderWidgets don't support scroll offset.
-  return gfx::Size(0, 0);
+  return gfx::Point(0, 0);
 }
 
 void RenderWidget::SetHidden(bool hidden) {

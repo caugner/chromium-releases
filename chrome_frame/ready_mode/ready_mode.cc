@@ -15,12 +15,13 @@
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/win_util.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "net/base/registry_controlled_domain.h"
-#include "chrome/installer/util/package_properties.h"
 #include "chrome_frame/infobars/infobar_manager.h"
 #include "chrome_frame/ready_mode/internal/ready_mode_web_browser_adapter.h"
 #include "chrome_frame/ready_mode/internal/ready_prompt_content.h"
 #include "chrome_frame/ready_mode/internal/registry_ready_mode_state.h"
+#include "chrome_frame/ready_mode/internal/url_launcher.h"
 #include "chrome_frame/utils.h"
 
 namespace {
@@ -89,6 +90,33 @@ class BrowserObserver : public ReadyModeWebBrowserAdapter::Observer {
 
   DISALLOW_COPY_AND_ASSIGN(BrowserObserver);
 };  // class BrowserObserver
+
+// Implements launching of a URL in an instance of IWebBrowser2.
+class UrlLauncherImpl : public UrlLauncher {
+ public:
+  explicit UrlLauncherImpl(IWebBrowser2* web_browser);
+
+  // UrlLauncher implementation
+  void LaunchUrl(const std::wstring& url);
+
+ private:
+  base::win::ScopedComPtr<IWebBrowser2> web_browser_;
+};  // class UrlLaucherImpl
+
+UrlLauncherImpl::UrlLauncherImpl(IWebBrowser2* web_browser) {
+  DCHECK(web_browser);
+  web_browser_ = web_browser;
+}
+
+void UrlLauncherImpl::LaunchUrl(const std::wstring& url) {
+  VARIANT flags = { VT_I4 };
+  V_I4(&flags) = navOpenInNewWindow;
+  base::win::ScopedBstr location(url.c_str());
+
+  HRESULT hr = web_browser_->Navigate(location, &flags, NULL, NULL, NULL);
+  DLOG_IF(ERROR, FAILED(hr)) << "Failed to invoke Navigate on IWebBrowser2. "
+                             << "Error: " << hr;
+}
 
 StateObserver::StateObserver(
     const base::WeakPtr<BrowserObserver>& ready_mode_ui)
@@ -192,17 +220,22 @@ void BrowserObserver::ShowPrompt() {
     scoped_ptr<RegistryReadyModeState::Observer> ready_mode_state_observer(
         new StateObserver(weak_ptr_factory_.GetWeakPtr()));
 
-    installer::ActivePackageProperties package_properties;
+    BrowserDistribution* dist =
+        BrowserDistribution::GetSpecificDistribution(
+            BrowserDistribution::CHROME_BINARIES);
 
     // Owned by infobar_content
     scoped_ptr<ReadyModeState> ready_mode_state(new RegistryReadyModeState(
-        package_properties.GetStateKey(),
+        dist->GetStateKey(),
         base::TimeDelta::FromMinutes(kTemporaryDeclineDurationMinutes),
         ready_mode_state_observer.release()));
 
+    // Owned by infobar_content
+    scoped_ptr<UrlLauncher> url_launcher(new UrlLauncherImpl(web_browser_));
+
     // Owned by infobar_manager
-    scoped_ptr<InfobarContent> infobar_content(
-        new ReadyPromptContent(ready_mode_state.release()));
+    scoped_ptr<InfobarContent> infobar_content(new ReadyPromptContent(
+        ready_mode_state.release(), url_launcher.release()));
 
     infobar_manager->Show(infobar_content.release(), TOP_INFOBAR);
   }
@@ -329,9 +362,12 @@ void Configure(Delegate* chrome_frame, IWebBrowser2* web_browser) {
   // Take ownership of the delegate
   linked_ptr<Delegate> delegate(chrome_frame);
   chrome_frame = NULL;
+    BrowserDistribution* dist =
+        BrowserDistribution::GetSpecificDistribution(
+            BrowserDistribution::CHROME_BINARIES);
 
   RegistryReadyModeState ready_mode_state(
-      installer::ActivePackageProperties().GetStateKey(),
+      dist->GetStateKey(),
       base::TimeDelta::FromMinutes(kTemporaryDeclineDurationMinutes),
       NULL);  // NULL => no observer required
 

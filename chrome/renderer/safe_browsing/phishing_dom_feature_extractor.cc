@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
@@ -146,11 +147,7 @@ void PhishingDOMFeatureExtractor::ExtractFeaturesWithTimeout() {
   if (!cur_frame_) {
     WebKit::WebView* web_view = render_view_->webview();
     if (!web_view) {
-      // When the WebView is going away, the render view should have called
-      // CancelPendingExtraction() which should have stopped any pending work,
-      // so this case should not happen.
-      NOTREACHED();
-      RunCallback(false);
+      RunCallback(false);  // The WebView is going away.
       return;
     }
     cur_frame_ = web_view->mainFrame();

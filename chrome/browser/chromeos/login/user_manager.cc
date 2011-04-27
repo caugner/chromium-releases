@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,24 +11,27 @@
 #include "base/nss_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/input_method_library.h"
+#include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_type.h"
-#include "gfx/codec/png_codec.h"
+#include "content/browser/browser_thread.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_type.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace chromeos {
 
@@ -41,7 +44,7 @@ const char kUserImages[] = "UserImages";
 
 // Incognito user is represented by an empty string (since some code already
 // depends on that and it's hard to figure out what).
-const char kIncognitoUser[] = "";
+const char kGuestUser[] = "";
 
 // Special pathes to default user images.
 const char* kDefaultImageNames[] = {
@@ -142,8 +145,8 @@ void UpdateOwnership(bool is_owner) {
 // Checks current user's ownership on file thread.
 void CheckOwnership() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-
   bool is_owner = OwnershipService::GetSharedInstance()->CurrentUserIsOwner();
+  VLOG(1) << "Current user " << (is_owner ? "is owner" : "is not owner");
 
   // UserManager should be accessed only on UI thread.
   BrowserThread::PostTask(
@@ -152,12 +155,81 @@ void CheckOwnership() {
       NewRunnableFunction(&UpdateOwnership, is_owner));
 }
 
+// Used to handle the asynchronous response of deleting a cryptohome directory.
+class RemoveAttempt : public CryptohomeLibrary::Delegate {
+ public:
+  // Creates new remove attempt for the given user. Note, |delegate| can
+  // be NULL.
+  RemoveAttempt(const std::string& user_email,
+                chromeos::RemoveUserDelegate* delegate)
+      : user_email_(user_email),
+        delegate_(delegate),
+        method_factory_(this) {
+    RemoveUser();
+  }
+
+  void RemoveUser() {
+    // Owner is not allowed to be removed from the device.
+    // Must not proceed without signature verification.
+    UserCrosSettingsProvider user_settings;
+    bool trusted_owner_available = user_settings.RequestTrustedOwner(
+        method_factory_.NewRunnableMethod(&RemoveAttempt::RemoveUser));
+    if (!trusted_owner_available) {
+      // Value of owner email is still not verified.
+      // Another attempt will be invoked after verification completion.
+      return;
+    }
+    if (user_email_ == UserCrosSettingsProvider::cached_owner()) {
+      // Owner is not allowed to be removed from the device. Probably on
+      // the stack, so deffer the deletion.
+      MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+      return;
+    }
+
+    if (delegate_)
+      delegate_->OnBeforeUserRemoved(user_email_);
+
+    chromeos::UserManager::Get()->RemoveUserFromList(user_email_);
+    RemoveUserCryptohome();
+
+    if (delegate_)
+      delegate_->OnUserRemoved(user_email_);
+  }
+
+  void RemoveUserCryptohome() {
+    if (CrosLibrary::Get()->EnsureLoaded()) {
+      CrosLibrary::Get()->GetCryptohomeLibrary()->AsyncRemove(user_email_,
+                                                              this);
+    }
+  }
+
+  void OnComplete(bool success, int return_code) {
+    // Log the error, but there's not much we can do.
+    if (!success) {
+      VLOG(1) << "Removal of cryptohome for " << user_email_
+              << " failed, return code: " << return_code;
+    }
+    delete this;
+  }
+
+ private:
+  std::string user_email_;
+  chromeos::RemoveUserDelegate* delegate_;
+
+  // Factory of callbacks.
+  ScopedRunnableMethodFactory<RemoveAttempt> method_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(RemoveAttempt);
+};
+
 }  // namespace
 
 UserManager::User::User() {
   image_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
       IDR_LOGIN_DEFAULT_USER);
 }
+
+UserManager::User::~User() {}
 
 std::string UserManager::User::GetDisplayName() const {
   size_t i = email_.find('@');
@@ -167,8 +239,25 @@ std::string UserManager::User::GetDisplayName() const {
   return email_.substr(0, i);
 }
 
+std::string UserManager::User::GetNameTooltip() const {
+  const std::string& user_email = email();
+  size_t at_pos = user_email.rfind('@');
+  if (at_pos == std::string::npos) {
+    NOTREACHED();
+    return std::string();
+  }
+  size_t domain_start = at_pos + 1;
+  std::string domain = user_email.substr(domain_start,
+                                         user_email.length() - domain_start);
+  return base::StringPrintf("%s (%s)",
+                            GetDisplayName().c_str(),
+                            domain.c_str());
+}
+
 // static
 UserManager* UserManager::Get() {
+  // Not thread-safe.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!user_manager_)
     user_manager_ = new UserManager();
   return user_manager_;
@@ -231,12 +320,12 @@ std::vector<UserManager::User> UserManager::GetUsers() const {
 void UserManager::OffTheRecordUserLoggedIn() {
   user_is_logged_in_ = true;
   logged_in_user_ = User();
-  logged_in_user_.set_email(kIncognitoUser);
+  logged_in_user_.set_email(kGuestUser);
   NotifyOnLogin();
 }
 
 void UserManager::UserLoggedIn(const std::string& email) {
-  if (email == kIncognitoUser) {
+  if (email == kGuestUser) {
     OffTheRecordUserLoggedIn();
     return;
   }
@@ -277,7 +366,22 @@ void UserManager::UserLoggedIn(const std::string& email) {
     SetDefaultUserImage(email);
 }
 
-void UserManager::RemoveUser(const std::string& email) {
+void UserManager::RemoveUser(const std::string& email,
+                             RemoveUserDelegate* delegate) {
+  // Get a copy of the current users.
+  std::vector<User> users = GetUsers();
+
+  bool user_found = false;
+  for (size_t i = 0; !user_found && i < users.size(); ++i)
+    user_found = (email == users[i].email());
+  if (!user_found)
+    return;
+
+  // |RemoveAttempt| deletes itself when done.
+  new RemoveAttempt(email, delegate);
+}
+
+void UserManager::RemoveUserFromList(const std::string& email) {
   // Get a copy of the current users.
   std::vector<User> users = GetUsers();
 
@@ -325,6 +429,10 @@ bool UserManager::IsKnownUser(const std::string& email) {
   }
 
   return false;
+}
+
+const UserManager::User& UserManager::logged_in_user() const {
+  return logged_in_user_;
 }
 
 void UserManager::SetLoggedInUserImage(const SkBitmap& image) {
@@ -403,6 +511,10 @@ void UserManager::OnImageLoaded(const std::string& username,
       Details<const User>(&user));
 }
 
+bool UserManager::IsLoggedInAsGuest() const {
+  return logged_in_user().email() == kGuestUser;
+}
+
 // Private constructor and destructor. Do nothing.
 UserManager::UserManager()
     : ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_(new UserImageLoader(this))),
@@ -434,7 +546,7 @@ void UserManager::NotifyOnLogin() {
       SetDeferImeStartup(false);
   // Shut down the IME so that it will reload the user's settings.
   chromeos::CrosLibrary::Get()->GetInputMethodLibrary()->
-      StopInputMethodProcesses();
+      StopInputMethodDaemon();
   // Let the window manager know that we're logged in now.
   WmIpc::instance()->SetLoggedInProperty(true);
   // Ensure we've opened the real user's key/certificate database.
@@ -452,6 +564,14 @@ void UserManager::Observe(NotificationType type,
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         NewRunnableFunction(&CheckOwnership));
   }
+}
+
+bool UserManager::current_user_is_owner() const {
+  return current_user_is_owner_;
+}
+
+void UserManager::set_current_user_is_owner(bool current_user_is_owner) {
+  current_user_is_owner_ = current_user_is_owner;
 }
 
 }  // namespace chromeos

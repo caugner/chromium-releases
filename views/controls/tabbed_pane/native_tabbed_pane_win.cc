@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,13 @@
 
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/font.h"
-#include "gfx/native_theme_win.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/native_theme_win.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
-#include "views/fill_layout.h"
+#include "views/layout/fill_layout.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_win.h"
 
@@ -53,38 +53,38 @@ class TabLayout : public LayoutManager {
 
   // Switches to the tab page identified by the given index.
   void SwitchToPage(View* host, View* page) {
-    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+    for (int i = 0; i < host->child_count(); ++i) {
       View* child = host->GetChildViewAt(i);
       // The child might not have been laid out yet.
       if (child == page)
-        child->SetBounds(gfx::Rect(host->size()));
+        child->SetBoundsRect(host->GetContentsBounds());
       child->SetVisible(child == page);
     }
 
     FocusManager* focus_manager = page->GetFocusManager();
     DCHECK(focus_manager);
     View* focused_view = focus_manager->GetFocusedView();
-    if (focused_view && host->IsParentOf(focused_view) &&
-        !page->IsParentOf(focused_view))
+    if (focused_view && host->Contains(focused_view) &&
+        !page->Contains(focused_view))
       focus_manager->SetFocusedView(page);
   }
 
  private:
   // LayoutManager overrides:
   virtual void Layout(View* host) {
-    gfx::Rect bounds(host->size());
-    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+    gfx::Rect bounds(host->GetContentsBounds());
+    for (int i = 0; i < host->child_count(); ++i) {
       View* child = host->GetChildViewAt(i);
       // We only layout visible children, since it may be expensive.
       if (child->IsVisible() && child->bounds() != bounds)
-        child->SetBounds(bounds);
+        child->SetBoundsRect(bounds);
     }
   }
 
   virtual gfx::Size GetPreferredSize(View* host) {
     // First, query the preferred sizes to determine a good width.
     int width = 0;
-    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+    for (int i = 0; i < host->child_count(); ++i) {
       View* page = host->GetChildViewAt(i);
       width = std::max(width, page->GetPreferredSize().width());
     }
@@ -94,7 +94,7 @@ class TabLayout : public LayoutManager {
 
   virtual int GetPreferredHeightForWidth(View* host, int width) {
     int height = 0;
-    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+    for (int i = 0; i < host->child_count(); ++i) {
       View* page = host->GetChildViewAt(i);
       height = std::max(height, page->GetHeightForWidth(width));
     }
@@ -235,7 +235,7 @@ View* NativeTabbedPaneWin::GetView() {
 
 void NativeTabbedPaneWin::SetFocus() {
   // Focus the associated HWND.
-  Focus();
+  OnFocus();
 }
 
 gfx::Size NativeTabbedPaneWin::GetPreferredSize() {
@@ -310,7 +310,7 @@ void NativeTabbedPaneWin::CreateNativeControl() {
   NativeControlCreated(tab_control);
 
   // Add tabs that are already added if any.
-  if (tab_views_.size() > 0) {
+  if (!tab_views_.empty()) {
     InitializeTabs();
     if (selected_index_ >= 0)
       DoSelectTabAt(selected_index_, false);
@@ -353,7 +353,8 @@ void NativeTabbedPaneWin::ViewHierarchyChanged(bool is_add,
   if (is_add && (child == this) && content_window_) {
     // We have been added to a view hierarchy, update the FocusTraversable
     // parent.
-    content_window_->SetFocusTraversableParent(GetRootView());
+    content_window_->SetFocusTraversableParent(
+        GetWidget()->GetFocusTraversable());
   }
 }
 

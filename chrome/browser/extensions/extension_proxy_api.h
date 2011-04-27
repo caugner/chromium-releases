@@ -7,38 +7,81 @@
 
 #include <string>
 
+#include "base/singleton.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/extension_preference_api.h"
+#include "chrome/browser/profiles/profile.h"
+#include "net/proxy/proxy_config.h"
 
 class DictionaryValue;
+class ExtensionEventRouterForwarder;
 
-class UseCustomProxySettingsFunction : public SyncExtensionFunction {
+// This class observes proxy error events and routes them to the appropriate
+// extensions listening to those events. All methods must be called on the IO
+// thread unless otherwise specified.
+class ExtensionProxyEventRouter {
  public:
-  ~UseCustomProxySettingsFunction() {}
-  virtual bool RunImpl();
+  static ExtensionProxyEventRouter* GetInstance();
 
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.proxy.useCustomProxySettings")
+  void OnProxyError(ExtensionEventRouterForwarder* event_router,
+                    ProfileId profile_id,
+                    int error_code);
 
  private:
-  struct ProxyServer {
-    enum {
-      INVALID_PORT = -1
-    };
-    ProxyServer() : scheme("http"), host(""), port(INVALID_PORT) {}
+  friend struct DefaultSingletonTraits<ExtensionProxyEventRouter>;
 
-    // The scheme of the proxy URI itself.
-    std::string scheme;
-    std::string host;
-    int port;
-  };
+  ExtensionProxyEventRouter();
+  ~ExtensionProxyEventRouter();
 
-  bool GetProxyServer(const DictionaryValue* dict, ProxyServer* proxy_server);
+  DISALLOW_COPY_AND_ASSIGN(ExtensionProxyEventRouter);
+};
 
-  bool ApplyMode(const std::string& mode);
-  bool ApplyPacScript(DictionaryValue* pac_dict);
-  bool ApplyProxyRules(DictionaryValue* proxy_rules);
+class SetProxySettingsFunction : public SetPreferenceFunction {
+ public:
+  virtual ~SetProxySettingsFunction() {}
+  virtual bool RunImpl();
 
-  // Takes ownership of |pref_value|.
-  void ApplyPreference(const char* pref_path, Value* pref_value);
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.proxy.set")
+ private:
+  // Converts a proxy "rules" element passed by the API caller into a proxy
+  // configuration string that can be used by the proxy subsystem (see
+  // proxy_config.h). Returns true if successful and sets |error_| otherwise.
+  bool GetProxyRules(DictionaryValue* proxy_rules, std::string* out);
+
+  // Converts a proxy server description |dict| as passed by the API caller
+  // (e.g. for the http proxy in the rules element) and converts it to a
+  // ProxyServer. Returns true if successful and sets |error_| otherwise.
+  bool GetProxyServer(const DictionaryValue* dict,
+                      net::ProxyServer::Scheme default_scheme,
+                      net::ProxyServer* proxy_server);
+
+  // Joins a list of URLs (stored as StringValues) with |joiner| to |out|.
+  // Returns true if successful and sets |error_| otherwise.
+  bool JoinUrlList(ListValue* list,
+                   const std::string& joiner,
+                   std::string* out);
+
+  // Creates a string of the "bypassList" entries of a ProxyRules object (see
+  // API documentation) by joining the elements with commas.
+  // Returns true if successful (i.e. string could be delivered or no
+  // "bypassList" exists in the |proxy_rules|) and sets |error_| otherwise.
+  bool GetBypassList(DictionaryValue* proxy_rules, std::string* out);
+};
+
+class GetProxySettingsFunction : public GetPreferenceFunction {
+ public:
+  virtual ~GetProxySettingsFunction() {}
+  virtual bool RunImpl();
+
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.proxy.get")
+ private:
+  // Convert the representation of a proxy configuration from the format
+  // that is stored in the pref stores to the format that is used by the API.
+  // See ProxyServer type defined in |experimental.proxy|.
+  bool ConvertToApiFormat(const DictionaryValue* proxy_prefs,
+                          DictionaryValue* api_proxy_config);
+  bool ParseRules(const std::string& rules, DictionaryValue* out) const;
+  DictionaryValue* ConvertToDictionary(const net::ProxyServer& proxy) const;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_PROXY_API_H_

@@ -10,18 +10,23 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/insets.h"
 #include "grit/app_strings.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/insets.h"
 #include "views/background.h"
 #include "views/border.h"
 #include "views/controls/menu/menu_2.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/controls/textfield/textfield_views_model.h"
-#include "views/event.h"
+#include "views/events/event.h"
+#include "views/metrics.h"
 #include "views/views_delegate.h"
+
+#if defined(OS_LINUX)
+#include "ui/gfx/gtk_util.h"
+#endif
 
 namespace {
 
@@ -59,7 +64,9 @@ NativeTextfieldViews::NativeTextfieldViews(Textfield* parent)
       text_offset_(0),
       insert_(true),
       is_cursor_visible_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(cursor_timer_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(cursor_timer_(this)),
+      last_mouse_press_time_(base::Time::FromInternalValue(0)),
+      click_state_(NONE) {
   set_border(text_border_);
 
   // Multiline is not supported.
@@ -77,14 +84,8 @@ NativeTextfieldViews::~NativeTextfieldViews() {
 // NativeTextfieldViews, View overrides:
 
 bool NativeTextfieldViews::OnMousePressed(const views::MouseEvent& e) {
-  textfield_->RequestFocus();
-  if (e.IsLeftMouseButton()) {
-    size_t pos = FindCursorPosition(e.location());
-    if (model_->MoveCursorTo(pos, false)) {
-      UpdateCursorBoundsAndTextOffset();
-      SchedulePaint();
-    }
-  }
+  if (HandleMousePressed(e))
+    SchedulePaint();
   return true;
 }
 
@@ -102,9 +103,8 @@ void NativeTextfieldViews::OnMouseReleased(const views::MouseEvent& e,
 }
 
 bool NativeTextfieldViews::OnKeyPressed(const views::KeyEvent& e) {
-  // OnKeyPressed/OnKeyReleased/WillGainFocus/DidGainFocus/WillLoseFocus
-  // will never be invoked on NativeTextfieldViews as it will never
-  // gain focus.
+  // OnKeyPressed/OnKeyReleased/OnFocus/OnBlur will never be invoked on
+  // NativeTextfieldViews as it will never gain focus.
   NOTREACHED();
   return false;
 }
@@ -114,36 +114,42 @@ bool NativeTextfieldViews::OnKeyReleased(const views::KeyEvent& e) {
   return false;
 }
 
-void NativeTextfieldViews::Paint(gfx::Canvas* canvas) {
+void NativeTextfieldViews::OnPaint(gfx::Canvas* canvas) {
   text_border_->set_has_focus(textfield_->HasFocus());
-  PaintBackground(canvas);
+  OnPaintBackground(canvas);
   PaintTextAndCursor(canvas);
   if (textfield_->draw_border())
-    PaintBorder(canvas);
+    OnPaintBorder(canvas);
 }
 
-void NativeTextfieldViews::DidChangeBounds(const gfx::Rect& previous,
-                                           const gfx::Rect& current) {
+void NativeTextfieldViews::OnBoundsChanged() {
   UpdateCursorBoundsAndTextOffset();
 }
 
-void NativeTextfieldViews::WillGainFocus() {
+void NativeTextfieldViews::OnFocus() {
   NOTREACHED();
 }
 
-void NativeTextfieldViews::DidGainFocus() {
+void NativeTextfieldViews::OnBlur() {
   NOTREACHED();
 }
 
-void NativeTextfieldViews::WillLoseFocus() {
-  NOTREACHED();
+gfx::NativeCursor NativeTextfieldViews::GetCursorForPoint(
+    ui::EventType event_type,
+    const gfx::Point& p) {
+#if defined(OS_WIN)
+  static HCURSOR ibeam = LoadCursor(NULL, IDC_IBEAM);
+  return ibeam;
+#else
+  return gfx::GetCursor(GDK_XTERM);
+#endif
 }
 
 /////////////////////////////////////////////////////////////////
 // NativeTextfieldViews, views::ContextMenuController overrides:
-void NativeTextfieldViews::ShowContextMenu(View* source,
-                                           const gfx::Point& p,
-                                           bool is_mouse_gesture) {
+void NativeTextfieldViews::ShowContextMenuForView(View* source,
+                                                  const gfx::Point& p,
+                                                  bool is_mouse_gesture) {
   InitContextMenuIfRequired();
   context_menu_menu_->RunContextMenuAt(p);
 }
@@ -280,6 +286,7 @@ void NativeTextfieldViews::GetSelectedRange(TextRange* range) const {
 
 void NativeTextfieldViews::SelectRange(const TextRange& range) {
   model_->SelectRange(range);
+  UpdateCursorBoundsAndTextOffset();
   SchedulePaint();
 }
 
@@ -299,10 +306,7 @@ bool NativeTextfieldViews::HandleKeyReleased(const views::KeyEvent& e) {
   return true;
 }
 
-void NativeTextfieldViews::HandleWillGainFocus() {
-}
-
-void NativeTextfieldViews::HandleDidGainFocus() {
+void NativeTextfieldViews::HandleFocus() {
   is_cursor_visible_ = true;
   SchedulePaint();
   // Start blinking cursor.
@@ -312,7 +316,7 @@ void NativeTextfieldViews::HandleDidGainFocus() {
       kCursorVisibleTimeMs);
 }
 
-void NativeTextfieldViews::HandleWillLoseFocus() {
+void NativeTextfieldViews::HandleBlur() {
   // Stop blinking cursor.
   cursor_timer_.RevokeAll();
   if (is_cursor_visible_) {
@@ -381,8 +385,9 @@ void NativeTextfieldViews::ExecuteCommand(int command_id) {
       NOTREACHED() << "unknown command: " << command_id;
       break;
   }
-  if (text_changed)
-    PropagateTextChange();
+
+  // The cursor must have changed if text changed during cut/paste/delete.
+  UpdateAfterChange(text_changed, text_changed);
 }
 
 // static
@@ -425,7 +430,7 @@ void NativeTextfieldViews::UpdateCursor() {
 void NativeTextfieldViews::RepaintCursor() {
   gfx::Rect r = cursor_bounds_;
   r.Inset(-1, -1, -1, -1);
-  SchedulePaint(r, false);
+  SchedulePaintInRect(r);
 }
 
 void NativeTextfieldViews::UpdateCursorBoundsAndTextOffset() {
@@ -519,8 +524,8 @@ void NativeTextfieldViews::PaintTextAndCursor(gfx::Canvas* canvas) {
 
 bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
   // TODO(oshima): handle IME.
-  if (key_event.GetType() == views::Event::ET_KEY_PRESSED) {
-    ui::KeyboardCode key_code = key_event.GetKeyCode();
+  if (key_event.type() == ui::ET_KEY_PRESSED) {
+    ui::KeyboardCode key_code = key_event.key_code();
     // TODO(oshima): shift-tab does not work. Figure out why and fix.
     if (key_code == ui::VKEY_TAB)
       return false;
@@ -538,7 +543,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
         break;
       case ui::VKEY_X:
         if (control && editable)
-          text_changed = model_->Cut();
+          cursor_changed = text_changed = model_->Cut();
         break;
       case ui::VKEY_C:
         if (control)
@@ -546,7 +551,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
         break;
       case ui::VKEY_V:
         if (control && editable)
-          text_changed = model_->Paste();
+          cursor_changed = text_changed = model_->Paste();
         break;
       case ui::VKEY_RIGHT:
         control ? model_->MoveCursorToNextWord(selection)
@@ -603,7 +608,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
             model_->MoveCursorToNextWord(true);
           }
         }
-        text_changed = model_->Delete();
+        cursor_changed = text_changed = model_->Delete();
         break;
       case ui::VKEY_INSERT:
         insert_ = !insert_;
@@ -620,17 +625,9 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
         model_->Replace(print_char);
       text_changed = true;
     }
-    if (text_changed)
-      PropagateTextChange();
-    if (cursor_changed) {
-      is_cursor_visible_ = true;
-      RepaintCursor();
-    }
-    if (text_changed || cursor_changed) {
-      UpdateCursorBoundsAndTextOffset();
-      SchedulePaint();
-      return true;
-    }
+
+    UpdateAfterChange(text_changed, cursor_changed);
+    return (text_changed || cursor_changed);
   }
   return false;
 }
@@ -638,7 +635,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
 char16 NativeTextfieldViews::GetPrintableChar(const KeyEvent& key_event) {
   // TODO(oshima): IME, i18n support.
   // This only works for UCS-2 characters.
-  ui::KeyboardCode key_code = key_event.GetKeyCode();
+  ui::KeyboardCode key_code = key_event.key_code();
   bool shift = key_event.IsShiftDown();
   bool upper = shift ^ key_event.IsCapsLockDown();
   // TODO(oshima): We should have a utility function
@@ -784,11 +781,66 @@ size_t NativeTextfieldViews::FindCursorPosition(const gfx::Point& point) const {
   return left_pos;
 }
 
+bool NativeTextfieldViews::HandleMousePressed(const views::MouseEvent& e) {
+  textfield_->RequestFocus();
+  base::TimeDelta time_delta = e.time_stamp() - last_mouse_press_time_;
+  gfx::Point location_delta = e.location().Subtract(last_mouse_press_location_);
+  last_mouse_press_time_ = e.time_stamp();
+  last_mouse_press_location_ = e.location();
+  if (e.IsLeftMouseButton()) {
+    if (!ExceededDragThreshold(location_delta.x(), location_delta.y())
+      && time_delta.InMilliseconds() <= GetDoubleClickInterval()) {
+      // Multiple mouse press detected. Check for double or triple.
+      switch (click_state_) {
+        case TRACKING_DOUBLE_CLICK:
+          click_state_ = TRACKING_TRIPLE_CLICK;
+          model_->SelectWord();
+          return true;
+        case TRACKING_TRIPLE_CLICK:
+          click_state_ = NONE;
+          model_->SelectAll();
+          return true;
+        case NONE:
+          click_state_ = TRACKING_DOUBLE_CLICK;
+          SetCursorForMouseClick(e);
+          return true;
+      }
+    } else {
+      // Single mouse press.
+      click_state_ = TRACKING_DOUBLE_CLICK;
+      SetCursorForMouseClick(e);
+      return true;
+    }
+  }
+  return false;
+}
+
+void NativeTextfieldViews::SetCursorForMouseClick(const views::MouseEvent& e) {
+  size_t pos = FindCursorPosition(e.location());
+  if (model_->MoveCursorTo(pos, false)) {
+    UpdateCursorBoundsAndTextOffset();
+  }
+}
+
 void NativeTextfieldViews::PropagateTextChange() {
   textfield_->SyncText();
   Textfield::Controller* controller = textfield_->GetController();
   if (controller)
     controller->ContentsChanged(textfield_, GetText());
+}
+
+void NativeTextfieldViews::UpdateAfterChange(bool text_changed,
+                                             bool cursor_changed) {
+  if (text_changed)
+    PropagateTextChange();
+  if (cursor_changed) {
+    is_cursor_visible_ = true;
+    RepaintCursor();
+  }
+  if (text_changed || cursor_changed) {
+    UpdateCursorBoundsAndTextOffset();
+    SchedulePaint();
+  }
 }
 
 void NativeTextfieldViews::InitContextMenuIfRequired() {

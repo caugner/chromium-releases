@@ -11,17 +11,17 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/task.h"
+#import "chrome/browser/cocoa/keystone_glue.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#import "chrome/browser/ui/cocoa/keystone_glue.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -51,7 +51,6 @@ class KeystonePromotionInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual void InfoBarClosed();
   virtual SkBitmap* GetIcon() const;
   virtual string16 GetMessageText() const;
-  virtual int GetButtons() const;
   virtual string16 GetButtonLabel(InfoBarButton button) const;
   virtual bool Accept();
   virtual bool Cancel();
@@ -101,10 +100,6 @@ SkBitmap* KeystonePromotionInfoBarDelegate::GetIcon() const {
 string16 KeystonePromotionInfoBarDelegate::GetMessageText() const {
   return l10n_util::GetStringFUTF16(IDS_PROMOTE_INFOBAR_TEXT,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
-}
-
-int KeystonePromotionInfoBarDelegate::GetButtons() const {
-  return BUTTON_OK | BUTTON_CANCEL;
 }
 
 string16 KeystonePromotionInfoBarDelegate::GetButtonLabel(
@@ -200,7 +195,7 @@ bool KeystonePromotionInfoBarDelegate::Cancel() {
 
       // Only show if no other info bars are showing, because that's how the
       // default browser info bar works.
-      if (tabContents && tabContents->infobar_delegate_count() == 0) {
+      if (tabContents && tabContents->infobar_count() == 0) {
         tabContents->AddInfoBar(
             new KeystonePromotionInfoBarDelegate(tabContents));
       }

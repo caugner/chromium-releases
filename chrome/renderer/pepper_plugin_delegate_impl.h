@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,26 +16,31 @@
 #include "ppapi/c/pp_errors.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
+#include "webkit/plugins/ppapi/ppb_flash_menu_impl.h"
 
 class FilePath;
 class RenderView;
 
 namespace gfx {
+class Point;
 class Rect;
 }
 
 namespace webkit {
 namespace ppapi {
-
+class PepperFilePath;
 class PluginInstance;
 class PluginModule;
-
-}  // namespace ppapi
-}  // namespace webkit
+}
+}
 
 namespace WebKit {
 class WebFileChooserCompletion;
 struct WebFileChooserParams;
+}
+
+namespace webkit_glue {
+struct CustomContextMenuContext;
 }
 
 class TransportDIB;
@@ -116,29 +121,23 @@ class PepperPluginDelegateImpl
                       fileapi::FileSystemCallbackDispatcher* dispatcher);
   virtual bool ReadDirectory(const FilePath& directory_path,
                              fileapi::FileSystemCallbackDispatcher* dispatcher);
-  virtual base::PlatformFileError OpenModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path,
+  virtual base::PlatformFileError OpenFile(
+      const webkit::ppapi::PepperFilePath& path,
       int flags,
       base::PlatformFile* file);
-  virtual base::PlatformFileError RenameModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path_from,
-      const FilePath& path_to);
-  virtual base::PlatformFileError DeleteModuleLocalFileOrDir(
-      const std::string& module_name,
-      const FilePath& path,
+  virtual base::PlatformFileError RenameFile(
+      const webkit::ppapi::PepperFilePath& from_path,
+      const webkit::ppapi::PepperFilePath& to_path);
+  virtual base::PlatformFileError DeleteFileOrDir(
+      const webkit::ppapi::PepperFilePath& path,
       bool recursive);
-  virtual base::PlatformFileError CreateModuleLocalDir(
-      const std::string& module_name,
-      const FilePath& path);
-  virtual base::PlatformFileError QueryModuleLocalFile(
-      const std::string& module_name,
-      const FilePath& path,
+  virtual base::PlatformFileError CreateDir(
+      const webkit::ppapi::PepperFilePath& path);
+  virtual base::PlatformFileError QueryFile(
+      const webkit::ppapi::PepperFilePath& path,
       base::PlatformFileInfo* info);
-  virtual base::PlatformFileError GetModuleLocalDirContents(
-      const std::string& module_name,
-      const FilePath& path,
+  virtual base::PlatformFileError GetDirContents(
+      const webkit::ppapi::PepperFilePath& path,
       webkit::ppapi::DirContents* contents);
   virtual scoped_refptr<base::MessageLoopProxy> GetFileThreadMessageLoopProxy();
   virtual int32_t ConnectTcp(
@@ -154,9 +153,21 @@ class PepperPluginDelegateImpl
       base::PlatformFile socket,
       const PP_Flash_NetAddress& local_addr,
       const PP_Flash_NetAddress& remote_addr);
+  virtual int32_t ShowContextMenu(
+      webkit::ppapi::PPB_Flash_Menu_Impl* menu,
+      const gfx::Point& position);
+  void OnContextMenuClosed(
+      const webkit_glue::CustomContextMenuContext& custom_context);
+  void OnCustomContextMenuAction(
+      const webkit_glue::CustomContextMenuContext& custom_context,
+      unsigned action);
+  void CompleteShowContextMenu(int request_id,
+                               bool did_select,
+                               unsigned action);
   virtual webkit::ppapi::FullscreenContainer*
       CreateFullscreenContainer(
           webkit::ppapi::PluginInstance* instance);
+  virtual gfx::Size GetScreenSize();
   virtual std::string GetDefaultEncoding();
   virtual void ZoomLimitsChanged(double minimum_factor, double maximum_factor);
   virtual std::string ResolveProxy(const GURL& url);
@@ -164,12 +175,17 @@ class PepperPluginDelegateImpl
   virtual void DidStopLoading();
   virtual void SetContentRestriction(int restrictions);
   virtual void HasUnsupportedFeature();
+  virtual P2PSocketDispatcher* GetP2PSocketDispatcher();
 
  private:
   // Pointer to the RenderView that owns us.
   RenderView* render_view_;
 
   std::set<webkit::ppapi::PluginInstance*> active_instances_;
+
+  // Used to send a single context menu "completion" upon menu close.
+  bool has_saved_context_menu_action_;
+  unsigned saved_context_menu_action_;
 
   // TODO(viettrungluu): Get rid of |id_generator_| -- just use |IDMap::Add()|.
   // Rename |messages_waiting_replies_| (to specify async open file).
@@ -178,6 +194,9 @@ class PepperPluginDelegateImpl
 
   IDMap<scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>,
         IDMapOwnPointer> pending_connect_tcps_;
+
+  IDMap<scoped_refptr<webkit::ppapi::PPB_Flash_Menu_Impl>,
+        IDMapOwnPointer> pending_context_menus_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPluginDelegateImpl);
 };

@@ -13,12 +13,12 @@
 
 #include "base/process.h"
 #include "base/weak_ptr.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/size.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/gpu_processor.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/size.h"
 
 class GpuChannel;
 
@@ -68,12 +68,17 @@ class GpuCommandBufferStub
 
  private:
   // Message handlers:
-  void OnInitialize(int32 size, base::SharedMemoryHandle* ring_buffer);
+  void OnInitialize(base::SharedMemoryHandle ring_buffer,
+                    int32 size,
+                    bool* result);
   void OnGetState(gpu::CommandBuffer::State* state);
   void OnAsyncGetState();
   void OnFlush(int32 put_offset, gpu::CommandBuffer::State* state);
   void OnAsyncFlush(int32 put_offset);
   void OnCreateTransferBuffer(int32 size, int32* id);
+  void OnRegisterTransferBuffer(base::SharedMemoryHandle transfer_buffer,
+                                size_t size,
+                                int32* id);
   void OnDestroyTransferBuffer(int32 id);
   void OnGetTransferBuffer(int32 id,
                            base::SharedMemoryHandle* transfer_buffer,

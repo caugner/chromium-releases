@@ -9,7 +9,13 @@
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/task.h"
 #include "base/threading/thread.h"
+// TODO(sergeyu): We should not depend on renderer here. Instead P2P
+// Pepper API should be used. Remove this dependency.
+// crbug.com/74951
+#include "chrome/renderer/p2p/ipc_network_manager.h"
+#include "chrome/renderer/p2p/ipc_socket_factory.h"
 #include "ppapi/c/pp_input_event.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/rect.h"
@@ -19,10 +25,21 @@
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/client/plugin/chromoting_scriptable_object.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
+#include "remoting/client/plugin/pepper_port_allocator_session.h"
 #include "remoting/client/plugin/pepper_view.h"
+#include "remoting/client/plugin/pepper_view_proxy.h"
+#include "remoting/client/plugin/pepper_util.h"
+#include "remoting/client/plugin/pepper_xmpp_proxy.h"
 #include "remoting/jingle_glue/jingle_thread.h"
+#include "remoting/proto/auth.pb.h"
 #include "remoting/protocol/connection_to_host.h"
-#include "remoting/protocol/jingle_connection_to_host.h"
+// TODO(sergeyu): This is a hack: plugin should not depend on webkit
+// glue. It is used here to get P2PPacketDispatcher corresponding to
+// the current RenderView. Use P2P Pepper API for connection and
+// remove these includes.
+// crbug.com/74951
+#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
+#include "webkit/plugins/ppapi/resource_tracker.h"
 
 namespace remoting {
 
@@ -30,7 +47,7 @@ const char* ChromotingInstance::kMimeType = "pepper-application/x-chromoting";
 
 ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
     : pp::Instance(pp_instance),
-      pepper_main_loop_dont_post_to_me_(NULL) {
+      initialized_(false) {
 }
 
 ChromotingInstance::~ChromotingInstance() {
@@ -38,43 +55,53 @@ ChromotingInstance::~ChromotingInstance() {
     client_->Stop();
   }
 
-  // TODO(ajwong): We need to ensure all objects have actually stopped posting
-  // to the message loop before this point.  Right now, we don't have a well
-  // defined stop for the plugin process, and the thread shutdown is likely a
-  // race condition.
+  // Stopping the context shutdown all chromoting threads. This is a requirement
+  // before we can call Detach() on |view_proxy_|.
   context_.Stop();
+
+  view_proxy_->Detach();
 }
 
 bool ChromotingInstance::Init(uint32_t argc,
                               const char* argn[],
                               const char* argv[]) {
-  CHECK(pepper_main_loop_dont_post_to_me_ == NULL);
+  CHECK(!initialized_);
+  initialized_ = true;
 
-  // Record the current thread.  This function should only be invoked by the
-  // plugin thread, so we capture the current message loop and assume it is
-  // indeed the plugin thread.
-  //
-  // We're abusing the pepper API slightly here.  We know we're running as an
-  // internal plugin, and thus we are on the pepper main thread that uses a
-  // message loop.
-  //
-  // TODO(ajwong): See if there is a method for querying what thread we're on
-  // from inside the pepper API.
-  pepper_main_loop_dont_post_to_me_ = MessageLoop::current();
   VLOG(1) << "Started ChromotingInstance::Init";
 
   // Start all the threads.
   context_.Start();
 
+  webkit::ppapi::PluginInstance* plugin_instance =
+      webkit::ppapi::ResourceTracker::Get()->GetInstance(pp_instance());
+
+  P2PSocketDispatcher* socket_dispatcher =
+      plugin_instance->delegate()->GetP2PSocketDispatcher();
+  IpcNetworkManager* network_manager = NULL;
+  IpcPacketSocketFactory* socket_factory = NULL;
+  PortAllocatorSessionFactory* session_factory =
+      CreatePepperPortAllocatorSessionFactory(this);
+
+  // If we don't have socket dispatcher for IPC (e.g. P2P API is
+  // disabled), then JingleClient will try to use physical sockets.
+  if (socket_dispatcher) {
+    VLOG(1) << "Creating IpcNetworkManager and IpcPacketSocketFactory.";
+    network_manager = new IpcNetworkManager(socket_dispatcher);
+    socket_factory = new IpcPacketSocketFactory(socket_dispatcher);
+  }
+
   // Create the chromoting objects.
-  host_connection_.reset(new protocol::JingleConnectionToHost(
-      context_.jingle_thread()));
+  host_connection_.reset(new protocol::ConnectionToHost(
+      context_.jingle_thread(), network_manager, socket_factory,
+      session_factory));
   view_.reset(new PepperView(this, &context_));
-  rectangle_decoder_.reset(
-      new RectangleUpdateDecoder(context_.decode_message_loop(), view_.get()));
+  view_proxy_ = new PepperViewProxy(this, view_.get());
+  rectangle_decoder_ = new RectangleUpdateDecoder(
+      context_.decode_message_loop(), view_proxy_);
   input_handler_.reset(new PepperInputHandler(&context_,
                                               host_connection_.get(),
-                                              view_.get()));
+                                              view_proxy_));
 
   // Default to a medium grey.
   view_->SetSolidFill(0xFFCDCDCD);
@@ -85,10 +112,12 @@ bool ChromotingInstance::Init(uint32_t argc,
 void ChromotingInstance::Connect(const ClientConfig& config) {
   DCHECK(CurrentlyOnPluginThread());
 
+  LogDebugInfo(StringPrintf("Connecting to %s as %s", config.host_jid.c_str(),
+                            config.username.c_str()).c_str());
   client_.reset(new ChromotingClient(config,
                                      &context_,
                                      host_connection_.get(),
-                                     view_.get(),
+                                     view_proxy_,
                                      rectangle_decoder_.get(),
                                      input_handler_.get(),
                                      NULL));
@@ -100,9 +129,41 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
                                            QUALITY_UNKNOWN);
 }
 
+void ChromotingInstance::ConnectSandboxed(const std::string& your_jid,
+                                          const std::string& host_jid) {
+  // TODO(ajwong): your_jid and host_jid should be moved into ClientConfig. In
+  // fact, this whole function should go away, and Connect() should just look at
+  // ClientConfig.
+  DCHECK(CurrentlyOnPluginThread());
+
+  LogDebugInfo("Attempting sandboxed connection");
+
+  // Setup the XMPP Proxy.
+  ChromotingScriptableObject* scriptable_object = GetScriptableObject();
+  scoped_refptr<PepperXmppProxy> xmpp_proxy =
+      new PepperXmppProxy(scriptable_object->AsWeakPtr(),
+                          context_.jingle_thread()->message_loop());
+  scriptable_object->AttachXmppProxy(xmpp_proxy);
+
+  client_.reset(new ChromotingClient(ClientConfig(),
+                                     &context_,
+                                     host_connection_.get(),
+                                     view_proxy_,
+                                     rectangle_decoder_.get(),
+                                     input_handler_.get(),
+                                     NULL));
+
+  // Kick off the connection.
+  client_->StartSandboxed(xmpp_proxy, your_jid, host_jid);
+
+  GetScriptableObject()->SetConnectionInfo(STATUS_INITIALIZING,
+                                           QUALITY_UNKNOWN);
+}
+
 void ChromotingInstance::Disconnect() {
   DCHECK(CurrentlyOnPluginThread());
 
+  LogDebugInfo("Disconnecting from host");
   if (client_.get()) {
     client_->Stop();
   }
@@ -122,10 +183,6 @@ void ChromotingInstance::ViewChanged(const pp::Rect& position,
   view_->SetViewport(position.x(), position.y(),
                      position.width(), position.height());
   view_->Paint();
-}
-
-bool ChromotingInstance::CurrentlyOnPluginThread() const {
-  return pepper_main_loop_dont_post_to_me_ == MessageLoop::current();
 }
 
 bool ChromotingInstance::HandleInputEvent(const PP_InputEvent& event) {
@@ -149,8 +206,16 @@ bool ChromotingInstance::HandleInputEvent(const PP_InputEvent& event) {
       pih->HandleMouseMoveEvent(event.u.mouse);
       return true;
 
+    case PP_INPUTEVENT_TYPE_CONTEXTMENU:
+      // We need to return true here or else we'll get a local (plugin) context
+      // menu instead of the mouseup event for the right click.
+      return true;
+
     case PP_INPUTEVENT_TYPE_KEYDOWN:
     case PP_INPUTEVENT_TYPE_KEYUP:
+      VLOG(3) << "PP_INPUTEVENT_TYPE_KEY"
+                << (event.type==PP_INPUTEVENT_TYPE_KEYDOWN ? "DOWN" : "UP")
+                << " key=" << event.u.key.key_code;
       pih->HandleKeyEvent(event.type == PP_INPUTEVENT_TYPE_KEYDOWN,
                           event.u.key);
       return true;
@@ -175,6 +240,29 @@ ChromotingScriptableObject* ChromotingInstance::GetScriptableObject() {
   }
   LOG(ERROR) << "Unable to get ScriptableObject for Chromoting plugin.";
   return NULL;
+}
+
+void ChromotingInstance::SubmitLoginInfo(const std::string& username,
+                                         const std::string& password) {
+  if (host_connection_->state() !=
+      protocol::ConnectionToHost::STATE_CONNECTED) {
+    LogDebugInfo("Client not connected or already authenticated.");
+    return;
+  }
+
+  protocol::LocalLoginCredentials* credentials =
+      new protocol::LocalLoginCredentials();
+  credentials->set_type(protocol::PASSWORD);
+  credentials->set_username(username);
+  credentials->set_credential(password.data(), password.length());
+
+  host_connection_->host_stub()->BeginSessionRequest(
+      credentials,
+      new DeleteTask<protocol::LocalLoginCredentials>(credentials));
+}
+
+void ChromotingInstance::LogDebugInfo(const std::string& info) {
+  GetScriptableObject()->LogDebugInfo(info);
 }
 
 pp::Var ChromotingInstance::GetInstanceObject() {

@@ -22,6 +22,7 @@ class URLRequest;
 
 class ConstrainedWindow;
 class GURL;
+class RenderViewHostDelegate;
 
 // This is the base implementation for the OS-specific classes that route
 // authentication info to the net::URLRequest that needs it. These functions
@@ -40,7 +41,7 @@ class LoginHandler : public base::RefCountedThreadSafe<LoginHandler>,
 
   // Initializes the underlying platform specific view.
   virtual void BuildViewForPasswordManager(PasswordManager* manager,
-                                           std::wstring explanation) = 0;
+                                           const string16& explanation) = 0;
 
   // Sets information about the authentication type (|form|) and the
   // |password_manager| for this profile.
@@ -50,9 +51,12 @@ class LoginHandler : public base::RefCountedThreadSafe<LoginHandler>,
   // Returns the TabContents that needs authentication.
   TabContents* GetTabContentsForLogin() const;
 
+  // Returns the RenderViewHostDelegate for the page that needs authentication.
+  RenderViewHostDelegate* GetRenderViewHostDelegate() const;
+
   // Resend the request with authentication credentials.
   // This function can be called from either thread.
-  void SetAuth(const std::wstring& username, const std::wstring& password);
+  void SetAuth(const string16& username, const string16& password);
 
   // Display the error page without asking for credentials again.
   // This function can be called from either thread.
@@ -95,8 +99,8 @@ class LoginHandler : public base::RefCountedThreadSafe<LoginHandler>,
   void RemoveObservers();
 
   // Notify observers that authentication is supplied.
-  void NotifyAuthSupplied(const std::wstring& username,
-                          const std::wstring& password);
+  void NotifyAuthSupplied(const string16& username,
+                          const string16& password);
 
   // Notify observers that authentication is cancelled.
   void NotifyAuthCancelled();
@@ -106,8 +110,8 @@ class LoginHandler : public base::RefCountedThreadSafe<LoginHandler>,
   bool TestAndSetAuthHandled();
 
   // Calls SetAuth from the IO loop.
-  void SetAuthDeferred(const std::wstring& username,
-                       const std::wstring& password);
+  void SetAuthDeferred(const string16& username,
+                       const string16& password);
 
   // Calls CancelAuth from the IO loop.
   void CancelAuthDeferred();
@@ -175,20 +179,20 @@ class LoginNotificationDetails {
 class AuthSuppliedLoginNotificationDetails : public LoginNotificationDetails {
  public:
   AuthSuppliedLoginNotificationDetails(LoginHandler* handler,
-                                       const std::wstring& username,
-                                       const std::wstring& password)
+                                       const string16& username,
+                                       const string16& password)
       : LoginNotificationDetails(handler),
         username_(username),
         password_(password) {}
-  const std::wstring& username() const { return username_; }
-  const std::wstring& password() const { return password_; }
+  const string16& username() const { return username_; }
+  const string16& password() const { return password_; }
 
  private:
   // The username that was used for the authentication.
-  const std::wstring username_;
+  const string16 username_;
 
   // The password that was used for the authentication.
-  const std::wstring password_;
+  const string16 password_;
 
   DISALLOW_COPY_AND_ASSIGN(AuthSuppliedLoginNotificationDetails);
 };

@@ -25,8 +25,8 @@
 #include "views/controls/table/table_view.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/focus/focus_manager.h"
-#include "views/grid_layout.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 #include "views/widget/widget.h"
 
 using views::ColumnSet;
@@ -75,7 +75,7 @@ UrlPicker::UrlPicker(UrlPickerDelegate* delegate,
   ColumnSet* column_set = layout->AddColumnSet(labels_column_set_id);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
 
@@ -93,7 +93,7 @@ UrlPicker::UrlPicker(UrlPickerDelegate* delegate,
   url_field_->SetController(this);
   layout->AddView(url_field_);
 
-  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   layout->StartRow(0, single_column_view_set_id);
   views::Label* description_label = new views::Label();
@@ -104,12 +104,12 @@ UrlPicker::UrlPicker(UrlPickerDelegate* delegate,
       description_label->font().DeriveFont(0, gfx::Font::BOLD));
   layout->AddView(description_label);
 
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(1, single_column_view_set_id);
   layout->AddView(url_table_);
 
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   AddAccelerator(views::Accelerator(ui::VKEY_RETURN, false, false, false));
 }

@@ -7,13 +7,13 @@
 #include <algorithm>
 
 #include "base/utf_string_conversions.h"
-#include "gfx/color_utils.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/grid_layout.h"
+#include "ui/gfx/color_utils.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 
 static const int kLocalStorageSetItemInfoViewBorderSize = 1;
 static const int kLocalStorageSetItemInfoViewInsetSize = 3;
@@ -97,18 +97,18 @@ void LocalStorageSetItemInfoView::Init() {
   views::ColumnSet* column_set = layout->AddColumnSet(three_column_layout_id);
   column_set->AddColumn(GridLayout::TRAILING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, three_column_layout_id);
   layout->AddView(host_label);
   layout->AddView(host_value_field_);
-  layout->AddPaddingRow(0, kRelatedControlSmallVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
   layout->StartRow(0, three_column_layout_id);
   layout->AddView(key_label);
   layout->AddView(key_value_field_);
-  layout->AddPaddingRow(0, kRelatedControlSmallVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
   layout->StartRow(0, three_column_layout_id);
   layout->AddView(value_label);
   layout->AddView(value_value_field_);

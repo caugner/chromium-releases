@@ -7,22 +7,22 @@
 #include "base/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_view_host_factory.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_views.h"
-#include "chrome/browser/tab_contents/interstitial_page.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/ui/views/sad_tab_view.h"
 #include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
-#include "gfx/canvas_skia_paint.h"
-#include "gfx/point.h"
-#include "gfx/rect.h"
-#include "gfx/size.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_factory.h"
+#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 #include "views/controls/native/native_view_host.h"
-#include "views/fill_layout.h"
 #include "views/focus/focus_manager.h"
 #include "views/focus/view_storage.h"
+#include "views/layout/fill_layout.h"
 #include "views/screen.h"
 #include "views/widget/widget.h"
 
@@ -56,18 +56,18 @@ TabContentsViewViews::~TabContentsViewViews() {
 
 void TabContentsViewViews::AttachConstrainedWindow(
     ConstrainedWindowGtk* constrained_window) {
-  // TODO(anicolao): reimplement all dialogs as DOMUI
+  // TODO(anicolao): reimplement all dialogs as WebUI
   NOTIMPLEMENTED();
 }
 
 void TabContentsViewViews::RemoveConstrainedWindow(
     ConstrainedWindowGtk* constrained_window) {
-  // TODO(anicolao): reimplement all dialogs as DOMUI
+  // TODO(anicolao): reimplement all dialogs as WebUI
   NOTIMPLEMENTED();
 }
 
 void TabContentsViewViews::CreateView(const gfx::Size& initial_size) {
-  SetBounds(gfx::Rect(bounds().origin(), initial_size));
+  SetBoundsRect(gfx::Rect(bounds().origin(), initial_size));
 }
 
 RenderWidgetHostView* TabContentsViewViews::CreateViewForWidget(
@@ -225,13 +225,12 @@ void TabContentsViewViews::GetViewBounds(gfx::Rect* out) const {
   out->SetRect(x(), y(), width(), height());
 }
 
-void TabContentsViewViews::DidChangeBounds(const gfx::Rect& previous,
-                                           const gfx::Rect& current) {
+void TabContentsViewViews::OnBoundsChanged() {
   if (IsVisibleInRootView())
-    WasSized(gfx::Size(current.width(), current.height()));
+    WasSized(size());
 }
 
-void TabContentsViewViews::Paint(gfx::Canvas* canvas) {
+void TabContentsViewViews::OnPaint(gfx::Canvas* canvas) {
 }
 
 void TabContentsViewViews::UpdateDragCursor(WebDragOperation operation) {
@@ -329,6 +328,6 @@ void TabContentsViewViews::WasSized(const gfx::Size& size) {
 }
 
 void TabContentsViewViews::SetFloatingPosition(const gfx::Size& size) {
-  // TODO(anicolao): rework this once we have DOMUI views for dialogs
+  // TODO(anicolao): rework this once we have WebUI views for dialogs
   SetBounds(x(), y(), size.width(), size.height());
 }

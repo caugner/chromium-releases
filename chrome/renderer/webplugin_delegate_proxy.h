@@ -13,11 +13,11 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/weak_ptr.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
 #include "webkit/plugins/npapi/webplugininfo.h"
 #include "webkit/plugins/npapi/webplugin_delegate.h"
 
@@ -26,7 +26,6 @@
 #include "base/linked_ptr.h"
 #endif
 
-class CommandBufferProxy;
 struct NPObject;
 class NPObjectStub;
 struct NPVariant_Param;
@@ -120,9 +119,6 @@ class WebPluginDelegateProxy
       unsigned long resource_id, const GURL& url, int notify_id);
   virtual webkit::npapi::WebPluginResourceClient* CreateSeekableResourceClient(
       unsigned long resource_id, int range_request_id);
-
-  CommandBufferProxy* CreateCommandBuffer();
-  void DestroyCommandBuffer(CommandBufferProxy* command_buffer);
 
   gfx::PluginWindowHandle GetPluginWindowHandle();
 

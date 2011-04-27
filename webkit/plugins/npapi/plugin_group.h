@@ -39,6 +39,7 @@ struct VersionRangeDefinition {
   // to match anything higher than |version_matcher_low|.
   const char* version_matcher_high;
   const char* min_version;  // Minimum secure version.
+  bool requires_authorization;  // If this range needs user permission to run.
 };
 
 // Hard-coded definitions of plugin groups.
@@ -65,6 +66,7 @@ struct VersionRange {
   scoped_ptr<Version> low;
   scoped_ptr<Version> high;
   scoped_ptr<Version> min;
+  bool requires_authorization;
  private:
   void InitFrom(const VersionRange& other);
 };
@@ -82,6 +84,9 @@ class PluginGroup {
   // enabled.
   static const char* kAdobeReaderGroupName;
   static const char* kAdobeReaderUpdateURL;
+  static const char* kJavaGroupName;
+  static const char* kQuickTimeGroupName;
+  static const char* kShockwaveGroupName;
 
   PluginGroup(const PluginGroup& other);
 
@@ -89,13 +94,23 @@ class PluginGroup {
 
   PluginGroup& operator=(const PluginGroup& other);
 
-  // Configures the set of plugin name patterns for disabling plugins via
-  // enterprise configuration management.
-  static void SetPolicyDisabledPluginPatterns(const std::set<string16>& set);
+  // Configures the set of plugin name patterns for enabling and disabling
+  // plugins via enterprise configuration management.
+  static void SetPolicyEnforcedPluginPatterns(
+      const std::set<string16>& plugins_disabled,
+      const std::set<string16>& plugins_disabled_exceptions,
+      const std::set<string16>& plugins_enabled);
 
-  // Tests to see if a plugin is on the blacklist using its name as
-  // the lookup key.
+  // Tests whether |plugin_name| is disabled by policy.
   static bool IsPluginNameDisabledByPolicy(const string16& plugin_name);
+
+  // Tests whether |plugin_name| within the plugin group |group_name| is
+  // disabled by policy.
+  static bool IsPluginFileNameDisabledByPolicy(const string16& plugin_name,
+                                               const string16& group_name);
+
+  // Tests whether |plugin_name| is enabled by policy.
+  static bool IsPluginNameEnabledByPolicy(const string16& plugin_name);
 
   // Returns true if the given plugin matches this group.
   bool Match(const WebPluginInfo& plugin) const;
@@ -160,6 +175,10 @@ class PluginGroup {
   // Returns true if the highest-priority plugin in this group has known
   // security problems.
   bool IsVulnerable() const;
+
+  // Returns true if this plug-in group always requires user authorization
+  // to run.
+  bool RequiresAuthorization() const;
 
   // Check if the group has no plugins. Could happen after a reload if the plug-
   // in has disappeared from the pc (or in the process of updating).
@@ -236,13 +255,24 @@ class PluginGroup {
   // Returns true on success. Does not update the group state.
   static bool Disable(WebPluginInfo* plugin, int reason);
 
+  // Helper function to implement the functions above.
+  static bool SetPluginState(WebPluginInfo* plugin,
+                             int new_reason,
+                             bool state_changes);
+
   // Returns a non-const vector of all plugins in the group. This is only used
   // by PluginList.
   std::vector<WebPluginInfo>& GetPluginsContainer() {
     return web_plugin_infos_;
   }
 
+  // Checks if |name| matches any of the patterns in |pattern_set|.
+  static bool IsStringMatchedInSet(const string16& name,
+                                   const std::set<string16>* pattern_set);
+
   static std::set<string16>* policy_disabled_plugin_patterns_;
+  static std::set<string16>* policy_disabled_plugin_exception_patterns_;
+  static std::set<string16>* policy_enabled_plugin_patterns_;
 
   std::string identifier_;
   string16 group_name_;

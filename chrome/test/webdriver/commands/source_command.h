@@ -12,21 +12,22 @@
 
 namespace webdriver {
 
+class Response;
+
 // Controls navigate to new web pages for the current tab.  A call with
 // an HTTP GET will return the source of the tab. See:
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol#/session/:sessionId/source
 class SourceCommand : public WebDriverCommand {
  public:
-  inline SourceCommand(const std::vector<std::string>& path_segments,
-                       const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters) {}
-  virtual ~SourceCommand() {}
+  SourceCommand(const std::vector<std::string>& path_segments,
+                const DictionaryValue* const parameters);
+  virtual ~SourceCommand();
 
-  virtual bool DoesGet() { return true; }
+  virtual bool DoesGet();
   virtual void ExecuteGet(Response* const response);
 
  private:
-  virtual bool RequiresValidTab() { return true; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(SourceCommand);
 };

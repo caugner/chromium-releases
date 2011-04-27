@@ -8,11 +8,11 @@
 
 #include <string>
 
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class Profile;
@@ -156,6 +156,13 @@ class MockLoginUtils : public LoginUtils {
 
   BackgroundView* GetBackgroundView() {
     return background_view_;
+  }
+
+  virtual std::string GetOffTheRecordCommandLine(
+      const GURL& start_url,
+      const CommandLine& base_command_line,
+      CommandLine* command_line) {
+    return std::string();
   }
 
  private:

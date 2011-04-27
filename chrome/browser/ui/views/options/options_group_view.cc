@@ -9,17 +9,17 @@
 
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
-#include "gfx/font.h"
-#include "gfx/native_theme_win.h"
 #include "grit/locale_settings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/grid_layout.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/font.h"
+#include "ui/gfx/native_theme_win.h"
 #include "views/controls/label.h"
 #include "views/controls/separator.h"
-#include "views/standard_layout.h"
+#include "views/layout/grid_layout.h"
+#include "views/layout/layout_constants.h"
 
 static const int kLeftColumnWidthChars = 20;
 static const int kOptionsGroupViewColumnSpacing = 30;
@@ -74,13 +74,13 @@ AccessibilityTypes::Role OptionsGroupView::GetAccessibleRole() {
   return AccessibilityTypes::ROLE_GROUPING;
 }
 
-void OptionsGroupView::Paint(gfx::Canvas* canvas) {
+void OptionsGroupView::OnPaint(gfx::Canvas* canvas) {
   if (highlighted_) {
     COLORREF infocolor = GetSysColor(COLOR_INFOBK);
     SkColor background_color = SkColorSetRGB(GetRValue(infocolor),
                                              GetGValue(infocolor),
                                              GetBValue(infocolor));
-    int y_offset = kUnrelatedControlVerticalSpacing / 2;
+    int y_offset = views::kUnrelatedControlVerticalSpacing / 2;
     canvas->FillRectInt(background_color, 0, 0, width(),
                         height() - y_offset);
   }
@@ -113,23 +113,23 @@ void OptionsGroupView::Init() {
 
   const int two_column_layout_id = 0;
   ColumnSet* column_set = layout->AddColumnSet(two_column_layout_id);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 0,
                         GridLayout::FIXED, left_column_width, 0);
   column_set->AddPaddingColumn(0, kOptionsGroupViewColumnSpacing);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 1,
                         GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
 
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   layout->StartRow(0, two_column_layout_id);
   layout->AddView(title_label_, 1, 1, GridLayout::FILL, GridLayout::LEADING);
   layout->AddView(contents_, 1, 3, GridLayout::FILL, GridLayout::FILL);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   layout->StartRow(1, two_column_layout_id);
   layout->AddView(description_label_, 1, 1,
                   GridLayout::FILL, GridLayout::LEADING);
-  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
+  layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   if (show_separator_) {
     const int single_column_layout_id = 1;

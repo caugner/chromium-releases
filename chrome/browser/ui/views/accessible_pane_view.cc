@@ -48,7 +48,7 @@ bool AccessiblePaneView::SetPaneFocus(int view_storage_id,
   // Use the provided initial focus if it's visible and enabled, otherwise
   // use the first focusable child.
   if (!initial_focus ||
-      !IsParentOf(initial_focus) ||
+      !Contains(initial_focus) ||
       !initial_focus->IsVisible() ||
       !initial_focus->IsEnabled()) {
     initial_focus = GetFirstFocusableChild();
@@ -85,6 +85,10 @@ bool AccessiblePaneView::SetPaneFocus(int view_storage_id,
 bool AccessiblePaneView::SetPaneFocusAndFocusDefault(
     int view_storage_id) {
   return SetPaneFocus(view_storage_id, GetDefaultFocusableChild());
+}
+
+views::View* AccessiblePaneView::GetDefaultFocusableChild() {
+  return NULL;
 }
 
 void AccessiblePaneView::RemovePaneFocus() {
@@ -216,7 +220,7 @@ void AccessiblePaneView::FocusWillChange(views::View* focused_before,
             &AccessiblePaneView::LocationBarSelectAll));
   }
 
-  if (!IsParentOf(focused_now) ||
+  if (!Contains(focused_now) ||
       reason == views::FocusManager::kReasonDirectFocusChange) {
     // We should remove pane focus (i.e. make most of the controls
     // not focusable again) either because the focus is leaving the pane,

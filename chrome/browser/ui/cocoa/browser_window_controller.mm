@@ -15,10 +15,8 @@
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util_mac.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
@@ -41,11 +39,11 @@
 #import "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
-#import "chrome/browser/ui/cocoa/previewable_contents_controller.h"
-#import "chrome/browser/ui/cocoa/sad_tab_controller.h"
 #import "chrome/browser/ui/cocoa/sidebar_controller.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
-#import "chrome/browser/ui/cocoa/tab_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tab_contents/previewable_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
+#import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
@@ -57,6 +55,8 @@
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -298,12 +298,6 @@
     // managing the creation of new tabs.
     [self createTabStripController];
 
-    // Create the infobar container view, so we can pass it to the
-    // ToolbarController.
-    infoBarContainerController_.reset(
-        [[InfoBarContainerController alloc] initWithResizeDelegate:self]);
-    [[[self window] contentView] addSubview:[infoBarContainerController_ view]];
-
     // Create a controller for the toolbar, giving it the toolbar model object
     // and the toolbar view from the nib. The controller will handle
     // registering for the appropriate command state changes from the back-end.
@@ -334,6 +328,12 @@
                                  positioned:NSWindowBelow
                                  relativeTo:[toolbarController_ view]];
     [bookmarkBarController_ setBookmarkBarEnabled:[self supportsBookmarkBar]];
+
+    // Create the infobar container view, so we can pass it to the
+    // ToolbarController.
+    infoBarContainerController_.reset(
+        [[InfoBarContainerController alloc] initWithResizeDelegate:self]);
+    [[[self window] contentView] addSubview:[infoBarContainerController_ view]];
 
     // We don't want to try and show the bar before it gets placed in its parent
     // view, so this step shoudn't be inside the bookmark bar controller's
@@ -424,6 +424,10 @@
   return tabStripController_.get();
 }
 
+- (InfoBarContainerController*)infoBarContainerController {
+  return infoBarContainerController_.get();
+}
+
 - (StatusBubbleMac*)statusBubble {
   return statusBubble_;
 }
@@ -479,7 +483,8 @@
 }
 
 - (void)updateDevToolsForContents:(TabContents*)contents {
-  [devToolsController_ updateDevToolsForTabContents:contents];
+  [devToolsController_ updateDevToolsForTabContents:contents
+                                        withProfile:browser_->profile()];
   [devToolsController_ ensureContentsVisible];
 }
 
@@ -1338,7 +1343,7 @@
   NSView *contentView = [[self window] contentView];
   [contentView addSubview:[findBarCocoaController_ view]
                positioned:NSWindowAbove
-               relativeTo:[toolbarController_ view]];
+               relativeTo:[infoBarContainerController_ view]];
 
   // Place the find bar immediately below the toolbar/attached bookmark bar. In
   // fullscreen mode, it hangs off the top of the screen when the bar is hidden.
@@ -1428,7 +1433,8 @@
   windowShim_->UpdateTitleBar();
 
   [sidebarController_ updateSidebarForTabContents:contents];
-  [devToolsController_ updateDevToolsForTabContents:contents];
+  [devToolsController_ updateDevToolsForTabContents:contents
+                                        withProfile:browser_->profile()];
 
   // Update the bookmark bar.
   // Must do it after sidebar and devtools update, otherwise bookmark bar might
@@ -2037,6 +2043,11 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   return [focused isKindOfClass:[AutocompleteTextFieldEditor class]];
 }
 
+- (void)tabposeWillClose:(NSNotification*)notif {
+  // Re-show the container after Tabpose closes.
+  [[infoBarContainerController_ view] setHidden:NO];
+}
+
 - (void)openTabpose {
   NSUInteger modifierFlags = [[NSApp currentEvent] modifierFlags];
   BOOL slomo = (modifierFlags & NSShiftKeyMask) != 0;
@@ -2044,17 +2055,33 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   // Cover info bars, inspector window, and detached bookmark bar on NTP.
   // Do not cover download shelf.
   NSRect activeArea = [[self tabContentArea] frame];
+  // Take out the anti-spoof height so that Tabpose doesn't draw on top of the
+  // browser chrome.
   activeArea.size.height +=
-      NSHeight([[infoBarContainerController_ view] frame]);
+      NSHeight([[infoBarContainerController_ view] frame]) -
+          [infoBarContainerController_ antiSpoofHeight];
   if ([self isBookmarkBarVisible] && [self placeBookmarkBarBelowInfoBar]) {
     NSView* bookmarkBarView = [bookmarkBarController_ view];
     activeArea.size.height += NSHeight([bookmarkBarView frame]);
   }
 
-  [TabposeWindow openTabposeFor:[self window]
-                           rect:activeArea
-                          slomo:slomo
-                  tabStripModel:browser_->tabstrip_model()];
+  // Hide the infobar container so that the anti-spoof bulge doesn't show when
+  // Tabpose is open.
+  [[infoBarContainerController_ view] setHidden:YES];
+
+  TabposeWindow* window =
+      [TabposeWindow openTabposeFor:[self window]
+                               rect:activeArea
+                              slomo:slomo
+                      tabStripModel:browser_->tabstrip_model()];
+
+  // When the Tabpose window closes, the infobar container needs to be made
+  // visible again.
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  [center addObserver:self
+             selector:@selector(tabposeWillClose:)
+                 name:NSWindowWillCloseNotification
+               object:window];
 }
 
 @end  // @implementation BrowserWindowController(Fullscreen)

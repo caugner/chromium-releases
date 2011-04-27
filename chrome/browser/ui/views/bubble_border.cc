@@ -5,11 +5,11 @@
 #include "chrome/browser/ui/views/bubble_border.h"
 
 #include "base/logging.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/path.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/path.h"
 
 // static
 SkBitmap* BubbleBorder::left_ = NULL;
@@ -433,7 +433,7 @@ void BubbleBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
   paint.setStyle(SkPaint::kFill_Style);
   paint.setColor(border_->background_color());
   gfx::Path path;
-  gfx::Rect bounds(view->GetLocalBounds(false));
+  gfx::Rect bounds(view->GetContentsBounds());
   SkRect rect;
   rect.set(SkIntToScalar(bounds.x()), SkIntToScalar(bounds.y()),
            SkIntToScalar(bounds.right()), SkIntToScalar(bounds.bottom()));

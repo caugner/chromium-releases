@@ -50,6 +50,7 @@
         'c/dev/ppb_buffer_dev.h',
         'c/dev/ppb_char_set_dev.h',
         'c/dev/ppb_context_3d_dev.h',
+        'c/dev/ppb_context_3d_trusted_dev.h',
         'c/dev/ppb_cursor_control_dev.h',
         'c/dev/ppb_directory_reader_dev.h',
         'c/dev/ppb_file_chooser_dev.h',
@@ -81,8 +82,13 @@
 
         # Private interfaces.
         'c/private/ppb_flash.h',
+        'c/private/ppb_flash_clipboard.h',
+        'c/private/ppb_flash_file.h',
+        'c/private/ppb_flash_menu.h',
+        'c/private/ppb_flash_net_connector.h',
         'c/private/ppb_nacl_private.h',
         'c/private/ppb_pdf.h',
+        'c/private/ppb_proxy_private.h',
 
         # Deprecated interfaces.
         'c/dev/deprecated_bool.h',

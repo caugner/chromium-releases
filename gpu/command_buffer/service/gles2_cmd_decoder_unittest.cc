@@ -58,6 +58,10 @@ class GLES2DecoderWithShaderTest : public GLES2DecoderWithShaderTestBase {
                                  _, GL_DYNAMIC_DRAW))
         .Times(1)
         .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, BufferSubData(
+        GL_ARRAY_BUFFER, 0, num_vertices * sizeof(GLfloat) * 4, _))
+        .Times(1)
+        .RetiresOnSaturation();
     EXPECT_CALL(*gl_, VertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, NULL))
         .Times(1)
         .RetiresOnSaturation();
@@ -233,8 +237,7 @@ TEST_F(GLES2DecoderWithShaderTest, DrawArraysInvalidCountFails) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 
   // Try with stride > 8 (vec2 + vec2 byte)
-  GLfloat f;
-  DoVertexAttribPointer(1, 2, GL_FLOAT, sizeof(f) * 2 + sizeof(f), 0);
+  DoVertexAttribPointer(1, 2, GL_FLOAT, sizeof(GLfloat) * 3, 0);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
@@ -2369,11 +2372,11 @@ TEST_F(GLES2DecoderTest, TexSubImage2DBadArgs) {
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGB, GL_UNSIGNED_BYTE,
            kSharedMemoryId, kSharedMemoryOffset);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGBA,
            GL_UNSIGNED_SHORT_4_4_4_4, kSharedMemoryId, kSharedMemoryOffset);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
            kInvalidSharedMemoryId, kSharedMemoryOffset);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));

@@ -13,6 +13,7 @@
 #include "chrome/renderer/renderer_webidbobjectstore_impl.h"
 #include "chrome/renderer/renderer_webidbtransaction_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyRange.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
@@ -24,6 +25,7 @@ using WebKit::WebFrame;
 using WebKit::WebIDBCallbacks;
 using WebKit::WebIDBKeyRange;
 using WebKit::WebIDBDatabase;
+using WebKit::WebIDBDatabaseCallbacks;
 using WebKit::WebIDBDatabaseError;
 using WebKit::WebIDBTransaction;
 using WebKit::WebIDBTransactionCallbacks;
@@ -37,7 +39,6 @@ IndexedDBDispatcher::~IndexedDBDispatcher() {
 bool IndexedDBDispatcher::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(IndexedDBDispatcher, msg)
-    IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessNull, OnSuccessNull)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIDBCursor,
                         OnSuccessOpenCursor)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIDBDatabase,
@@ -53,9 +54,12 @@ bool IndexedDBDispatcher::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessSerializedScriptValue,
                         OnSuccessSerializedScriptValue)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksError, OnError)
+    IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksBlocked, OnBlocked)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksAbort, OnAbort)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksComplete, OnComplete)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksTimeout, OnTimeout)
+    IPC_MESSAGE_HANDLER(IndexedDBMsg_DatabaseCallbacksVersionChange,
+                        OnVersionChange)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -123,6 +127,44 @@ void IndexedDBDispatcher::RequestIDBFactoryOpen(
   params.name = name;
   params.maximum_size = maximum_size;
   RenderThread::current()->Send(new IndexedDBHostMsg_FactoryOpen(params));
+}
+
+void IndexedDBDispatcher::RequestIDBFactoryDeleteDatabase(
+    const string16& name,
+    WebIDBCallbacks* callbacks_ptr,
+    const string16& origin,
+    WebFrame* web_frame) {
+  scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
+
+  if (!web_frame)
+    return; // We must be shutting down.
+  RenderView* render_view = RenderView::FromWebView(web_frame->view());
+  if (!render_view)
+    return; // We must be shutting down.
+
+  IndexedDBHostMsg_FactoryDeleteDatabase_Params params;
+  params.routing_id = render_view->routing_id();
+  params.response_id = pending_callbacks_.Add(callbacks.release());
+  params.origin = origin;
+  params.name = name;
+  RenderThread::current()->Send(
+      new IndexedDBHostMsg_FactoryDeleteDatabase(params));
+}
+
+void IndexedDBDispatcher::RequestIDBDatabaseClose(int32 idb_database_id) {
+  RenderThread::current()->Send(
+      new IndexedDBHostMsg_DatabaseClose(idb_database_id));
+  pending_database_callbacks_.Remove(idb_database_id);
+}
+
+  void IndexedDBDispatcher::RequestIDBDatabaseOpen(
+      WebIDBDatabaseCallbacks* callbacks_ptr,
+      int32 idb_database_id) {
+  scoped_ptr<WebIDBDatabaseCallbacks> callbacks(callbacks_ptr);
+
+  int32 response_id = pending_database_callbacks_.Add(callbacks.release());
+  RenderThread::current()->Send(new IndexedDBHostMsg_DatabaseOpen(response_id,
+      idb_database_id));
 }
 
 void IndexedDBDispatcher::RequestIDBDatabaseSetVersion(
@@ -240,7 +282,7 @@ void IndexedDBDispatcher::RequestIDBObjectStoreGet(
 void IndexedDBDispatcher::RequestIDBObjectStorePut(
     const SerializedScriptValue& value,
     const IndexedDBKey& key,
-    bool add_only,
+    WebKit::WebIDBObjectStore::PutMode put_mode,
     WebIDBCallbacks* callbacks_ptr,
     int32 idb_object_store_id,
     const WebIDBTransaction& transaction,
@@ -251,7 +293,7 @@ void IndexedDBDispatcher::RequestIDBObjectStorePut(
   params.response_id = pending_callbacks_.Add(callbacks.release());
   params.serialized_value = value;
   params.key = key;
-  params.add_only = add_only;
+  params.put_mode = put_mode;
   params.transaction_id = TransactionId(transaction);
   RenderThread::current()->Send(new IndexedDBHostMsg_ObjectStorePut(
       params, ec));
@@ -272,6 +314,22 @@ void IndexedDBDispatcher::RequestIDBObjectStoreDelete(
       new IndexedDBHostMsg_ObjectStoreDelete(
           idb_object_store_id, response_id,
           key, TransactionId(transaction), ec));
+  if (*ec)
+    pending_callbacks_.Remove(response_id);
+}
+
+void IndexedDBDispatcher::RequestIDBObjectStoreClear(
+    WebIDBCallbacks* callbacks_ptr,
+    int32 idb_object_store_id,
+    const WebIDBTransaction& transaction,
+    WebExceptionCode* ec) {
+  scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
+
+  int32 response_id = pending_callbacks_.Add(callbacks.release());
+  RenderThread::current()->Send(
+      new IndexedDBHostMsg_ObjectStoreClear(
+          idb_object_store_id, response_id,
+          TransactionId(transaction), ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
@@ -310,12 +368,6 @@ int32 IndexedDBDispatcher::TransactionId(
   const RendererWebIDBTransactionImpl* impl =
       static_cast<const RendererWebIDBTransactionImpl*>(&transaction);
   return impl->id();
-}
-
-void IndexedDBDispatcher::OnSuccessNull(int32 response_id) {
-  WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
-  callbacks->onSuccess();
-  pending_callbacks_.Remove(response_id);
 }
 
 void IndexedDBDispatcher::OnSuccessIDBDatabase(int32 response_id,
@@ -368,6 +420,11 @@ void IndexedDBDispatcher::OnSuccessOpenCursor(int32 repsonse_id,
   pending_callbacks_.Remove(repsonse_id);
 }
 
+void IndexedDBDispatcher::OnBlocked(int32 response_id) {
+  WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  callbacks->onBlocked();
+}
+
 void IndexedDBDispatcher::OnError(int32 response_id, int code,
                                   const string16& message) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
@@ -394,4 +451,14 @@ void IndexedDBDispatcher::OnTimeout(int32 transaction_id) {
       pending_transaction_callbacks_.Lookup(transaction_id);
   callbacks->onTimeout();
   pending_transaction_callbacks_.Remove(transaction_id);
+}
+
+void IndexedDBDispatcher::OnVersionChange(int32 database_id,
+                                          const string16& newVersion) {
+  WebIDBDatabaseCallbacks* callbacks =
+      pending_database_callbacks_.Lookup(database_id);
+  // callbacks would be NULL if a versionchange event is received after close
+  // has been called.
+  if (callbacks)
+    callbacks->onVersionChange(newVersion);
 }

@@ -763,6 +763,8 @@ TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
   chrome_frame_test::MockWindowObserver save_dialog_watcher;
   save_dialog_watcher.WatchWindow("Save As", "");
 
+  testing::StrictMock<MockIEEventSink> download_window_mock;
+
   EXPECT_CALL(server_mock_, Get(_, StrEq(L"/post_source.html"), _)).WillOnce(
     SendFast(
       "HTTP/1.1 200 OK\r\n"
@@ -776,14 +778,15 @@ TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
       " <form id=\"myform\" action=\"post_target.html\" method=\"POST\">"
       "</form></body></html>"));
 
-  EXPECT_CALL(server_mock_, Post(_, StrEq(L"/post_target.html"), _)).WillOnce(
-    SendFast(
-      "HTTP/1.1 200 OK\r\n"
-      "content-disposition: attachment;filename=\"hello.txt\"\r\n"
-      "Content-Type: application/text\r\n"
-      "Cache-Control: private\r\n",
-      "hello"));
-
+  EXPECT_CALL(server_mock_, Post(_, StrEq(L"/post_target.html"), _))
+    .Times(2)
+    .WillRepeatedly(
+      SendFast(
+        "HTTP/1.1 200 OK\r\n"
+        "content-disposition: attachment;filename=\"hello.txt\"\r\n"
+        "Content-Type: application/text\r\n"
+        "Cache-Control: private\r\n",
+        "hello"));
 
   // If you want to debug this action then you may need to
   // SendMessage(parent_window, WM_NCACTIVATE, TRUE, 0);
@@ -814,11 +817,20 @@ TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
   EXPECT_CALL(ie_mock_, OnLoad(true, StrEq(src_url)))
       .Times(testing::AnyNumber());
 
+  ie_mock_.ExpectNewWindow(&download_window_mock);
   EXPECT_CALL(ie_mock_, OnLoadError(StrEq(tgt_url)))
       .Times(testing::AnyNumber());
-  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
+
+  EXPECT_CALL(download_window_mock, OnFileDownload(_, _))
+    .Times(testing::AnyNumber());
+  EXPECT_CALL(download_window_mock, OnLoadError(StrEq(tgt_url)))
+    .Times(testing::AtMost(1));
+  EXPECT_CALL(download_window_mock, OnBeforeNavigate2(_,
                               testing::Field(&VARIANT::bstrVal,
                               StrEq(tgt_url)), _, _, _, _, _));
+  EXPECT_CALL(download_window_mock, OnLoad(false, _));
+  EXPECT_CALL(download_window_mock, OnQuit()).Times(testing::AtMost(1));
+
   FilePath temp_file_path;
   ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
   file_util::DieFileDie(temp_file_path, false);
@@ -946,13 +958,14 @@ TEST_P(FullTabNavigationTest, RefreshContents) {
                                 _, _, _, _, _));
   EXPECT_CALL(ie_mock_,
               OnNavigateComplete2(_, testing::Field(&VARIANT::bstrVal,
-                                                    StrEq(src_url))))
-      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 2000));
-
+                                                    StrEq(src_url))));
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(src_url)))
-      .Times(2);
+      .Times(2)
+      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 50))
+      .WillOnce(testing::Return());
 
-  LaunchIEAndNavigate(src_url);
+  LaunchIENavigateAndLoop(src_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 }
 
 class FullTabSeleniumTest
@@ -1086,7 +1099,9 @@ TEST_F(FullTabDownloadTest, TopLevelPostReissueFromChromeFramePage) {
   EXPECT_CALL(ie_mock_, OnLoad(false, StrEq(src_url)));
 
   EXPECT_CALL(ie_mock_, OnLoad(true, StrEq(tgt_url)))
-      .Times(2);
+      .Times(testing::Between(1,2))
+      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 50))
+      .WillOnce(testing::Return());
 
   EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
                               testing::Field(&VARIANT::bstrVal,
@@ -1097,11 +1112,11 @@ TEST_F(FullTabDownloadTest, TopLevelPostReissueFromChromeFramePage) {
                               testing::Field(&VARIANT::bstrVal,
                               StrEq(tgt_url))))
       .Times(2)
-      .WillOnce(testing::DoAll(DelayRefresh(&ie_mock_, &loop_, 2000),
-                DelayCloseBrowserMock(&loop_, 4000, &ie_mock_)))
+      .WillOnce(DelayCloseBrowserMock(&loop_, 4000, &ie_mock_))
       .WillOnce(testing::Return());
 
-  LaunchIENavigateAndLoop(src_url, kChromeFrameLongNavigationTimeoutInSeconds);
+  LaunchIENavigateAndLoop(src_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 }
 
 MATCHER_P(UserAgentHeaderMatcher, ua_string, "") {
@@ -1162,13 +1177,14 @@ TEST_P(FullTabNavigationTest, RefreshContentsUATest) {
                                 _, _, _, _, _));
   EXPECT_CALL(ie_mock_,
               OnNavigateComplete2(_, testing::Field(&VARIANT::bstrVal,
-                                                    StrEq(src_url))))
-      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 2000));
-
+                                                    StrEq(src_url))));
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(src_url)))
-      .Times(testing::AtMost(2));
+      .Times(testing::Between(1, 2))
+      .WillOnce(DelayRefresh(&ie_mock_, &loop_, 50))
+      .WillOnce(testing::Return());
 
-  LaunchIEAndNavigate(src_url);
+  LaunchIENavigateAndLoop(src_url,
+                          kChromeFrameVeryLongNavigationTimeoutInSeconds);
 }
 
 // Link navigations in the same domain specified with the noreferrer flag

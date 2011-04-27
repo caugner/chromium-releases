@@ -7,8 +7,8 @@
 #pragma once
 
 #include "build/build_config.h"
-#include "gfx/point.h"
-#include "gfx/size.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/size.h"
 #include "views/view.h"
 
 namespace views {
@@ -52,7 +52,7 @@ class DraggedTabView : public views::View {
 
  private:
   // Overridden from views::View:
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
 

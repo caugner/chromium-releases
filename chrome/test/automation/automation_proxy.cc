@@ -17,6 +17,7 @@
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/extension_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -201,6 +202,10 @@ void AutomationProxy::SignalAppLaunch(const std::string& version_string) {
   }
   server_version_ = version_string;
   app_launched_.Signal();
+}
+
+bool AutomationProxy::WaitForProcessLauncherThreadToGoIdle() {
+  return Send(new AutomationMsg_WaitForProcessLauncherThreadToGoIdle());
 }
 
 bool AutomationProxy::WaitForInitialLoads() {
@@ -546,4 +551,12 @@ bool AutomationProxy::LoginWithUserAndPass(const std::string& username,
 
 bool AutomationProxy::ResetToDefaultTheme() {
   return Send(new AutomationMsg_ResetToDefaultTheme());
+}
+
+bool AutomationProxy::SendJSONRequest(const std::string& request,
+                                      std::string* response) {
+  bool result = false;
+  if (!SendAutomationJSONRequest(this, request, response, &result))
+    return false;
+  return result;
 }

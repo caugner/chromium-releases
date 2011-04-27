@@ -30,6 +30,7 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
 #if defined(OS_MACOSX)
       plugin_handle_(NULL),
 #endif  // defined(OS_MACOSX)
+      context_lost_callback_(0),
       cached_width_(0),
       cached_height_(0),
       bound_fbo_(0) {
@@ -37,19 +38,6 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
 
 WebGraphicsContext3DCommandBufferImpl::
     ~WebGraphicsContext3DCommandBufferImpl() {
-#if defined(OS_MACOSX)
-  if (web_view_) {
-    DCHECK(plugin_handle_ != gfx::kNullPluginWindow);
-    RenderView* renderview = RenderView::FromWebView(web_view_);
-    // The RenderView might already have been freed, but in its
-    // destructor it destroys all fake plugin window handles it
-    // allocated.
-    if (renderview) {
-      renderview->DestroyFakePluginWindowHandle(plugin_handle_);
-    }
-    plugin_handle_ = gfx::kNullPluginWindow;
-  }
-#endif
   if (context_) {
     ggl::DestroyContext(context_);
   }
@@ -101,18 +89,10 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     RenderView* renderview = RenderView::FromWebView(web_view);
     if (!renderview)
       return false;
-    gfx::NativeViewId view_id;
-#if !defined(OS_MACOSX)
-    view_id = renderview->host_window();
-#else
-    plugin_handle_ = renderview->AllocateFakePluginWindowHandle(
-        /*opaque=*/true, /*root=*/true);
-    view_id = static_cast<gfx::NativeViewId>(plugin_handle_);
-#endif
+
     web_view_ = web_view;
     context_ = ggl::CreateViewContext(
         host,
-        view_id,
         renderview->routing_id(),
         kWebGraphicsContext3DPerferredGLExtensions,
         attribs);
@@ -150,6 +130,12 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
   }
   if (!context_)
     return false;
+
+  ggl::SetContextLostCallback(
+      context_,
+      NewCallback(this,
+                  &WebGraphicsContext3DCommandBufferImpl::OnContextLost));
+
   // TODO(gman): Remove this.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDisableGLSLTranslator)) {
@@ -188,40 +174,11 @@ int WebGraphicsContext3DCommandBufferImpl::height() {
   return cached_height_;
 }
 
-int WebGraphicsContext3DCommandBufferImpl::sizeInBytes(int type) {
-  switch (type) {
-    case GL_BYTE:
-      return sizeof(GLbyte);
-    case GL_UNSIGNED_BYTE:
-      return sizeof(GLubyte);
-    case GL_SHORT:
-      return sizeof(GLshort);
-    case GL_UNSIGNED_SHORT:
-      return sizeof(GLushort);
-    case GL_INT:
-      return sizeof(GLint);
-    case GL_UNSIGNED_INT:
-      return sizeof(GLuint);
-    case GL_FLOAT:
-      return sizeof(GLfloat);
-  }
-  return 0;
-}
-
 bool WebGraphicsContext3DCommandBufferImpl::isGLES2Compliant() {
   return true;
 }
 
-bool WebGraphicsContext3DCommandBufferImpl::isGLES2NPOTStrict() {
-  return true;
-}
-
-bool WebGraphicsContext3DCommandBufferImpl::
-    isErrorGeneratedOnOutOfBoundsAccesses() {
-  return true;
-}
-
-unsigned int WebGraphicsContext3DCommandBufferImpl::getPlatformTextureId() {
+WebGLId WebGraphicsContext3DCommandBufferImpl::getPlatformTextureId() {
   DCHECK(context_);
   return ggl::GetParentTextureId(context_);
 }
@@ -254,14 +211,14 @@ void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
 #endif  // FLIP_FRAMEBUFFER_VERTICALLY
 }
 
-unsigned WebGraphicsContext3DCommandBufferImpl::createCompositorTexture(
-    unsigned width, unsigned height) {
+WebGLId WebGraphicsContext3DCommandBufferImpl::createCompositorTexture(
+    WGC3Dsizei width, WGC3Dsizei height) {
   makeContextCurrent();
   return ggl::CreateParentTexture(context_, gfx::Size(width, height));
 }
 
 void WebGraphicsContext3DCommandBufferImpl::deleteCompositorTexture(
-    unsigned parent_texture) {
+    WebGLId parent_texture) {
   makeContextCurrent();
   ggl::DeleteParentTexture(context_, parent_texture);
 }
@@ -333,7 +290,7 @@ bool WebGraphicsContext3DCommandBufferImpl::readBackFramebuffer(
 }
 
 void WebGraphicsContext3DCommandBufferImpl::synthesizeGLError(
-    unsigned long error) {
+    WGC3Denum error) {
   if (find(synthetic_errors_.begin(), synthetic_errors_.end(), error) ==
       synthetic_errors_.end()) {
     synthetic_errors_.push_back(error);
@@ -341,10 +298,10 @@ void WebGraphicsContext3DCommandBufferImpl::synthesizeGLError(
 }
 
 void* WebGraphicsContext3DCommandBufferImpl::mapBufferSubDataCHROMIUM(
-    unsigned target,
-    int offset,
-    int size,
-    unsigned access) {
+    WGC3Denum target,
+    WGC3Dintptr offset,
+    WGC3Dsizeiptr size,
+    WGC3Denum access) {
   return glMapBufferSubDataCHROMIUM(target, offset, size, access);
 }
 
@@ -354,15 +311,15 @@ void WebGraphicsContext3DCommandBufferImpl::unmapBufferSubDataCHROMIUM(
 }
 
 void* WebGraphicsContext3DCommandBufferImpl::mapTexSubImage2DCHROMIUM(
-    unsigned target,
-    int level,
-    int xoffset,
-    int yoffset,
-    int width,
-    int height,
-    unsigned format,
-    unsigned type,
-    unsigned access) {
+    WGC3Denum target,
+    WGC3Dint level,
+    WGC3Dint xoffset,
+    WGC3Dint yoffset,
+    WGC3Dsizei width,
+    WGC3Dsizei height,
+    WGC3Denum format,
+    WGC3Denum type,
+    WGC3Denum access) {
   return glMapTexSubImage2DCHROMIUM(
       target, level, xoffset, yoffset, width, height, format, type, access);
 }
@@ -373,7 +330,7 @@ void WebGraphicsContext3DCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
 }
 
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToParentTextureCHROMIUM(
-    unsigned texture, unsigned parentTexture) {
+    WebGLId texture, WebGLId parentTexture) {
   copyTextureToCompositor(texture, parentTexture);
 }
 
@@ -385,6 +342,23 @@ WebKit::WebString WebGraphicsContext3DCommandBufferImpl::
 void WebGraphicsContext3DCommandBufferImpl::requestExtensionCHROMIUM(
     const char* extension) {
   glRequestExtensionCHROMIUM(extension);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::blitFramebufferCHROMIUM(
+    WGC3Dint srcX0, WGC3Dint srcY0, WGC3Dint srcX1, WGC3Dint srcY1,
+    WGC3Dint dstX0, WGC3Dint dstY0, WGC3Dint dstX1, WGC3Dint dstY1,
+    WGC3Dbitfield mask, WGC3Denum filter) {
+  glBlitFramebufferEXT(srcX0, srcY0, srcX1, srcY1,
+                       dstX0, dstY0, dstX1, dstY1,
+                       mask, filter);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::
+    renderbufferStorageMultisampleCHROMIUM(
+        WGC3Denum target, WGC3Dsizei samples, WGC3Denum internalformat,
+        WGC3Dsizei width, WGC3Dsizei height) {
+  glRenderbufferStorageMultisampleEXT(target, samples, internalformat,
+                                      width, height);
 }
 
 // Helper macros to reduce the amount of code.
@@ -399,12 +373,6 @@ void WebGraphicsContext3DCommandBufferImpl::name() {                    \
 void WebGraphicsContext3DCommandBufferImpl::name(t1 a1) {               \
   makeContextCurrent();                                                 \
   gl##glname(a1);                                                       \
-}
-
-#define DELEGATE_TO_GL_1_C(name, glname, t1)                            \
-void WebGraphicsContext3DCommandBufferImpl::name(t1 a1) {               \
-  makeContextCurrent();                                                 \
-  gl##glname(static_cast<GLclampf>(a1));                                \
 }
 
 #define DELEGATE_TO_GL_1R(name, glname, t1, rt)                         \
@@ -425,18 +393,6 @@ void WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2) {        \
   gl##glname(a1, a2);                                                   \
 }
 
-#define DELEGATE_TO_GL_2_C1(name, glname, t1, t2)                       \
-void WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2) {        \
-  makeContextCurrent();                                                 \
-  gl##glname(static_cast<GLclampf>(a1), a2);                            \
-}
-
-#define DELEGATE_TO_GL_2_C12(name, glname, t1, t2)                      \
-void WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2) {        \
-  makeContextCurrent();                                                 \
-  gl##glname(static_cast<GLclampf>(a1), static_cast<GLclampf>(a2));     \
-}
-
 #define DELEGATE_TO_GL_2R(name, glname, t1, t2, rt)                     \
 rt WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2) {          \
   makeContextCurrent();                                                 \
@@ -453,13 +409,6 @@ void WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2, t3 a3) { \
 void WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2, t3 a3, t4 a4) { \
   makeContextCurrent();                                                 \
   gl##glname(a1, a2, a3, a4);                                           \
-}
-
-#define DELEGATE_TO_GL_4_C1234(name, glname, t1, t2, t3, t4)            \
-void WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2, t3 a3, t4 a4) { \
-  makeContextCurrent();                                                 \
-  gl##glname(static_cast<GLclampf>(a1), static_cast<GLclampf>(a2),      \
-             static_cast<GLclampf>(a3), static_cast<GLclampf>(a4));     \
 }
 
 #define DELEGATE_TO_GL_5(name, glname, t1, t2, t3, t4, t5)              \
@@ -499,115 +448,118 @@ void WebGraphicsContext3DCommandBufferImpl::name(t1 a1, t2 a2, t3 a3,   \
   gl##glname(a1, a2, a3, a4, a5, a6, a7, a8, a9);                       \
 }
 
-DELEGATE_TO_GL_1(activeTexture, ActiveTexture, unsigned long)
+DELEGATE_TO_GL_1(activeTexture, ActiveTexture, WGC3Denum)
 
 DELEGATE_TO_GL_2(attachShader, AttachShader, WebGLId, WebGLId)
 
 DELEGATE_TO_GL_3(bindAttribLocation, BindAttribLocation, WebGLId,
-                 unsigned long, const char*)
+                 WGC3Duint, const WGC3Dchar*)
 
-DELEGATE_TO_GL_2(bindBuffer, BindBuffer, unsigned long, WebGLId)
+DELEGATE_TO_GL_2(bindBuffer, BindBuffer, WGC3Denum, WebGLId)
 
 void WebGraphicsContext3DCommandBufferImpl::bindFramebuffer(
-    unsigned long target,
+    WGC3Denum target,
     WebGLId framebuffer) {
   makeContextCurrent();
   glBindFramebuffer(target, framebuffer);
   bound_fbo_ = framebuffer;
 }
 
-DELEGATE_TO_GL_2(bindRenderbuffer, BindRenderbuffer, unsigned long, WebGLId)
+DELEGATE_TO_GL_2(bindRenderbuffer, BindRenderbuffer, WGC3Denum, WebGLId)
 
-DELEGATE_TO_GL_2(bindTexture, BindTexture, unsigned long, WebGLId)
+DELEGATE_TO_GL_2(bindTexture, BindTexture, WGC3Denum, WebGLId)
 
-DELEGATE_TO_GL_4_C1234(blendColor, BlendColor, double, double, double, double)
+DELEGATE_TO_GL_4(blendColor, BlendColor,
+                 WGC3Dclampf, WGC3Dclampf, WGC3Dclampf, WGC3Dclampf)
 
-DELEGATE_TO_GL_1(blendEquation, BlendEquation, unsigned long)
+DELEGATE_TO_GL_1(blendEquation, BlendEquation, WGC3Denum)
 
 DELEGATE_TO_GL_2(blendEquationSeparate, BlendEquationSeparate,
-                 unsigned long, unsigned long)
+                 WGC3Denum, WGC3Denum)
 
-DELEGATE_TO_GL_2(blendFunc, BlendFunc, unsigned long, unsigned long)
+DELEGATE_TO_GL_2(blendFunc, BlendFunc, WGC3Denum, WGC3Denum)
 
 DELEGATE_TO_GL_4(blendFuncSeparate, BlendFuncSeparate,
-                 unsigned long, unsigned long, unsigned long, unsigned long)
+                 WGC3Denum, WGC3Denum, WGC3Denum, WGC3Denum)
 
 DELEGATE_TO_GL_4(bufferData, BufferData,
-                 unsigned long, int, const void*, unsigned long)
+                 WGC3Denum, WGC3Dsizeiptr, const void*, WGC3Denum)
 
 DELEGATE_TO_GL_4(bufferSubData, BufferSubData,
-                 unsigned long, long, int, const void*)
+                 WGC3Denum, WGC3Dintptr, WGC3Dsizeiptr, const void*)
 
 DELEGATE_TO_GL_1R(checkFramebufferStatus, CheckFramebufferStatus,
-                  unsigned long, unsigned long)
+                  WGC3Denum, WGC3Denum)
 
-DELEGATE_TO_GL_1(clear, Clear, unsigned long)
+DELEGATE_TO_GL_1(clear, Clear, WGC3Dbitfield)
 
-DELEGATE_TO_GL_4_C1234(clearColor, ClearColor, double, double, double, double)
+DELEGATE_TO_GL_4(clearColor, ClearColor,
+                 WGC3Dclampf, WGC3Dclampf, WGC3Dclampf, WGC3Dclampf)
 
-DELEGATE_TO_GL_1_C(clearDepth, ClearDepthf, double)
+DELEGATE_TO_GL_1(clearDepth, ClearDepthf, WGC3Dclampf)
 
-DELEGATE_TO_GL_1(clearStencil, ClearStencil, long)
+DELEGATE_TO_GL_1(clearStencil, ClearStencil, WGC3Dint)
 
-DELEGATE_TO_GL_4(colorMask, ColorMask, bool, bool, bool, bool)
+DELEGATE_TO_GL_4(colorMask, ColorMask,
+                 WGC3Dboolean, WGC3Dboolean, WGC3Dboolean, WGC3Dboolean)
 
 DELEGATE_TO_GL_1(compileShader, CompileShader, WebGLId)
 
 DELEGATE_TO_GL_8(copyTexImage2D, CopyTexImage2D,
-                 unsigned long, long, unsigned long, long, long,
-                 unsigned long, unsigned long, long)
+                 WGC3Denum, WGC3Dint, WGC3Denum, WGC3Dint, WGC3Dint,
+                 WGC3Dsizei, WGC3Dsizei, WGC3Dint)
 
 DELEGATE_TO_GL_8(copyTexSubImage2D, CopyTexSubImage2D,
-                 unsigned long, long, long, long, long, long,
-                 unsigned long, unsigned long)
+                 WGC3Denum, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint,
+                 WGC3Dsizei, WGC3Dsizei)
 
-DELEGATE_TO_GL_1(cullFace, CullFace, unsigned long)
+DELEGATE_TO_GL_1(cullFace, CullFace, WGC3Denum)
 
-DELEGATE_TO_GL_1(depthFunc, DepthFunc, unsigned long)
+DELEGATE_TO_GL_1(depthFunc, DepthFunc, WGC3Denum)
 
-DELEGATE_TO_GL_1(depthMask, DepthMask, bool)
+DELEGATE_TO_GL_1(depthMask, DepthMask, WGC3Dboolean)
 
-DELEGATE_TO_GL_2_C12(depthRange, DepthRangef, double, double)
+DELEGATE_TO_GL_2(depthRange, DepthRangef, WGC3Dclampf, WGC3Dclampf)
 
 DELEGATE_TO_GL_2(detachShader, DetachShader, WebGLId, WebGLId)
 
-DELEGATE_TO_GL_1(disable, Disable, unsigned long)
+DELEGATE_TO_GL_1(disable, Disable, WGC3Denum)
 
 DELEGATE_TO_GL_1(disableVertexAttribArray, DisableVertexAttribArray,
-                 unsigned long)
+                 WGC3Duint)
 
-DELEGATE_TO_GL_3(drawArrays, DrawArrays, unsigned long, long, long)
+DELEGATE_TO_GL_3(drawArrays, DrawArrays, WGC3Denum, WGC3Dint, WGC3Dsizei)
 
-void WebGraphicsContext3DCommandBufferImpl::drawElements(unsigned long mode,
-                                                         unsigned long count,
-                                                         unsigned long type,
-                                                         long offset) {
+void WebGraphicsContext3DCommandBufferImpl::drawElements(WGC3Denum mode,
+                                                         WGC3Dsizei count,
+                                                         WGC3Denum type,
+                                                         WGC3Dintptr offset) {
   makeContextCurrent();
   glDrawElements(mode, count, type,
                  reinterpret_cast<void*>(static_cast<intptr_t>(offset)));
 }
 
-DELEGATE_TO_GL_1(enable, Enable, unsigned long)
+DELEGATE_TO_GL_1(enable, Enable, WGC3Denum)
 
 DELEGATE_TO_GL_1(enableVertexAttribArray, EnableVertexAttribArray,
-                 unsigned long)
+                 WGC3Duint)
 
 DELEGATE_TO_GL(finish, Finish)
 
 DELEGATE_TO_GL(flush, Flush)
 
 DELEGATE_TO_GL_4(framebufferRenderbuffer, FramebufferRenderbuffer,
-                 unsigned long, unsigned long, unsigned long, WebGLId)
+                 WGC3Denum, WGC3Denum, WGC3Denum, WebGLId)
 
 DELEGATE_TO_GL_5(framebufferTexture2D, FramebufferTexture2D,
-                 unsigned long, unsigned long, unsigned long, WebGLId, long)
+                 WGC3Denum, WGC3Denum, WGC3Denum, WebGLId, WGC3Dint)
 
-DELEGATE_TO_GL_1(frontFace, FrontFace, unsigned long)
+DELEGATE_TO_GL_1(frontFace, FrontFace, WGC3Denum)
 
-DELEGATE_TO_GL_1(generateMipmap, GenerateMipmap, unsigned long)
+DELEGATE_TO_GL_1(generateMipmap, GenerateMipmap, WGC3Denum)
 
 bool WebGraphicsContext3DCommandBufferImpl::getActiveAttrib(
-    WebGLId program, unsigned long index, ActiveInfo& info) {
+    WebGLId program, WGC3Duint index, ActiveInfo& info) {
   makeContextCurrent();
   if (!program) {
     synthesizeGLError(GL_INVALID_VALUE);
@@ -637,7 +589,7 @@ bool WebGraphicsContext3DCommandBufferImpl::getActiveAttrib(
 }
 
 bool WebGraphicsContext3DCommandBufferImpl::getActiveUniform(
-    WebGLId program, unsigned long index, ActiveInfo& info) {
+    WebGLId program, WGC3Duint index, ActiveInfo& info) {
   makeContextCurrent();
   GLint max_name_length = -1;
   glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
@@ -663,25 +615,25 @@ bool WebGraphicsContext3DCommandBufferImpl::getActiveUniform(
 }
 
 DELEGATE_TO_GL_4(getAttachedShaders, GetAttachedShaders,
-                 WebGLId, int, int*, unsigned int*)
+                 WebGLId, WGC3Dsizei, WGC3Dsizei*, WebGLId*)
 
 DELEGATE_TO_GL_2R(getAttribLocation, GetAttribLocation,
-                  WebGLId, const char*, int)
+                  WebGLId, const WGC3Dchar*, WGC3Dint)
 
-DELEGATE_TO_GL_2(getBooleanv, GetBooleanv, unsigned long, unsigned char*)
+DELEGATE_TO_GL_2(getBooleanv, GetBooleanv, WGC3Denum, WGC3Dboolean*)
 
 DELEGATE_TO_GL_3(getBufferParameteriv, GetBufferParameteriv,
-                 unsigned long, unsigned long, int*)
+                 WGC3Denum, WGC3Denum, WGC3Dint*)
 
 WebKit::WebGraphicsContext3D::Attributes
 WebGraphicsContext3DCommandBufferImpl::getContextAttributes() {
   return attributes_;
 }
 
-unsigned long WebGraphicsContext3DCommandBufferImpl::getError() {
-  if (synthetic_errors_.size() > 0) {
-    std::vector<unsigned long>::iterator iter = synthetic_errors_.begin();
-    unsigned long err = *iter;
+WGC3Denum WebGraphicsContext3DCommandBufferImpl::getError() {
+  if (!synthetic_errors_.empty()) {
+    std::vector<WGC3Denum>::iterator iter = synthetic_errors_.begin();
+    WGC3Denum err = *iter;
     synthetic_errors_.erase(iter);
     return err;
   }
@@ -694,15 +646,15 @@ bool WebGraphicsContext3DCommandBufferImpl::isContextLost() {
   return ggl::IsCommandBufferContextLost(context_);
 }
 
-DELEGATE_TO_GL_2(getFloatv, GetFloatv, unsigned long, float*)
+DELEGATE_TO_GL_2(getFloatv, GetFloatv, WGC3Denum, WGC3Dfloat*)
 
 DELEGATE_TO_GL_4(getFramebufferAttachmentParameteriv,
                  GetFramebufferAttachmentParameteriv,
-                 unsigned long, unsigned long, unsigned long, int*)
+                 WGC3Denum, WGC3Denum, WGC3Denum, WGC3Dint*)
 
-DELEGATE_TO_GL_2(getIntegerv, GetIntegerv, unsigned long, int*)
+DELEGATE_TO_GL_2(getIntegerv, GetIntegerv, WGC3Denum, WGC3Dint*)
 
-DELEGATE_TO_GL_3(getProgramiv, GetProgramiv, WebGLId, unsigned long, int*)
+DELEGATE_TO_GL_3(getProgramiv, GetProgramiv, WebGLId, WGC3Denum, WGC3Dint*)
 
 WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getProgramInfoLog(
     WebGLId program) {
@@ -723,9 +675,9 @@ WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getProgramInfoLog(
 }
 
 DELEGATE_TO_GL_3(getRenderbufferParameteriv, GetRenderbufferParameteriv,
-                 unsigned long, unsigned long, int*)
+                 WGC3Denum, WGC3Denum, WGC3Dint*)
 
-DELEGATE_TO_GL_3(getShaderiv, GetShaderiv, WebGLId, unsigned long, int*)
+DELEGATE_TO_GL_3(getShaderiv, GetShaderiv, WebGLId, WGC3Denum, WGC3Dint*)
 
 WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getShaderInfoLog(
     WebGLId shader) {
@@ -764,112 +716,113 @@ WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getShaderSource(
 }
 
 WebKit::WebString WebGraphicsContext3DCommandBufferImpl::getString(
-    unsigned long name) {
+    WGC3Denum name) {
   makeContextCurrent();
   return WebKit::WebString::fromUTF8(
       reinterpret_cast<const char*>(glGetString(name)));
 }
 
 DELEGATE_TO_GL_3(getTexParameterfv, GetTexParameterfv,
-                 unsigned long, unsigned long, float*)
+                 WGC3Denum, WGC3Denum, WGC3Dfloat*)
 
 DELEGATE_TO_GL_3(getTexParameteriv, GetTexParameteriv,
-                 unsigned long, unsigned long, int*)
+                 WGC3Denum, WGC3Denum, WGC3Dint*)
 
-DELEGATE_TO_GL_3(getUniformfv, GetUniformfv, WebGLId, long, float*)
+DELEGATE_TO_GL_3(getUniformfv, GetUniformfv, WebGLId, WGC3Dint, WGC3Dfloat*)
 
-DELEGATE_TO_GL_3(getUniformiv, GetUniformiv, WebGLId, long, int*)
+DELEGATE_TO_GL_3(getUniformiv, GetUniformiv, WebGLId, WGC3Dint, WGC3Dint*)
 
 DELEGATE_TO_GL_2R(getUniformLocation, GetUniformLocation,
-                  WebGLId, const char*, long)
+                  WebGLId, const WGC3Dchar*, WGC3Dint)
 
 DELEGATE_TO_GL_3(getVertexAttribfv, GetVertexAttribfv,
-                 unsigned long, unsigned long, float*)
+                 WGC3Duint, WGC3Denum, WGC3Dfloat*)
 
 DELEGATE_TO_GL_3(getVertexAttribiv, GetVertexAttribiv,
-                 unsigned long, unsigned long, int*)
+                 WGC3Duint, WGC3Denum, WGC3Dint*)
 
-long WebGraphicsContext3DCommandBufferImpl::getVertexAttribOffset(
-    unsigned long index, unsigned long pname) {
+WGC3Dsizeiptr WebGraphicsContext3DCommandBufferImpl::getVertexAttribOffset(
+    WGC3Duint index, WGC3Denum pname) {
   makeContextCurrent();
   GLvoid* value = NULL;
   // NOTE: If pname is ever a value that returns more then 1 element
   // this will corrupt memory.
   glGetVertexAttribPointerv(index, pname, &value);
-  return reinterpret_cast<intptr_t>(value);
+  return static_cast<WGC3Dsizeiptr>(reinterpret_cast<intptr_t>(value));
 }
 
-DELEGATE_TO_GL_2(hint, Hint, unsigned long, unsigned long)
+DELEGATE_TO_GL_2(hint, Hint, WGC3Denum, WGC3Denum)
 
-DELEGATE_TO_GL_1RB(isBuffer, IsBuffer, WebGLId, bool)
+DELEGATE_TO_GL_1RB(isBuffer, IsBuffer, WebGLId, WGC3Dboolean)
 
-DELEGATE_TO_GL_1RB(isEnabled, IsEnabled, unsigned long, bool)
+DELEGATE_TO_GL_1RB(isEnabled, IsEnabled, WGC3Denum, WGC3Dboolean)
 
-DELEGATE_TO_GL_1RB(isFramebuffer, IsFramebuffer, WebGLId, bool)
+DELEGATE_TO_GL_1RB(isFramebuffer, IsFramebuffer, WebGLId, WGC3Dboolean)
 
-DELEGATE_TO_GL_1RB(isProgram, IsProgram, WebGLId, bool)
+DELEGATE_TO_GL_1RB(isProgram, IsProgram, WebGLId, WGC3Dboolean)
 
-DELEGATE_TO_GL_1RB(isRenderbuffer, IsRenderbuffer, WebGLId, bool)
+DELEGATE_TO_GL_1RB(isRenderbuffer, IsRenderbuffer, WebGLId, WGC3Dboolean)
 
-DELEGATE_TO_GL_1RB(isShader, IsShader, WebGLId, bool)
+DELEGATE_TO_GL_1RB(isShader, IsShader, WebGLId, WGC3Dboolean)
 
-DELEGATE_TO_GL_1RB(isTexture, IsTexture, WebGLId, bool)
+DELEGATE_TO_GL_1RB(isTexture, IsTexture, WebGLId, WGC3Dboolean)
 
-DELEGATE_TO_GL_1_C(lineWidth, LineWidth, double)
+DELEGATE_TO_GL_1(lineWidth, LineWidth, WGC3Dfloat)
 
 DELEGATE_TO_GL_1(linkProgram, LinkProgram, WebGLId)
 
-DELEGATE_TO_GL_2(pixelStorei, PixelStorei, unsigned long, long)
+DELEGATE_TO_GL_2(pixelStorei, PixelStorei, WGC3Denum, WGC3Dint)
 
-DELEGATE_TO_GL_2_C12(polygonOffset, PolygonOffset, double, double)
+DELEGATE_TO_GL_2(polygonOffset, PolygonOffset, WGC3Dfloat, WGC3Dfloat)
 
 DELEGATE_TO_GL_7(readPixels, ReadPixels,
-                 long, long, unsigned long, unsigned long, unsigned long,
-                 unsigned long, void*)
+                 WGC3Dint, WGC3Dint, WGC3Dsizei, WGC3Dsizei, WGC3Denum,
+                 WGC3Denum, void*)
 
 void WebGraphicsContext3DCommandBufferImpl::releaseShaderCompiler() {
 }
 
 DELEGATE_TO_GL_4(renderbufferStorage, RenderbufferStorage,
-                 unsigned long, unsigned long, unsigned long, unsigned long)
+                 WGC3Denum, WGC3Denum, WGC3Dsizei, WGC3Dsizei)
 
-DELEGATE_TO_GL_2_C1(sampleCoverage, SampleCoverage, double, bool)
+DELEGATE_TO_GL_2(sampleCoverage, SampleCoverage, WGC3Dfloat, WGC3Dboolean)
 
-DELEGATE_TO_GL_4(scissor, Scissor, long, long, unsigned long, unsigned long)
+DELEGATE_TO_GL_4(scissor, Scissor, WGC3Dint, WGC3Dint, WGC3Dsizei, WGC3Dsizei)
 
 void WebGraphicsContext3DCommandBufferImpl::shaderSource(
-    WebGLId shader, const char* string) {
+    WebGLId shader, const WGC3Dchar* string) {
   makeContextCurrent();
   GLint length = strlen(string);
   glShaderSource(shader, 1, &string, &length);
 }
 
-DELEGATE_TO_GL_3(stencilFunc, StencilFunc, unsigned long, long, unsigned long)
+DELEGATE_TO_GL_3(stencilFunc, StencilFunc, WGC3Denum, WGC3Dint, WGC3Duint)
 
 DELEGATE_TO_GL_4(stencilFuncSeparate, StencilFuncSeparate,
-                 unsigned long, unsigned long, long, unsigned long)
+                 WGC3Denum, WGC3Denum, WGC3Dint, WGC3Duint)
 
-DELEGATE_TO_GL_1(stencilMask, StencilMask, unsigned long)
+DELEGATE_TO_GL_1(stencilMask, StencilMask, WGC3Duint)
 
 DELEGATE_TO_GL_2(stencilMaskSeparate, StencilMaskSeparate,
-                 unsigned long, unsigned long)
+                 WGC3Denum, WGC3Duint)
 
 DELEGATE_TO_GL_3(stencilOp, StencilOp,
-                 unsigned long, unsigned long, unsigned long)
+                 WGC3Denum, WGC3Denum, WGC3Denum)
 
 DELEGATE_TO_GL_4(stencilOpSeparate, StencilOpSeparate,
-                 unsigned long, unsigned long, unsigned long, unsigned long)
+                 WGC3Denum, WGC3Denum, WGC3Denum, WGC3Denum)
 
 DELEGATE_TO_GL_9(texImage2D, TexImage2D,
-                 unsigned, unsigned, unsigned, unsigned, unsigned, unsigned,
-                 unsigned, unsigned, const void*)
+                 WGC3Denum, WGC3Dint, WGC3Denum, WGC3Dsizei, WGC3Dsizei,
+                 WGC3Dint, WGC3Denum, WGC3Denum, const void*)
 
-DELEGATE_TO_GL_3(texParameterf, TexParameterf, unsigned, unsigned, float);
+DELEGATE_TO_GL_3(texParameterf, TexParameterf,
+                 WGC3Denum, WGC3Denum, WGC3Dfloat);
 
 static const unsigned int kTextureWrapR = 0x8072;
 
 void WebGraphicsContext3DCommandBufferImpl::texParameteri(
-    unsigned target, unsigned pname, int param) {
+    WGC3Denum target, WGC3Denum pname, WGC3Dint param) {
   // TODO(kbr): figure out whether the setting of TEXTURE_WRAP_R in
   // GraphicsContext3D.cpp is strictly necessary to avoid seams at the
   // edge of cube maps, and, if it is, push it into the GLES2 service
@@ -882,153 +835,166 @@ void WebGraphicsContext3DCommandBufferImpl::texParameteri(
 }
 
 DELEGATE_TO_GL_9(texSubImage2D, TexSubImage2D,
-                 unsigned, unsigned, unsigned, unsigned, unsigned, unsigned,
-                 unsigned, unsigned, const void*)
+                 WGC3Denum, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dsizei,
+                 WGC3Dsizei, WGC3Denum, WGC3Denum, const void*)
 
-DELEGATE_TO_GL_2(uniform1f, Uniform1f, long, float)
+DELEGATE_TO_GL_2(uniform1f, Uniform1f, WGC3Dint, WGC3Dfloat)
 
-DELEGATE_TO_GL_3(uniform1fv, Uniform1fv, long, int, float*)
+DELEGATE_TO_GL_3(uniform1fv, Uniform1fv, WGC3Dint, WGC3Dsizei,
+                 const WGC3Dfloat*)
 
-DELEGATE_TO_GL_2(uniform1i, Uniform1i, long, int)
+DELEGATE_TO_GL_2(uniform1i, Uniform1i, WGC3Dint, WGC3Dint)
 
-DELEGATE_TO_GL_3(uniform1iv, Uniform1iv, long, int, int*)
+DELEGATE_TO_GL_3(uniform1iv, Uniform1iv, WGC3Dint, WGC3Dsizei, const WGC3Dint*)
 
-DELEGATE_TO_GL_3(uniform2f, Uniform2f, long, float, float)
+DELEGATE_TO_GL_3(uniform2f, Uniform2f, WGC3Dint, WGC3Dfloat, WGC3Dfloat)
 
-DELEGATE_TO_GL_3(uniform2fv, Uniform2fv, long, int, float*)
+DELEGATE_TO_GL_3(uniform2fv, Uniform2fv, WGC3Dint, WGC3Dsizei,
+                 const WGC3Dfloat*)
 
-DELEGATE_TO_GL_3(uniform2i, Uniform2i, long, int, int)
+DELEGATE_TO_GL_3(uniform2i, Uniform2i, WGC3Dint, WGC3Dint, WGC3Dint)
 
-DELEGATE_TO_GL_3(uniform2iv, Uniform2iv, long, int, int*)
+DELEGATE_TO_GL_3(uniform2iv, Uniform2iv, WGC3Dint, WGC3Dsizei, const WGC3Dint*)
 
-DELEGATE_TO_GL_4(uniform3f, Uniform3f, long, float, float, float)
+DELEGATE_TO_GL_4(uniform3f, Uniform3f, WGC3Dint,
+                 WGC3Dfloat, WGC3Dfloat, WGC3Dfloat)
 
-DELEGATE_TO_GL_3(uniform3fv, Uniform3fv, long, int, float*)
+DELEGATE_TO_GL_3(uniform3fv, Uniform3fv, WGC3Dint, WGC3Dsizei,
+                 const WGC3Dfloat*)
 
-DELEGATE_TO_GL_4(uniform3i, Uniform3i, long, int, int, int)
+DELEGATE_TO_GL_4(uniform3i, Uniform3i, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint)
 
-DELEGATE_TO_GL_3(uniform3iv, Uniform3iv, long, int, int*)
+DELEGATE_TO_GL_3(uniform3iv, Uniform3iv, WGC3Dint, WGC3Dsizei, const WGC3Dint*)
 
-DELEGATE_TO_GL_5(uniform4f, Uniform4f, long, float, float, float, float)
+DELEGATE_TO_GL_5(uniform4f, Uniform4f, WGC3Dint,
+                 WGC3Dfloat, WGC3Dfloat, WGC3Dfloat, WGC3Dfloat)
 
-DELEGATE_TO_GL_3(uniform4fv, Uniform4fv, long, int, float*)
+DELEGATE_TO_GL_3(uniform4fv, Uniform4fv, WGC3Dint, WGC3Dsizei,
+                 const WGC3Dfloat*)
 
-DELEGATE_TO_GL_5(uniform4i, Uniform4i, long, int, int, int, int)
+DELEGATE_TO_GL_5(uniform4i, Uniform4i, WGC3Dint,
+                 WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint)
 
-DELEGATE_TO_GL_3(uniform4iv, Uniform4iv, long, int, int*)
+DELEGATE_TO_GL_3(uniform4iv, Uniform4iv, WGC3Dint, WGC3Dsizei, const WGC3Dint*)
 
 DELEGATE_TO_GL_4(uniformMatrix2fv, UniformMatrix2fv,
-                 long, int, bool, const float*)
+                 WGC3Dint, WGC3Dsizei, WGC3Dboolean, const WGC3Dfloat*)
 
 DELEGATE_TO_GL_4(uniformMatrix3fv, UniformMatrix3fv,
-                 long, int, bool, const float*)
+                 WGC3Dint, WGC3Dsizei, WGC3Dboolean, const WGC3Dfloat*)
 
 DELEGATE_TO_GL_4(uniformMatrix4fv, UniformMatrix4fv,
-                 long, int, bool, const float*)
+                 WGC3Dint, WGC3Dsizei, WGC3Dboolean, const WGC3Dfloat*)
 
 DELEGATE_TO_GL_1(useProgram, UseProgram, WebGLId)
 
 DELEGATE_TO_GL_1(validateProgram, ValidateProgram, WebGLId)
 
-DELEGATE_TO_GL_2(vertexAttrib1f, VertexAttrib1f, unsigned long, float)
+DELEGATE_TO_GL_2(vertexAttrib1f, VertexAttrib1f, WGC3Duint, WGC3Dfloat)
 
-DELEGATE_TO_GL_2(vertexAttrib1fv, VertexAttrib1fv, unsigned long, const float*)
+DELEGATE_TO_GL_2(vertexAttrib1fv, VertexAttrib1fv, WGC3Duint,
+                 const WGC3Dfloat*)
 
-DELEGATE_TO_GL_3(vertexAttrib2f, VertexAttrib2f, unsigned long, float, float)
+DELEGATE_TO_GL_3(vertexAttrib2f, VertexAttrib2f, WGC3Duint,
+                 WGC3Dfloat, WGC3Dfloat)
 
-DELEGATE_TO_GL_2(vertexAttrib2fv, VertexAttrib2fv, unsigned long, const float*)
+DELEGATE_TO_GL_2(vertexAttrib2fv, VertexAttrib2fv, WGC3Duint,
+                 const WGC3Dfloat*)
 
-DELEGATE_TO_GL_4(vertexAttrib3f, VertexAttrib3f,
-                 unsigned long, float, float, float)
+DELEGATE_TO_GL_4(vertexAttrib3f, VertexAttrib3f, WGC3Duint,
+                 WGC3Dfloat, WGC3Dfloat, WGC3Dfloat)
 
-DELEGATE_TO_GL_2(vertexAttrib3fv, VertexAttrib3fv, unsigned long, const float*)
+DELEGATE_TO_GL_2(vertexAttrib3fv, VertexAttrib3fv, WGC3Duint,
+                 const WGC3Dfloat*)
 
-DELEGATE_TO_GL_5(vertexAttrib4f, VertexAttrib4f,
-                 unsigned long, float, float, float, float)
+DELEGATE_TO_GL_5(vertexAttrib4f, VertexAttrib4f, WGC3Duint,
+                 WGC3Dfloat, WGC3Dfloat, WGC3Dfloat, WGC3Dfloat)
 
-DELEGATE_TO_GL_2(vertexAttrib4fv, VertexAttrib4fv, unsigned long, const float*)
+DELEGATE_TO_GL_2(vertexAttrib4fv, VertexAttrib4fv, WGC3Duint,
+                 const WGC3Dfloat*)
 
 void WebGraphicsContext3DCommandBufferImpl::vertexAttribPointer(
-    unsigned long indx, int size, int type, bool normalized,
-    unsigned long stride, unsigned long offset) {
+    WGC3Duint index, WGC3Dint size, WGC3Denum type, WGC3Dboolean normalized,
+    WGC3Dsizei stride, WGC3Dintptr offset) {
   makeContextCurrent();
 
-  glVertexAttribPointer(indx, size, type, normalized, stride,
+  glVertexAttribPointer(index, size, type, normalized, stride,
                         reinterpret_cast<void*>(
                             static_cast<intptr_t>(offset)));
 }
 
-DELEGATE_TO_GL_4(viewport, Viewport, long, long, unsigned long, unsigned long)
+DELEGATE_TO_GL_4(viewport, Viewport,
+                 WGC3Dint, WGC3Dint, WGC3Dsizei, WGC3Dsizei)
 
-unsigned WebGraphicsContext3DCommandBufferImpl::createBuffer() {
+WebGLId WebGraphicsContext3DCommandBufferImpl::createBuffer() {
   makeContextCurrent();
   GLuint o;
   glGenBuffers(1, &o);
   return o;
 }
 
-unsigned WebGraphicsContext3DCommandBufferImpl::createFramebuffer() {
+WebGLId WebGraphicsContext3DCommandBufferImpl::createFramebuffer() {
   makeContextCurrent();
   GLuint o = 0;
   glGenFramebuffers(1, &o);
   return o;
 }
 
-unsigned WebGraphicsContext3DCommandBufferImpl::createProgram() {
+WebGLId WebGraphicsContext3DCommandBufferImpl::createProgram() {
   makeContextCurrent();
   return glCreateProgram();
 }
 
-unsigned WebGraphicsContext3DCommandBufferImpl::createRenderbuffer() {
+WebGLId WebGraphicsContext3DCommandBufferImpl::createRenderbuffer() {
   makeContextCurrent();
   GLuint o;
   glGenRenderbuffers(1, &o);
   return o;
 }
 
-DELEGATE_TO_GL_1R(createShader, CreateShader, unsigned long, unsigned);
+DELEGATE_TO_GL_1R(createShader, CreateShader, WGC3Denum, WebGLId);
 
-unsigned WebGraphicsContext3DCommandBufferImpl::createTexture() {
+WebGLId WebGraphicsContext3DCommandBufferImpl::createTexture() {
   makeContextCurrent();
   GLuint o;
   glGenTextures(1, &o);
   return o;
 }
 
-void WebGraphicsContext3DCommandBufferImpl::deleteBuffer(unsigned buffer) {
+void WebGraphicsContext3DCommandBufferImpl::deleteBuffer(WebGLId buffer) {
   makeContextCurrent();
   glDeleteBuffers(1, &buffer);
 }
 
 void WebGraphicsContext3DCommandBufferImpl::deleteFramebuffer(
-    unsigned framebuffer) {
+    WebGLId framebuffer) {
   makeContextCurrent();
   glDeleteFramebuffers(1, &framebuffer);
 }
 
-void WebGraphicsContext3DCommandBufferImpl::deleteProgram(unsigned program) {
+void WebGraphicsContext3DCommandBufferImpl::deleteProgram(WebGLId program) {
   makeContextCurrent();
   glDeleteProgram(program);
 }
 
 void WebGraphicsContext3DCommandBufferImpl::deleteRenderbuffer(
-    unsigned renderbuffer) {
+    WebGLId renderbuffer) {
   makeContextCurrent();
   glDeleteRenderbuffers(1, &renderbuffer);
 }
 
-void WebGraphicsContext3DCommandBufferImpl::deleteShader(unsigned shader) {
+void WebGraphicsContext3DCommandBufferImpl::deleteShader(WebGLId shader) {
   makeContextCurrent();
   glDeleteShader(shader);
 }
 
-void WebGraphicsContext3DCommandBufferImpl::deleteTexture(unsigned texture) {
+void WebGraphicsContext3DCommandBufferImpl::deleteTexture(WebGLId texture) {
   makeContextCurrent();
   glDeleteTextures(1, &texture);
 }
 
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToCompositor(
-    unsigned texture, unsigned parentTexture) {
+    WebGLId texture, WebGLId parentTexture) {
   makeContextCurrent();
   glCopyTextureToParentTextureCHROMIUM(texture, parentTexture);
   glFlush();
@@ -1040,6 +1006,18 @@ void WebGraphicsContext3DCommandBufferImpl::OnSwapBuffers() {
       web_view_ ? RenderView::FromWebView(web_view_) : NULL;
   if (renderview)
     renderview->DidFlushPaint();
+}
+
+void WebGraphicsContext3DCommandBufferImpl::setContextLostCallback(
+    WebGraphicsContext3D::WebGraphicsContextLostCallback* cb)
+{
+  context_lost_callback_ = cb;
+}
+
+void WebGraphicsContext3DCommandBufferImpl::OnContextLost() {
+  if (context_lost_callback_) {
+    context_lost_callback_->onContextLost();
+  }
 }
 
 #endif  // defined(ENABLE_GPU)

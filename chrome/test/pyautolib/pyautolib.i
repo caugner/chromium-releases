@@ -37,6 +37,7 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/pyautolib/pyautolib.h"
+#include "net/test/test_server.h"
 %}
 
 // Handle type uint32 conversions as int
@@ -166,6 +167,9 @@ class PyUITestSuiteBase {
 
   %feature("docstring", "Initialize from the path to browser dir.") Initialize;
   void Initialize(const FilePath& browser_dir);
+  %feature("docstring", "Set chrome source root path, used in some tests")
+      SetCrSourceRoot;
+  void SetCrSourceRoot(const FilePath& path);
 };
 
 class PyUITestBase {
@@ -175,6 +179,8 @@ class PyUITestBase {
   %feature("docstring", "Initialize the entire setup. Should be called "
            "before launching the browser. For internal use.") Initialize;
   void Initialize(const FilePath& browser_dir);
+
+  void UseNamedChannelID(const std::string& named_channel_id);
 
   %feature("docstring",
            "Fires up the browser and opens a window.") SetUp;
@@ -339,10 +345,10 @@ class PyUITestBase {
   bool SetCookie(const GURL& cookie_url, const std::string& value,
                  int window_index=0, int tab_index=0);
 
-  %feature("docstring", "Get the value of the cokie at cookie_url for the "
+  %feature("docstring", "Get the value of the cookie at cookie_url for the "
            "given window index and tab index. "
            "Returns empty string on error or if there is no value for the "
-           "cookie.") GetCookieVal;
+           "cookie.") GetCookie;
   std::string GetCookie(const GURL& cookie_url, int window_index=0,
                         int tab_index=0);
 
@@ -352,8 +358,9 @@ class PyUITestBase {
       IsBrowserRunning;
   bool IsBrowserRunning();
 
-  %feature("docstring", "Install an extension from the given file. Returns "
-           "True if successfully installed and loaded.") InstallExtension;
+  %feature("docstring", "Install an extension from the given file.  The file "
+           "must be specified with an absolute path. Returns True if "
+           "successfully installed and loaded.") InstallExtension;
   bool InstallExtension(const FilePath& crx_file, bool with_ui);
 
   %feature("docstring", "Get a proxy to the browser window at the given "
@@ -365,7 +372,7 @@ class PyUITestBase {
                         "Returns a JSON dict as a response.  "
                         "Internal method.")
       _SendJSONRequest;
-  std::string _SendJSONRequest(int window_index, std::string request);
+  std::string _SendJSONRequest(int window_index, const std::string& request);
 
   %feature("docstring", "Execute a string of javascript in the specified "
            "(window, tab, frame) and return a string.") ExecuteJavascript;
@@ -388,4 +395,36 @@ class PyUITestBase {
   bool ResetToDefaultTheme();
 
 };
+
+namespace net {
+// TestServer
+%feature("docstring",
+         "TestServer. Serves files in data dir over a local http server")
+    TestServer;
+class TestServer {
+ public:
+  enum Type {
+    TYPE_FTP,
+    TYPE_HTTP,
+    TYPE_HTTPS,
+    TYPE_SYNC,
+  };
+
+  TestServer(Type type, const FilePath& document_root);
+
+  %feature("docstring", "Start TestServer over an ephemeral port") Start;
+  bool Start();
+
+  %feature("docstring", "Stop TestServer") Stop;
+  bool Stop();
+
+  %feature("docstring", "Get FilePath to the document root") document_root;
+  const FilePath& document_root() const;
+
+  std::string GetScheme() const;
+
+  %feature("docstring", "Get URL for a file path") GetURL;
+  GURL GetURL(const std::string& path) const;
+};
+}
 

@@ -45,17 +45,43 @@ cr.define('options', function() {
      */
     editCancelled_: true,
 
+    /**
+     * The editable item corresponding to the last click, if any. Used to decide
+     * initial focus when entering edit mode.
+     * @type {HTMLElement}
+     * @private
+     */
+    editClickTarget_: null,
+
     /** @inheritDoc */
     decorate: function() {
       DeletableItem.prototype.decorate.call(this);
 
+      this.addEventListener('mousedown', this.handleMouseDown_.bind(this));
       this.addEventListener('keydown', this.handleKeyDown_.bind(this));
+      this.addEventListener('leadChange', this.handleLeadChange_);
     },
 
     /** @inheritDoc */
     selectionChanged: function() {
+      this.updateEditState();
+    },
+
+    /**
+     * Called when this element gains or loses 'lead' status. Updates editing
+     * mode accordingly.
+     * @private
+     */
+    handleLeadChange_: function() {
+      this.updateEditState();
+    },
+
+    /**
+     * Updates the edit state based on the current selected and lead states.
+     */
+    updateEditState: function() {
       if (this.editable)
-        this.editing = this.selected;
+        this.editing = this.selected && this.lead;
     },
 
     /**
@@ -79,14 +105,20 @@ cr.define('options', function() {
 
         cr.dispatchSimpleEvent(this, 'edit', true);
 
-        var focusElement = this.initialFocusElement;
+        var focusElement = this.editClickTarget_ || this.initialFocusElement;
+        this.editClickTarget_ = null;
+
         // When this is called in response to the selectedChange event,
         // the list grabs focus immediately afterwards. Thus we must delay
         // our focus grab.
+        var self = this;
         if (focusElement) {
           window.setTimeout(function() {
-            focusElement.focus();
-            focusElement.select();
+            // Make sure we are still in edit mode by the time we execute.
+            if (self.editing) {
+              focusElement.focus();
+              focusElement.select();
+            }
           }, 50);
         }
       } else {
@@ -115,7 +147,8 @@ cr.define('options', function() {
     },
 
     /**
-     * The HTML element that should have focus initially when editing starts.
+     * The HTML element that should have focus initially when editing starts,
+     * if a specific element wasn't clicked.
      * Defaults to the first <input> element; can be overriden by subclasses if
      * a different element should be focused.
      * @type {HTMLElement}
@@ -160,7 +193,7 @@ cr.define('options', function() {
         var textEl = this.ownerDocument.createElement('div');
         textEl.className = 'static-text';
         textEl.textContent = text;
-        textEl.setAttribute('editmode', false);
+        textEl.setAttribute('displaymode', 'static');
         container.appendChild(textEl);
       }
 
@@ -168,7 +201,7 @@ cr.define('options', function() {
       inputEl.type = 'text';
       inputEl.value = text;
       if (!opt_alwaysEditable) {
-        inputEl.setAttribute('editmode', true);
+        inputEl.setAttribute('displaymode', 'edit');
         inputEl.staticVersion = textEl;
       }
       container.appendChild(inputEl);
@@ -182,7 +215,7 @@ cr.define('options', function() {
      * @private
      */
     resetEditableValues_: function() {
-      var editFields = this.querySelectorAll('[editmode=true]');
+      var editFields = this.querySelectorAll('[displaymode=edit]');
       for (var i = 0; i < editFields.length; i++) {
         var staticLabel = editFields[i].staticVersion;
         if (!staticLabel)
@@ -202,7 +235,7 @@ cr.define('options', function() {
      * @private
      */
     updateStaticValues_: function() {
-      var editFields = this.querySelectorAll('[editmode=true]');
+      var editFields = this.querySelectorAll('[displaymode=edit]');
       for (var i = 0; i < editFields.length; i++) {
         var staticLabel = editFields[i].staticVersion;
         if (!staticLabel)
@@ -242,6 +275,26 @@ cr.define('options', function() {
         e.stopPropagation();
       }
     },
+
+    /**
+     * Called when the list item is clicked. If the click target corresponds to
+     * an editable item, stores that item to focus when edit mode is started.
+     * @param {Event} e The mouse down event.
+     * @private
+     */
+    handleMouseDown_: function(e) {
+      if (!this.editable || this.editing)
+        return;
+
+      var clickTarget = e.target;
+      var editFields = this.querySelectorAll('[displaymode=edit]');
+      for (var i = 0; i < editFields.length; i++) {
+        if (editFields[i].staticVersion == clickTarget) {
+          this.editClickTarget_ = editFields[i];
+          return;
+        }
+      }
+    },
   };
 
   var InlineEditableItemList = cr.ui.define('list');
@@ -252,26 +305,25 @@ cr.define('options', function() {
     /** @inheritDoc */
     decorate: function() {
       DeletableItemList.prototype.decorate.call(this);
-      this.addEventListener('blur', this.handleBlur_.bind(this), true);
+      this.setAttribute('inlineeditable', '');
+      this.addEventListener('hasElementFocusChange',
+                            this.handleListFocusChange_);
     },
 
     /**
-     * Called when an element in the list is blurred. Removes selection (thus
-     * ending edit) if focus moves outside the list.
-     * @param {Event} e The blur event.
+     * Called when the list hierarchy as a whole loses or gains focus; starts
+     * or ends editing for the lead item if necessary.
+     * @param {Event} e The change event.
      * @private
      */
-    handleBlur_: function(e) {
-      // When the blur event happens we do not know who is getting focus so we
-      // delay this a bit until we know if the new focus node is outside the
-      // list.
-      var list = this;
-      var doc = e.target.ownerDocument;
-      window.setTimeout(function() {
-        var activeElement = doc.activeElement;
-        if (!list.contains(activeElement))
-          list.selectionModel.unselectAll();
-      }, 50);
+    handleListFocusChange_: function(e) {
+      var leadItem = this.getListItemByIndex(this.selectionModel.leadIndex);
+      if (leadItem) {
+        if (e.newValue)
+          leadItem.updateEditState();
+        else
+          leadItem.editing = false;
+      }
     },
   };
 

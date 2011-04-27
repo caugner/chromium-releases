@@ -66,6 +66,14 @@ enum IPCMessageStart {
   IndexedDBMsgStart,
   PepperFileMsgStart,
   SpeechInputMsgStart,
+  PepperMsgStart,
+  AutoFillMsgStart,
+  SafeBrowsingMsgStart,
+  P2PMsgStart,
+  SocketStreamMsgStart,
+  ResourceMsgStart,
+  FileSystemMsgStart,
+  ChildProcessMsgStart,
 };
 
 class DictionaryValue;
@@ -116,6 +124,12 @@ class MessageIterator {
  private:
   const Message& msg_;
   mutable void* iter_;
+};
+
+//-----------------------------------------------------------------------------
+// A dummy struct to place first just to allow leading commas for all
+// members in the macro-generated constructor initializer lists.
+struct NoParams {
 };
 
 //-----------------------------------------------------------------------------
@@ -404,7 +418,7 @@ template <>
 struct ParamTraits<std::vector<unsigned char> > {
   typedef std::vector<unsigned char> param_type;
   static void Write(Message* m, const param_type& p) {
-    if (p.size() == 0) {
+    if (p.empty()) {
       m->WriteData(NULL, 0);
     } else {
       m->WriteData(reinterpret_cast<const char*>(&p.front()),
@@ -430,7 +444,7 @@ template <>
 struct ParamTraits<std::vector<char> > {
   typedef std::vector<char> param_type;
   static void Write(Message* m, const param_type& p) {
-    if (p.size() == 0) {
+    if (p.empty()) {
       m->WriteData(NULL, 0);
     } else {
       m->WriteData(&p.front(), static_cast<int>(p.size()));
@@ -763,8 +777,10 @@ struct ParamTraits<LogData> {
 template <>
 struct ParamTraits<Message> {
   static void Write(Message* m, const Message& p) {
-    m->WriteInt(p.size());
-    m->WriteData(reinterpret_cast<const char*>(p.data()), p.size());
+    DCHECK(p.size() <= INT_MAX);
+    int message_size = static_cast<int>(p.size());
+    m->WriteInt(message_size);
+    m->WriteData(reinterpret_cast<const char*>(p.data()), message_size);
   }
   static bool Read(const Message* m, void** iter, Message* r) {
     int size;

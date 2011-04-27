@@ -6,6 +6,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram.h"
+#include "base/string_util.h"
+#include "net/base/address_list.h"
 #include "net/base/auth.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ssl_cert_request_info.h"
@@ -39,11 +41,17 @@ HttpStreamParser::HttpStreamParser(ClientSocketHandle* connection,
       connection_(connection),
       net_log_(net_log),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          io_callback_(this, &HttpStreamParser::OnIOComplete)) {
+          io_callback_(this, &HttpStreamParser::OnIOComplete)),
+      chunk_length_(0),
+      chunk_length_without_encoding_(0),
+      sent_last_chunk_(false) {
   DCHECK_EQ(0, read_buffer->offset());
 }
 
-HttpStreamParser::~HttpStreamParser() {}
+HttpStreamParser::~HttpStreamParser() {
+  if (request_body_ != NULL && request_body_->is_chunked())
+    request_body_->set_chunk_callback(NULL);
+}
 
 int HttpStreamParser::SendRequest(const std::string& request_line,
                                   const HttpRequestHeaders& headers,
@@ -62,14 +70,28 @@ int HttpStreamParser::SendRequest(const std::string& request_line,
             request_line, headers)));
   }
   response_ = response;
+
+  // Put the peer's IP address and port into the response.
+  AddressList address;
+  int result = connection_->socket()->GetPeerAddress(&address);
+  if (result != OK)
+    return result;
+  response_->socket_address = HostPortPair::FromAddrInfo(address.head());
+
   std::string request = request_line + headers.ToString();
   scoped_refptr<StringIOBuffer> headers_io_buf(new StringIOBuffer(request));
   request_headers_ = new DrainableIOBuffer(headers_io_buf,
                                            headers_io_buf->size());
   request_body_.reset(request_body);
+  if (request_body_ != NULL && request_body_->is_chunked()) {
+    request_body_->set_chunk_callback(this);
+    const int kChunkHeaderFooterSize = 12;  // 2 CRLFs + max of 8 hex chars.
+    chunk_buf_ = new IOBuffer(request_body_->GetMaxBufferSize() +
+                              kChunkHeaderFooterSize);
+  }
 
   io_state_ = STATE_SENDING_HEADERS;
-  int result = DoLoop(OK);
+  result = DoLoop(OK);
   if (result == ERR_IO_PENDING)
     user_callback_ = callback;
 
@@ -143,6 +165,16 @@ void HttpStreamParser::OnIOComplete(int result) {
   }
 }
 
+void HttpStreamParser::OnChunkAvailable() {
+  // This method may get called while sending the headers or body, so check
+  // before processing the new data. If we were still initializing or sending
+  // headers, we will automatically start reading the chunks once we get into
+  // STATE_SENDING_BODY so nothing to do here.
+  DCHECK(io_state_ == STATE_SENDING_HEADERS || io_state_ == STATE_SENDING_BODY);
+  if (io_state_ == STATE_SENDING_BODY)
+    OnIOComplete(0);
+}
+
 int HttpStreamParser::DoLoop(int result) {
   bool can_do_more = true;
   do {
@@ -169,7 +201,8 @@ int HttpStreamParser::DoLoop(int result) {
         break;
       case STATE_READ_HEADERS_COMPLETE:
         result = DoReadHeadersComplete(result);
-        net_log_.EndEvent(NetLog::TYPE_HTTP_STREAM_PARSER_READ_HEADERS, NULL);
+        net_log_.EndEventWithNetErrorCode(
+            NetLog::TYPE_HTTP_STREAM_PARSER_READ_HEADERS, result);
         break;
       case STATE_BODY_PENDING:
         DCHECK(result != ERR_IO_PENDING);
@@ -208,12 +241,16 @@ int HttpStreamParser::DoSendHeaders(int result) {
       // We'll record the count of uncoalesced packets IFF coalescing will help,
       // and otherwise we'll use an enum to tell why it won't help.
       enum COALESCE_POTENTIAL {
-        NO_ADVANTAGE = 0,   // Coalescing won't reduce packet count.
-        HEADER_ONLY = 1,    // There is only a header packet (can't coalesce).
-        COALESCE_POTENTIAL_MAX = 30 // Various cases of coalasced savings.
+        // Coalescing won't reduce packet count.
+        NO_ADVANTAGE = 0,
+        // There is only a header packet or we have a request body but the
+        // request body isn't available yet (can't coalesce).
+        HEADER_ONLY = 1,
+        // Various cases of coalasced savings.
+        COALESCE_POTENTIAL_MAX = 30
       };
       size_t coalesce = HEADER_ONLY;
-      if (request_body_ != NULL) {
+      if (request_body_ != NULL && !request_body_->is_chunked()) {
         const size_t kBytesPerPacket = 1430;
         uint64 body_packets = (request_body_->size() + kBytesPerPacket - 1) /
                               kBytesPerPacket;
@@ -236,7 +273,8 @@ int HttpStreamParser::DoSendHeaders(int result) {
     result = connection_->socket()->Write(request_headers_,
                                           bytes_remaining,
                                           &io_callback_);
-  } else if (request_body_ != NULL && request_body_->size()) {
+  } else if (request_body_ != NULL &&
+             (request_body_->is_chunked() || request_body_->size())) {
     io_state_ = STATE_SENDING_BODY;
     result = OK;
   } else {
@@ -246,8 +284,51 @@ int HttpStreamParser::DoSendHeaders(int result) {
 }
 
 int HttpStreamParser::DoSendBody(int result) {
-  if (result > 0)
-    request_body_->DidConsume(result);
+  if (request_body_->is_chunked()) {
+    chunk_length_ -= result;
+    if (chunk_length_) {
+      memmove(chunk_buf_->data(), chunk_buf_->data() + result, chunk_length_);
+      return connection_->socket()->Write(chunk_buf_, chunk_length_,
+                                          &io_callback_);
+    }
+
+    if (sent_last_chunk_) {
+      io_state_ = STATE_REQUEST_SENT;
+      return OK;
+    }
+
+    request_body_->MarkConsumedAndFillBuffer(chunk_length_without_encoding_);
+    chunk_length_without_encoding_ = 0;
+    chunk_length_ = 0;
+
+    int buf_len = static_cast<int>(request_body_->buf_len());
+    if (request_body_->eof()) {
+      static const char kLastChunk[] = "0\r\n\r\n";
+      chunk_length_ = strlen(kLastChunk);
+      memcpy(chunk_buf_->data(), kLastChunk, chunk_length_);
+      sent_last_chunk_ = true;
+    } else if (buf_len) {
+      // Encode and send the buffer as 1 chunk.
+      std::string chunk_header = StringPrintf("%X\r\n", buf_len);
+      char* chunk_ptr = chunk_buf_->data();
+      memcpy(chunk_ptr, chunk_header.data(), chunk_header.length());
+      chunk_ptr += chunk_header.length();
+      memcpy(chunk_ptr, request_body_->buf()->data(), buf_len);
+      chunk_ptr += buf_len;
+      memcpy(chunk_ptr, "\r\n", 2);
+      chunk_length_without_encoding_ = buf_len;
+      chunk_length_ = chunk_header.length() + buf_len + 2;
+    }
+
+    if (!chunk_length_)  // More POST data is yet to come?
+      return ERR_IO_PENDING;
+
+    return connection_->socket()->Write(chunk_buf_, chunk_length_,
+                                        &io_callback_);
+  }
+
+  // Non-chunked request body.
+  request_body_->MarkConsumedAndFillBuffer(result);
 
   if (!request_body_->eof()) {
     int buf_len = static_cast<int>(request_body_->buf_len());

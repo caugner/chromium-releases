@@ -13,6 +13,8 @@
 
 namespace webdriver {
 
+class Response;
+
 // Retrieve the capabilities of the specified session. If the HTTP Delete
 // method is used then all chrome instances linked to the session ID are
 // closed.  The session's capabilities will be returned in a JSON object
@@ -22,19 +24,18 @@ namespace webdriver {
 // files and directories created are deleted.
 class SessionWithID : public WebDriverCommand {
  public:
-  inline SessionWithID(const std::vector<std::string>& path_segments,
-                       const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters) {}
-  virtual ~SessionWithID() {}
+  SessionWithID(const std::vector<std::string>& path_segments,
+                const DictionaryValue* const parameters);
+  virtual ~SessionWithID();
 
-  virtual bool DoesGet() { return true; }
-  virtual bool DoesDelete() { return true; }
+  virtual bool DoesGet();
+  virtual bool DoesDelete();
 
   virtual void ExecuteGet(Response* const response);
   virtual void ExecuteDelete(Response* const response);
 
  private:
-  virtual bool RequiresValidTab() { return false; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(SessionWithID);
 };

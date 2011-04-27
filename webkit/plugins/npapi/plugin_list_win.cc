@@ -16,7 +16,9 @@
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/win/pe_image.h"
 #include "base/win/registry.h"
+#include "base/win/scoped_handle.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/plugin_switches.h"
@@ -215,6 +217,18 @@ void GetJavaDirectory(std::set<FilePath>* plugin_dirs) {
   }
 }
 
+bool IsValid32BitImage(FilePath path) {
+  file_util::MemoryMappedFile plugin_image;
+
+  if (!plugin_image.InitializeAsImageSection(path))
+    return false;
+
+  base::win::PEImage image(plugin_image.data());
+
+  PIMAGE_NT_HEADERS nt_headers = image.GetNTHeaders();
+  return (nt_headers->FileHeader.Machine == IMAGE_FILE_MACHINE_I386);
+}
+
 }  // anonymous namespace
 
 void PluginList::PlatformInit() {
@@ -343,9 +357,9 @@ bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info,
         (*plugin_groups)[i]->web_plugins_info();
     for (size_t j = 0; j < plugins.size(); ++j) {
       std::wstring plugin1 =
-          StringToLowerASCII(plugins[j].path.BaseName().ToWStringHack());
+          StringToLowerASCII(plugins[j].path.BaseName().value());
       std::wstring plugin2 =
-          StringToLowerASCII(info.path.BaseName().ToWStringHack());
+          StringToLowerASCII(info.path.BaseName().value());
       if ((plugin1 == plugin2 && HaveSharedMimeType(plugins[j], info)) ||
           (plugin1 == kJavaDeploy1 && plugin2 == kJavaDeploy2) ||
           (plugin1 == kJavaDeploy2 && plugin2 == kJavaDeploy1)) {
@@ -421,7 +435,19 @@ bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info,
     }
   }
 
-  return true;
+  HMODULE plugin_dll = NULL;
+  bool load_plugin = true;
+
+  // The plugin list could contain a 64 bit plugin which we cannot load.
+  for (size_t i = 0; i < internal_plugins_.size(); ++i) {
+    if (info.path == internal_plugins_[i].info.path)
+      continue;
+
+    if (file_util::PathExists(info.path) && (!IsValid32BitImage(info.path)))
+      load_plugin = false;
+    break;
+  }
+  return load_plugin;
 }
 
 }  // namespace npapi

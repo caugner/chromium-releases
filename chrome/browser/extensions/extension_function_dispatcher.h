@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/ref_counted.h"
-#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
+#include "ui/gfx/native_widget_types.h"
 
 class Browser;
 class Extension;
@@ -39,13 +39,6 @@ class ExtensionFunctionDispatcher {
     // Returns the native view for this extension view, if any. This may be NULL
     // if the view is not visible.
     virtual gfx::NativeView GetNativeViewOfHost() = 0;
-
-    // Typically, the window is assumed to be the window associated with the
-    // result of GetBrowser(). Implementations may override this behavior with
-    // this method.
-    virtual gfx::NativeWindow GetCustomFrameNativeWindow() {
-      return NULL;
-    }
 
     // Asks the delegate for any relevant TabContents associated with this
     // context. For example, the TabContents in which an infobar or

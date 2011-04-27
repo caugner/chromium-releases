@@ -22,7 +22,7 @@
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
-#include "net/http/http_network_layer.h"
+#include "net/http/http_network_session.h"
 #include "net/proxy/proxy_service.h"
 
 namespace {
@@ -104,43 +104,36 @@ std::string MakeUserAgentForServiceProcess() {
 }  // namespace
 
 ServiceURLRequestContext::ServiceURLRequestContext(
-    const std::string& user_agent) : user_agent_(user_agent) {
-  host_resolver_ =
+    const std::string& user_agent,
+    net::ProxyService* net_proxy_service) : user_agent_(user_agent) {
+  set_host_resolver(
       net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                    NULL, NULL);
-  DCHECK(g_service_process);
-  // TODO(sanjeevr): Change CreateSystemProxyConfigService to accept a
-  // MessageLoopProxy* instead of MessageLoop*.
-  // Also this needs to be created on the UI thread on Linux. Fix this.
-  net::ProxyConfigService * proxy_config_service =
-      net::ProxyService::CreateSystemProxyConfigService(
-          g_service_process->io_thread()->message_loop(),
-          g_service_process->file_thread()->message_loop());
-  proxy_service_ = net::ProxyService::CreateUsingSystemProxyResolver(
-      proxy_config_service, 0u, NULL);
-  cert_verifier_ = new net::CertVerifier;
-  dnsrr_resolver_ = new net::DnsRRResolver;
-  ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
-  ssl_config_service_ = new net::SSLConfigServiceDefaults;
-  http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault(
-      host_resolver_);
-  http_transaction_factory_ = new net::HttpCache(
-      net::HttpNetworkLayer::CreateFactory(host_resolver_,
-                                           cert_verifier_,
-                                           dnsrr_resolver_,
-                                           NULL /* dns_cert_checker */,
-                                           NULL /* ssl_host_info_factory */,
-                                           proxy_service_,
-                                           ssl_config_service_,
-                                           http_auth_handler_factory_,
-                                           NULL /* network_delegate */,
-                                           NULL /* net_log */),
-      NULL /* net_log */,
-      net::HttpCache::DefaultBackend::InMemory(0));
+                                    NULL, NULL));
+  set_proxy_service(net_proxy_service);
+  set_cert_verifier(new net::CertVerifier);
+  set_dnsrr_resolver(new net::DnsRRResolver);
+  set_ftp_transaction_factory(new net::FtpNetworkLayer(host_resolver()));
+  set_ssl_config_service(new net::SSLConfigServiceDefaults);
+  set_http_auth_handler_factory(net::HttpAuthHandlerFactory::CreateDefault(
+      host_resolver()));
+
+  net::HttpNetworkSession::Params session_params;
+  session_params.host_resolver = host_resolver();
+  session_params.cert_verifier = cert_verifier();
+  session_params.dnsrr_resolver = dnsrr_resolver();
+  session_params.proxy_service = proxy_service();
+  session_params.ssl_config_service = ssl_config_service();
+  session_params.http_auth_handler_factory = http_auth_handler_factory();
+  scoped_refptr<net::HttpNetworkSession> network_session(
+      new net::HttpNetworkSession(session_params));
+  set_http_transaction_factory(
+      new net::HttpCache(
+          network_session,
+          net::HttpCache::DefaultBackend::InMemory(0)));
   // In-memory cookie store.
-  cookie_store_ = new net::CookieMonster(NULL, NULL);
-  accept_language_ = "en-us,fr";
-  accept_charset_ = "iso-8859-1,*,utf-8";
+  set_cookie_store(new net::CookieMonster(NULL, NULL));
+  set_accept_language("en-us,fr");
+  set_accept_charset("iso-8859-1,*,utf-8");
 }
 
 const std::string& ServiceURLRequestContext::GetUserAgent(
@@ -152,11 +145,12 @@ const std::string& ServiceURLRequestContext::GetUserAgent(
 }
 
 ServiceURLRequestContext::~ServiceURLRequestContext() {
-  delete ftp_transaction_factory_;
-  delete http_transaction_factory_;
-  delete http_auth_handler_factory_;
-  delete cert_verifier_;
-  delete dnsrr_resolver_;
+  delete ftp_transaction_factory();
+  delete http_transaction_factory();
+  delete http_auth_handler_factory();
+  delete cert_verifier();
+  delete dnsrr_resolver();
+  delete host_resolver();
 }
 
 ServiceURLRequestContextGetter::ServiceURLRequestContextGetter()
@@ -164,12 +158,23 @@ ServiceURLRequestContextGetter::ServiceURLRequestContextGetter()
           g_service_process->io_thread()->message_loop_proxy()) {
   // Build the default user agent.
   user_agent_ = MakeUserAgentForServiceProcess();
+
+#if defined(OS_LINUX)
+  // Create the proxy service now, at initialization time, on the main thread,
+  // only for Linux, which requires that.
+  CreateProxyService();
+#endif
 }
 
 net::URLRequestContext*
 ServiceURLRequestContextGetter::GetURLRequestContext() {
+#if !defined(OS_LINUX)
+  if (!proxy_service_)
+    CreateProxyService();
+#endif
   if (!url_request_context_)
-    url_request_context_ = new ServiceURLRequestContext(user_agent_);
+    url_request_context_ = new ServiceURLRequestContext(user_agent_,
+                                                        proxy_service_);
   return url_request_context_;
 }
 
@@ -179,3 +184,15 @@ ServiceURLRequestContextGetter::GetIOMessageLoopProxy() const {
 }
 
 ServiceURLRequestContextGetter::~ServiceURLRequestContextGetter() {}
+
+void ServiceURLRequestContextGetter::CreateProxyService() {
+  // TODO(sanjeevr): Change CreateSystemProxyConfigService to accept a
+  // MessageLoopProxy* instead of MessageLoop*.
+  DCHECK(g_service_process);
+  net::ProxyConfigService * proxy_config_service =
+      net::ProxyService::CreateSystemProxyConfigService(
+          g_service_process->io_thread()->message_loop(),
+          g_service_process->file_thread()->message_loop());
+  proxy_service_ = net::ProxyService::CreateUsingSystemProxyResolver(
+      proxy_config_service, 0u, NULL);
+}

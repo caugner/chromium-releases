@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "views/metrics.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // ReloadButton, public:
@@ -22,7 +23,7 @@ ReloadButton::ReloadButton(LocationBarView* location_bar, Browser* browser)
       intended_mode_(MODE_RELOAD),
       visible_mode_(MODE_RELOAD),
       double_click_timer_delay_(
-          base::TimeDelta::FromMilliseconds(GetDoubleClickTimeMS())),
+          base::TimeDelta::FromMilliseconds(views::GetDoubleClickInterval())),
       stop_to_reload_timer_delay_(base::TimeDelta::FromMilliseconds(1350)),
       testing_mouse_hovered_(false),
       testing_reload_count_(0) {
@@ -83,7 +84,7 @@ void ReloadButton::ButtonPressed(views::Button* /* button */,
     if (event.IsShiftDown() || event.IsControlDown()) {
       command = IDC_RELOAD_IGNORING_CACHE;
       // Mask off Shift and Control so they don't affect the disposition below.
-      flags &= ~(views::Event::EF_SHIFT_DOWN | views::Event::EF_CONTROL_DOWN);
+      flags &= ~(ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
     } else {
       command = IDC_RELOAD;
     }

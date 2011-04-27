@@ -5,9 +5,9 @@
 #include "views/controls/button/image_button.h"
 
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas.h"
-#include "gfx/skbitmap_operations.h"
 #include "ui/base/animation/throb_animation.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/skbitmap_operations.h"
 
 namespace views {
 
@@ -22,7 +22,7 @@ ImageButton::ImageButton(ButtonListener* listener)
       h_alignment_(ALIGN_LEFT),
       v_alignment_(ALIGN_TOP),
       preferred_size_(kDefaultWidth, kDefaultHeight) {
-  // By default, we request that the gfx::Canvas passed to our View::Paint()
+  // By default, we request that the gfx::Canvas passed to our View::OnPaint()
   // implementation is flipped horizontally so that the button's bitmaps are
   // mirrored when the UI directionality is right-to-left.
   EnableCanvasFlippingForRTLUI(true);
@@ -64,9 +64,9 @@ gfx::Size ImageButton::GetPreferredSize() {
   return preferred_size_;
 }
 
-void ImageButton::Paint(gfx::Canvas* canvas) {
+void ImageButton::OnPaint(gfx::Canvas* canvas) {
   // Call the base class first to paint any background/borders.
-  View::Paint(canvas);
+  View::OnPaint(canvas);
 
   SkBitmap img = GetImageToPaint();
 
@@ -87,7 +87,7 @@ void ImageButton::Paint(gfx::Canvas* canvas) {
       canvas->DrawBitmapInt(background_image_, x, y);
     canvas->DrawBitmapInt(img, x, y);
   }
-  PaintFocusBorder(canvas);
+  OnPaintFocusBorder(canvas);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,44 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
-#include "ui/base/win/hwnd_util.h"
+#include "views/widget/widget_win.h"
 #endif
 
 namespace views {
+
+DefaultThemeProvider::DefaultThemeProvider() {}
+
+DefaultThemeProvider::~DefaultThemeProvider() {}
+
+void DefaultThemeProvider::Init(Profile* profile) {}
 
 SkBitmap* DefaultThemeProvider::GetBitmapNamed(int id) const {
   return ResourceBundle::GetSharedInstance().GetBitmapNamed(id);
 }
 
+SkColor DefaultThemeProvider::GetColor(int id) const {
+  // Return debugging-blue.
+  return 0xff0000ff;
+}
+
+bool DefaultThemeProvider::GetDisplayProperty(int id, int* result) const {
+  return false;
+}
+
 bool DefaultThemeProvider::ShouldUseNativeFrame() const {
 #if defined(OS_WIN)
-  return ui::ShouldUseVistaFrame();
+  return WidgetWin::IsAeroGlassEnabled();
 #else
   return false;
 #endif
+}
+
+bool DefaultThemeProvider::HasCustomImage(int id) const {
+  return false;
+}
+
+RefCountedMemory* DefaultThemeProvider::GetRawData(int id) const {
+  return NULL;
 }
 
 }  // namespace views

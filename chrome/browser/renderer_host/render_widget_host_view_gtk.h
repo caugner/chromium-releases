@@ -13,12 +13,13 @@
 
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/ui/gtk/owned_widget_gtk.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/rect.h"
+#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
+#include "ui/base/gtk/gtk_signal.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/plugins/npapi/gtk_plugin_container_manager.h"
 
@@ -54,7 +55,7 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // RenderWidgetHostView implementation.
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos);
-  virtual void InitAsFullscreen(RenderWidgetHostView* parent_host_view);
+  virtual void InitAsFullscreen();
   virtual RenderWidgetHost* GetRenderWidgetHost() const;
   virtual void DidBecomeSelected();
   virtual void WasHidden();
@@ -90,7 +91,10 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id);
   virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate);
   virtual bool ContainsNativeView(gfx::NativeView native_view) const;
+
   virtual void AcceleratedCompositingActivated(bool activated);
+  virtual gfx::PluginWindowHandle AcquireCompositingSurface();
+  virtual void ReleaseCompositingSurface(gfx::PluginWindowHandle surface);
 
   // ui::AnimationDelegate implementation.
   virtual void AnimationEnded(const ui::Animation* animation);
@@ -122,23 +126,32 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
  private:
   friend class RenderWidgetHostViewGtkWidget;
 
+  CHROMEGTK_CALLBACK_1(RenderWidgetHostViewGtk,
+                       gboolean,
+                       OnWindowStateEvent,
+                       GdkEventWindowState*);
+
+  CHROMEGTK_CALLBACK_0(RenderWidgetHostViewGtk,
+                       void,
+                       OnDestroy);
+
   // Returns whether the widget needs an input grab (GTK+ and X) to work
   // properly.
   bool NeedsInputGrab();
 
   // Returns whether this render view is a popup (<select> dropdown or
   // autocomplete window).
-  bool IsPopup();
+  bool IsPopup() const;
+
+  // Do initialization needed by all InitAs*() methods.
+  void DoSharedInit();
+
+  // Do initialization needed just by InitAsPopup() and InitAsFullscreen().
+  // We move and resize |window| to |bounds| and show it and its contents.
+  void DoPopupOrFullscreenInit(GtkWindow* window, const gfx::Rect& bounds);
 
   // Update the display cursor for the render view.
   void ShowCurrentCursor();
-
-  // Helper method for InitAsPopup() and InitAsFullscreen().
-  void DoInitAsPopup(
-      RenderWidgetHostView* parent_host_view,
-      GtkWindowType window_type,
-      const gfx::Rect& pos,  // Ignored if is_fullscreen is true.
-      bool is_fullscreen);
 
   // The model object.
   RenderWidgetHost* host_;
@@ -159,6 +172,7 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
 
   // Whether we are currently loading.
   bool is_loading_;
+
   // The cursor for the page. This is passed up from the renderer.
   WebCursor current_cursor_;
 
@@ -181,14 +195,10 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // value affects the alpha we use for |overlay_color_|.
   ui::SlideAnimation overlay_animation_;
 
-  // Variables used only for popups --------------------------------------------
-  // Our parent widget.
-  RenderWidgetHostView* parent_host_view_;
-  // The native view of our parent, equivalent to
-  // parent_host_view_->GetNativeView().
+  // The native view of our parent widget.  Used only for popups.
   GtkWidget* parent_;
-  // We ignore the first mouse release on popups.  This allows the popup to
-  // stay open.
+
+  // We ignore the first mouse release on popups so the popup will remain open.
   bool is_popup_first_mouse_release_;
 
   // Whether or not this widget was focused before shadowed by another widget.
@@ -199,6 +209,13 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // for <select> dropdowns. It should be true for most such cases, but false
   // for extension popups.
   bool do_x_grab_;
+
+  // Is the widget fullscreen?
+  bool is_fullscreen_;
+
+  // For full-screen windows we have a OnDestroy handler that we need to remove,
+  // so we keep it ID here.
+  unsigned long destroy_handler_id_;
 
   // A convenience wrapper object for GtkIMContext;
   scoped_ptr<GtkIMContextWrapper> im_context_;
@@ -223,6 +240,8 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // monitor (if the widget is aligned with that edge). Negative values
   // indicate the top edge, positive the bottom.
   int dragged_at_vertical_edge_;
+
+  bool accelerated_surface_acquired_;
 
 #if defined(OS_CHROMEOS)
   // Custimized tooltip window.

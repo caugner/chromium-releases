@@ -17,7 +17,7 @@ class BubbleWidget : public views::WidgetWin {
     set_window_ex_style(WS_EX_TOOLWINDOW);
   }
 
-  void Show(bool activate) {
+  void ShowAndActivate(bool activate) {
     if (activate)
       ShowWindow(SW_SHOW);
     else
@@ -98,10 +98,6 @@ void BrowserBubble::InitPopup() {
   // we'll assign it into popup_.
   views::WidgetWin* pop = new BubbleWidget(this);
 
-  // Enable the drop-shadow through the native windows drop-shadow support.
-  if (drop_shadow_enabled_)
-    pop->set_initial_class_style(CS_DROPSHADOW | pop->initial_class_style());
-
   pop->Init(frame_->GetNativeView(), bounds_);
   pop->SetContentsView(view_);
 
@@ -119,7 +115,7 @@ void BrowserBubble::Show(bool activate) {
   if (visible_)
     return;
   BubbleWidget* pop = static_cast<BubbleWidget*>(popup_);
-  pop->Show(activate);
+  pop->ShowAndActivate(activate);
   visible_ = true;
 }
 

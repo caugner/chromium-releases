@@ -6,6 +6,7 @@
 
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
+#include "views/window/client_view.h"
 #include "views/window/window.h"
 
 #if !defined(OS_WIN)
@@ -44,11 +45,11 @@ void NonClientView::SetFrameView(NonClientFrameView* frame_view) {
   if (frame_view_.get())
     RemoveChildView(frame_view_.get());
   frame_view_.reset(frame_view);
-  if (GetParent())
-    AddChildView(kFrameViewIndex, frame_view_.get());
+  if (parent())
+    AddChildViewAt(frame_view_.get(), kFrameViewIndex);
 }
 
-bool NonClientView::CanClose() const {
+bool NonClientView::CanClose() {
   return client_view_->CanClose();
 }
 
@@ -58,7 +59,7 @@ void NonClientView::WindowClosing() {
 
 void NonClientView::UpdateFrame() {
   SetFrameView(frame_->CreateFrameViewForWindow());
-  GetRootView()->NotifyThemeChanged();
+  GetWidget()->ThemeChanged();
   Layout();
   SchedulePaint();
   frame_->UpdateFrameAfterFrameChange();
@@ -115,7 +116,7 @@ void NonClientView::LayoutFrameView() {
   // change independently of the bounds changing - e.g. after the initial
   // display of the window the metrics of the native window controls can change,
   // which does not change the bounds of the window but requires a re-layout to
-  // trigger a repaint. We override DidChangeBounds for the NonClientFrameView
+  // trigger a repaint. We override OnBoundsChanged() for the NonClientFrameView
   // to do nothing so that SetBounds above doesn't cause Layout to be called
   // twice.
   frame_view_->Layout();
@@ -140,7 +141,7 @@ void NonClientView::Layout() {
   LayoutFrameView();
 
   // Then layout the ClientView, using those bounds.
-  client_view_->SetBounds(frame_view_->GetBoundsForClientView());
+  client_view_->SetBoundsRect(frame_view_->GetBoundsForClientView());
 
   // We need to manually call Layout on the ClientView as well for the same
   // reason as above.
@@ -153,12 +154,12 @@ void NonClientView::ViewHierarchyChanged(bool is_add, View* parent,
   // are subsequently resized all the parent-child relationships are
   // established.
   if (is_add && GetWidget() && child == this) {
-    AddChildView(kFrameViewIndex, frame_view_.get());
-    AddChildView(kClientViewIndex, client_view_);
+    AddChildViewAt(frame_view_.get(), kFrameViewIndex);
+    AddChildViewAt(client_view_, kClientViewIndex);
   }
 }
 
-views::View* NonClientView::GetViewForPoint(const gfx::Point& point) {
+views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
   // Because of the z-ordering of our child views (the client view is positioned
   // over the non-client frame view, if the client view ever overlaps the frame
   // view visually (as it does for the browser window), then it will eat mouse
@@ -169,9 +170,9 @@ views::View* NonClientView::GetViewForPoint(const gfx::Point& point) {
   gfx::Point point_in_child_coords(point);
   View::ConvertPointToView(this, frame_view_.get(), &point_in_child_coords);
   if (frame_view_->HitTest(point_in_child_coords))
-    return frame_view_->GetViewForPoint(point_in_child_coords);
+    return frame_view_->GetEventHandlerForPoint(point_in_child_coords);
 
-  return View::GetViewForPoint(point);
+  return View::GetEventHandlerForPoint(point);
 }
 
 AccessibilityTypes::Role NonClientView::GetAccessibleRole() {
@@ -181,14 +182,21 @@ AccessibilityTypes::Role NonClientView::GetAccessibleRole() {
 ////////////////////////////////////////////////////////////////////////////////
 // NonClientFrameView, View overrides:
 
+bool NonClientFrameView::AlwaysUseCustomFrame() const {
+  return false;
+}
+
+bool NonClientFrameView::AlwaysUseNativeFrame() const {
+  return false;
+}
+
 bool NonClientFrameView::HitTest(const gfx::Point& l) const {
   // For the default case, we assume the non-client frame view never overlaps
   // the client view.
-  return !GetWindow()->GetClientView()->bounds().Contains(l);
+  return !GetWindow()->client_view()->bounds().Contains(l);
 }
 
-void NonClientFrameView::DidChangeBounds(const gfx::Rect& previous,
-                                         const gfx::Rect& current) {
+void NonClientFrameView::OnBoundsChanged() {
   // Overridden to do nothing. The NonClientView manually calls Layout on the
   // FrameView when it is itself laid out, see comment in NonClientView::Layout.
 }

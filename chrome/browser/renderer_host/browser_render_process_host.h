@@ -6,8 +6,6 @@
 #define CHROME_BROWSER_RENDERER_HOST_BROWSER_RENDER_PROCESS_HOST_H_
 #pragma once
 
-#include "build/build_config.h"
-
 #include <map>
 #include <queue>
 #include <string>
@@ -18,26 +16,19 @@
 #include "base/scoped_callback_factory.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/child_process_launcher.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
+#include "content/browser/child_process_launcher.h"
+#include "content/browser/renderer_host/render_process_host.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
 class CommandLine;
-class GURL;
 class RendererMainThread;
 class RenderWidgetHelper;
-class TabContents;
 class VisitedLinkUpdater;
-class URLRequestContextGetter;
 
 namespace base {
 class SharedMemory;
-}
-
-namespace gfx {
-class Size;
 }
 
 // Implements a concrete RenderProcessHost for the browser process for talking
@@ -124,10 +115,6 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // Initialize support for extension APIs. Send the list of registered API
   // functions to thre renderer process.
   void InitExtensions();
-
-  // Initialize support for speech input API. Informs the renderer if the API
-  // is enabled or not.
-  void InitSpeechInput();
 
   // Sends the renderer process a new set of user scripts.
   void SendUserScriptsUpdate(base::SharedMemory* shared_memory);

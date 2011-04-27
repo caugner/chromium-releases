@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
@@ -2171,6 +2172,36 @@ TEST(CookieMonsterTest, FlushStore) {
   MessageLoop::current()->RunAllPending();
 
   ASSERT_EQ(3, counter->callback_count());
+}
+
+TEST(CookieMonsterTest, GetCookieSourceFromURL) {
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("http://example.com")));
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("http://example.com/")));
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("http://example.com/test")));
+  EXPECT_EQ("file:///tmp/test.html",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("file:///tmp/test.html")));
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("http://example.com:1234/")));
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("https://example.com/")));
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("http://user:pwd@example.com/")));
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("http://example.com/test?foo")));
+  EXPECT_EQ("http://example.com/",
+            CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
+                GURL("http://example.com/test#foo")));
 }
 
 }  // namespace

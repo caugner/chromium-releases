@@ -68,6 +68,7 @@ kStringIds = [
   'IDS_INSTALL_NON_MULTI_INSTALLATION_EXISTS',
   'IDS_INSTALL_MULTI_INSTALLATION_EXISTS',
   'IDS_INSTALL_CONFLICTING_CHANNEL_EXISTS',
+  'IDS_INSTALL_READY_MODE_REQUIRES_CHROME',
   'IDS_OEM_MAIN_SHORTCUT_NAME',
   'IDS_SHORTCUT_TOOLTIP',
 ]
@@ -84,7 +85,8 @@ class TranslationStruct:
 
   def __cmp__(self, other):
     """Allow TranslationStructs to be sorted by id."""
-    return cmp(self.resource_id_str, other.resource_id_str)
+    id_result = cmp(self.resource_id_str, other.resource_id_str)
+    return cmp(self.language, other.language) if id_result == 0 else id_result
 
 
 def CollectTranslatedStrings(branding):
@@ -123,7 +125,7 @@ def CollectTranslatedStrings(branding):
   # have a .xtb file.
   translated_strings = []
   for string_id, message_text in zip(kStringIds, message_texts):
-    translated_strings.append(TranslationStruct(string_id + '_EN_US',
+    translated_strings.append(TranslationStruct(string_id,
                                                 'EN_US',
                                                 message_text))
 
@@ -143,7 +145,7 @@ def CollectTranslatedStrings(branding):
     for i, string_id in enumerate(kStringIds):
       translated_string = translation_nodes.get(translation_ids[i],
                                                 message_texts[i])
-      translated_strings.append(TranslationStruct(string_id + '_' + language,
+      translated_strings.append(TranslationStruct(string_id,
                                                   language,
                                                   translated_string))
 
@@ -167,7 +169,8 @@ def WriteRCFile(translated_strings, out_filename):
     translation = (translation_struct.translation.replace('"', '""')
                                                  .replace('\t', '\\t')
                                                  .replace('\n', '\\n'))
-    lines.append(u'  %s "%s"\n' % (translation_struct.resource_id_str,
+    lines.append(u'  %s "%s"\n' % (translation_struct.resource_id_str + '_'
+                                       + translation_struct.language,
                                    translation))
   lines.append(kFooterText)
   outfile = open(out_filename + '.rc', 'wb')
@@ -197,7 +200,8 @@ def WriteHeaderFile(translated_strings, out_filename):
   # Write the resource ids themselves.
   resource_id = kFirstResourceID
   for translation_struct in translated_strings:
-    lines.append('#define %s %s' % (translation_struct.resource_id_str,
+    lines.append('#define %s %s' % (translation_struct.resource_id_str + '_'
+                                        + translation_struct.language,
                                     resource_id))
     resource_id += 1
 

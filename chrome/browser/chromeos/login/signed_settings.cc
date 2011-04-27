@@ -9,13 +9,14 @@
 
 #include "base/ref_counted.h"
 #include "base/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/signed_settings_temp_storage.h"
+#include "content/browser/browser_thread.h"
 
 namespace chromeos {
 
@@ -241,7 +242,7 @@ StorePropertyOp::StorePropertyOp(const std::string& name,
 StorePropertyOp::~StorePropertyOp() {}
 
 void StorePropertyOp::Execute() {
-  if (!service_->IsAlreadyOwned()) {
+  if (service_->GetStatus(true) != OwnershipService::OWNERSHIP_TAKEN) {
     if (g_browser_process &&
         g_browser_process->local_state() &&
         SignedSettingsTempStorage::Store(name_, value_,
@@ -305,7 +306,7 @@ void RetrievePropertyOp::Execute() {
   // device has been owned and before temp_storage settings are finally
   // persisted into signed settings.
   // In this lapse of time Retrieve loses access to those settings.
-  if (!service_->IsAlreadyOwned()) {
+  if (service_->GetStatus(true) != OwnershipService::OWNERSHIP_TAKEN) {
     if (g_browser_process &&
         g_browser_process->local_state() &&
         SignedSettingsTempStorage::Retrieve(

@@ -4,11 +4,11 @@
 
 #include "chrome_frame/utils.h"
 
+#include <atlsafe.h>
+#include <atlsecurity.h>
 #include <htiframe.h>
 #include <mshtml.h>
 #include <shlobj.h>
-
-#include <atlsecurity.h>
 
 #include "base/file_util.h"
 #include "base/file_version_info.h"
@@ -38,6 +38,8 @@
 #include "grit/chromium_strings.h"
 #include "net/base/escape.h"
 #include "net/http/http_util.h"
+
+#include "chrome_tab.h"  // NOLINT
 
 using base::win::RegKey;
 using base::win::ScopedComPtr;
@@ -791,7 +793,7 @@ RendererType RendererTypeForUrl(const std::wstring& url) {
 
 HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
                                  const wchar_t* headers, IBindCtx* bind_ctx,
-                                 const wchar_t* fragment) {
+                                 const wchar_t* fragment, IStream* post_data) {
   DCHECK(browser);
   DCHECK(moniker);
   DCHECK(bind_ctx);
@@ -805,6 +807,46 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
   if (FAILED(hr))
     return hr;
 
+  // Always issue the download request in a new window to ensure that the
+  // currently loaded ChromeFrame document does not inadvarently see an unload
+  // request. This runs javascript unload handlers on the page which renders
+  // the page non functional.
+  VARIANT flags = { VT_I4 };
+  V_I4(&flags) = navOpenInNewWindow | navNoHistory;
+
+  // If the data to be downloaded was received in response to a post request
+  // then we need to reissue the post request.
+  base::win::ScopedVariant post_data_variant;
+  if (post_data) {
+    RewindStream(post_data);
+
+    CComSafeArray<uint8> safe_array_post;
+
+    STATSTG stat;
+    post_data->Stat(&stat, STATFLAG_NONAME);
+
+    if (stat.cbSize.LowPart > 0) {
+      std::string data;
+
+      HRESULT hr = E_FAIL;
+      while ((hr = ReadStream(post_data, 0xffff, &data)) == S_OK) {
+        safe_array_post.Add(
+            data.size(),
+            reinterpret_cast<unsigned char*>(const_cast<char*>(data.data())));
+        data.clear();
+      }
+    } else {
+      // If we get here it means that the navigation is being reissued for a
+      // POST request with no data. To ensure that the new window used as a
+      // target to handle the new navigation issues a POST request
+      // we need valid POST data. In this case we create a dummy 1 byte array.
+      // May not work as expected with some web sites.
+      DLOG(WARNING) << "Reissuing navigation with empty POST data. May not"
+                    << " work as expected";
+      safe_array_post.Create(1);
+    }
+    post_data_variant.Set(safe_array_post.Detach());
+  }
   // Create a new bind context that's not associated with our callback.
   // Calling RevokeBindStatusCallback doesn't disassociate the callback with
   // the bind context in IE7.  The returned bind context has the same
@@ -852,14 +894,16 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
 
       if (GetIEVersion() < IE_9) {
         hr = browser_priv2->NavigateWithBindCtx2(
-            uri_obj, NULL, NULL, NULL, headers_var.AsInput(), bind_ctx,
-            const_cast<wchar_t*>(fragment));
+                uri_obj, &flags, NULL, post_data_variant.AsInput(),
+                headers_var.AsInput(), bind_ctx,
+                const_cast<wchar_t*>(fragment));
       } else {
         IWebBrowserPriv2CommonIE9* browser_priv2_ie9 =
             reinterpret_cast<IWebBrowserPriv2CommonIE9*>(browser_priv2.get());
         hr = browser_priv2_ie9->NavigateWithBindCtx2(
-            uri_obj, NULL, NULL, NULL, headers_var.AsInput(), bind_ctx,
-            const_cast<wchar_t*>(fragment), 0);
+                uri_obj, &flags, NULL, post_data_variant.AsInput(),
+                headers_var.AsInput(), bind_ctx,
+                const_cast<wchar_t*>(fragment), 0);
       }
       DLOG_IF(WARNING, FAILED(hr))
           << base::StringPrintf(L"NavigateWithBindCtx2 0x%08X", hr);
@@ -887,9 +931,9 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
         }
 
         base::win::ScopedVariant var_url(UTF8ToWide(target_url.spec()).c_str());
-        hr = browser_priv->NavigateWithBindCtx(var_url.AsInput(), NULL, NULL,
-                                               NULL, headers_var.AsInput(),
-                                               bind_ctx,
+        hr = browser_priv->NavigateWithBindCtx(var_url.AsInput(), &flags, NULL,
+                                               post_data_variant.AsInput(),
+                                               headers_var.AsInput(), bind_ctx,
                                                const_cast<wchar_t*>(fragment));
         DLOG_IF(WARNING, FAILED(hr))
             << base::StringPrintf(L"NavigateWithBindCtx 0x%08X", hr);
@@ -1583,3 +1627,54 @@ std::wstring GetCurrentModuleVersion() {
   DCHECK(module_version_info.get() != NULL);
   return module_version_info->file_version();
 }
+
+bool IsChromeFrameDocument(IWebBrowser2* web_browser) {
+  if (!web_browser)
+    return false;
+
+  ScopedComPtr<IDispatch> doc;
+  web_browser->get_Document(doc.Receive());
+  if (doc) {
+    // Detect if CF is rendering based on whether the document is a
+    // ChromeActiveDocument. Detecting based on hwnd is problematic as
+    // the CF Active Document window may not have been created yet.
+    ScopedComPtr<IChromeFrame> chrome_frame;
+    chrome_frame.QueryFrom(doc);
+    return chrome_frame.get() != NULL;
+  }
+  return false;
+}
+
+bool IncreaseWinInetConnections(DWORD connections) {
+  static bool wininet_connection_count_updated = false;
+  if (wininet_connection_count_updated) {
+    return true;
+  }
+
+  static int connection_options[] = {
+    INTERNET_OPTION_MAX_CONNS_PER_SERVER,
+    INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER,
+  };
+
+  BOOL ret = FALSE;
+
+  for (int option_index = 0; option_index < arraysize(connection_options);
+       ++option_index) {
+    DWORD connection_value_size = sizeof(DWORD);
+    DWORD current_connection_limit = 0;
+    InternetQueryOption(NULL, connection_options[option_index],
+                        &current_connection_limit, &connection_value_size);
+    if (current_connection_limit > connections) {
+      continue;
+    }
+
+    ret = InternetSetOption(NULL, connection_options[option_index],
+                            &connections, connection_value_size);
+    if (!ret) {
+      return false;
+    }
+  }
+  wininet_connection_count_updated = true;
+  return true;
+}
+

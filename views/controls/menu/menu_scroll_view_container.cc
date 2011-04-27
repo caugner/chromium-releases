@@ -10,8 +10,8 @@
 #include <Vssym32.h>
 #endif
 
-#include "gfx/canvas_skia.h"
-#include "gfx/color_utils.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/color_utils.h"
 #include "views/border.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "views/controls/menu/menu_config.h"
@@ -20,7 +20,7 @@
 #include "views/controls/menu/submenu_view.h"
 
 #if defined(OS_WIN)
-#include "gfx/native_theme_win.h"
+#include "ui/gfx/native_theme_win.h"
 #endif
 
 #if defined(OS_WIN)
@@ -79,7 +79,7 @@ class MenuScrollButton : public View {
     return ui::DragDropTypes::DRAG_NONE;
   }
 
-  virtual void Paint(gfx::Canvas* canvas) {
+  virtual void OnPaint(gfx::Canvas* canvas) {
     const MenuConfig& config = MenuConfig::instance();
 
 #if defined(OS_WIN)
@@ -178,9 +178,9 @@ MenuScrollViewContainer::MenuScrollViewContainer(SubmenuView* content_view) {
                  SubmenuView::kSubmenuBorderSize));
 }
 
-void MenuScrollViewContainer::PaintBackground(gfx::Canvas* canvas) {
+void MenuScrollViewContainer::OnPaintBackground(gfx::Canvas* canvas) {
   if (background()) {
-    View::PaintBackground(canvas);
+    View::OnPaintBackground(canvas);
     return;
   }
 
@@ -252,8 +252,7 @@ void MenuScrollViewContainer::Layout() {
   scroll_view_->Layout();
 }
 
-void MenuScrollViewContainer::DidChangeBounds(const gfx::Rect& previous,
-                                              const gfx::Rect& current) {
+void MenuScrollViewContainer::OnBoundsChanged() {
   gfx::Size content_pref = scroll_view_->GetContents()->GetPreferredSize();
   scroll_up_button_->SetVisible(content_pref.height() > height());
   scroll_down_button_->SetVisible(content_pref.height() > height());

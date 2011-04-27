@@ -19,6 +19,10 @@ class PluginGroup;
 }
 }
 
+namespace webkit_glue {
+struct CustomContextMenuContext;
+}
+
 class BlockedPlugin : public RenderViewObserver,
                       public CppBoundClass,
                       public webkit::npapi::WebViewPlugin::Delegate {
@@ -45,7 +49,9 @@ class BlockedPlugin : public RenderViewObserver,
   // RenderViewObserver methods:
   virtual bool OnMessageReceived(const IPC::Message& message);
 
-  void OnMenuItemSelected(unsigned id);
+  void OnMenuItemSelected(
+      const webkit_glue::CustomContextMenuContext& /* ignored */,
+      unsigned id);
 
   // Load the blocked plugin.
   void LoadPlugin();
@@ -70,6 +76,7 @@ class BlockedPlugin : public RenderViewObserver,
   // True iff the plugin was blocked because the page was being prerendered.
   // Plugin will automatically be loaded when the page is displayed.
   bool is_blocked_for_prerendering_;
+  bool hidden_;
 };
 
 #endif  // CHROME_RENDERER_BLOCKED_PLUGIN_H_

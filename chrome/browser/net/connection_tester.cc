@@ -8,6 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/importer/firefox_proxy_settings.h"
@@ -25,7 +26,7 @@
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
-#include "net/http/http_network_layer.h"
+#include "net/http/http_network_session.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/url_request/url_request.h"
@@ -48,46 +49,56 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
     int rv;
 
     // Create a custom HostResolver for this experiment.
+    net::HostResolver* host_resolver_tmp = NULL;
     rv = CreateHostResolver(experiment.host_resolver_experiment,
-                            &host_resolver_);
+                            &host_resolver_tmp);
     if (rv != net::OK)
       return rv;  // Failure.
+    set_host_resolver(host_resolver_tmp);
 
     // Create a custom ProxyService for this this experiment.
+    scoped_refptr<net::ProxyService> proxy_service_tmp = NULL;
     rv = CreateProxyService(experiment.proxy_settings_experiment,
-                            &proxy_service_);
+                            &proxy_service_tmp);
     if (rv != net::OK)
       return rv;  // Failure.
+    set_proxy_service(proxy_service_tmp);
 
     // The rest of the dependencies are standard, and don't depend on the
     // experiment being run.
-    cert_verifier_ = new net::CertVerifier;
-    dnsrr_resolver_ = new net::DnsRRResolver;
-    ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
-    ssl_config_service_ = new net::SSLConfigServiceDefaults;
-    http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault(
-        host_resolver_);
-    http_transaction_factory_ = new net::HttpCache(
-        net::HttpNetworkLayer::CreateFactory(host_resolver_, cert_verifier_,
-            dnsrr_resolver_, NULL /* dns_cert_checker */,
-            NULL /* ssl_host_info_factory */, proxy_service_,
-            ssl_config_service_, http_auth_handler_factory_, NULL, NULL),
-        NULL /* net_log */,
-        net::HttpCache::DefaultBackend::InMemory(0));
+    set_cert_verifier(new net::CertVerifier);
+    set_dnsrr_resolver(new net::DnsRRResolver);
+    set_ftp_transaction_factory(new net::FtpNetworkLayer(host_resolver_tmp));
+    set_ssl_config_service(new net::SSLConfigServiceDefaults);
+    set_http_auth_handler_factory(net::HttpAuthHandlerFactory::CreateDefault(
+        host_resolver_tmp));
+
+    net::HttpNetworkSession::Params session_params;
+    session_params.host_resolver = host_resolver_tmp;
+    session_params.dnsrr_resolver = dnsrr_resolver();
+    session_params.cert_verifier = cert_verifier();
+    session_params.proxy_service = proxy_service_tmp;
+    session_params.http_auth_handler_factory = http_auth_handler_factory();
+    session_params.ssl_config_service = ssl_config_service();
+    scoped_refptr<net::HttpNetworkSession> network_session(
+        new net::HttpNetworkSession(session_params));
+    set_http_transaction_factory(new net::HttpCache(
+        network_session,
+        net::HttpCache::DefaultBackend::InMemory(0)));
     // In-memory cookie store.
-    cookie_store_ = new net::CookieMonster(NULL, NULL);
+    set_cookie_store(new net::CookieMonster(NULL, NULL));
 
     return net::OK;
   }
 
  protected:
   virtual ~ExperimentURLRequestContext() {
-    delete ftp_transaction_factory_;
-    delete http_transaction_factory_;
-    delete http_auth_handler_factory_;
-    delete dnsrr_resolver_;
-    delete cert_verifier_;
-    delete host_resolver_;
+    delete ftp_transaction_factory();
+    delete http_transaction_factory();
+    delete http_auth_handler_factory();
+    delete dnsrr_resolver();
+    delete cert_verifier();
+    delete host_resolver();
   }
 
  private:
@@ -237,7 +248,9 @@ class ConnectionTester::TestRunner : public net::URLRequest::Delegate {
  public:
   // |tester| must remain alive throughout the TestRunner's lifetime.
   // |tester| will be notified of completion.
-  explicit TestRunner(ConnectionTester* tester) : tester_(tester) {}
+  explicit TestRunner(ConnectionTester* tester)
+      : tester_(tester),
+        ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {}
 
   // Starts running |experiment|. Notifies tester->OnExperimentCompleted() when
   // it is done.
@@ -258,9 +271,12 @@ class ConnectionTester::TestRunner : public net::URLRequest::Delegate {
 
   // Called when the request has completed (for both success and failure).
   void OnResponseCompleted(net::URLRequest* request);
+  void OnExperimentCompletedWithResult(int result);
 
   ConnectionTester* tester_;
   scoped_ptr<net::URLRequest> request_;
+
+  ScopedRunnableMethodFactory<TestRunner> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRunner);
 };
@@ -306,6 +322,17 @@ void ConnectionTester::TestRunner::OnResponseCompleted(
     DCHECK_NE(net::ERR_IO_PENDING, request->status().os_error());
     result = request->status().os_error();
   }
+
+  // Post a task to notify the parent rather than handling it right away,
+  // to avoid re-entrancy problems with URLRequest. (Don't want the caller
+  // to end up deleting the URLRequest while in the middle of processing).
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(
+          &TestRunner::OnExperimentCompletedWithResult, result));
+}
+
+void ConnectionTester::TestRunner::OnExperimentCompletedWithResult(int result) {
   tester_->OnExperimentCompleted(result);
 }
 

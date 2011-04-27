@@ -1,21 +1,22 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/tab_contents/background_contents.h"
 
 #include "chrome/browser/background_contents_service.h"
-#include "chrome/browser/browsing_instance.h"
+#include "chrome/browser/desktop_notification_handler.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/view_types.h"
-#include "chrome/common/render_messages_params.h"
-#include "gfx/rect.h"
+#include "content/browser/browsing_instance.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/site_instance.h"
+#include "ui/gfx/rect.h"
 
 ////////////////
 // BackgroundContents
@@ -39,6 +40,8 @@ BackgroundContents::BackgroundContents(SiteInstance* site_instance,
   // APP_TERMINATING before non-OTR profiles are destroyed).
   registrar_.Add(this, NotificationType::PROFILE_DESTROYED,
                  Source<Profile>(profile));
+  desktop_notification_handler_.reset(
+      new DesktopNotificationHandler(NULL, site_instance->GetProcess()));
 }
 
 // Exposed to allow creating mocks.
@@ -185,6 +188,12 @@ void BackgroundContents::RenderViewGone(RenderViewHost* rvh,
   delete this;
 }
 
+bool BackgroundContents::OnMessageReceived(const IPC::Message& message) {
+  // Forward desktop notification IPCs if any to the
+  // DesktopNotificationHandler.
+  return desktop_notification_handler_->OnMessageReceived(message);
+}
+
 RendererPreferences BackgroundContents::GetRendererPrefs(
     Profile* profile) const {
   RendererPreferences preferences;
@@ -197,10 +206,10 @@ WebPreferences BackgroundContents::GetWebkitPrefs() {
   // apps.
   Profile* profile = render_view_host_->process()->profile();
   return RenderViewHostDelegateHelper::GetWebkitPrefs(profile,
-                                                      false);  // is_dom_ui
+                                                      false);  // is_web_ui
 }
 
-void BackgroundContents::ProcessDOMUIMessage(
+void BackgroundContents::ProcessWebUIMessage(
     const ViewHostMsg_DomMessage_Params& params) {
   // TODO(rafaelw): It may make sense for extensions to be able to open
   // BackgroundContents to chrome-extension://<id> pages. Consider implementing.
@@ -209,16 +218,15 @@ void BackgroundContents::ProcessDOMUIMessage(
 
 void BackgroundContents::CreateNewWindow(
     int route_id,
-    WindowContainerType window_container_type,
-    const string16& frame_name) {
+    const ViewHostMsg_CreateWindow_Params& params) {
   delegate_view_helper_.CreateNewWindow(
       route_id,
       render_view_host_->process()->profile(),
       render_view_host_->site_instance(),
-      DOMUIFactory::GetDOMUIType(render_view_host_->process()->profile(), url_),
+      WebUIFactory::GetWebUIType(render_view_host_->process()->profile(), url_),
       this,
-      window_container_type,
-      frame_name);
+      params.window_container_type,
+      params.frame_name);
 }
 
 void BackgroundContents::CreateNewWidget(int route_id,
@@ -226,8 +234,7 @@ void BackgroundContents::CreateNewWidget(int route_id,
   NOTREACHED();
 }
 
-void BackgroundContents::CreateNewFullscreenWidget(
-    int route_id, WebKit::WebPopupType popup_type) {
+void BackgroundContents::CreateNewFullscreenWidget(int route_id) {
   NOTREACHED();
 }
 

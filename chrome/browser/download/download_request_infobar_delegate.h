@@ -8,7 +8,7 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/download/download_request_limiter.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 
 class TabContents;
 
@@ -33,10 +33,8 @@ class DownloadRequestInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual void InfoBarClosed();
   virtual SkBitmap* GetIcon() const;
   virtual string16 GetMessageText() const;
-  virtual int GetButtons() const;
   virtual string16 GetButtonLabel(InfoBarButton button) const;
   virtual bool Accept();
-  virtual bool Cancel();
 
   DownloadRequestLimiter::TabDownloadState* host_;
 

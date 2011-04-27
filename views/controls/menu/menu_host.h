@@ -6,8 +6,8 @@
 #define VIEWS_CONTROLS_MENU_MENU_HOST_H_
 #pragma once
 
-#include "gfx/native_widget_types.h"
-#include "gfx/rect.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
 
 namespace views {
 
@@ -29,10 +29,10 @@ class MenuHost {
   static MenuHost* Create(SubmenuView* submenu_view);
 
   // Initializes and shows the MenuHost.
-  virtual void Init(gfx::NativeWindow parent,
-                    const gfx::Rect& bounds,
-                    View* contents_view,
-                    bool do_capture) = 0;
+  virtual void InitMenuHost(gfx::NativeWindow parent,
+                            const gfx::Rect& bounds,
+                            View* contents_view,
+                            bool do_capture) = 0;
 
   // Returns true if the menu host is visible.
   virtual bool IsMenuHostVisible() = 0;

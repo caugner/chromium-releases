@@ -15,11 +15,11 @@
 #include "chrome/browser/ui/gtk/gtk_custom_menu.h"
 #include "chrome/browser/ui/gtk/gtk_custom_menu_item.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "gfx/gtk_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/accelerator_gtk.h"
 #include "ui/base/models/button_menu_item_model.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/gfx/gtk_util.h"
 #include "webkit/glue/window_open_disposition.h"
 
 bool MenuGtk::block_activation_ = false;
@@ -369,29 +369,20 @@ GtkWidget* MenuGtk::AppendMenuItemToMenu(int index,
   return menu_item;
 }
 
-void MenuGtk::Popup(GtkWidget* widget, GdkEvent* event) {
-  DCHECK(event->type == GDK_BUTTON_PRESS)
-      << "Non-button press event sent to RunMenuAt";
-
-  Popup(widget, event->button.button, event->button.time);
-}
-
-void MenuGtk::Popup(GtkWidget* widget, gint button_type, guint32 timestamp) {
+void MenuGtk::PopupForWidget(GtkWidget* widget, int button,
+                             guint32 event_time) {
   gtk_menu_popup(GTK_MENU(menu_), NULL, NULL,
                  WidgetMenuPositionFunc,
                  widget,
-                 button_type, timestamp);
+                 button, event_time);
 }
 
-void MenuGtk::PopupAsContext(guint32 event_time) {
-  // TODO(estade): |button| value of 3 (6th argument) is not strictly true,
-  // but does it matter?
-  gtk_menu_popup(GTK_MENU(menu_), NULL, NULL, NULL, NULL, 3, event_time);
-}
-
-void MenuGtk::PopupAsContextAt(guint32 event_time, gfx::Point point) {
+void MenuGtk::PopupAsContext(const gfx::Point& point, guint32 event_time) {
+  // gtk_menu_popup doesn't like the "const" qualifier on point.
+  gfx::Point nonconst_point(point);
   gtk_menu_popup(GTK_MENU(menu_), NULL, NULL,
-                 PointMenuPositionFunc, &point, 3, event_time);
+                 PointMenuPositionFunc, &nonconst_point,
+                 3, event_time);
 }
 
 void MenuGtk::PopupAsContextForStatusIcon(guint32 event_time, guint32 button,
@@ -401,7 +392,7 @@ void MenuGtk::PopupAsContextForStatusIcon(guint32 event_time, guint32 button,
 }
 
 void MenuGtk::PopupAsFromKeyEvent(GtkWidget* widget) {
-  Popup(widget, 0, gtk_get_current_event_time());
+  PopupForWidget(widget, 0, gtk_get_current_event_time());
   gtk_menu_shell_select_first(GTK_MENU_SHELL(menu_), FALSE);
 }
 
@@ -479,7 +470,7 @@ void MenuGtk::BuildSubmenuFromModel(ui::MenuModel* model, GtkWidget* menu) {
       case ui::MenuModel::TYPE_BUTTON_ITEM: {
         ui::ButtonMenuItemModel* button_menu_item_model =
             model->GetButtonMenuItemAt(i);
-        menu_item = BuildButtomMenuItem(button_menu_item_model, menu);
+        menu_item = BuildButtonMenuItem(button_menu_item_model, menu);
         connect_to_activate = false;
         break;
       }
@@ -523,7 +514,7 @@ void MenuGtk::BuildSubmenuFromModel(ui::MenuModel* model, GtkWidget* menu) {
   }
 }
 
-GtkWidget* MenuGtk::BuildButtomMenuItem(ui::ButtonMenuItemModel* model,
+GtkWidget* MenuGtk::BuildButtonMenuItem(ui::ButtonMenuItemModel* model,
                                         GtkWidget* menu) {
   GtkWidget* menu_item = gtk_custom_menu_item_new(
       gfx::RemoveWindowsStyleAccelerators(UTF16ToUTF8(model->label())).c_str());

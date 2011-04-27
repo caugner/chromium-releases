@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,9 @@
 
 namespace history {
 
-const int kLowQualityMatchTypedLimit = 1;
-const int kLowQualityMatchVisitLimit = 3;
-const int kLowQualityMatchAgeLimitInDays = 3;
-
 HistoryMatch::HistoryMatch()
     : url_info(),
-      input_location(std::wstring::npos),
+      input_location(string16::npos),
       match_in_scheme(false),
       innermost_match(true) {
 }
@@ -31,9 +27,4 @@ bool HistoryMatch::operator==(const GURL& url) const {
   return url_info.url() == url;
 }
 
-base::Time AutocompleteAgeThreshold() {
-  return (base::Time::Now() -
-          base::TimeDelta::FromDays(kLowQualityMatchAgeLimitInDays));
-}
-
-}
+}  // namespace history

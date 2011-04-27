@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,6 @@
 #include "chrome/installer/test/resource_loader.h"
 #include "chrome/installer/test/resource_updater.h"
 #include "chrome/installer/util/lzma_util.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
@@ -148,10 +147,14 @@ class MappedFile {
 
 MappedFile::~MappedFile() {
   if (view_ != NULL) {
-    EXPECT_NE(0, UnmapViewOfFile(view_));
+    if (UnmapViewOfFile(view_) == 0) {
+      PLOG(DFATAL) << "MappedFile failed to unmap view.";
+    }
   }
   if (mapping_ != NULL) {
-    EXPECT_NE(0, CloseHandle(mapping_));
+    if (CloseHandle(mapping_) == 0) {
+      PLOG(DFATAL) << "Could not close file mapping handle.";
+    }
   }
 }
 
@@ -211,17 +214,17 @@ bool RunProcessAndWait(const wchar_t* exe_path, const std::wstring& cmdline,
   return result;
 }
 
-// Retrieves the version number of setup.exe in |work_dir| from its version
+// Retrieves the version number of |pe_file| from its version
 // resource, placing the value in |version|.  Returns true on success.
-bool GetSetupExeVersion(const FilePath& work_dir, ChromeVersion* version) {
+bool GetFileVersion(const FilePath& pe_file, ChromeVersion* version) {
   DCHECK(version);
   bool result = false;
-  upgrade_test::ResourceLoader setup;
+  upgrade_test::ResourceLoader pe_file_loader;
   std::pair<const uint8*, DWORD> version_info_data;
 
-  if (setup.Initialize(work_dir.Append(&kSetupExe[0])) &&
-      setup.Load(VS_VERSION_INFO, reinterpret_cast<WORD>(RT_VERSION),
-                 &version_info_data)) {
+  if (pe_file_loader.Initialize(pe_file) &&
+      pe_file_loader.Load(VS_VERSION_INFO, reinterpret_cast<WORD>(RT_VERSION),
+                          &version_info_data)) {
     const VS_FIXEDFILEINFO* fixed_file_info;
     UINT ver_info_len;
     if (VerQueryValue(version_info_data.first, L"\\",
@@ -239,6 +242,13 @@ bool GetSetupExeVersion(const FilePath& work_dir, ChromeVersion* version) {
 
   return result;
 }
+
+// Retrieves the version number of setup.exe in |work_dir| from its version
+// resource, placing the value in |version|.  Returns true on success.
+bool GetSetupExeVersion(const FilePath& work_dir, ChromeVersion* version) {
+  return GetFileVersion(work_dir.Append(&kSetupExe[0]), version);
+}
+
 
 // Replace all occurrences in the sequence [|dest_first|, |dest_last) that
 // equals [|src_first|, |src_last) with the sequence at |replacement_first| of
@@ -343,28 +353,44 @@ bool UpdateVersionIfMatch(const FilePath& image_file,
   return result;
 }
 
-// Bumps the version of all .exe and .dll files in |work_dir| as well as the
-// |work-dir|\Chrome-bin\w.x.y.z directory.
-bool ApplyNextVersion(const FilePath& work_dir) {
+bool IncrementNewVersion(upgrade_test::Direction direction,
+                         VisitResourceContext* ctx) {
+  DCHECK(ctx);
+
+  // Figure out a past or future version with the same string length as this one
+  // by decrementing or incrementing each component.
+  LONGLONG incrementer = (direction == upgrade_test::PREVIOUS_VERSION ? -1 : 1);
+
+  do {
+    if (incrementer == 0) {
+      LOG(DFATAL) << "Improbable version at the cusp of complete rollover";
+      return false;
+    }
+    ctx->new_version.set_value(ctx->current_version.value() + incrementer);
+    ctx->new_version_str = ctx->new_version.ToString();
+    incrementer <<= 16;
+  } while (ctx->new_version_str.size() != ctx->current_version_str.size());
+
+  return true;
+}
+
+// Raises or lowers the version of all .exe and .dll files in |work_dir| as well
+// as the |work-dir|\Chrome-bin\w.x.y.z directory.  |original_version| and
+// |new_version|, when non-NULL, are given the original and new version numbers
+// on success.
+bool ApplyAlternateVersion(const FilePath& work_dir,
+                           upgrade_test::Direction direction,
+                           std::wstring* original_version,
+                           std::wstring* new_version) {
   VisitResourceContext ctx;
   if (!GetSetupExeVersion(work_dir, &ctx.current_version)) {
     return false;
   }
   ctx.current_version_str = ctx.current_version.ToString();
 
-  // Figure out a future version with the same string length as this one by
-  // incrementing each component.
-  ULONGLONG incrementer = 1;
-
-  do {
-    if (incrementer == 0) {
-      LOG(DFATAL) << "Improbable version composed of only 9s and/or USHRT_MAX";
-      return false;
-    }
-    ctx.new_version.set_value(ctx.current_version.value() + incrementer);
-    ctx.new_version_str = ctx.new_version.ToString();
-    incrementer <<= 16;
-  } while (ctx.new_version_str.size() != ctx.current_version_str.size());
+  if (!IncrementNewVersion(direction, &ctx)) {
+    return false;
+  }
 
   // Modify all .dll and .exe files with the current version.
   bool doing_great = true;
@@ -385,6 +411,14 @@ bool ApplyNextVersion(const FilePath& work_dir) {
   FilePath chrome_bin = work_dir.Append(&kChromeBin[0]);
   doing_great = file_util::Move(chrome_bin.Append(ctx.current_version_str),
                                 chrome_bin.Append(ctx.new_version_str));
+
+  if (doing_great) {
+    // Report the version numbers if requested.
+    if (original_version != NULL)
+      original_version->assign(ctx.current_version_str);
+    if (new_version != NULL)
+      new_version->assign(ctx.new_version_str);
+  }
 
   return doing_great;
 }
@@ -437,8 +471,11 @@ bool CreateArchive(const FilePath& output_file, const FilePath& input_path,
 
 namespace upgrade_test {
 
-bool GenerateNextVersion(const FilePath& original_installer_path,
-                         const FilePath& target_path) {
+bool GenerateAlternateVersion(const FilePath& original_installer_path,
+                              const FilePath& target_path,
+                              Direction direction,
+                              std::wstring* original_version,
+                              std::wstring* new_version) {
   // Create a temporary directory in which we'll do our work.
   ScopedTempDirectory work_dir;
   if (!work_dir.Initialize())
@@ -532,7 +569,8 @@ bool GenerateNextVersion(const FilePath& original_installer_path,
   }
 
   // Increment the version in all files.
-  ApplyNextVersion(work_dir.directory());
+  ApplyAlternateVersion(work_dir.directory(), direction, original_version,
+                        new_version);
 
   // Pack up files into chrome.7z
   if (!CreateArchive(chrome_7z, work_dir.directory().Append(&kChromeBin[0]), 0))
@@ -571,6 +609,34 @@ bool GenerateNextVersion(const FilePath& original_installer_path,
 
   // Finally, move the updated mini_installer into place.
   return file_util::Move(mini_installer, target_path);
+}
+
+bool GenerateAlternatePEFileVersion(const FilePath& original_file,
+                                    const FilePath& target_file,
+                                    Direction direction) {
+  // First copy original_file to target_file.
+  if (!file_util::CopyFile(original_file, target_file)) {
+    LOG(DFATAL) << "Failed copying \"" << original_file.value()
+                << "\" to \"" << target_file.value() << "\"";
+    return false;
+  }
+
+  VisitResourceContext ctx;
+  if (!GetFileVersion(target_file, &ctx.current_version)) {
+    LOG(DFATAL) << "Failed reading version from \"" << target_file.value()
+                << "\"";
+    return false;
+  }
+  ctx.current_version_str = ctx.current_version.ToString();
+
+  if (!IncrementNewVersion(direction, &ctx) ||
+      !UpdateVersionIfMatch(target_file, &ctx)) {
+    LOG(DFATAL) << "Failed to update version in \"" << target_file.value()
+                << "\"";
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace upgrade_test

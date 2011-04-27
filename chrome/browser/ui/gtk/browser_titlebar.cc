@@ -18,7 +18,6 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -33,15 +32,16 @@
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/gtk_util.h"
-#include "gfx/skbitmap_operations.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_service.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/gtk_util.h"
+#include "ui/gfx/skbitmap_operations.h"
 
 namespace {
 
@@ -709,7 +709,7 @@ void BrowserTitlebar::ShowFaviconMenu(GdkEventButton* event) {
     favicon_menu_.reset(new MenuGtk(NULL, favicon_menu_model_.get()));
   }
 
-  favicon_menu_->Popup(app_mode_favicon_, reinterpret_cast<GdkEvent*>(event));
+  favicon_menu_->PopupForWidget(app_mode_favicon_, event->button, event->time);
 }
 
 void BrowserTitlebar::MaximizeButtonClicked() {
@@ -796,13 +796,14 @@ gboolean BrowserTitlebar::OnButtonPressed(GtkWidget* widget,
   return TRUE;
 }
 
-void BrowserTitlebar::ShowContextMenu() {
+void BrowserTitlebar::ShowContextMenu(GdkEventButton* event) {
   if (!context_menu_.get()) {
     context_menu_model_.reset(new ContextMenuModel(this));
     context_menu_.reset(new MenuGtk(NULL, context_menu_model_.get()));
   }
 
-  context_menu_->PopupAsContext(gtk_get_current_event_time());
+  context_menu_->PopupAsContext(gfx::Point(event->x_root, event->y_root),
+                                event->time);
 }
 
 bool BrowserTitlebar::IsCommandIdEnabled(int command_id) const {

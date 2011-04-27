@@ -133,7 +133,7 @@ PluginObject::PluginObject(NPP npp)
       mac_window_selected_tab_(0),
       mac_cocoa_window_(0),
       mac_surface_hidden_(0),
-      mac_2d_context_(0),
+      mac_cg_context_ref_(0),
       mac_agl_context_(0),
       mac_cgl_context_(0),
       mac_cgl_pbuffer_(0),
@@ -257,16 +257,52 @@ void PluginObject::TearDown() {
 }
 
 void PluginObject::CreateRenderer(const o3d::DisplayWindow& display_window) {
-  if (!o3d::CheckConfig(npp_)) {
-    renderer_init_status_ = o3d::Renderer::GPU_NOT_UP_TO_SPEC;
-  } else {
-    renderer_ = o3d::Renderer::CreateDefaultRenderer(&service_locator_);
-    DCHECK(renderer_);
+  bool software_renderer = false;
+  // In case CreateRenderer is called more than once, reset to the
+  // uninitialized state..
+  DeleteRenderer();
+  renderer_init_status_ = o3d::Renderer::UNINITIALIZED;
 
-    // Attempt to initialize renderer.
-    renderer_init_status_ = renderer_->Init(display_window, false);
-    if (renderer_init_status_ != o3d::Renderer::SUCCESS) {
-      DeleteRenderer();
+  if (features_->render_mode() != Renderer::RENDER_MODE_2D) {
+    if (!o3d::CheckConfig(npp_)) {
+      renderer_init_status_ = o3d::Renderer::GPU_NOT_UP_TO_SPEC;
+    } else {
+      renderer_ = o3d::Renderer::CreateDefaultRenderer(&service_locator_);
+      DCHECK(renderer_);
+
+      // Attempt to initialize renderer.
+      renderer_init_status_ = renderer_->Init(display_window, false);
+      if (renderer_init_status_ != o3d::Renderer::SUCCESS) {
+        DeleteRenderer();
+      } else {
+        ClientInfoManager* client_info_manager =
+              service_locator()->GetService<ClientInfoManager>();
+        software_renderer =
+            client_info_manager->client_info().software_renderer();
+      }
+    }
+  }
+  if (software_renderer &&
+      (features_->render_mode() == Renderer::RENDER_MODE_AUTO)) {
+    // If the client is OK with 2d mode, we prefer to use cairo instead of a
+    // software renderer.  We don't need the 3D renderer we just created.
+    DeleteRenderer();
+    renderer_init_status_ = o3d::Renderer::GPU_NOT_UP_TO_SPEC;
+    DLOG(INFO) << "Software renderer detected.  Falling back to o2d.";
+  }
+  if ((renderer_init_status_ != o3d::Renderer::SUCCESS) &&
+      (features_->render_mode() != Renderer::RENDER_MODE_3D)) {
+    // Attempt to fall back to o2d renderer
+    renderer_ = o3d::Renderer::Create2DRenderer(&service_locator_);
+    if (renderer_) {
+      renderer_init_status_ = renderer_->Init(display_window, false);
+      if (renderer_init_status_ != o3d::Renderer::SUCCESS) {
+        DeleteRenderer();
+      } else {
+        ClientInfoManager* client_info_manager =
+              service_locator()->GetService<ClientInfoManager>();
+        client_info_manager->SetRender2d(true);
+      }
     }
   }
 }

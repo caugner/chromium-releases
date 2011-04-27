@@ -8,11 +8,15 @@
 
 #include "base/string16.h"
 #include "base/task.h"
-#include "gfx/font.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/gfx/font.h"
 #include "views/border.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #include "views/view.h"
+
+namespace base {
+class Time;
+}
 
 namespace gfx {
 class Canvas;
@@ -43,59 +47,60 @@ class NativeTextfieldViews : public views::View,
   ~NativeTextfieldViews();
 
   // views::View overrides:
-  virtual bool OnMousePressed(const views::MouseEvent& e);
-  virtual bool OnMouseDragged(const views::MouseEvent& e);
-  virtual void OnMouseReleased(const views::MouseEvent& e, bool canceled);
-  virtual bool OnKeyPressed(const views::KeyEvent& e);
-  virtual bool OnKeyReleased(const views::KeyEvent& e);
-  virtual void Paint(gfx::Canvas* canvas);
-  virtual void DidChangeBounds(const gfx::Rect& previous,
-                               const gfx::Rect& current);
-  virtual void WillGainFocus();
-  virtual void DidGainFocus();
-  virtual void WillLoseFocus();
+  virtual bool OnMousePressed(const views::MouseEvent& e) OVERRIDE;
+  virtual bool OnMouseDragged(const views::MouseEvent& e) OVERRIDE;
+  virtual void OnMouseReleased(const views::MouseEvent& e,
+                               bool canceled) OVERRIDE;
+  virtual bool OnKeyPressed(const views::KeyEvent& e) OVERRIDE;
+  virtual bool OnKeyReleased(const views::KeyEvent& e) OVERRIDE;
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnBoundsChanged() OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
+  virtual gfx::NativeCursor GetCursorForPoint(ui::EventType event_type,
+                                              const gfx::Point& p) OVERRIDE;
 
   // views::ContextMenuController overrides:
-  virtual void ShowContextMenu(View* source,
-                               const gfx::Point& p,
-                               bool is_mouse_gesture);
+  virtual void ShowContextMenuForView(View* source,
+                                      const gfx::Point& p,
+                                      bool is_mouse_gesture) OVERRIDE;
 
   // NativeTextfieldWrapper overrides:
-  virtual string16 GetText() const;
-  virtual void UpdateText();
-  virtual void AppendText(const string16& text);
-  virtual string16 GetSelectedText() const;
-  virtual void SelectAll();
-  virtual void ClearSelection();
-  virtual void UpdateBorder();
-  virtual void UpdateTextColor();
-  virtual void UpdateBackgroundColor();
-  virtual void UpdateReadOnly();
-  virtual void UpdateFont();
-  virtual void UpdateIsPassword();
-  virtual void UpdateEnabled();
-  virtual gfx::Insets CalculateInsets();
-  virtual void UpdateHorizontalMargins();
-  virtual void UpdateVerticalMargins();
-  virtual bool SetFocus();
-  virtual View* GetView();
-  virtual gfx::NativeView GetTestingHandle() const;
-  virtual bool IsIMEComposing() const;
-  virtual void GetSelectedRange(TextRange* range) const;
-  virtual void SelectRange(const TextRange& range);
-  virtual size_t GetCursorPosition() const;
-  virtual bool HandleKeyPressed(const views::KeyEvent& e);
-  virtual bool HandleKeyReleased(const views::KeyEvent& e);
-  virtual void HandleWillGainFocus();
-  virtual void HandleDidGainFocus();
-  virtual void HandleWillLoseFocus();
+  virtual string16 GetText() const OVERRIDE;
+  virtual void UpdateText() OVERRIDE;
+  virtual void AppendText(const string16& text) OVERRIDE;
+  virtual string16 GetSelectedText() const OVERRIDE;
+  virtual void SelectAll() OVERRIDE;
+  virtual void ClearSelection() OVERRIDE;
+  virtual void UpdateBorder() OVERRIDE;
+  virtual void UpdateTextColor() OVERRIDE;
+  virtual void UpdateBackgroundColor() OVERRIDE;
+  virtual void UpdateReadOnly() OVERRIDE;
+  virtual void UpdateFont() OVERRIDE;
+  virtual void UpdateIsPassword() OVERRIDE;
+  virtual void UpdateEnabled() OVERRIDE;
+  virtual gfx::Insets CalculateInsets() OVERRIDE;
+  virtual void UpdateHorizontalMargins() OVERRIDE;
+  virtual void UpdateVerticalMargins() OVERRIDE;
+  virtual bool SetFocus() OVERRIDE;
+  virtual View* GetView() OVERRIDE;
+  virtual gfx::NativeView GetTestingHandle() const OVERRIDE;
+  virtual bool IsIMEComposing() const OVERRIDE;
+  virtual void GetSelectedRange(TextRange* range) const OVERRIDE;
+  virtual void SelectRange(const TextRange& range) OVERRIDE;
+  virtual size_t GetCursorPosition() const OVERRIDE;
+  virtual bool HandleKeyPressed(const views::KeyEvent& e) OVERRIDE;
+  virtual bool HandleKeyReleased(const views::KeyEvent& e) OVERRIDE;
+  virtual void HandleFocus() OVERRIDE;
+  virtual void HandleBlur() OVERRIDE;
 
   // ui::SimpleMenuModel::Delegate overrides
-  virtual bool IsCommandIdChecked(int command_id) const;
-  virtual bool IsCommandIdEnabled(int command_id) const;
-  virtual bool GetAcceleratorForCommandId(int command_id,
-                                          ui::Accelerator* accelerator);
-  virtual void ExecuteCommand(int command_id);
+  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      ui::Accelerator* accelerator) OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
 
   // class name of internal
   static const char kViewClassName[];
@@ -107,6 +112,13 @@ class NativeTextfieldViews : public views::View,
   static bool IsTextfieldViewsEnabled();
   // Enable/Disable TextfieldViews implementation for Textfield.
   static void SetEnableTextfieldViews(bool enabled);
+
+  enum ClickState {
+    TRACKING_DOUBLE_CLICK,
+    TRACKING_TRIPLE_CLICK,
+    NONE,
+  };
+
 
  private:
   friend class NativeTextfieldViewsTest;
@@ -162,9 +174,20 @@ class NativeTextfieldViews : public views::View,
   // Find a cusor position for given |point| in this views coordinates.
   size_t FindCursorPosition(const gfx::Point& point) const;
 
+  // Mouse event handler. Returns true if textfield needs to be repainted.
+  bool HandleMousePressed(const views::MouseEvent& e);
+
+  // Helper function that sets the cursor position at the location of mouse
+  // event.
+  void SetCursorForMouseClick(const views::MouseEvent& e);
+
   // Utility function to inform the parent textfield (and its controller if any)
   // that the text in the textfield has changed.
   void PropagateTextChange();
+
+  // Does necessary updates when the text and/or the position of the cursor
+  // changed.
+  void UpdateAfterChange(bool text_changed, bool cursor_changed);
 
   // Utility function to create the context menu if one does not already exist.
   void InitContextMenuIfRequired();
@@ -192,6 +215,15 @@ class NativeTextfieldViews : public views::View,
 
   // A runnable method factory for callback to update the cursor.
   ScopedRunnableMethodFactory<NativeTextfieldViews> cursor_timer_;
+
+  // Time of last LEFT mouse press. Used for tracking double/triple click.
+  base::Time last_mouse_press_time_;
+
+  // Position of last LEFT mouse press. Used for tracking double/triple click.
+  gfx::Point last_mouse_press_location_;
+
+  // State variable to track double and triple clicks.
+  ClickState click_state_;
 
   // Context menu and its content list for the textfield.
   scoped_ptr<ui::SimpleMenuModel> context_menu_contents_;

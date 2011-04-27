@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_H_
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
 #include "base/logging.h"
 #include "base/ref_counted.h"
+#include "base/string16.h"
 #include "base/timer.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_parse.h"
@@ -52,6 +54,7 @@
 // Search Primary Provider (navigational suggestion)                   |  800++
 // HistoryContents (any match in title of nonstarred page)             |  700++
 // Search Primary Provider (suggestion)                                |  600++
+// Built-in                                                            |  575++
 // HistoryContents (any match in body of starred page)                 |  550++
 // HistoryContents (any match in body of nonstarred page)              |  500++
 // Keyword (inexact match)                                             |  450
@@ -74,6 +77,7 @@
 // Search Primary Provider (navigational suggestion)                   |  800++
 // HistoryContents (any match in title of nonstarred page)             |  700++
 // Search Primary Provider (suggestion)                                |  600++
+// Built-in                                                            |  575++
 // HistoryContents (any match in body of starred page)                 |  550++
 // HistoryContents (any match in body of nonstarred page)              |  500++
 // Keyword (inexact match)                                             |  450
@@ -93,6 +97,7 @@
 // Search Primary Provider (navigational suggestion)                   |  800++
 // Search Primary Provider (past query in history)                     |  750--
 // Keyword (inexact match)                                             |  700
+// Built-in                                                            |  575++
 // Search Primary Provider (suggestion)                                |  300++
 // Search Secondary Provider (what you typed)                          |  250
 // Search Secondary Provider (past query in history)                   |  200--
@@ -147,11 +152,12 @@
 // --: relevance score falls off over two days (discounted 99 points after two
 //     days).
 
+class AutocompleteController;
+class AutocompleteControllerDelegate;
 class AutocompleteInput;
 struct AutocompleteMatch;
 class AutocompleteProvider;
 class AutocompleteResult;
-class AutocompleteController;
 class HistoryContentsProvider;
 class Profile;
 class SearchProvider;
@@ -180,8 +186,8 @@ class AutocompleteInput {
   };
 
   AutocompleteInput();
-  AutocompleteInput(const std::wstring& text,
-                    const std::wstring& desired_tld,
+  AutocompleteInput(const string16& text,
+                    const string16& desired_tld,
                     bool prevent_inline_autocomplete,
                     bool prefer_keyword,
                     bool allow_exact_keyword_match,
@@ -189,7 +195,7 @@ class AutocompleteInput {
   ~AutocompleteInput();
 
   // If type is |FORCED_QUERY| and |text| starts with '?', it is removed.
-  static void RemoveForcedQueryStringIfNecessary(Type type, std::wstring* text);
+  static void RemoveForcedQueryStringIfNecessary(Type type, string16* text);
 
   // Converts |type| to a string representation.  Used in logging.
   static std::string TypeToString(Type type);
@@ -199,18 +205,18 @@ class AutocompleteInput {
   // it is non-NULL. The scheme is stored in |scheme| if it is non-NULL. The
   // canonicalized URL is stored in |canonicalized_url|; however, this URL is
   // not guaranteed to be valid, especially if the parsed type is, e.g., QUERY.
-  static Type Parse(const std::wstring& text,
-                    const std::wstring& desired_tld,
+  static Type Parse(const string16& text,
+                    const string16& desired_tld,
                     url_parse::Parsed* parts,
-                    std::wstring* scheme,
+                    string16* scheme,
                     GURL* canonicalized_url);
 
   // Parses |text| and fill |scheme| and |host| by the positions of them.
   // The results are almost as same as the result of Parse(), but if the scheme
   // is view-source, this function returns the positions of scheme and host
   // in the URL qualified by "view-source:" prefix.
-  static void ParseForEmphasizeComponents(const std::wstring& text,
-                                          const std::wstring& desired_tld,
+  static void ParseForEmphasizeComponents(const string16& text,
+                                          const string16& desired_tld,
                                           url_parse::Component* scheme,
                                           url_parse::Component* host);
 
@@ -220,23 +226,27 @@ class AutocompleteInput {
   // function with the URL and its formatted string, and it will return a
   // formatted string with the same meaning as the original URL (i.e. it will
   // re-append a slash if necessary).
-  static std::wstring FormattedStringWithEquivalentMeaning(
+  static string16 FormattedStringWithEquivalentMeaning(
       const GURL& url,
-      const std::wstring& formatted_url);
+      const string16& formatted_url);
 
   // User-provided text to be completed.
-  const std::wstring& text() const { return text_; }
+  const string16& text() const { return text_; }
 
   // Use of this setter is risky, since no other internal state is updated
   // besides |text_|.  Only callers who know that they're not changing the
   // type/scheme/etc. should use this.
-  void set_text(const std::wstring& text) { text_ = text; }
+  void set_text(const string16& text) { text_ = text; }
+
+  // The text supplied to the constructor. This differs from |text| if the text
+  // supplied to the constructor had leading or trailing white space.
+  const string16& original_text() const { return original_text_; }
 
   // User's desired TLD, if one is not already present in the text to
   // autocomplete.  When this is non-empty, it also implies that "www." should
   // be prepended to the domain where possible.  This should not have a leading
   // '.' (use "com" instead of ".com").
-  const std::wstring& desired_tld() const { return desired_tld_; }
+  const string16& desired_tld() const { return desired_tld_; }
 
   // The type of input supplied.
   Type type() const { return type_; }
@@ -246,7 +256,7 @@ class AutocompleteInput {
 
   // The scheme parsed from the provided text; only meaningful when type_ is
   // URL.
-  const std::wstring& scheme() const { return scheme_; }
+  const string16& scheme() const { return scheme_; }
 
   // The input as an URL to navigate to, if possible.
   const GURL& canonicalized_url() const { return canonicalized_url_; }
@@ -285,11 +295,12 @@ class AutocompleteInput {
   void Clear();
 
  private:
-  std::wstring text_;
-  std::wstring desired_tld_;
+  string16 text_;
+  string16 original_text_;
+  string16 desired_tld_;
   Type type_;
   url_parse::Parsed parts_;
-  std::wstring scheme_;
+  string16 scheme_;
   GURL canonicalized_url_;
   bool initial_prevent_inline_autocomplete_;
   bool prevent_inline_autocomplete_;
@@ -389,7 +400,7 @@ class AutocompleteProvider
   virtual ~AutocompleteProvider();
 
   // Returns whether |input| begins "http:" or "view-source:http:".
-  static bool HasHTTPScheme(const std::wstring& input);
+  static bool HasHTTPScheme(const string16& input);
 
   // Updates the starred state of each of the matches in matches_ from the
   // profile's bookmark bar model.
@@ -398,9 +409,9 @@ class AutocompleteProvider
   // A convenience function to call net::FormatUrl() with the current set of
   // "Accept Languages" when check_accept_lang is true.  Otherwise, it's called
   // with an empty list.
-  std::wstring StringForURLDisplay(const GURL& url,
-                                   bool check_accept_lang,
-                                   bool trim_http) const;
+  string16 StringForURLDisplay(const GURL& url,
+                               bool check_accept_lang,
+                               bool trim_http) const;
 
   // The profile associated with the AutocompleteProvider.  Reference is not
   // owned by us.
@@ -466,6 +477,11 @@ class AutocompleteResult {
   // operator=() by another name.
   void CopyFrom(const AutocompleteResult& rhs);
 
+  // Copies matches from |old_matches| to provide a consistant result set. See
+  // comments in code for specifics.
+  void CopyOldMatches(const AutocompleteInput& input,
+                      const AutocompleteResult& old_matches);
+
   // Adds a single match. The match is inserted at the appropriate position
   // based on relevancy and display order. This is ONLY for use after
   // SortAndCull() has been invoked, and preserves default_match_.
@@ -478,6 +494,9 @@ class AutocompleteResult {
   // the best kMaxMatches matches.  Sets the default match to the best match
   // and updates the alternate nav URL.
   void SortAndCull(const AutocompleteInput& input);
+
+  // Returns true if at least one match was copied from the last result.
+  bool HasCopiedMatches() const;
 
   // Vector-style accessors/operators.
   size_t size() const;
@@ -499,6 +518,8 @@ class AutocompleteResult {
   // Clears the matches for this result set.
   void Reset();
 
+  void Swap(AutocompleteResult* other);
+
 #ifndef NDEBUG
   // Does a data integrity check on this result.
   void Validate() const;
@@ -508,6 +529,21 @@ class AutocompleteResult {
   static const size_t kMaxMatches;
 
  private:
+  typedef std::map<AutocompleteProvider*, ACMatches> ProviderToMatches;
+
+  // Populates |provider_to_matches| from |matches_|.
+  void BuildProviderToMatches(ProviderToMatches* provider_to_matches) const;
+
+  // Returns true if |matches| contains a match with the same destination as
+  // |match|.
+  static bool HasMatchByDestination(const AutocompleteMatch& match,
+                                    const ACMatches& matches);
+
+  // Copies matches into this result. |old_matches| gives the matches from the
+  // last result, and |new_matches| the results from this result.
+  void MergeMatchesByProvider(const ACMatches& old_matches,
+                              const ACMatches& new_matches);
+
   ACMatches matches_;
 
   const_iterator default_match_;
@@ -537,15 +573,15 @@ class AutocompleteController : public ACProviderListener {
   // second to set the providers to some known testing providers.  The default
   // providers will be overridden and the controller will take ownership of the
   // providers, Release()ing them on destruction.
-  explicit AutocompleteController(Profile* profile);
+  AutocompleteController(Profile* profile,
+                         AutocompleteControllerDelegate* delegate);
 #ifdef UNIT_TEST
   explicit AutocompleteController(const ACProviders& providers)
-      : providers_(providers),
+      : delegate_(NULL),
+        providers_(providers),
         search_provider_(NULL),
-        updated_latest_result_(false),
-        delay_interval_has_passed_(false),
-        have_committed_during_this_query_(false),
-        done_(true) {
+        done_(true),
+        in_start_(false) {
   }
 #endif
   ~AutocompleteController();
@@ -579,15 +615,13 @@ class AutocompleteController : public ACProviderListener {
   // return matches which are synchronously available, which should mean that
   // all providers will be done immediately.
   //
-  // The controller will fire
-  // AUTOCOMPLETE_CONTROLLER_SYNCHRONOUS_MATCHES_AVAILABLE from inside this
-  // call, and unless the query is stopped, will fire at least one (and perhaps
-  // more) AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED later as more matches come in
-  // (even if the query completes synchronously).  Listeners should use the
-  // result set provided in the accompanying Details object to update
-  // themselves.
-  void Start(const std::wstring& text,
-             const std::wstring& desired_tld,
+  // The controller calls AutocompleteControllerDelegate::OnResultChanged() from
+  // inside this call at least once. If matches are available later on that
+  // result in changing the result set the delegate is notified again. When the
+  // controller is done the notification AUTOCOMPLETE_CONTROLLER_RESULT_READY is
+  // sent.
+  void Start(const string16& text,
+             const string16& desired_tld,
              bool prevent_inline_autocomplete,
              bool prefer_keyword,
              bool allow_exact_keyword_match,
@@ -605,43 +639,37 @@ class AutocompleteController : public ACProviderListener {
   // no query is running.
   void DeleteMatch(const AutocompleteMatch& match);
 
-  // Commits the results for the current query if they've never been committed.
-  // This is used by the popup to ensure it's not showing an out-of-date query.
-  void CommitIfQueryHasNeverBeenCommitted();
+  // Removes any entries that were copied from the last result. This is used by
+  // the popup to ensure it's not showing an out-of-date query.
+  void ExpireCopiedEntries();
 
   SearchProvider* search_provider() const { return search_provider_; }
 
   // Getters
   const AutocompleteInput& input() const { return input_; }
   const AutocompleteResult& result() const { return result_; }
-  // This next is temporary and should go away when
-  // AutocompletePopup::InfoForCurrentSelection() moves to the controller.
-  const AutocompleteResult& latest_result() const { return latest_result_; }
-  bool done() const { return done_ && !update_delay_timer_.IsRunning(); }
+  bool done() const { return done_; }
 
   // From AutocompleteProvider::Listener
   virtual void OnProviderUpdate(bool updated_matches);
 
  private:
-  // Updates |latest_result_| and |done_| to reflect the current provider state.
-  // Resets timers and fires notifications as necessary.  |is_synchronous_pass|
-  // is true only when Start() is calling this to get the synchronous result.
-  void UpdateLatestResult(bool is_synchronous_pass);
+  // Updates |result_| to reflect the current provider state.  Resets timers and
+  // fires notifications as necessary.  |is_synchronous_pass| is true only when
+  // Start() is calling this to get the synchronous result.
+  void UpdateResult(bool is_synchronous_pass);
 
-  // Callback for when |max_delay_timer_| fires; this notes that the delay
-  // interval has passed and commits the result, if it's changed.
-  void DelayTimerFired();
-
-  // Copies |latest_result_| to |result_| and notifies observers of updates.
-  // |notify_default_match| should normally be true; if it's false, we don't
-  // send an AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED notification.  This
-  // is a hack to avoid updating the edit with out-of-date data.
-  // TODO(pkasting): Don't hardcode assumptions about who listens to these
-  // notificiations.
-  void CommitResult(bool notify_default_match);
+  // Calls AutocompleteControllerDelegate::OnResultChanged() and if done sends
+  // AUTOCOMPLETE_CONTROLLER_RESULT_READY.
+  void NotifyChanged(bool notify_default_match);
 
   // Updates |done_| to be accurate with respect to current providers' statuses.
   void CheckIfDone();
+
+  // Starts the expire timer.
+  void StartExpireTimer();
+
+  AutocompleteControllerDelegate* delegate_;
 
   // A list of all providers.
   ACProviders providers_;
@@ -654,43 +682,16 @@ class AutocompleteController : public ACProviderListener {
   // Data from the autocomplete query.
   AutocompleteResult result_;
 
-  // The latest result available from the autocomplete providers.  This may be
-  // different than |result_| if we've gotten matches from our providers that we
-  // haven't yet shown the user.  If there aren't yet as many matches as in
-  // |result|, we'll wait to display these in hopes of minimizing flicker in GUI
-  // observers.
-  AutocompleteResult latest_result_;
-
-  // True if |latest_result_| has been updated since it was last committed to
-  // |result_|.  Used to determine whether we need to commit any changes.
-  bool updated_latest_result_;
-
-  // True when it's been at least one interval of the delay timer since we
-  // committed any updates.  This is used to allow a new update to be committed
-  // immediately.
-  //
-  // NOTE: This can never be true when |have_committed_during_this_query_| is
-  // false (except transiently while processing the timer firing).
-  bool delay_interval_has_passed_;
-
-  // True when we've committed a result set at least once during this query.
-  // When this is false, we commit immediately when |done_| is set, since there
-  // are no more updates to come and thus no possible flicker due to committing
-  // immediately.
-  //
-  // NOTE: This can never be false when |delay_interval_has_passed_| is true
-  // (except transiently while processing the timer firing).
-  bool have_committed_during_this_query_;
+  // Timer used to remove any matches copied from the last result. When run
+  // invokes |ExpireCopiedEntries|.
+  base::OneShotTimer<AutocompleteController> expire_timer_;
 
   // True if a query is not currently running.
   bool done_;
 
-  // Timer that tracks how long it's been since the last time we sent our
-  // observers a new result set.  This is used both to enforce a lower bound on
-  // the delay between most commits (to reduce flicker), and ensure that updates
-  // eventually get committed no matter what delays occur between them or how
-  // fast or continuously the user is typing.
-  base::RepeatingTimer<AutocompleteController> update_delay_timer_;
+  // Are we in Start()? This is used to avoid updating |result_| and sending
+  // notifications until Start() has been invoked on all providers.
+  bool in_start_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteController);
 };
@@ -700,7 +701,7 @@ class AutocompleteController : public ACProviderListener {
 // The data to log (via the metrics service) when the user selects an item
 // from the omnibox popup.
 struct AutocompleteLog {
-  AutocompleteLog(std::wstring text,
+  AutocompleteLog(string16 text,
                   AutocompleteInput::Type input_type,
                   size_t selected_index,
                   size_t inline_autocompleted_length,
@@ -712,7 +713,7 @@ struct AutocompleteLog {
         result(result) {
   }
   // The user's input text in the omnibox.
-  std::wstring text;
+  string16 text;
   // The detected type of the user's input.
   AutocompleteInput::Type input_type;
   // Selected index (if selected) or -1 (AutocompletePopupModel::kNoMatch).

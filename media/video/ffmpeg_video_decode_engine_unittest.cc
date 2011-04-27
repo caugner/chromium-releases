@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "media/base/data_buffer.h"
 #include "media/base/mock_ffmpeg.h"
 #include "media/base/mock_task.h"
+#include "media/base/pipeline.h"
 #include "media/video/ffmpeg_video_decode_engine.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,9 +68,6 @@ class FFmpegVideoDecodeEngineTest : public testing::Test,
 
     buffer_ = new DataBuffer(1);
 
-    // Initialize MockFFmpeg.
-    MockFFmpeg::set(&mock_ffmpeg_);
-
     test_engine_.reset(new FFmpegVideoDecodeEngine());
     test_engine_->SetCodecContextForTest(&codec_context_);
 
@@ -83,19 +81,18 @@ class FFmpegVideoDecodeEngineTest : public testing::Test,
 
   ~FFmpegVideoDecodeEngineTest() {
     test_engine_.reset();
-    MockFFmpeg::set(NULL);
   }
 
   void Initialize() {
-    EXPECT_CALL(*MockFFmpeg::get(), AVCodecFindDecoder(CODEC_ID_NONE))
+    EXPECT_CALL(mock_ffmpeg_, AVCodecFindDecoder(CODEC_ID_NONE))
         .WillOnce(Return(&codec_));
-    EXPECT_CALL(*MockFFmpeg::get(), AVCodecAllocFrame())
+    EXPECT_CALL(mock_ffmpeg_, AVCodecAllocFrame())
         .WillOnce(Return(&yuv_frame_));
-    EXPECT_CALL(*MockFFmpeg::get(), AVCodecThreadInit(&codec_context_, 2))
+    EXPECT_CALL(mock_ffmpeg_, AVCodecThreadInit(&codec_context_, 2))
         .WillOnce(Return(0));
-    EXPECT_CALL(*MockFFmpeg::get(), AVCodecOpen(&codec_context_, &codec_))
+    EXPECT_CALL(mock_ffmpeg_, AVCodecOpen(&codec_context_, &codec_))
         .WillOnce(Return(0));
-    EXPECT_CALL(*MockFFmpeg::get(), AVFree(&yuv_frame_))
+    EXPECT_CALL(mock_ffmpeg_, AVFree(&yuv_frame_))
         .Times(1);
 
     config_.codec = kCodecH264;
@@ -117,7 +114,7 @@ class FFmpegVideoDecodeEngineTest : public testing::Test,
 
     EXPECT_CALL(*this, ProduceVideoSample(_))
         .WillOnce(DemuxComplete(test_engine_.get(), buffer_));
-    EXPECT_CALL(*this, ConsumeVideoFrame(_))
+    EXPECT_CALL(*this, ConsumeVideoFrame(_, _))
         .WillOnce(DecodeComplete(this));
     test_engine_->ProduceVideoFrame(video_frame_);
   }
@@ -130,8 +127,9 @@ class FFmpegVideoDecodeEngineTest : public testing::Test,
   }
 
  public:
-  MOCK_METHOD1(ConsumeVideoFrame,
-               void(scoped_refptr<VideoFrame> video_frame));
+  MOCK_METHOD2(ConsumeVideoFrame,
+               void(scoped_refptr<VideoFrame> video_frame,
+                    const PipelineStatistics& statistics));
   MOCK_METHOD1(ProduceVideoSample,
                void(scoped_refptr<Buffer> buffer));
   MOCK_METHOD1(OnInitializeComplete,
@@ -164,11 +162,11 @@ TEST_F(FFmpegVideoDecodeEngineTest, Initialize_Normal) {
 
 TEST_F(FFmpegVideoDecodeEngineTest, Initialize_FindDecoderFails) {
   // Test avcodec_find_decoder() returning NULL.
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecFindDecoder(CODEC_ID_NONE))
+  EXPECT_CALL(mock_ffmpeg_, AVCodecFindDecoder(CODEC_ID_NONE))
       .WillOnce(ReturnNull());
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecAllocFrame())
+  EXPECT_CALL(mock_ffmpeg_, AVCodecAllocFrame())
       .WillOnce(Return(&yuv_frame_));
-  EXPECT_CALL(*MockFFmpeg::get(), AVFree(&yuv_frame_))
+  EXPECT_CALL(mock_ffmpeg_, AVFree(&yuv_frame_))
       .Times(1);
 
   config_.codec = kCodecH264;
@@ -184,13 +182,13 @@ TEST_F(FFmpegVideoDecodeEngineTest, Initialize_FindDecoderFails) {
 // Note There are 2 threads for FFmpeg-mt.
 TEST_F(FFmpegVideoDecodeEngineTest, Initialize_InitThreadFails) {
   // Test avcodec_thread_init() failing.
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecFindDecoder(CODEC_ID_NONE))
+  EXPECT_CALL(mock_ffmpeg_, AVCodecFindDecoder(CODEC_ID_NONE))
       .WillOnce(Return(&codec_));
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecAllocFrame())
+  EXPECT_CALL(mock_ffmpeg_, AVCodecAllocFrame())
       .WillOnce(Return(&yuv_frame_));
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecThreadInit(&codec_context_, 2))
+  EXPECT_CALL(mock_ffmpeg_, AVCodecThreadInit(&codec_context_, 2))
       .WillOnce(Return(-1));
-  EXPECT_CALL(*MockFFmpeg::get(), AVFree(&yuv_frame_))
+  EXPECT_CALL(mock_ffmpeg_, AVFree(&yuv_frame_))
       .Times(1);
 
   config_.codec = kCodecH264;
@@ -205,15 +203,15 @@ TEST_F(FFmpegVideoDecodeEngineTest, Initialize_InitThreadFails) {
 
 TEST_F(FFmpegVideoDecodeEngineTest, Initialize_OpenDecoderFails) {
   // Test avcodec_open() failing.
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecFindDecoder(CODEC_ID_NONE))
+  EXPECT_CALL(mock_ffmpeg_, AVCodecFindDecoder(CODEC_ID_NONE))
       .WillOnce(Return(&codec_));
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecAllocFrame())
+  EXPECT_CALL(mock_ffmpeg_, AVCodecAllocFrame())
       .WillOnce(Return(&yuv_frame_));
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecThreadInit(&codec_context_, 2))
+  EXPECT_CALL(mock_ffmpeg_, AVCodecThreadInit(&codec_context_, 2))
       .WillOnce(Return(0));
-  EXPECT_CALL(*MockFFmpeg::get(), AVCodecOpen(&codec_context_, &codec_))
+  EXPECT_CALL(mock_ffmpeg_, AVCodecOpen(&codec_context_, &codec_))
       .WillOnce(Return(-1));
-  EXPECT_CALL(*MockFFmpeg::get(), AVFree(&yuv_frame_))
+  EXPECT_CALL(mock_ffmpeg_, AVFree(&yuv_frame_))
       .Times(1);
 
   config_.codec = kCodecH264;
@@ -262,7 +260,7 @@ TEST_F(FFmpegVideoDecodeEngineTest, DecodeFrame_0ByteFrame) {
   EXPECT_CALL(*this, ProduceVideoSample(_))
       .WillOnce(DemuxComplete(test_engine_.get(), buffer_))
       .WillOnce(DemuxComplete(test_engine_.get(), buffer_));
-  EXPECT_CALL(*this, ConsumeVideoFrame(_))
+  EXPECT_CALL(*this, ConsumeVideoFrame(_, _))
       .WillOnce(DecodeComplete(this));
   test_engine_->ProduceVideoFrame(video_frame_);
 
@@ -280,7 +278,7 @@ TEST_F(FFmpegVideoDecodeEngineTest, DecodeFrame_DecodeError) {
 
   EXPECT_CALL(*this, ProduceVideoSample(_))
       .WillOnce(DemuxComplete(test_engine_.get(), buffer_));
-  EXPECT_CALL(*this, ConsumeVideoFrame(_))
+  EXPECT_CALL(*this, ConsumeVideoFrame(_, _))
       .WillOnce(DecodeComplete(this));
   test_engine_->ProduceVideoFrame(video_frame_);
 

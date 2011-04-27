@@ -4,8 +4,10 @@
 
 #include "base/values.h"
 
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 
 namespace {
@@ -80,7 +82,7 @@ FundamentalValue* Value::CreateIntegerValue(int in_value) {
 }
 
 // static
-FundamentalValue* Value::CreateRealValue(double in_value) {
+FundamentalValue* Value::CreateDoubleValue(double in_value) {
   return new FundamentalValue(in_value);
 }
 
@@ -92,6 +94,19 @@ StringValue* Value::CreateStringValue(const std::string& in_value) {
 // static
 StringValue* Value::CreateStringValue(const string16& in_value) {
   return new StringValue(in_value);
+}
+
+// static
+StringValue* Value::CreateFilePathValue(const FilePath& in_value) {
+#if defined(OS_POSIX)
+  // Value::SetString only knows about UTF8 strings, so convert the path from
+  // the system native value to UTF8.
+  std::string path_utf8 = WideToUTF8(base::SysNativeMBToWide(in_value.value()));
+  return new StringValue(path_utf8);
+#else
+  return new StringValue(in_value.value());
+#endif
+
 }
 
 // static
@@ -107,7 +122,7 @@ bool Value::GetAsInteger(int* out_value) const {
   return false;
 }
 
-bool Value::GetAsReal(double* out_value) const {
+bool Value::GetAsDouble(double* out_value) const {
   return false;
 }
 
@@ -116,6 +131,10 @@ bool Value::GetAsString(std::string* out_value) const {
 }
 
 bool Value::GetAsString(string16* out_value) const {
+  return false;
+}
+
+bool Value::GetAsFilePath(FilePath* out_value) const {
   return false;
 }
 
@@ -158,7 +177,7 @@ FundamentalValue::FundamentalValue(int in_value)
 }
 
 FundamentalValue::FundamentalValue(double in_value)
-    : Value(TYPE_REAL), real_value_(in_value) {
+    : Value(TYPE_DOUBLE), double_value_(in_value) {
 }
 
 FundamentalValue::~FundamentalValue() {
@@ -176,10 +195,10 @@ bool FundamentalValue::GetAsInteger(int* out_value) const {
   return (IsType(TYPE_INTEGER));
 }
 
-bool FundamentalValue::GetAsReal(double* out_value) const {
-  if (out_value && IsType(TYPE_REAL))
-    *out_value = real_value_;
-  return (IsType(TYPE_REAL));
+bool FundamentalValue::GetAsDouble(double* out_value) const {
+  if (out_value && IsType(TYPE_DOUBLE))
+    *out_value = double_value_;
+  return (IsType(TYPE_DOUBLE));
 }
 
 FundamentalValue* FundamentalValue::DeepCopy() const {
@@ -190,8 +209,8 @@ FundamentalValue* FundamentalValue::DeepCopy() const {
     case TYPE_INTEGER:
       return CreateIntegerValue(integer_value_);
 
-    case TYPE_REAL:
-      return CreateRealValue(real_value_);
+    case TYPE_DOUBLE:
+      return CreateDoubleValue(double_value_);
 
     default:
       NOTREACHED();
@@ -212,9 +231,9 @@ bool FundamentalValue::Equals(const Value* other) const {
       int lhs, rhs;
       return GetAsInteger(&lhs) && other->GetAsInteger(&rhs) && lhs == rhs;
     }
-    case TYPE_REAL: {
+    case TYPE_DOUBLE: {
       double lhs, rhs;
-      return GetAsReal(&lhs) && other->GetAsReal(&rhs) && lhs == rhs;
+      return GetAsDouble(&lhs) && other->GetAsDouble(&rhs) && lhs == rhs;
     }
     default:
       NOTREACHED();
@@ -247,6 +266,20 @@ bool StringValue::GetAsString(std::string* out_value) const {
 bool StringValue::GetAsString(string16* out_value) const {
   if (out_value)
     *out_value = UTF8ToUTF16(value_);
+  return true;
+}
+
+bool StringValue::GetAsFilePath(FilePath* out_value) const {
+  if (out_value) {
+    FilePath::StringType result;
+#if defined(OS_POSIX)
+    // We store filepaths as UTF8, so convert it back to the system type.
+    result = base::SysWideToNativeMB(UTF8ToWide(value_));
+#elif defined(OS_WIN)
+    result = UTF8ToUTF16(value_);
+#endif
+    *out_value = FilePath(result);
+  }
   return true;
 }
 
@@ -367,8 +400,8 @@ void DictionaryValue::SetInteger(const std::string& path, int in_value) {
   Set(path, CreateIntegerValue(in_value));
 }
 
-void DictionaryValue::SetReal(const std::string& path, double in_value) {
-  Set(path, CreateRealValue(in_value));
+void DictionaryValue::SetDouble(const std::string& path, double in_value) {
+  Set(path, CreateDoubleValue(in_value));
 }
 
 void DictionaryValue::SetString(const std::string& path,
@@ -430,13 +463,13 @@ bool DictionaryValue::GetInteger(const std::string& path,
   return value->GetAsInteger(out_value);
 }
 
-bool DictionaryValue::GetReal(const std::string& path,
-                              double* out_value) const {
+bool DictionaryValue::GetDouble(const std::string& path,
+                                double* out_value) const {
   Value* value;
   if (!Get(path, &value))
     return false;
 
-  return value->GetAsReal(out_value);
+  return value->GetAsDouble(out_value);
 }
 
 bool DictionaryValue::GetString(const std::string& path,
@@ -533,13 +566,13 @@ bool DictionaryValue::GetIntegerWithoutPathExpansion(const std::string& key,
   return value->GetAsInteger(out_value);
 }
 
-bool DictionaryValue::GetRealWithoutPathExpansion(const std::string& key,
-                                                  double* out_value) const {
+bool DictionaryValue::GetDoubleWithoutPathExpansion(const std::string& key,
+                                                    double* out_value) const {
   Value* value;
   if (!GetWithoutPathExpansion(key, &value))
     return false;
 
-  return value->GetAsReal(out_value);
+  return value->GetAsDouble(out_value);
 }
 
 bool DictionaryValue::GetStringWithoutPathExpansion(
@@ -742,12 +775,12 @@ bool ListValue::GetInteger(size_t index, int* out_value) const {
   return value->GetAsInteger(out_value);
 }
 
-bool ListValue::GetReal(size_t index, double* out_value) const {
+bool ListValue::GetDouble(size_t index, double* out_value) const {
   Value* value;
   if (!Get(index, &value))
     return false;
 
-  return value->GetAsReal(out_value);
+  return value->GetAsDouble(out_value);
 }
 
 bool ListValue::GetString(size_t index, std::string* out_value) const {

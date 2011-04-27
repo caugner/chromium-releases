@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,16 @@ class DownloadPrefs {
 
   static void RegisterUserPrefs(PrefService* prefs);
 
-  bool prompt_for_download() const { return *prompt_for_download_; }
   FilePath download_path() const { return *download_path_; }
+  int save_file_type() const { return *save_file_type_; }
+
+  // Returns true if the prompt_for_download preference has been set and the
+  // download location is not managed (which means the user shouldn't be able
+  // to choose another download location).
+  bool PromptForDownload() const;
+
+  // Returns true if the download path preference is managed.
+  bool IsDownloadPathManaged() const;
 
   // Returns true if there is at least one file extension registered
   // for auto-open.
@@ -48,6 +56,7 @@ class DownloadPrefs {
 
   BooleanPrefMember prompt_for_download_;
   FilePathPrefMember download_path_;
+  IntegerPrefMember save_file_type_;
 
   // Set of file extensions to open at download completion.
   struct AutoOpenCompareFunctor {

@@ -84,7 +84,8 @@ ProfileSyncServiceHarness::ProfileSyncServiceHarness(
     const std::string& username,
     const std::string& password,
     int id)
-    : wait_state_(INITIAL_WAIT_STATE),
+    : waiting_for_encryption_type_(syncable::UNSPECIFIED),
+      wait_state_(INITIAL_WAIT_STATE),
       profile_(profile),
       service_(NULL),
       timestamp_match_partner_(NULL),
@@ -288,6 +289,14 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       LogClientInfo("SYNC_DISABLED");
       break;
     }
+    case WAITING_FOR_ENCRYPTION: {
+      // If the type whose encryption we are waiting for is now complete, there
+      // is nothing to do.
+      LogClientInfo("WAITING_FOR_ENCRYPTION");
+      if (IsTypeEncrypted(waiting_for_encryption_type_))
+        SignalStateCompleteWithNextState(FULLY_SYNCED);
+      break;
+    }
     default:
       // Invalid state during observer callback which may be triggered by other
       // classes using the the UI message loop.  Defer to their handling.
@@ -447,7 +456,7 @@ bool ProfileSyncServiceHarness::IsSynced() {
           snap->num_conflicting_updates == 0 &&  // We can decrypt everything.
           ServiceIsPushingChanges() &&
           GetStatus().notifications_enabled &&
-          !service()->backend()->HasUnsyncedItems() &&
+          !service()->HasUnsyncedItems() &&
           !snap->has_more_to_sync &&
           snap->unsynced_count == 0);
 }
@@ -480,8 +489,8 @@ bool ProfileSyncServiceHarness::MatchesOtherClient(
 const SyncSessionSnapshot*
     ProfileSyncServiceHarness::GetLastSessionSnapshot() const {
   DCHECK(service_ != NULL) << "Sync service has not yet been set up.";
-  if (service_->backend()) {
-    return service_->backend()->GetLastSessionSnapshot();
+  if (service_->sync_initialized()) {
+    return service_->GetLastSessionSnapshot();
   }
   return NULL;
 }
@@ -582,7 +591,7 @@ void ProfileSyncServiceHarness::LogClientInfo(std::string message) {
               << ", unsynced_count: " << snap->unsynced_count
               << ", num_conflicting_updates: " << snap->num_conflicting_updates
               << ", has_unsynced_items: "
-              << service()->backend()->HasUnsyncedItems()
+              << service()->HasUnsyncedItems()
               << ", observed_passphrase_required: "
               << service()->observed_passphrase_required()
               << ", notifications_enabled: "
@@ -596,4 +605,37 @@ void ProfileSyncServiceHarness::LogClientInfo(std::string message) {
     VLOG(1) << "Client " << id_ << ": " << message
             << ": Sync service not available.";
   }
+}
+
+bool ProfileSyncServiceHarness::EnableEncryptionForType(
+    syncable::ModelType type) {
+  syncable::ModelTypeSet encrypted_types;
+  service_->GetEncryptedDataTypes(&encrypted_types);
+  if (encrypted_types.count(type) > 0)
+    return true;
+  encrypted_types.insert(type);
+  service_->EncryptDataTypes(encrypted_types);
+
+  // Wait some time to let the enryption finish.
+  std::string reason = "Waiting for encryption.";
+  DCHECK_EQ(FULLY_SYNCED, wait_state_);
+  wait_state_ = WAITING_FOR_ENCRYPTION;
+  waiting_for_encryption_type_ = type;
+  if (!AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason)) {
+    LOG(ERROR) << "Did not receive EncryptionComplete notification after"
+               << kLiveSyncOperationTimeoutMs / 1000
+               << " seconds.";
+    return false;
+  }
+
+  return IsTypeEncrypted(type);
+}
+
+bool ProfileSyncServiceHarness::IsTypeEncrypted(syncable::ModelType type) {
+  syncable::ModelTypeSet encrypted_types;
+  service_->GetEncryptedDataTypes(&encrypted_types);
+  if (encrypted_types.count(type) == 0) {
+    return false;
+  }
+  return true;
 }

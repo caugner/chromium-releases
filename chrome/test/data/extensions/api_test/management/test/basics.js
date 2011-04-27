@@ -7,7 +7,8 @@ function checkIcon(item, size, path) {
   for (var i = 0; i < icons.length; i++) {
     var icon = icons[i];
     if (icon.size == size) {
-      var expected_url = "chrome-extension://" + item.id + "/" + path;
+      var expected_url =
+          "chrome://extension-icon/" + item.id + "/" + size + "/0";
       assertEq(expected_url, icon.url);
       return;
     }
@@ -52,7 +53,8 @@ var tests = [
       checkItemInList(items, "enabled_app", true, true,
                 {"appLaunchUrl": "http://www.google.com/"});
       checkItemInList(items, "disabled_app", false, true);
-      checkItemInList(items, "enabled_extension", true, false);
+      checkItemInList(items, "enabled_extension", true, false,
+                     { "homepageUrl": "http://example.com/" });
       checkItemInList(items, "disabled_extension", false, false,
                 {"optionsUrl": "chrome-extension://<ID>/pages/options.html"});
 

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "net/tools/flip_server/split.h"
+
 #include <string.h>
 
 #include <vector>
@@ -17,7 +19,7 @@ void SplitStringPieceToVector(const base::StringPiece& full,
                               std::vector<base::StringPiece>* vec,
                               bool omit_empty_strings) {
   vec->clear();
-  if (full.size() == 0 || delim[0] == '\0')
+  if (full.empty() || delim[0] == '\0')
     return;
 
   if (delim[1] == '\0') {

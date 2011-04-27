@@ -12,17 +12,18 @@
 #include "base/ref_counted_memory.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/navigation_controller.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents_delegate.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "gfx/codec/png_codec.h"
-#include "gfx/favicon_size.h"
+#include "chrome/common/render_messages.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "skia/ext/image_operations.h"
+#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/favicon_size.h"
 
 FavIconHelper::FavIconHelper(TabContents* tab_contents)
-    : tab_contents_(tab_contents),
+    : TabContentsObserver(tab_contents),
       got_fav_icon_url_(false),
       got_fav_icon_from_history_(false),
       fav_icon_expired_(false) {
@@ -64,7 +65,7 @@ int FavIconHelper::DownloadImage(const GURL& image_url,
 }
 
 Profile* FavIconHelper::profile() {
-  return tab_contents_->profile();
+  return tab_contents()->profile();
 }
 
 FaviconService* FavIconHelper::GetFaviconService() {
@@ -108,12 +109,10 @@ void FavIconHelper::UpdateFavIcon(NavigationEntry* entry,
     return;
 
   entry->favicon().set_bitmap(image);
-  tab_contents_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TAB);
+  tab_contents()->NotifyNavigationStateChanged(TabContents::INVALIDATE_TAB);
 }
 
-void FavIconHelper::UpdateFavIconURL(RenderViewHost* render_view_host,
-                                     int32 page_id,
-                                     const GURL& icon_url) {
+void FavIconHelper::OnUpdateFavIconURL(int32 page_id, const GURL& icon_url) {
   // TODO(davemoore) Should clear on empty url. Currently we ignore it.
   // This appears to be what FF does as well.
   if (icon_url.is_empty())
@@ -140,11 +139,20 @@ void FavIconHelper::UpdateFavIconURL(RenderViewHost* render_view_host,
     DownloadFavIconOrAskHistory(entry);
 }
 
-void FavIconHelper::DidDownloadFavIcon(RenderViewHost* render_view_host,
-                                       int id,
-                                       const GURL& image_url,
-                                       bool errored,
-                                       const SkBitmap& image) {
+bool FavIconHelper::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(FavIconHelper, message)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_UpdateFavIconURL, OnUpdateFavIconURL)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidDownloadFavIcon, OnDidDownloadFavIcon)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
+void FavIconHelper::OnDidDownloadFavIcon(int id,
+                                         const GURL& image_url,
+                                         bool errored,
+                                         const SkBitmap& image) {
   DownloadRequests::iterator i = download_requests_.find(id);
   if (i == download_requests_.end()) {
     // Currently TabContents notifies us of ANY downloads so that it is
@@ -162,9 +170,9 @@ void FavIconHelper::DidDownloadFavIcon(RenderViewHost* render_view_host,
 }
 
 NavigationEntry* FavIconHelper::GetEntry() {
-  NavigationEntry* entry = tab_contents_->controller().GetActiveEntry();
+  NavigationEntry* entry = tab_contents()->controller().GetActiveEntry();
   if (entry && entry->url() == url_ &&
-      tab_contents_->IsActiveEntry(entry->page_id())) {
+      tab_contents()->IsActiveEntry(entry->page_id())) {
     return entry;
   }
   // If the URL has changed out from under us (as will happen with redirects)
@@ -274,7 +282,7 @@ int FavIconHelper::ScheduleDownload(const GURL& url,
                                     const GURL& image_url,
                                     int image_size,
                                     ImageDownloadCallback* callback) {
-  const int download_id = tab_contents_->render_view_host()->DownloadFavIcon(
+  const int download_id = tab_contents()->render_view_host()->DownloadFavIcon(
       image_url, image_size);
 
   if (download_id) {

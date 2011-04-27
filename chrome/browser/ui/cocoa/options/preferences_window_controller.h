@@ -92,6 +92,7 @@ class ProfileSyncService;
   BooleanPrefMember instantEnabled_;
   IBOutlet NSButton* instantCheckbox_;
   scoped_nsobject<SearchEngineListModel> searchEngineModel_;
+  BooleanPrefMember default_browser_policy_;
   // Used when creating a new home page url to make the new cell editable.
   BOOL pendingSelectForEdit_;
   BOOL restoreButtonsEnabled_;
@@ -142,8 +143,29 @@ class ProfileSyncService;
   BOOL dnsPrefetchEnabled_;
   BOOL safeBrowsingEnabled_;
   BOOL metricsReportingEnabled_;
+  BOOL downloadLocationEnabled_;
   BOOL proxiesConfigureButtonEnabled_;
 }
+
+// Usable from cocoa bindings to hook up the custom home pages table.
+@property(nonatomic, readonly) CustomHomePagesModel* customPagesSource;
+
+// Properties for the enabled state of various UI elements. Keep these ordered
+// by occurrence on the dialog.
+@property(nonatomic) BOOL restoreButtonsEnabled;
+@property(nonatomic) BOOL restoreURLsEnabled;
+@property(nonatomic) BOOL showHomeButtonEnabled;
+@property(nonatomic) BOOL defaultSearchEngineEnabled;
+@property(nonatomic) BOOL passwordManagerChoiceEnabled;
+@property(nonatomic) BOOL passwordManagerButtonEnabled;
+@property(nonatomic) BOOL autoFillSettingsButtonEnabled;
+@property(nonatomic) BOOL showAlternateErrorPagesEnabled;
+@property(nonatomic) BOOL useSuggestEnabled;
+@property(nonatomic) BOOL dnsPrefetchEnabled;
+@property(nonatomic) BOOL safeBrowsingEnabled;
+@property(nonatomic) BOOL metricsReportingEnabled;
+@property(nonatomic) BOOL downloadLocationEnabled;
+@property(nonatomic) BOOL proxiesConfigureButtonEnabled;
 
 // Designated initializer. |profile| should not be NULL.
 - (id)initWithProfile:(Profile*)profile initialPage:(OptionsPage)initialPage;
@@ -193,24 +215,6 @@ class ProfileSyncService;
 // When a toolbar button is clicked
 - (IBAction)toolbarButtonSelected:(id)sender;
 
-// Usable from cocoa bindings to hook up the custom home pages table.
-@property (nonatomic, readonly) CustomHomePagesModel* customPagesSource;
-
-// Properties for the enabled state of various UI elements. Keep these ordered
-// by occurrence on the dialog.
-@property (nonatomic) BOOL restoreButtonsEnabled;
-@property (nonatomic) BOOL restoreURLsEnabled;
-@property (nonatomic) BOOL showHomeButtonEnabled;
-@property (nonatomic) BOOL defaultSearchEngineEnabled;
-@property (nonatomic) BOOL passwordManagerChoiceEnabled;
-@property (nonatomic) BOOL passwordManagerButtonEnabled;
-@property (nonatomic) BOOL autoFillSettingsButtonEnabled;
-@property (nonatomic) BOOL showAlternateErrorPagesEnabled;
-@property (nonatomic) BOOL useSuggestEnabled;
-@property (nonatomic) BOOL dnsPrefetchEnabled;
-@property (nonatomic) BOOL safeBrowsingEnabled;
-@property (nonatomic) BOOL metricsReportingEnabled;
-@property (nonatomic) BOOL proxiesConfigureButtonEnabled;
 @end
 
 @interface PreferencesWindowController(Testing)

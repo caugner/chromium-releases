@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/gtk/browser_actions_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -18,14 +19,14 @@
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/notification_details.h"
-#include "chrome/common/notification_source.h"
-#include "chrome/common/notification_type.h"
-#include "gfx/gtk_util.h"
+#include "content/common/notification_details.h"
+#include "content/common/notification_source.h"
+#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/gtk_util.h"
 
 namespace {
 
@@ -45,6 +46,18 @@ const int kAnimationWaitMS = 50;
 const int kContentBorder = 7;
 
 }  // namespace
+
+namespace browser {
+
+void ShowExtensionInstalledBubble(
+    const Extension* extension,
+    Browser* browser,
+    SkBitmap icon,
+    Profile* profile) {
+  ExtensionInstalledBubbleGtk::Show(extension, browser, icon);
+}
+
+} // namespace browser
 
 void ExtensionInstalledBubbleGtk::Show(const Extension* extension,
                                        Browser* browser,
@@ -210,16 +223,14 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   gtk_label_set_markup(GTK_LABEL(heading_label), markup);
   g_free(markup);
 
-  gtk_label_set_line_wrap(GTK_LABEL(heading_label), TRUE);
-  gtk_widget_set_size_request(heading_label, kTextColumnWidth, -1);
+  gtk_util::SetLabelWidth(heading_label, kTextColumnWidth);
   gtk_box_pack_start(GTK_BOX(text_column), heading_label, FALSE, FALSE, 0);
 
   // Page action label
   if (type_ == PAGE_ACTION) {
     GtkWidget* info_label = gtk_label_new(l10n_util::GetStringUTF8(
         IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO).c_str());
-    gtk_label_set_line_wrap(GTK_LABEL(info_label), TRUE);
-    gtk_widget_set_size_request(info_label, kTextColumnWidth, -1);
+    gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
     gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
   }
 
@@ -228,16 +239,14 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
     GtkWidget* info_label = gtk_label_new(l10n_util::GetStringFUTF8(
         IDS_EXTENSION_INSTALLED_OMNIBOX_KEYWORD_INFO,
         UTF8ToUTF16(extension_->omnibox_keyword())).c_str());
-    gtk_label_set_line_wrap(GTK_LABEL(info_label), TRUE);
-    gtk_widget_set_size_request(info_label, kTextColumnWidth, -1);
+    gtk_util::SetLabelWidth(info_label, kTextColumnWidth);
     gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
   }
 
   // Manage label
   GtkWidget* manage_label = gtk_label_new(
       l10n_util::GetStringUTF8(IDS_EXTENSION_INSTALLED_MANAGE_INFO).c_str());
-  gtk_label_set_line_wrap(GTK_LABEL(manage_label), TRUE);
-  gtk_widget_set_size_request(manage_label, kTextColumnWidth, -1);
+  gtk_util::SetLabelWidth(manage_label, kTextColumnWidth);
   gtk_box_pack_start(GTK_BOX(text_column), manage_label, FALSE, FALSE, 0);
 
   // Create and pack the close button.

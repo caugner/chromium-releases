@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,20 +11,26 @@
 #include "ppapi/c/pp_input_event.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/proxy/serialized_var.h" // TODO(brettw) eraseme.
 
 struct PP_FileInfo_Dev;
 struct PP_ObjectProperty;
+struct PP_Flash_Menu;
 
 namespace pp {
 namespace proxy {
+
+class HostResource;
+struct PPBFileRef_CreateInfo;
 struct PPBFlash_DrawGlyphs_Params;
 struct PPBFont_DrawTextAt_Params;
+struct PPBURLLoader_UpdateProgress_Params;
 struct SerializedDirEntry;
 struct SerializedFontDescription;
+class SerializedFlashMenu;
 class SerializedVar;
-}
-}
+
+}  // namespace proxy
+}  // namespace pp
 
 namespace IPC {
 
@@ -93,8 +99,24 @@ struct ParamTraits<pp::proxy::PPBFlash_DrawGlyphs_Params> {
 };
 
 template<>
+struct ParamTraits<pp::proxy::PPBFileRef_CreateInfo> {
+  typedef pp::proxy::PPBFileRef_CreateInfo param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template<>
 struct ParamTraits<pp::proxy::PPBFont_DrawTextAt_Params> {
   typedef pp::proxy::PPBFont_DrawTextAt_Params param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template<>
+struct ParamTraits<pp::proxy::PPBURLLoader_UpdateProgress_Params> {
+  typedef pp::proxy::PPBURLLoader_UpdateProgress_Params param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
@@ -117,6 +139,14 @@ struct ParamTraits<pp::proxy::SerializedFontDescription> {
 };
 
 template<>
+struct ParamTraits<pp::proxy::HostResource> {
+  typedef pp::proxy::HostResource param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template<>
 struct ParamTraits<pp::proxy::SerializedVar> {
   typedef pp::proxy::SerializedVar param_type;
   static void Write(Message* m, const param_type& p);
@@ -127,6 +157,14 @@ struct ParamTraits<pp::proxy::SerializedVar> {
 template<>
 struct ParamTraits< std::vector<pp::proxy::SerializedVar> > {
   typedef std::vector<pp::proxy::SerializedVar> param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template<>
+struct ParamTraits<pp::proxy::SerializedFlashMenu> {
+  typedef pp::proxy::SerializedFlashMenu param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);

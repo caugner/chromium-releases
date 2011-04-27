@@ -32,9 +32,9 @@ class CollectedCookiesMac : public ConstrainedWindowMacDelegateCustomSheet,
   virtual ~CollectedCookiesMac();
 
   // NotificationObserver implementation.
-  void Observe(NotificationType type,
-               const NotificationSource& source,
-               const NotificationDetails& details);
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
   NotificationRegistrar registrar_;
 
@@ -87,11 +87,11 @@ class CollectedCookiesMac : public ConstrainedWindowMacDelegateCustomSheet,
 
   BOOL infoBarVisible_;
 }
-@property (readonly, nonatomic) NSTreeController* allowedTreeController;
-@property (readonly, nonatomic) NSTreeController* blockedTreeController;
+@property(readonly, nonatomic) NSTreeController* allowedTreeController;
+@property(readonly, nonatomic) NSTreeController* blockedTreeController;
 
-@property (assign, nonatomic) BOOL allowedCookiesButtonsEnabled;
-@property (assign, nonatomic) BOOL blockedCookiesButtonsEnabled;
+@property(assign, nonatomic) BOOL allowedCookiesButtonsEnabled;
+@property(assign, nonatomic) BOOL blockedCookiesButtonsEnabled;
 
 // Designated initializer. TabContents cannot be NULL.
 - (id)initWithTabContents:(TabContents*)tabContents;

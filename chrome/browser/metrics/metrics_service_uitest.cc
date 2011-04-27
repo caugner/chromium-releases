@@ -96,7 +96,6 @@ TEST_F(MetricsServiceTest, DISABLED_CrashRenderers) {
     defined(GOOGLE_CHROME_BUILD)
     expected_crashes_ = 1;
 #endif
-
     ASSERT_TRUE(tab->NavigateToURLAsync(GURL(chrome::kAboutCrashURL)));
   }
 

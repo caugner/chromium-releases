@@ -32,12 +32,12 @@
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/gtk_util.h"
 
 // Shows the editor for adding/editing an AutoFillProfile. If
 // |auto_fill_profile| is NULL, a new AutoFillProfile should be created.
@@ -115,7 +115,7 @@ class AutoFillDialog : public PersonalDataManager::Observer,
   // data is available if the response is GTK_RESPONSE_APPLY or GTK_RESPONSE_OK.
   // We close the dialog if the response is GTK_RESPONSE_OK or
   // GTK_RESPONSE_CANCEL.
-  CHROMEG_CALLBACK_1(AutoFillDialog, void, OnResponse, GtkDialog*, gint);
+  CHROMEGTK_CALLBACK_1(AutoFillDialog, void, OnResponse, int);
 
   CHROMEGTK_CALLBACK_0(AutoFillDialog, void, OnAutoFillCheckToggled);
   CHROMEG_CALLBACK_2(AutoFillDialog, void, OnRowActivated, GtkTreeView*,
@@ -252,11 +252,11 @@ void AutoFillDialog::OnDestroy(GtkWidget* widget) {
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-void AutoFillDialog::OnResponse(GtkDialog* dialog, gint response_id) {
+void AutoFillDialog::OnResponse(GtkWidget* dialog, int response_id) {
   if (response_id == GTK_RESPONSE_OK ||
       response_id == GTK_RESPONSE_CANCEL ||
       response_id == GTK_RESPONSE_DELETE_EVENT) {
-    gtk_widget_destroy(GTK_WIDGET(dialog));
+    gtk_widget_destroy(dialog);
   }
 
   if (response_id == kAutoFillDialogAboutLink)

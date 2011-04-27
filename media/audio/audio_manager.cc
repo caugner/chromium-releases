@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,37 +7,8 @@
 #include "base/at_exit.h"
 #include "base/logging.h"
 
-namespace {
-
-bool g_destroy_called = false;
-AudioManager* g_audio_manager = NULL;
-
-// NullAudioManager is the audio manager used on the systems that have no
-// audio support.
-class NullAudioManager : public AudioManager {
- public:
-  NullAudioManager() { }
-
-  // Implementation of AudioManager.
-  virtual bool HasAudioOutputDevices() { return false; }
-  virtual bool HasAudioInputDevices() { return false; }
-  virtual AudioOutputStream* MakeAudioOutputStream(AudioParameters params) {
-    NOTIMPLEMENTED();
-    return NULL;
-  }
-  virtual AudioInputStream* MakeAudioInputStream(AudioParameters params,
-                                                 int samples_per_packet) {
-    NOTIMPLEMENTED();
-    return NULL;
-  }
-  virtual void MuteAll() { NOTIMPLEMENTED(); }
-  virtual void UnMuteAll() { NOTIMPLEMENTED(); }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NullAudioManager);
-};
-
-}  // namespace
+static bool g_destroy_called = false;
+static AudioManager* g_audio_manager = NULL;
 
 // static
 void AudioManager::Destroy(void* not_used) {

@@ -7,12 +7,13 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/ref_counted.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/renderer_host/resource_handler.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "content/browser/renderer_host/resource_handler.h"
 
 class ResourceDispatcherHost;
 
@@ -130,6 +131,9 @@ class SafeBrowsingResourceHandler : public ResourceHandler,
 
   // Timer to abort the safe browsing check if it takes too long.
   base::OneShotTimer<SafeBrowsingResourceHandler> timer_;
+
+  // The redirect chain for this resource
+  std::vector<GURL> redirect_urls_;
 
   // Details on the deferred request (either a start or redirect). It is only
   // valid to access these members when defer_state_ != DEFERRED_NONE.

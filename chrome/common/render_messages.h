@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,11 +20,11 @@
 #include "chrome/common/translate_errors.h"
 #include "chrome/common/view_types.h"
 #include "chrome/common/webkit_param_traits.h"
+#include "content/common/common_param_traits.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_platform_file.h"                     // ifdefed typedef.
 #include "ui/base/clipboard/clipboard.h"                   // enum
 #include "webkit/appcache/appcache_interfaces.h"  // enum appcache::Status
-#include "webkit/fileapi/file_system_types.h"  // enum fileapi::FileSystemType
 
 #if defined(OS_MACOSX)
 struct FontDescriptor;
@@ -39,22 +39,12 @@ namespace base {
 class Time;
 }
 
-namespace net {
-class HttpResponseHeaders;
-class UploadData;
-}
-
 namespace webkit_blob {
 class BlobData;
 }
 
 namespace webkit_glue {
-struct FormData;
-class FormField;
-struct PasswordFormFillData;
-struct ResourceDevToolsInfo;
-struct ResourceLoadTimingInfo;
-struct ResourceResponseInfo;
+struct CustomContextMenuContext;
 struct WebAccessibility;
 struct WebCookie;
 }
@@ -74,9 +64,6 @@ class SkBitmap;
 class URLPattern;
 struct ContextMenuParams;
 struct EditCommand;
-struct PP_Flash_NetAddress;
-struct ResourceResponseHead;
-struct SyncLoadResult;
 struct RendererPreferences;
 struct WebDropData;
 struct WebMenuItem;
@@ -84,33 +71,33 @@ struct WebPreferences;
 
 // Forward declarations of structures used to store data for when we have a lot
 // of parameters.
-struct ViewMsg_Navigate_Params;
-struct ViewMsg_AudioStreamState_Params;
-struct ViewMsg_StopFinding_Params;
-struct ViewHostMsg_GetSearchProviderInstallState_Params;
-struct ViewHostMsg_PageHasOSDD_Type;
-struct ViewHostMsg_FrameNavigate_Params;
-struct ViewHostMsg_UpdateRect_Params;
-struct ViewMsg_ClosePage_Params;
-struct ViewHostMsg_Resource_Request;
-struct ViewMsg_Print_Params;
-struct ViewMsg_PrintPage_Params;
-struct ViewMsg_PrintPages_Params;
+struct ViewHostMsg_AccessibilityNotification_Params;
+struct ViewHostMsg_Audio_CreateStream_Params;
+struct ViewHostMsg_CreateWindow_Params;
+struct ViewHostMsg_CreateWorker_Params;
 struct ViewHostMsg_DidPreviewDocument_Params;
 struct ViewHostMsg_DidPrintPage_Params;
-struct ViewHostMsg_Audio_CreateStream_Params;
+struct ViewHostMsg_DomMessage_Params;
+struct ViewHostMsg_FrameNavigate_Params;
+struct ViewHostMsg_GetSearchProviderInstallState_Params;
+struct ViewHostMsg_MalwareDOMDetails_Params;
+struct ViewHostMsg_PageHasOSDD_Type;
+struct ViewHostMsg_RunFileChooser_Params;
+struct ViewHostMsg_ShowNotification_Params;
 struct ViewHostMsg_ShowPopup_Params;
 struct ViewHostMsg_ScriptedPrint_Params;
-struct ViewMsg_ExecuteCode_Params;
-struct ViewHostMsg_CreateWorker_Params;
-struct ViewHostMsg_ShowNotification_Params;
-struct ViewMsg_New_Params;
-struct ViewHostMsg_CreateWindow_Params;
-struct ViewHostMsg_RunFileChooser_Params;
-struct ViewMsg_ExtensionLoaded_Params;
+struct ViewHostMsg_UpdateRect_Params;
+struct ViewMsg_AudioStreamState_Params;
+struct ViewMsg_ClosePage_Params;
 struct ViewMsg_DeviceOrientationUpdated_Params;
-struct ViewHostMsg_DomMessage_Params;
-struct ViewHostMsg_AccessibilityNotification_Params;
+struct ViewMsg_ExecuteCode_Params;
+struct ViewMsg_ExtensionLoaded_Params;
+struct ViewMsg_New_Params;
+struct ViewMsg_Navigate_Params;
+struct ViewMsg_Print_Params;
+struct ViewMsg_PrintPages_Params;
+struct ViewMsg_PrintPage_Params;
+struct ViewMsg_StopFinding_Params;
 
 // Values that may be OR'd together to form the 'flags' parameter of the
 // ViewMsg_EnablePreferredSizeChangedMode message.
@@ -135,15 +122,6 @@ enum ViewHostMsg_JavaScriptStressTestControl_Commands {
 
 namespace IPC {
 
-// Traits for FormField_Params structure to pack/unpack.
-template <>
-struct ParamTraits<webkit_glue::FormField> {
-  typedef webkit_glue::FormField param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* p);
-  static void Log(const param_type& p, std::string* l);
-};
-
 #if defined(OS_MACOSX)
 // Traits for FontDescriptor structure to pack/unpack.
 template <>
@@ -154,6 +132,14 @@ struct ParamTraits<FontDescriptor> {
   static void Log(const param_type& p, std::string* l);
 };
 #endif
+
+template <>
+struct ParamTraits<webkit_glue::CustomContextMenuContext> {
+  typedef webkit_glue::CustomContextMenuContext param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* p);
+  static void Log(const param_type& p, std::string* l);
+};
 
 template <>
 struct ParamTraits<ContextMenuParams> {
@@ -185,74 +171,6 @@ struct ParamTraits<webkit::npapi::WebPluginInfo> {
   typedef webkit::npapi::WebPluginInfo param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-// Traits for webkit_glue::PasswordFormDomManager::FillData.
-template <>
-struct ParamTraits<webkit_glue::PasswordFormFillData> {
-  typedef webkit_glue::PasswordFormFillData param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<scoped_refptr<net::HttpResponseHeaders> > {
-  typedef scoped_refptr<net::HttpResponseHeaders> param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-// Traits for webkit_glue::ResourceLoadTimingInfo
-template <>
-struct ParamTraits<webkit_glue::ResourceLoadTimingInfo> {
-  typedef webkit_glue::ResourceLoadTimingInfo param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> > {
-  typedef scoped_refptr<webkit_glue::ResourceDevToolsInfo> param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-// Traits for webkit_glue::ResourceResponseInfo
-template <>
-struct ParamTraits<webkit_glue::ResourceResponseInfo> {
-  typedef webkit_glue::ResourceResponseInfo param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<ResourceResponseHead> {
-  typedef ResourceResponseHead param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<SyncLoadResult> {
-  typedef SyncLoadResult param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-// Traits for FormData structure to pack/unpack.
-template <>
-struct ParamTraits<webkit_glue::FormData> {
-  typedef webkit_glue::FormData param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -537,23 +455,10 @@ struct ParamTraits<scoped_refptr<webkit_blob::BlobData> > {
   static void Log(const param_type& p, std::string* l);
 };
 
-template <>
-struct SimilarTypeTraits<fileapi::FileSystemType> {
-  typedef int Type;
-};
-
 // Traits for AudioBuffersState structure.
 template <>
 struct ParamTraits<AudioBuffersState> {
   typedef AudioBuffersState param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* p);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<PP_Flash_NetAddress> {
-  typedef PP_Flash_NetAddress param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* p);
   static void Log(const param_type& p, std::string* l);

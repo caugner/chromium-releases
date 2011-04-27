@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,17 +20,19 @@
 class GPUInfo {
  public:
   GPUInfo();
-  ~GPUInfo() {}
+  ~GPUInfo();
 
-  enum Progress {
+  enum Level {
     kUninitialized,
+    kPreliminary,
     kPartial,
+    kCompleting,
     kComplete,
   };
 
   // Returns whether this GPUInfo has been partially or fully initialized with
   // information.
-  Progress progress() const;
+  Level level() const;
 
   // The amount of time taken to get from the process starting to the message
   // loop being pumped.
@@ -48,6 +50,9 @@ class GPUInfo {
 
   // Return the version of the graphics driver currently installed.
   std::string driver_version() const;
+
+  // Return the date of the graphics driver currently installed.
+  std::string driver_date() const;
 
   // Return the version of the pixel/fragment shader used by the gpu.
   // Major version in the second lowest 8 bits, minor in the lowest 8 bits,
@@ -79,18 +84,28 @@ class GPUInfo {
   // Return "" if we are not using OpenGL.
   std::string gl_renderer() const;
 
+  // Return the GL_EXTENSIONS string.
+  // Return "" if we are not using OpenGL.
+  std::string gl_extensions() const;
+
   // Return the device semantics, i.e. whether the Vista and Windows 7 specific
   // semantics are available.
   bool can_lose_context() const;
 
-  void SetProgress(Progress progress);
+  // Return true if there was an error at any stage of collecting GPUInfo data.
+  // If there was an error, then the GPUInfo fields may be incomplete or set
+  // to default values such as 0 or empty string.
+  bool collection_error() const;
+
+  void SetLevel(Level level);
 
   void SetInitializationTime(const base::TimeDelta& initialization_time);
 
   void SetVideoCardInfo(uint32 vendor_id, uint32 device_id);
 
   void SetDriverInfo(const std::string& driver_vendor,
-                     const std::string& driver_version);
+                     const std::string& driver_version,
+                     const std::string& driver_date);
 
   void SetShaderVersion(uint32 pixel_shader_version,
                         uint32 vertex_shader_version);
@@ -103,7 +118,11 @@ class GPUInfo {
 
   void SetGLRenderer(const std::string& gl_renderer);
 
+  void SetGLExtensions(const std::string& gl_extensions);
+
   void SetCanLoseContext(bool can_lose_context);
+
+  void SetCollectionError(bool collection_error);
 
 #if defined(OS_WIN)
   // The information returned by the DirectX Diagnostics Tool.
@@ -113,19 +132,22 @@ class GPUInfo {
 #endif
 
  private:
-  Progress progress_;
+  Level level_;
   base::TimeDelta initialization_time_;
   uint32 vendor_id_;
   uint32 device_id_;
   std::string driver_vendor_;
   std::string driver_version_;
+  std::string driver_date_;
   uint32 pixel_shader_version_;
   uint32 vertex_shader_version_;
   uint32 gl_version_;
   std::string gl_version_string_;
   std::string gl_vendor_;
   std::string gl_renderer_;
+  std::string gl_extensions_;
   bool can_lose_context_;
+  bool collection_error_;
 
 #if defined(OS_WIN)
   DxDiagNode dx_diagnostics_;

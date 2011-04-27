@@ -153,9 +153,10 @@ class ChromeInvalidationListener
  public:
   ChromeInvalidationListener() {}
 
-  virtual void OnInvalidate(syncable::ModelType model_type) {
+  virtual void OnInvalidate(syncable::ModelType model_type,
+                            const std::string& payload) {
     LOG(INFO) << "OnInvalidate: "
-              << syncable::ModelTypeToString(model_type);
+              << syncable::ModelTypeToString(model_type) << " - " << payload;
     // A real implementation would respond to the invalidation.
   }
 
@@ -190,7 +191,14 @@ class ServerNotifierDelegate
                                       server_notifier_state_,
                                       &chrome_invalidation_listener_,
                                       this, base_task);
-    chrome_invalidation_client_.RegisterTypes();
+    syncable::ModelTypeSet all_types;
+    for (int i = syncable::FIRST_REAL_MODEL_TYPE;
+         i < syncable::MODEL_TYPE_COUNT; ++i) {
+      syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
+      all_types.insert(model_type);
+    }
+
+    chrome_invalidation_client_.RegisterTypes(all_types);
   }
 
   virtual void OnError() {
@@ -223,7 +231,6 @@ int main(int argc, char* argv[]) {
       logging::LOCK_LOG_FILE,
       logging::DELETE_OLD_LOG_FILE,
       logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
-  logging::SetMinLogLevel(logging::LOG_INFO);
   // TODO(akalin): Make sure that all log messages are printed to the
   // console, even on Windows (SetMinLogLevel isn't enough).
   talk_base::LogMessage::LogToDebug(talk_base::LS_VERBOSE);

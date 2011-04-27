@@ -26,7 +26,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/views/window.h"
-#include "gfx/gtk_util.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -35,6 +34,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/gtk_util.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/screen.h"
@@ -83,7 +83,7 @@ class TextButtonWithHandCursorOver : public views::TextButton {
   virtual ~TextButtonWithHandCursorOver() {}
 
   virtual gfx::NativeCursor GetCursorForPoint(
-      views::Event::EventType event_type,
+      ui::EventType event_type,
       const gfx::Point& p) {
     if (!IsEnabled()) {
       return NULL;
@@ -194,12 +194,17 @@ void BackgroundView::CreateModalPopup(views::WindowDelegate* view) {
   window->Show();
 }
 
+gfx::NativeWindow BackgroundView::GetNativeWindow() const {
+  return
+      GTK_WINDOW(static_cast<const WidgetGtk*>(GetWidget())->GetNativeView());
+}
+
 void BackgroundView::SetStatusAreaVisible(bool visible) {
   status_area_->SetVisible(visible);
 }
 
 void BackgroundView::SetStatusAreaEnabled(bool enable) {
-  status_area_->EnableButtons(enable);
+  status_area_->MakeButtonsActive(enable);
 }
 
 void BackgroundView::SetOobeProgressBarVisible(bool visible) {
@@ -243,8 +248,8 @@ bool BackgroundView::ScreenSaverEnabled() {
 ///////////////////////////////////////////////////////////////////////////////
 // BackgroundView protected:
 
-void BackgroundView::Paint(gfx::Canvas* canvas) {
-  views::View::Paint(canvas);
+void BackgroundView::OnPaint(gfx::Canvas* canvas) {
+  views::View::OnPaint(canvas);
   if (!did_paint_) {
     did_paint_ = true;
     UpdateWindowType();
@@ -253,9 +258,9 @@ void BackgroundView::Paint(gfx::Canvas* canvas) {
 
 void BackgroundView::Layout() {
   const int kCornerPadding = 5;
-  const int kInfoLeftPadding = 15;
-  const int kInfoBottomPadding = 15;
-  const int kInfoBetweenLinesPadding = 4;
+  const int kInfoLeftPadding = 10;
+  const int kInfoBottomPadding = 10;
+  const int kInfoBetweenLinesPadding = 1;
   const int kProgressBarBottomPadding = 20;
   const int kProgressBarWidth = 750;
   const int kProgressBarHeight = 70;
@@ -268,7 +273,7 @@ void BackgroundView::Layout() {
   gfx::Size version_size = os_version_label_->GetPreferredSize();
   int os_version_y = height() - version_size.height() - kInfoBottomPadding;
   if (!is_official_build_)
-    os_version_y -= version_size.height() - kInfoBetweenLinesPadding;
+    os_version_y -= (version_size.height() + kInfoBetweenLinesPadding);
   os_version_label_->SetBounds(
       kInfoLeftPadding,
       os_version_y,
@@ -292,17 +297,12 @@ void BackgroundView::Layout() {
     shutdown_button_->LayoutIn(this);
   }
   if (background_area_)
-    background_area_->SetBounds(this->bounds());
+    background_area_->SetBoundsRect(this->bounds());
 }
 
 void BackgroundView::ChildPreferredSizeChanged(View* child) {
   Layout();
   SchedulePaint();
-}
-
-gfx::NativeWindow BackgroundView::GetNativeWindow() const {
-  return
-      GTK_WINDOW(static_cast<WidgetGtk*>(GetWidget())->GetNativeView());
 }
 
 bool BackgroundView::ShouldOpenButtonOptions(

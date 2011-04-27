@@ -12,6 +12,7 @@
       'target_name': 'media',
       'type': '<(library)',
       'dependencies': [
+        'yuv_convert',
         '../base/base.gyp:base',
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
       ],
@@ -57,6 +58,8 @@
         'audio/openbsd/audio_manager_openbsd.h',
         'audio/mac/audio_input_mac.cc',
         'audio/mac/audio_input_mac.h',
+        'audio/mac/audio_low_latency_output_mac.cc',
+        'audio/mac/audio_low_latency_output_mac.h',
         'audio/mac/audio_manager_mac.cc',
         'audio/mac/audio_manager_mac.h',
         'audio/mac/audio_output_mac.cc',
@@ -73,9 +76,8 @@
         'base/buffers.h',
         'base/callback.cc',
         'base/callback.h',
+        'base/clock.cc',
         'base/clock.h',
-        'base/clock_impl.cc',
-        'base/clock_impl.h',
         'base/composite_filter.cc',
         'base/composite_filter.h',
         'base/data_buffer.cc',
@@ -87,6 +89,8 @@
         'base/filter_host.h',
         'base/filters.cc',
         'base/filters.h',
+        'base/h264_bitstream_converter.cc',
+        'base/h264_bitstream_converter.h',
         'base/media.h',
         'base/media_format.cc',
         'base/media_format.h',
@@ -109,12 +113,6 @@
         'base/state_matrix.h',
         'base/video_frame.cc',
         'base/video_frame.h',
-        'base/yuv_convert.cc',
-        'base/yuv_convert.h',
-        'base/yuv_row_win.cc',
-        'base/yuv_row_posix.cc',
-        'base/yuv_row_table.cc',
-        'base/yuv_row.h',
         'ffmpeg/ffmpeg_common.cc',
         'ffmpeg/ffmpeg_common.h',
         'ffmpeg/ffmpeg_util.cc',
@@ -140,6 +138,8 @@
         'filters/ffmpeg_audio_decoder.h',
         'filters/ffmpeg_demuxer.cc',
         'filters/ffmpeg_demuxer.h',
+        'filters/ffmpeg_h264_bitstream_converter.cc',
+        'filters/ffmpeg_h264_bitstream_converter.h',
         'filters/ffmpeg_glue.cc',
         'filters/ffmpeg_glue.h',
         'filters/ffmpeg_interfaces.cc',
@@ -150,6 +150,8 @@
         'filters/file_data_source.h',
         'filters/null_audio_renderer.cc',
         'filters/null_audio_renderer.h',
+        'filters/null_video_renderer.cc',
+        'filters/null_video_renderer.h',
         'filters/video_renderer_base.cc',
         'filters/video_renderer_base.h',
         'video/ffmpeg_video_allocator.cc',
@@ -205,11 +207,78 @@
         ['OS=="mac"', {
           'link_settings': {
             'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/AudioUnit.framework',
               '$(SDKROOT)/System/Library/Frameworks/AudioToolbox.framework',
               '$(SDKROOT)/System/Library/Frameworks/CoreAudio.framework',
             ],
           },
         }],
+      ],
+    },
+    {
+      'target_name': 'cpu_features',
+      'type': '<(library)',
+      'include_dirs': [
+        '..',
+      ],
+      'conditions': [
+        [ 'target_arch == "ia32" or target_arch == "x64"', {
+          'sources': [
+            'base/cpu_features_x86.cc',
+          ],
+        }],
+        [ 'target_arch == "arm"', {
+          'sources': [
+            'base/cpu_features_arm.cc',
+          ],
+        }],
+      ],
+      'sources': [
+        'base/cpu_features.h',
+      ],
+    },
+    {
+      'target_name': 'yuv_convert',
+      'type': '<(library)',
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        'cpu_features',
+      ],
+      'conditions': [
+        [ 'target_arch == "ia32" or target_arch == "x64"', {
+          'dependencies': [
+            'yuv_convert_sse2',
+          ],
+        }],
+      ],
+      'sources': [
+        'base/yuv_convert.cc',
+        'base/yuv_convert.h',
+        'base/yuv_convert_internal.h',
+        'base/yuv_convert_c.cc',
+        'base/yuv_row_win.cc',
+        'base/yuv_row_posix.cc',
+        'base/yuv_row_table.cc',
+        'base/yuv_row.h',
+      ],
+    },
+    {
+      'target_name': 'yuv_convert_sse2',
+      'type': '<(library)',
+      'include_dirs': [
+        '..',
+      ],
+      'conditions': [
+        [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
+          'cflags': [
+            '-msse2',
+          ],
+        }],
+      ],
+      'sources': [
+        'base/yuv_convert_sse2.cc',
       ],
     },
     {
@@ -277,11 +346,12 @@
         'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
+        'base/clock_unittest.cc',
         'base/composite_filter_unittest.cc',
-        'base/clock_impl_unittest.cc',
         'base/data_buffer_unittest.cc',
         'base/djb2_unittest.cc',
         'base/filter_collection_unittest.cc',
+        'base/h264_bitstream_converter_unittest.cc',
         'base/mock_ffmpeg.cc',
         'base/mock_ffmpeg.h',
         'base/mock_reader.h',
@@ -300,6 +370,7 @@
         'filters/decoder_base_unittest.cc',
         'filters/ffmpeg_demuxer_unittest.cc',
         'filters/ffmpeg_glue_unittest.cc',
+        'filters/ffmpeg_h264_bitstream_converter_unittest.cc',
         'filters/ffmpeg_video_decoder_unittest.cc',
         'filters/file_data_source_unittest.cc',
         'filters/video_renderer_base_unittest.cc',
@@ -347,6 +418,8 @@
         'base/mock_filter_host.h',
         'base/mock_filters.cc',
         'base/mock_filters.h',
+        'video/video_mock_objects.cc',
+        'video/video_mock_objects.h',
       ],
     },
     {
@@ -450,7 +523,7 @@
           ],
           'sources': [
             'tools/mfplayer/mfplayer.h',
-            'tools/mfplayer/mfplayer.cc',    
+            'tools/mfplayer/mfplayer.cc',
             'tools/mfplayer/mf_playback_main.cc',
           ],
           'msvs_settings': {
@@ -471,7 +544,7 @@
           ],
           'sources': [
             'tools/mfdecoder/main.cc',
-            'tools/mfdecoder/mfdecoder.h',    
+            'tools/mfdecoder/mfdecoder.h',
             'tools/mfdecoder/mfdecoder.cc',
           ],
           'msvs_settings': {
@@ -524,6 +597,25 @@
                 'tools/shader_bench/window_win.cc',
               ],
             }],
+          ],
+        },
+      ],
+    }],
+    ['OS == "linux" and target_arch != "arm"', {
+      'targets': [
+        {
+          'target_name': 'tile_render_bench',
+          'type': 'executable',
+          'dependencies': [
+            '../app/app.gyp:app_base',
+            '../base/base.gyp:base',
+          ],
+          'libraries': [
+            '-lGL',
+            '-ldl',
+          ],
+          'sources': [
+            'tools/tile_render_bench/tile_render_bench.cc',
           ],
         },
       ],

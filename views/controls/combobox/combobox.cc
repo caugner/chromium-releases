@@ -50,6 +50,7 @@ void Combobox::SelectionChanged() {
   selected_item_ = native_wrapper_->GetSelectedItem();
   if (listener_)
     listener_->ItemChanged(this, prev_selected_item, selected_item_);
+  NotifyAccessibilityEvent(AccessibilityTypes::EVENT_VALUE_CHANGED, false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -77,16 +78,16 @@ void Combobox::SetEnabled(bool flag) {
 // VKEY_ESCAPE should be handled by this view when the drop down list is active.
 // In other words, the list should be closed instead of the dialog.
 bool Combobox::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
-  if (e.GetKeyCode() != ui::VKEY_ESCAPE ||
+  if (e.key_code() != ui::VKEY_ESCAPE ||
       e.IsShiftDown() || e.IsControlDown() || e.IsAltDown()) {
     return false;
   }
   return native_wrapper_ && native_wrapper_->IsDropdownOpen();
 }
 
-void Combobox::PaintFocusBorder(gfx::Canvas* canvas) {
+void Combobox::OnPaintFocusBorder(gfx::Canvas* canvas) {
   if (NativeViewHost::kRenderNativeControlFocus)
-    View::PaintFocusBorder(canvas);
+    View::OnPaintFocusBorder(canvas);
 }
 
 AccessibilityTypes::Role Combobox::GetAccessibleRole() {
@@ -97,13 +98,13 @@ string16 Combobox::GetAccessibleValue() {
   return model_->GetItemAt(selected_item_);
 }
 
-void Combobox::Focus() {
+void Combobox::OnFocus() {
   // Forward the focus to the wrapper.
   if (native_wrapper_)
     native_wrapper_->SetFocus();
   else
-    View::Focus();  // Will focus the RootView window (so we still get
-                    // keyboard messages).
+    View::OnFocus();  // Will focus the RootView window (so we still get
+                      // keyboard messages).
 }
 
 void Combobox::ViewHierarchyChanged(bool is_add, View* parent,

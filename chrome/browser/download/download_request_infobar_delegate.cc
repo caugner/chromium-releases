@@ -4,7 +4,7 @@
 
 #include "chrome/browser/download/download_request_infobar_delegate.h"
 
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -15,17 +15,15 @@ DownloadRequestInfoBarDelegate::DownloadRequestInfoBarDelegate(
     DownloadRequestLimiter::TabDownloadState* host)
     : ConfirmInfoBarDelegate(tab),
       host_(host) {
-  if (tab)
-    tab->AddInfoBar(this);
 }
 
 DownloadRequestInfoBarDelegate::~DownloadRequestInfoBarDelegate() {
 }
 
 void DownloadRequestInfoBarDelegate::InfoBarClosed() {
-  Cancel();
-  // This will delete us.
-  ConfirmInfoBarDelegate::InfoBarClosed();
+  if (host_)
+    host_->Cancel();
+  delete this;
 }
 
 SkBitmap* DownloadRequestInfoBarDelegate::GetIcon() const {
@@ -35,10 +33,6 @@ SkBitmap* DownloadRequestInfoBarDelegate::GetIcon() const {
 
 string16 DownloadRequestInfoBarDelegate::GetMessageText() const {
   return l10n_util::GetStringUTF16(IDS_MULTI_DOWNLOAD_WARNING);
-}
-
-int DownloadRequestInfoBarDelegate::GetButtons() const {
-  return BUTTON_OK | BUTTON_CANCEL;
 }
 
 string16 DownloadRequestInfoBarDelegate::GetButtonLabel(
@@ -54,12 +48,4 @@ bool DownloadRequestInfoBarDelegate::Accept() {
   }
 
   return !host_;
-}
-
-bool DownloadRequestInfoBarDelegate::Cancel() {
-  if (host_) {
-    host_->Cancel();
-    host_ = NULL;
-  }
-  return true;
 }

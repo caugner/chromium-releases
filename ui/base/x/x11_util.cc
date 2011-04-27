@@ -16,16 +16,16 @@
 #include <sys/shm.h>
 
 #include <list>
-#include <set>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
-#include "gfx/rect.h"
-#include "gfx/size.h"
 #include "ui/base/x/x11_util_internal.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 namespace ui {
 
@@ -56,7 +56,8 @@ CachedPictFormats* get_cached_pict_formats() {
 const size_t kMaxCacheSize = 5;
 
 int DefaultX11ErrorHandler(Display* d, XErrorEvent* e) {
-  LOG(ERROR) << GetErrorEventDescription(d, e);
+  MessageLoop::current()->PostTask(
+       FROM_HERE, NewRunnableFunction(LogErrorEventDescription, d, *e));
   return 0;
 }
 
@@ -64,6 +65,28 @@ int DefaultX11IOErrorHandler(Display* d) {
   // If there's an IO error it likely means the X server has gone away
   LOG(ERROR) << "X IO Error detected";
   _exit(1);
+}
+
+// Note: The caller should free the resulting value data.
+bool GetProperty(XID window, const std::string& property_name, long max_length,
+                 Atom* type, int* format, unsigned long* num_items,
+                 unsigned char** property) {
+  Atom property_atom = gdk_x11_get_xatom_by_name_for_display(
+      gdk_display_get_default(), property_name.c_str());
+
+  unsigned long remaining_bytes = 0;
+  return XGetWindowProperty(GetXDisplay(),
+                            window,
+                            property_atom,
+                            0,          // offset into property data to read
+                            max_length, // max length to get
+                            False,      // deleted
+                            AnyPropertyType,
+                            type,
+                            format,
+                            num_items,
+                            &remaining_bytes,
+                            property);
 }
 
 }  // namespace
@@ -82,11 +105,6 @@ Display* GetXDisplay() {
 }
 
 static SharedMemorySupport DoQuerySharedMemorySupport(Display* dpy) {
-  // A temporary flag for tracking down shared memory problems.
-  // TODO(evanm): remove this.
-  if (CommandLine::ForCurrentProcess()->HasSwitch("disable-xshm"))
-    return SHARED_MEMORY_NONE;
-
   int dummy;
   Bool pixmaps_supported;
   // Query the server's support for XSHM.
@@ -221,27 +239,29 @@ bool GetWindowRect(XID window, gfx::Rect* rect) {
   return true;
 }
 
-bool GetIntProperty(XID window, const std::string& property_name, int* value) {
-  Atom property_atom = gdk_x11_get_xatom_by_name_for_display(
-      gdk_display_get_default(), property_name.c_str());
-
+bool PropertyExists(XID window, const std::string& property_name) {
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0, remaining_bytes = 0;
+  long unsigned int num_items = 0;
   unsigned char* property = NULL;
 
-  int result = XGetWindowProperty(GetXDisplay(),
-                                  window,
-                                  property_atom,
-                                  0,      // offset into property data to read
-                                  1,      // max length to get
-                                  False,  // deleted
-                                  AnyPropertyType,
-                                  &type,
-                                  &format,
-                                  &num_items,
-                                  &remaining_bytes,
-                                  &property);
+  int result = GetProperty(window, property_name, 1,
+                           &type, &format, &num_items, &property);
+  if (result != Success)
+    return false;
+
+  XFree(property);
+  return num_items > 0;
+}
+
+bool GetIntProperty(XID window, const std::string& property_name, int* value) {
+  Atom type = None;
+  int format = 0;  // size in bits of each item in 'property'
+  long unsigned int num_items = 0;
+  unsigned char* property = NULL;
+
+  int result = GetProperty(window, property_name, 1,
+                           &type, &format, &num_items, &property);
   if (result != Success)
     return false;
 
@@ -258,26 +278,14 @@ bool GetIntProperty(XID window, const std::string& property_name, int* value) {
 bool GetIntArrayProperty(XID window,
                          const std::string& property_name,
                          std::vector<int>* value) {
-  Atom property_atom = gdk_x11_get_xatom_by_name_for_display(
-      gdk_display_get_default(), property_name.c_str());
-
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0, remaining_bytes = 0;
+  long unsigned int num_items = 0;
   unsigned char* properties = NULL;
 
-  int result = XGetWindowProperty(GetXDisplay(),
-                                  window,
-                                  property_atom,
-                                  0,      // offset into property data to read
-                                  (~0L),  // max length to get (all of them)
-                                  False,  // deleted
-                                  AnyPropertyType,
-                                  &type,
-                                  &format,
-                                  &num_items,
-                                  &remaining_bytes,
-                                  &properties);
+  int result = GetProperty(window, property_name,
+                           (~0L), // (all of them)
+                           &type, &format, &num_items, &properties);
   if (result != Success)
     return false;
 
@@ -293,28 +301,41 @@ bool GetIntArrayProperty(XID window,
   return true;
 }
 
-bool GetStringProperty(
-    XID window, const std::string& property_name, std::string* value) {
-  Atom property_atom = gdk_x11_get_xatom_by_name_for_display(
-      gdk_display_get_default(), property_name.c_str());
-
+bool GetAtomArrayProperty(XID window,
+                          const std::string& property_name,
+                          std::vector<Atom>* value) {
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0, remaining_bytes = 0;
+  long unsigned int num_items = 0;
+  unsigned char* properties = NULL;
+
+  int result = GetProperty(window, property_name,
+                           (~0L), // (all of them)
+                           &type, &format, &num_items, &properties);
+  if (result != Success)
+    return false;
+
+  if (type != XA_ATOM) {
+    XFree(properties);
+    return false;
+  }
+
+  Atom* atom_properties = reinterpret_cast<Atom*>(properties);
+  value->clear();
+  value->insert(value->begin(), atom_properties, atom_properties + num_items);
+  XFree(properties);
+  return true;
+}
+
+bool GetStringProperty(
+    XID window, const std::string& property_name, std::string* value) {
+  Atom type = None;
+  int format = 0;  // size in bits of each item in 'property'
+  long unsigned int num_items = 0;
   unsigned char* property = NULL;
 
-  int result = XGetWindowProperty(GetXDisplay(),
-                                  window,
-                                  property_atom,
-                                  0,      // offset into property data to read
-                                  1024,   // max length to get
-                                  False,  // deleted
-                                  AnyPropertyType,
-                                  &type,
-                                  &format,
-                                  &num_items,
-                                  &remaining_bytes,
-                                  &property);
+  int result = GetProperty(window, property_name, 1024,
+                           &type, &format, &num_items, &property);
   if (result != Success)
     return false;
 
@@ -376,16 +397,16 @@ bool EnumerateChildren(EnumerateWindowsDelegate* delegate, XID window,
   if (status == 0)
     return false;
 
-  std::set<XID> windows;
-  for (unsigned int i = 0; i < num_children; i++)
-    windows.insert(children[i]);
+  std::vector<XID> windows;
+  for (int i = static_cast<int>(num_children) - 1; i >= 0; i--)
+    windows.push_back(children[i]);
 
   XFree(children);
 
   // XQueryTree returns the children of |window| in bottom-to-top order, so
   // reverse-iterate the list to check the windows from top-to-bottom.
-  std::set<XID>::reverse_iterator iter;
-  for (iter = windows.rbegin(); iter != windows.rend(); iter++) {
+  std::vector<XID>::iterator iter;
+  for (iter = windows.begin(); iter != windows.end(); iter++) {
     if (IsWindowNamed(*iter) && delegate->ShouldStopIterating(*iter))
       return true;
   }
@@ -395,7 +416,7 @@ bool EnumerateChildren(EnumerateWindowsDelegate* delegate, XID window,
   // loop because the recursion and call to XQueryTree are expensive and is only
   // needed for a small number of cases.
   if (++depth <= max_depth) {
-    for (iter = windows.rbegin(); iter != windows.rend(); iter++) {
+    for (iter = windows.begin(); iter != windows.end(); iter++) {
       if (EnumerateChildren(delegate, *iter, max_depth, depth))
         return true;
     }
@@ -409,29 +430,20 @@ bool EnumerateAllWindows(EnumerateWindowsDelegate* delegate, int max_depth) {
   return EnumerateChildren(delegate, root, max_depth, 0);
 }
 
-bool GetXWindowStack(std::vector<XID>* windows) {
+bool GetXWindowStack(Window window, std::vector<XID>* windows) {
   windows->clear();
-
-  static Atom atom = XInternAtom(GetXDisplay(),
-                                 "_NET_CLIENT_LIST_STACKING", False);
 
   Atom type;
   int format;
   unsigned long count;
-  unsigned long bytes_after;
   unsigned char *data = NULL;
-  if (XGetWindowProperty(GetXDisplay(),
-                         GetX11RootWindow(),
-                         atom,
-                         0,                // offset
-                         ~0L,              // length
-                         False,            // delete
-                         AnyPropertyType,  // requested type
-                         &type,
-                         &format,
-                         &count,
-                         &bytes_after,
-                         &data) != Success) {
+  if (GetProperty(window,
+                  "_NET_CLIENT_LIST_STACKING",
+                  ~0L,
+                  &type,
+                  &format,
+                  &count,
+                  &data) != Success) {
     return false;
   }
 
@@ -439,8 +451,8 @@ bool GetXWindowStack(std::vector<XID>* windows) {
   if (type == XA_WINDOW && format == 32 && data && count > 0) {
     result = true;
     XID* stack = reinterpret_cast<XID*>(data);
-    for (unsigned long i = 0; i < count; i++)
-      windows->insert(windows->begin(), stack[i]);
+    for (long i = static_cast<long>(count) - 1; i >= 0; i--)
+      windows->push_back(stack[i]);
   }
 
   if (data)
@@ -676,54 +688,6 @@ bool GetWindowManagerName(std::string* wm_name) {
   return !got_error && result;
 }
 
-static cairo_status_t SnapshotCallback(
-    void *closure, const unsigned char *data, unsigned int length) {
-  std::vector<unsigned char>* png_representation =
-      static_cast<std::vector<unsigned char>*>(closure);
-
-  size_t old_size = png_representation->size();
-  png_representation->resize(old_size + length);
-  memcpy(&(*png_representation)[old_size], data, length);
-  return CAIRO_STATUS_SUCCESS;
-}
-
-void GrabWindowSnapshot(GtkWindow* gtk_window,
-                        std::vector<unsigned char>* png_representation) {
-  GdkWindow* gdk_window = GTK_WIDGET(gtk_window)->window;
-  Display* display = GDK_WINDOW_XDISPLAY(gdk_window);
-  XID win = GDK_WINDOW_XID(gdk_window);
-  XWindowAttributes attr;
-  if (XGetWindowAttributes(display, win, &attr) == 0) {
-    LOG(ERROR) << "Couldn't get window attributes";
-    return;
-  }
-  XImage* image = XGetImage(
-      display, win, 0, 0, attr.width, attr.height, AllPlanes, ZPixmap);
-  if (!image) {
-    LOG(ERROR) << "Couldn't get image";
-    return;
-  }
-  if (image->depth != 24) {
-    LOG(ERROR)<< "Unsupported image depth " << image->depth;
-    return;
-  }
-  cairo_surface_t* surface =
-      cairo_image_surface_create_for_data(
-          reinterpret_cast<unsigned char*>(image->data),
-          CAIRO_FORMAT_RGB24,
-          image->width,
-          image->height,
-          image->bytes_per_line);
-
-  if (!surface) {
-    LOG(ERROR) << "Unable to create Cairo surface from XImage data";
-    return;
-  }
-  cairo_surface_write_to_png_stream(
-      surface, SnapshotCallback, png_representation);
-  cairo_surface_destroy(surface);
-}
-
 bool ChangeWindowDesktop(XID window, XID destination) {
   int desktop;
   if (!GetWindowDesktop(destination, &desktop))
@@ -750,6 +714,34 @@ bool ChangeWindowDesktop(XID window, XID destination) {
 
 void SetDefaultX11ErrorHandlers() {
   SetX11ErrorHandlers(NULL, NULL);
+}
+
+bool IsX11WindowFullScreen(XID window) {
+  // First check if _NET_WM_STATE property contains _NET_WM_STATE_FULLSCREEN.
+  static Atom atom = gdk_x11_get_xatom_by_name_for_display(
+      gdk_display_get_default(), "_NET_WM_STATE_FULLSCREEN");
+
+  std::vector<Atom> atom_properties;
+  if (GetAtomArrayProperty(window,
+                           "_NET_WM_STATE",
+                           &atom_properties) &&
+      std::find(atom_properties.begin(), atom_properties.end(), atom)
+          != atom_properties.end())
+    return true;
+
+  // As the last resort, check if the window size is as large as the main
+  // screen.
+  GdkRectangle monitor_rect;
+  gdk_screen_get_monitor_geometry(gdk_screen_get_default(), 0, &monitor_rect);
+
+  gfx::Rect window_rect;
+  if (!ui::GetWindowRect(window, &window_rect))
+    return false;
+
+  return monitor_rect.x == window_rect.x() &&
+         monitor_rect.y == window_rect.y() &&
+         monitor_rect.width == window_rect.width() &&
+         monitor_rect.height == window_rect.height();
 }
 
 // ----------------------------------------------------------------------------
@@ -835,29 +827,29 @@ void SetX11ErrorHandlers(XErrorHandler error_handler,
       io_error_handler ? io_error_handler : DefaultX11IOErrorHandler);
 }
 
-std::string GetErrorEventDescription(Display *dpy,
-                                     XErrorEvent *error_event) {
+void LogErrorEventDescription(Display* dpy,
+                              XErrorEvent error_event) {
   char error_str[256];
   char request_str[256];
 
-  XGetErrorText(dpy, error_event->error_code, error_str, sizeof(error_str));
+  XGetErrorText(dpy, error_event.error_code, error_str, sizeof(error_str));
 
   strncpy(request_str, "Unknown", sizeof(request_str));
-  if (error_event->request_code < 128) {
-    std::string num = base::UintToString(error_event->request_code);
+  if (error_event.request_code < 128) {
+    std::string num = base::UintToString(error_event.request_code);
     XGetErrorDatabaseText(
         dpy, "XRequest", num.c_str(), "Unknown", request_str,
         sizeof(request_str));
-  }  else {
+  } else {
     int num_ext;
-    char **ext_list = XListExtensions(dpy, &num_ext);
+    char** ext_list = XListExtensions(dpy, &num_ext);
 
     for (int i = 0; i < num_ext; i++) {
       int ext_code, first_event, first_error;
       XQueryExtension(dpy, ext_list[i], &ext_code, &first_event, &first_error);
-      if (error_event->request_code == ext_code) {
+      if (error_event.request_code == ext_code) {
         std::string msg = StringPrintf(
-            "%s.%d", ext_list[i], error_event->minor_code);
+            "%s.%d", ext_list[i], error_event.minor_code);
         XGetErrorDatabaseText(
             dpy, "XRequest", msg.c_str(), "Unknown", request_str,
             sizeof(request_str));
@@ -867,12 +859,16 @@ std::string GetErrorEventDescription(Display *dpy,
     XFreeExtensionList(ext_list);
   }
 
-  return base::StringPrintf(
-      "X Error detected: serial %lu, error_code %u (%s), "
-      "request_code %u minor_code %u (%s)",
-      error_event->serial, error_event->error_code, error_str,
-      error_event->request_code, error_event->minor_code, request_str);
+  LOG(ERROR) 
+      << "X Error detected: "
+      << "serial " << error_event.serial << ", "
+      << "error_code " << static_cast<int>(error_event.error_code)
+      << " (" << error_str << "), "
+      << "request_code " << static_cast<int>(error_event.request_code) << ", "
+      << "minor_code " << static_cast<int>(error_event.minor_code)
+      << " (" << request_str << ")";
 }
+
 // ----------------------------------------------------------------------------
 // End of x11_util_internal.h
 

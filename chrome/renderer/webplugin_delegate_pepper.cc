@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,18 +15,12 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
-#if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
-#endif
 #include "base/md5.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#if defined(OS_MACOSX)
-#include "base/mac/scoped_cftyperef.h"
-#endif
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -39,17 +33,9 @@
 #include "chrome/renderer/pepper_widget.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
-#if defined(OS_LINUX)
-#include "chrome/renderer/renderer_sandbox_support_linux.h"
-#endif
 #include "chrome/renderer/webplugin_delegate_proxy.h"
-#include "gfx/blit.h"
-#if defined(OS_WIN)
-#include "gfx/codec/jpeg_codec.h"
-#include "gfx/gdi_util.h"
-#include "printing/units.h"
-#include "skia/ext/vector_platform_device.h"
-#endif
+#include "ui/gfx/blit.h"
+#include "printing/native_metafile_factory.h"
 #include "printing/native_metafile.h"
 #include "third_party/npapi/bindings/npapi_extensions.h"
 #include "third_party/npapi/bindings/npapi_extensions_private.h"
@@ -64,12 +50,17 @@
 #include "webkit/plugins/npapi/plugin_host.h"
 #include "webkit/plugins/npapi/plugin_stream_url.h"
 
-#if defined(ENABLE_GPU)
-#include "webkit/plugins/npapi/plugin_constants_win.h"
-#endif
-
-#if defined(ENABLE_GPU)
-using gpu::Buffer;
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
+#include "base/mac/scoped_cftyperef.h"
+#elif defined(OS_LINUX)
+#include "chrome/renderer/renderer_sandbox_support_linux.h"
+#include "printing/pdf_ps_metafile_cairo.h"
+#elif defined(OS_WIN)
+#include "printing/units.h"
+#include "skia/ext/vector_platform_device.h"
+#include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/gdi_util.h"
 #endif
 
 using webkit::npapi::WebPlugin;
@@ -87,15 +78,6 @@ namespace {
 struct Device2DImpl {
   TransportDIB* dib;
 };
-
-struct Device3DImpl {
-#if defined(ENABLE_GPU)
-  gpu::CommandBuffer* command_buffer;
-#endif
-  bool dynamically_created;
-};
-
-const int32 kDefaultCommandBufferSize = 1024 * 1024;
 
 }  // namespace
 
@@ -198,22 +180,6 @@ void WebPluginDelegatePepper::DestroyInstance() {
 
     instance_ = 0;
   }
-
-  // Destroy the nested GPU plugin only after first destroying the underlying
-  // Pepper plugin. This is so the Pepper plugin does not attempt to issue
-  // rendering commands after the GPU plugin has stopped processing them and
-  // responding to them.
-  if (nested_delegate_) {
-#if defined(ENABLE_GPU)
-    if (command_buffer_) {
-      nested_delegate_->DestroyCommandBuffer(command_buffer_);
-      command_buffer_ = NULL;
-    }
-#endif
-
-    nested_delegate_->PluginDestroyed();
-    nested_delegate_ = NULL;
-  }
 }
 
 void WebPluginDelegatePepper::UpdateGeometry(
@@ -237,21 +203,6 @@ void WebPluginDelegatePepper::UpdateGeometry(
                           window_rect_.width(), window_rect_.height());
   new_committed.allocPixels();
   committed_bitmap_ = new_committed;
-
-  // Forward the new geometry to the nested plugin instance.
-  if (nested_delegate_)
-    nested_delegate_->UpdateGeometry(window_rect, clip_rect);
-
-#if defined(ENABLE_GPU)
-#if defined(OS_MACOSX)
-  // Send the new window size to the command buffer service code so it
-  // can allocate a new backing store. The handle to the new backing
-  // store is sent back to the browser asynchronously.
-  if (command_buffer_) {
-    command_buffer_->SetWindowSize(window_rect_.size());
-  }
-#endif  // OS_MACOSX
-#endif  // ENABLE_GPU
 
   if (!instance())
     return;
@@ -568,8 +519,7 @@ NPError WebPluginDelegatePepper::Device2DInitializeContext(
   }
 
   // This is a windowless plugin, so set it to have no handle. Defer this
-  // until we know the plugin will use the 2D device. If it uses the 3D device
-  // it will have a window handle.
+  // until we know the plugin will use the 2D device.
   plugin_->SetWindow(gfx::kNullPluginWindow);
 
   scoped_ptr<Graphics2DDeviceContext> g2d(new Graphics2DDeviceContext(this));
@@ -670,76 +620,6 @@ NPError WebPluginDelegatePepper::Device3DQueryConfig(
 NPError WebPluginDelegatePepper::Device3DInitializeContext(
     const NPDeviceContext3DConfig* config,
     NPDeviceContext3D* context) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-#if defined(ENABLE_GPU)
-  // Check to see if the GPU plugin is already initialized and fail if so.
-  if (nested_delegate_)
-    return NPERR_GENERIC_ERROR;
-
-  // Create an instance of the GPU plugin that is responsible for 3D
-  // rendering.
-  nested_delegate_ = new WebPluginDelegateProxy(
-      "application/vnd.google.chrome.gpu-plugin", render_view_);
-
-  // TODO(apatrick): should the GPU plugin be attached to plugin_?
-  if (nested_delegate_->Initialize(GURL(),
-                                   std::vector<std::string>(),
-                                   std::vector<std::string>(),
-                                   plugin_,
-                                   false)) {
-    plugin_->SetAcceptsInputEvents(true);
-
-    // Ensure the window has the correct size before initializing the
-    // command buffer.
-    nested_delegate_->UpdateGeometry(window_rect_, clip_rect_);
-
-    // Ask the GPU plugin to create a command buffer and return a proxy.
-    command_buffer_ = nested_delegate_->CreateCommandBuffer();
-    if (command_buffer_) {
-      // Initialize the proxy command buffer.
-      if (command_buffer_->Initialize(config->commandBufferSize)) {
-        // Get the initial command buffer state.
-        gpu::CommandBuffer::State state = command_buffer_->GetState();
-
-        // Initialize the 3D context.
-        context->reserved = NULL;
-        context->waitForProgress = true;
-        Buffer ring_buffer = command_buffer_->GetRingBuffer();
-        context->commandBuffer = ring_buffer.ptr;
-        context->commandBufferSize = state.num_entries;
-        context->repaintCallback = NULL;
-        Synchronize3DContext(context, state);
-
-        ScheduleHandleRepaint(instance_->npp(), context);
-
-#if defined(OS_MACOSX)
-        command_buffer_->SetWindowSize(window_rect_.size());
-#endif  // OS_MACOSX
-
-        // Make sure the nested delegate shows up in the right place
-        // on the page.
-        SendNestedDelegateGeometryToBrowser(window_rect_, clip_rect_);
-
-        // Save the implementation information (the CommandBuffer).
-        Device3DImpl* impl = new Device3DImpl;
-        impl->command_buffer = command_buffer_;
-        impl->dynamically_created = false;
-        context->reserved = impl;
-
-        return NPERR_NO_ERROR;
-      }
-
-      nested_delegate_->DestroyCommandBuffer(command_buffer_);
-      command_buffer_ = NULL;
-    }
-  }
-
-  nested_delegate_->PluginDestroyed();
-  nested_delegate_ = NULL;
-#endif  // ENABLE_GPU
-
   return NPERR_GENERIC_ERROR;
 }
 
@@ -762,212 +642,49 @@ NPError WebPluginDelegatePepper::Device3DFlushContext(
     NPDeviceContext3D* context,
     NPDeviceFlushContextCallbackPtr callback,
     void* user_data) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-#if defined(ENABLE_GPU)
-  gpu::CommandBuffer::State state;
-
-  if (context->waitForProgress) {
-    if (callback) {
-      command_buffer_->AsyncFlush(
-          context->putOffset,
-          method_factory3d_.NewRunnableMethod(
-              &WebPluginDelegatePepper::Device3DUpdateState,
-              id,
-              context,
-              callback,
-              user_data));
-    } else {
-      state = command_buffer_->FlushSync(context->putOffset);
-      Synchronize3DContext(context, state);
-    }
-  } else {
-    if (callback) {
-      command_buffer_->AsyncGetState(
-          method_factory3d_.NewRunnableMethod(
-              &WebPluginDelegatePepper::Device3DUpdateState,
-              id,
-              context,
-              callback,
-              user_data));
-    } else {
-      state = command_buffer_->GetState();
-      Synchronize3DContext(context, state);
-    }
-  }
-#endif  // ENABLE_GPU
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DDestroyContext(
     NPDeviceContext3D* context) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-#if defined(ENABLE_GPU)
-  // Prevent any async flush callbacks from being invoked after the context
-  // has been destroyed.
-  method_factory3d_.RevokeAll();
-
-  // TODO(apatrick): this will be much simpler when we switch to the new device
-  // API. There should be no need for the Device3DImpl and the context will
-  // always be destroyed dynamically.
-  Device3DImpl* impl = static_cast<Device3DImpl*>(context->reserved);
-  bool dynamically_created = impl->dynamically_created;
-  delete impl;
-  context->reserved = NULL;
-  if (dynamically_created) {
-    delete context;
-  }
-
-  if (nested_delegate_) {
-    if (command_buffer_) {
-      nested_delegate_->DestroyCommandBuffer(command_buffer_);
-      command_buffer_ = NULL;
-    }
-
-    nested_delegate_->PluginDestroyed();
-    nested_delegate_ = NULL;
-  }
-#endif  // ENABLE_GPU
-
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DCreateBuffer(
     NPDeviceContext3D* context,
     size_t size,
     int32* id) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-#if defined(ENABLE_GPU)
-  *id = command_buffer_->CreateTransferBuffer(size);
-  if (*id < 0)
-    return NPERR_GENERIC_ERROR;
-#endif  // ENABLE_GPU
-
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DDestroyBuffer(
     NPDeviceContext3D* context,
     int32 id) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-#if defined(ENABLE_GPU)
-  command_buffer_->DestroyTransferBuffer(id);
-#endif  // ENABLE_GPU
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DMapBuffer(
     NPDeviceContext3D* context,
     int32 id,
     NPDeviceBuffer* np_buffer) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-#if defined(ENABLE_GPU)
-  Buffer gpu_buffer;
-  if (id == NP3DCommandBufferId) {
-    gpu_buffer = command_buffer_->GetRingBuffer();
-  } else {
-    gpu_buffer = command_buffer_->GetTransferBuffer(id);
-  }
-
-  np_buffer->ptr = gpu_buffer.ptr;
-  np_buffer->size = gpu_buffer.size;
-  if (!np_buffer->ptr)
-    return NPERR_GENERIC_ERROR;
-#endif  // ENABLE_GPU
-
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DGetNumConfigs(int32* num_configs) {
-  if (!num_configs)
-    return NPERR_GENERIC_ERROR;
-
-  *num_configs = 1;
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DGetConfigAttribs(
     int32 config,
     int32* attrib_list) {
-  // Only one config available currently.
-  if (config != 0)
-    return NPERR_GENERIC_ERROR;
-
-  if (attrib_list) {
-    for (int32* attrib_pair = attrib_list; *attrib_pair; attrib_pair += 2) {
-      switch (attrib_pair[0]) {
-        case NP3DAttrib_BufferSize:
-          attrib_pair[1] = 32;
-          break;
-        case NP3DAttrib_AlphaSize:
-        case NP3DAttrib_BlueSize:
-        case NP3DAttrib_GreenSize:
-        case NP3DAttrib_RedSize:
-          attrib_pair[1] = 8;
-          break;
-        case NP3DAttrib_DepthSize:
-          attrib_pair[1] = 24;
-          break;
-        case NP3DAttrib_StencilSize:
-          attrib_pair[1] = 8;
-          break;
-        case NP3DAttrib_SurfaceType:
-          attrib_pair[1] = 0;
-          break;
-        default:
-          return NPERR_GENERIC_ERROR;
-      }
-    }
-  }
-
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DCreateContext(
     int32 config,
     const int32* attrib_list,
     NPDeviceContext3D** context) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-  // Only one config available currently.
-  if (config != 0)
-    return NPERR_GENERIC_ERROR;
-
-  // For now, just use the old API to initialize the context.
-  NPDeviceContext3DConfig old_config;
-  old_config.commandBufferSize = kDefaultCommandBufferSize;
-  if (attrib_list) {
-    for (const int32* attrib_pair = attrib_list; *attrib_pair;
-         attrib_pair += 2) {
-      switch (attrib_pair[0]) {
-        case NP3DAttrib_CommandBufferSize:
-          old_config.commandBufferSize = attrib_pair[1];
-          break;
-        default:
-          return NPERR_GENERIC_ERROR;
-      }
-    }
-  }
-
-  *context = new NPDeviceContext3D;
-  Device3DInitializeContext(&old_config, *context);
-
-  // Flag the context as dynamically created by the browser. TODO(apatrick):
-  // take this out when all contexts are dynamically created.
-  Device3DImpl* impl = static_cast<Device3DImpl*>((*context)->reserved);
-  impl->dynamically_created = true;
-
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DRegisterCallback(
@@ -976,19 +693,7 @@ NPError WebPluginDelegatePepper::Device3DRegisterCallback(
     int32 callback_type,
     NPDeviceGenericCallbackPtr callback,
     void* callback_data) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-  switch (callback_type) {
-    case NP3DCallback_Repaint:
-      context->repaintCallback = reinterpret_cast<NPDeviceContext3DRepaintPtr>(
-          callback);
-      break;
-    default:
-      return NPERR_GENERIC_ERROR;
-  }
-
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::Device3DSynchronizeContext(
@@ -999,58 +704,7 @@ NPError WebPluginDelegatePepper::Device3DSynchronizeContext(
     int32* output_attrib_list,
     NPDeviceSynchronizeContextCallbackPtr callback,
     void* callback_data) {
-  if (!context)
-    return NPERR_GENERIC_ERROR;
-
-  // Copy input attributes into context.
-  if (input_attrib_list) {
-    for (const int32* attrib_pair = input_attrib_list;
-         *attrib_pair;
-         attrib_pair += 2) {
-      switch (attrib_pair[0]) {
-        case NP3DAttrib_PutOffset:
-          context->putOffset = attrib_pair[1];
-          break;
-        default:
-          return NPERR_GENERIC_ERROR;
-      }
-    }
-  }
-
-  // Use existing flush mechanism for now.
-  if (mode != NPDeviceSynchronizationMode_Cached) {
-    context->waitForProgress = mode == NPDeviceSynchronizationMode_Flush;
-    Device3DFlushContext(id, context, callback, callback_data);
-  }
-
-  // Copy most recent output attributes from context.
-  // To read output attributes after the completion of an asynchronous flush,
-  // invoke SynchronizeContext again with mode
-  // NPDeviceSynchronizationMode_Cached from the callback function.
-  if (output_attrib_list) {
-    for (int32* attrib_pair = output_attrib_list;
-         *attrib_pair;
-         attrib_pair += 2) {
-      switch (attrib_pair[0]) {
-        case NP3DAttrib_CommandBufferSize:
-          attrib_pair[1] = context->commandBufferSize;
-          break;
-        case NP3DAttrib_GetOffset:
-          attrib_pair[1] = context->getOffset;
-          break;
-        case NP3DAttrib_PutOffset:
-          attrib_pair[1] = context->putOffset;
-          break;
-        case NP3DAttrib_Token:
-          attrib_pair[1] = context->token;
-          break;
-        default:
-          return NPERR_GENERIC_ERROR;
-      }
-    }
-  }
-
-  return NPERR_NO_ERROR;
+  return NPERR_GENERIC_ERROR;
 }
 
 NPError WebPluginDelegatePepper::DeviceAudioQueryCapability(int32 capability,
@@ -1222,7 +876,7 @@ bool WebPluginDelegatePepper::VectorPrintPage(int page_number,
   // directly.
   cairo_t* context = canvas->beginPlatformPaint();
   printing::NativeMetafile* metafile =
-      printing::NativeMetafile::FromCairoContext(context);
+      printing::PdfPsMetafile::FromCairoContext(context);
   DCHECK(metafile);
   if (metafile) {
     ret = metafile->SetRawData(pdf_output, output_size);
@@ -1231,14 +885,15 @@ bool WebPluginDelegatePepper::VectorPrintPage(int page_number,
   }
   canvas->endPlatformPaint();
 #elif defined(OS_MACOSX)
-  printing::NativeMetafile metafile;
+  scoped_ptr<printing::NativeMetafile> metafile(
+      printing::NativeMetafileFactory::CreateMetafile());
   // Create a PDF metafile and render from there into the passed in context.
-  if (metafile.Init(pdf_output, output_size)) {
+  if (metafile->Init(pdf_output, output_size)) {
     // Flip the transform.
     CGContextSaveGState(canvas);
     CGContextTranslateCTM(canvas, 0, current_printable_area_.height());
     CGContextScaleCTM(canvas, 1.0, -1.0);
-    ret = metafile.RenderPage(1, canvas, current_printable_area_.ToCGRect(),
+    ret = metafile->RenderPage(1, canvas, current_printable_area_.ToCGRect(),
                               true, false, true, true);
     CGContextRestoreGState(canvas);
   }
@@ -1383,16 +1038,11 @@ WebPluginDelegatePepper::WebPluginDelegatePepper(
     : render_view_(render_view),
       plugin_(NULL),
       instance_(instance),
-      nested_delegate_(NULL),
       current_printer_dpi_(-1),
 #if defined (OS_LINUX)
       num_pages_(0),
       pdf_output_done_(false),
 #endif  // (OS_LINUX)
-#if defined(ENABLE_GPU)
-      command_buffer_(NULL),
-      method_factory3d_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-#endif
       find_identifier_(-1),
       current_choose_file_callback_(NULL),
       current_choose_file_user_data_(NULL) {
@@ -1430,21 +1080,16 @@ void WebPluginDelegatePepper::PluginDestroyed() {
 
 void WebPluginDelegatePepper::Paint(WebKit::WebCanvas* canvas,
                                     const gfx::Rect& rect) {
-  if (nested_delegate_) {
-    // TODO(apatrick): The GPU plugin will render to an offscreen render target.
-    //    Need to copy it to the screen here.
-  } else {
-    // Blit from background_context to context.
-    if (!committed_bitmap_.isNull()) {
+  // Blit from background_context to context.
+  if (!committed_bitmap_.isNull()) {
 #if defined(OS_MACOSX)
-      DrawSkBitmapToCanvas(committed_bitmap_, canvas, window_rect_,
-                           static_cast<int>(CGBitmapContextGetHeight(canvas)));
+    DrawSkBitmapToCanvas(committed_bitmap_, canvas, window_rect_,
+                         static_cast<int>(CGBitmapContextGetHeight(canvas)));
 #else
-      canvas->drawBitmap(committed_bitmap_,
-                         SkIntToScalar(window_rect_.origin().x()),
-                         SkIntToScalar(window_rect_.origin().y()));
+    canvas->drawBitmap(committed_bitmap_,
+                       SkIntToScalar(window_rect_.origin().x()),
+                       SkIntToScalar(window_rect_.origin().y()));
 #endif
-    }
   }
 }
 
@@ -1582,70 +1227,6 @@ bool WebPluginDelegatePepper::HandleInputEvent(const WebInputEvent& event,
   if (cursor_.get())
     *cursor_info = *cursor_;
   return rv;
-}
-
-#if defined(ENABLE_GPU)
-
-void WebPluginDelegatePepper::ScheduleHandleRepaint(
-    NPP npp, NPDeviceContext3D* context) {
-  command_buffer_->SetNotifyRepaintTask(method_factory3d_.NewRunnableMethod(
-      &WebPluginDelegatePepper::ForwardHandleRepaint,
-      npp,
-      context));
-}
-
-void WebPluginDelegatePepper::ForwardHandleRepaint(
-    NPP npp, NPDeviceContext3D* context) {
-  if (context->repaintCallback)
-    context->repaintCallback(npp, context);
-  ScheduleHandleRepaint(npp, context);
-}
-
-void WebPluginDelegatePepper::Synchronize3DContext(
-    NPDeviceContext3D* context,
-    const gpu::CommandBuffer::State& state) {
-  context->getOffset = state.get_offset;
-  context->putOffset = state.put_offset;
-  context->token = state.token;
-  context->error = static_cast<NPDeviceContext3DError>(state.error);
-}
-
-void WebPluginDelegatePepper::Device3DUpdateState(
-    NPP npp,
-    NPDeviceContext3D* context,
-    NPDeviceFlushContextCallbackPtr callback,
-    void* user_data) {
-  if (command_buffer_) {
-    Synchronize3DContext(context, command_buffer_->GetLastState());
-    if (callback)
-      callback(npp, context, NPERR_NO_ERROR, user_data);
-  }
-}
-
-#endif  // ENABLE_GPU
-
-void WebPluginDelegatePepper::SendNestedDelegateGeometryToBrowser(
-    const gfx::Rect& window_rect,
-    const gfx::Rect& clip_rect) {
-  // Inform the browser about the location of the plugin on the page.
-  // It appears that initially the plugin does not get laid out correctly --
-  // possibly due to lazy creation of the nested delegate.
-  if (!nested_delegate_ ||
-      !nested_delegate_->GetPluginWindowHandle() ||
-      !render_view_) {
-    return;
-  }
-
-  webkit::npapi::WebPluginGeometry geom;
-  geom.window = nested_delegate_->GetPluginWindowHandle();
-  geom.window_rect = window_rect;
-  geom.clip_rect = clip_rect;
-  // Rects_valid must be true for this to work in the Gtk port;
-  // hopefully not having the cutout rects will not cause incorrect
-  // clipping.
-  geom.rects_valid = true;
-  geom.visible = true;
-  render_view_->DidMovePlugin(geom);
 }
 
 bool WebPluginDelegatePepper::CalculatePrintedPageDimensions(

@@ -434,6 +434,21 @@
    fun:_ZN12_GLOBAL__N_127HistoryContentsProviderTest5SetUpEv
 }
 {
+   bug_36605b
+   Memcheck:Leak
+   fun:malloc
+   fun:realloc
+   fun:new_sem_from_pool
+   fun:_pthread_cond_wait
+   fun:pthread_cond_timedwait$UNIX2003
+   fun:_ZN4base17ConditionVariable9TimedWaitERKNS_9TimeDeltaE
+   fun:_ZN4base22PosixDynamicThreadPool11WaitForTaskEv
+   fun:_ZN4base12_GLOBAL__N_112WorkerThread10ThreadMainEv
+   fun:_ZN4base12_GLOBAL__N_110ThreadFuncEPv
+   fun:_pthread_start
+   fun:thread_start
+}
+{
    bug_40429
    Memcheck:Leak
    fun:calloc
@@ -607,7 +622,6 @@
    fun:_ZN15AudioManagerMac21HasAudioOutputDevicesEv
    fun:_ZN5mediaL21HasAudioOutputDevicesEv
    fun:_ZN5media45AudioOutputControllerTest_CreateAndClose_Test8TestBodyEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
 }
 {
    bug_46186_e
@@ -621,7 +635,6 @@
    fun:_ZN15AudioManagerMac21HasAudioOutputDevicesEv
    fun:_ZN5mediaL21HasAudioOutputDevicesEv
    fun:_ZN5media45AudioOutputControllerTest_CreateAndClose_Test8TestBodyEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
 }
 {
    bug_47949
@@ -939,9 +952,9 @@
    ...
    fun:FSFindFolder
    fun:_ZN12_GLOBAL__N_124GetPluginCommonDirectoryEPSt6vectorI8FilePathSaIS1_EEb
-   fun:_ZN5NPAPI10PluginList20GetPluginDirectoriesEPSt6vectorI8FilePathSaIS2_EE
-   fun:_ZN5NPAPI10PluginList11LoadPluginsEb
-   fun:_ZN5NPAPI10PluginList10GetPluginsEbPSt6vectorI13WebPluginInfoSaIS2_EE
+   fun:_ZN6webkit5npapi10PluginList20GetPluginDirectoriesEPSt6vectorI8FilePathSaIS2_EE
+   fun:_ZN6webkit5npapi10PluginList11LoadPluginsEb
+   fun:_ZN6webkit5npapi10PluginList10GetPluginsEbPSt6vectorI13WebPluginInfoSaIS2_EE
    fun:_ZN13PluginUpdater30GetPreferencesDataOnFileThreadEPv
 }
 {
@@ -950,9 +963,9 @@
    ...
    fun:FSFindFolder
    fun:_ZN12_GLOBAL__N_124GetPluginCommonDirectoryEPSt6vectorI8FilePathSaIS1_EEb
-   fun:_ZN5NPAPI10PluginList20GetPluginDirectoriesEPSt6vectorI8FilePathSaIS2_EE
-   fun:_ZN5NPAPI10PluginList11LoadPluginsEb
-   fun:_ZN5NPAPI10PluginList10GetPluginsEbPSt6vectorI13WebPluginInfoSaIS2_EE
+   fun:_ZN6webkit5npapi10PluginList20GetPluginDirectoriesEPSt6vectorI8FilePathSaIS2_EE
+   fun:_ZN6webkit5npapi10PluginList11LoadPluginsEb
+   fun:_ZN6webkit5npapi10PluginList10GetPluginsEbPSt6vectorI13WebPluginInfoSaIS2_EE
    fun:_ZN13PluginUpdater30GetPreferencesDataOnFileThreadEPv
 }
 {
@@ -961,7 +974,6 @@
    fun:_Znw*
    fun:_ZN20BrowserAccessibility6CreateEv
    fun:_ZN24BrowserAccessibilityTest5SetUpEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
 }
 {
    bug_59243_b
@@ -971,7 +983,6 @@
    fun:_ZNSt3mapIiSbItN4base20string16_char_traitsESaItEESt4lessIiESaISt4pairIKiS3_EEEaSERKSA_
    fun:_ZN20BrowserAccessibility10InitializeEP27BrowserAccessibilityManagerPS_iiRKN11webkit_glue16WebAccessibilityE
    fun:_ZN24BrowserAccessibilityTest5SetUpEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
 }
 
 {
@@ -1045,7 +1056,7 @@
    fun:createBitmapContext
    fun:CGBitmapContextCreate
    fun:_ZN4skia12_GLOBAL__N_1L16CGContextForDataEPvii
-   fun:_ZN4skia20BitmapPlatformDevice14CreateWithDataEPhiib
+   fun:_ZN4skia20BitmapPlatformDevice*
 }
 {
    bug_61228_a
@@ -1070,6 +1081,14 @@
    fun:_ZN6policy23FileBasedPolicyProviderC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListEPNS0_8DelegateE
    fun:_ZN6policy30ConfigurationPolicyProviderMacC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListE
    fun:_ZN6policy30ConfigurationPolicyProviderMacC1EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListE
+}
+{
+   bug_61228_c
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN15FilePathWatcherC2Ev
+   fun:_ZN15FilePathWatcherC1Ev
+   fun:_ZN6policy21FileBasedPolicyLoader16InitOnFileThreadEv
 }
 {
    bug_61737
@@ -1264,7 +1283,6 @@
    fun:-[NSApplication _commonBeginModalSessionForWindow:relativeToWindow:modalDelegate:didEndSelector:contextInfo:]
    fun:-[AutoFillDialogController editSelection:]
    fun:_ZN12_GLOBAL__N_154AutoFillDialogControllerTest_AutoFillDataMutation_Test8TestBodyEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
 }
 {
    bug_69757a
@@ -1282,22 +1300,12 @@
    fun:_ZN3net13CookieMonster20SetCookieWithOptionsERK4GURLRKSsRKNS_13CookieOptionsE
    fun:_ZN3net11CookieStore9SetCookieERK4GURLRKSs
    fun:_ZN12_GLOBAL__N_*CookiesWindowControllerTest_*_Test8TestBodyEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
 }
 {
    bug_69757b
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN9__gnu_cxx13new_allocatorISt13_Rb_tree_nodeISt4pairIKSsPN3net22HttpAuthHandlerFactoryEEEE8allocateEmPKv
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net22HttpAuthHandlerFactoryEESt10_Select1stIS5_ESt4lessISsESaIS5_EE11_M_get_nodeEv
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net22HttpAuthHandlerFactoryEESt10_Select1stIS5_ESt4lessISsESaIS5_EE14_M_create_nodeERKS5_
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net22HttpAuthHandlerFactoryEESt10_Select1stIS5_ESt4lessISsESaIS5_EE9_M_insertEPSt18_Rb_tree_node_baseSD_RKS5_
    ...
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net22HttpAuthHandlerFactoryEESt10_Select1stIS5_ESt4lessISsESaIS5_EE13insert_uniqueESt17_Rb_tree_iteratorIS5_ERKS5_
-   fun:_ZNSt3mapISsPN3net22HttpAuthHandlerFactoryESt4lessISsESaISt4pairIKSsS2_EEE6insertESt17_Rb_tree_iteratorIS7_ERKS7_
-   fun:_ZNSt3mapISsPN3net22HttpAuthHandlerFactoryESt4lessISsESaISt4pairIKSsS2_EEEixERS6_
-   fun:_ZN3net30HttpAuthHandlerRegistryFactory21RegisterSchemeFactoryERKSsPNS_22HttpAuthHandlerFactoryE
-   fun:_ZN3net22HttpAuthHandlerFactory13CreateDefaultEPNS_12HostResolverE
    fun:_ZN21TestURLRequestContext4InitEv
    fun:_ZN21TestURLRequestContextC2Ev
    fun:_ZN21TestURLRequestContextC1Ev
@@ -1306,7 +1314,6 @@
    fun:-[CookiesWindowController loadTreeModelFromProfile]
    fun:-[CookiesWindowController initWithProfile:databaseHelper:storageHelper:appcacheHelper:indexedDBHelper:]
    fun:_ZN12_GLOBAL__N_127CookiesWindowControllerTest5SetUpEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
 }
 {
    bug_69757c
@@ -1314,5 +1321,144 @@
    fun:_Znw*
    fun:_ZN14TestingProfile20CreateRequestContextEv
    fun:_ZN12_GLOBAL__N_127CookiesWindowControllerTest5SetUpEv
-   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
+}
+{
+   bug_71111
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:_CFRuntimeCreateInstance
+   fun:__CFDictionaryInit
+   fun:utDeactivateAllSelectedIMInDoc
+   fun:MyDeactivateTSMDocument
+   fun:_ReactivateTSMDocumentAfterMenuTracking
+   fun:_Z20TearDownMenuTrackingR14MenuSelectData
+   fun:_Z19PopUpMenuSelectCoreP8MenuData5PointdS1_tjPK4RecttmS4_S4_PK10__CFStringPP13OpaqueMenuRefPt
+   fun:_HandlePopUpMenuSelection7
+   fun:_NSPopUpCarbonMenu3
+   fun:-[NSCarbonMenuImpl popUpMenu:atLocation:width:forView:withSelectedItem:withFont:withFlags:withOptions:]
+   fun:-[NSPopUpButtonCell trackMouse:inRect:ofView:untilMouseUp:]
+   fun:-[NSPopUpButtonCell performClickWithFrame:inView:]
+   fun:-[MenuButton(Private) showMenu:]
+   fun:-[MenuButton(Private) clickShowMenu:]
+   fun:-[NSApplication sendAction:to:from:]
+   fun:-[NSControl sendAction:to:]
+   fun:-[NSCell _sendActionFrom:]
+   fun:-[NSButtonCell performClick:]
+   fun:_ZN12_GLOBAL__N_131MenuButtonTest_OpenOnClick_Test8TestBodyEv
+}
+{
+   bug_73036a
+   Memcheck:Leak
+   fun:malloc_zone_calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:NSAllocateObject
+   fun:+[NSHashTable alloc]
+   fun:+[NSTrackingArea initialize]
+   fun:_class_initialize
+   fun:_class_lookupMethodAndLoadCache
+   fun:objc_msgSend
+   fun:-[NSView addTrackingRect:owner:userData:assumeInside:]
+   fun:-[NSThemeFrame _updateMouseTracking]
+   fun:-[NSThemeFrame _tileTitlebarAndRedisplay:]
+   fun:-[NSThemeFrame _updateButtons]
+   fun:-[NSThemeFrame initWithFrame:styleMask:owner:]
+   fun:-[NSGrayFrame initWithFrame:styleMask:owner:]
+   fun:-[NSWindow _commonInitFrame:styleMask:backing:defer:]
+   fun:-[NSWindow _initContent:styleMask:backing:defer:contentView:]
+   fun:-[NSWindow initWithContentRect:styleMask:backing:defer:]
+   fun:-[FramedBrowserWindow initWithContentRect:styleMask:backing:defer:]
+   fun:-[NSWindowTemplate nibInstantiate]
+   fun:-[NSIBObjectData instantiateObject:]
+   fun:-[NSIBObjectData nibInstantiateWithOwner:topLevelObjects:]
+   fun:loadNib
+}
+{
+   bug_73036b
+   Memcheck:Leak
+   fun:malloc_zone_calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:NSAllocateObject
+   fun:+[NSHashTable alloc]
+   fun:+[NSTrackingArea initialize]
+   fun:_class_initialize
+   fun:_class_lookupMethodAndLoadCache
+   fun:objc_msgSend
+   fun:-[NSView addTrackingRect:owner:userData:assumeInside:]
+   fun:-[NSCell(NSPrivate_CellMouseTracking) _setMouseTrackingInRect:ofView:]
+   fun:-[NSButtonCell _setMouseTrackingInRect:ofView:]
+   fun:-[NSControl _setMouseTrackingForCell:]
+   fun:-[NSButton(NSButtonBorder) _setMouseTrackingForCell:]
+   fun:-[NSButtonCell setControlView:]
+   fun:-[NSControl initWithCoder:]
+   fun:-[NSButton initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:-[NSKeyedUnarchiver _decodeArrayOfObjectsForKey:]
+   fun:-[NSArray(NSArray) initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSView initWithCoder:]
+}
+{
+   bug_73275
+   Memcheck:Leak
+   fun:malloc_zone_calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:NSAllocateObject
+   fun:+[NSHashTable alloc]
+   fun:+[NSTrackingArea initialize]
+   fun:_class_initialize
+   fun:_class_lookupMethodAndLoadCache
+   fun:objc_msgSend
+   fun:-[TabContentsViewCocoa initWithTabContentsViewMac:]
+   fun:_ZN18TabContentsViewMac10CreateViewERKN3gfx4SizeE
+   fun:_ZN11TabContentsC2EP7ProfileP12SiteInstanceiPKS_P23SessionStorageNamespace
+   fun:_ZN15TestTabContentsC2EP7ProfileP12SiteInstance
+   fun:_ZN15TestTabContentsC1EP7ProfileP12SiteInstance
+   fun:_ZN25RenderViewHostTestHarness21CreateTestTabContentsEv
+   fun:_ZN25RenderViewHostTestHarness5SetUpEv
+   fun:_ZN30AutocompleteHistoryManagerTest5SetUpEv
+}
+{
+   bug_73299_b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN24BrowserRenderProcessHost20CreateMessageFiltersEv
+   fun:_ZN24BrowserRenderProcessHost4InitEbb
+   fun:_ZN14RenderViewHost16CreateRenderViewERKSbItN4base20string16_char_traitsESaItEE
+   fun:_ZN13ExtensionHost19CreateRenderViewNowEv
+   fun:_ZN13ExtensionHost20ProcessCreationQueue14ProcessOneHostEv
+   fun:_Z16DispatchToMethodIN13ExtensionHost20ProcessCreationQueueEMS1_FvvEEvPT_T0_RK6Tuple0
+   fun:_ZN27ScopedRunnableMethodFactoryIN13ExtensionHost20ProcessCreationQueueEE14RunnableMethodIMS1_FvvE6Tuple0E3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+   fun:_ZN11MessageLoop21DeferOrRunPendingTaskERKNS_11PendingTaskE
+   fun:_ZN11MessageLoop6DoWorkEv
+   fun:_ZN4base24MessagePumpCFRunLoopBase7RunWorkEv
+   fun:_ZN4base24MessagePumpCFRunLoopBase13RunWorkSourceEPv
+   fun:CFRunLoopRunSpecific
+   fun:CFRunLoopRunInMode
+   fun:RunCurrentEventLoopInMode
+   fun:ReceiveNextEventCommon
+   fun:BlockUntilNextEventMatchingListInMode
+   fun:_DPSNextEvent
+   fun:-[NSApplication nextEventMatchingMask:untilDate:inMode:dequeue:]
+   fun:-[NSApplication run]
+   fun:_ZN4base24MessagePumpNSApplication5DoRunEPNS_11MessagePump8DelegateE
+}
+{
+   bug_75136a
+   Memcheck:Addr1
+   ...
+   fun:CFBundlePreflightExecutable
+}
+{
+   bug_75136b
+   Memcheck:Addr4
+   ...
+   fun:CFBundlePreflightExecutable
+}
+{
+   bug_75142
+   Memcheck:Addr4
+   ...
+   fun:CGContextShowGlyphsWithAdvances
 }

@@ -15,9 +15,9 @@
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/extensions/extension.h"
-#include "gfx/gtk_util.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/gtk_util.h"
 
 class Profile;
 
@@ -26,15 +26,15 @@ namespace {
 // Left or right margin.
 const int kPanelHorizMargin = 13;
 
-void OnDialogResponse(GtkDialog* dialog, int response_id,
-                      ExtensionInstallUI::Delegate* delegate) {
+void OnResponse(GtkWidget* dialog, int response_id,
+                ExtensionInstallUI::Delegate* delegate) {
   if (response_id == GTK_RESPONSE_ACCEPT) {
     delegate->InstallUIProceed();
   } else {
     delegate->InstallUIAbort();
   }
 
-  gtk_widget_destroy(GTK_WIDGET(dialog));
+  gtk_widget_destroy(dialog);
 }
 
 void ShowInstallPromptDialog(GtkWindow* parent, SkBitmap* skia_icon,
@@ -79,7 +79,7 @@ void ShowInstallPromptDialog(GtkWindow* parent, SkBitmap* skia_icon,
   gtk_misc_set_alignment(GTK_MISC(heading_label), 0.0, 0.5);
   gtk_box_pack_start(GTK_BOX(right_column_area), heading_label, TRUE, TRUE, 0);
 
-  g_signal_connect(dialog, "response", G_CALLBACK(OnDialogResponse), delegate);
+  g_signal_connect(dialog, "response", G_CALLBACK(OnResponse), delegate);
   gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
   gtk_widget_show_all(dialog);
 }

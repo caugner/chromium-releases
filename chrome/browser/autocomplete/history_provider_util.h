@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,6 @@
 #include "chrome/browser/history/history_types.h"
 
 namespace history {
-
-// Constants which specify, when considered altogether, 'significant'
-// history items. These are used to filter out insignificant items
-// for consideration as autocomplete candidates.
-extern const int kLowQualityMatchTypedLimit;
-extern const int kLowQualityMatchVisitLimit;
-extern const int kLowQualityMatchAgeLimitInDays;
 
 // Used for intermediate history result operations.
 struct HistoryMatch {
@@ -57,11 +50,11 @@ struct HistoryMatch {
 typedef std::deque<HistoryMatch> HistoryMatches;
 
 struct Prefix {
-  Prefix(const std::wstring& prefix, int num_components)
+  Prefix(const string16& prefix, int num_components)
       : prefix(prefix),
         num_components(num_components) {}
 
-  std::wstring prefix;
+  string16 prefix;
 
   // The number of "components" in the prefix.  The scheme is a component,
   // and the initial "www." or "ftp." is a component.  So "http://foo.com"
@@ -71,10 +64,6 @@ struct Prefix {
   int num_components;
 };
 typedef std::vector<Prefix> Prefixes;
-
-// Returns the date threshold for considering an history item as significant.
-base::Time AutocompleteAgeThreshold();
-
 }
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_UTIL_H_

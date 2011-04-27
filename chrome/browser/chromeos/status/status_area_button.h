@@ -17,7 +17,7 @@ class StatusAreaButton : public views::MenuButton {
  public:
   explicit StatusAreaButton(views::ViewMenuDelegate* menu_delegate);
   virtual ~StatusAreaButton() {}
-  virtual void Paint(gfx::Canvas* canvas, bool for_drag);
+  virtual void PaintButton(gfx::Canvas* canvas, PaintButtonMode mode);
   virtual gfx::Size GetPreferredSize();
   virtual gfx::Insets GetInsets() const;
 
@@ -29,16 +29,14 @@ class StatusAreaButton : public views::MenuButton {
     use_menu_button_paint_ = use_menu_button_paint;
   }
 
-  void Enable(bool enable) { enabled_ = enable; }
-
   // views::MenuButton overrides.
   virtual bool Activate();
 
+  // Controls whether or not this status area button is able to be pressed.
+  void set_active(bool active) { active_ = active; }
+  bool active() const { return active_; }
+
  protected:
-  // Draws the icon for this status area button on the canvas.
-  // Subclasses should override this method if they need to draw their own icon.
-  // Otherwise, just call SetIcon() and the it will be handled for you.
-  virtual void DrawIcon(gfx::Canvas* canvas);
 
   // Subclasses should override these methods to return the correct dimensions.
   virtual int icon_height() { return 24; }
@@ -54,7 +52,10 @@ class StatusAreaButton : public views::MenuButton {
   // Insets to use for this button.
   gfx::Insets insets_;
 
-  bool enabled_;
+  // Indicates when this button can be pressed.  Independent of
+  // IsEnabled state, so that when IsEnabled is true, this can still
+  // be false, and vice versa.
+  bool active_;
 
   DISALLOW_COPY_AND_ASSIGN(StatusAreaButton);
 };

@@ -9,8 +9,10 @@
 #include "base/basictypes.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_network_transaction.h"
 #include "net/spdy/spdy_framer.h"
+#include "net/spdy/spdy_http_utils.h"
 
 namespace net {
 
@@ -290,7 +292,7 @@ spdy::SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
     type,                         // Kind = Syn
     stream_id,                    // Stream ID
     associated_stream_id,         // Associated stream ID
-    net::ConvertRequestPriorityToSpdyPriority(request_priority),
+    ConvertRequestPriorityToSpdyPriority(request_priority),
                                   // Priority
     flags,                        // Control Flags
     compressed,                   // Compressed
@@ -670,6 +672,35 @@ spdy::SpdyFrame* ConstructSpdyPost(int64 content_length,
                                    arraysize(post_headers));
 }
 
+// Constructs a chunked transfer SPDY POST SYN packet.
+// |extra_headers| are the extra header-value pairs, which typically
+// will vary the most between calls.
+// Returns a SpdyFrame.
+spdy::SpdyFrame* ConstructChunkedSpdyPost(const char* const extra_headers[],
+                                          int extra_header_count) {
+  const char* post_headers[] = {
+    "method",
+    "POST",
+    "url",
+    "/",
+    "host",
+    "www.google.com",
+    "scheme",
+    "http",
+    "version",
+    "HTTP/1.1"
+  };
+  return ConstructSpdyControlFrame(extra_headers,
+                                   extra_header_count,
+                                   false,
+                                   1,
+                                   LOWEST,
+                                   spdy::SYN_STREAM,
+                                   spdy::CONTROL_FLAG_NONE,
+                                   post_headers,
+                                   arraysize(post_headers));
+}
+
 // Constructs a standard SPDY SYN_REPLY packet to match the SPDY POST.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
@@ -885,67 +916,59 @@ SpdySessionDependencies::~SpdySessionDependencies() {}
 // static
 HttpNetworkSession* SpdySessionDependencies::SpdyCreateSession(
     SpdySessionDependencies* session_deps) {
-  return new HttpNetworkSession(session_deps->host_resolver.get(),
-                                session_deps->cert_verifier.get(),
-                                NULL /* dnsrr_resolver */,
-                                NULL /* dns_cert_checker */,
-                                NULL /* ssl_host_info_factory */,
-                                session_deps->proxy_service,
-                                session_deps->socket_factory.get(),
-                                session_deps->ssl_config_service,
-                                new SpdySessionPool(NULL),
-                                session_deps->http_auth_handler_factory.get(),
-                                NULL,
-                                NULL);
+  net::HttpNetworkSession::Params params;
+  params.client_socket_factory = session_deps->socket_factory.get();
+  params.host_resolver = session_deps->host_resolver.get();
+  params.cert_verifier = session_deps->cert_verifier.get();
+  params.proxy_service = session_deps->proxy_service;
+  params.ssl_config_service = session_deps->ssl_config_service;
+  params.http_auth_handler_factory =
+      session_deps->http_auth_handler_factory.get();
+  return new HttpNetworkSession(params);
 }
 
 // static
 HttpNetworkSession* SpdySessionDependencies::SpdyCreateSessionDeterministic(
     SpdySessionDependencies* session_deps) {
-  return new HttpNetworkSession(session_deps->host_resolver.get(),
-                                session_deps->cert_verifier.get(),
-                                NULL /* dnsrr_resolver */,
-                                NULL /* dns_cert_checker */,
-                                NULL /* ssl_host_info_factory */,
-                                session_deps->proxy_service,
-                                session_deps->
-                                deterministic_socket_factory.get(),
-                                session_deps->ssl_config_service,
-                                new SpdySessionPool(NULL),
-                                session_deps->http_auth_handler_factory.get(),
-                                NULL,
-                                NULL);
+  net::HttpNetworkSession::Params params;
+  params.client_socket_factory =
+      session_deps->deterministic_socket_factory.get();
+  params.host_resolver = session_deps->host_resolver.get();
+  params.cert_verifier = session_deps->cert_verifier.get();
+  params.proxy_service = session_deps->proxy_service;
+  params.ssl_config_service = session_deps->ssl_config_service;
+  params.http_auth_handler_factory =
+      session_deps->http_auth_handler_factory.get();
+  return new HttpNetworkSession(params);
 }
 
 SpdyURLRequestContext::SpdyURLRequestContext() {
-  host_resolver_ = new MockHostResolver();
-  cert_verifier_ = new CertVerifier;
-  proxy_service_ = ProxyService::CreateDirect();
-  ssl_config_service_ = new SSLConfigServiceDefaults;
-  http_auth_handler_factory_ = HttpAuthHandlerFactory::CreateDefault(
-      host_resolver_);
-  http_transaction_factory_ = new HttpCache(
-      new HttpNetworkLayer(&socket_factory_,
-                           host_resolver_,
-                           cert_verifier_,
-                           NULL /* dnsrr_resolver */,
-                           NULL /* dns_cert_checker */,
-                           NULL /* ssl_host_info_factory */,
-                           proxy_service_,
-                           ssl_config_service_,
-                           new SpdySessionPool(NULL),
-                           http_auth_handler_factory_,
-                           network_delegate_,
-                           NULL),
-      NULL /* net_log */,
-      HttpCache::DefaultBackend::InMemory(0));
+  set_host_resolver(new MockHostResolver());
+  set_cert_verifier(new CertVerifier);
+  set_proxy_service(ProxyService::CreateDirect());
+  set_ssl_config_service(new SSLConfigServiceDefaults);
+  set_http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault(
+      host_resolver()));
+  net::HttpNetworkSession::Params params;
+  params.client_socket_factory = &socket_factory_;
+  params.host_resolver = host_resolver();
+  params.cert_verifier = cert_verifier();
+  params.proxy_service = proxy_service();
+  params.ssl_config_service = ssl_config_service();
+  params.http_auth_handler_factory = http_auth_handler_factory();
+  params.network_delegate = network_delegate();
+  scoped_refptr<HttpNetworkSession> network_session(
+      new HttpNetworkSession(params));
+  set_http_transaction_factory(new HttpCache(
+      network_session,
+      HttpCache::DefaultBackend::InMemory(0)));
 }
 
 SpdyURLRequestContext::~SpdyURLRequestContext() {
-  delete http_transaction_factory_;
-  delete http_auth_handler_factory_;
-  delete cert_verifier_;
-  delete host_resolver_;
+  delete http_transaction_factory();
+  delete http_auth_handler_factory();
+  delete cert_verifier();
+  delete host_resolver();
 }
 
 const SpdyHeaderInfo make_spdy_header(spdy::SpdyControlType type) {

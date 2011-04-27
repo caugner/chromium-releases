@@ -16,7 +16,7 @@
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
-#include "gfx/point.h"
+#include "ui/gfx/point.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -581,9 +581,11 @@ bool BrowserProxy::SendJSONRequest(const std::string& request,
     return false;
 
   bool result = false;
-  return sender_->Send(new AutomationMsg_SendJSONRequest(handle_,
-                                                         request, response,
-                                                         &result));
+  if (!sender_->Send(new AutomationMsg_SendJSONRequest(handle_,
+                                                       request,
+                                                       response,
+                                                       &result)))
+    return false;
   return result;
 }
 
@@ -628,11 +630,11 @@ bool BrowserProxy::GetInitialLoadTimes(float* min_start_time,
     tab_dict = static_cast<DictionaryValue*>(tab_value);
 
     double temp;
-    if (!tab_dict->GetReal("load_start_ms", &temp))
+    if (!tab_dict->GetDouble("load_start_ms", &temp))
       return false;
     start_ms = static_cast<float>(temp);
     // load_stop_ms can only be null if WaitForInitialLoads did not run.
-    if (!tab_dict->GetReal("load_stop_ms", &temp))
+    if (!tab_dict->GetDouble("load_stop_ms", &temp))
       return false;
     stop_ms = static_cast<float>(temp);
 

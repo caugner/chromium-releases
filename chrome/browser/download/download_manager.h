@@ -40,9 +40,9 @@
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "base/weak_ptr.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_status_updater_delegate.h"
-#include "chrome/browser/shell_dialogs.h"
+#include "chrome/browser/ui/shell_dialogs.h"
+#include "content/browser/browser_thread.h"
 
 class DownloadFileManager;
 class DownloadHistory;
@@ -63,10 +63,6 @@ class DownloadManager
                                         BrowserThread::DeleteOnUIThread>,
       public DownloadStatusUpdaterDelegate,
       public SelectFileDialog::Listener {
-  // For testing.
-  friend class DownloadManagerTest;
-  friend class MockDownloadManager;
-
  public:
   explicit DownloadManager(DownloadStatusUpdater* status_updater);
 
@@ -157,6 +153,10 @@ class DownloadManager
   // Remove the download with id |download_id| from |active_downloads_|.
   void RemoveFromActiveList(int32 download_id);
 
+  // Add DownloadItem to history, validate |db_handle| and store
+  // it in the DownloadItem.
+  void AddDownloadItemToHistory(DownloadItem* item, int64 db_handle);
+
   // Called when a Save Page As download is started. Transfers ownership
   // of |download_item| to the DownloadManager.
   void SavePageAsDownloadStarted(DownloadItem* download_item);
@@ -225,7 +225,14 @@ class DownloadManager
   // Called when the user has validated the download of a dangerous file.
   void DangerousDownloadValidated(DownloadItem* download);
 
+  // Callback function after url is checked with safebrowsing service.
+  void CheckDownloadUrlDone(DownloadCreateInfo* info, bool is_dangerous_url);
+
  private:
+  // For testing.
+  friend class DownloadManagerTest;
+  friend class MockDownloadManager;
+
   // This class is used to let an incognito DownloadManager observe changes to
   // a normal DownloadManager, to propagate ModelChanged() calls from the parent
   // DownloadManager to the observers of the incognito DownloadManager.
@@ -247,7 +254,7 @@ class DownloadManager
     DownloadManager* observed_download_manager_;
   };
 
-  friend class BrowserThread;
+  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
   friend class DeleteTask<DownloadManager>;
   friend class OtherDownloadManagerObserver;
 
@@ -266,8 +273,7 @@ class DownloadManager
   // Called back after a target path for the file to be downloaded to has been
   // determined, either automatically based on the suggested file name, or by
   // the user in a Save As dialog box.
-  void AttachDownloadItem(DownloadCreateInfo* info,
-                          const FilePath& target_path);
+  void AttachDownloadItem(DownloadCreateInfo* info);
 
   // Download cancel helper function.
   void DownloadCancelledInternal(int download_id,

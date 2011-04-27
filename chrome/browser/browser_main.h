@@ -80,6 +80,8 @@ class BrowserMainParts {
   void EarlyInitialization();
   void MainMessageLoopStart();
 
+  void SetupFieldTrials();
+
  protected:
   explicit BrowserMainParts(const MainFunctionParams& parameters);
 
@@ -116,12 +118,12 @@ class BrowserMainParts {
   // A/B test for spdy when --use-spdy not set.
   void SpdyFieldTrial();
 
-  // A/B test for prefetching with --(enable|disable)-prefetch not set.
-  void PrefetchFieldTrial();
-
   // A/B test for automatically establishing a backup TCP connection when a
   // specified timeout value is reached.
   void ConnectBackupJobsFieldTrial();
+
+  // A/B test for SSL False Start.
+  void SSLFalseStartFieldTrial();
 
   // Used to initialize NSPR where appropriate.
   virtual void InitializeSSL() = 0;

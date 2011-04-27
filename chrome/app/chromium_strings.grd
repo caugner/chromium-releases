@@ -67,7 +67,9 @@ be available for now. -->
 
     <output filename="chromium_strings_am.pak" type="data_package" lang="am" />
     <output filename="chromium_strings_ar.pak" type="data_package" lang="ar" />
-    <output filename="chromium_strings_ast.pak" type="data_package" lang="ast" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_ast.pak" type="data_package" lang="ast" />
+    </if>
     <output filename="chromium_strings_bg.pak" type="data_package" lang="bg" />
     <output filename="chromium_strings_bn.pak" type="data_package" lang="bn" />
     <output filename="chromium_strings_ca.pak" type="data_package" lang="ca" />
@@ -80,12 +82,16 @@ be available for now. -->
     <output filename="chromium_strings_es.pak" type="data_package" lang="es" />
     <output filename="chromium_strings_es-419.pak" type="data_package" lang="es-419" />
     <output filename="chromium_strings_et.pak" type="data_package" lang="et" />
-    <output filename="chromium_strings_eu.pak" type="data_package" lang="eu" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_eu.pak" type="data_package" lang="eu" />
+    </if>
     <output filename="chromium_strings_fa.pak" type="data_package" lang="fa" />
     <output filename="chromium_strings_fi.pak" type="data_package" lang="fi" />
     <output filename="chromium_strings_fil.pak" type="data_package" lang="fil" />
     <output filename="chromium_strings_fr.pak" type="data_package" lang="fr" />
-    <output filename="chromium_strings_gl.pak" type="data_package" lang="gl" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_gl.pak" type="data_package" lang="gl" />
+    </if>
     <output filename="chromium_strings_gu.pak" type="data_package" lang="gu" />
     <output filename="chromium_strings_he.pak" type="data_package" lang="he" />
     <output filename="chromium_strings_hi.pak" type="data_package" lang="hi" />
@@ -94,8 +100,14 @@ be available for now. -->
     <output filename="chromium_strings_id.pak" type="data_package" lang="id" />
     <output filename="chromium_strings_it.pak" type="data_package" lang="it" />
     <output filename="chromium_strings_ja.pak" type="data_package" lang="ja" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_ka.pak" type="data_package" lang="ka" />
+    </if>
     <output filename="chromium_strings_kn.pak" type="data_package" lang="kn" />
     <output filename="chromium_strings_ko.pak" type="data_package" lang="ko" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_ku.pak" type="data_package" lang="ku" />
+    </if>
     <output filename="chromium_strings_lt.pak" type="data_package" lang="lt" />
     <output filename="chromium_strings_lv.pak" type="data_package" lang="lv" />
     <output filename="chromium_strings_ml.pak" type="data_package" lang="ml" />
@@ -117,32 +129,42 @@ be available for now. -->
     <output filename="chromium_strings_te.pak" type="data_package" lang="te" />
     <output filename="chromium_strings_th.pak" type="data_package" lang="th" />
     <output filename="chromium_strings_tr.pak" type="data_package" lang="tr" />
-    <output filename="chromium_strings_ug.pak" type="data_package" lang="ug" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_ug.pak" type="data_package" lang="ug" />
+    </if>
     <output filename="chromium_strings_uk.pak" type="data_package" lang="uk" />
     <output filename="chromium_strings_vi.pak" type="data_package" lang="vi" />
     <output filename="chromium_strings_zh-CN.pak" type="data_package" lang="zh-CN" />
     <output filename="chromium_strings_zh-TW.pak" type="data_package" lang="zh-TW" />
   </outputs>
   <translations>
-    <file path="../third_party/launchpad_translations/chromium_strings_ast.xtb" lang="ast" />
-    <file path="../third_party/launchpad_translations/chromium_strings_ca.xtb" lang="ca" />
-    <file path="../third_party/launchpad_translations/chromium_strings_cs.xtb" lang="cs" />
-    <file path="../third_party/launchpad_translations/chromium_strings_da.xtb" lang="da" />
-    <file path="../third_party/launchpad_translations/chromium_strings_de.xtb" lang="de" />
-    <file path="../third_party/launchpad_translations/chromium_strings_es.xtb" lang="es" />
-    <file path="../third_party/launchpad_translations/chromium_strings_eu.xtb" lang="eu" />
-    <file path="../third_party/launchpad_translations/chromium_strings_fi.xtb" lang="fi" />
-    <file path="../third_party/launchpad_translations/chromium_strings_fr.xtb" lang="fr" />
-    <file path="../third_party/launchpad_translations/chromium_strings_gl.xtb" lang="gl" />
-    <file path="../third_party/launchpad_translations/chromium_strings_he.xtb" lang="he" />
-    <file path="../third_party/launchpad_translations/chromium_strings_id.xtb" lang="id" />
-    <file path="../third_party/launchpad_translations/chromium_strings_lt.xtb" lang="lt" />
-    <file path="../third_party/launchpad_translations/chromium_strings_nl.xtb" lang="nl" />
-    <file path="../third_party/launchpad_translations/chromium_strings_no.xtb" lang="no" />
-    <file path="../third_party/launchpad_translations/chromium_strings_pt-BR.xtb" lang="pt-BR" />
-    <file path="../third_party/launchpad_translations/chromium_strings_ru.xtb" lang="ru" />
-    <file path="../third_party/launchpad_translations/chromium_strings_sl.xtb" lang="sl" />
-    <file path="../third_party/launchpad_translations/chromium_strings_zh-CN.xtb" lang="zh-CN" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <file path="../../third_party/launchpad_translations/chromium_strings_ast.xtb" lang="ast" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_ca.xtb" lang="ca" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_cs.xtb" lang="cs" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_da.xtb" lang="da" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_de.xtb" lang="de" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_es.xtb" lang="es" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_eu.xtb" lang="eu" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_fi.xtb" lang="fi" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_fr.xtb" lang="fr" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_gl.xtb" lang="gl" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_he.xtb" lang="he" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_id.xtb" lang="id" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_it.xtb" lang="it" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_ka.xtb" lang="ka" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_ku.xtb" lang="ku" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_lt.xtb" lang="lt" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_nl.xtb" lang="nl" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_no.xtb" lang="no" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_pt-BR.xtb" lang="pt-BR" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_ru.xtb" lang="ru" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_sl.xtb" lang="sl" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_sr.xtb" lang="sr" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_sv.xtb" lang="sv" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_ug.xtb" lang="ug" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_zh-CN.xtb" lang="zh-CN" />
+    </if>
   </translations>
   <release seq="1" allow_pseudo="false">
     <messages fallback_to_english="true">
@@ -168,7 +190,7 @@ be available for now. -->
           Chromium Frame Update.
         </message>
         <message name="IDS_VERSIONMISMATCH">
-          Chromium Frame has been updated. Please restart your browser. Chrome version: <ph name="TODO_0001">%ls<ex>TODO</ex></ph>, Chromium Frame version: <ph name="TODO_0002">%ls<ex>TODO</ex></ph>
+          Chromium Frame has been updated. Please relaunch your browser. Chrome version: <ph name="TODO_0001">%ls<ex>TODO</ex></ph>, Chromium Frame version: <ph name="TODO_0002">%ls<ex>TODO</ex></ph>
         </message>
         <message name="IDS_VERSIONUNKNOWN">
           Unknown version.
@@ -176,6 +198,12 @@ be available for now. -->
         <message name="IDS_CHROME_FRAME_MENU_ABOUT" desc="About Chrome Frame label">
           About Chromium Frame...
         </message>
+	<message name="IDS_CHROME_FRAME_READY_MODE_LEARN_MORE_URL" desc="Link to knowledge-base article about Chromium Frame Ready Mode">
+	  http://www.google.com/support/chrome/bin/answer.py?hl=[GRITLANGCODE]&amp;answer=161796
+	</message>
+	<message name="IDS_CHROME_FRAME_READY_MODE_PROMPT" desc="Ready Mode prompt message">
+	  This site recommends Chromium Frame (already installed).
+	</message>
       </if>
       <message name="IDS_INSTANT_OPT_IN_TITLE" desc="Title of the instant opt-in dialog">
         Instant
@@ -236,7 +264,7 @@ be available for now. -->
       </message>
       <!-- Hung Browser Detector -->
       <message name="IDS_BROWSER_HUNGBROWSER_MESSAGE" desc="Content of the dialog box shown when the browser is hung">
-        Chromium is unresponsive. Restart now?
+        Chromium is unresponsive. Relaunch now?
       </message>
       <message name="IDS_IMPORT_PROGRESS_INFO" desc="Explanatory text for the importing progress dialog">
         Chromium is now importing the following items from <ph name="BROWSER_COMPONENT">$1<ex>History</ex></ph>:
@@ -304,12 +332,12 @@ be available for now. -->
         Chromium language:
       </message>
       <if expr="not pp_ifdef('chromeos')">
-        <message name="IDS_OPTIONS_RESTART_REQUIRED" desc="The message displayed for an option that requires a restart to take effect. This appears in a message box if an option is changed that requires a restart.">
-          Please close all Chromium windows and restart Chromium for this change to take effect.
+        <message name="IDS_OPTIONS_RELAUNCH_REQUIRED" desc="The message displayed for an option that requires a relaunch to take effect. This appears in a message box if an option is changed that requires a relaunch.">
+          Please close all Chromium windows and relaunch Chromium for this change to take effect.
         </message>
       </if>
       <if expr="pp_ifdef('chromeos')">
-        <message name="IDS_OPTIONS_RESTART_REQUIRED" desc="The message displayed for an option that requires a restart to take effect. This appears in a message box if an option is changed that requires a restart.">
+        <message name="IDS_OPTIONS_RELAUNCH_REQUIRED" desc="The message displayed for an option that requires a relaunch to take effect. This appears in a message box if an option is changed that requires a relaunch.">
           Please sign out of Chromium OS and sign in again for this change to take effect.
         </message>
       </if>
@@ -338,7 +366,7 @@ be available for now. -->
         Chromium
       </message>
       <message name="IDS_CRASH_RECOVERY_CONTENT" desc="Text content telling the user the browser has crashed.">
-        Whoa! Chromium has crashed. Restart now?
+        Whoa! Chromium has crashed. Relaunch now?
       </message>
       <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Info bar message to save a password">
         Do you want Chromium to save your password?
@@ -415,6 +443,9 @@ be available for now. -->
       <message name="IDS_INSTALL_CONFLICTING_CHANNEL_EXISTS" desc="Error during install if a version of Chromium on a different update channel exists when installing Chromium Frame.">
         A conflicting installation of Chromium was found on the system. Please uninstall it and try again.
       </message>
+      <message name="IDS_INSTALL_READY_MODE_REQUIRES_CHROME" desc="Chrome Frame in ready mode requires Chrome.">
+        Invalid arguments. Chromium Frame cannot be installed in ready mode without also installing Chromium.
+      </message>
       <!-- Options Dialog -->
       <!--TODO(kmadhusu): Remove "IDS_OPTIONS_DISABLE_SERVICES" after platform-specific dialogs are removed.-->
       <message name="IDS_OPTIONS_DISABLE_SERVICES" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
@@ -475,6 +506,10 @@ be available for now. -->
       </message>
       <message name="IDS_CONFLICTS_CHECK_WARNING_SUSPECTED" desc="Warning label on the compatibility page">
         A module with the same name has been known to conflict with Chromium.
+      </message>
+      <!-- chrome://crashes strings -->
+      <message name="IDS_CRASHES_DISABLED_MESSAGE" desc="The explanatory message for chrome://crashes when crash reporting is disabled">
+        Crash reporting is not available in Chromium.
       </message>
 
       <if expr="os == 'darwin'">

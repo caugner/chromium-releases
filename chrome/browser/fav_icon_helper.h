@@ -11,10 +11,10 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon_service.h"
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/common/ref_counted_util.h"
+#include "content/browser/cancelable_request.h"
+#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "googleurl/src/gurl.h"
 
 class NavigationEntry;
@@ -65,7 +65,7 @@ class TabContents;
 // at which point we update the favicon of the NavigationEntry and notify
 // the database to save the favicon.
 
-class FavIconHelper : public RenderViewHostDelegate::FavIcon {
+class FavIconHelper : public TabContentsObserver {
  public:
   explicit FavIconHelper(TabContents* tab_contents);
   virtual ~FavIconHelper();
@@ -84,6 +84,10 @@ class FavIconHelper : public RenderViewHostDelegate::FavIcon {
   int DownloadImage(const GURL& image_url, int image_size,
                     ImageDownloadCallback* callback);
 
+  // Message Handler.  Must be public, becaue also called from
+  // PrerenderContents.
+  void OnUpdateFavIconURL(int32 page_id, const GURL& icon_url);
+
  private:
   struct DownloadRequest {
     DownloadRequest() {}
@@ -99,15 +103,13 @@ class FavIconHelper : public RenderViewHostDelegate::FavIcon {
     ImageDownloadCallback* callback;
   };
 
-  // RenderViewHostDelegate::Favicon implementation.
-  virtual void DidDownloadFavIcon(RenderViewHost* render_view_host,
-                                  int id,
-                                  const GURL& image_url,
-                                  bool errored,
-                                  const SkBitmap& image);
-  virtual void UpdateFavIconURL(RenderViewHost* render_view_host,
-                                int32 page_id,
-                                const GURL& icon_url);
+  // TabContentsObserver implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message);
+
+  void OnDidDownloadFavIcon(int id,
+                            const GURL& image_url,
+                            bool errored,
+                            const SkBitmap& image);
 
   // Return the NavigationEntry for the active entry, or NULL if the active
   // entries URL does not match that of the URL last passed to FetchFavIcon.
@@ -158,9 +160,6 @@ class FavIconHelper : public RenderViewHostDelegate::FavIcon {
 
   // Returns true if the favicon should be saved.
   bool ShouldSaveFavicon(const GURL& url);
-
-  // Hosting TabContents. We callback into this when done.
-  TabContents* tab_contents_;
 
   // Used for history requests.
   CancelableRequestConsumer cancelable_consumer_;

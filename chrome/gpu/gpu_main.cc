@@ -31,7 +31,7 @@
 #endif
 
 #if defined(USE_X11)
-#include "gfx/gtk_util.h"
+#include "ui/gfx/gtk_util.h"
 #endif
 
 // Main function for starting the Gpu process.
@@ -82,8 +82,16 @@ int GpuMain(const MainFunctionParams& parameters) {
   // this reason we defer all work related to the GPU until receiving
   // the GpuMsg_Initialize message from the browser.
   GpuProcess gpu_process;
-  GpuThread* gpu_thread = new GpuThread;
+
+  GpuThread* gpu_thread =
+#if defined(OS_WIN)
+      new GpuThread(parameters.sandbox_info_.TargetServices());
+#else
+      new GpuThread;
+#endif
+
   gpu_thread->Init(start_time);
+
   gpu_process.set_main_thread(gpu_thread);
 
   main_message_loop.Run();

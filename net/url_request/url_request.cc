@@ -8,9 +8,12 @@
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
+#include "net/base/network_delegate.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
@@ -36,6 +39,18 @@ void StripPostSpecificHeaders(net::HttpRequestHeaders* headers) {
   headers->RemoveHeader(net::HttpRequestHeaders::kContentLength);
   headers->RemoveHeader(net::HttpRequestHeaders::kContentType);
   headers->RemoveHeader(net::HttpRequestHeaders::kOrigin);
+}
+
+// This counter keeps track of the identifiers used for URL requests so far.
+uint64 g_next_url_request_identifier = 0;
+
+// This lock protects g_next_url_request_identifier.
+base::Lock g_next_url_request_identifier_lock;
+
+// Returns an prior unused identifier for URL requests.
+uint64 GenerateURLRequestIdentifier() {
+  base::AutoLock lock(g_next_url_request_identifier_lock);
+  return g_next_url_request_identifier++;
 }
 
 }  // namespace
@@ -104,7 +119,8 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
       enable_profiling_(false),
       redirect_limit_(kMaxRedirects),
       final_upload_progress_(0),
-      priority_(net::LOWEST) {
+      priority_(net::LOWEST),
+      identifier_(GenerateURLRequestIdentifier()) {
   SIMPLE_STATS_COUNTER("URLRequestCount");
 
   // Sanity check out environment.
@@ -158,6 +174,23 @@ void URLRequest::AppendFileRangeToUpload(
     upload_ = new UploadData();
   upload_->AppendFileRange(file_path, offset, length,
                            expected_modification_time);
+}
+
+void URLRequest::EnableChunkedUpload() {
+  DCHECK(!upload_ || upload_->is_chunked());
+  if (!upload_) {
+    upload_ = new UploadData();
+    upload_->set_is_chunked(true);
+  }
+}
+
+void URLRequest::AppendChunkToUpload(const char* bytes,
+                                     int bytes_len,
+                                     bool is_last_chunk) {
+  DCHECK(upload_);
+  DCHECK(upload_->is_chunked());
+  DCHECK_GT(bytes_len, 0);
+  upload_->AppendChunk(bytes, bytes_len, is_last_chunk);
 }
 
 void URLRequest::set_upload(net::UploadData* upload) {
@@ -234,6 +267,11 @@ void URLRequest::GetAllResponseHeaders(string* headers) {
   } else {
     headers->clear();
   }
+}
+
+HostPortPair URLRequest::GetSocketAddress() const {
+  DCHECK(job_);
+  return job_->GetSocketAddress();
 }
 
 net::HttpResponseHeaders* URLRequest::response_headers() const {
@@ -324,6 +362,11 @@ void URLRequest::Start() {
 void URLRequest::StartJob(URLRequestJob* job) {
   DCHECK(!is_pending_);
   DCHECK(!job_);
+
+  // TODO(mpcomplete): pass in request ID?
+  // TODO(mpcomplete): allow delegate to potentially delay/cancel request.
+  if (context_ && context_->network_delegate())
+    context_->network_delegate()->NotifyBeforeURLRequest(this);
 
   net_log_.BeginEvent(
       net::NetLog::TYPE_URL_REQUEST_START_JOB,
@@ -445,8 +488,11 @@ void URLRequest::ResponseStarted() {
       URLRequestJobManager::GetInstance()->MaybeInterceptResponse(this);
   if (job) {
     RestartWithJob(job);
-  } else if (delegate_) {
-    delegate_->OnResponseStarted(this);
+  } else {
+    if (context_ && context_->network_delegate())
+      context_->network_delegate()->NotifyResponseStarted(this);
+    if (delegate_)
+      delegate_->OnResponseStarted(this);
   }
 }
 

@@ -43,6 +43,14 @@ class CapturerMac : public Capturer {
   void ReleaseBuffers();
   CGLContextObj cgl_context_;
   scoped_array<uint8> buffers_[kNumBuffers];
+  scoped_array<uint8> flip_buffer_;
+
+  // Screen size.
+  int width_;
+  int height_;
+
+  int bytes_per_row_;
+
   DISALLOW_COPY_AND_ASSIGN(CapturerMac);
 };
 

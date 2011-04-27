@@ -132,8 +132,6 @@
    Intentional leak in BrowserThreadTest.NotReleasedIfTargetThreadNonExistent
    Heapcheck:Leak
    fun:BrowserThreadTest_NotReleasedIfTargetThreadNonExistent_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
 }
 #-----------------------------------------------------------------------
 # 3. Suppressions for real chromium bugs that are not yet fixed.
@@ -173,15 +171,6 @@
    fun:URLRequestJobManager::CreateJob
    fun:net::URLRequest::Start
    fun:URLRequestTest_CancelTest_DuringCookiePolicy_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
-   fun:testing::TestInfo::Run
-   fun:testing::TestCase::Run
-   fun:testing::internal::UnitTestImpl::RunAllTests
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::UnitTest::Run
-   fun:TestSuite::Run
-   fun:main
 }
 {
    bug_34994_a
@@ -211,8 +200,6 @@
   Heapcheck:Leak
   ...
   fun:::RenderThreadTest::SetUp
-  fun:testing::HandleExceptionsInMethodIfSupported
-  fun:testing::Test::Run
 }
 # TODO(glider): sometimes the stacks differ between the bot and the local run,
 # e.g. "base::subtle::RefCountedBase::RefCountedBase" vs. "RefCountedBase".
@@ -260,12 +247,6 @@
   fun:UserScriptSlaveTest::Serialize
   ...
   fun:testing::Test::Run
-  fun:testing::TestInfo::Run
-  fun:testing::TestCase::Run
-  fun:testing::internal::UnitTestImpl::RunAllTests
-  fun:testing::HandleExceptionsInMethodIfSupported
-  fun:testing::UnitTest::Run
-  fun:TestSuite::Run
 }
 {
   bug_42153
@@ -418,12 +399,6 @@
    fun:TestShell::LoadURLForFrame
    fun:TestShell::LoadURL
    fun:::BookmarkletTest_NonEmptyResult_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
-   fun:testing::TestInfo::Run
-   fun:testing::TestCase::Run
-   fun:testing::internal::UnitTestImpl::RunAllTests
-   fun:testing::HandleExceptionsInMethodIfSupported
 }
 # "*~TestShell" means "~TestShell" and "TestShell::~TestShell".
 {
@@ -460,13 +435,6 @@
    fun:TestShell::LoadURLForFrame
    fun:TestShell::LoadURL
    fun:::BookmarkletTest_NonEmptyResult_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
-   fun:testing::TestInfo::Run
-   fun:testing::TestCase::Run
-   fun:testing::internal::UnitTestImpl::RunAllTests
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::UnitTest::Run
 }
 {
    bug_32366
@@ -646,8 +614,6 @@
    bug_46678_c
    Heapcheck:Leak
    fun:remoting::DifferTest_*_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
 }
 # '*ChromotingPlugin' stands for 'ChromotingPlugin' and
 # 'remoting::ChromotingPlugin::ChromotingPlugin'.
@@ -949,14 +915,6 @@
    fun:::MessageLoopRelay::ProcessOnTargetThread
 }
 {
-   bug_57683
-   Heapcheck:Leak
-   ...
-   fun:logging::MakeCheckOpString
-   fun:logging::Check*Impl
-   fun:logging::::LoggingTest_*_Test::TestBody
-}
-{
    bug_57799
    Heapcheck:Leak
    fun:cricket::Transport::OnRemoteCandidate
@@ -1034,32 +992,12 @@
    Heapcheck:Leak
    ...
    fun:FileSystemHostContextTest_CheckValidPath_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
-   fun:testing::TestInfo::Run
-   fun:testing::TestCase::Run
-   fun:testing::internal::UnitTestImpl::RunAllTests
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::UnitTest::Run
-   fun:base::TestSuite::Run
-   fun:main
-   fun:__libc_start_main
 }
 {
    bug_58474_b
    Heapcheck:Leak
    ...
    fun:FileSystemHostContextTest_GetRootPath_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
-   fun:testing::TestInfo::Run
-   fun:testing::TestCase::Run
-   fun:testing::internal::UnitTestImpl::RunAllTests
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::UnitTest::Run
-   fun:base::TestSuite::Run
-   fun:main
-   fun:__libc_start_main
 }
 {
    bug_60872
@@ -1069,14 +1007,11 @@
    fun:ReloadButtonGtk::OnClickedThunk
    fun:g_closure_invoke
    fun:ReloadButtonGtkTest_*_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
-   fun:testing::Test::Run
 }
 {
    bug_65680a
    Heapcheck:Leak
    fun:remoting::ScreenRecorderTest_OneRecordCycle_Test::TestBody
-   fun:testing::HandleExceptionsInMethodIfSupported
 }
 {
    bug_65680b
@@ -1172,6 +1107,7 @@
 {
    bug_70115
    Heapcheck:Leak
+   ...
    fun:FilePathWatcher
    fun:PluginService
    fun:DefaultSingletonTraits::New
@@ -1195,4 +1131,91 @@
    fun:ui::ElideUrl
    fun:ui::::RunTest
    fun:ui::TextEliderTest_TestGeneralEliding_Test::TestBody
+}
+{
+   bug_70782
+   Heapcheck:Leak
+   fun:SyncSetupWizard
+   fun:ProfileSyncService
+}
+{
+   bug_71728a
+   Heapcheck:Leak
+   fun:__gnu_cxx::new_allocator::allocate
+   fun:std::_Vector_base::_M_allocate
+   fun:std::vector::_M_allocate_and_copy
+   fun:std::vector::reserve
+   fun:__gnu_cxx::hashtable::_M_initialize_buckets
+   fun:hashtable
+   fun:hash_map
+   fun:DownloadManager
+   fun:MockDownloadManager
+   fun:::DownloadFileTest::SetUp
+}
+{
+   bug_71728b
+   Heapcheck:Leak
+   fun:::DownloadFileTest::SetUp
+}
+{
+   bug_71728c
+   Heapcheck:Leak
+   fun:base::internal::WeakReferenceOwner::GetRef
+   fun:base::SupportsWeakPtr::AsWeakPtr
+   fun:DownloadManager
+   fun:MockDownloadManager
+   fun:::DownloadFileTest::SetUp
+}
+{
+   bug_71728d
+   Heapcheck:Leak
+   fun:RefCountedBase
+   fun:RefCounted
+   fun:Flag
+   fun:base::internal::WeakReferenceOwner::GetRef
+   fun:base::SupportsWeakPtr::AsWeakPtr
+   fun:DownloadManager
+   fun:MockDownloadManager
+   fun:::DownloadFileTest::SetUp
+}
+{
+   bug_71909
+   Heapcheck:Leak
+   fun:TestingProfile::CreateRequestContext
+   fun:MockService
+   ...
+   fun:ExtensionUpdaterTest*
+}
+{
+   bug_73358
+   Heapcheck:Leak
+   fun:TestingProfile::GetRequestContextForExtensions
+   fun:ExtensionDataDeleter
+   fun:ExtensionService::ClearExtensionData
+   fun:ExtensionService::UninstallExtension
+   fun:BackgroundApplicationListModelTest_Load*Extension*_Test::TestBody
+}
+{
+   bug_73828
+   Heapcheck:Leak
+   ...
+   fun:GpuProcessHostUIShim::GetForRenderer
+}
+{
+   bug_74850
+   Heapcheck:Leak
+   fun:Callback1::Type* NewCallback
+   fun:remoting::HeartbeatSender::Start
+   fun:remoting::HeartbeatSenderTest_DoSendStanza_Test::TestBody
+}
+{
+   bug_75120
+   Heapcheck:Leak
+   fun:remoting::ChromotingHostTest::SetUp
+}
+{
+   bug_75224
+   Heapcheck:Leak
+   fun:AutofillDownloadTestHelper
+   fun:AutoFillDownloadTest_*Test_Test::TestBody
 }

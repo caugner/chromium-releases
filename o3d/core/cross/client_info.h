@@ -77,11 +77,7 @@ class ClientInfo {
 
   // Whether render in 2d Mode
   bool render_2d() const {
-#if defined(RENDERER_CAIRO)
-    return true;
-#else
-    return false;
-#endif
+    return render_2d_;
   }
 
   // Whether or not the underlying GPU supports non power of 2 textures.
@@ -108,6 +104,7 @@ class ClientInfo {
   int buffer_memory_used_;
   bool software_renderer_;
   bool non_power_of_two_textures_;
+  bool render_2d_;
   String version_;
 };
 
@@ -138,6 +135,10 @@ class ClientInfoManager {
 
   void SetNonPowerOfTwoTextures(bool npot) {
     client_info_.non_power_of_two_textures_ = npot;
+  }
+
+  void SetRender2d(bool render2d) {
+    client_info_.render_2d_ = render2d;
   }
 
 private:

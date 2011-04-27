@@ -4,8 +4,6 @@
 
 #include "net/base/net_util.h"
 
-#include <algorithm>
-#include <map>
 #include <unicode/regex.h>
 #include <unicode/ucnv.h>
 #include <unicode/uidna.h>
@@ -13,13 +11,14 @@
 #include <unicode/uniset.h>
 #include <unicode/uscript.h>
 #include <unicode/uset.h>
+#include <algorithm>
+#include <map>
 
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
 #include <winsock2.h>
-#include <ws2tcpip.h>
 #include <wspiapi.h>  // Needed for Win2k compat.
 #elif defined(OS_POSIX)
 #include <fcntl.h>
@@ -27,7 +26,6 @@
 #include <netdb.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
 #endif
 
 #include "base/base64.h"
@@ -898,10 +896,9 @@ std::wstring FormatUrlInternal(const GURL& url,
 
   // Copy everything before the username (the scheme and the separators.)
   // These are ASCII.
-  std::copy(spec.begin(),
+  url_string.insert(url_string.end(), spec.begin(),
       spec.begin() + parsed.CountCharactersBefore(url_parse::Parsed::USERNAME,
-                                                  true),
-      std::back_inserter(url_string));
+                                                  true));
 
   const wchar_t kHTTP[] = L"http://";
   const char kFTP[] = "ftp.";
@@ -970,8 +967,9 @@ std::wstring FormatUrlInternal(const GURL& url,
   if (parsed.port.is_nonempty()) {
     url_string.push_back(':');
     new_parsed->port.begin = url_string.length();
-    std::copy(spec.begin() + parsed.port.begin,
-              spec.begin() + parsed.port.end(), std::back_inserter(url_string));
+    url_string.insert(url_string.end(),
+                      spec.begin() + parsed.port.begin,
+                      spec.begin() + parsed.port.end());
     new_parsed->port.len = url_string.length() - new_parsed->port.begin;
   } else {
     new_parsed->port.reset();
@@ -1193,7 +1191,7 @@ std::wstring IDNToUnicode(const char* host,
   // Convert the ASCII input to a wide string for ICU.
   string16 input16;
   input16.reserve(host_len);
-  std::copy(host, host + host_len, std::back_inserter(input16));
+  input16.insert(input16.end(), host, host + host_len);
 
   string16 out16;
   size_t output_offset = offset_for_adjustment ?
@@ -1377,38 +1375,37 @@ string16 StripWWW(const string16& text) {
       text.substr(www.length()) : text;
 }
 
-FilePath GetSuggestedFilename(const GURL& url,
+string16 GetSuggestedFilename(const GURL& url,
                               const std::string& content_disposition,
                               const std::string& referrer_charset,
-                              const FilePath& default_name) {
+                              const string16& default_name) {
+  // TODO: this function to be updated to match the httpbis recommendations.
+  // Talk to abarth for the latest news.
+
   // We don't translate this fallback string, "download". If localization is
   // needed, the caller should provide localized fallback default_name.
-  static const FilePath::CharType kFinalFallbackName[] =
-      FILE_PATH_LITERAL("download");
+  static const char* kFinalFallbackName = "download";
 
   // about: and data: URLs don't have file names, but esp. data: URLs may
   // contain parts that look like ones (i.e., contain a slash).
   // Therefore we don't attempt to divine a file name out of them.
   if (url.SchemeIs("about") || url.SchemeIs("data")) {
-    return default_name.empty() ? FilePath(kFinalFallbackName) : default_name;
+    return default_name.empty() ? ASCIIToUTF16(kFinalFallbackName)
+                                : default_name;
   }
 
-  const std::string filename_from_cd = GetFileNameFromCD(content_disposition,
-                                                         referrer_charset);
-#if defined(OS_WIN)
-  FilePath::StringType filename = UTF8ToWide(filename_from_cd);
-#elif defined(OS_POSIX)
-  FilePath::StringType filename = filename_from_cd;
-#endif
+  std::string filename = GetFileNameFromCD(content_disposition,
+                                           referrer_charset);
 
   if (!filename.empty()) {
-    // Remove any path information the server may have sent, take the name
-    // only.
-    filename = FilePath(filename).BaseName().value();
+    // Replace any path information the server may have sent, by changing
+    // path separators with underscores.
+    ReplaceSubstringsAfterOffset(&filename, 0, "/", "_");
+    ReplaceSubstringsAfterOffset(&filename, 0, "\\", "_");
 
     // Next, remove "." from the beginning and end of the file name to avoid
     // tricks with hidden files, "..", and "."
-    TrimString(filename, FILE_PATH_LITERAL("."), &filename);
+    TrimString(filename, ".", &filename);
   }
   if (filename.empty()) {
     if (url.is_valid()) {
@@ -1426,18 +1423,14 @@ FilePath GetSuggestedFilename(const GURL& url,
                    &decoded_filename);
       }
 
-#if defined(OS_WIN)
-      filename = UTF8ToWide(decoded_filename);
-#elif defined(OS_POSIX)
       filename = decoded_filename;
-#endif
     }
   }
 
 #if defined(OS_WIN)
   { // Handle CreateFile() stripping trailing dots and spaces on filenames
     // http://support.microsoft.com/kb/115827
-    std::string::size_type pos = filename.find_last_not_of(L" .");
+    std::string::size_type pos = filename.find_last_not_of(" .");
     if (pos == std::string::npos)
       filename.resize(0);
     else
@@ -1445,30 +1438,32 @@ FilePath GetSuggestedFilename(const GURL& url,
   }
 #endif
   // Trim '.' once more.
-  TrimString(filename, FILE_PATH_LITERAL("."), &filename);
+  TrimString(filename, ".", &filename);
 
   // If there's no filename or it gets trimed to be empty, use
   // the URL hostname or default_name
   if (filename.empty()) {
     if (!default_name.empty()) {
-      filename = default_name.value();
+      return default_name;
     } else if (url.is_valid()) {
       // Some schemes (e.g. file) do not have a hostname. Even though it's
       // not likely to reach here, let's hardcode the last fallback name.
       // TODO(jungshik) : Decode a 'punycoded' IDN hostname. (bug 1264451)
-      filename = url.host().empty() ? kFinalFallbackName :
-#if defined(OS_WIN)
-          UTF8ToWide(url.host());
-#elif defined(OS_POSIX)
-          url.host();
-#endif
+      filename = url.host().empty() ? kFinalFallbackName : url.host();
     } else {
       NOTREACHED();
     }
   }
 
-  file_util::ReplaceIllegalCharactersInPath(&filename, '-');
-  return FilePath(filename);
+#if defined(OS_WIN)
+  string16 path = UTF8ToUTF16(filename);
+  file_util::ReplaceIllegalCharactersInPath(&path, '-');
+  return path;
+#else
+  std::string path = filename;
+  file_util::ReplaceIllegalCharactersInPath(&path, '-');
+  return UTF8ToUTF16(path);
+#endif
 }
 
 bool IsPortAllowedByDefault(int port) {
@@ -1581,6 +1576,11 @@ std::string GetHostAndOptionalPort(const GURL& url) {
 }
 
 std::string NetAddressToString(const struct addrinfo* net_address) {
+  return NetAddressToString(net_address->ai_addr, net_address->ai_addrlen);
+}
+
+std::string NetAddressToString(const struct sockaddr* net_address,
+                               socklen_t address_len) {
 #if defined(OS_WIN)
   EnsureWinsockInit();
 #endif
@@ -1588,22 +1588,28 @@ std::string NetAddressToString(const struct addrinfo* net_address) {
   // This buffer is large enough to fit the biggest IPv6 string.
   char buffer[INET6_ADDRSTRLEN];
 
-  int result = getnameinfo(net_address->ai_addr,
-      net_address->ai_addrlen, buffer, sizeof(buffer), NULL, 0, NI_NUMERICHOST);
+  int result = getnameinfo(net_address, address_len, buffer, sizeof(buffer),
+                           NULL, 0, NI_NUMERICHOST);
 
   if (result != 0) {
-    DVLOG(1) << "getnameinfo() failed with " << result;
+    DVLOG(1) << "getnameinfo() failed with " << result << ": "
+             << gai_strerror(result);
     buffer[0] = '\0';
   }
   return std::string(buffer);
 }
 
 std::string NetAddressToStringWithPort(const struct addrinfo* net_address) {
-  std::string ip_address_string = NetAddressToString(net_address);
+  return NetAddressToStringWithPort(
+      net_address->ai_addr, net_address->ai_addrlen);
+}
+std::string NetAddressToStringWithPort(const struct sockaddr* net_address,
+                                       socklen_t address_len) {
+  std::string ip_address_string = NetAddressToString(net_address, address_len);
   if (ip_address_string.empty())
     return std::string();  // Failed.
 
-  int port = GetPortFromAddrinfo(net_address);
+  int port = GetPortFromSockaddr(net_address, address_len);
 
   if (ip_address_string.find(':') != std::string::npos) {
     // Surround with square brackets to avoid ambiguity.
@@ -2041,17 +2047,38 @@ bool IPNumberMatchesPrefix(const IPAddressNumber& ip_number,
 }
 
 // Returns the port field of the sockaddr in |info|.
-uint16* GetPortFieldFromAddrinfo(const struct addrinfo* info) {
+uint16* GetPortFieldFromAddrinfo(struct addrinfo* info) {
+  const struct addrinfo* const_info = info;
+  const uint16* port_field = GetPortFieldFromAddrinfo(const_info);
+  return const_cast<uint16*>(port_field);
+}
+
+const uint16* GetPortFieldFromAddrinfo(const struct addrinfo* info) {
   DCHECK(info);
-  if (info->ai_family == AF_INET) {
-    DCHECK_EQ(sizeof(sockaddr_in), static_cast<size_t>(info->ai_addrlen));
-    struct sockaddr_in* sockaddr =
-        reinterpret_cast<struct sockaddr_in*>(info->ai_addr);
+  const struct sockaddr* address = info->ai_addr;
+  DCHECK(address);
+  DCHECK_EQ(info->ai_family, address->sa_family);
+  return GetPortFieldFromSockaddr(address, info->ai_addrlen);
+}
+
+int GetPortFromAddrinfo(const struct addrinfo* info) {
+  const uint16* port_field = GetPortFieldFromAddrinfo(info);
+  if (!port_field)
+    return -1;
+  return ntohs(*port_field);
+}
+
+const uint16* GetPortFieldFromSockaddr(const struct sockaddr* address,
+                                       socklen_t address_len) {
+  if (address->sa_family == AF_INET) {
+    DCHECK_LE(sizeof(sockaddr_in), static_cast<size_t>(address_len));
+    const struct sockaddr_in* sockaddr =
+        reinterpret_cast<const struct sockaddr_in*>(address);
     return &sockaddr->sin_port;
-  } else if (info->ai_family == AF_INET6) {
-    DCHECK_EQ(sizeof(sockaddr_in6), static_cast<size_t>(info->ai_addrlen));
-    struct sockaddr_in6* sockaddr =
-        reinterpret_cast<struct sockaddr_in6*>(info->ai_addr);
+  } else if (address->sa_family == AF_INET6) {
+    DCHECK_LE(sizeof(sockaddr_in6), static_cast<size_t>(address_len));
+    const struct sockaddr_in6* sockaddr =
+        reinterpret_cast<const struct sockaddr_in6*>(address);
     return &sockaddr->sin6_port;
   } else {
     NOTREACHED();
@@ -2059,8 +2086,8 @@ uint16* GetPortFieldFromAddrinfo(const struct addrinfo* info) {
   }
 }
 
-int GetPortFromAddrinfo(const struct addrinfo* info) {
-  uint16* port_field = GetPortFieldFromAddrinfo(info);
+int GetPortFromSockaddr(const struct sockaddr* address, socklen_t address_len) {
+  const uint16* port_field = GetPortFieldFromSockaddr(address, address_len);
   if (!port_field)
     return -1;
   return ntohs(*port_field);

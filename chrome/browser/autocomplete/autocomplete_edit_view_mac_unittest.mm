@@ -8,21 +8,21 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
-#include "gfx/size.h"
 #include "testing/platform_test.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/gfx/size.h"
 
 namespace {
 
 TEST(AutocompleteEditViewMacTest, GetClipboardText) {
   ui::Clipboard clipboard;
-  std::wstring text;
+  string16 text;
 
   // Does an empty clipboard get empty text?
   clipboard.WriteObjects(ui::Clipboard::ObjectMap());
   text = AutocompleteEditViewMac::GetClipboardText(&clipboard);
-  EXPECT_EQ(std::wstring(), text);
+  EXPECT_EQ(string16(), text);
 
   const string16 plainText(ASCIIToUTF16("test text"));
   const std::string url("http://www.example.com/");
@@ -35,7 +35,7 @@ TEST(AutocompleteEditViewMacTest, GetClipboardText) {
   }
 
   text = AutocompleteEditViewMac::GetClipboardText(&clipboard);
-  EXPECT_EQ(UTF16ToWide(plainText), text);
+  EXPECT_EQ(plainText, text);
 
   // Can we pull a bookmark off the clipboard?
   {
@@ -44,7 +44,7 @@ TEST(AutocompleteEditViewMacTest, GetClipboardText) {
   }
 
   text = AutocompleteEditViewMac::GetClipboardText(&clipboard);
-  EXPECT_EQ(ASCIIToWide(url), text);
+  EXPECT_EQ(ASCIIToUTF16(url), text);
 
   // Do we pull text in preference to a bookmark?
   {
@@ -54,7 +54,7 @@ TEST(AutocompleteEditViewMacTest, GetClipboardText) {
   }
 
   text = AutocompleteEditViewMac::GetClipboardText(&clipboard);
-  EXPECT_EQ(UTF16ToWide(plainText), text);
+  EXPECT_EQ(plainText, text);
 
   // Do we get nothing if there is neither text nor a bookmark?
   {

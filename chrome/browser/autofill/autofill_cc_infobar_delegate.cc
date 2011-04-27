@@ -5,7 +5,6 @@
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 
 #include "base/metrics/histogram.h"
-#include "chrome/browser/autofill/autofill_cc_infobar.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/browser_list.h"
 #include "grit/generated_resources.h"
@@ -14,7 +13,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 AutoFillCCInfoBarDelegate::AutoFillCCInfoBarDelegate(TabContents* tab_contents,
-                                                     AutoFillManager* host)
+                                                     AutofillManager* host)
     : ConfirmInfoBarDelegate(tab_contents),
       host_(host) {
 }
@@ -51,10 +50,6 @@ string16 AutoFillCCInfoBarDelegate::GetMessageText() const {
   return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_INFOBAR_TEXT);
 }
 
-int AutoFillCCInfoBarDelegate::GetButtons() const {
-  return BUTTON_OK | BUTTON_CANCEL;
-}
-
 string16 AutoFillCCInfoBarDelegate::GetButtonLabel(InfoBarButton button) const {
   return l10n_util::GetStringUTF16((button == BUTTON_OK) ?
       IDS_AUTOFILL_CC_INFOBAR_ACCEPT : IDS_AUTOFILL_CC_INFOBAR_DENY);
@@ -71,10 +66,6 @@ bool AutoFillCCInfoBarDelegate::Accept() {
 
 bool AutoFillCCInfoBarDelegate::Cancel() {
   UMA_HISTOGRAM_COUNTS("AutoFill.CCInfoBarDenied", 1);
-  if (host_) {
-    host_->OnInfoBarClosed(false);
-    host_ = NULL;
-  }
   return true;
 }
 
@@ -88,9 +79,3 @@ bool AutoFillCCInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
   browser->OpenAutoFillHelpTabAndActivate();
   return false;
 }
-
-#if defined(OS_WIN)
-InfoBar* AutoFillCCInfoBarDelegate::CreateInfoBar() {
-  return CreateAutofillCcInfoBar(this);
-}
-#endif  // defined(OS_WIN)

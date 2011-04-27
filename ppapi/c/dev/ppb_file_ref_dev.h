@@ -1,17 +1,19 @@
-/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 #ifndef PPAPI_C_DEV_PPB_FILE_REF_DEV_H_
 #define PPAPI_C_DEV_PPB_FILE_REF_DEV_H_
 
-#include "ppapi/c/pp_bool.h"
 #include "ppapi/c/dev/pp_file_info_dev.h"
+#include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
 
-#define PPB_FILEREF_DEV_INTERFACE "PPB_FileRef(Dev);0.5"
+struct PP_CompletionCallback;
+
+#define PPB_FILEREF_DEV_INTERFACE "PPB_FileRef(Dev);0.7"
 
 // A FileRef is a "weak pointer" to a file in a file system.  It contains a
 // PP_FileSystemType identifier and a file path string.
@@ -24,7 +26,8 @@ struct PPB_FileRef_Dev {
   // resource is invalid or some type other than a FileRef.
   PP_Bool (*IsFileRef)(PP_Resource resource);
 
-  // Returns the file system identifier of this file.
+  // Returns the file system identifier of this file, or
+  // PP_FILESYSTEMTYPE_INVALID if the file ref is invalid.
   PP_FileSystemType_Dev (*GetFileSystemType)(PP_Resource file_ref);
 
   // Returns the name of the file. The value returned by this function does not
@@ -50,12 +53,6 @@ struct PPB_FileRef_Dev {
   int32_t (*MakeDirectory)(PP_Resource directory_ref,
                            PP_Bool make_ancestors,
                            struct PP_CompletionCallback callback);
-
-  // Queries info about the file.  You must have read access to this file if it
-  // exists in the external filesystem.
-  int32_t (*Query)(PP_Resource file_ref,
-                   struct PP_FileInfo_Dev* info,
-                   struct PP_CompletionCallback callback);
 
   // Updates timestamps for a file.  You must have write access to the file if
   // it exists in the external filesystem.

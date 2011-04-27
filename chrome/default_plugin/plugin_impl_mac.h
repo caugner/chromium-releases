@@ -8,8 +8,8 @@
 
 #include <string>
 
-#include "gfx/native_widget_types.h"
 #include "third_party/npapi/bindings/npapi.h"
+#include "ui/gfx/native_widget_types.h"
 
 #ifdef __OBJC__
 @class NSImage;
@@ -285,7 +285,7 @@ class PluginInstallerImpl {
   // Dimensions of the plugin
   uint32_t width_;
   uint32_t height_;
-  // Plugin icon
+  // Plugin icon, weak (owned by ResourceBundle).
   NSImage* image_;
   // Displayed text
   NSString* command_;

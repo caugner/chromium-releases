@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "gfx/native_widget_types.h"
+#include "ui/gfx/native_widget_types.h"
 #include "views/view.h"
 
 namespace views {
@@ -78,13 +78,14 @@ class NativeViewHost : public View {
   // Overridden from View:
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
-  virtual void Paint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas);
   virtual void VisibilityChanged(View* starting_from, bool is_visible);
-  virtual void Focus();
+  virtual void OnFocus();
   virtual bool ContainsNativeView(gfx::NativeView native_view) const;
 
  protected:
-  virtual void VisibleBoundsInRootChanged();
+  virtual bool NeedsNotificationWhenVisibleBoundsChange() const;
+  virtual void OnVisibleBoundsChanged();
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
   virtual std::string GetClassName() const;
 

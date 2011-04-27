@@ -25,8 +25,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #import "chrome/browser/ui/cocoa/content_settings/content_setting_bubble_cocoa.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
@@ -46,6 +44,8 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/notification_service.h"
+#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "net/base/net_util.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -89,7 +89,6 @@ LocationBarViewMac::LocationBarViewMac(
       profile_(profile),
       browser_(browser),
       toolbar_model_(toolbar_model),
-      update_instant_(true),
       transition_(PageTransition::TYPED),
       first_run_bubble_(this) {
   for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
@@ -139,8 +138,7 @@ std::wstring LocationBarViewMac::GetInputString() const {
 }
 
 void LocationBarViewMac::SetSuggestedText(const string16& text) {
-  edit_view_->SetInstantSuggestion(
-      edit_view_->model()->UseVerbatimInstant() ? string16() : text);
+  edit_view_->model()->SetSuggestedText(text);
 }
 
 WindowOpenDisposition LocationBarViewMac::GetWindowOpenDisposition() const {
@@ -214,54 +212,6 @@ void LocationBarViewMac::Update(const TabContents* contents,
   OnChanged();
 }
 
-void LocationBarViewMac::OnAutocompleteWillClosePopup() {
-  if (!update_instant_)
-    return;
-
-  InstantController* controller = browser_->instant();
-  if (controller && !controller->commit_on_mouse_up())
-    controller->DestroyPreviewContents();
-  SetSuggestedText(string16());
-}
-
-void LocationBarViewMac::OnAutocompleteLosingFocus(gfx::NativeView unused) {
-  SetSuggestedText(string16());
-
-  InstantController* instant = browser_->instant();
-  if (!instant)
-    return;
-
-  // If |IsMouseDownFromActivate()| returns false, the RenderWidgetHostView did
-  // not receive a mouseDown event.  Therefore, we should destroy the preview.
-  // Otherwise, the RWHV was clicked, so we commit the preview.
-  if (!instant->is_displayable() || !instant->GetPreviewContents() ||
-      !instant->IsMouseDownFromActivate()) {
-    instant->DestroyPreviewContents();
-  } else if (instant->IsShowingInstant()) {
-    instant->SetCommitOnMouseUp();
-  } else {
-    instant->CommitCurrentPreview(INSTANT_COMMIT_FOCUS_LOST);
-  }
-}
-
-void LocationBarViewMac::OnAutocompleteWillAccept() {
-  update_instant_ = false;
-}
-
-bool LocationBarViewMac::OnCommitSuggestedText(const std::wstring& typed_text) {
-  return edit_view_->CommitSuggestText();
-}
-
-bool LocationBarViewMac::AcceptCurrentInstantPreview() {
-  return InstantController::CommitIfCurrent(browser_->instant());
-}
-
-void LocationBarViewMac::OnPopupBoundsChanged(const gfx::Rect& bounds) {
-  InstantController* instant = browser_->instant();
-  if (instant)
-    instant->SetOmniboxBounds(bounds);
-}
-
 void LocationBarViewMac::OnAutocompleteAccept(const GURL& url,
                                               WindowOpenDisposition disposition,
                                               PageTransition::Type transition,
@@ -294,11 +244,6 @@ void LocationBarViewMac::OnAutocompleteAccept(const GURL& url,
       }
     }
   }
-
-  if (browser_->instant() && !edit_view_->model()->popup_model()->IsOpen())
-    browser_->instant()->DestroyPreviewContents();
-
-  update_instant_ = true;
 }
 
 void LocationBarViewMac::OnChanged() {
@@ -308,30 +253,6 @@ void LocationBarViewMac::OnChanged() {
   location_icon_decoration_->SetImage(image);
   ev_bubble_decoration_->SetImage(image);
   Layout();
-
-  InstantController* instant = browser_->instant();
-  string16 suggested_text;
-  if (update_instant_ && instant && GetTabContents()) {
-    if (edit_view_->model()->user_input_in_progress() &&
-        edit_view_->model()->popup_model()->IsOpen()) {
-      instant->Update
-          (browser_->GetSelectedTabContentsWrapper(),
-           edit_view_->model()->CurrentMatch(),
-           WideToUTF16(edit_view_->GetText()),
-           edit_view_->model()->UseVerbatimInstant(),
-           &suggested_text);
-      if (!instant->MightSupportInstant()) {
-        edit_view_->model()->FinalizeInstantQuery(std::wstring(),
-                                                  std::wstring());
-      }
-    } else {
-      instant->DestroyPreviewContents();
-      edit_view_->model()->FinalizeInstantQuery(std::wstring(),
-                                                std::wstring());
-    }
-  }
-
-  SetSuggestedText(suggested_text);
 }
 
 void LocationBarViewMac::OnSelectionBoundsChanged() {
@@ -357,13 +278,33 @@ SkBitmap LocationBarViewMac::GetFavIcon() const {
   return SkBitmap();
 }
 
-std::wstring LocationBarViewMac::GetTitle() const {
+string16 LocationBarViewMac::GetTitle() const {
   NOTIMPLEMENTED();
-  return std::wstring();
+  return string16();
+}
+
+InstantController* LocationBarViewMac::GetInstant() {
+  return browser_->instant();
+}
+
+TabContentsWrapper* LocationBarViewMac::GetTabContentsWrapper() {
+  return browser_->GetSelectedTabContentsWrapper();
 }
 
 void LocationBarViewMac::Revert() {
   edit_view_->RevertAll();
+}
+
+const AutocompleteEditView* LocationBarViewMac::location_entry() const {
+    return edit_view_.get();
+  }
+
+AutocompleteEditView* LocationBarViewMac::location_entry() {
+    return edit_view_.get();
+  }
+
+LocationBarTesting* LocationBarViewMac::GetLocationBarForTesting() {
+  return this;
 }
 
 // TODO(pamg): Change all these, here and for other platforms, to size_t.
@@ -520,10 +461,9 @@ NSPoint LocationBarViewMac::GetPageInfoBubblePoint() const {
   }
 }
 
-NSImage* LocationBarViewMac::GetKeywordImage(const std::wstring& keyword) {
+NSImage* LocationBarViewMac::GetKeywordImage(const string16& keyword) {
   const TemplateURL* template_url =
-      profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(
-          WideToUTF16Hack(keyword));
+      profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(keyword);
   if (template_url && template_url->IsExtensionKeyword()) {
     const SkBitmap& bitmap = profile_->GetExtensionService()->
         GetOmniboxIcon(template_url->GetExtensionId());
@@ -651,12 +591,12 @@ void LocationBarViewMac::Layout() {
   keyword_hint_decoration_->SetVisible(false);
 
   // Get the keyword to use for keyword-search and hinting.
-  const std::wstring keyword(edit_view_->model()->keyword());
+  const string16 keyword = edit_view_->model()->keyword();
   string16 short_name;
   bool is_extension_keyword = false;
   if (!keyword.empty()) {
     short_name = profile_->GetTemplateURLModel()->
-        GetKeywordShortName(WideToUTF16Hack(keyword), &is_extension_keyword);
+        GetKeywordShortName(keyword, &is_extension_keyword);
   }
 
   const bool is_keyword_hint = edit_view_->model()->is_keyword_hint();
@@ -665,8 +605,7 @@ void LocationBarViewMac::Layout() {
     // Switch from location icon to keyword mode.
     location_icon_decoration_->SetVisible(false);
     selected_keyword_decoration_->SetVisible(true);
-    selected_keyword_decoration_->SetKeyword(UTF16ToWideHack(short_name),
-                                             is_extension_keyword);
+    selected_keyword_decoration_->SetKeyword(short_name, is_extension_keyword);
     selected_keyword_decoration_->SetImage(GetKeywordImage(keyword));
   } else if (toolbar_model_->GetSecurityLevel() == ToolbarModel::EV_SECURE) {
     // Switch from location icon to show the EV bubble instead.

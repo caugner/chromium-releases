@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,10 @@ using ::testing::_;
 using ::testing::Mock;
 using ::testing::Return;
 
-namespace {
-const int kTestCloseDelayMs = 100;
+static const int kTestCloseDelayMs = 100;
 
 // Used in the test where we don't want a stream to be closed unexpectedly.
-const int kTestBigCloseDelayMs = 1000 * 1000;
-}  // namespace
+static const int kTestBigCloseDelayMs = 1000 * 1000;
 
 class MockAudioOutputStream : public AudioOutputStream {
  public:
@@ -50,6 +48,8 @@ class MockAudioManager : public AudioManager {
       AudioParameters params));
   MOCK_METHOD0(MuteAll, void());
   MOCK_METHOD0(UnMuteAll, void());
+  MOCK_METHOD0(CanShowAudioInputSettings, bool());
+  MOCK_METHOD0(ShowAudioInputSettings, void());
   MOCK_METHOD0(GetMessageLoop, MessageLoop*());
 };
 

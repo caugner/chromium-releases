@@ -45,7 +45,28 @@ void ServerNotifierThread::SubscribeForUpdates(
   worker_message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(
-          this, &ServerNotifierThread::RegisterTypesAndSignalSubscribed));
+          this, &ServerNotifierThread::RegisterTypes));
+
+  worker_message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(
+          this, &ServerNotifierThread::SignalSubscribed));
+}
+
+void ServerNotifierThread::UpdateEnabledTypes(
+    const syncable::ModelTypeSet& types) {
+  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
+  worker_message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(
+          this,
+          &ServerNotifierThread::SetRegisteredTypes,
+          types));
+
+  worker_message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(
+          this, &ServerNotifierThread::RegisterTypes));
 }
 
 void ServerNotifierThread::Logout() {
@@ -66,7 +87,9 @@ void ServerNotifierThread::SendNotification(
                   "used";
 }
 
-void ServerNotifierThread::OnInvalidate(syncable::ModelType model_type) {
+void ServerNotifierThread::OnInvalidate(
+    syncable::ModelType model_type,
+    const std::string& payload) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
   DCHECK_GE(model_type, syncable::FIRST_REAL_MODEL_TYPE);
   DCHECK_LT(model_type, syncable::MODEL_TYPE_COUNT);
@@ -75,7 +98,8 @@ void ServerNotifierThread::OnInvalidate(syncable::ModelType model_type) {
   syncable::ModelTypeBitSet model_types;
   model_types[model_type] = true;
   IncomingNotificationData notification_data;
-  notification_data.service_specific_data = model_types.to_string();
+  notification_data.service_url = model_types.to_string();
+  notification_data.service_specific_data = payload;
   observers_->Notify(&Observer::OnIncomingNotification, notification_data);
 }
 
@@ -86,7 +110,8 @@ void ServerNotifierThread::OnInvalidateAll() {
   syncable::ModelTypeBitSet model_types;
   model_types.set();  // InvalidateAll, so set all datatypes to true.
   IncomingNotificationData notification_data;
-  notification_data.service_specific_data = model_types.to_string();
+  notification_data.service_url = model_types.to_string();
+  notification_data.service_specific_data = std::string();  // No payload.
   observers_->Notify(&Observer::OnIncomingNotification, notification_data);
 }
 
@@ -120,22 +145,30 @@ void ServerNotifierThread::DoListenForUpdates() {
     const std::string& client_info = webkit_glue::GetUserAgent(GURL());
     chrome_invalidation_client_->Start(
         kClientId, client_info, state_, this, this, base_task_);
+    RegisterTypes();
     state_.clear();
   }
 }
 
-void ServerNotifierThread::RegisterTypesAndSignalSubscribed() {
+void ServerNotifierThread::RegisterTypes() {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
   if (!chrome_invalidation_client_.get()) {
     return;
   }
-  chrome_invalidation_client_->RegisterTypes();
+  chrome_invalidation_client_->RegisterTypes(registered_types_);
+}
+
+void ServerNotifierThread::SignalSubscribed() {
   observers_->Notify(&Observer::OnSubscriptionStateChange, true);
 }
 
 void ServerNotifierThread::StopInvalidationListener() {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
   chrome_invalidation_client_.reset();
+}
+
+void ServerNotifierThread::SetRegisteredTypes(syncable::ModelTypeSet types) {
+  registered_types_ = types;
 }
 
 }  // namespace sync_notifier

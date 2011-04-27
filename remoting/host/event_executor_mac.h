@@ -16,15 +16,17 @@ namespace remoting {
 // A class to generate events on Mac.
 class EventExecutorMac : public protocol::InputStub {
  public:
-  EventExecutorMac(MessageLoop* message_loop, Capturer* capturer);
+  EventExecutorMac(MessageLoopForUI* message_loop, Capturer* capturer);
   virtual ~EventExecutorMac();
 
   virtual void InjectKeyEvent(const protocol::KeyEvent* event, Task* done);
   virtual void InjectMouseEvent(const protocol::MouseEvent* event, Task* done);
 
  private:
-  MessageLoop* message_loop_;
+  MessageLoopForUI* message_loop_;
   Capturer* capturer_;
+  int last_x_, last_y_;
+  int modifiers_;
 
   DISALLOW_COPY_AND_ASSIGN(EventExecutorMac);
 };

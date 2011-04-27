@@ -5,13 +5,13 @@
 #include "chrome/browser/ui/views/tabs/side_tab.h"
 
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/favicon_size.h"
-#include "gfx/path.h"
-#include "gfx/skia_util.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/favicon_size.h"
+#include "ui/gfx/path.h"
+#include "ui/gfx/skia_util.h"
 #include "views/controls/button/image_button.h"
 
 namespace {
@@ -52,15 +52,8 @@ int SideTab::GetPreferredHeight() {
 
 void SideTab::Layout() {
   if (ShouldShowIcon()) {
-    int icon_x = kIconLeftPadding;
     int icon_y = (height() - kFavIconSize) / 2;
-    int icon_size =
-        !data().favicon.empty() ? data().favicon.width() : kFavIconSize;
-    if (icon_size != kFavIconSize) {
-      icon_x -= (icon_size - kFavIconSize) / 2;
-      icon_y -= (icon_size - kFavIconSize) / 2;
-    }
-    icon_bounds_.SetRect(icon_x, icon_y, icon_size, icon_size);
+    icon_bounds_.SetRect(kIconLeftPadding, icon_y, kFavIconSize, kFavIconSize);
   } else {
     icon_bounds_ = gfx::Rect();
   }
@@ -82,7 +75,7 @@ void SideTab::Layout() {
       font_height());
 }
 
-void SideTab::Paint(gfx::Canvas* canvas) {
+void SideTab::OnPaint(gfx::Canvas* canvas) {
   if (ShouldPaintHighlight()) {
     SkPaint paint;
     paint.setColor(kTabBackgroundColor);
@@ -96,13 +89,21 @@ void SideTab::Paint(gfx::Canvas* canvas) {
   }
 
   if (ShouldShowIcon())
-    PaintIcon(canvas, icon_bounds_.x(), icon_bounds_.y());
+    PaintIcon(canvas);
 
   PaintTitle(canvas, kTextColor);
 }
 
 gfx::Size SideTab::GetPreferredSize() {
   return gfx::Size(0, GetPreferredHeight());
+}
+
+const gfx::Rect& SideTab::GetTitleBounds() const {
+  return title_bounds_;
+}
+
+const gfx::Rect& SideTab::GetIconBounds() const {
+  return icon_bounds_;
 }
 
 bool SideTab::ShouldPaintHighlight() const {

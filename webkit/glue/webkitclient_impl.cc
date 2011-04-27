@@ -14,10 +14,11 @@
 
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
-#include "base/metrics/stats_counters.h"
 #include "base/metrics/histogram.h"
-#include "base/process_util.h"
+#include "base/metrics/stats_counters.h"
 #include "base/platform_file.h"
+#include "base/process_util.h"
+#include "base/rand_util.h"
 #include "base/singleton.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -377,24 +378,6 @@ WebData WebKitClientImpl::loadResource(const char* name) {
     { "masterCardCC", IDR_AUTOFILL_CC_MASTERCARD },
     { "soloCC", IDR_AUTOFILL_CC_SOLO },
     { "visaCC", IDR_AUTOFILL_CC_VISA },
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-    // TODO(port): rename these to "skia" instead of "Linux".
-    { "linuxCheckboxDisabledIndeterminate",
-        IDR_LINUX_CHECKBOX_DISABLED_INDETERMINATE },
-    { "linuxCheckboxDisabledOff", IDR_LINUX_CHECKBOX_DISABLED_OFF },
-    { "linuxCheckboxDisabledOn", IDR_LINUX_CHECKBOX_DISABLED_ON },
-    { "linuxCheckboxIndeterminate", IDR_LINUX_CHECKBOX_INDETERMINATE },
-    { "linuxCheckboxOff", IDR_LINUX_CHECKBOX_OFF },
-    { "linuxCheckboxOn", IDR_LINUX_CHECKBOX_ON },
-    { "linuxRadioDisabledOff", IDR_LINUX_RADIO_DISABLED_OFF },
-    { "linuxRadioDisabledOn", IDR_LINUX_RADIO_DISABLED_ON },
-    { "linuxRadioOff", IDR_LINUX_RADIO_OFF },
-    { "linuxRadioOn", IDR_LINUX_RADIO_ON },
-    { "linuxProgressBar", IDR_PROGRESS_BAR },
-    { "linuxProgressBorderLeft", IDR_PROGRESS_BORDER_LEFT },
-    { "linuxProgressBorderRight", IDR_PROGRESS_BORDER_RIGHT },
-    { "linuxProgressValue", IDR_PROGRESS_VALUE },
-#endif
   };
 
   // Check the name prefix to see if it's an audio resource.
@@ -461,6 +444,17 @@ WebString WebKitClientImpl::queryLocalizedString(
 
 double WebKitClientImpl::currentTime() {
   return base::Time::Now().ToDoubleT();
+}
+
+void WebKitClientImpl::cryptographicallyRandomValues(
+    unsigned char* buffer, size_t length) {
+  uint64 bytes = 0;
+  for (size_t i = 0; i < length; ++i) {
+    size_t offset = i % sizeof(bytes);
+    if (!offset)
+      bytes = base::RandUint64();
+    buffer[i] = reinterpret_cast<unsigned char*>(&bytes)[offset];
+  }
 }
 
 void WebKitClientImpl::setSharedTimerFiredFunction(void (*func)()) {

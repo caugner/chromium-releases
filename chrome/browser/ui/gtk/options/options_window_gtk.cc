@@ -6,14 +6,12 @@
 
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/accessibility_events.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/gtk/accessible_widget_helper_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/options/advanced_page_gtk.h"
 #include "chrome/browser/ui/gtk/options/content_page_gtk.h"
@@ -24,11 +22,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/options/internet_page_view.h"
-#include "chrome/browser/chromeos/options/system_page_view.h"
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsWindowGtk
@@ -70,8 +63,6 @@ class OptionsWindowGtk {
   // The last page the user was on when they opened the Options window.
   IntegerPrefMember last_selected_page_;
 
-  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
-
   DISALLOW_COPY_AND_ASSIGN(OptionsWindowGtk);
 };
 
@@ -108,10 +99,6 @@ OptionsWindowGtk::OptionsWindowGtk(Profile* profile)
       GTK_RESPONSE_CLOSE,
       NULL);
 
-  accessible_widget_helper_.reset(new AccessibleWidgetHelper(
-      dialog_, profile));
-  accessible_widget_helper_->SendOpenWindowNotification(dialog_name);
-
   gtk_window_set_default_size(GTK_WINDOW(dialog_), 500, -1);
   // Allow browser windows to go in front of the options dialog in metacity.
   gtk_window_set_type_hint(GTK_WINDOW(dialog_), GDK_WINDOW_TYPE_HINT_NORMAL);
@@ -119,20 +106,6 @@ OptionsWindowGtk::OptionsWindowGtk(Profile* profile)
                       gtk_util::kContentAreaSpacing);
 
   notebook_ = gtk_notebook_new();
-
-#if defined(OS_CHROMEOS)
-  gtk_notebook_append_page(
-      GTK_NOTEBOOK(notebook_),
-      (new chromeos::SystemPageView(profile_))->WrapInGtkWidget(),
-      gtk_label_new(
-          l10n_util::GetStringUTF8(IDS_OPTIONS_SYSTEM_TAB_LABEL).c_str()));
-
-  gtk_notebook_append_page(
-      GTK_NOTEBOOK(notebook_),
-      (new chromeos::InternetPageView(profile_))->WrapInGtkWidget(),
-      gtk_label_new(
-          l10n_util::GetStringUTF8(IDS_OPTIONS_INTERNET_TAB_LABEL).c_str()));
-#endif
 
   gtk_notebook_append_page(
       GTK_NOTEBOOK(notebook_),
@@ -240,9 +213,6 @@ void OptionsWindowGtk::OnWindowDestroy(GtkWidget* widget,
 ///////////////////////////////////////////////////////////////////////////////
 // Factory/finder method:
 
-#if !defined(OS_CHROMEOS)
-// ShowOptionsWindow for non ChromeOS build. For ChromeOS build, see
-// chrome/browser/chromeos/options/options_window_view.h
 void ShowOptionsWindow(OptionsPage page,
                        OptionsGroup highlight_group,
                        Profile* profile) {
@@ -251,17 +221,8 @@ void ShowOptionsWindow(OptionsPage page,
   // If there's already an existing options window, activate it and switch to
   // the specified page.
   if (!options_window) {
-    // Creating and initializing a bunch of controls generates a bunch of
-    // spurious events as control values change. Temporarily suppress
-    // accessibility events until the window is created.
-    profile->PauseAccessibilityEvents();
-
     // Create the options window.
     options_window = new OptionsWindowGtk(profile);
-
-    // Resume accessibility events.
-    profile->ResumeAccessibilityEvents();
   }
   options_window->ShowOptionsPage(page, highlight_group);
 }
-#endif  // !defined(OS_CHROMEOS)

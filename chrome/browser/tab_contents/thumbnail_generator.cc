@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,24 +14,24 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/backing_store.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/property_bag.h"
 #include "chrome/common/thumbnail_score.h"
-#include "gfx/color_utils.h"
-#include "gfx/rect.h"
-#include "gfx/skbitmap_operations.h"
+#include "content/browser/renderer_host/backing_store.h"
+#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/skbitmap_operations.h"
 
 #if defined(OS_WIN)
-#include "app/win/win_util.h"
+#include "chrome/common/section_util_win.h"
 #endif
 
 // Overview
@@ -268,7 +268,7 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
   // Duplicate the handle to the DIB here because the renderer process does not
   // have permission. The duplicated handle is owned by the renderer process,
   // which is responsible for closing it.
-  TransportDIB::Handle renderer_dib_handle = app::win::GetSectionForProcess(
+  TransportDIB::Handle renderer_dib_handle = chrome::GetSectionForProcess(
       thumbnail_dib->handle(),
       renderer->process()->GetHandle(),
       false);
@@ -632,11 +632,10 @@ SkBitmap ThumbnailGenerator::GetClippedBitmap(const SkBitmap& bitmap,
 
 void ThumbnailGenerator::UpdateThumbnailIfNecessary(
     TabContents* tab_contents, const GURL& url) {
-  if (tab_contents->profile()->IsOffTheRecord() ||
-      (url.SchemeIs("chrome") && url.host() == "newtab"))
+  history::TopSites* top_sites = tab_contents->profile()->GetTopSites();
+  // Skip if we don't need to update the thumbnail.
+  if (!ShouldUpdateThumbnail(tab_contents->profile(), top_sites, url))
     return;
-  // TODO(satorux): Add more conditions here to avoid unnecessary
-  // thumbnail generation.
 
   ThumbnailGenerator* generator = g_browser_process->GetThumbnailGenerator();
   const int options = ThumbnailGenerator::kClippedThumbnail;
@@ -650,16 +649,37 @@ void ThumbnailGenerator::UpdateThumbnailIfNecessary(
   // Compute the thumbnail score.
   ThumbnailScore score;
   score.at_top =
-      (tab_contents->render_view_host()->last_scroll_offset().height() == 0);
+      (tab_contents->render_view_host()->last_scroll_offset().y() == 0);
   score.boring_score = ThumbnailGenerator::CalculateBoringScore(&thumbnail);
   score.good_clipping =
       (clip_result == ThumbnailGenerator::kTallerThanWide ||
        clip_result == ThumbnailGenerator::kNotClipped);
 
-  history::TopSites* top_sites = tab_contents->profile()->GetTopSites();
   top_sites->SetPageThumbnail(url, thumbnail, score);
-  VLOG(1) << "Thumbnail taken for " << url
-          << ", at_top: " << score.at_top
-          << ", boring_score: " << score.boring_score
-          << ", good_clipping: " << score.good_clipping;
+  VLOG(1) << "Thumbnail taken for " << url << ": " << score.ToString();
+}
+
+bool ThumbnailGenerator::ShouldUpdateThumbnail(Profile* profile,
+                                               history::TopSites* top_sites,
+                                               const GURL& url) {
+  if (!profile || !top_sites)
+    return false;
+  // Skip if it's in the off-the-record mode.
+  if (profile->IsOffTheRecord())
+    return false;
+  // Skip if the given URL is not appropriate for history.
+  if (!HistoryService::CanAddURL(url))
+    return false;
+  // Skip if the top sites list is full, and the URL is not known.
+  const bool is_known = top_sites->IsKnownURL(url);
+  if (top_sites->IsFull() && !is_known)
+    return false;
+  // Skip if we don't have to udpate the existing thumbnail.
+  ThumbnailScore current_score;
+  if (is_known &&
+      top_sites->GetPageThumbnailScore(url, &current_score) &&
+      !current_score.ShouldConsiderUpdating())
+    return false;
+
+  return true;
 }

@@ -32,10 +32,6 @@ class BaseTabStrip : public views::View,
 
   Type type() const { return type_; }
 
-  // Returns the preferred height of this TabStrip. This is based on the
-  // typical height of its constituent tabs.
-  virtual int GetPreferredHeight() = 0;
-
   // Set the background offset used by inactive tabs to match the frame image.
   virtual void SetBackgroundOffset(const gfx::Point& offset) = 0;
 
@@ -56,9 +52,6 @@ class BaseTabStrip : public views::View,
 
   // Stops all tab higlighting.
   virtual void StopAllHighlighting() = 0;
-
-  // Returns the selected tab.
-  virtual BaseTab* GetSelectedBaseTab() const;
 
   // Retrieves the ideal bounds for the Tab at the specified index.
   const gfx::Rect& ideal_bounds(int tab_data_index) {
@@ -136,7 +129,7 @@ class BaseTabStrip : public views::View,
   // TabController overrides:
   virtual void SelectTab(BaseTab* tab);
   virtual void CloseTab(BaseTab* tab);
-  virtual void ShowContextMenu(BaseTab* tab, const gfx::Point& p);
+  virtual void ShowContextMenuForTab(BaseTab* tab, const gfx::Point& p);
   virtual bool IsTabSelected(const BaseTab* tab) const;
   virtual bool IsTabPinned(const BaseTab* tab) const;
   virtual bool IsTabCloseable(const BaseTab* tab) const;
@@ -171,7 +164,7 @@ class BaseTabStrip : public views::View,
 
   // Invoked from |MoveTab| after |tab_data_| has been updated to animate the
   // move.
-  virtual void StartMoveTabAnimation() = 0;
+  virtual void StartMoveTabAnimation();
 
   // Starts the remove tab animation.
   virtual void StartRemoveTabAnimation(int model_index);
@@ -180,7 +173,7 @@ class BaseTabStrip : public views::View,
   virtual void StartMiniTabAnimation();
 
   // Returns whether the highlight button should be highlighted after a remove.
-  virtual bool ShouldHighlightCloseButtonAfterRemove() { return true; }
+  virtual bool ShouldHighlightCloseButtonAfterRemove();
 
   // Animates all the views to their ideal bounds.
   // NOTE: this does *not* invoke GenerateIdealBounds, it uses the bounds
@@ -204,7 +197,7 @@ class BaseTabStrip : public views::View,
 
   // Stops any ongoing animations. If |layout| is true and an animation is
   // ongoing this does a layout.
-  virtual void StopAnimating(bool layout) = 0;
+  virtual void StopAnimating(bool layout);
 
   // Destroys the active drag controller.
   void DestroyDragController();

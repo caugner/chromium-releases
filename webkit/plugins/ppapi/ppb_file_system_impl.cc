@@ -12,6 +12,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "webkit/fileapi/file_system_types.h"
+#include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/file_callbacks.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -31,9 +32,20 @@ PP_Resource Create(PP_Instance instance, PP_FileSystemType_Dev type) {
   if (!plugin_instance)
     return 0;
 
+  if (type != PP_FILESYSTEMTYPE_EXTERNAL &&
+      type != PP_FILESYSTEMTYPE_LOCALPERSISTENT &&
+      type != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
+    return 0;
+
   PPB_FileSystem_Impl* file_system =
       new PPB_FileSystem_Impl(plugin_instance, type);
   return file_system->GetReference();
+}
+
+PP_Bool IsFileSystem(PP_Resource resource) {
+  scoped_refptr<PPB_FileSystem_Impl> file_system(
+      Resource::GetAs<PPB_FileSystem_Impl>(resource));
+  return BoolToPPBool(!!file_system.get());
 }
 
 int32_t Open(PP_Resource file_system_id,
@@ -44,8 +56,10 @@ int32_t Open(PP_Resource file_system_id,
   if (!file_system)
     return PP_ERROR_BADRESOURCE;
 
-  if (file_system->opened())
-    return PP_OK;
+  // Should not allow multiple opens.
+  if (file_system->called_open())
+    return PP_ERROR_FAILED;
+  file_system->set_called_open();
 
   if ((file_system->type() != PP_FILESYSTEMTYPE_LOCALPERSISTENT) &&
       (file_system->type() != PP_FILESYSTEMTYPE_LOCALTEMPORARY))
@@ -66,9 +80,19 @@ int32_t Open(PP_Resource file_system_id,
   return PP_ERROR_WOULDBLOCK;
 }
 
+PP_FileSystemType_Dev GetType(PP_Resource resource) {
+  scoped_refptr<PPB_FileSystem_Impl> file_system(
+      Resource::GetAs<PPB_FileSystem_Impl>(resource));
+  if (!file_system)
+    return PP_FILESYSTEMTYPE_INVALID;
+  return file_system->type();
+}
+
 const PPB_FileSystem_Dev ppb_filesystem = {
   &Create,
-  &Open
+  &IsFileSystem,
+  &Open,
+  &GetType
 };
 
 }  // namespace
@@ -78,7 +102,9 @@ PPB_FileSystem_Impl::PPB_FileSystem_Impl(PluginInstance* instance,
     : Resource(instance),
       instance_(instance),
       type_(type),
-      opened_(false) {
+      opened_(false),
+      called_open_(false) {
+  DCHECK(type_ != PP_FILESYSTEMTYPE_INVALID);
 }
 
 PPB_FileSystem_Impl* PPB_FileSystem_Impl::AsPPB_FileSystem_Impl() {

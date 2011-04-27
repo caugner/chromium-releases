@@ -7,12 +7,12 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/font.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_resources.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/font.h"
 #include "views/controls/button/text_button.h"
 
 using ui::OSExchangeData;
@@ -33,7 +33,7 @@ void SetURLAndDragImage(const GURL& url,
                         OSExchangeData* data) {
   DCHECK(url.is_valid() && data);
 
-  data->SetURL(url, title);
+  data->SetURL(url, WideToUTF16(title));
 
   // Create a button to render the drag image for us.
   views::TextButton button(NULL,
@@ -50,13 +50,13 @@ void SetURLAndDragImage(const GURL& url,
 
   // Render the image.
   gfx::CanvasSkia canvas(prefsize.width(), prefsize.height(), false);
-  button.Paint(&canvas, true);
+  button.PaintButton(&canvas, views::TextButton::PB_FOR_DRAG);
   SetDragImageOnDataObject(canvas, prefsize,
       gfx::Point(prefsize.width() / 2, prefsize.height() / 2), data);
 }
 
 void CreateDragImageForFile(const FilePath& file_name,
-                            SkBitmap* icon,
+                            const SkBitmap* icon,
                             OSExchangeData* data_object) {
   DCHECK(icon);
   DCHECK(data_object);
@@ -74,7 +74,7 @@ void CreateDragImageForFile(const FilePath& file_name,
   // Paint the icon.
   canvas.DrawBitmapInt(*icon, (width - icon->width()) / 2, 0);
 
-  std::wstring name = file_name.BaseName().ToWStringHack();
+  std::wstring name = UTF16ToWide(file_name.BaseName().LossyDisplayName());
 #if defined(OS_WIN)
   // Paint the file name. We inset it one pixel to allow room for the halo.
   canvas.DrawStringWithHalo(name, font, kFileDragImageTextColor, SK_ColorWHITE,

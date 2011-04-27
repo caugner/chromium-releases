@@ -8,13 +8,13 @@
 
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/notification_service.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/color_utils.h"
-#include "gfx/path.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/fill_layout.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/path.h"
+#include "views/layout/fill_layout.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 #include "views/window/client_view.h"
@@ -103,7 +103,7 @@ gfx::Rect BorderContents::GetMonitorBounds(const gfx::Rect& rect) {
   return monitor_provider->GetMonitorWorkAreaMatching(rect);
 }
 
-void BorderContents::Paint(gfx::Canvas* canvas) {
+void BorderContents::OnPaint(gfx::Canvas* canvas) {
   // The border of this view creates an anti-aliased round-rect region for the
   // contents, which we need to fill with the background color.
   // NOTE: This doesn't handle an arrow location of "NONE", which has square top
@@ -113,7 +113,7 @@ void BorderContents::Paint(gfx::Canvas* canvas) {
   paint.setStyle(SkPaint::kFill_Style);
   paint.setColor(InfoBubble::kBackgroundColor);
   gfx::Path path;
-  gfx::Rect bounds(GetLocalBounds(false));
+  gfx::Rect bounds(GetContentsBounds());
   SkRect rect;
   rect.set(SkIntToScalar(bounds.x()), SkIntToScalar(bounds.y()),
            SkIntToScalar(bounds.right()), SkIntToScalar(bounds.bottom()));
@@ -124,7 +124,7 @@ void BorderContents::Paint(gfx::Canvas* canvas) {
   // Now we paint the border, so it will be alpha-blended atop the contents.
   // This looks slightly better in the corners than drawing the contents atop
   // the border.
-  PaintBorder(canvas);
+  OnPaintBorder(canvas);
 }
 
 void BorderContents::MirrorArrowIfOffScreen(
@@ -231,13 +231,19 @@ gfx::Rect BorderWidget::SizeAndGetBounds(
   return contents_bounds;
 }
 
-LRESULT BorderWidget::OnMouseActivate(HWND window,
-                                      UINT hit_test,
-                                      UINT mouse_message) {
+LRESULT BorderWidget::OnMouseActivate(UINT message,
+                                      WPARAM w_param,
+                                      LPARAM l_param) {
   // Never activate.
   return MA_NOACTIVATE;
 }
 #endif
+
+// InfoBubbleDelegate ---------------------------------------------------------
+
+std::wstring InfoBubbleDelegate::accessible_name() {
+  return L"";
+}
 
 // InfoBubble -----------------------------------------------------------------
 
@@ -247,10 +253,10 @@ InfoBubble* InfoBubble::Show(views::Widget* parent,
                              BubbleBorder::ArrowLocation arrow_location,
                              views::View* contents,
                              InfoBubbleDelegate* delegate) {
-  InfoBubble* window = new InfoBubble;
-  window->Init(parent, position_relative_to, arrow_location,
-               contents, delegate);
-  return window;
+  InfoBubble* bubble = new InfoBubble;
+  bubble->InitBubble(parent, position_relative_to, arrow_location,
+                     contents, delegate);
+  return bubble;
 }
 
 #if defined(OS_CHROMEOS)
@@ -262,11 +268,11 @@ InfoBubble* InfoBubble::ShowFocusless(
     views::View* contents,
     InfoBubbleDelegate* delegate,
     bool show_while_screen_is_locked) {
-  InfoBubble* window = new InfoBubble(views::WidgetGtk::TYPE_POPUP,
+  InfoBubble* bubble = new InfoBubble(views::WidgetGtk::TYPE_POPUP,
                                       show_while_screen_is_locked);
-  window->Init(parent, position_relative_to, arrow_location,
-               contents, delegate);
-  return window;
+  bubble->InitBubble(parent, position_relative_to, arrow_location,
+                     contents, delegate);
+  return bubble;
 }
 #endif
 
@@ -347,11 +353,11 @@ InfoBubble::InfoBubble(views::WidgetGtk::Type type,
 InfoBubble::~InfoBubble() {
 }
 
-void InfoBubble::Init(views::Widget* parent,
-                      const gfx::Rect& position_relative_to,
-                      BubbleBorder::ArrowLocation arrow_location,
-                      views::View* contents,
-                      InfoBubbleDelegate* delegate) {
+void InfoBubble::InitBubble(views::Widget* parent,
+                            const gfx::Rect& position_relative_to,
+                            BubbleBorder::ArrowLocation arrow_location,
+                            views::View* contents,
+                            InfoBubbleDelegate* delegate) {
   delegate_ = delegate;
   position_relative_to_ = position_relative_to;
   arrow_location_ = arrow_location;
@@ -438,12 +444,13 @@ void InfoBubble::Init(views::Widget* parent,
       arrow_location, false, contents->GetPreferredSize(),
       &contents_bounds, &window_bounds);
   // This new view must be added before |contents| so it will paint under it.
-  contents_view->AddChildView(0, border_contents_);
+  contents_view->AddChildViewAt(border_contents_, 0);
 
   // |contents_view| has no layout manager, so we have to explicitly position
   // its children.
-  border_contents_->SetBounds(gfx::Rect(gfx::Point(), window_bounds.size()));
-  contents->SetBounds(contents_bounds);
+  border_contents_->SetBoundsRect(
+      gfx::Rect(gfx::Point(), window_bounds.size()));
+  contents->SetBoundsRect(contents_bounds);
 #endif
   SetBounds(window_bounds);
 
@@ -486,8 +493,9 @@ void InfoBubble::SizeToContents() {
       &contents_bounds, &window_bounds);
   // |contents_view| has no layout manager, so we have to explicitly position
   // its children.
-  border_contents_->SetBounds(gfx::Rect(gfx::Point(), window_bounds.size()));
-  contents_->SetBounds(contents_bounds);
+  border_contents_->SetBoundsRect(
+      gfx::Rect(gfx::Point(), window_bounds.size()));
+  contents_->SetBoundsRect(contents_bounds);
 #endif
   SetBounds(window_bounds);
 }
@@ -498,7 +506,7 @@ void InfoBubble::OnActivate(UINT action, BOOL minimized, HWND window) {
   if (action == WA_INACTIVE) {
     Close();
   } else if (action == WA_ACTIVE) {
-    DCHECK_GT(GetRootView()->GetChildViewCount(), 0);
+    DCHECK(GetRootView()->has_children());
     GetRootView()->GetChildViewAt(0)->RequestFocus();
   }
 }

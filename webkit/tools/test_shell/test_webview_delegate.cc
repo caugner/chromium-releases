@@ -16,8 +16,6 @@
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/native_widget_types.h"
-#include "gfx/point.h"
 #include "media/base/filter_collection.h"
 #include "media/base/message_loop_factory_impl.h"
 #include "net/base/net_errors.h"
@@ -55,6 +53,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
+#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/point.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/media/video_renderer_impl.h"
@@ -66,7 +66,6 @@
 #include "webkit/plugins/npapi/webplugin_impl.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
-#include "webkit/tools/test_shell/accessibility_controller.h"
 #include "webkit/tools/test_shell/mock_spellcheck.h"
 #include "webkit/tools/test_shell/notification_presenter.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
@@ -77,7 +76,6 @@
 
 #if defined(OS_WIN)
 // TODO(port): make these files work everywhere.
-#include "webkit/tools/test_shell/drag_delegate.h"
 #include "webkit/tools/test_shell/drop_delegate.h"
 #endif
 
@@ -392,44 +390,22 @@ void TestWebViewDelegate::didStopLoading() {
 // expected by the layout tests.  See EditingDelegate.m in DumpRenderTree.
 
 bool TestWebViewDelegate::shouldBeginEditing(const WebRange& range) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: shouldBeginEditingInDOMRange:%s\n",
-           GetRangeDescription(range).c_str());
-  }
   return shell_->AcceptsEditing();
 }
 
 bool TestWebViewDelegate::shouldEndEditing(const WebRange& range) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: shouldEndEditingInDOMRange:%s\n",
-           GetRangeDescription(range).c_str());
-  }
   return shell_->AcceptsEditing();
 }
 
 bool TestWebViewDelegate::shouldInsertNode(const WebNode& node,
                                            const WebRange& range,
                                            WebEditingAction action) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: shouldInsertNode:%s "
-           "replacingDOMRange:%s givenAction:%s\n",
-           GetNodeDescription(node, 0).c_str(),
-           GetRangeDescription(range).c_str(),
-           GetEditingActionDescription(action).c_str());
-  }
   return shell_->AcceptsEditing();
 }
 
 bool TestWebViewDelegate::shouldInsertText(const WebString& text,
                                            const WebRange& range,
                                            WebEditingAction action) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: shouldInsertText:%s "
-           "replacingDOMRange:%s givenAction:%s\n",
-           text.utf8().data(),
-           GetRangeDescription(range).c_str(),
-           GetEditingActionDescription(action).c_str());
-  }
   return shell_->AcceptsEditing();
 }
 
@@ -437,32 +413,15 @@ bool TestWebViewDelegate::shouldChangeSelectedRange(const WebRange& from_range,
                                                     const WebRange& to_range,
                                                     WebTextAffinity affinity,
                                                     bool still_selecting) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: shouldChangeSelectedDOMRange:%s "
-           "toDOMRange:%s affinity:%s stillSelecting:%s\n",
-           GetRangeDescription(from_range).c_str(),
-           GetRangeDescription(to_range).c_str(),
-           GetTextAffinityDescription(affinity).c_str(),
-           (still_selecting ? "TRUE" : "FALSE"));
-  }
   return shell_->AcceptsEditing();
 }
 
 bool TestWebViewDelegate::shouldDeleteRange(const WebRange& range) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: shouldDeleteDOMRange:%s\n",
-           GetRangeDescription(range).c_str());
-  }
   return shell_->AcceptsEditing();
 }
 
 bool TestWebViewDelegate::shouldApplyStyle(const WebString& style,
                                            const WebRange& range) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: shouldApplyStyle:%s toElementsInDOMRange:%s\n",
-           style.utf8().data(),
-           GetRangeDescription(range).c_str());
-  }
   return shell_->AcceptsEditing();
 }
 
@@ -475,32 +434,16 @@ bool TestWebViewDelegate::isSelectTrailingWhitespaceEnabled() {
 }
 
 void TestWebViewDelegate::didBeginEditing() {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: "
-           "webViewDidBeginEditing:WebViewDidBeginEditingNotification\n");
-  }
 }
 
 void TestWebViewDelegate::didChangeSelection(bool is_empty_selection) {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: "
-    "webViewDidChangeSelection:WebViewDidChangeSelectionNotification\n");
-  }
   UpdateSelectionClipboard(is_empty_selection);
 }
 
 void TestWebViewDelegate::didChangeContents() {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: "
-           "webViewDidChange:WebViewDidChangeNotification\n");
-  }
 }
 
 void TestWebViewDelegate::didEndEditing() {
-  if (shell_->ShouldDumpEditingCallbacks()) {
-    printf("EDITING DELEGATE: "
-           "webViewDidEndEditing:WebViewDidEndEditingNotification\n");
-  }
 }
 
 bool TestWebViewDelegate::handleCurrentKeyboardEvent() {
@@ -589,12 +532,6 @@ void TestWebViewDelegate::ClearContextMenuData() {
 
 
 void TestWebViewDelegate::setStatusText(const WebString& text) {
-  if (WebKit::layoutTestMode() &&
-      shell_->layout_test_controller()->ShouldDumpStatusCallbacks()) {
-    // When running tests, write to stdout.
-    printf("UI DELEGATE STATUS CALLBACK: setStatusText:%s\n",
-           text.utf8().data());
-  }
 }
 
 void TestWebViewDelegate::startDragging(
@@ -602,30 +539,7 @@ void TestWebViewDelegate::startDragging(
     WebDragOperationsMask mask,
     const WebImage& image,
     const WebPoint& image_offset) {
-  if (WebKit::layoutTestMode()) {
-    WebDragData mutable_drag_data = data;
-    if (shell_->layout_test_controller()->ShouldAddFileToPasteboard()) {
-      // Add a file called DRTFakeFile to the drag&drop clipboard.
-      AddDRTFakeFileToDataObject(&mutable_drag_data);
-    }
-
-    // When running a test, we need to fake a drag drop operation otherwise
-    // Windows waits for real mouse events to know when the drag is over.
-    shell_->event_sending_controller()->DoDragDrop(
-        mutable_drag_data, mask);
-  } else {
-    // TODO(tc): Drag and drop is disabled in the test shell because we need
-    // to be able to convert from WebDragData to an IDataObject.
-    //if (!drag_delegate_)
-    //  drag_delegate_ = new TestDragDelegate(shell_->webViewWnd(),
-    //                                        shell_->webView());
-    //const DWORD ok_effect = DROPEFFECT_COPY | DROPEFFECT_LINK |
-    //                        DROPEFFECT_MOVE;
-    //DWORD effect;
-    //HRESULT res = DoDragDrop(drop_data.data_object, drag_delegate_.get(),
-    //                         ok_effect, &effect);
-    //DCHECK(DRAGDROP_S_DROP == res || DRAGDROP_S_CANCEL == res);
-  }
+  shell_->webView()->dragSourceSystemDragEnded();
 }
 
 void TestWebViewDelegate::navigateBackForwardSoon(int offset) {
@@ -642,11 +556,6 @@ int TestWebViewDelegate::historyForwardListCount() {
   int current_index =
       shell_->navigation_controller()->GetLastCommittedEntryIndex();
   return shell_->navigation_controller()->GetEntryCount() - current_index - 1;
-}
-
-void TestWebViewDelegate::focusAccessibilityObject(
-    const WebAccessibilityObject& object) {
-  shell_->accessibility_controller()->SetFocusedElement(object);
 }
 
 WebNotificationPresenter* TestWebViewDelegate::notificationPresenter() {
@@ -840,18 +749,9 @@ void TestWebViewDelegate::unableToImplementPolicyWithError(
 void TestWebViewDelegate::willPerformClientRedirect(
     WebFrame* frame, const WebURL& from, const WebURL& to,
     double interval, double fire_time) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - willPerformClientRedirectToURL: %s \n",
-           GetFrameDescription(frame).c_str(),
-           to.spec().data());
-  }
 }
 
 void TestWebViewDelegate::didCancelClientRedirect(WebFrame* frame) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didCancelClientRedirectForFrame\n",
-           GetFrameDescription(frame).c_str());
-  }
 }
 
 void TestWebViewDelegate::didCreateDataSource(
@@ -860,11 +760,6 @@ void TestWebViewDelegate::didCreateDataSource(
 }
 
 void TestWebViewDelegate::didStartProvisionalLoad(WebFrame* frame) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didStartProvisionalLoadForFrame\n",
-           GetFrameDescription(frame).c_str());
-  }
-
   if (!top_loading_frame_) {
     top_loading_frame_ = frame;
   }
@@ -879,20 +774,11 @@ void TestWebViewDelegate::didStartProvisionalLoad(WebFrame* frame) {
 
 void TestWebViewDelegate::didReceiveServerRedirectForProvisionalLoad(
     WebFrame* frame) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didReceiveServerRedirectForProvisionalLoadForFrame\n",
-           GetFrameDescription(frame).c_str());
-  }
   UpdateAddressBar(frame->view());
 }
 
 void TestWebViewDelegate::didFailProvisionalLoad(
     WebFrame* frame, const WebURLError& error) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didFailProvisionalLoadWithError\n",
-           GetFrameDescription(frame).c_str());
-  }
-
   LocationChangeDone(frame);
 
   // Don't display an error page if we're running layout tests, because
@@ -911,6 +797,10 @@ void TestWebViewDelegate::didFailProvisionalLoad(
       static_cast<TestShellExtraData*>(failed_ds->extraData());
   bool replace = extra_data && extra_data->pending_page_id != -1;
 
+  // Ensure the error page ends up with the same page ID if we are replacing.
+  if (replace)
+    set_pending_extra_data(new TestShellExtraData(extra_data->pending_page_id));
+
   const std::string& error_text =
       base::StringPrintf("Error %d when loading url %s", error.reason,
       failed_ds->request().url().spec().data());
@@ -920,14 +810,14 @@ void TestWebViewDelegate::didFailProvisionalLoad(
 
   frame->loadHTMLString(
       error_text, GURL("testshell-error:"), error.unreachableURL, replace);
+
+  // In case the load failed before DidCreateDataSource was called.
+  if (replace)
+    set_pending_extra_data(NULL);
 }
 
 void TestWebViewDelegate::didCommitProvisionalLoad(
     WebFrame* frame, bool is_new_navigation) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didCommitLoadForFrame\n",
-           GetFrameDescription(frame).c_str());
-  }
   UpdateForCommittedLoad(frame, is_new_navigation);
 }
 
@@ -939,53 +829,27 @@ void TestWebViewDelegate::didReceiveTitle(
     WebFrame* frame, const WebString& title) {
   std::wstring wtitle = UTF16ToWideHack(title);
 
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didReceiveTitle: %S\n",
-           GetFrameDescription(frame).c_str(), wtitle.c_str());
-  }
-
-  if (shell_->ShouldDumpTitleChanges()) {
-    printf("TITLE CHANGED: %S\n", wtitle.c_str());
-  }
-
   SetPageTitle(wtitle);
 }
 
 void TestWebViewDelegate::didFinishDocumentLoad(WebFrame* frame) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didFinishDocumentLoadForFrame\n",
-           GetFrameDescription(frame).c_str());
-  } else {
-    unsigned pending_unload_events = frame->unloadListenerCount();
-    if (pending_unload_events) {
-      printf("%S - has %u onunload handler(s)\n",
-          GetFrameDescription(frame).c_str(), pending_unload_events);
-    }
+  unsigned pending_unload_events = frame->unloadListenerCount();
+  if (pending_unload_events) {
+    printf("%S - has %u onunload handler(s)\n",
+        GetFrameDescription(frame).c_str(), pending_unload_events);
   }
 }
 
 void TestWebViewDelegate::didHandleOnloadEvents(WebFrame* frame) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didHandleOnloadEventsForFrame\n",
-           GetFrameDescription(frame).c_str());
-  }
 }
 
 void TestWebViewDelegate::didFailLoad(
     WebFrame* frame, const WebURLError& error) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didFailLoadWithError\n",
-           GetFrameDescription(frame).c_str());
-  }
   LocationChangeDone(frame);
 }
 
 void TestWebViewDelegate::didFinishLoad(WebFrame* frame) {
   TRACE_EVENT_END("frame.load", this, frame->url().spec());
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didFinishLoadForFrame\n",
-           GetFrameDescription(frame).c_str());
-  }
   UpdateAddressBar(frame->view());
   LocationChangeDone(frame);
 }
@@ -998,18 +862,10 @@ void TestWebViewDelegate::didNavigateWithinPage(
 }
 
 void TestWebViewDelegate::didChangeLocationWithinPage(WebFrame* frame) {
-  if (shell_->ShouldDumpFrameLoadCallbacks()) {
-    printf("%S - didChangeLocationWithinPageForFrame\n",
-           GetFrameDescription(frame).c_str());
-  }
 }
 
 void TestWebViewDelegate::assignIdentifierToRequest(
     WebFrame* frame, unsigned identifier, const WebURLRequest& request) {
-  if (shell_->ShouldDumpResourceLoadCallbacks()) {
-    resource_identifier_map_[identifier] =
-        DescriptionSuitableForTestResult(request.url().spec());
-  }
 }
 
 void TestWebViewDelegate::willSendRequest(
@@ -1017,17 +873,6 @@ void TestWebViewDelegate::willSendRequest(
     const WebURLResponse& redirect_response) {
   GURL url = request.url();
   std::string request_url = url.possibly_invalid_spec();
-
-  if (shell_->ShouldDumpResourceLoadCallbacks()) {
-    GURL main_document_url = request.firstPartyForCookies();
-    printf("%s - willSendRequest <NSURLRequest URL %s, main document URL %s,"
-           " http method %s> redirectResponse %s\n",
-           GetResourceDescription(identifier).c_str(),
-           DescriptionSuitableForTestResult(request_url).c_str(),
-           GetURLDescription(main_document_url).c_str(),
-           request.httpMethod().utf8().data(),
-           GetResponseDescription(redirect_response).c_str());
-  }
 
   if (!redirect_response.isNull() && block_redirects_) {
     printf("Returning null for this redirect\n");
@@ -1069,61 +914,24 @@ void TestWebViewDelegate::willSendRequest(
 
 void TestWebViewDelegate::didReceiveResponse(
     WebFrame* frame, unsigned identifier, const WebURLResponse& response) {
-  if (shell_->ShouldDumpResourceLoadCallbacks()) {
-    printf("%s - didReceiveResponse %s\n",
-           GetResourceDescription(identifier).c_str(),
-           GetResponseDescription(response).c_str());
-  }
-  if (shell_->ShouldDumpResourceResponseMIMETypes()) {
-    GURL url = response.url();
-    WebString mimeType = response.mimeType();
-    printf("%s has MIME type %s\n",
-        url.ExtractFileName().c_str(),
-        // Simulate NSURLResponse's mapping of empty/unknown MIME types to
-        // application/octet-stream.
-        mimeType.isEmpty() ?
-            "application/octet-stream" : mimeType.utf8().data());
-  }
 }
 
 void TestWebViewDelegate::didFinishResourceLoad(
     WebFrame* frame, unsigned identifier) {
   TRACE_EVENT_END("url.load", identifier, "");
-  if (shell_->ShouldDumpResourceLoadCallbacks()) {
-    printf("%s - didFinishLoading\n",
-           GetResourceDescription(identifier).c_str());
-  }
   resource_identifier_map_.erase(identifier);
 }
 
 void TestWebViewDelegate::didFailResourceLoad(
     WebFrame* frame, unsigned identifier, const WebURLError& error) {
-  if (shell_->ShouldDumpResourceLoadCallbacks()) {
-    printf("%s - didFailLoadingWithError: %s\n",
-           GetResourceDescription(identifier).c_str(),
-           GetErrorDescription(error).c_str());
-  }
   resource_identifier_map_.erase(identifier);
 }
 
 void TestWebViewDelegate::didDisplayInsecureContent(WebFrame* frame) {
-  if (shell_->ShouldDumpFrameLoadCallbacks())
-    printf("didDisplayInsecureContent\n");
-}
-
-// We have two didRunInsecureContent's with the same name. That's because
-// we're in the process of adding an argument and one of them will be correct.
-// Once the WebKit change is in, the first should be removed.
-void TestWebViewDelegate::didRunInsecureContent(
-    WebFrame* frame, const WebSecurityOrigin& origin) {
-  if (shell_->ShouldDumpFrameLoadCallbacks())
-    printf("didRunInsecureContent\n");
 }
 
 void TestWebViewDelegate::didRunInsecureContent(
     WebFrame* frame, const WebSecurityOrigin& origin, const WebURL& target) {
-  if (shell_->ShouldDumpFrameLoadCallbacks())
-    printf("didRunInsecureContent\n");
 }
 
 bool TestWebViewDelegate::allowScript(WebFrame* frame,

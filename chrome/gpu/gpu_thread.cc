@@ -13,17 +13,19 @@
 #include "base/command_line.h"
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
-#include "chrome/common/child_process.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/gpu/gpu_info_collector.h"
 #include "chrome/gpu/gpu_watchdog_thread.h"
+#include "content/common/child_process.h"
 #include "ipc/ipc_channel_handle.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/common/sandbox_init_wrapper.h"
 #include "chrome/common/sandbox_mac.h"
+#elif defined(OS_WIN)
+#include "sandbox/src/sandbox.h"
 #endif
 
 const int kGpuTimeout = 10000;
@@ -37,21 +39,32 @@ bool InitializeGpuSandbox() {
   return sandbox_wrapper.InitializeSandbox(*parsed_command_line,
                                            switches::kGpuProcess);
 #else
-  // TODO(port): Create GPU sandbox for linux and windows.
+  // TODO(port): Create GPU sandbox for linux.
   return true;
 #endif
 }
 
 }  // namespace
 
+#if defined(OS_WIN)
+GpuThread::GpuThread(sandbox::TargetServices* target_services)
+    : target_services_(target_services) {
+}
+#else
 GpuThread::GpuThread() {
 }
+#endif
 
 GpuThread::GpuThread(const std::string& channel_id)
     : ChildThread(channel_id) {
+#if defined(OS_WIN)
+  target_services_ = NULL;
+#endif
 }
 
+
 GpuThread::~GpuThread() {
+  logging::SetLogMessageHandler(NULL);
 }
 
 void GpuThread::Init(const base::Time& process_start_time) {
@@ -69,6 +82,8 @@ bool GpuThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_Initialize, OnInitialize)
     IPC_MESSAGE_HANDLER(GpuMsg_EstablishChannel, OnEstablishChannel)
     IPC_MESSAGE_HANDLER(GpuMsg_CloseChannel, OnCloseChannel)
+    IPC_MESSAGE_HANDLER(GpuMsg_CreateViewCommandBuffer,
+                        OnCreateViewCommandBuffer);
     IPC_MESSAGE_HANDLER(GpuMsg_Synchronize, OnSynchronize)
     IPC_MESSAGE_HANDLER(GpuMsg_CollectGraphicsInfo, OnCollectGraphicsInfo)
 #if defined(OS_MACOSX)
@@ -84,33 +99,49 @@ bool GpuThread::OnControlMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
+namespace {
+
+bool GpuProcessLogMessageHandler(int severity,
+                                 const char* file, int line,
+                                 size_t message_start,
+                                 const std::string& str) {
+  std::string header = str.substr(0, message_start);
+  std::string message = str.substr(message_start);
+  ChildThread::current()->Send(
+      new GpuHostMsg_OnLogMessage(severity, header, message));
+  return false;
+}
+
+}  // namespace
+
 void GpuThread::OnInitialize() {
+  // Redirect LOG messages to the GpuProcessHost
+  bool single_process = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kSingleProcess);
+  if (!single_process)
+    logging::SetLogMessageHandler(GpuProcessLogMessageHandler);
+
   // Load the GL implementation and locate the bindings before starting the GPU
   // watchdog because this can take a lot of time and the GPU watchdog might
   // terminate the GPU process.
   if (!gfx::GLContext::InitializeOneOff()) {
+    LOG(INFO) << "GLContext::InitializeOneOff failed";
     MessageLoop::current()->Quit();
     return;
   }
-  gpu_info_collector::CollectGraphicsInfo(&gpu_info_);
-  child_process_logging::SetGpuInfo(gpu_info_);
-
-#if defined(OS_WIN)
-  // Asynchronously collect the DirectX diagnostics because this can take a
-  // couple of seconds.
-  if (!base::WorkerPool::PostTask(
-      FROM_HERE,
-      NewRunnableFunction(&GpuThread::CollectDxDiagnostics, this),
-      true)) {
-    // Flag GPU info as complete if the DirectX diagnostics cannot be collected.
-    gpu_info_.SetProgress(GPUInfo::kComplete);
+  bool gpu_info_result = gpu_info_collector::CollectGraphicsInfo(&gpu_info_);
+  if (!gpu_info_result) {
+    gpu_info_.SetCollectionError(true);
+    LOG(ERROR) << "gpu_info_collector::CollectGraphicsInfo() failed";
   }
-#endif
+  child_process_logging::SetGpuInfo(gpu_info_);
+  LOG(INFO) << "gpu_info_collector::CollectGraphicsInfo complete";
 
   // Record initialization only after collecting the GPU info because that can
   // take a significant amount of time.
   gpu_info_.SetInitializationTime(base::Time::Now() - process_start_time_);
 
+#if defined (OS_MACOSX)
   // Note that kNoSandbox will also disable the GPU sandbox.
   bool no_gpu_sandbox = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kNoGpuSandbox);
@@ -123,6 +154,13 @@ void GpuThread::OnInitialize() {
   } else {
     LOG(ERROR) << "Running without GPU sandbox";
   }
+#elif defined(OS_WIN)
+  // For windows, if the target_services interface is not zero, the process
+  // is sandboxed and we must call LowerToken() before rendering untrusted
+  // content.
+  if (target_services_)
+    target_services_->LowerToken();
+#endif
 
   // In addition to disabling the watchdog if the command line switch is
   // present, disable it in two other cases. OSMesa is expected to run very
@@ -208,8 +246,45 @@ void GpuThread::OnSynchronize() {
   Send(new GpuHostMsg_SynchronizeReply());
 }
 
-void GpuThread::OnCollectGraphicsInfo() {
+void GpuThread::OnCollectGraphicsInfo(GPUInfo::Level level) {
+#if defined(OS_WIN)
+  if (level == GPUInfo::kComplete && gpu_info_.level() <= GPUInfo::kPartial) {
+    // Prevent concurrent collection of DirectX diagnostics.
+    gpu_info_.SetLevel(GPUInfo::kCompleting);
+
+    // Asynchronously collect the DirectX diagnostics because this can take a
+    // couple of seconds.
+    if (!base::WorkerPool::PostTask(
+        FROM_HERE,
+        NewRunnableFunction(&GpuThread::CollectDxDiagnostics, this),
+        true)) {
+
+      // Flag GPU info as complete if the DirectX diagnostics cannot be
+      // collected.
+      gpu_info_.SetLevel(GPUInfo::kComplete);
+    } else {
+      // Do not send response if we are still completing the GPUInfo struct
+      return;
+    }
+  }
+#endif
   Send(new GpuHostMsg_GraphicsInfoCollected(gpu_info_));
+}
+
+void GpuThread::OnCreateViewCommandBuffer(
+    gfx::PluginWindowHandle window,
+    int32 render_view_id,
+    int32 renderer_id,
+    const GPUCreateCommandBufferConfig& init_params) {
+  int32 route_id = MSG_ROUTING_NONE;
+
+  GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
+  if (iter != gpu_channels_.end()) {
+    iter->second->CreateViewCommandBuffer(
+        window, render_view_id, init_params, &route_id);
+  }
+
+  Send(new GpuHostMsg_CommandBufferCreated(route_id));
 }
 
 #if defined(OS_MACOSX)
@@ -232,12 +307,14 @@ void GpuThread::OnDidDestroyAcceleratedSurface(
 #endif
 
 void GpuThread::OnCrash() {
+  LOG(INFO) << "GPU: Simulating GPU crash";
   // Good bye, cruel world.
   volatile int* it_s_the_end_of_the_world_as_we_know_it = NULL;
   *it_s_the_end_of_the_world_as_we_know_it = 0xdead;
 }
 
 void GpuThread::OnHang() {
+  LOG(INFO) << "GPU: Simulating GPU hang";
   for (;;) {
     // Do not sleep here. The GPU watchdog timer tracks the amount of user
     // time this thread is using and it doesn't use much while calling Sleep.
@@ -262,7 +339,8 @@ void GpuThread::CollectDxDiagnostics(GpuThread* thread) {
 // Runs on the GPU thread.
 void GpuThread::SetDxDiagnostics(GpuThread* thread, const DxDiagNode& node) {
   thread->gpu_info_.SetDxDiagnostics(node);
-  thread->gpu_info_.SetProgress(GPUInfo::kComplete);
+  thread->gpu_info_.SetLevel(GPUInfo::kComplete);
+  thread->Send(new GpuHostMsg_GraphicsInfoCollected(thread->gpu_info_));
 }
 
 #endif

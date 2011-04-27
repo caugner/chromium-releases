@@ -15,15 +15,13 @@
 #include "grit/generated_resources.h"
 #include "ui/base/gtk/gtk_signal.h"
 
-#if defined(TOOLKIT_VIEWS)
 namespace gfx {
 class Point;
 }
-#endif
 
 class TaskManagerGtk : public TaskManagerModelObserver {
  public:
-  TaskManagerGtk();
+  explicit TaskManagerGtk(bool highlight_background_resources);
   virtual ~TaskManagerGtk();
 
   // TaskManagerModelObserver
@@ -32,9 +30,14 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   virtual void OnItemsAdded(int start, int length);
   virtual void OnItemsRemoved(int start, int length);
 
+  // Closes the task manager window.
+  void Close();
+
   // Creates the task manager if it doesn't exist; otherwise, it activates the
-  // existing task manager window.
-  static void Show();
+  // existing task manager window. If |highlight_background_resources| is true,
+  // background resources are rendered with a yellow highlight (for the
+  // "View Background Pages" menu item).
+  static void Show(bool highlight_background_resources);
 
  private:
   class ContextMenuController;
@@ -66,11 +69,7 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   void KillSelectedProcesses();
 
   // Opens the context menu used to select the task manager columns.
-#if defined(TOOLKIT_VIEWS)
-  void ShowContextMenu(const gfx::Point& point);
-#else
-  void ShowContextMenu();
-#endif
+  void ShowContextMenu(const gfx::Point& point, guint32 event_time);
 
   // Opens about:memory in a new foreground tab.
   void OnLinkActivated();
@@ -83,7 +82,7 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   CHROMEGTK_CALLBACK_0(TaskManagerGtk, void, OnDestroy);
 
   // Response signal handler that notifies us of dialog responses.
-  CHROMEGTK_CALLBACK_1(TaskManagerGtk, void, OnResponse, gint);
+  CHROMEGTK_CALLBACK_1(TaskManagerGtk, void, OnResponse, int);
 
   // Realize signal handler to set the page column's initial size.
   CHROMEG_CALLBACK_0(TaskManagerGtk, void, OnTreeViewRealize, GtkTreeView*);
@@ -97,8 +96,10 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   CHROMEGTK_CALLBACK_2(TaskManagerGtk, void, OnRowActivated,
                        GtkTreePath*, GtkTreeViewColumn*);
 
-  // button-release-event handler that opens the right-click context menu.
-  CHROMEGTK_CALLBACK_1(TaskManagerGtk, gboolean, OnButtonReleaseEvent,
+  // button-event handler that opens the right-click context menu.
+  // Note: GTK does menu on mouse-up while views does menu on mouse-down;
+  // this handler is used for both.
+  CHROMEGTK_CALLBACK_1(TaskManagerGtk, gboolean, OnButtonEvent,
                        GdkEventButton*);
 
   // Handles an accelerator being pressed.
@@ -226,6 +227,9 @@ class TaskManagerGtk : public TaskManagerModelObserver {
   // variable to prevent ourselves from handling further changes that we
   // ourselves caused.
   bool ignore_selection_changed_;
+
+  // If true, background resources are rendered with a yellow highlight.
+  bool highlight_background_resources_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerGtk);
 };

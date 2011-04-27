@@ -5,14 +5,15 @@
 cr.define('options', function() {
   const OptionsPage = options.OptionsPage;
   const ArrayDataModel = cr.ui.ArrayDataModel;
-  const ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
 
   //
   // BrowserOptions class
   // Encapsulated handling of browser options page.
   //
   function BrowserOptions() {
-    OptionsPage.call(this, 'browser', templateData.browserPage, 'browserPage');
+    OptionsPage.call(this, 'browser',
+                     templateData.browserPageTabTitle,
+                     'browserPage');
   }
 
   cr.addSingletonGetter(BrowserOptions);
@@ -20,6 +21,11 @@ cr.define('options', function() {
   BrowserOptions.prototype = {
     // Inherit BrowserOptions from OptionsPage.
     __proto__: options.OptionsPage.prototype,
+
+    startup_pages_pref_: {
+      'name': 'session.urls_to_restore_on_startup',
+      'managed': false
+    },
 
     homepage_pref_: {
       'name': 'homepage',
@@ -33,6 +39,9 @@ cr.define('options', function() {
       'managed': false
     },
 
+    // The cached value of the instant.confirm_dialog_shown preference.
+    instantConfirmDialogShown_: false,
+
     /**
      * Initialize BrowserOptions page.
      */
@@ -45,24 +54,27 @@ cr.define('options', function() {
         chrome.send('setStartupPagesToCurrentPages');
       };
       $('startupAddButton').onclick = function(event) {
-        OptionsPage.showOverlay('addStartupPageOverlay');
+        OptionsPage.navigateToPage('addStartupPage');
       };
       $('defaultSearchManageEnginesButton').onclick = function(event) {
-        OptionsPage.showPageByName('searchEngines');
+        OptionsPage.navigateToPage('searchEngines');
         chrome.send('coreOptionsUserMetricsAction',
             ['Options_ManageSearchEngines']);
       };
-      $('instantEnableCheckbox').onclick = function(event) {
-        var alreadyConfirmed = $('instantDialogShown').checked;
+      $('defaultSearchEngine').onchange = this.setDefaultSearchEngine;
 
-        if (this.checked && !alreadyConfirmed) {
+      var self = this;
+      $('instantEnableCheckbox').onclick = function(event) {
+        if (this.checked && !self.instantConfirmDialogShown_) {
           // Leave disabled for now. The PrefCheckbox handler already set it to
           // true so undo that.
           Preferences.setBooleanPref(this.pref, false, this.metric);
-          OptionsPage.showOverlay('instantConfirmOverlay');
+          OptionsPage.navigateToPage('instantConfirm');
         }
       };
-      $('defaultSearchEngine').onchange = this.setDefaultSearchEngine;
+
+      Preferences.getInstance().addEventListener('instant.confirm_dialog_shown',
+          this.onInstantConfirmDialogShownChanged_.bind(this));
 
       var homepageField = $('homepageURL');
       $('homepageUseNTPButton').onchange =
@@ -92,7 +104,6 @@ cr.define('options', function() {
       var list = $('startupPagesList');
       options.browser_options.StartupPageList.decorate(list);
       list.autoExpands = true;
-      list.selectionModel = new ListSingleSelectionModel;
 
       // Check if we are in the guest mode.
       if (cr.commandLine.options['--bwsi']) {
@@ -102,22 +113,37 @@ cr.define('options', function() {
         // Initialize control enabled states.
         Preferences.getInstance().addEventListener('session.restore_on_startup',
             this.updateCustomStartupPageControlStates_.bind(this));
-        Preferences.getInstance().addEventListener('homepage_is_newtabpage',
-            this.handleHomepageIsNewTabPageChange_.bind(this));
-        Preferences.getInstance().addEventListener('homepage',
+        Preferences.getInstance().addEventListener(
+            this.startup_pages_pref_.name,
+            this.handleStartupPageListChange_.bind(this));
+        Preferences.getInstance().addEventListener(
+            this.homepage_pref_.name,
             this.handleHomepageChange_.bind(this));
+        Preferences.getInstance().addEventListener(
+            this.homepage_is_newtabpage_pref_.name,
+            this.handleHomepageIsNewTabPageChange_.bind(this));
 
         this.updateCustomStartupPageControlStates_();
       }
     },
 
     /**
-     * Update the Default Browsers section based on the current state.
+     * Called when the value of the instant.confirm_dialog_shown preference
+     * changes. Cache this value.
+     * @param {Event} event Change event.
      * @private
+     */
+    onInstantConfirmDialogShownChanged_: function(event) {
+      this.instantConfirmDialogShown_ = event.value['value'];
+    },
+
+    /**
+     * Update the Default Browsers section based on the current state.
      * @param {string} statusString Description of the current default state.
      * @param {boolean} isDefault Whether or not the browser is currently
      *     default.
      * @param {boolean} canBeDefault Whether or not the browser can be default.
+     * @private
      */
     updateDefaultBrowserState_: function(statusString, isDefault,
                                          canBeDefault) {
@@ -160,18 +186,18 @@ cr.define('options', function() {
     /**
      * Returns true if the custom startup page control block should
      * be enabled.
-     * @private
      * @returns {boolean} Whether the startup page controls should be
      *     enabled.
      */
-    shouldEnableCustomStartupPageControls_: function(pages) {
-      return $('startupShowPagesButton').checked;
+    shouldEnableCustomStartupPageControls: function(pages) {
+      return $('startupShowPagesButton').checked &&
+          !this.startup_pages_pref_.managed;
     },
 
     /**
      * Updates the startup pages list with the given entries.
-     * @private
      * @param {Array} pages List of startup pages.
+     * @private
      */
     updateStartupPages_: function(pages) {
       $('startupPagesList').dataModel = new ArrayDataModel(pages);
@@ -179,26 +205,26 @@ cr.define('options', function() {
 
     /**
      * Handles change events of the radio button 'homepageUseURLButton'.
-     * @private
      * @param {event} change event.
+     * @private
      */
     handleHomepageUseURLButtonChange_: function(event) {
-      Preferences.setBooleanPref('homepage_is_newtabpage', false);
+      Preferences.setBooleanPref(this.homepage_is_newtabpage_pref_.name, false);
     },
 
     /**
      * Handles change events of the radio button 'homepageUseNTPButton'.
-     * @private
      * @param {event} change event.
+     * @private
      */
     handleHomepageUseNTPButtonChange_: function(event) {
-      Preferences.setBooleanPref('homepage_is_newtabpage', true);
+      Preferences.setBooleanPref(this.homepage_is_newtabpage_pref_.name, true);
     },
 
     /**
      * Handles input and change events of the text field 'homepageURL'.
-     * @private
      * @param {event} input/change event.
+     * @private
      */
     handleHomepageURLChange_: function(event) {
       var doFixup = event.type == 'change' ? '1' : '0';
@@ -207,8 +233,8 @@ cr.define('options', function() {
 
     /**
      * Handle change events of the preference 'homepage'.
-     * @private
      * @param {event} preference changed event.
+     * @private
      */
     handleHomepageChange_: function(event) {
       this.homepage_pref_.value = event.value['value'];
@@ -216,16 +242,17 @@ cr.define('options', function() {
       if (this.isHomepageURLNewTabPageURL_() && !this.homepage_pref_.managed &&
           !this.homepage_is_newtabpage_pref_.managed) {
         var useNewTabPage = this.isHomepageIsNewTabPageChoiceSelected_();
-        Preferences.setStringPref('homepage', '')
-        Preferences.setBooleanPref('homepage_is_newtabpage', useNewTabPage)
+        Preferences.setStringPref(this.homepage_pref_.name, '')
+        Preferences.setBooleanPref(this.homepage_is_newtabpage_pref_.name,
+                                   useNewTabPage)
       }
       this.updateHomepageControlStates_();
     },
 
     /**
      * Handle change events of the preference homepage_is_newtabpage.
-     * @private
      * @param {event} preference changed event.
+     * @private
      */
     handleHomepageIsNewTabPageChange_: function(event) {
       this.homepage_is_newtabpage_pref_.value = event.value['value'];
@@ -273,7 +300,8 @@ cr.define('options', function() {
     updateHomepageControlStates_: function() {
       var homepageField = $('homepageURL');
       homepageField.disabled = !this.isHomepageURLFieldEnabled_();
-      homepageField.value = this.homepage_pref_.value;
+      if (homepageField.value != this.homepage_pref_.value)
+        homepageField.value = this.homepage_pref_.value;
       homepageField.style.backgroundImage = url('chrome://favicon/' +
                                                 this.homepage_pref_.value);
       var disableChoice = !this.isHomepageChoiceEnabled_();
@@ -287,9 +315,9 @@ cr.define('options', function() {
     /**
      * Tests whether the value of the 'homepage' preference equls the new tab
      * page url (chrome://newtab).
-     * @private
      * @returns {boolean} True if the 'homepage' value equals the new tab page
      *     url.
+     * @private
      */
     isHomepageURLNewTabPageURL_ : function() {
       return (this.homepage_pref_.value.toLowerCase() == 'chrome://newtab');
@@ -297,8 +325,8 @@ cr.define('options', function() {
 
     /**
      * Tests whether the Homepage choice "Use New Tab Page" is selected.
-     * @private
      * @returns {boolean} True if "Use New Tab Page" is selected.
+     * @private
      */
     isHomepageIsNewTabPageChoiceSelected_: function() {
       return (this.homepage_is_newtabpage_pref_.value ||
@@ -309,8 +337,8 @@ cr.define('options', function() {
 
     /**
      * Tests whether the home page choice controls are enabled.
-     * @private
      * @returns {boolean} True if the home page choice controls are enabled.
+     * @private
      */
     isHomepageChoiceEnabled_: function() {
       return (!this.homepage_is_newtabpage_pref_.managed &&
@@ -320,8 +348,8 @@ cr.define('options', function() {
 
     /**
      * Checks whether the home page field should be enabled.
-     * @private
      * @returns {boolean} True if the home page field should be enabled.
+     * @private
      */
     isHomepageURLFieldEnabled_: function() {
       return (!this.homepage_is_newtabpage_pref_.value &&
@@ -336,10 +364,21 @@ cr.define('options', function() {
      * @private
      */
     updateCustomStartupPageControlStates_: function() {
-      var disable = !this.shouldEnableCustomStartupPageControls_();
+      var disable = !this.shouldEnableCustomStartupPageControls();
       $('startupPagesList').disabled = disable;
       $('startupUseCurrentButton').disabled = disable;
       $('startupAddButton').disabled = disable;
+    },
+
+    /**
+     * Handle change events of the preference
+     * 'session.urls_to_restore_on_startup'.
+     * @param {event} preference changed event.
+     * @private
+     */
+    handleStartupPageListChange_: function(event) {
+      this.startup_pages_pref_.managed = event.value['managed'];
+      this.updateCustomStartupPageControlStates_();
     },
 
     /**

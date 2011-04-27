@@ -7,9 +7,10 @@
 #include <pulse/pulseaudio.h>
 
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/task.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/browser_thread.h"
+#include "content/browser/browser_thread.h"
 
 namespace chromeos {
 
@@ -59,6 +60,19 @@ AudioMixerPulse::AudioMixerPulse()
 }
 
 AudioMixerPulse::~AudioMixerPulse() {
+  bool run_all_pending = false;
+  {
+    base::AutoLock lock(mixer_state_lock_);
+    // DoInit() has not even been called yet, but is still in the thread message
+    // queue.  Force it out of the queue and exit DoInit() right away.
+    if ((!pa_mainloop_) && (mixer_state_ == INITIALIZING)) {
+      mixer_state_ = UNINITIALIZED;
+      run_all_pending = true;
+    }
+  }
+  if (run_all_pending)
+    thread_->message_loop()->RunAllPending();
+
   PulseAudioFree();
   if (thread_ != NULL) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -66,6 +80,7 @@ AudioMixerPulse::~AudioMixerPulse() {
     // The worker thread should be idle at this time.
     // See http://crosbug.com/11110 for discussion.
     base::ThreadRestrictions::ScopedAllowIO allow_io_for_thread_join;
+    thread_->message_loop()->AssertIdle();
 
     thread_->Stop();
     thread_.reset();
@@ -471,4 +486,3 @@ inline bool AudioMixerPulse::MainloopLockIfReady() const {
 }
 
 }  // namespace chromeos
-

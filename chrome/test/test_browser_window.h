@@ -6,8 +6,6 @@
 #define CHROME_TEST_TEST_BROWSER_WINDOW_H_
 #pragma once
 
-#include <vector>
-
 #include "chrome/browser/browser_window.h"
 #include "chrome/test/test_location_bar.h"
 
@@ -16,8 +14,8 @@
 // See BrowserWithTestWindowTest for an example of using this class.
 class TestBrowserWindow : public BrowserWindow {
  public:
-  explicit TestBrowserWindow(Browser* browser) {}
-  virtual ~TestBrowserWindow() {}
+  explicit TestBrowserWindow(Browser* browser);
+  virtual ~TestBrowserWindow();
 
   virtual void Init() {}
   virtual void Show() {}
@@ -25,25 +23,24 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Close() {}
   virtual void Activate() {}
   virtual void Deactivate() {}
-  virtual bool IsActive() const { return false; }
+  virtual bool IsActive() const;
   virtual void FlashFrame() {}
-  virtual gfx::NativeWindow GetNativeHandle() { return NULL; }
-  virtual BrowserWindowTesting* GetBrowserWindowTesting() { return NULL; }
-  virtual StatusBubble* GetStatusBubble() { return NULL; }
+  virtual gfx::NativeWindow GetNativeHandle();
+  virtual BrowserWindowTesting* GetBrowserWindowTesting();
+  virtual StatusBubble* GetStatusBubble();
   virtual void SelectedTabToolbarSizeChanged(bool is_animating) {}
   virtual void UpdateTitleBar() {}
   virtual void ShelfVisibilityChanged() {}
   virtual void UpdateDevTools() {}
   virtual void UpdateLoadingAnimations(bool should_animate) {}
   virtual void SetStarredState(bool is_starred) {}
-  virtual gfx::Rect GetRestoredBounds() const { return gfx::Rect(); }
-  virtual bool IsMaximized() const { return false; }
+  virtual gfx::Rect GetRestoredBounds() const;
+  virtual gfx::Rect GetBounds() const;
+  virtual bool IsMaximized() const;
   virtual void SetFullscreen(bool fullscreen) {}
-  virtual bool IsFullscreen() const { return false; }
-  virtual bool IsFullscreenBubbleVisible() const { return false; }
-  virtual LocationBar* GetLocationBar() const {
-    return const_cast<TestLocationBar*>(&location_bar_);
-  }
+  virtual bool IsFullscreen() const;
+  virtual bool IsFullscreenBubbleVisible() const;
+  virtual LocationBar* GetLocationBar() const;
   virtual void SetFocusToLocationBar(bool select_all) {}
   virtual void UpdateReloadStopState(bool is_loading, bool force) {}
   virtual void UpdateToolbar(TabContentsWrapper* contents,
@@ -55,9 +52,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void RotatePaneFocus(bool forwards) {}
   virtual void ShowAppMenu() {}
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) {
-    return false;
-  }
+                                      bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
   virtual void ShowCreateWebAppShortcutsDialog(TabContents* tab_contents) {}
   virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,
@@ -66,21 +61,21 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ToggleCompactNavigationBar() {}
 #endif  // defined(TOOLKIT_VIEWS)
 
-  virtual bool IsBookmarkBarVisible() const { return false; }
-  virtual bool IsBookmarkBarAnimating() const { return false; }
-  virtual bool IsTabStripEditable() const { return false; }
-  virtual bool IsToolbarVisible() const { return false; }
+  virtual bool IsBookmarkBarVisible() const;
+  virtual bool IsBookmarkBarAnimating() const;
+  virtual bool IsTabStripEditable() const;
+  virtual bool IsToolbarVisible() const;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) {}
   virtual void ToggleBookmarkBar() {}
-  virtual views::Window* ShowAboutChromeDialog() { return NULL; }
+  virtual void ShowAboutChromeDialog();
   virtual void ShowUpdateChromeDialog() {}
   virtual void ShowTaskManager() {}
   virtual void ShowBackgroundPages() {}
   virtual void ShowBookmarkManager() {}
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {}
-  virtual bool IsDownloadShelfVisible() const { return false; }
-  virtual DownloadShelf* GetDownloadShelf() { return NULL; }
+  virtual bool IsDownloadShelfVisible() const;
+  virtual DownloadShelf* GetDownloadShelf();
   virtual void ShowReportBugDialog() {}
   virtual void ShowClearBrowsingDataDialog() {}
   virtual void ShowImportDialog() {}
@@ -96,7 +91,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
                               gfx::NativeWindow parent_window) {}
   virtual void UserChangedTheme() {}
-  virtual int GetExtraRenderViewHeight() const { return 0; }
+  virtual int GetExtraRenderViewHeight() const;
   virtual void TabContentsFocused(TabContents* tab_contents) {}
   virtual void ShowPageInfo(Profile* profile,
                             const GURL& url,
@@ -110,12 +105,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void PrepareForInstant() {}
   virtual void ShowInstant(TabContents* preview_contents) {}
   virtual void HideInstant(bool instant_is_active) {}
-  virtual gfx::Rect GetInstantBounds() { return gfx::Rect(); }
-
-  virtual gfx::Rect GrabWindowSnapshot(std::vector<unsigned char>*
-                                       png_representation) {
-    return gfx::Rect();
-  }
+  virtual gfx::Rect GetInstantBounds();
 
 #if defined(OS_CHROMEOS)
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) {}

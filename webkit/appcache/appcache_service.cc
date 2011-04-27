@@ -8,7 +8,9 @@
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
 #include "webkit/appcache/appcache_backend_impl.h"
+#include "webkit/appcache/appcache_entry.h"
 #include "webkit/appcache/appcache_storage_impl.h"
+#include "webkit/quota/special_storage_policy.h"
 
 namespace appcache {
 
@@ -60,6 +62,43 @@ void AppCacheService::AsyncHelper::Cancel() {
   service_ = NULL;
 }
 
+// CanHandleOfflineHelper -------
+
+class AppCacheService::CanHandleOfflineHelper : AsyncHelper {
+ public:
+  CanHandleOfflineHelper(
+      AppCacheService* service, const GURL& url,
+      net::CompletionCallback* callback)
+      : AsyncHelper(service, callback), url_(url) {
+  }
+
+  virtual void Start() {
+    service_->storage()->FindResponseForMainRequest(url_, this);
+  }
+
+ private:
+  // AppCacheStorage::Delegate override
+  virtual void OnMainResponseFound(
+      const GURL& url, const AppCacheEntry& entry,
+      const GURL& fallback_url, const AppCacheEntry& fallback_entry,
+      int64 cache_id, const GURL& mainfest_url,
+      bool was_blocked_by_policy);
+
+  GURL url_;
+  DISALLOW_COPY_AND_ASSIGN(CanHandleOfflineHelper);
+};
+
+void AppCacheService::CanHandleOfflineHelper::OnMainResponseFound(
+      const GURL& url, const AppCacheEntry& entry,
+      const GURL& fallback_url, const AppCacheEntry& fallback_entry,
+      int64 cache_id, const GURL& mainfest_url,
+      bool was_blocked_by_policy) {
+  bool can = !was_blocked_by_policy &&
+             (entry.has_response_id() || fallback_entry.has_response_id());
+  CallCallback(can ? net::OK : net::ERR_FAILED);
+  delete this;
+}
+
 // DeleteHelper -------
 
 class AppCacheService::DeleteHelper : public AsyncHelper {
@@ -82,6 +121,7 @@ class AppCacheService::DeleteHelper : public AsyncHelper {
       appcache::AppCacheGroup* group, bool success);
 
   GURL manifest_url_;
+  DISALLOW_COPY_AND_ASSIGN(DeleteHelper);
 };
 
 void AppCacheService::DeleteHelper::OnGroupLoaded(
@@ -121,6 +161,7 @@ class AppCacheService::GetInfoHelper : AsyncHelper {
   virtual void OnAllInfo(AppCacheInfoCollection* collection);
 
   scoped_refptr<AppCacheInfoCollection> collection_;
+  DISALLOW_COPY_AND_ASSIGN(GetInfoHelper);
 };
 
 void AppCacheService::GetInfoHelper::OnAllInfo(
@@ -155,6 +196,14 @@ void AppCacheService::Initialize(const FilePath& cache_directory,
   storage_.reset(storage);
 }
 
+void AppCacheService::CanHandleMainResourceOffline(
+    const GURL& url,
+    net::CompletionCallback* callback) {
+  CanHandleOfflineHelper* helper =
+      new CanHandleOfflineHelper(this, url, callback);
+  helper->Start();
+}
+
 void AppCacheService::GetAllAppCacheInfo(AppCacheInfoCollection* collection,
                                          net::CompletionCallback* callback) {
   DCHECK(collection);
@@ -168,6 +217,10 @@ void AppCacheService::DeleteAppCacheGroup(const GURL& manifest_url,
   helper->Start();
 }
 
+void AppCacheService::set_special_storage_policy(
+    quota::SpecialStoragePolicy* policy) {
+  special_storage_policy_ = policy;
+}
 void AppCacheService::RegisterBackend(
     AppCacheBackendImpl* backend_impl) {
   DCHECK(backends_.find(backend_impl->process_id()) == backends_.end());

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,11 +16,11 @@
 #include "chrome/browser/autofill/autofill_dialog.h"
 #include "chrome/browser/autofill/autofill_download.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
-#include "chrome/browser/tab_contents/web_navigation_observer.h"
+#include "content/browser/tab_contents/tab_contents_observer.h"
 
 class AutoFillCCInfoBarDelegate;
 class AutoFillProfile;
-class AutoFillMetrics;
+class AutofillMetrics;
 class CreditCard;
 class FormStructure;
 class PrefService;
@@ -33,22 +33,19 @@ class FormField;
 
 // Manages saving and restoring the user's personal information entered into web
 // forms.
-class AutoFillManager : public WebNavigationObserver,
-                        public AutoFillDownloadManager::Observer {
+class AutofillManager : public TabContentsObserver,
+                        public AutofillDownloadManager::Observer {
  public:
-  explicit AutoFillManager(TabContents* tab_contents);
-  virtual ~AutoFillManager();
+  explicit AutofillManager(TabContents* tab_contents);
+  virtual ~AutofillManager();
 
   // Registers our browser prefs.
   static void RegisterBrowserPrefs(PrefService* prefs);
 
-  // Registers our Enable/Disable AutoFill pref.
+  // Registers our Enable/Disable Autofill pref.
   static void RegisterUserPrefs(PrefService* prefs);
 
-  // Returns the TabContents hosting this AutoFillManager.
-  TabContents* tab_contents() const { return tab_contents_; }
-
-  // WebNavigationObserver implementation.
+  // TabContentsObserver implementation.
   virtual void DidNavigateMainFramePostCommit(
       const NavigationController::LoadCommittedDetails& details,
       const ViewHostMsg_FrameNavigate_Params& params);
@@ -58,12 +55,12 @@ class AutoFillManager : public WebNavigationObserver,
   // infobar.
   virtual void OnInfoBarClosed(bool should_save);
 
-  // AutoFillDownloadManager::Observer implementation:
-  virtual void OnLoadedAutoFillHeuristics(const std::string& heuristic_xml);
-  virtual void OnUploadedAutoFillHeuristics(const std::string& form_signature);
+  // AutofillDownloadManager::Observer implementation:
+  virtual void OnLoadedAutofillHeuristics(const std::string& heuristic_xml);
+  virtual void OnUploadedAutofillHeuristics(const std::string& form_signature);
   virtual void OnHeuristicsRequestError(
       const std::string& form_signature,
-      AutoFillDownloadManager::AutoFillRequestType request_type,
+      AutofillDownloadManager::AutofillRequestType request_type,
       int http_error);
 
   // Returns the value of the AutoFillEnabled pref.
@@ -72,7 +69,7 @@ class AutoFillManager : public WebNavigationObserver,
   // Imports the form data, submitted by the user, into |personal_data_|.
   void ImportFormData(const FormStructure& submitted_form);
 
-  // Uploads the form data to the AutoFill server.
+  // Uploads the form data to the Autofill server.
   void UploadFormData(const FormStructure& submitted_form);
 
   // Reset cache.
@@ -80,18 +77,17 @@ class AutoFillManager : public WebNavigationObserver,
 
  protected:
   // For tests.
-  AutoFillManager();
-  AutoFillManager(TabContents* tab_contents,
+  AutofillManager(TabContents* tab_contents,
                   PersonalDataManager* personal_data);
 
   void set_personal_data_manager(PersonalDataManager* personal_data) {
     personal_data_ = personal_data;
   }
 
-  const AutoFillMetrics* metric_logger() const {
+  const AutofillMetrics* metric_logger() const {
     return metric_logger_.get();
   }
-  void set_metric_logger(const AutoFillMetrics* metric_logger);
+  void set_metric_logger(const AutofillMetrics* metric_logger);
 
   ScopedVector<FormStructure>* form_structures() { return &form_structures_; }
 
@@ -120,7 +116,7 @@ class AutoFillManager : public WebNavigationObserver,
   void OnDidShowAutoFillSuggestions();
 
   // Fills |host| with the RenderViewHost for this tab.
-  // Returns false if AutoFill is disabled or if the host is unavailable.
+  // Returns false if Autofill is disabled or if the host is unavailable.
   bool GetHost(const std::vector<AutoFillProfile*>& profiles,
                const std::vector<CreditCard*>& credit_cards,
                RenderViewHost** host) WARN_UNUSED_RESULT;
@@ -137,14 +133,14 @@ class AutoFillManager : public WebNavigationObserver,
       const webkit_glue::FormData& form,
       const webkit_glue::FormField& field,
       FormStructure** form_structure,
-      AutoFillField** autofill_field) WARN_UNUSED_RESULT;
+      AutofillField** autofill_field) WARN_UNUSED_RESULT;
 
   // Returns a list of values from the stored profiles that match |type| and the
   // value of |field| and returns the labels of the matching profiles. |labels|
   // is filled with the Profile label.
   void GetProfileSuggestions(FormStructure* form,
                              const webkit_glue::FormField& field,
-                             AutoFillType type,
+                             AutofillType type,
                              std::vector<string16>* values,
                              std::vector<string16>* labels,
                              std::vector<string16>* icons,
@@ -154,7 +150,7 @@ class AutoFillManager : public WebNavigationObserver,
   // the value of |field| and returns the labels of the matching credit cards.
   void GetCreditCardSuggestions(FormStructure* form,
                                 const webkit_glue::FormField& field,
-                                AutoFillType type,
+                                AutofillType type,
                                 std::vector<string16>* values,
                                 std::vector<string16>* labels,
                                 std::vector<string16>* icons,
@@ -163,20 +159,21 @@ class AutoFillManager : public WebNavigationObserver,
   // Set |field| argument's value based on |type| and contents of the
   // |credit_card|.
   void FillCreditCardFormField(const CreditCard* credit_card,
-                               AutoFillType type,
+                               AutofillType type,
                                webkit_glue::FormField* field);
 
   // Set |field| argument's value based on |type| and contents of the |profile|.
   void FillFormField(const AutoFillProfile* profile,
-                     AutoFillType type,
+                     AutofillType type,
                      webkit_glue::FormField* field);
 
-  // Set |field| argument's value for phone number based on contents of the
-  // |profile|.
+  // Set |field| argument's value for phone/fax number based on contents of the
+  // |profile|. |type| is the type of the phone.
   void FillPhoneNumberField(const AutoFillProfile* profile,
+                            AutofillType type,
                             webkit_glue::FormField* field);
 
-  // Parses the forms using heuristic matching and querying the AutoFill server.
+  // Parses the forms using heuristic matching and querying the Autofill server.
   void ParseForms(const std::vector<webkit_glue::FormData>& forms);
 
   // Uses existing personal data to determine possible field types for the
@@ -186,29 +183,24 @@ class AutoFillManager : public WebNavigationObserver,
   void LogMetricsAboutSubmittedForm(const webkit_glue::FormData& form,
                                     const FormStructure* submitted_form);
 
-  // The TabContents hosting this AutoFillManager.
-  // Weak reference.
-  // May not be NULL.
-  TabContents* tab_contents_;
-
   // The personal data manager, used to save and load personal data to/from the
-  // web database.  This is overridden by the AutoFillManagerTest.
+  // web database.  This is overridden by the AutofillManagerTest.
   // Weak reference.
   // May be NULL.  NULL indicates OTR.
   PersonalDataManager* personal_data_;
 
   std::list<std::string> autofilled_forms_signatures_;
-  // Handles queries and uploads to AutoFill servers.
-  AutoFillDownloadManager download_manager_;
+  // Handles queries and uploads to Autofill servers.
+  AutofillDownloadManager download_manager_;
 
-  // Should be set to true in AutoFillManagerTest and other tests, false in
-  // AutoFillDownloadManagerTest and in non-test environment. Is false by
+  // Should be set to true in AutofillManagerTest and other tests, false in
+  // AutofillDownloadManagerTest and in non-test environment. Is false by
   // default for the public constructor, and true by default for the test-only
   // constructors.
   bool disable_download_manager_requests_;
 
   // For logging UMA metrics. Overridden by metrics tests.
-  scoped_ptr<const AutoFillMetrics> metric_logger_;
+  scoped_ptr<const AutofillMetrics> metric_logger_;
 
   // Our copy of the form data.
   ScopedVector<FormStructure> form_structures_;
@@ -217,26 +209,37 @@ class AutoFillManager : public WebNavigationObserver,
   // Deletes itself when closed.
   AutoFillCCInfoBarDelegate* cc_infobar_;
 
+  // The imported credit card that should be saved if the user accepts the
+  // infobar.
+  scoped_ptr<const CreditCard> imported_credit_card_;
+
   // GUID to ID mapping.  We keep two maps to convert back and forth.
   std::map<std::string, int> guid_id_map_;
   std::map<int, std::string> id_guid_map_;
 
-  friend class AutoFillManagerTest;
+  friend class AutofillManagerTest;
   friend class FormStructureBrowserTest;
-  FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FillCreditCardForm);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FillAddressForm);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FillAddressAndCreditCardForm);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FillAutoFilledForm);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FillPhoneNumber);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FormChangesRemoveField);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FormChangesAddField);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillMetricsTest, QualityMetrics);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillMetricsTest,
-                           NoQualityMetricsForNonAutoFillableForms);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillMetricsTest, SaneMetricsWithCacheMismatch);
-  FRIEND_TEST_ALL_PREFIXES(AutoFillMetricsTest, QualityMetricsForFailure);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillCreditCardForm);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           FillCreditCardFormNoYearNoMonth);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillCreditCardFormYearNoMonth);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillCreditCardFormNoYearMonth);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillCreditCardFormYearMonth);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillAddressForm);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillAddressAndCreditCardForm);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillFormWithMultipleSections);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillAutoFilledForm);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillPhoneNumber);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FormChangesRemoveField);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FormChangesAddField);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetrics);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest,
+                           NoQualityMetricsForNonAutofillableForms);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, SaneMetricsWithCacheMismatch);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsForFailure);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsWithExperimentId);
 
-  DISALLOW_COPY_AND_ASSIGN(AutoFillManager);
+  DISALLOW_COPY_AND_ASSIGN(AutofillManager);
 };
 
 #endif  // CHROME_BROWSER_AUTOFILL_AUTOFILL_MANAGER_H_

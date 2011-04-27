@@ -106,6 +106,7 @@ void VideoRendererBase::Flush(FilterCallback* callback) {
 void VideoRendererBase::Stop(FilterCallback* callback) {
   DCHECK_EQ(pending_reads_, 0);
 
+  base::PlatformThreadHandle old_thread_handle = base::kNullThreadHandle;
   {
     base::AutoLock auto_lock(lock_);
     state_ = kStopped;
@@ -115,14 +116,13 @@ void VideoRendererBase::Stop(FilterCallback* callback) {
       // Signal the thread since it's possible to get stopped with the video
       // thread waiting for a read to complete.
       frame_available_.Signal();
-      {
-        base::AutoUnlock auto_unlock(lock_);
-        base::PlatformThread::Join(thread_);
-      }
+      old_thread_handle = thread_;
       thread_ = base::kNullThreadHandle;
     }
-
   }
+  if (old_thread_handle)
+    base::PlatformThread::Join(old_thread_handle);
+
   // Signal the subclass we're stopping.
   OnStop(callback);
 }
@@ -157,13 +157,17 @@ void VideoRendererBase::Seek(base::TimeDelta time, FilterCallback* callback) {
 }
 
 void VideoRendererBase::Initialize(VideoDecoder* decoder,
-                                   FilterCallback* callback) {
+                                   FilterCallback* callback,
+                                   StatisticsCallback* stats_callback) {
   base::AutoLock auto_lock(lock_);
   DCHECK(decoder);
   DCHECK(callback);
+  DCHECK(stats_callback);
   DCHECK_EQ(kUninitialized, state_);
   decoder_ = decoder;
   AutoCallbackRunner done_runner(callback);
+
+  statistics_callback_.reset(stats_callback);
 
   decoder_->set_consume_video_frame_callback(
       NewCallback(this, &VideoRendererBase::ConsumeVideoFrame));
@@ -219,7 +223,17 @@ void VideoRendererBase::ThreadMain() {
   base::PlatformThread::SetName("CrVideoRenderer");
   base::TimeDelta remaining_time;
 
+  uint32 frames_dropped = 0;
+
   for (;;) {
+    if (frames_dropped > 0) {
+      PipelineStatistics statistics;
+      statistics.video_frames_dropped = frames_dropped;
+      statistics_callback_->Run(statistics);
+
+      frames_dropped = 0;
+    }
+
     base::AutoLock auto_lock(lock_);
 
     const base::TimeDelta kIdleTimeDelta =
@@ -310,6 +324,7 @@ void VideoRendererBase::ThreadMain() {
           // which is the first frame in the queue.
           timeout_frame = frames_queue_ready_.front();
           frames_queue_ready_.pop_front();
+          ++frames_dropped;
         }
       }
       if (timeout_frame.get()) {
@@ -318,7 +333,6 @@ void VideoRendererBase::ThreadMain() {
       }
       if (new_frame_available) {
         base::AutoUnlock auto_unlock(lock_);
-        // Notify subclass that |current_frame_| has been updated.
         OnFrameAvailable();
       }
     }
@@ -376,6 +390,10 @@ void VideoRendererBase::PutCurrentFrame(scoped_refptr<VideoFrame> frame) {
 }
 
 void VideoRendererBase::ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
+  PipelineStatistics statistics;
+  statistics.video_frames_decoded = 1;
+  statistics_callback_->Run(statistics);
+
   base::AutoLock auto_lock(lock_);
 
   // Decoder could reach seek state before our Seek() get called.
@@ -419,6 +437,7 @@ void VideoRendererBase::ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
   }
 
   // Check for our preroll complete condition.
+  bool new_frame_available = false;
   if (state_ == kSeeking) {
     if (frames_queue_ready_.size() == Limits::kMaxVideoFrames ||
         frame->IsEndOfStream()) {
@@ -435,7 +454,7 @@ void VideoRendererBase::ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
         frames_queue_ready_.pop_front();
         current_frame_ = first_frame;
       }
-      OnFrameAvailable();
+      new_frame_available = true;
 
       // If we reach prerolled state before Seek() is called by pipeline,
       // |seek_callback_| is not set, we will return immediately during
@@ -447,6 +466,11 @@ void VideoRendererBase::ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
     }
   } else if (state_ == kFlushing && pending_reads_ == 0 && !pending_paint_) {
     OnFlushDone();
+  }
+
+  if (new_frame_available) {
+    base::AutoUnlock auto_unlock(lock_);
+    OnFrameAvailable();
   }
 }
 

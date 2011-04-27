@@ -15,7 +15,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
@@ -28,6 +27,7 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
 NSString* const kBrowserActionVisibilityChangedNotification =
@@ -360,7 +360,7 @@ class ExtensionServiceObserverBridge : public NotificationObserver,
     // Migration code to the new VisibleIconCount pref.
     // TODO(mpcomplete): remove this at some point.
     double predefinedWidth =
-        profile_->GetPrefs()->GetReal(prefs::kBrowserActionContainerWidth);
+        profile_->GetPrefs()->GetDouble(prefs::kBrowserActionContainerWidth);
     if (predefinedWidth != 0) {
       int iconWidth = kBrowserActionWidth + kBrowserActionButtonPadding;
       int extraWidth = kChevronWidth;
@@ -419,7 +419,7 @@ class ExtensionServiceObserverBridge : public NotificationObserver,
 }
 
 + (void)registerUserPrefs:(PrefService*)prefs {
-  prefs->RegisterRealPref(prefs::kBrowserActionContainerWidth, 0);
+  prefs->RegisterDoublePref(prefs::kBrowserActionContainerWidth, 0);
 }
 
 #pragma mark -

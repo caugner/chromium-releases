@@ -8,9 +8,9 @@
 #include "base/i18n/break_iterator.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/canvas_skia.h"
-#include "gfx/color_utils.h"
-#include "gfx/size.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/size.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
 
@@ -122,8 +122,7 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
     // If we exceed the boundaries, we need to wrap.
     WrapIfWordDoesntFit(w, font.GetHeight(), position, bounds);
 
-    int x = label->MirroredXCoordinateInsideView(position->width()) +
-                                                 bounds.x();
+    int x = label->GetMirroredXInView(position->width()) + bounds.x();
     if (text_direction_is_rtl) {
       x -= w;
       // When drawing LTR strings inside RTL text we need to make sure we
@@ -143,7 +142,7 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
     canvas->DrawStringInt(word, font, text_color, x, y, w, font.GetHeight(),
                           flags);
 
-    if (word.size() > 0 && word[word.size() - 1] == '\x0a') {
+    if (!word.empty() && word[word.size() - 1] == '\x0a') {
       // When we come across '\n', we move to the beginning of the next line.
       position->set_width(0);
       position->Enlarge(0, font.GetHeight());

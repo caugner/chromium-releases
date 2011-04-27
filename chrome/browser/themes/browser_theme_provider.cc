@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
-#include "ui/base/win/hwnd_util.h"
+#include "views/widget/widget_win.h"
 #endif
 
 // Strings used in alignment properties.
@@ -35,10 +35,17 @@ const char* BrowserThemeProvider::kTilingRepeatX = "repeat-x";
 const char* BrowserThemeProvider::kTilingRepeatY = "repeat-y";
 const char* BrowserThemeProvider::kTilingRepeat = "repeat";
 
-// Saved default values.
+// The default theme if we haven't installed a theme yet or if we've clicked
+// the "Use Classic" button.
 const char* BrowserThemeProvider::kDefaultThemeID = "";
 
 namespace {
+
+// The default theme if we've gone to the theme gallery and installed the
+// "Default" theme. We have to detect this case specifically. (By the time we
+// realize we've installed the default theme, we already have an extension
+// unpacked on the filesystem.)
+const char* kDefaultThemeGalleryID = "hkacjpbfdknhflllbcmjibkdeoafencn";
 
 SkColor TintForUnderline(SkColor input) {
   return SkColorSetA(input, SkColorGetA(input) / 3);
@@ -255,7 +262,7 @@ bool BrowserThemeProvider::ShouldUseNativeFrame() const {
   if (HasCustomImage(IDR_THEME_FRAME))
     return false;
 #if defined(OS_WIN)
-  return ui::ShouldUseVistaFrame();
+  return views::WidgetWin::IsAeroGlassEnabled();
 #else
   return false;
 #endif
@@ -331,7 +338,9 @@ void BrowserThemeProvider::SetNativeTheme() {
 }
 
 bool BrowserThemeProvider::UsingDefaultTheme() {
-  return GetThemeID() == BrowserThemeProvider::kDefaultThemeID;
+  std::string id = GetThemeID();
+  return id == BrowserThemeProvider::kDefaultThemeID ||
+      id == kDefaultThemeGalleryID;
 }
 
 std::string BrowserThemeProvider::GetThemeID() const {

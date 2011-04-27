@@ -9,8 +9,8 @@
 #include "chrome/service/service_process.h"
 #include "ipc/ipc_logging.h"
 
-ServiceIPCServer::ServiceIPCServer(const std::string& channel_name)
-    : channel_name_(channel_name), client_connected_(false) {
+ServiceIPCServer::ServiceIPCServer(const IPC::ChannelHandle& channel_handle)
+    : channel_handle_(channel_handle), client_connected_(false) {
 }
 
 bool ServiceIPCServer::Init() {
@@ -24,8 +24,9 @@ bool ServiceIPCServer::Init() {
 }
 
 void ServiceIPCServer::CreateChannel() {
-  channel_.reset(new IPC::SyncChannel(channel_name_,
-      IPC::Channel::MODE_SERVER, this,
+  channel_.reset(NULL); // Tear down the existing channel, if any.
+  channel_.reset(new IPC::SyncChannel(channel_handle_,
+      IPC::Channel::MODE_NAMED_SERVER, this,
       g_service_process->io_thread()->message_loop(), true,
       g_service_process->shutdown_event()));
   DCHECK(sync_message_filter_.get());
@@ -63,8 +64,21 @@ void ServiceIPCServer::OnChannelError() {
   client_connected_ = false;
   // TODO(sanjeevr): Instead of invoking the service process for such handlers,
   // define a Client interface that the ServiceProcess can implement.
-  if (client_was_connected && g_service_process->HandleClientDisconnect()) {
-    CreateChannel();
+  if (client_was_connected) {
+    if (g_service_process->HandleClientDisconnect()) {
+#if defined(OS_WIN)
+      // On Windows, once an error on a named pipe occurs, the named pipe is no
+      // longer valid and must be re-created. This is not the case on Mac or
+      // Linux.
+      CreateChannel();
+#endif
+    }
+  } else {
+    // If the client was never even connected we had an error connecting.
+    if (!client_connected_) {
+      LOG(ERROR) << "Unable to open service ipc channel "
+                 << "named: " << channel_handle_.name;
+    }
   }
 }
 
@@ -79,6 +93,11 @@ bool ServiceIPCServer::Send(IPC::Message* msg) {
 
 bool ServiceIPCServer::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
+  // When we get a message, always mark the client as connected. The
+  // ChannelProxy::Context is only letting OnChannelConnected get called once,
+  // so on the Mac and Linux, we never would set client_connected_ to true
+  // again on subsequent connections.
+  client_connected_ = true;
   IPC_BEGIN_MESSAGE_MAP(ServiceIPCServer, msg)
     IPC_MESSAGE_HANDLER(ServiceMsg_EnableCloudPrintProxy,
                         OnEnableCloudPrintProxy)

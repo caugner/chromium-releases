@@ -39,7 +39,8 @@ class BaseTool(object):
   """
 
   def __init__(self):
-    self.temp_dir = tempfile.mkdtemp()
+    self.temp_dir = tempfile.mkdtemp(prefix="vg_logs_")  # Generated every time
+    self.log_dir = self.temp_dir  # overridable by --keep_logs
     self.option_parser_hooks = []
 
   def ToolName(self):
@@ -75,9 +76,13 @@ class BaseTool(object):
                             default=False,
                             help="ignore exit code of the test "
                                  "(e.g. test failures)")
-    self._parser.add_option("", "--nocleanup_on_exit", action="store_true",
+    self._parser.add_option("", "--keep_logs", action="store_true",
                             default=False,
-                            help="don't delete directory with logs on exit")
+                            help="store memory tool logs in the <tool>.logs "
+                                 "directory instead of /tmp.\nThis can be "
+                                 "useful for tool developers/maintainers.\n"
+                                 "Please note that the <tool>.logs directory "
+                                 "will be clobbered on tool startup.")
 
     # To add framework- or tool-specific flags, please add a hook using
     # RegisterOptionParserHook in the corresponding subclass.
@@ -114,7 +119,12 @@ class BaseTool(object):
 
     self._timeout = int(self._options.timeout)
     self._source_dir = self._options.source_dir
-    self._nocleanup_on_exit = self._options.nocleanup_on_exit
+    if self._options.keep_logs:
+      self.log_dir = "%s.logs" % self.ToolName()
+      if os.path.exists(self.log_dir):
+        shutil.rmtree(self.log_dir)
+      os.mkdir(self.log_dir)
+
     self._ignore_exit_code = self._options.ignore_exit_code
     if self._options.gtest_filter != "":
       self._args.append("--gtest_filter=%s" % self._options.gtest_filter)
@@ -148,10 +158,6 @@ class BaseTool(object):
       "NSS_DISABLE_ARENA_FREE_LIST" : "1",
       "GTEST_DEATH_TEST_USE_FORK" : "1",
     }
-    if common.IsWine():
-      # TODO(timurrrr): Maybe we need it for TSan/Win too?
-      add_env["CHROME_ALLOCATOR"] = "winheap"
-
     for k,v in add_env.iteritems():
       logging.info("export %s=%s", k, v)
       os.putenv(k, v)
@@ -187,8 +193,7 @@ class BaseTool(object):
     retcode = -1
     if self.Setup(args):
       retcode = self.RunTestsAndAnalyze(check_sanity)
-      if not self._nocleanup_on_exit:
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+      shutil.rmtree(self.temp_dir, ignore_errors=True)
       self.Cleanup()
     else:
       logging.error("Setup failed")
@@ -252,9 +257,7 @@ class ValgrindTool(BaseTool):
   def Setup(self, args):
     if not BaseTool.Setup(self, args):
       return False
-    if common.IsWine():
-      self.PrepareForTestWine()
-    elif common.IsMac():
+    if common.IsMac():
       self.PrepareForTestMac()
     return True
 
@@ -321,39 +324,6 @@ class ValgrindTool(BaseTool):
                      "not be shown.  Either tell xcode to generate .dSYM "
                      "file, or use --generate_dsym option to this tool.")
 
-  def PrepareForTestWine(self):
-    """Set up the Wine environment.
-
-    We need to run some sanity checks, set up a Wine prefix, and make sure
-    wineserver is running by starting a dummy win32 program.
-    """
-    if not os.path.exists('/usr/share/ca-certificates/root_ca_cert.crt'):
-      logging.warning('WARNING: SSL certificate missing! SSL tests will fail.')
-      logging.warning('You need to run:')
-      logging.warning('sudo cp src/net/data/ssl/certificates/root_ca_cert.crt '
-                      '/usr/share/ca-certificates/')
-      logging.warning('sudo vi /etc/ca-certificates.conf')
-      logging.warning('  (and add the line root_ca_cert.crt)')
-      logging.warning('sudo update-ca-certificates')
-
-    # Shutdown the Wine server in case the last run got interrupted.
-    common.RunSubprocess([os.environ.get('WINESERVER'), '-k'])
-
-    # Yes, this can be dangerous if $WINEPREFIX is set incorrectly.
-    shutil.rmtree(os.environ.get('WINEPREFIX'), ignore_errors=True)
-
-    winetricks = os.path.join(self._source_dir, 'tools', 'valgrind',
-                              'wine_memcheck', 'winetricks')
-    common.RunSubprocess(['sh', winetricks,
-                          'nocrashdialog', 'corefonts', 'gecko'])
-    time.sleep(1)
-
-    # Start a dummy program like winemine so Valgrind won't run memcheck on
-    # the wineserver startup routine when it launches the test binary, which
-    # is slow and not interesting to us.
-    common.RunSubprocessInBackground([os.environ.get('WINE'), 'winemine'])
-    return
-
   def ToolCommand(self):
     """Get the valgrind command to run."""
     # Note that self._args begins with the exe to be run.
@@ -382,7 +352,7 @@ class ValgrindTool(BaseTool):
     if not suppression_count:
       logging.warning("WARNING: NOT USING SUPPRESSIONS!")
 
-    logfilename = self.temp_dir + ("/%s." % tool_name) + "%p"
+    logfilename = self.log_dir + ("/%s." % tool_name) + "%p"
     if self.UseXML():
       proc += ["--xml=yes", "--xml-file=" + logfilename]
     else:
@@ -400,11 +370,6 @@ class ValgrindTool(BaseTool):
     raise NotImplementedError, "This method should be implemented " \
                                "in the tool-specific subclass"
 
-  def Cleanup(self):
-    if common.IsWine():
-      # Shutdown the Wine server.
-      common.RunSubprocess([os.environ.get('WINESERVER'), '-k'])
-
   def CreateBrowserWrapper(self, command, logfiles):
     """The program being run invokes Python or something else
     that can't stand to be valgrinded, and also invokes
@@ -412,7 +377,7 @@ class ValgrindTool(BaseTool):
     tell the program to prefix the Chrome commandline
     with a magic wrapper.  Build the magic wrapper here.
     """
-    (fd, indirect_fname) = tempfile.mkstemp(dir=self.temp_dir,
+    (fd, indirect_fname) = tempfile.mkstemp(dir=self.log_dir,
                                             prefix="browser_wrapper.",
                                             text=True)
     f = os.fdopen(fd, "w")
@@ -433,7 +398,7 @@ class ValgrindTool(BaseTool):
 
   def GetAnalyzeResults(self, check_sanity=False):
     # Glob all the files in the "testing.tmp" directory
-    filenames = glob.glob(self.temp_dir + "/" + self.ToolName() + ".*")
+    filenames = glob.glob(self.log_dir + "/" + self.ToolName() + ".*")
 
     # If we have browser wrapper, the logfiles are named as
     # "toolname.wrapper_PID.valgrind_PID".
@@ -487,6 +452,9 @@ class Memcheck(ValgrindTool):
     return "memcheck"
 
   def ExtendOptionParser(self, parser):
+    parser.add_option("--leak-check", "--leak_check", type="string",
+                      default="yes",  # --leak-check=yes is equivalent of =full
+                      help="perform leak checking at the end of the run")
     parser.add_option("", "--show_all_leaks", action="store_true",
                       default=False,
                       help="also show less blatant leaks")
@@ -495,7 +463,8 @@ class Memcheck(ValgrindTool):
                       help="Show whence uninitialized bytes came. 30% slower.")
 
   def ToolSpecificFlags(self):
-    ret = ["--leak-check=full", "--gen-suppressions=all", "--demangle=no"]
+    ret = ["--gen-suppressions=all", "--demangle=no"]
+    ret += ["--leak-check=%s" % self._options.leak_check]
 
     if self._options.show_all_leaks:
       ret += ["--show-reachable=yes"]
@@ -691,7 +660,7 @@ class ThreadSanitizerWindows(ThreadSanitizerBase, PinTool):
     if not suppression_count:
       logging.warning("WARNING: NOT USING SUPPRESSIONS!")
 
-    logfilename = self.temp_dir + "/tsan.%p"
+    logfilename = self.log_dir + "/tsan.%p"
     proc += ["--log-file=" + logfilename]
 
     # TODO(timurrrr): Add flags for Valgrind trace children analog when we
@@ -700,7 +669,7 @@ class ThreadSanitizerWindows(ThreadSanitizerBase, PinTool):
     return proc
 
   def Analyze(self, check_sanity=False):
-    filenames = glob.glob(self.temp_dir + "/tsan.*")
+    filenames = glob.glob(self.log_dir + "/tsan.*")
     analyzer = tsan_analyze.TsanAnalyzer(self._source_dir)
     ret = analyzer.Report(filenames, check_sanity)
     if ret != 0:
@@ -752,7 +721,7 @@ class DrMemory(BaseTool):
     # Un-comment to dump Dr.Memory events on error
     #proc += ["-dr_ops", "-dumpcore_mask 0x8bff"]
 
-    proc += ["-logdir", self.temp_dir]
+    proc += ["-logdir", self.log_dir]
     proc += ["-batch", "-quiet"]
     proc += ["-callstack_max_frames", "30"]
     #proc += ["-no_check_leaks", "-no_count_leaks"]
@@ -766,7 +735,7 @@ class DrMemory(BaseTool):
 
   def Analyze(self, check_sanity=False):
     # Glob all the results files in the "testing.tmp" directory
-    filenames = glob.glob(self.temp_dir + "/*/results.txt")
+    filenames = glob.glob(self.log_dir + "/*/results.txt")
 
     analyzer = drmemory_analyze.DrMemoryAnalyze(self._source_dir, filenames)
     ret = analyzer.Report(check_sanity)
@@ -902,9 +871,7 @@ class RaceVerifier(object):
 
 class ToolFactory:
   def Create(self, tool_name):
-    if tool_name == "memcheck" and not common.IsWine():
-      return Memcheck()
-    if tool_name == "wine_memcheck" and common.IsWine():
+    if tool_name == "memcheck":
       return Memcheck()
     if tool_name == "tsan":
       if common.IsWindows():

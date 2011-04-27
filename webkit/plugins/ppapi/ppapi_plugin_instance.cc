@@ -1,15 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
-#include "gfx/rect.h"
-#include "gfx/skia_util.h"
 #include "ppapi/c/dev/ppb_find_dev.h"
 #include "ppapi/c/dev/ppb_fullscreen_dev.h"
 #include "ppapi/c/dev/ppb_zoom_dev.h"
@@ -24,7 +23,6 @@
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_instance.h"
 #include "ppapi/c/ppp_instance.h"
-#include "printing/native_metafile.h"
 #include "printing/units.h"
 #include "skia/ext/vector_platform_device.h"
 #include "skia/ext/platform_canvas.h"
@@ -39,6 +37,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/skia_util.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/event_conversion.h"
 #include "webkit/plugins/ppapi/fullscreen_container.h"
@@ -54,14 +54,23 @@
 #include "webkit/plugins/ppapi/string.h"
 #include "webkit/plugins/ppapi/var.h"
 
+#if defined(OS_POSIX)
+#include "printing/native_metafile.h"
+#endif
+
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
+#include "printing/native_metafile_factory.h"
+#endif
+
+#if defined(OS_LINUX)
+#include "printing/pdf_ps_metafile_cairo.h"
 #endif
 
 #if defined(OS_WIN)
-#include "gfx/codec/jpeg_codec.h"
-#include "gfx/gdi_util.h"
+#include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/gdi_util.h"
 #endif
 
 using WebKit::WebBindings;
@@ -145,7 +154,10 @@ COMPILE_ASSERT_MATCHING_ENUM(TypeNone, PP_CURSORTYPE_NONE);
 COMPILE_ASSERT_MATCHING_ENUM(TypeNotAllowed, PP_CURSORTYPE_NOTALLOWED);
 COMPILE_ASSERT_MATCHING_ENUM(TypeZoomIn, PP_CURSORTYPE_ZOOMIN);
 COMPILE_ASSERT_MATCHING_ENUM(TypeZoomOut, PP_CURSORTYPE_ZOOMOUT);
-COMPILE_ASSERT_MATCHING_ENUM(TypeCustom, PP_CURSORTYPE_CUSTOM);
+COMPILE_ASSERT_MATCHING_ENUM(TypeGrab, PP_CURSORTYPE_GRAB);
+COMPILE_ASSERT_MATCHING_ENUM(TypeGrabbing, PP_CURSORTYPE_GRABBING);
+// Do not assert WebCursorInfo::TypeCustom == PP_CURSORTYPE_CUSTOM;
+// PP_CURSORTYPE_CUSTOM is pinned to allow new cursor types.
 
 void RectToPPRect(const gfx::Rect& input, PP_Rect* output) {
   *output = PP_MakeRectFromXYWH(input.x(), input.y(),
@@ -236,12 +248,24 @@ PP_Bool SetFullscreen(PP_Instance instance_id, PP_Bool fullscreen) {
   PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
   if (!instance)
     return PP_FALSE;
-  return BoolToPPBool(instance->SetFullscreen(PPBoolToBool(fullscreen)));
+  instance->SetFullscreen(PPBoolToBool(fullscreen), true);
+  return PP_TRUE;
 }
+
+PP_Bool GetScreenSize(PP_Instance instance_id, PP_Size* size) {
+  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
+  if (!instance || !size)
+    return PP_FALSE;
+  gfx::Size screen_size = instance->delegate()->GetScreenSize();
+  *size = PP_MakeSize(screen_size.width(), screen_size.height());
+  return PP_TRUE;
+}
+
 
 const PPB_Fullscreen_Dev ppb_fullscreen = {
   &IsFullscreen,
   &SetFullscreen,
+  &GetScreenSize
 };
 
 void ZoomChanged(PP_Instance instance_id, double factor) {
@@ -310,7 +334,8 @@ PluginInstance::PluginInstance(PluginDelegate* delegate,
       plugin_print_interface_(NULL),
       plugin_graphics_3d_interface_(NULL),
       always_on_top_(false),
-      fullscreen_container_(NULL) {
+      fullscreen_container_(NULL),
+      fullscreen_(false) {
   pp_instance_ = ResourceTracker::Get()->AddInstance(this);
 
   memset(&current_print_settings_, 0, sizeof(current_print_settings_));
@@ -359,6 +384,12 @@ const PPB_Fullscreen_Dev* PluginInstance::GetFullscreenInterface() {
 const PPB_Zoom_Dev* PluginInstance::GetZoomInterface() {
   return &ppb_zoom;
 }
+
+// NOTE: Any of these methods that calls into the plugin needs to take into
+// account that the plugin may use Var to remove the <embed> from the DOM, which
+// will make the WebPluginImpl drop its reference, usually the last one. If a
+// method needs to access a member of the instance after the call has returned,
+// then it needs to keep its own reference on the stack.
 
 void PluginInstance::Paint(WebCanvas* canvas,
                            const gfx::Rect& plugin_rect,
@@ -411,6 +442,18 @@ void PluginInstance::CommitBackingTexture() {
     container_->commitBackingTexture();
 }
 
+void PluginInstance::InstanceCrashed() {
+  // Force free all resources and vars.
+  ResourceTracker::Get()->InstanceCrashed(pp_instance());
+
+  // Free any associated graphics.
+  SetFullscreen(false, false);
+  bound_graphics_ = NULL;
+  InvalidateRect(gfx::Rect());
+
+  // TODO(brettw) show a crashed plugin screen.
+}
+
 PP_Var PluginInstance::GetWindowObject() {
   if (!container_)
     return PP_MakeUndefined();
@@ -450,6 +493,9 @@ bool PluginInstance::BindGraphics(PP_Resource graphics_id) {
       Resource::GetAs<PPB_Surface3D_Impl>(graphics_id);
 
   if (graphics_2d) {
+    // Refuse to bind if we're transitioning to fullscreen.
+    if (fullscreen_container_ && !fullscreen_)
+      return false;
     if (!graphics_2d->BindToInstance(this))
       return false;  // Can't bind to more than one instance.
 
@@ -479,6 +525,9 @@ bool PluginInstance::BindGraphics(PP_Resource graphics_id) {
     bound_graphics_ = graphics_2d;
     // BindToInstance will have invalidated the plugin if necessary.
   } else if (graphics_3d) {
+    // Refuse to bind if we're transitioning to fullscreen.
+    if (fullscreen_container_ && !fullscreen_)
+      return false;
     // Make sure graphics can only be bound to the instance it is
     // associated with.
     if (graphics_3d->instance() != this)
@@ -493,6 +542,12 @@ bool PluginInstance::BindGraphics(PP_Resource graphics_id) {
 }
 
 bool PluginInstance::SetCursor(PP_CursorType_Dev type) {
+  if (type == PP_CURSORTYPE_CUSTOM) {
+    // TODO(neb): implement custom cursors.
+    // (Remember that PP_CURSORTYPE_CUSTOM != WebCursorInfo::TypeCustom.)
+    NOTIMPLEMENTED();
+    return false;
+  }
   cursor_.reset(new WebCursorInfo(static_cast<WebCursorInfo::Type>(type)));
   return true;
 }
@@ -536,6 +591,8 @@ PP_Var PluginInstance::ExecuteScript(PP_Var script, PP_Var* exception) {
 }
 
 void PluginInstance::Delete() {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   instance_interface_->DidDestroy(pp_instance());
 
   if (fullscreen_container_) {
@@ -575,6 +632,8 @@ bool PluginInstance::HandleDocumentLoad(PPB_URLLoader_Impl* loader) {
 
 bool PluginInstance::HandleInputEvent(const WebKit::WebInputEvent& event,
                                       WebCursorInfo* cursor_info) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   std::vector<PP_InputEvent> pp_events;
   CreatePPEvent(event, &pp_events);
 
@@ -596,6 +655,7 @@ PP_Var PluginInstance::GetInstanceObject() {
 
 void PluginInstance::ViewChanged(const gfx::Rect& position,
                                  const gfx::Rect& clip) {
+  fullscreen_ = (fullscreen_container_ != NULL);
   position_ = position;
 
   if (clip.IsEmpty()) {
@@ -646,6 +706,8 @@ void PluginInstance::ViewInitiatedPaint() {
 }
 
 void PluginInstance::ViewFlushedPaint() {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (bound_graphics_2d())
     bound_graphics_2d()->ViewFlushedPaint();
   if (bound_graphics_3d())
@@ -682,6 +744,8 @@ bool PluginInstance::GetBitmapForOptimizedPluginPaint(
 }
 
 string16 PluginInstance::GetSelectedText(bool html) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (!LoadSelectionInterface())
     return string16();
 
@@ -695,6 +759,8 @@ string16 PluginInstance::GetSelectedText(bool html) {
 }
 
 string16 PluginInstance::GetLinkAtPosition(const gfx::Point& point) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (!LoadPdfInterface())
     return string16();
 
@@ -710,6 +776,8 @@ string16 PluginInstance::GetLinkAtPosition(const gfx::Point& point) {
 }
 
 void PluginInstance::Zoom(double factor, bool text_only) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (!LoadZoomInterface())
     return;
   plugin_zoom_interface_->Zoom(pp_instance(), factor, BoolToPPBool(text_only));
@@ -718,6 +786,8 @@ void PluginInstance::Zoom(double factor, bool text_only) {
 bool PluginInstance::StartFind(const string16& search_text,
                                bool case_sensitive,
                                int identifier) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (!LoadFindInterface())
     return false;
   find_identifier_ = identifier;
@@ -729,12 +799,16 @@ bool PluginInstance::StartFind(const string16& search_text,
 }
 
 void PluginInstance::SelectFindResult(bool forward) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (LoadFindInterface())
     plugin_find_interface_->SelectFindResult(pp_instance(),
                                              BoolToPPBool(forward));
 }
 
 void PluginInstance::StopFind() {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (!LoadFindInterface())
     return;
   find_identifier_ = -1;
@@ -785,8 +859,18 @@ bool PluginInstance::PluginHasFocus() const {
   return has_webkit_focus_ && has_content_area_focus_;
 }
 
+void PluginInstance::ReportGeometry() {
+  // If this call was delayed, we may have transitioned back to fullscreen in
+  // the mean time, so only report the geometry if we are actually in normal
+  // mode.
+  if (container_ && !fullscreen_container_)
+    container_->reportGeometry();
+}
+
 bool PluginInstance::GetPreferredPrintOutputFormat(
     PP_PrintOutputFormat_Dev* format) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   if (!plugin_print_interface_) {
     plugin_print_interface_ =
         reinterpret_cast<const PPP_Printing_Dev*>(module_->GetPluginInterface(
@@ -825,6 +909,8 @@ bool PluginInstance::SupportsPrintInterface() {
 
 int PluginInstance::PrintBegin(const gfx::Rect& printable_area,
                                int printer_dpi) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   PP_PrintOutputFormat_Dev format;
   if (!GetPreferredPrintOutputFormat(&format)) {
     // PrintBegin should not have been called since SupportsPrintInterface
@@ -867,6 +953,8 @@ bool PluginInstance::PrintPage(int page_number, WebKit::WebCanvas* canvas) {
 bool PluginInstance::PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
                                      int num_ranges,
                                      WebKit::WebCanvas* canvas) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
   PP_Resource print_output = plugin_print_interface_->PrintPages(
       pp_instance(), page_ranges, num_ranges);
   if (!print_output)
@@ -886,6 +974,8 @@ bool PluginInstance::PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
 }
 
 void PluginInstance::PrintEnd() {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
 #if defined(OS_LINUX)
   // This hack is here because all pages need to be written to PDF at once.
   if (!ranges_.empty())
@@ -905,28 +995,40 @@ void PluginInstance::PrintEnd() {
 }
 
 bool PluginInstance::IsFullscreen() {
+  return fullscreen_;
+}
+
+bool PluginInstance::IsFullscreenOrPending() {
   return fullscreen_container_ != NULL;
 }
 
-bool PluginInstance::SetFullscreen(bool fullscreen) {
-  bool is_fullscreen = (fullscreen_container_ != NULL);
-  if (fullscreen == is_fullscreen)
-    return true;
+void PluginInstance::SetFullscreen(bool fullscreen, bool delay_report) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
+
+  // We check whether we are trying to switch to the state we're already going
+  // to (i.e. if we're already switching to fullscreen but the fullscreen
+  // container isn't ready yet, don't do anything more).
+  if (fullscreen == IsFullscreenOrPending())
+    return;
+
+  BindGraphics(0);
   VLOG(1) << "Setting fullscreen to " << (fullscreen ? "on" : "off");
   if (fullscreen) {
+    DCHECK(!fullscreen_container_);
     fullscreen_container_ = delegate_->CreateFullscreenContainer(this);
   } else {
+    DCHECK(fullscreen_container_);
     fullscreen_container_->Destroy();
     fullscreen_container_ = NULL;
-    // TODO(piman): currently the fullscreen container resizes the plugin to the
-    // fullscreen size so we need to reset the size here. Eventually it will
-    // transparently scale and this won't be necessary.
-    if (container_) {
-      container_->reportGeometry();
-      container_->invalidate();
+    fullscreen_ = false;
+    if (!delay_report) {
+      ReportGeometry();
+    } else {
+      MessageLoop::current()->PostTask(
+          FROM_HERE, NewRunnableMethod(this, &PluginInstance::ReportGeometry));
     }
   }
-  return true;
 }
 
 bool PluginInstance::NavigateToURL(const char* url, const char* target) {
@@ -982,15 +1084,16 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
   // directly.
   cairo_t* context = canvas->beginPlatformPaint();
   printing::NativeMetafile* metafile =
-      printing::NativeMetafile::FromCairoContext(context);
+      printing::PdfPsMetafile::FromCairoContext(context);
   DCHECK(metafile);
   if (metafile)
     ret = metafile->SetRawData(buffer->mapped_buffer(), buffer->size());
   canvas->endPlatformPaint();
 #elif defined(OS_MACOSX)
-  printing::NativeMetafile metafile;
+  scoped_ptr<printing::NativeMetafile> metafile(
+      printing::NativeMetafileFactory::CreateMetafile());
   // Create a PDF metafile and render from there into the passed in context.
-  if (metafile.Init(buffer->mapped_buffer(), buffer->size())) {
+  if (metafile->Init(buffer->mapped_buffer(), buffer->size())) {
     // Flip the transform.
     CGContextSaveGState(canvas);
     CGContextTranslateCTM(canvas, 0,
@@ -1002,7 +1105,7 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
     page_rect.size.width = current_print_settings_.printable_area.size.width;
     page_rect.size.height = current_print_settings_.printable_area.size.height;
 
-    ret = metafile.RenderPage(1, canvas, page_rect, true, false, true, true);
+    ret = metafile->RenderPage(1, canvas, page_rect, true, false, true, true);
     CGContextRestoreGState(canvas);
   }
 #elif defined(OS_WIN)

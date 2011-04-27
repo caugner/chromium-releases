@@ -10,7 +10,6 @@
 #include "base/path_service.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_unpacker.h"
 #include "chrome/common/extensions/update_manifest.h"
@@ -18,18 +17,21 @@
 #include "chrome/common/serialized_script_value.h"
 #include "chrome/common/utility_messages.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
-#include "gfx/rect.h"
-#include "printing/native_metafile.h"
+#include "content/common/child_process.h"
 #include "printing/page_range.h"
 #include "printing/units.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "ui/gfx/rect.h"
 #include "webkit/glue/idb_bindings.h"
 #include "webkit/glue/image_decoder.h"
 
 #if defined(OS_WIN)
 #include "app/win/iat_patch_function.h"
+#include "base/scoped_ptr.h"
 #include "base/win/scoped_handle.h"
+#include "printing/native_metafile_factory.h"
+#include "printing/native_metafile.h"
 #endif
 
 namespace {
@@ -63,6 +65,8 @@ bool UtilityThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnRenderPDFPagesToMetafile)
     IPC_MESSAGE_HANDLER(UtilityMsg_IDBKeysFromValuesAndKeyPath,
                         OnIDBKeysFromValuesAndKeyPath)
+    IPC_MESSAGE_HANDLER(UtilityMsg_InjectIDBKey,
+                        OnInjectIDBKey)
     IPC_MESSAGE_HANDLER(UtilityMsg_BatchMode_Started, OnBatchModeStarted)
     IPC_MESSAGE_HANDLER(UtilityMsg_BatchMode_Finished, OnBatchModeFinished)
     IPC_MESSAGE_HANDLER(UtilityMsg_GetPrinterCapsAndDefaults,
@@ -133,10 +137,15 @@ void UtilityThread::OnRenderPDFPagesToMetafile(
     const std::vector<printing::PageRange>& page_ranges) {
   bool succeeded = false;
 #if defined(OS_WIN)
-  printing::NativeMetafile metafile;
+  scoped_ptr<printing::NativeMetafile> metafile(
+      printing::NativeMetafileFactory::CreateMetafile());
   int highest_rendered_page_number = 0;
-  succeeded = RenderPDFToWinMetafile(pdf_file, metafile_path, render_area,
-                                     render_dpi, page_ranges, &metafile,
+  succeeded = RenderPDFToWinMetafile(pdf_file,
+                                     metafile_path,
+                                     render_area,
+                                     render_dpi,
+                                     page_ranges,
+                                     metafile.get(),
                                      &highest_rendered_page_number);
   if (succeeded) {
     Send(new UtilityHostMsg_RenderPDFPagesToMetafile_Succeeded(
@@ -304,6 +313,15 @@ void UtilityThread::OnIDBKeysFromValuesAndKeyPath(
   ReleaseProcessIfNeeded();
 }
 
+void UtilityThread::OnInjectIDBKey(const IndexedDBKey& key,
+                                   const SerializedScriptValue& value,
+                                   const string16& key_path) {
+  SerializedScriptValue new_value(webkit_glue::InjectIDBKey(key, value,
+                                                              key_path));
+  Send(new UtilityHostMsg_InjectIDBKey_Finished(new_value));
+  ReleaseProcessIfNeeded();
+}
+
 void UtilityThread::OnBatchModeStarted() {
   batch_mode_ = true;
 }
@@ -330,4 +348,3 @@ void UtilityThread::ReleaseProcessIfNeeded() {
   if (!batch_mode_)
     ChildProcess::current()->ReleaseProcess();
 }
-

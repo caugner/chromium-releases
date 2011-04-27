@@ -15,7 +15,7 @@
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/client/x11_view.h"
 #include "remoting/client/x11_input_handler.h"
-#include "remoting/protocol/jingle_connection_to_host.h"
+#include "remoting/protocol/connection_to_host.h"
 
 void ClientQuit(MessageLoop* loop) {
   loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
@@ -32,14 +32,15 @@ int main(int argc, char** argv) {
 
   MessageLoop ui_loop;
   remoting::ClientContext context;
-  remoting::protocol::JingleConnectionToHost connection(
-      context.jingle_thread());
+  remoting::protocol::ConnectionToHost connection(context.jingle_thread(),
+                                                  NULL, NULL, NULL);
   remoting::X11View view;
-  remoting::RectangleUpdateDecoder rectangle_decoder(
-      context.decode_message_loop(), &view);
+  scoped_refptr<remoting::RectangleUpdateDecoder> rectangle_decoder =
+      new remoting::RectangleUpdateDecoder(context.decode_message_loop(),
+                                           &view);
   remoting::X11InputHandler input_handler(&context, &connection, &view);
   remoting::ChromotingClient client(
-      config, &context, &connection, &view, &rectangle_decoder, &input_handler,
+      config, &context, &connection, &view, rectangle_decoder, &input_handler,
       NewRunnableFunction(&ClientQuit, &ui_loop));
 
   // Run the client on a new MessageLoop until

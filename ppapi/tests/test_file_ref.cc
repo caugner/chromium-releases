@@ -68,13 +68,13 @@ std::string TestFileRef::TestGetFileSystemType() {
   if (file_ref_temp.GetFileSystemType() != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
     return "file_ref_temp expected to be temporary.";
 
-  pp::URLRequestInfo request;
+  pp::URLRequestInfo request(instance_);
   request.SetURL("test_url_loader_data/hello.txt");
   request.SetStreamToFile(true);
 
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
 
-  pp::URLLoader loader(*instance_);
+  pp::URLLoader loader(instance_);
   int32_t rv = loader.Open(request, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
@@ -117,13 +117,13 @@ std::string TestFileRef::TestGetName() {
   if (name != "/")
     return ReportMismatch("FileRef::GetName", name, "/");
 
-  pp::URLRequestInfo request;
+  pp::URLRequestInfo request(instance_);
   request.SetURL("test_url_loader_data/hello.txt");
   request.SetStreamToFile(true);
 
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
 
-  pp::URLLoader loader(*instance_);
+  pp::URLLoader loader(instance_);
   int32_t rv = loader.Open(request, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
@@ -161,13 +161,13 @@ std::string TestFileRef::TestGetPath() {
   if (path != kTempFilePath)
     return ReportMismatch("FileRef::GetPath", path, kTempFilePath);
 
-  pp::URLRequestInfo request;
+  pp::URLRequestInfo request(instance_);
   request.SetURL("test_url_loader_data/hello.txt");
   request.SetStreamToFile(true);
 
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
 
-  pp::URLLoader loader(*instance_);
+  pp::URLLoader loader(instance_);
   int32_t rv = loader.Open(request, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
@@ -216,13 +216,13 @@ std::string TestFileRef::TestGetParent() {
   if (parent_path != "/")
     return ReportMismatch("FileRef::GetParent", parent_path, "/");
 
-  pp::URLRequestInfo request;
+  pp::URLRequestInfo request(instance_);
   request.SetURL("test_url_loader_data/hello.txt");
   request.SetStreamToFile(true);
 
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
 
-  pp::URLLoader loader(*instance_);
+  pp::URLLoader loader(instance_);
   int32_t rv = loader.Open(request, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
@@ -244,7 +244,7 @@ std::string TestFileRef::TestGetParent() {
 }
 
 std::string TestFileRef::TestMakeDirectory() {
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
 
   // Open.
   pp::FileSystem_Dev file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
@@ -253,20 +253,6 @@ std::string TestFileRef::TestMakeDirectory() {
     rv = callback.WaitForResult();
   if (rv != PP_OK)
     return ReportError("FileSystem::Open", rv);
-
-  // Open aborted (see the DirectoryReader test for comments).
-  callback.reset_run_count();
-  rv = pp::FileSystem_Dev(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY)
-      .Open(1024, callback);
-  if (callback.run_count() > 0)
-    return "FileSystem::Open ran callback synchronously.";
-  if (rv == PP_ERROR_WOULDBLOCK) {
-    rv = callback.WaitForResult();
-    if (rv != PP_ERROR_ABORTED)
-      return "FileSystem::Open not aborted.";
-  } else if (rv != PP_OK) {
-    return ReportError("FileSystem::Open", rv);
-  }
 
   // MakeDirectory.
   pp::FileRef_Dev dir_ref(file_system, "/test_dir_make_directory");
@@ -328,7 +314,7 @@ std::string TestFileRef::TestMakeDirectory() {
 }
 
 std::string TestFileRef::TestQueryAndTouchFile() {
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
   pp::FileSystem_Dev file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
   int32_t rv = file_system.Open(1024, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
@@ -337,7 +323,7 @@ std::string TestFileRef::TestQueryAndTouchFile() {
     return ReportError("FileSystem::Open", rv);
 
   pp::FileRef_Dev file_ref(file_system, "/file_touch");
-  pp::FileIO_Dev file_io;
+  pp::FileIO_Dev file_io(instance_);
   rv = file_io.Open(file_ref,
                     PP_FILEOPENFLAG_CREATE | PP_FILEOPENFLAG_WRITE,
                     callback);
@@ -380,7 +366,7 @@ std::string TestFileRef::TestQueryAndTouchFile() {
 
   // Query.
   PP_FileInfo_Dev info;
-  rv = file_ref.Query(&info, callback);
+  rv = file_io.Query(&info, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
   if (rv != PP_OK)
@@ -397,22 +383,23 @@ std::string TestFileRef::TestQueryAndTouchFile() {
   // TODO(viettrungluu): this test causes a bunch of LOG(WARNING)s; investigate.
   callback.reset_run_count();
   // TODO(viettrungluu): check |info| for late writes.
-  rv = pp::FileRef_Dev(file_system, "/file_touch").Query(&info, callback);
+  rv = pp::FileRef_Dev(file_system, "/file_touch").Touch(
+      last_access_time, last_modified_time, callback);
   if (callback.run_count() > 0)
-    return "FileSystem::Query ran callback synchronously.";
+    return "FileSystem::Touch ran callback synchronously.";
   if (rv == PP_ERROR_WOULDBLOCK) {
     rv = callback.WaitForResult();
     if (rv != PP_ERROR_ABORTED)
-      return "FileSystem::Query not aborted.";
+      return "FileSystem::Touch not aborted.";
   } else if (rv != PP_OK) {
-    return ReportError("FileSystem::Query", rv);
+    return ReportError("FileSystem::Touch", rv);
   }
 
   PASS();
 }
 
 std::string TestFileRef::TestDeleteFileAndDirectory() {
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
   pp::FileSystem_Dev file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
   int32_t rv = file_system.Open(1024, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
@@ -421,7 +408,7 @@ std::string TestFileRef::TestDeleteFileAndDirectory() {
     return ReportError("FileSystem::Open", rv);
 
   pp::FileRef_Dev file_ref(file_system, "/file_delete");
-  pp::FileIO_Dev file_io;
+  pp::FileIO_Dev file_io(instance_);
   rv = file_io.Open(file_ref, PP_FILEOPENFLAG_CREATE, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
@@ -472,7 +459,7 @@ std::string TestFileRef::TestDeleteFileAndDirectory() {
   // Delete aborted.
   {
     pp::FileRef_Dev file_ref_abort(file_system, "/file_delete_abort");
-    pp::FileIO_Dev file_io_abort;
+    pp::FileIO_Dev file_io_abort(instance_);
     rv = file_io_abort.Open(file_ref_abort, PP_FILEOPENFLAG_CREATE, callback);
     if (rv == PP_ERROR_WOULDBLOCK)
       rv = callback.WaitForResult();
@@ -496,7 +483,7 @@ std::string TestFileRef::TestDeleteFileAndDirectory() {
 }
 
 std::string TestFileRef::TestRenameFileAndDirectory() {
-  TestCompletionCallback callback;
+  TestCompletionCallback callback(instance_->pp_instance());
   pp::FileSystem_Dev file_system(instance_, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
   int32_t rv = file_system.Open(1024, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
@@ -505,7 +492,7 @@ std::string TestFileRef::TestRenameFileAndDirectory() {
     return ReportError("FileSystem::Open", rv);
 
   pp::FileRef_Dev file_ref(file_system, "/file_rename");
-  pp::FileIO_Dev file_io;
+  pp::FileIO_Dev file_io(instance_);
   rv = file_io.Open(file_ref, PP_FILEOPENFLAG_CREATE, callback);
   if (rv == PP_ERROR_WOULDBLOCK)
     rv = callback.WaitForResult();
@@ -554,7 +541,7 @@ std::string TestFileRef::TestRenameFileAndDirectory() {
                                         "/target_file_rename_abort");
   {
     pp::FileRef_Dev file_ref_abort(file_system, "/file_rename_abort");
-    pp::FileIO_Dev file_io_abort;
+    pp::FileIO_Dev file_io_abort(instance_);
     rv = file_io_abort.Open(file_ref_abort, PP_FILEOPENFLAG_CREATE, callback);
     if (rv == PP_ERROR_WOULDBLOCK)
       rv = callback.WaitForResult();

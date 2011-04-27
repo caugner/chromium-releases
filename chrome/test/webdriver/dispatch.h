@@ -5,37 +5,53 @@
 #ifndef CHROME_TEST_WEBDRIVER_DISPATCH_H_
 #define CHROME_TEST_WEBDRIVER_DISPATCH_H_
 
-#include <sstream>
 #include <string>
 #include <vector>
 
-#include "base/logging.h"
-#include "base/scoped_ptr.h"
-#include "base/string_split.h"
-#include "base/string_util.h"
-#include "chrome/test/webdriver/utility_functions.h"
-#include "chrome/test/webdriver/commands/command.h"
-
+#include "base/basictypes.h"
+#include "chrome/test/webdriver/commands/response.h"
 #include "third_party/mongoose/mongoose.h"
+
+class DictionaryValue;
+
+namespace base {
+class WaitableEvent;
+}
 
 namespace webdriver {
 
 class Command;
+class HttpResponse;
+
+namespace internal {
+
+// Converts a |Response| into a |HttpResponse| to be returned to the client.
+// This function is exposed for testing.
+void PrepareHttpResponse(const Response& command_response,
+                         HttpResponse* const http_response);
 
 // Sends a |response| to a WebDriver command back to the client.
 // |connection| is the communication pipe to the HTTP server and
 // |request_info| contains any data sent by the user.
 void SendResponse(struct mg_connection* const connection,
-                  const struct mg_request_info* const request_info,
+                  const std::string& request_method,
                   const Response& response);
 
+// Parses the request info and returns whether parsing was successful. If not,
+// |response| has been modified with the error.
+bool ParseRequestInfo(const struct mg_request_info* const request_info,
+                      std::string* method,
+                      std::vector<std::string>* path_segments,
+                      DictionaryValue** parameters,
+                      Response* const response);
 
-// Serves as a link to the mongoose server to find if the user request
-// is an HTTP POST, GET, or DELETE and then executes the proper function
-// calls for the class that inherts from Command.  An HTTP CREATE is not
-// handled and is reserved only for the establishment of a session.
-void DispatchCommand(Command* const command, const std::string& method,
-                     Response* response);
+// Allows the bulk of the implementation of |Dispatch| to be moved out of this
+// header file. Takes ownership of |command|.
+void DispatchHelper(Command* const command,
+                    const std::string& method,
+                    Response* const response);
+
+}  // namespace internal
 
 // Template function for dispatching commands sent to the WebDriver REST
 // service. |CommandType| must be a subtype of |webdriver::Command|.
@@ -43,37 +59,62 @@ template<typename CommandType>
 void Dispatch(struct mg_connection* connection,
               const struct mg_request_info* request_info,
               void* user_data) {
-  Response response;
-
-  std::string method(request_info->request_method);
-
+  std::string method;
   std::vector<std::string> path_segments;
-  std::string uri(request_info->uri);
-  base::SplitString(uri, '/', &path_segments);
-
   DictionaryValue* parameters = NULL;
-  if ((method == "POST" || method == "PUT") &&
-      request_info->post_data_len > 0) {
-    VLOG(1) << "...parsing request body";
-    std::string json(request_info->post_data, request_info->post_data_len);
-    std::string error;
-    if (!ParseJSONDictionary(json, &parameters, &error)) {
-      response.set_value(Value::CreateStringValue(
-          "Failed to parse command data: " + error + "\n  Data: " + json));
-      response.set_status(kBadRequest);
-      SendResponse(connection, request_info, response);
-      return;
-    }
+  Response response;
+  if (internal::ParseRequestInfo(request_info,
+                                 &method,
+                                 &path_segments,
+                                 &parameters,
+                                 &response)) {
+    internal::DispatchHelper(
+        new CommandType(path_segments, parameters),
+        method,
+        &response);
   }
 
-  VLOG(1) << "Dispatching " << method << " " << uri
-          << std::string(request_info->post_data, request_info->post_data_len);
-  scoped_ptr<CommandType> ptr(new CommandType(path_segments, parameters));
-  DispatchCommand(ptr.get(), method, &response);
-  SendResponse(connection, request_info, response);
+  internal::SendResponse(connection,
+                         request_info->request_method,
+                         response);
+}
+
+class Dispatcher {
+ public:
+  // Creates a new dispatcher that will register all URL callbacks with the
+  // given |context|. Each callback's pattern will be prefixed with the provided
+  // |root|.
+  Dispatcher(struct mg_context* context, const std::string& root);
+  ~Dispatcher();
+
+  // Registers a callback for a WebDriver command using the given URL |pattern|.
+  // The |CommandType| must be a subtype of |webdriver::Command|.
+  template<typename CommandType>
+  void Add(const std::string& pattern);
+
+  // Registers a callback that will shutdown the server.  When any HTTP request
+  // is received at this URL |pattern|, the |shutdown_event| will be signaled.
+  void AddShutdown(const std::string& pattern,
+                   base::WaitableEvent* shutdown_event);
+
+  // Registers a callback that will always respond with a
+  // "HTTP/1.1 501 Not Implemented" message.
+  void SetNotImplemented(const std::string& pattern);
+
+ private:
+  struct mg_context* context_;
+  const std::string root_;
+
+  DISALLOW_COPY_AND_ASSIGN(Dispatcher);
+};
+
+
+template <typename CommandType>
+void Dispatcher::Add(const std::string& pattern) {
+  mg_set_uri_callback(context_, (root_ + pattern).c_str(),
+                      &Dispatch<CommandType>, NULL);
 }
 
 }  // namespace webdriver
 
 #endif  // CHROME_TEST_WEBDRIVER_DISPATCH_H_
-

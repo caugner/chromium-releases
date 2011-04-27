@@ -22,12 +22,10 @@
 #include "base/threading/platform_thread.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/browser/automation/automation_provider_list.h"
-#include "chrome/browser/plugin_service.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -38,8 +36,11 @@
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/net/test_automation_resource_message_filter.h"
 #include "chrome_frame/test/simulate_input.h"
+#include "chrome_frame/test_utils.h"
 #include "chrome_frame/test/win_event_receiver.h"
 #include "chrome_frame/utils.h"
+#include "content/browser/plugin_service.h"
+#include "content/browser/renderer_host/render_process_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -222,18 +223,18 @@ void FakeExternalTab::Initialize() {
 
   RenderProcessHost::set_run_renderer_in_process(true);
 
+  // Must register prefs before calling into the profile code.
+  PrefService* local_state = browser_process_->local_state();
+  local_state->RegisterStringPref(prefs::kApplicationLocale, "");
+  local_state->RegisterBooleanPref(prefs::kMetricsReportingEnabled, false);
+  browser::RegisterLocalState(local_state);
+
   FilePath profile_path(ProfileManager::GetDefaultProfileDir(user_data()));
   Profile* profile = g_browser_process->profile_manager()->GetProfile(
       profile_path, false);
   PrefService* prefs = profile->GetPrefs();
   DCHECK(prefs != NULL);
   WebCacheManager::RegisterPrefs(prefs);
-
-  PrefService* local_state = browser_process_->local_state();
-  local_state->RegisterStringPref(prefs::kApplicationLocale, "");
-  local_state->RegisterBooleanPref(prefs::kMetricsReportingEnabled, false);
-
-  browser::RegisterLocalState(local_state);
 
   // Override some settings to avoid hitting some preferences that have not
   // been registered.
@@ -461,6 +462,11 @@ void FilterDisabledTests() {
     // This test is disabled as it expects an empty UA to be echoed back from
     // the server which is not the case in ChromeFrame.
     "URLRequestTestHTTP.DefaultUserAgent",
+    // This test modifies the UploadData object after it has been marshaled to
+    // ChromeFrame. We don't support this.
+    "URLRequestTestHTTP.TestPostChunkedDataAfterStart",
+    // Not supported in ChromeFrame as we use IE's network stack.
+    "URLRequestTest.NetworkDelegateProxyError",
   };
 
   std::string filter("-");  // All following filters will be negative.
@@ -492,12 +498,23 @@ int main(int argc, char** argv) {
   if (chrome_frame_test::GetInstalledIEVersion() == IE_9) {
     // Adding this here as the command line and the logging stuff gets
     // initialized in the NetTestSuite constructor. Did not want to break that.
-    base::AtExitManager at_exit_manager_;
+    base::AtExitManager at_exit_manager;
     CommandLine::Init(argc, argv);
     CFUrlRequestUnittestRunner::InitializeLogging();
     LOG(INFO) << "Not running ChromeFrame net tests on IE9";
     return 0;
   }
+
+  // TODO(tommi): Stuff be broke. Needs a fixin'.
+  // This is awkward: the TestSuite derived CFUrlRequestUnittestRunner contains
+  // the instance of the AtExitManager that RegisterPathProvider() and others
+  // below require. So we have to instantiate this first.
+  CFUrlRequestUnittestRunner test_suite(argc, argv);
+
+  // Register paths needed by the ScopedChromeFrameRegistrar.
+  chrome::RegisterPathProvider();
+  ScopedChromeFrameRegistrar registrar(chrome_frame_test::GetTestBedType());
+
   WindowWatchdog watchdog;
   // See url_request_unittest.cc for these credentials.
   SupplyProxyCredentials credentials("user", "secret");
@@ -505,7 +522,6 @@ int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   FilterDisabledTests();
   PluginService::EnableChromePlugins(false);
-  CFUrlRequestUnittestRunner test_suite(argc, argv);
   test_suite.RunMainUIThread();
   return 0;
 }

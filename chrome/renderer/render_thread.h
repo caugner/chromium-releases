@@ -14,14 +14,14 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "build/build_config.h"
-#include "chrome/common/child_thread.h"
 #include "chrome/common/css_colors.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/gpu_info.h"
 #include "chrome/renderer/visitedlink_slave.h"
-#include "gfx/native_widget_types.h"
+#include "content/common/child_thread.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_platform_file.h"
+#include "ui/gfx/native_widget_types.h"
 
 class AppCacheDispatcher;
 class CookieMessageFilter;
@@ -51,16 +51,11 @@ struct WebPreferences;
 
 namespace base {
 class MessageLoopProxy;
-template<class T> class ScopedCallbackFactory;
 class Thread;
 }
 
 namespace IPC {
 struct ChannelHandle;
-}
-
-namespace safe_browsing {
-class Scorer;
 }
 
 namespace WebKit {
@@ -201,12 +196,6 @@ class RenderThread : public RenderThreadBase,
     return spellchecker_.get();
   }
 
-  // Returns the phishing Scorer object, or NULL if a model has not been passed
-  // in from the browser yet.
-  const safe_browsing::Scorer* phishing_scorer() const {
-    return phishing_scorer_.get();
-  }
-
   bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
 
   // Do DNS prefetch resolution of a hostname.
@@ -226,7 +215,9 @@ class RenderThread : public RenderThreadBase,
   void SetCacheMode(bool enabled);
 
   // Sends a message to the browser to clear the disk cache.
-  void ClearCache();
+  // |preserve_ssl_host_info| is a flag indicating if the cache should purge
+  // entries related to cached SSL information.
+  void ClearCache(bool preserve_ssl_host_info);
 
   // Sends a message to the browser to enable/disable spdy.
   void EnableSpdy(bool enable);
@@ -326,13 +317,12 @@ class RenderThread : public RenderThreadBase,
   void OnSpellCheckEnableAutoSpellCorrect(bool enable);
 
   void OnGpuChannelEstablished(const IPC::ChannelHandle& channel_handle,
+                               base::ProcessHandle renderer_process_for_gpu,
                                const GPUInfo& gpu_info);
 
   void OnSetPhishingModel(IPC::PlatformFileForTransit model_file);
 
   void OnGetAccessibilityTree();
-
-  void OnSetSpeechInputEnabled(bool enabled);
 
   // Gather usage statistics from the in-memory cache and inform our host.
   // These functions should be call periodically so that the host can make
@@ -352,12 +342,8 @@ class RenderThread : public RenderThreadBase,
   // it is allowed to run on.
   void RegisterExtension(v8::Extension* extension, bool restrict_to_extensions);
 
-  // Callback to be run once the phishing Scorer has been created.
-  void PhishingScorerCreated(safe_browsing::Scorer* scorer);
-
   // These objects live solely on the render thread.
   scoped_ptr<ScopedRunnableMethodFactory<RenderThread> > task_factory_;
-  scoped_ptr<base::ScopedCallbackFactory<RenderThread> > callback_factory_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<UserScriptSlave> user_script_slave_;
   scoped_ptr<RendererNetPredictor> renderer_net_predictor_;
@@ -369,7 +355,6 @@ class RenderThread : public RenderThreadBase,
   scoped_ptr<WebKit::WebStorageEventDispatcher> dom_storage_event_dispatcher_;
   scoped_ptr<WebDatabaseObserverImpl> web_database_observer_impl_;
   scoped_ptr<SpellCheck> spellchecker_;
-  scoped_ptr<const safe_browsing::Scorer> phishing_scorer_;
 
   // Used on the renderer and IPC threads.
   scoped_refptr<DBMessageFilter> db_message_filter_;
@@ -403,10 +388,6 @@ class RenderThread : public RenderThreadBase,
 
   bool suspend_webkit_shared_timer_;
   bool notify_webkit_of_modal_loop_;
-
-  // True if this renderer has speech input enabled, set once during thread
-  // initialization.
-  bool is_speech_input_enabled_;
 
   // Timer that periodically calls IdleHandler.
   base::RepeatingTimer<RenderThread> idle_timer_;

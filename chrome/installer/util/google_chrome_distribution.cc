@@ -170,7 +170,7 @@ bool RelaunchSetup(const std::string& flag, int value,
 // This function changes the permisions so that any authenticated user
 // can launch |exe| later on. This function should only be called if the
 // code is running at the system level.
-bool FixDACLsForExecute(const wchar_t* exe) {
+bool FixDACLsForExecute(const FilePath& exe) {
   // The general strategy to is to add an ACE to the exe DACL the quick
   // and dirty way: a) read the DACL b) convert it to sddl string c) add the
   // new ACE to the string d) convert sddl string back to DACL and finally
@@ -178,8 +178,10 @@ bool FixDACLsForExecute(const wchar_t* exe) {
   char buff[1024];
   DWORD len = sizeof(buff);
   PSECURITY_DESCRIPTOR sd = reinterpret_cast<PSECURITY_DESCRIPTOR>(buff);
-  if (!::GetFileSecurityW(exe, DACL_SECURITY_INFORMATION, sd, len, &len))
+  if (!::GetFileSecurityW(exe.value().c_str(), DACL_SECURITY_INFORMATION,
+                          sd, len, &len)) {
     return false;
+  }
   wchar_t* sddl = 0;
   if (!::ConvertSecurityDescriptorToStringSecurityDescriptorW(sd,
       SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &sddl, NULL))
@@ -205,7 +207,8 @@ bool FixDACLsForExecute(const wchar_t* exe) {
   if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(new_sddl.c_str(),
       SDDL_REVISION_1, &sd, NULL))
     return false;
-  bool rv = ::SetFileSecurityW(exe, DACL_SECURITY_INFORMATION, sd) == TRUE;
+  bool rv = ::SetFileSecurityW(exe.value().c_str(), DACL_SECURITY_INFORMATION,
+                               sd) == TRUE;
   ::LocalFree(sd);
   return rv;
 }
@@ -232,7 +235,7 @@ bool RelaunchSetupAsConsoleUser(const std::string& flag) {
   if (base::win::GetVersion() > base::win::VERSION_XP) {
     // Make sure that in Vista and Above we have the proper DACLs so
     // the interactive user can launch it.
-    if (!FixDACLsForExecute(setup_exe.ToWStringHack().c_str()))
+    if (!FixDACLsForExecute(setup_exe))
       NOTREACHED();
   }
 
@@ -253,9 +256,9 @@ bool RelaunchSetupAsConsoleUser(const std::string& flag) {
 
 }  // namespace
 
-GoogleChromeDistribution::GoogleChromeDistribution(
-    const installer::MasterPreferences& prefs)
-        : BrowserDistribution(prefs), product_guid_(kChromeGuid) {
+GoogleChromeDistribution::GoogleChromeDistribution()
+    : BrowserDistribution(CHROME_BROWSER),
+      product_guid_(kChromeGuid) {
 }
 
 // The functions below are not used by the 64-bit Windows binary -
@@ -502,11 +505,11 @@ std::wstring GoogleChromeDistribution::GetVersionKey() {
 // string (if it is present) regardless of whether installer failed or not.
 // There is no fall-back for full installer :)
 void GoogleChromeDistribution::UpdateInstallStatus(bool system_install,
-    bool incremental_install, bool multi_install,
+    installer::ArchiveType archive_type,
     installer::InstallStatus install_status) {
   GoogleUpdateSettings::UpdateInstallStatus(system_install,
-      incremental_install, multi_install,
-      InstallUtil::GetInstallReturnCode(install_status), product_guid());
+      archive_type, InstallUtil::GetInstallReturnCode(install_status),
+      product_guid());
 }
 
 // The functions below are not used by the 64-bit Windows binary -
@@ -633,7 +636,8 @@ void GoogleChromeDistribution::LaunchUserExperiment(
 
 // User qualifies for the experiment. Launch chrome with --try-chrome=flavor.
 void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
-    const installer::Product& installation) {
+    const installer::Product& installation,
+    const FilePath& application_path) {
   bool has_welcome_url = (flavor == 0);
   // Possibly add a url to launch depending on the experiment flavor.
   CommandLine options(CommandLine::NO_PROGRAM);
@@ -651,7 +655,7 @@ void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
   }
   // Launch chrome now. It will show the toast UI.
   int32 exit_code = 0;
-  if (!installation.LaunchChromeAndWait(options, &exit_code))
+  if (!installation.LaunchChromeAndWait(application_path, options, &exit_code))
     return;
 
   // The chrome process has exited, figure out what happened.
@@ -682,16 +686,8 @@ void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
   bool system_level_toast = CommandLine::ForCurrentProcess()->HasSwitch(
       installer::switches::kSystemLevelToast);
 
-  std::wstring cmd(InstallUtil::GetChromeUninstallCmd(
-      system_level_toast, this));
-
+  CommandLine cmd(InstallUtil::GetChromeUninstallCmd(system_level_toast,
+                                                     GetType()));
   base::LaunchApp(cmd, false, false, NULL);
 }
 #endif
-
-bool GoogleChromeDistribution::SetChannelFlags(
-    bool set,
-    installer::ChannelInfo* channel_info) {
-  DCHECK(channel_info);
-  return channel_info->SetChrome(set);
-}

@@ -12,20 +12,21 @@
 
 namespace webdriver {
 
+class Response;
+
 // Navigate forward in the browser history, if possible. See:
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol#/session/:sessionId/forward
 class ForwardCommand : public WebDriverCommand {
  public:
   ForwardCommand(const std::vector<std::string>& path_segments,
-                 const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters) {}
-  virtual ~ForwardCommand() {}
+                 const DictionaryValue* const parameters);
+  virtual ~ForwardCommand();
 
-  virtual bool DoesPost() { return true; }
+  virtual bool DoesPost();
   virtual void ExecutePost(Response* const response);
 
  private:
-  virtual bool RequiresValidTab() { return true; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(ForwardCommand);
 };
@@ -35,15 +36,14 @@ class ForwardCommand : public WebDriverCommand {
 class BackCommand : public WebDriverCommand {
  public:
   BackCommand(const std::vector<std::string>& path_segments,
-              const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters) {}
-  virtual ~BackCommand() {}
+              const DictionaryValue* const parameters);
+  virtual ~BackCommand();
 
-  virtual bool DoesPost() { return true; }
+  virtual bool DoesPost();
   virtual void ExecutePost(Response* const response);
 
  private:
-  virtual bool RequiresValidTab() { return true; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(BackCommand);
 };
@@ -53,15 +53,14 @@ class BackCommand : public WebDriverCommand {
 class RefreshCommand : public WebDriverCommand {
  public:
   RefreshCommand(const std::vector<std::string>& path_segments,
-                 const DictionaryValue* const parameters)
-      : WebDriverCommand(path_segments, parameters) {}
-  virtual ~RefreshCommand() {}
+                 const DictionaryValue* const parameters);
+  virtual ~RefreshCommand();
 
-  virtual bool DoesPost() { return true; }
+  virtual bool DoesPost();
   virtual void ExecutePost(Response* const response);
 
  private:
-  virtual bool RequiresValidTab() { return true; }
+  virtual bool RequiresValidTab();
 
   DISALLOW_COPY_AND_ASSIGN(RefreshCommand);
 };

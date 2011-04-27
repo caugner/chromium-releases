@@ -8,14 +8,14 @@
 #include <uxtheme.h>
 #include <Vssym32.h>
 
-#include "gfx/canvas_skia.h"
-#include "gfx/native_theme_win.h"
+#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/native_theme_win.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/menu_item_view.h"
 
 namespace views {
 
-void MenuSeparator::Paint(gfx::Canvas* canvas) {
+void MenuSeparator::OnPaint(gfx::Canvas* canvas) {
   const MenuConfig& config = MenuConfig::instance();
   // The gutter is rendered before the background.
   int start_x = 0;

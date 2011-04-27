@@ -28,9 +28,11 @@
 #include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/cloud_print/cloud_print_helpers.h"
 #include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
 #include "printing/backend/cups_helper.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/print_backend_consts.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 static const char kCUPSPrinterInfoOpt[] = "printer-info";
@@ -73,7 +75,8 @@ class PrintSystemCUPS : public PrintSystem {
   // PrintSystem implementation.
   virtual PrintSystemResult Init();
 
-  virtual void EnumeratePrinters(printing::PrinterList* printer_list);
+  virtual PrintSystem::PrintSystemResult EnumeratePrinters(
+      printing::PrinterList* printer_list);
 
   virtual void GetPrinterCapsAndDefaults(
       const std::string& printer_name,
@@ -92,6 +95,7 @@ class PrintSystemCUPS : public PrintSystem {
   virtual PrintSystem::PrinterWatcher* CreatePrinterWatcher(
       const std::string& printer_name);
   virtual PrintSystem::JobSpooler* CreateJobSpooler();
+  virtual std::string GetSupportedMimeTypes();
 
   // Helper functions.
   PlatformJobId SpoolPrintJob(const std::string& print_ticket,
@@ -151,6 +155,7 @@ class PrintSystemCUPS : public PrintSystem {
 
   int update_timeout_;
   bool initialized_;
+  bool printer_enum_succeeded_;
 };
 
 class PrintServerWatcherCUPS
@@ -358,7 +363,9 @@ class JobSpoolerCUPS : public PrintSystem::JobSpooler {
 };
 
 PrintSystemCUPS::PrintSystemCUPS(const DictionaryValue* print_system_settings)
-    : update_timeout_(kCheckForPrinterUpdatesMs), initialized_(false) {
+    : update_timeout_(kCheckForPrinterUpdatesMs),
+      initialized_(false),
+      printer_enum_succeeded_(false) {
   if (print_system_settings) {
     int timeout;
     if (print_system_settings->GetInteger(kCUPSUpdateTimeoutMs, &timeout))
@@ -412,8 +419,10 @@ PrintSystem::PrintSystemResult PrintSystemCUPS::Init() {
 
 void PrintSystemCUPS::UpdatePrinters() {
   PrintServerList::iterator it;
+  printer_enum_succeeded_ = true;
   for (it = print_servers_.begin(); it != print_servers_.end(); ++it) {
-    it->backend->EnumeratePrinters(&it->printers);
+    if (!it->backend->EnumeratePrinters(&it->printers))
+      printer_enum_succeeded_ = false;
     it->caps_cache.clear();
     printing::PrinterList::iterator printer_it;
     for (printer_it = it->printers.begin();
@@ -431,7 +440,8 @@ void PrintSystemCUPS::UpdatePrinters() {
       GetUpdateTimeoutMs());
 }
 
-void PrintSystemCUPS::EnumeratePrinters(printing::PrinterList* printer_list) {
+PrintSystem::PrintSystemResult PrintSystemCUPS::EnumeratePrinters(
+    printing::PrinterList* printer_list) {
   DCHECK(initialized_);
   printer_list->clear();
   PrintServerList::iterator it;
@@ -440,6 +450,9 @@ void PrintSystemCUPS::EnumeratePrinters(printing::PrinterList* printer_list) {
         it->printers.begin(), it->printers.end());
   }
   VLOG(1) << "CUPS: Total " << printer_list->size() << " printers enumerated.";
+  // TODO(sanjeevr): Maybe some day we want to report the actual server names
+  // for which the enumeration failed.
+  return PrintSystemResult(printer_enum_succeeded_, std::string());
 }
 
 void PrintSystemCUPS::GetPrinterCapsAndDefaults(
@@ -533,19 +546,21 @@ bool PrintSystemCUPS::GetJobDetails(const std::string& printer_name,
   cups_job_t* jobs = NULL;
   int num_jobs = GetJobs(&jobs, server_info->url,
                          short_printer_name.c_str(), 1, -1);
-
+  bool error = (num_jobs == 0) && (cupsLastError() > IPP_OK_EVENTS_COMPLETE);
+  if (error) {
+    VLOG(1) << "CP_CUPS: Error getting jobs from CUPS server. Printer:"
+            << printer_name
+            << " Error: "
+            << static_cast<int>(cupsLastError());
+    return false;
+  }
 
   // Check if the request is for dummy dry run job.
   // We check this after calling GetJobs API to see if this printer is actually
   // accessible through CUPS.
   if (job_id == kDryRunJobId) {
-    if (num_jobs >= 0) {
-      job_details->status = PRINT_JOB_STATUS_COMPLETED;
-      VLOG(1) << "CP_CUPS: Dry run job succeeded for: " << printer_name;
-    } else {
-      job_details->status = PRINT_JOB_STATUS_ERROR;
-      VLOG(1) << "CP_CUPS: Dry run job faield for: " << printer_name;
-    }
+    job_details->status = PRINT_JOB_STATUS_COMPLETED;
+    VLOG(1) << "CP_CUPS: Dry run job succeeded for: " << printer_name;
     return true;
   }
 
@@ -628,6 +643,14 @@ PrintSystem::PrinterWatcher* PrintSystemCUPS::CreatePrinterWatcher(
 PrintSystem::JobSpooler* PrintSystemCUPS::CreateJobSpooler() {
   DCHECK(initialized_);
   return new JobSpoolerCUPS(this);
+}
+
+std::string PrintSystemCUPS::GetSupportedMimeTypes() {
+  // Since we hand off the document to the CUPS server directly, list some types
+  // that we know CUPS supports (http://www.cups.org/articles.php?L205+TFAQ+Q)
+  // TODO(sanjeevr): Determine this dynamically (http://crbug.com/73240).
+  return
+      "application/pdf,application/postscript,image/jpeg,image/png,image/gif";
 }
 
 std::string PrintSystem::GenerateProxyId() {

@@ -158,7 +158,8 @@ class PrintSystem : public base::RefCountedThreadSafe<PrintSystem> {
   virtual PrintSystemResult Init() = 0;
 
   // Enumerates the list of installed local and network printers.
-  virtual void EnumeratePrinters(printing::PrinterList* printer_list) = 0;
+  virtual PrintSystemResult EnumeratePrinters(
+      printing::PrinterList* printer_list) = 0;
 
   // Gets the capabilities and defaults for a specific printer asynchronously.
   virtual void GetPrinterCapsAndDefaults(
@@ -183,6 +184,11 @@ class PrintSystem : public base::RefCountedThreadSafe<PrintSystem> {
   virtual PrinterWatcher* CreatePrinterWatcher(
       const std::string& printer_name) = 0;
   virtual JobSpooler* CreateJobSpooler() = 0;
+
+  // Returns a comma separated list of mimetypes for print data that are
+  // supported by this print system. The format of this string is the same as
+  // that used for the HTTP Accept: header.
+  virtual std::string GetSupportedMimeTypes() = 0;
 
   // Generate unique for proxy.
   static std::string GenerateProxyId();
