@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <Vssym32.h>
 #endif
 
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/color_utils.h"
 #include "views/border.h"
@@ -20,10 +21,8 @@
 #include "views/controls/menu/submenu_view.h"
 
 #if defined(OS_WIN)
-#include "ui/gfx/native_theme_win.h"
-#endif
+#include "ui/gfx/native_theme.h"
 
-#if defined(OS_WIN)
 using gfx::NativeTheme;
 #endif
 
@@ -83,15 +82,13 @@ class MenuScrollButton : public View {
     const MenuConfig& config = MenuConfig::instance();
 
 #if defined(OS_WIN)
-    HDC dc = canvas->BeginPlatformPaint();
-
     // The background.
-    RECT item_bounds = { 0, 0, width(), height() };
-    NativeTheme::instance()->PaintMenuItemBackground(
-        NativeTheme::MENU, dc, MENU_POPUPITEM, MPI_NORMAL, false,
-        &item_bounds);
-    canvas->EndPlatformPaint();
-
+    gfx::Rect item_bounds(0, 0, width(), height());
+    NativeTheme::ExtraParams extra;
+    extra.menu_item.is_selected = false;
+    NativeTheme::instance()->Paint(canvas->AsCanvasSkia(),
+                                   NativeTheme::kMenuItemBackground,
+                                   NativeTheme::kNormal, item_bounds, extra);
     SkColor arrow_color = color_utils::GetSysSkColor(COLOR_MENUTEXT);
 #else
     SkColor arrow_color = SK_ColorBLACK;
@@ -162,7 +159,8 @@ class MenuScrollViewContainer::MenuScrollView : public View {
 
 // MenuScrollViewContainer ----------------------------------------------------
 
-MenuScrollViewContainer::MenuScrollViewContainer(SubmenuView* content_view) {
+MenuScrollViewContainer::MenuScrollViewContainer(SubmenuView* content_view)
+    : content_view_(content_view) {
   scroll_up_button_ = new MenuScrollButton(content_view, true);
   scroll_down_button_ = new MenuScrollButton(content_view, false);
   AddChildView(scroll_up_button_);
@@ -186,9 +184,10 @@ void MenuScrollViewContainer::OnPaintBackground(gfx::Canvas* canvas) {
 
 #if defined(OS_WIN)
   HDC dc = canvas->BeginPlatformPaint();
-  RECT bounds = {0, 0, width(), height()};
-  NativeTheme::instance()->PaintMenuBackground(
-      NativeTheme::MENU, dc, MENU_POPUPBACKGROUND, 0, &bounds);
+  gfx::Rect bounds(0, 0, width(), height());
+  NativeTheme::ExtraParams extra;
+  NativeTheme::instance()->Paint(canvas->AsCanvasSkia(),
+      NativeTheme::kMenuPopupBackground, NativeTheme::kNormal, bounds, extra);
   canvas->EndPlatformPaint();
 #elif defined(OS_CHROMEOS)
   static const SkColor kGradientColors[2] = {
@@ -252,13 +251,6 @@ void MenuScrollViewContainer::Layout() {
   scroll_view_->Layout();
 }
 
-void MenuScrollViewContainer::OnBoundsChanged() {
-  gfx::Size content_pref = scroll_view_->GetContents()->GetPreferredSize();
-  scroll_up_button_->SetVisible(content_pref.height() > height());
-  scroll_down_button_->SetVisible(content_pref.height() > height());
-  Layout();
-}
-
 gfx::Size MenuScrollViewContainer::GetPreferredSize() {
   gfx::Size prefsize = scroll_view_->GetContents()->GetPreferredSize();
   gfx::Insets insets = GetInsets();
@@ -266,14 +258,24 @@ gfx::Size MenuScrollViewContainer::GetPreferredSize() {
   return prefsize;
 }
 
-AccessibilityTypes::Role MenuScrollViewContainer::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_MENUBAR;
-}
+void MenuScrollViewContainer::GetAccessibleState(
+    ui::AccessibleViewState* state) {
+  // Get the name from the submenu view.
+  content_view_->GetAccessibleState(state);
 
-AccessibilityTypes::State MenuScrollViewContainer::GetAccessibleState() {
+  // Now change the role.
+  state->role = ui::AccessibilityTypes::ROLE_MENUBAR;
   // Some AT (like NVDA) will not process focus events on menu item children
   // unless a parent claims to be focused.
-  return AccessibilityTypes::STATE_FOCUSED;
+  state->state = ui::AccessibilityTypes::STATE_FOCUSED;
+}
+
+void MenuScrollViewContainer::OnBoundsChanged(
+    const gfx::Rect& previous_bounds) {
+  gfx::Size content_pref = scroll_view_->GetContents()->GetPreferredSize();
+  scroll_up_button_->SetVisible(content_pref.height() > height());
+  scroll_down_button_->SetVisible(content_pref.height() > height());
+  Layout();
 }
 
 }  // namespace views

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -13,11 +13,14 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "jingle/notifier/base/notifier_options.h"
 #include "jingle/notifier/listener/mediator_thread.h"
 #include "jingle/notifier/listener/talk_mediator.h"
 #include "talk/xmpp/xmppclientsettings.h"
+
+class MessageLoop;
 
 namespace notifier {
 
@@ -29,23 +32,29 @@ class TalkMediatorImpl
   // This means that you can store a pointer to mediator_thread separately
   // and use it until this object is destroyed.
   TalkMediatorImpl(
-      MediatorThread* mediator_thread, bool invalidate_xmpp_auth_token,
-      bool allow_insecure_connection);
+      MediatorThread* mediator_thread,
+      const NotifierOptions& notifier_options);
   virtual ~TalkMediatorImpl();
 
   // TalkMediator implementation.
 
+  // Should be called on the same thread as the constructor.
   virtual void SetDelegate(TalkMediator::Delegate* delegate);
 
-  virtual bool SetAuthToken(const std::string& email,
+  // All the methods below should be called on the same thread. It may or may
+  // not be same as the thread on which the object was constructed.
+
+  // |email| must be a valid email address (e.g., foo@bar.com).
+  virtual void SetAuthToken(const std::string& email,
                             const std::string& token,
                             const std::string& token_service);
   virtual bool Login();
+  // Users must call Logout once Login is called.
   virtual bool Logout();
 
-  virtual bool SendNotification(const OutgoingNotificationData& data);
+  virtual void SendNotification(const Notification& data);
 
-  virtual void AddSubscribedServiceUrl(const std::string& service_url);
+  virtual void AddSubscription(const Subscription& subscription);
 
   // MediatorThread::Delegate implementation.
 
@@ -53,16 +62,14 @@ class TalkMediatorImpl
 
   virtual void OnSubscriptionStateChange(bool subscribed);
 
-  virtual void OnIncomingNotification(
-      const IncomingNotificationData& notification_data);
+  virtual void OnIncomingNotification(const Notification& notification);
 
   virtual void OnOutgoingNotification();
 
  private:
   struct TalkMediatorState {
     TalkMediatorState()
-        : started(0), initialized(0), logging_in(0),
-          logged_in(0), subscribed(0) {
+        : started(0), initialized(0), logging_in(0), logged_in(0) {
     }
 
     unsigned int started : 1;      // Background thread has started.
@@ -70,10 +77,9 @@ class TalkMediatorImpl
     unsigned int logging_in : 1;   // Logging in to the mediator's
                                    // authenticator.
     unsigned int logged_in : 1;    // Logged in the mediator's authenticator.
-    unsigned int subscribed : 1;   // Subscribed to the xmpp receiving channel.
   };
 
-  base::NonThreadSafe non_thread_safe_;
+  void CheckOrSetValidThread();
 
   // Delegate, which we don't own.  May be NULL.
   TalkMediator::Delegate* delegate_;
@@ -87,13 +93,14 @@ class TalkMediatorImpl
   // The worker thread through which talk events are posted and received.
   scoped_ptr<MediatorThread> mediator_thread_;
 
-  const bool invalidate_xmpp_auth_token_;
-  const bool allow_insecure_connection_;
+  const NotifierOptions notifier_options_;
 
-  std::vector<std::string> subscribed_services_list_;
+  SubscriptionList subscriptions_;
 
-  FRIEND_TEST_ALL_PREFIXES(TalkMediatorImplTest, SetAuthTokenWithBadInput);
-  FRIEND_TEST_ALL_PREFIXES(TalkMediatorImplTest, SetAuthTokenWithGoodInput);
+  MessageLoop* construction_message_loop_;
+  MessageLoop* method_message_loop_;
+
+  FRIEND_TEST_ALL_PREFIXES(TalkMediatorImplTest, SetAuthToken);
   FRIEND_TEST_ALL_PREFIXES(TalkMediatorImplTest, SendNotification);
   FRIEND_TEST_ALL_PREFIXES(TalkMediatorImplTest, MediatorThreadCallbacks);
 

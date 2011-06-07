@@ -7,11 +7,12 @@
 
 #include <string>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "remoting/base/encoder.h"
 #include "remoting/host/access_verifier.h"
 #include "remoting/host/capturer.h"
+#include "remoting/host/client_session.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/heartbeat_sender.h"
 #include "remoting/jingle_glue/jingle_client.h"
@@ -63,7 +64,7 @@ class ScreenRecorder;
 //    incoming connection.
 class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
                        public protocol::ConnectionToClient::EventHandler,
-                       public DesktopEnvironment::EventHandler,
+                       public ClientSession::EventHandler,
                        public JingleClient::Callback {
  public:
   // Factory methods that must be used to create ChromotingHost instances.
@@ -105,9 +106,11 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   virtual void OnStateChange(JingleClient* client, JingleClient::State state);
 
   ////////////////////////////////////////////////////////////////////////////
-  // DesktopEnvironment::EventHandler implementations
-  virtual void LocalLoginSucceeded();
-  virtual void LocalLoginFailed();
+  // ClientSession::EventHandler implementations
+  virtual void LocalLoginSucceeded(
+      scoped_refptr<protocol::ConnectionToClient> client);
+  virtual void LocalLoginFailed(
+      scoped_refptr<protocol::ConnectionToClient> client);
 
   // Callback for ChromotingServer.
   void OnNewClientSession(
@@ -118,13 +121,8 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // |config| is transferred to the object. Must be called before Start().
   void set_protocol_config(protocol::CandidateSessionConfig* config);
 
-  // This getter is only used in unit test.
-  protocol::HostStub* host_stub() const;
-
   // This setter is only used in unit test to simulate client connection.
-  void set_connection(protocol::ConnectionToClient* conn) {
-    connection_ = conn;
-  }
+  void AddClient(ClientSession* client);
 
  private:
   friend class base::RefCountedThreadSafe<ChromotingHost>;
@@ -147,6 +145,10 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   std::string GenerateHostAuthToken(const std::string& encoded_client_token);
 
+  bool HasAuthenticatedClients() const;
+
+  void EnableCurtainMode(bool enable);
+
   // The context that the chromoting host runs on.
   ChromotingHostContext* context_;
 
@@ -167,9 +169,8 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   AccessVerifier access_verifier_;
 
-  // A ConnectionToClient manages the connectino to a remote client.
-  // TODO(hclam): Expand this to a list of clients.
-  scoped_refptr<protocol::ConnectionToClient> connection_;
+  // The connections to remote clients.
+  std::vector<scoped_refptr<ClientSession> > clients_;
 
   // Session manager for the host process.
   scoped_refptr<ScreenRecorder> recorder_;
@@ -188,6 +189,9 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   // Configuration of the protocol.
   scoped_ptr<protocol::CandidateSessionConfig> protocol_config_;
+
+  // Whether or not the host is currently curtained.
+  bool is_curtained_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);
 };

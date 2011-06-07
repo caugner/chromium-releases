@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -268,7 +268,7 @@ void DrawStringContext::DrawWithHalo(const SkColor& text_color,
 
   cairo_t* text_cr = text_canvas.beginPlatformPaint();
 
-  cairo_move_to(text_cr, 1, 1);
+  cairo_move_to(text_cr, 2, 1);
   pango_cairo_layout_path(text_cr, layout_);
 
   cairo_set_source_rgba(text_cr,
@@ -382,6 +382,11 @@ void CanvasSkia::DrawGdkPixbuf(GdkPixbuf* pixbuf, int x, int y) {
   cairo_t* cr = beginPlatformPaint();
   gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
   cairo_paint(cr);
+}
+
+ui::TextureID CanvasSkia::GetTextureID() {
+  // TODO(wjmaclean)
+  return 0;
 }
 
 }  // namespace gfx

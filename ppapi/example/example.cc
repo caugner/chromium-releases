@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,21 +10,25 @@
 #include <time.h>
 
 #include <algorithm>
+#include <sstream>
 
+#include "ppapi/c/dev/ppb_console_dev.h"
+#include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_input_event.h"
 #include "ppapi/c/pp_rect.h"
+#include "ppapi/c/ppb_var.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
-#include "ppapi/cpp/instance.h"
+#include "ppapi/cpp/private/instance_private.h"
 #include "ppapi/cpp/module.h"
+#include "ppapi/cpp/private/var_private.h"
 #include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/url_loader.h"
 #include "ppapi/cpp/url_request_info.h"
-#include "ppapi/cpp/var.h"
 
 static const int kStepsPerCircle = 800;
 
@@ -44,7 +48,8 @@ void FillRect(pp::ImageData* image, int left, int top, int width, int height,
 
 class MyScriptableObject : public pp::deprecated::ScriptableObject {
  public:
-  explicit MyScriptableObject(pp::Instance* instance) : instance_(instance) {}
+  explicit MyScriptableObject(pp::InstancePrivate* instance)
+      : instance_(instance) {}
 
   virtual bool HasMethod(const pp::Var& method, pp::Var* exception) {
     return method.AsString() == "toString";
@@ -58,7 +63,7 @@ class MyScriptableObject : public pp::deprecated::ScriptableObject {
 
   virtual pp::Var GetProperty(const pp::Var& name, pp::Var* exception) {
     if (name.is_string() && name.AsString() == "blah")
-      return pp::Var(instance_, new MyScriptableObject(instance_));
+      return pp::VarPrivate(instance_, new MyScriptableObject(instance_));
     return pp::Var();
   }
 
@@ -76,7 +81,7 @@ class MyScriptableObject : public pp::deprecated::ScriptableObject {
   }
 
  private:
-  pp::Instance* instance_;
+  pp::InstancePrivate* instance_;
 };
 
 class MyFetcherClient {
@@ -90,7 +95,7 @@ class MyFetcher {
     callback_factory_.Initialize(this);
   }
 
-  void Start(const pp::Instance& instance,
+  void Start(const pp::InstancePrivate& instance,
              const pp::Var& url,
              MyFetcherClient* client) {
     pp::URLRequestInfo request;
@@ -103,7 +108,7 @@ class MyFetcher {
     pp::CompletionCallback callback =
         callback_factory_.NewCallback(&MyFetcher::DidOpen);
     int rv = loader_.Open(request, callback);
-    if (rv != PP_ERROR_WOULDBLOCK)
+    if (rv != PP_OK_COMPLETIONPENDING)
       callback.Run(rv);
   }
 
@@ -120,7 +125,7 @@ class MyFetcher {
     pp::CompletionCallback callback =
         callback_factory_.NewCallback(&MyFetcher::DidRead);
     int rv = loader_.ReadResponseBody(buf_, sizeof(buf_), callback);
-    if (rv != PP_ERROR_WOULDBLOCK)
+    if (rv != PP_OK_COMPLETIONPENDING)
       callback.Run(rv);
   }
 
@@ -153,16 +158,17 @@ class MyFetcher {
   std::string data_;
 };
 
-class MyInstance : public pp::Instance, public MyFetcherClient {
+class MyInstance : public pp::InstancePrivate, public MyFetcherClient {
  public:
   MyInstance(PP_Instance instance)
-      : pp::Instance(instance),
+      : pp::InstancePrivate(instance),
         time_at_last_check_(0.0),
         fetcher_(NULL),
         width_(0),
         height_(0),
         animation_counter_(0),
-        print_settings_valid_(false) {}
+        print_settings_valid_(false),
+        showing_custom_cursor_(false) {}
 
   virtual ~MyInstance() {
     if (fetcher_) {
@@ -175,20 +181,46 @@ class MyInstance : public pp::Instance, public MyFetcherClient {
     return true;
   }
 
+  void Log(PP_LogLevel_Dev level, const pp::Var& value) {
+    const PPB_Console_Dev* console = reinterpret_cast<const PPB_Console_Dev*>(
+        pp::Module::Get()->GetBrowserInterface(PPB_CONSOLE_DEV_INTERFACE));
+    if (!console)
+      return;
+    console->Log(pp_instance(), level, value.pp_var());
+  }
+
   virtual bool HandleDocumentLoad(const pp::URLLoader& loader) {
     fetcher_ = new MyFetcher();
     fetcher_->StartWithOpenedLoader(loader, this);
     return true;
   }
 
+  void HandleKeyEvent(const PP_InputEvent_Key& key_event) {
+    Log(PP_LOGLEVEL_LOG, "HandleKeyDownEvent");
+
+    // Stringify the Windows-style and Native key codes
+    std::ostringstream last_key_down_text;
+    last_key_down_text << "vkey=" << key_event.key_code
+                       << " native=" << key_event.native_key_code
+                       << " usb=" << std::hex << key_event.usb_key_code;
+
+    // Locate the field to update in the page DOM
+    pp::VarPrivate window = GetWindowObject();
+    pp::VarPrivate doc = window.GetProperty("document");
+    pp::VarPrivate last_key_down = doc.Call("getElementById", "lastKeyDown");
+    last_key_down.SetProperty("innerHTML", last_key_down_text.str());
+  }
+
   virtual bool HandleInputEvent(const PP_InputEvent& event) {
     switch (event.type) {
       case PP_INPUTEVENT_TYPE_MOUSEDOWN:
-        //SayHello();
+        SayHello();
+        ToggleCursor();
         return true;
       case PP_INPUTEVENT_TYPE_MOUSEMOVE:
         return true;
       case PP_INPUTEVENT_TYPE_KEYDOWN:
+        HandleKeyEvent(event.u.key);
         return true;
       default:
         return false;
@@ -196,7 +228,7 @@ class MyInstance : public pp::Instance, public MyFetcherClient {
   }
 
   virtual pp::Var GetInstanceObject() {
-    return pp::Var(this, new MyScriptableObject(this));
+    return pp::VarPrivate(this, new MyScriptableObject(this));
   }
 
   pp::ImageData PaintImage(int width, int height) {
@@ -242,6 +274,7 @@ class MyInstance : public pp::Instance, public MyFetcherClient {
   }
 
   virtual void DidChangeView(const pp::Rect& position, const pp::Rect& clip) {
+    Log(PP_LOGLEVEL_LOG, "DidChangeView");
     if (position.size().width() == width_ &&
         position.size().height() == height_)
       return;  // We don't care about the position, only the size.
@@ -263,9 +296,9 @@ class MyInstance : public pp::Instance, public MyFetcherClient {
   void UpdateFps() {
 // Time code doesn't currently compile on Windows, just skip FPS for now.
 #ifndef _WIN32
-    pp::Var window = GetWindowObject();
-    pp::Var doc = window.GetProperty("document");
-    pp::Var fps = doc.Call("getElementById", "fps");
+    pp::VarPrivate window = GetWindowObject();
+    pp::VarPrivate doc = window.GetProperty("document");
+    pp::VarPrivate fps = doc.Call("getElementById", "fps");
 
     struct timeval tv;
     struct timezone tz = {0, 0};
@@ -342,40 +375,28 @@ class MyInstance : public pp::Instance, public MyFetcherClient {
   }
 
  private:
-  void Log(const pp::Var& var) {
-    pp::Var doc = GetWindowObject().GetProperty("document");
-    if (console_.is_undefined()) {
-      pp::Var body = doc.GetProperty("body");
-      console_ = doc.Call("createElement", "pre");
-      console_.GetProperty("style").SetProperty("backgroundColor", "lightgray");
-      body.Call("appendChild", console_);
-    }
-    console_.Call("appendChild", doc.Call("createTextNode", var));
-    console_.Call("appendChild", doc.Call("createTextNode", "\n"));
-  }
-
   void SayHello() {
-    pp::Var window = GetWindowObject();
-    pp::Var doc = window.GetProperty("document");
-    pp::Var body = doc.GetProperty("body");
+    pp::VarPrivate window = GetWindowObject();
+    pp::VarPrivate doc = window.GetProperty("document");
+    pp::VarPrivate body = doc.GetProperty("body");
 
-    pp::Var obj(this, new MyScriptableObject(this));
+    pp::VarPrivate obj(this, new MyScriptableObject(this));
 
     // Our object should have its toString method called.
-    Log("Testing MyScriptableObject::toString():");
-    Log(obj);
+    Log(PP_LOGLEVEL_LOG, "Testing MyScriptableObject::toString():");
+    Log(PP_LOGLEVEL_LOG, obj);
 
     // body.appendChild(body) should throw an exception
-    Log("\nCalling body.appendChild(body):");
+    Log(PP_LOGLEVEL_LOG, "Calling body.appendChild(body):");
     pp::Var exception;
     body.Call("appendChild", body, &exception);
-    Log(exception);
+    Log(PP_LOGLEVEL_LOG, exception);
 
-    Log("\nEnumeration of window properties:");
+    Log(PP_LOGLEVEL_LOG, "Enumeration of window properties:");
     std::vector<pp::Var> props;
     window.GetAllPropertyNames(&props);
     for (size_t i = 0; i < props.size(); ++i)
-      Log(props[i]);
+      Log(PP_LOGLEVEL_LOG, props[i]);
 
     pp::Var location = window.GetProperty("location");
     pp::Var href = location.GetProperty("href");
@@ -387,14 +408,38 @@ class MyInstance : public pp::Instance, public MyFetcherClient {
   }
 
   void DidFetch(bool success, const std::string& data) {
-    Log("\nDownloaded location.href:");
+    Log(PP_LOGLEVEL_LOG, "Downloaded location.href:");
     if (success) {
-      Log(data);
+      Log(PP_LOGLEVEL_LOG, data);
     } else {
-      Log("Failed to download.");
+      Log(PP_LOGLEVEL_ERROR, "Failed to download.");
     }
     delete fetcher_;
     fetcher_ = NULL;
+  }
+
+  void ToggleCursor() {
+    const PPB_CursorControl_Dev* cursor_control =
+        reinterpret_cast<const PPB_CursorControl_Dev*>(
+            pp::Module::Get()->GetBrowserInterface(
+                PPB_CURSOR_CONTROL_DEV_INTERFACE));
+    if (!cursor_control)
+      return;
+
+    if (showing_custom_cursor_) {
+      cursor_control->SetCursor(pp_instance(), PP_CURSORTYPE_POINTER, 0, NULL);
+    } else {
+      pp::ImageData image_data(this, pp::ImageData::GetNativeImageDataFormat(),
+                               pp::Size(50, 50), false);
+      FillRect(&image_data, 0, 0, 50, 50,
+               image_data.format() == PP_IMAGEDATAFORMAT_BGRA_PREMUL ?
+                   0x80800000 : 0x80000080);
+      pp::Point hot_spot(0, 0);
+      cursor_control->SetCursor(pp_instance(), PP_CURSORTYPE_CUSTOM,
+                                image_data.pp_resource(), &hot_spot.pp_point());
+    }
+
+    showing_custom_cursor_ = !showing_custom_cursor_;
   }
 
   pp::Var console_;
@@ -411,6 +456,8 @@ class MyInstance : public pp::Instance, public MyFetcherClient {
   int animation_counter_;
   bool print_settings_valid_;
   PP_PrintSettings_Dev print_settings_;
+
+  bool showing_custom_cursor_;
 };
 
 void FlushCallback(void* data, int32_t result) {

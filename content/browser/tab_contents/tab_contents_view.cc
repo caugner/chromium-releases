@@ -4,15 +4,15 @@
 
 #include "content/browser/tab_contents/tab_contents_view.h"
 
-#include "chrome/common/notification_service.h"
-#include "chrome/common/render_messages_params.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/common/notification_service.h"
+#include "content/common/view_messages.h"
 
 TabContentsView::TabContentsView(TabContents* tab_contents)
     : tab_contents_(tab_contents) {
@@ -37,8 +37,7 @@ void TabContentsView::CreateNewWindow(
       route_id,
       tab_contents_->profile(),
       tab_contents_->GetSiteInstance(),
-      WebUIFactory::GetWebUIType(tab_contents_->profile(),
-          tab_contents_->GetURL()),
+      tab_contents_->GetWebUITypeForCurrentState(),
       tab_contents_,
       params.window_container_type,
       params.frame_name);
@@ -69,8 +68,8 @@ void TabContentsView::ShowCreatedWindow(int route_id,
                                         bool user_gesture) {
   TabContents* contents = delegate_view_helper_.GetCreatedWindow(route_id);
   if (contents) {
-    tab_contents()->AddNewContents(contents, disposition, initial_pos,
-                                   user_gesture);
+    tab_contents()->AddOrBlockNewContents(
+        contents, disposition, initial_pos, user_gesture);
   }
 }
 

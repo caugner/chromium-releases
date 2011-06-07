@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -96,6 +96,7 @@ class ChromeTests(object):
       "ui": self.TestUI,                "ui_tests": self.TestUI,
       "unit": self.TestUnit,            "unit_tests": self.TestUnit,
       "app": self.TestApp,              "app_unittests": self.TestApp,
+      "ui_unit": self.TestUIUnit,       "ui_unittests": self.TestUIUnit,
       "gfx": self.TestGfx,              "gfx_unittests": self.TestGfx,
     }
 
@@ -292,6 +293,9 @@ class ChromeTests(object):
 
   def TestApp(self):
     return self.SimpleTest("chrome", "app_unittests")
+
+  def TestUIUnit(self):
+    return self.SimpleTest("chrome", "ui_unittests")
 
   def TestGfx(self):
     return self.SimpleTest("chrome", "gfx_unittests")

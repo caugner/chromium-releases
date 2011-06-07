@@ -25,7 +25,6 @@ namespace views {
 class Menu2;
 class NativeViewHost;
 class Textfield;
-class TextRange;
 
 static const int kDefaultEditStyle = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN |
     WS_CLIPSIBLINGS;
@@ -79,13 +78,14 @@ class NativeTextfieldWin
   virtual View* GetView() OVERRIDE;
   virtual gfx::NativeView GetTestingHandle() const OVERRIDE;
   virtual bool IsIMEComposing() const OVERRIDE;
-  virtual void GetSelectedRange(TextRange* range) const OVERRIDE;
-  virtual void SelectRange(const TextRange& range) OVERRIDE;
+  virtual void GetSelectedRange(ui::Range* range) const OVERRIDE;
+  virtual void SelectRange(const ui::Range& range) OVERRIDE;
   virtual size_t GetCursorPosition() const OVERRIDE;
-  virtual bool HandleKeyPressed(const views::KeyEvent& e) OVERRIDE;
-  virtual bool HandleKeyReleased(const views::KeyEvent& e) OVERRIDE;
+  virtual bool HandleKeyPressed(const views::KeyEvent& event) OVERRIDE;
+  virtual bool HandleKeyReleased(const views::KeyEvent& event) OVERRIDE;
   virtual void HandleFocus() OVERRIDE;
   virtual void HandleBlur() OVERRIDE;
+  virtual TextInputClient* GetTextInputClient() OVERRIDE;
 
   // Overridden from ui::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;

@@ -5,9 +5,9 @@
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "ppapi/c/dev/ppb_find_dev.h"
 #include "ppapi/c/dev/ppb_fullscreen_dev.h"
@@ -22,9 +22,12 @@
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_instance.h"
+#include "ppapi/c/ppb_messaging.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/ppp_messaging.h"
+#include "ppapi/c/private/ppb_instance_private.h"
+#include "ppapi/c/private/ppp_instance_private.h"
 #include "printing/units.h"
-#include "skia/ext/vector_platform_device.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
@@ -35,6 +38,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/rect.h"
@@ -42,6 +46,7 @@
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/event_conversion.h"
 #include "webkit/plugins/ppapi/fullscreen_container.h"
+#include "webkit/plugins/ppapi/message_channel.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/plugin_object.h"
@@ -50,25 +55,25 @@
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
 #include "webkit/plugins/ppapi/ppb_surface_3d_impl.h"
 #include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
+#include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
 #include "webkit/plugins/ppapi/ppp_pdf.h"
 #include "webkit/plugins/ppapi/string.h"
 #include "webkit/plugins/ppapi/var.h"
-
-#if defined(OS_POSIX)
-#include "printing/native_metafile.h"
-#endif
+#include "webkit/plugins/sad_plugin.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "printing/native_metafile_factory.h"
+#include "printing/metafile_impl.h"
 #endif
 
 #if defined(OS_LINUX)
-#include "printing/pdf_ps_metafile_cairo.h"
+#include "printing/metafile.h"
+#include "printing/metafile_skia_wrapper.h"
 #endif
 
 #if defined(OS_WIN)
+#include "skia/ext/vector_platform_device_emf_win.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/gdi_util.h"
 #endif
@@ -99,7 +104,8 @@ typedef bool (*RenderPDFPageToDCProc)(
 namespace {
 
 #define COMPILE_ASSERT_MATCHING_ENUM(webkit_name, np_name) \
-    COMPILE_ASSERT(int(WebCursorInfo::webkit_name) == int(np_name), \
+    COMPILE_ASSERT(static_cast<int>(WebCursorInfo::webkit_name) \
+                       == static_cast<int>(np_name), \
                    mismatching_enums)
 
 COMPILE_ASSERT_MATCHING_ENUM(TypePointer, PP_CURSORTYPE_POINTER);
@@ -209,6 +215,12 @@ const PPB_Instance ppb_instance = {
   &ExecuteScript,
 };
 
+const PPB_Instance_Private ppb_instance_private = {
+  &GetWindowObject,
+  &GetOwnerElementObject,
+  &ExecuteScript
+};
+
 void NumberOfFindResultsChanged(PP_Instance instance_id,
                                 int32_t total,
                                 PP_Bool final_result) {
@@ -261,11 +273,21 @@ PP_Bool GetScreenSize(PP_Instance instance_id, PP_Size* size) {
   return PP_TRUE;
 }
 
-
 const PPB_Fullscreen_Dev ppb_fullscreen = {
   &IsFullscreen,
   &SetFullscreen,
   &GetScreenSize
+};
+
+void PostMessage(PP_Instance instance_id, PP_Var message) {
+  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
+  if (!instance)
+    return;
+  instance->PostMessage(message);
+}
+
+const PPB_Messaging ppb_messaging = {
+  &PostMessage
 };
 
 void ZoomChanged(PP_Instance instance_id, double factor) {
@@ -325,9 +347,12 @@ PluginInstance::PluginInstance(PluginDelegate* delegate,
       has_content_area_focus_(false),
       find_identifier_(-1),
       plugin_find_interface_(NULL),
+      plugin_messaging_interface_(NULL),
       plugin_pdf_interface_(NULL),
+      plugin_private_interface_(NULL),
       plugin_selection_interface_(NULL),
       plugin_zoom_interface_(NULL),
+      checked_for_plugin_messaging_interface_(false),
 #if defined(OS_LINUX)
       canvas_(NULL),
 #endif  // defined(OS_LINUX)
@@ -335,13 +360,16 @@ PluginInstance::PluginInstance(PluginDelegate* delegate,
       plugin_graphics_3d_interface_(NULL),
       always_on_top_(false),
       fullscreen_container_(NULL),
-      fullscreen_(false) {
+      fullscreen_(false),
+      message_channel_(NULL),
+      sad_plugin_(NULL) {
   pp_instance_ = ResourceTracker::Get()->AddInstance(this);
 
   memset(&current_print_settings_, 0, sizeof(current_print_settings_));
   DCHECK(delegate);
   module_->InstanceCreated(this);
   delegate_->InstanceCreated(this);
+  message_channel_.reset(new MessageChannel(this));
 }
 
 PluginInstance::~PluginInstance() {
@@ -381,6 +409,16 @@ const PPB_Fullscreen_Dev* PluginInstance::GetFullscreenInterface() {
 }
 
 // static
+const PPB_Messaging* PluginInstance::GetMessagingInterface() {
+  return &ppb_messaging;
+}
+
+// static
+const PPB_Instance_Private* PluginInstance::GetPrivateInterface() {
+  return &ppb_instance_private;
+}
+
+// static
 const PPB_Zoom_Dev* PluginInstance::GetZoomInterface() {
   return &ppb_zoom;
 }
@@ -391,9 +429,30 @@ const PPB_Zoom_Dev* PluginInstance::GetZoomInterface() {
 // method needs to access a member of the instance after the call has returned,
 // then it needs to keep its own reference on the stack.
 
+void PluginInstance::Delete() {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
+  instance_interface_->DidDestroy(pp_instance());
+
+  if (fullscreen_container_) {
+    fullscreen_container_->Destroy();
+    fullscreen_container_ = NULL;
+  }
+  container_ = NULL;
+}
+
 void PluginInstance::Paint(WebCanvas* canvas,
                            const gfx::Rect& plugin_rect,
                            const gfx::Rect& paint_rect) {
+  if (module()->is_crashed()) {
+    // Crashed plugin painting.
+    if (!sad_plugin_)  // Lazily initialize bitmap.
+      sad_plugin_ = delegate_->GetSadPluginBitmap();
+    if (sad_plugin_)
+      webkit::PaintSadPlugin(canvas, plugin_rect, *sad_plugin_);
+    return;
+  }
+
   if (bound_graphics_2d())
     bound_graphics_2d()->Paint(canvas, plugin_rect, paint_rect);
 }
@@ -451,7 +510,7 @@ void PluginInstance::InstanceCrashed() {
   bound_graphics_ = NULL;
   InvalidateRect(gfx::Rect());
 
-  // TODO(brettw) show a crashed plugin screen.
+  delegate()->PluginCrashed(this);
 }
 
 PP_Var PluginInstance::GetWindowObject() {
@@ -481,6 +540,7 @@ bool PluginInstance::BindGraphics(PP_Resource graphics_id) {
       } else if (bound_graphics_.get()) {
         bound_graphics_3d()->BindToInstance(false);
       }
+      setBackingTextureId(0);
       InvalidateRect(gfx::Rect());
     }
     bound_graphics_ = NULL;
@@ -523,6 +583,7 @@ bool PluginInstance::BindGraphics(PP_Resource graphics_id) {
     }
 
     bound_graphics_ = graphics_2d;
+    setBackingTextureId(0);
     // BindToInstance will have invalidated the plugin if necessary.
   } else if (graphics_3d) {
     // Refuse to bind if we're transitioning to fullscreen.
@@ -535,20 +596,60 @@ bool PluginInstance::BindGraphics(PP_Resource graphics_id) {
     if (!graphics_3d->BindToInstance(true))
       return false;
 
+    setBackingTextureId(graphics_3d->GetBackingTextureId());
     bound_graphics_ = graphics_3d;
   }
 
   return true;
 }
 
-bool PluginInstance::SetCursor(PP_CursorType_Dev type) {
-  if (type == PP_CURSORTYPE_CUSTOM) {
-    // TODO(neb): implement custom cursors.
-    // (Remember that PP_CURSORTYPE_CUSTOM != WebCursorInfo::TypeCustom.)
+bool PluginInstance::SetCursor(PP_CursorType_Dev type,
+                               PP_Resource custom_image,
+                               const PP_Point* hot_spot) {
+  if (type != PP_CURSORTYPE_CUSTOM) {
+    cursor_.reset(new WebCursorInfo(static_cast<WebCursorInfo::Type>(type)));
+    return true;
+  }
+
+  if (!hot_spot)
+    return false;
+
+  scoped_refptr<PPB_ImageData_Impl> image_data(
+      Resource::GetAs<PPB_ImageData_Impl>(custom_image));
+  if (!image_data.get())
+    return false;
+
+  if (image_data->format() != PPB_ImageData_Impl::GetNativeImageDataFormat()) {
+    // TODO(yzshen): Handle the case that the image format is different from the
+    // native format.
     NOTIMPLEMENTED();
     return false;
   }
-  cursor_.reset(new WebCursorInfo(static_cast<WebCursorInfo::Type>(type)));
+
+  ImageDataAutoMapper auto_mapper(image_data);
+  if (!auto_mapper.is_valid())
+    return false;
+
+  scoped_ptr<WebCursorInfo> custom_cursor(
+      new WebCursorInfo(WebCursorInfo::TypeCustom));
+  custom_cursor->hotSpot.x = hot_spot->x;
+  custom_cursor->hotSpot.y = hot_spot->y;
+
+#if WEBKIT_USING_SKIA
+  const SkBitmap* bitmap = image_data->GetMappedBitmap();
+  // Make a deep copy, so that the cursor remains valid even after the original
+  // image data gets freed.
+  if (!bitmap->copyTo(&custom_cursor->customImage.getSkBitmap(),
+                      bitmap->config())) {
+    return false;
+  }
+#elif WEBKIT_USING_CG
+  // TODO(yzshen): Implement it.
+  NOTIMPLEMENTED();
+  return false;
+#endif
+
+  cursor_.reset(custom_cursor.release());
   return true;
 }
 
@@ -577,6 +678,8 @@ PP_Var PluginInstance::ExecuteScript(PP_Var script, PP_Var* exception) {
   NPVariant result;
   bool ok = WebBindings::evaluate(NULL, frame->windowObject(), &np_script,
                                   &result);
+  // DANGER! |this| could be deleted at this point if the script removed the
+  // plugin from the DOM.
   if (!ok) {
     // TODO(brettw) bug 54011: The TryCatch isn't working properly and
     // doesn't actually catch this exception.
@@ -590,23 +693,17 @@ PP_Var PluginInstance::ExecuteScript(PP_Var script, PP_Var* exception) {
   return ret;
 }
 
-void PluginInstance::Delete() {
-  // Keep a reference on the stack. See NOTE above.
-  scoped_refptr<PluginInstance> ref(this);
-  instance_interface_->DidDestroy(pp_instance());
-
-  if (fullscreen_container_) {
-    fullscreen_container_->Destroy();
-    fullscreen_container_ = NULL;
-  }
-  container_ = NULL;
+void PluginInstance::PostMessage(PP_Var message) {
+  message_channel_->PostMessageToJavaScript(message);
 }
 
 bool PluginInstance::Initialize(WebPluginContainer* container,
                                 const std::vector<std::string>& arg_names,
                                 const std::vector<std::string>& arg_values,
+                                const GURL& plugin_url,
                                 bool full_frame) {
   container_ = container;
+  plugin_url_ = plugin_url;
   full_frame_ = full_frame;
 
   size_t argc = 0;
@@ -649,7 +746,24 @@ bool PluginInstance::HandleInputEvent(const WebKit::WebInputEvent& event,
   return rv;
 }
 
+void PluginInstance::HandleMessage(PP_Var message) {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
+  if (!LoadMessagingInterface())
+    return;
+  plugin_messaging_interface_->HandleMessage(pp_instance(), message);
+}
+
 PP_Var PluginInstance::GetInstanceObject() {
+  // Keep a reference on the stack. See NOTE above.
+  scoped_refptr<PluginInstance> ref(this);
+
+  // Try the private interface first.  If it is not supported, we fall back to
+  // the primary PPP_Instance interface.
+  // TODO(dmichael): Remove support for PPP_Instance.GetInstanceObject
+  if (LoadPrivateInterface()) {
+    return plugin_private_interface_->GetInstanceObject(pp_instance());
+  }
   return instance_interface_->GetInstanceObject(pp_instance());
 }
 
@@ -818,17 +932,28 @@ void PluginInstance::StopFind() {
 bool PluginInstance::LoadFindInterface() {
   if (!plugin_find_interface_) {
     plugin_find_interface_ =
-        reinterpret_cast<const PPP_Find_Dev*>(module_->GetPluginInterface(
+        static_cast<const PPP_Find_Dev*>(module_->GetPluginInterface(
             PPP_FIND_DEV_INTERFACE));
   }
 
   return !!plugin_find_interface_;
 }
 
+bool PluginInstance::LoadMessagingInterface() {
+  if (!checked_for_plugin_messaging_interface_) {
+    checked_for_plugin_messaging_interface_ = true;
+    plugin_messaging_interface_ =
+        static_cast<const PPP_Messaging*>(module_->GetPluginInterface(
+            PPP_MESSAGING_INTERFACE));
+  }
+
+  return !!plugin_messaging_interface_;
+}
+
 bool PluginInstance::LoadPdfInterface() {
   if (!plugin_pdf_interface_) {
     plugin_pdf_interface_ =
-        reinterpret_cast<const PPP_Pdf*>(module_->GetPluginInterface(
+        static_cast<const PPP_Pdf*>(module_->GetPluginInterface(
             PPP_PDF_INTERFACE));
   }
 
@@ -838,17 +963,26 @@ bool PluginInstance::LoadPdfInterface() {
 bool PluginInstance::LoadSelectionInterface() {
   if (!plugin_selection_interface_) {
     plugin_selection_interface_ =
-        reinterpret_cast<const PPP_Selection_Dev*>(module_->GetPluginInterface(
+        static_cast<const PPP_Selection_Dev*>(module_->GetPluginInterface(
             PPP_SELECTION_DEV_INTERFACE));
   }
 
   return !!plugin_selection_interface_;
 }
 
+bool PluginInstance::LoadPrivateInterface() {
+  if (!plugin_private_interface_) {
+    plugin_private_interface_ = static_cast<const PPP_Instance_Private*>(
+            module_->GetPluginInterface(PPP_INSTANCE_PRIVATE_INTERFACE));
+  }
+
+  return !!plugin_private_interface_;
+}
+
 bool PluginInstance::LoadZoomInterface() {
   if (!plugin_zoom_interface_) {
     plugin_zoom_interface_ =
-        reinterpret_cast<const PPP_Zoom_Dev*>(module_->GetPluginInterface(
+        static_cast<const PPP_Zoom_Dev*>(module_->GetPluginInterface(
             PPP_ZOOM_DEV_INTERFACE));
   }
 
@@ -873,7 +1007,7 @@ bool PluginInstance::GetPreferredPrintOutputFormat(
   scoped_refptr<PluginInstance> ref(this);
   if (!plugin_print_interface_) {
     plugin_print_interface_ =
-        reinterpret_cast<const PPP_Printing_Dev*>(module_->GetPluginInterface(
+        static_cast<const PPP_Printing_Dev*>(module_->GetPluginInterface(
             PPP_PRINTING_DEV_INTERFACE));
   }
   if (!plugin_print_interface_)
@@ -1031,24 +1165,43 @@ void PluginInstance::SetFullscreen(bool fullscreen, bool delay_report) {
   }
 }
 
-bool PluginInstance::NavigateToURL(const char* url, const char* target) {
-  if (!url || !target || !container_)
-    return false;
+int32_t PluginInstance::Navigate(PPB_URLRequestInfo_Impl* request,
+                                 const char* target,
+                                 bool from_user_action) {
+  if (!container_)
+    return PP_ERROR_FAILED;
 
   WebDocument document = container_->element().document();
-  GURL complete_url = document.completeURL(WebString::fromUTF8(url));
-  // Don't try to deal with the security issues of javascript.
-  if (complete_url.SchemeIs("javascript"))
-    return false;
+  WebFrame* frame = document.frame();
+  if (!frame)
+    return PP_ERROR_FAILED;
+  WebURLRequest web_request(request->ToWebURLRequest(frame));
+  web_request.setFirstPartyForCookies(document.firstPartyForCookies());
+  web_request.setHasUserGesture(from_user_action);
 
-  WebURLRequest request(complete_url);
-  document.frame()->setReferrerForRequest(request, GURL());
-  request.setHTTPMethod(WebString::fromUTF8("GET"));
-  request.setFirstPartyForCookies(document.firstPartyForCookies());
+  GURL gurl(web_request.url());
+  if (gurl.SchemeIs("javascript")) {
+    // In imitation of the NPAPI implementation, only |target_frame == frame| is
+    // allowed for security reasons.
+    WebFrame* target_frame =
+        frame->view()->findFrameByName(WebString::fromUTF8(target), frame);
+    if (target_frame != frame)
+      return PP_ERROR_NOACCESS;
+
+    // TODO(viettrungluu): NPAPI sends the result back to the plugin -- do we
+    // need that?
+    WebString result = container_->executeScriptURL(gurl, from_user_action);
+    return result.isNull() ? PP_ERROR_FAILED : PP_OK;
+  }
+
+  // Only GETs and POSTs are supported.
+  if (web_request.httpMethod() != "GET" &&
+      web_request.httpMethod() != "POST")
+    return PP_ERROR_BADARGUMENT;
 
   WebString target_str = WebString::fromUTF8(target);
-  container_->loadFrameRequest(request, target_str, false, NULL);
-  return true;
+  container_->loadFrameRequest(web_request, target_str, false, NULL);
+  return PP_OK;
 }
 
 PluginDelegate::PlatformContext3D* PluginInstance::CreateContext3D() {
@@ -1080,20 +1233,18 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
 
   bool ret = false;
 #if defined(OS_LINUX)
-  // On Linux we need to get the backing PdfPsMetafile and write the bits
-  // directly.
-  cairo_t* context = canvas->beginPlatformPaint();
-  printing::NativeMetafile* metafile =
-      printing::PdfPsMetafile::FromCairoContext(context);
-  DCHECK(metafile);
+  // On Linux we just set the final bits in the native metafile
+  // (NativeMetafile and PreviewMetafile must have compatible formats,
+  // i.e. both PDF for this to work).
+  printing::Metafile* metafile =
+    printing::MetafileSkiaWrapper::GetMetafileFromCanvas(canvas);
+  DCHECK(metafile != NULL);
   if (metafile)
-    ret = metafile->SetRawData(buffer->mapped_buffer(), buffer->size());
-  canvas->endPlatformPaint();
+    ret = metafile->InitFromData(buffer->mapped_buffer(), buffer->size());
 #elif defined(OS_MACOSX)
-  scoped_ptr<printing::NativeMetafile> metafile(
-      printing::NativeMetafileFactory::CreateMetafile());
+  printing::NativeMetafile metafile;
   // Create a PDF metafile and render from there into the passed in context.
-  if (metafile->Init(buffer->mapped_buffer(), buffer->size())) {
+  if (metafile.InitFromData(buffer->mapped_buffer(), buffer->size())) {
     // Flip the transform.
     CGContextSaveGState(canvas);
     CGContextTranslateCTM(canvas, 0,
@@ -1105,16 +1256,13 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
     page_rect.size.width = current_print_settings_.printable_area.size.width;
     page_rect.size.height = current_print_settings_.printable_area.size.height;
 
-    ret = metafile->RenderPage(1, canvas, page_rect, true, false, true, true);
+    ret = metafile.RenderPage(1, canvas, page_rect, true, false, true, true);
     CGContextRestoreGState(canvas);
   }
 #elif defined(OS_WIN)
   // On Windows, we now need to render the PDF to the DC that backs the
   // supplied canvas.
-  skia::VectorPlatformDevice& device =
-      static_cast<skia::VectorPlatformDevice&>(
-          canvas->getTopPlatformDevice());
-  HDC dc = device.getBitmapDC();
+  HDC dc = skia::BeginPlatformPaint(canvas);
   gfx::Size size_in_pixels;
   size_in_pixels.set_width(
       printing::ConvertUnit(current_print_settings_.printable_area.size.width,
@@ -1136,6 +1284,7 @@ bool PluginInstance::PrintPDFOutput(PP_Resource print_output,
                     current_print_settings_.dpi, current_print_settings_.dpi,
                     0, 0, size_in_pixels.width(),
                     size_in_pixels.height(), true, false, true, true);
+  skia::EndPlatformPaint(canvas);
 #endif  // defined(OS_WIN)
 
   return ret;
@@ -1202,18 +1351,6 @@ bool PluginInstance::DrawJPEGToPlatformDC(
     const SkBitmap& bitmap,
     const gfx::Rect& printable_area,
     WebKit::WebCanvas* canvas) {
-  skia::VectorPlatformDevice& device =
-      static_cast<skia::VectorPlatformDevice&>(
-          canvas->getTopPlatformDevice());
-  HDC dc = device.getBitmapDC();
-  // TODO(sanjeevr): This is a temporary hack. If we output a JPEG
-  // to the EMF, the EnumEnhMetaFile call fails in the browser
-  // process. The failure also happens if we output nothing here.
-  // We need to investigate the reason for this failure and fix it.
-  // In the meantime this temporary hack of drawing an empty
-  // rectangle in the DC gets us by.
-  Rectangle(dc, 0, 0, 0, 0);
-
   // Ideally we should add JPEG compression to the VectorPlatformDevice class
   // However, Skia currently has no JPEG compression code and we cannot
   // depend on gfx/jpeg_codec.h in Skia. So we do the compression here.
@@ -1233,6 +1370,15 @@ bool PluginInstance::DrawJPEGToPlatformDC(
     NOTREACHED();
     return false;
   }
+
+  HDC dc = skia::BeginPlatformPaint(canvas);
+  // TODO(sanjeevr): This is a temporary hack. If we output a JPEG
+  // to the EMF, the EnumEnhMetaFile call fails in the browser
+  // process. The failure also happens if we output nothing here.
+  // We need to investigate the reason for this failure and fix it.
+  // In the meantime this temporary hack of drawing an empty
+  // rectangle in the DC gets us by.
+  Rectangle(dc, 0, 0, 0, 0);
   BITMAPINFOHEADER bmi = {0};
   gfx::CreateBitmapHeader(bitmap.width(), bitmap.height(), &bmi);
   bmi.biCompression = BI_JPEG;
@@ -1244,6 +1390,7 @@ bool PluginInstance::DrawJPEGToPlatformDC(
                 &compressed_image.front(),
                 reinterpret_cast<const BITMAPINFO*>(&bmi),
                 DIB_RGB_COLORS, SRCCOPY);
+  skia::EndPlatformPaint(canvas);
   return true;
 }
 #endif  // OS_WIN
@@ -1295,6 +1442,21 @@ PPB_Surface3D_Impl* PluginInstance::bound_graphics_3d() const {
     return NULL;
 
   return bound_graphics_->Cast<PPB_Surface3D_Impl>();
+}
+
+void PluginInstance::setBackingTextureId(unsigned int id) {
+  // If we have a full-screen container_ then the plugin is fullscreen,
+  // and the parent context is not the one for the browser page, but for the
+  // full-screen window, and so the parent texture ID doesn't correspond to
+  // anything in the page's context.
+  //
+  // TODO(alokp): It would be better at some point to have the equivalent
+  // in the FullscreenContainer so that we don't need to poll
+  if (fullscreen_container_)
+    return;
+
+  if (container_)
+    container_->setBackingTextureId(id);
 }
 
 void PluginInstance::AddPluginObject(PluginObject* plugin_object) {

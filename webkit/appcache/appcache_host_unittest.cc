@@ -1,9 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/callback.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "net/url_request/url_request.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/appcache/appcache.h"
@@ -156,6 +156,7 @@ TEST_F(AppCacheHostTest, SelectNoCache) {
   EXPECT_EQ(&mock_frontend_, host.frontend());
   EXPECT_EQ(NULL, host.associated_cache());
   EXPECT_FALSE(host.is_selection_pending());
+  EXPECT_TRUE(host.preferred_manifest_url().is_empty());
 }
 
 TEST_F(AppCacheHostTest, ForeignEntry) {

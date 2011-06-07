@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,15 @@
 #include <vssym32.h>
 
 #include "base/command_line.h"
-#include "base/ref_counted_memory.h"
+#include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/resource_util.h"
-#include "base/scoped_ptr.h"
 #include "grit/gfx_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/brush.h"
 #include "ui/gfx/canvas_direct2d.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "ui/gfx/native_theme_win.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/win_util.h"
 
@@ -100,7 +99,7 @@ class TestWindow {
 
   HWND hwnd_;
 
-  ScopedComPtr<ID2D1RenderTarget> rt_;
+  base::win::ScopedComPtr<ID2D1RenderTarget> rt_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindow);
 };
@@ -212,23 +211,6 @@ TEST(CanvasDirect2D, FillRect) {
   gfx::CanvasDirect2D canvas(window.rt());
 
   canvas.FillRectInt(SK_ColorRED, 20, 20, 100, 100);
-}
-
-TEST(CanvasDirect2D, PlatformPainting) {
-  if (!CheckForD2DCompatibility())
-    return;
-  TestWindow window;
-  gfx::CanvasDirect2D canvas(window.rt());
-
-  gfx::NativeDrawingContext dc = canvas.BeginPlatformPaint();
-
-  // Use the system theme engine to draw a native button. This only works on a
-  // GDI device context.
-  RECT r = { 20, 20, 220, 80 };
-  gfx::NativeTheme::instance()->PaintButton(
-      dc, BP_PUSHBUTTON, PBS_NORMAL, DFCS_BUTTONPUSH, &r);
-
-  canvas.EndPlatformPaint();
 }
 
 TEST(CanvasDirect2D, ClipRect) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include "base/time.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/net/url_request_context_getter.h"
 #include "content/browser/browser_thread.h"
+#include "net/url_request/url_request_context_getter.h"
 
 using media::AudioInputController;
 using std::string;
@@ -24,7 +24,7 @@ const float kDownSmoothingFactor = 0.7f;
 const float kAudioMeterMaxDb = 90.31f;
 // This value corresponds to RMS dB for int16 with 6 most-significant-bits = 0.
 // Values lower than this will display as empty level-meter.
-const float kAudioMeterMinDb = 60.21f;
+const float kAudioMeterMinDb = 30.0f;
 const float kAudioMeterDbRange = kAudioMeterMaxDb - kAudioMeterMinDb;
 
 // Maximum level to draw to display unclipped meter. (1.0f displays clipping.)
@@ -66,7 +66,7 @@ SpeechRecognizer::SpeechRecognizer(Delegate* delegate,
       grammar_(grammar),
       hardware_info_(hardware_info),
       origin_url_(origin_url),
-      codec_(AudioEncoder::CODEC_SPEEX),
+      codec_(AudioEncoder::CODEC_FLAC),
       encoder_(NULL),
       endpointer_(kAudioSampleRate),
       num_samples_recorded_(0),
@@ -219,7 +219,8 @@ void SpeechRecognizer::HandleOnData(string* data) {
 
   if (request_ == NULL) {
     // This was the first audio packet recorded, so start a request to the
-    // server to send the data.
+    // server to send the data and inform the delegate.
+    delegate_->DidStartReceivingAudio(caller_id_);
     request_.reset(new SpeechRecognitionRequest(
         Profile::GetDefaultRequestContext(), this));
     request_->Start(language_, grammar_, hardware_info_, origin_url_,

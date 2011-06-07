@@ -12,7 +12,6 @@
 
 #include <vector>
 
-#include "app/app_switches.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -21,31 +20,28 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_plugin_browsing_context.h"
+#include "chrome/browser/net/resolve_proxy_msg_helper.h"
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/plugin_download_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/net/url_request_context_getter.h"
-#include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
 #include "content/browser/browser_thread.h"
-#include "content/browser/child_process_security_policy.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
+#include "content/common/plugin_messages.h"
 #include "content/common/resource_messages.h"
 #include "ipc/ipc_switches.h"
-#include "net/base/cookie_store.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 #if defined(USE_X11)
 #include "ui/gfx/gtk_native_view_id_manager.h"
@@ -53,34 +49,12 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
-#include "chrome/common/plugin_carbon_interpose_constants_mac.h"
+#include "content/common/plugin_carbon_interpose_constants_mac.h"
 #include "ui/gfx/rect.h"
 #endif
 
 static const char kDefaultPluginFinderURL[] =
     "https://dl-ssl.google.com/edgedl/chrome/plugins/plugins2.xml";
-
-namespace {
-
-// Helper class that we pass to ResourceMessageFilter so that it can find the
-// right net::URLRequestContext for a request.
-class PluginURLRequestContextOverride
-    : public ResourceMessageFilter::URLRequestContextOverride {
- public:
-  PluginURLRequestContextOverride() {
-  }
-
-  virtual net::URLRequestContext* GetRequestContext(
-      const ResourceHostMsg_Request& resource_request) {
-    return CPBrowsingContextManager::GetInstance()->ToURLRequestContext(
-        resource_request.request_context);
-  }
-
- private:
-  virtual ~PluginURLRequestContextOverride() {}
-};
-
-}  // namespace
 
 #if defined(OS_WIN)
 void PluginProcessHost::OnPluginWindowDestroyed(HWND window, HWND parent) {
@@ -119,11 +93,7 @@ void PluginProcessHost::OnMapNativeViewId(gfx::NativeViewId id,
 #endif  // defined(TOOLKIT_USES_GTK)
 
 PluginProcessHost::PluginProcessHost()
-    : BrowserChildProcessHost(
-          PLUGIN_PROCESS,
-          PluginService::GetInstance()->resource_dispatcher_host(),
-          new PluginURLRequestContextOverride()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(resolve_proxy_msg_helper_(this, NULL))
+    : BrowserChildProcessHost(PLUGIN_PROCESS)
 #if defined(OS_MACOSX)
       , plugin_cursor_visible_(true)
 #endif
@@ -206,26 +176,27 @@ bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
   // Propagate the following switches to the plugin command line (along with
   // any associated values) if present in the browser command line
   static const char* const kSwitchNames[] = {
-    switches::kPluginStartupDialog,
-    switches::kNoSandbox,
-    switches::kSafePlugins,
-    switches::kTestSandbox,
-    switches::kUserAgent,
     switches::kDisableBreakpad,
-    switches::kFullMemoryCrashReport,
-    switches::kEnableLogging,
     switches::kDisableLogging,
-    switches::kLoggingLevel,
-    switches::kLogPluginMessages,
-    switches::kUserDataDir,
     switches::kEnableDCHECK,
-    switches::kSilentDumpOnDCHECK,
-    switches::kMemoryProfiling,
+    switches::kEnableLogging,
     switches::kEnableStatsTable,
-    switches::kUseGL,
+    switches::kFullMemoryCrashReport,
+    switches::kLoggingLevel,
 #if defined(OS_CHROMEOS)
     switches::kLoginProfile,
 #endif
+    switches::kLogPluginMessages,
+    switches::kMemoryProfiling,
+    switches::kNoSandbox,
+    switches::kPluginStartupDialog,
+    switches::kSafePlugins,
+    switches::kSilentDumpOnDCHECK,
+    switches::kTestSandbox,
+    switches::kUseGL,
+    switches::kUserAgent,
+    switches::kUserDataDir,
+    switches::kV,
   };
 
   cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
@@ -240,12 +211,6 @@ bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
     // prompt to install the desired plugin.
     cmd_line->AppendSwitchASCII(switches::kLang, locale);
   }
-
-  // Gears requires the data dir to be available on startup.
-  FilePath data_dir =
-    PluginService::GetInstance()->GetChromePluginDataDir();
-  DCHECK(!data_dir.empty());
-  cmd_line->AppendSwitchPath(switches::kPluginDataDir, data_dir);
 
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id());
 
@@ -278,6 +243,8 @@ bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
 #endif
       cmd_line);
 
+  AddFilter(new ResolveProxyMsgHelper(NULL));
+
   return true;
 }
 
@@ -287,30 +254,12 @@ void PluginProcessHost::ForceShutdown() {
   BrowserChildProcessHost::ForceShutdown();
 }
 
-void PluginProcessHost::OnProcessLaunched() {
-  FilePath gears_path;
-  if (PathService::Get(chrome::FILE_GEARS_PLUGIN, &gears_path)) {
-    FilePath::StringType gears_path_lc = StringToLowerASCII(gears_path.value());
-    FilePath::StringType plugin_path_lc =
-        StringToLowerASCII(info_.path.value());
-    if (plugin_path_lc == gears_path_lc) {
-      // Give Gears plugins "background" priority.  See http://b/1280317.
-      SetProcessBackgrounded();
-    }
-  }
-}
-
 bool PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PluginProcessHost, msg)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_ChannelCreated, OnChannelCreated)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_GetPluginFinderUrl,
                         OnGetPluginFinderUrl)
-    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginMessage, OnPluginMessage)
-    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_GetCookies, OnGetCookies)
-    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_AccessFiles, OnAccessFiles)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(PluginProcessHostMsg_ResolveProxy,
-                                    OnResolveProxy)
 #if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginWindowDestroyed,
                         OnPluginWindowDestroyed)
@@ -379,56 +328,6 @@ void PluginProcessHost::OpenChannelToPlugin(Client* client) {
   RequestPluginChannel(client);
 }
 
-void PluginProcessHost::OnGetCookies(uint32 request_context,
-                                     const GURL& url,
-                                     std::string* cookies) {
-  net::URLRequestContext* context = CPBrowsingContextManager::GetInstance()->
-        ToURLRequestContext(request_context);
-  // TODO(mpcomplete): remove fallback case when Gears support is prevalent.
-  if (!context)
-    context = Profile::GetDefaultRequestContext()->GetURLRequestContext();
-
-  // Note: We don't have a first_party_for_cookies check because plugins bypass
-  // third-party cookie blocking.
-  if (context && context->cookie_store()) {
-    *cookies = context->cookie_store()->GetCookies(url);
-  } else {
-    DLOG(ERROR) << "Could not serve plugin cookies request.";
-    cookies->clear();
-  }
-}
-
-void PluginProcessHost::OnAccessFiles(int renderer_id,
-                                      const std::vector<std::string>& files,
-                                      bool* allowed) {
-  ChildProcessSecurityPolicy* policy =
-      ChildProcessSecurityPolicy::GetInstance();
-
-  for (size_t i = 0; i < files.size(); ++i) {
-    const FilePath path = FilePath::FromWStringHack(UTF8ToWide(files[i]));
-    if (!policy->CanReadFile(renderer_id, path)) {
-      VLOG(1) << "Denied unauthorized request for file " << files[i];
-      *allowed = false;
-      return;
-    }
-  }
-
-  *allowed = true;
-}
-
-void PluginProcessHost::OnResolveProxy(const GURL& url,
-                                       IPC::Message* reply_msg) {
-  resolve_proxy_msg_helper_.Start(url, reply_msg);
-}
-
-void PluginProcessHost::OnResolveProxyCompleted(IPC::Message* reply_msg,
-                                                int result,
-                                                const std::string& proxy_list) {
-  PluginProcessHostMsg_ResolveProxy::WriteReplyParams(
-      reply_msg, result, proxy_list);
-  Send(reply_msg);
-}
-
 void PluginProcessHost::RequestPluginChannel(Client* client) {
   // We can't send any sync messages from the browser because it might lead to
   // a hang.  However this async messages must be answered right away by the
@@ -467,17 +366,5 @@ void PluginProcessHost::OnGetPluginFinderUrl(std::string* plugin_finder_url) {
     *plugin_finder_url = kDefaultPluginFinderURL;
   } else {
     plugin_finder_url->clear();
-  }
-}
-
-void PluginProcessHost::OnPluginMessage(
-    const std::vector<uint8>& data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  ChromePluginLib *chrome_plugin = ChromePluginLib::Find(info_.path);
-  if (chrome_plugin) {
-    void *data_ptr = const_cast<void*>(reinterpret_cast<const void*>(&data[0]));
-    uint32 data_len = static_cast<uint32>(data.size());
-    chrome_plugin->functions().on_message(data_ptr, data_len);
   }
 }

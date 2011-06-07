@@ -65,6 +65,14 @@ std::string ResourceBundle::InitSharedInstance(
 }
 
 /* static */
+void ResourceBundle::InitSharedInstanceForTest(const FilePath& path) {
+  DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
+  g_shared_instance_ = new ResourceBundle();
+
+  g_shared_instance_->LoadTestResources(path);
+}
+
+/* static */
 std::string ResourceBundle::ReloadSharedInstance(
     const std::string& pref_locale) {
   DCHECK(g_shared_instance_ != NULL) << "ResourceBundle not initialized";
@@ -153,7 +161,10 @@ RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
 }
 
 const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
-  LoadFontsIfNecessary();
+  {
+    base::AutoLock lock_scope(*lock_);
+    LoadFontsIfNecessary();
+  }
   switch (style) {
     case BoldFont:
       return *bold_font_;
@@ -170,6 +181,12 @@ const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
   }
 }
 
+void ResourceBundle::ReloadFonts() {
+  base::AutoLock lock_scope(*lock_);
+  base_font_.reset();
+  LoadFontsIfNecessary();
+}
+
 ResourceBundle::ResourceBundle()
     : lock_(new base::Lock),
       resources_data_(NULL),
@@ -183,7 +200,7 @@ void ResourceBundle::FreeImages() {
 }
 
 void ResourceBundle::LoadFontsIfNecessary() {
-  base::AutoLock lock_scope(*lock_);
+  lock_->AssertAcquired();
   if (!base_font_.get()) {
     base_font_.reset(new gfx::Font());
 
@@ -255,17 +272,22 @@ void ResourceBundle::LoadedDataPack::Load() {
   data_pack_.reset(new ui::DataPack);
   bool success = data_pack_->Load(path_);
   LOG_IF(ERROR, !success) << "Failed to load " << path_.value()
-      << "\nYou will not be able to use the Bookmarks Manager or "
-      << "about:net-internals.";
+      << "\nSome features may not be available.";
+  if (!success)
+    data_pack_.reset();
 }
 
 bool ResourceBundle::LoadedDataPack::GetStringPiece(
     int resource_id, base::StringPiece* data) const {
+  if (!data_pack_.get())
+    return false;
   return data_pack_->GetStringPiece(static_cast<uint32>(resource_id), data);
 }
 
 RefCountedStaticMemory* ResourceBundle::LoadedDataPack::GetStaticMemory(
     int resource_id) const {
+  if (!data_pack_.get())
+    return NULL;
   return data_pack_->GetStaticMemory(resource_id);
 }
 

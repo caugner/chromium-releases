@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,14 @@
 #include <string>
 #include <vector>
 
-#include "app/surface/transport_dib.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/timer.h"
-#include "chrome/common/edit_command.h"
-#include "chrome/common/native_web_keyboard_event.h"
-#include "chrome/common/property_bag.h"
+#include "content/common/edit_command.h"
+#include "content/common/native_web_keyboard_event.h"
+#include "content/common/property_bag.h"
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
@@ -26,6 +25,7 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/surface/transport_dib.h"
 
 namespace gfx {
 class Rect;
@@ -412,6 +412,10 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Retrieves an id the renderer can use to refer to its view.
   // This is used for various IPC messages, including plugins.
   gfx::NativeViewId GetNativeViewId();
+
+  // Retrieves an id for the surface that the renderer can draw to
+  // when accelerated compositing is enabled.
+  gfx::PluginWindowHandle GetCompositingSurface();
 
   // Called to handled a keyboard event before sending it to the renderer.
   // This is overridden by RenderView to send upwards to its delegate.

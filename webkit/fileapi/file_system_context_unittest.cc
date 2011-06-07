@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,11 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/quota/special_storage_policy.h"
 
 using namespace fileapi;
 
@@ -34,6 +33,10 @@ class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
   virtual bool IsStorageUnlimited(const GURL& origin) {
     return origin == GURL(kTestOrigins[1]);
   }
+
+  virtual bool IsFileHandler(const std::string& extension_id) {
+    return false;
+  }
 };
 
 scoped_refptr<FileSystemContext> NewFileSystemContext(
@@ -44,7 +47,7 @@ scoped_refptr<FileSystemContext> NewFileSystemContext(
                                base::MessageLoopProxy::CreateForCurrentThread(),
                                special_storage_policy,
                                FilePath(), false /* is_incognito */,
-                               allow_file_access, unlimited_quota);
+                               allow_file_access, unlimited_quota, NULL);
 }
 
 }  // anonymous namespace

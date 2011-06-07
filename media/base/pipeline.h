@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,35 +12,14 @@
 #include <string>
 
 #include "base/callback.h"
+#include "media/base/filters.h"
+#include "media/base/pipeline_status.h"
 
 namespace base {
 class TimeDelta;
 }
 
 namespace media {
-
-// Error definitions for pipeline.  All codes indicate an error except:
-// PIPELINE_OK indicates the pipeline is running normally.
-enum PipelineError {
-  PIPELINE_OK,
-  PIPELINE_ERROR_URL_NOT_FOUND,
-  PIPELINE_ERROR_NETWORK,
-  PIPELINE_ERROR_DECODE,
-  PIPELINE_ERROR_ABORT,
-  PIPELINE_ERROR_INITIALIZATION_FAILED,
-  PIPELINE_ERROR_REQUIRED_FILTER_MISSING,
-  PIPELINE_ERROR_OUT_OF_MEMORY,
-  PIPELINE_ERROR_COULD_NOT_RENDER,
-  PIPELINE_ERROR_READ,
-  PIPELINE_ERROR_AUDIO_HARDWARE,
-  PIPELINE_ERROR_OPERATION_PENDING,
-  PIPELINE_ERROR_INVALID_STATE,
-  // Demuxer related errors.
-  DEMUXER_ERROR_COULD_NOT_OPEN,
-  DEMUXER_ERROR_COULD_NOT_PARSE,
-  DEMUXER_ERROR_NO_SUPPORTED_STREAMS,
-  DEMUXER_ERROR_COULD_NOT_CREATE_THREAD,
-};
 
 struct PipelineStatistics {
   PipelineStatistics() :
@@ -58,10 +37,6 @@ struct PipelineStatistics {
 
 class FilterCollection;
 
-// Client-provided callbacks for various pipeline operations.  Clients should
-// inspect the Pipeline for errors.
-typedef Callback0::Type PipelineCallback;
-
 class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
  public:
   // Initializes pipeline. Pipeline takes ownership of all callbacks passed
@@ -69,9 +44,9 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // |ended_callback| will be executed when the media reaches the end.
   // |error_callback_| will be executed upon an error in the pipeline.
   // |network_callback_| will be executed when there's a network event.
-  virtual void Init(PipelineCallback* ended_callback,
-                    PipelineCallback* error_callback,
-                    PipelineCallback* network_callback) = 0;
+  virtual void Init(PipelineStatusCallback* ended_callback,
+                    PipelineStatusCallback* error_callback,
+                    PipelineStatusCallback* network_callback) = 0;
 
   // Build a pipeline to render the given URL using the given filter collection
   // to construct a filter chain.  Returns true if successful, false otherwise
@@ -83,11 +58,10 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   //
   // This method is asynchronous and can execute a callback when completed.
   // If the caller provides a |start_callback|, it will be called when the
-  // pipeline initialization completes.  Clients are expected to call GetError()
-  // to check whether initialization succeeded.
+  // pipeline initialization completes.
   virtual bool Start(FilterCollection* filter_collection,
                      const std::string& url,
-                     PipelineCallback* start_callback) = 0;
+                     PipelineStatusCallback* start_callback) = 0;
 
   // Asynchronously stops the pipeline and resets it to an uninitialized state.
   // If provided, |stop_callback| will be executed when the pipeline has been
@@ -99,14 +73,15 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   //
   // TODO(scherkus): ideally clients would destroy the pipeline after calling
   // Stop() and create a new pipeline as needed.
-  virtual void Stop(PipelineCallback* stop_callback) = 0;
+  virtual void Stop(PipelineStatusCallback* stop_callback) = 0;
 
   // Attempt to seek to the position specified by time.  |seek_callback| will be
   // executed when the all filters in the pipeline have processed the seek.
   //
   // Clients are expected to call GetCurrentTime() to check whether the seek
   // succeeded.
-  virtual void Seek(base::TimeDelta time, PipelineCallback* seek_callback) = 0;
+  virtual void Seek(base::TimeDelta time,
+                    PipelineStatusCallback* seek_callback) = 0;
 
   // Returns true if the pipeline has been started via Start().  If IsRunning()
   // returns true, it is expected that Stop() will be called before destroying
@@ -121,11 +96,11 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // Returns true if there has been network activity.
   virtual bool IsNetworkActive() const = 0;
 
-  // If the |major_mime_type| exists in the pipeline and is being rendered, this
-  // method will return true.  Types are defined in media/base/media_foramt.h.
-  // For example, to determine if a pipeline contains video:
-  //   bool has_video = pipeline->IsRendered(mime_type::kMajorTypeVideo);
-  virtual bool IsRendered(const std::string& major_mime_type) const = 0;
+  // Returns true if the media has audio.
+  virtual bool HasAudio() const = 0;
+
+  // Returns true if the media has video.
+  virtual bool HasVideo() const = 0;
 
   // Gets the current playback rate of the pipeline.  When the pipeline is
   // started, the playback rate will be 0.0f.  A rate of 1.0f indicates
@@ -149,6 +124,9 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // range from 0.0f (muted) to 1.0f (full volume).  This value affects all
   // channels proportionately for multi-channel audio streams.
   virtual void SetVolume(float volume) = 0;
+
+  // Set the preload value for the pipeline.
+  virtual void SetPreload(Preload preload) = 0;
 
   // Gets the current pipeline time. For a pipeline "time" progresses from 0 to
   // the end of the media.
@@ -181,10 +159,6 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // If this method returns true, that means the data source has fully loaded
   // the media and that the network is no longer needed.
   virtual bool IsLoaded() const = 0;
-
-  // Gets the current error status for the pipeline.  If the pipeline is
-  // operating correctly, this will return OK.
-  virtual PipelineError GetError() const = 0;
 
   // Gets the current pipeline statistics.
   virtual PipelineStatistics GetStatistics() const = 0;

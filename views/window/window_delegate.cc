@@ -28,15 +28,19 @@ bool WindowDelegate::CanMaximize() const {
   return false;
 }
 
+bool WindowDelegate::CanActivate() const {
+  return true;
+}
+
 bool WindowDelegate::IsModal() const {
   return false;
 }
 
-AccessibilityTypes::Role WindowDelegate::accessible_role() const {
-  return AccessibilityTypes::ROLE_WINDOW;
+ui::AccessibilityTypes::Role WindowDelegate::GetAccessibleWindowRole() const {
+  return ui::AccessibilityTypes::ROLE_WINDOW;
 }
 
-AccessibilityTypes::State WindowDelegate::accessible_state() const {
+ui::AccessibilityTypes::State WindowDelegate::GetAccessibleWindowState() const {
   return 0;
 }
 

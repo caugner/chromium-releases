@@ -1,6 +1,5 @@
 ############################
-# Chromium
-
+# Real races in Chromium
 {
   bug_23433
   ThreadSanitizer:Race
@@ -68,8 +67,7 @@
   bug_64075a
   ThreadSanitizer:Race
   fun:disk_cache::EntryImpl::GetDataSize*
-  fun:net::HttpCache::Transaction::AddTruncatedFlag*
-  fun:net::HttpCache::DoneWithEntry*
+  fun:net::HttpCache::Transaction::*
 }
 
 {
@@ -105,14 +103,6 @@
 }
 
 {
-  bug_71695
-  ThreadSanitizer:Race
-  ...
-  fun:ServiceProcessState::TearDownState*
-  fun:ServiceProcessState::SignalStopped*
-}
-
-{
   bug_72169a
   ThreadSanitizer:Race
   fun:base::Thread::ThreadMain*
@@ -140,13 +130,20 @@
   ThreadSanitizer:Race
   ...
   fun:ObserverListBase*
+  ...
   fun:sync_api::SyncManager::SyncInternal::*
-  fun:sync_api::SyncManager::*
-  fun:browser_sync::*
+  fun:syncable::BaseTransaction::*
+  fun:syncable::BaseTransaction::*
 }
 
 ############################
-# Benign races
+# Benign races in Chromium
+{
+  bug_61179 [benign race on tracked_objects::Births]
+  ThreadSanitizer:Race
+  fun:tracked_objects::Births::*Birth*
+}
+
 {
   bug_62694 [benign races in Histogram in CookieMonster]
   ThreadSanitizer:Race
@@ -203,36 +200,6 @@
 }
 
 {
-  bug_25913 (libjingle) (1)
-  ThreadSanitizer:Race
-  fun:*talk_base*MessageQueue*Stop*
-}
-
-{
-  bug_25913 (libjingle) (2)
-  ThreadSanitizer:Race
-  fun:*talk_base*MessageQueue*Get*
-}
-
-{
-  bug_25913 (libjingle) (3)
-  ThreadSanitizer:Race
-  fun:*talk_base*MessageQueue*Quit*
-}
-
-{
-  bug_25913 (libjingle) (4)
-  ThreadSanitizer:Race
-  fun:*talk_base*MessageQueue*Post*
-}
-
-{
-  bug_44168 (benign race in libjingle)
-  ThreadSanitizer:Race
-  fun:notifier::MediatorThreadImpl::~MediatorThreadImpl*
-}
-
-{
   bug_28765 (tcmalloc)
   ThreadSanitizer:Race
   ...
@@ -250,15 +217,15 @@
   bug_53192
   ThreadSanitizer:UnlockNonLocked
   fun:pthread_mutex_unlock
-  fun:talk_base::CriticalSection::Leave()
-  fun:talk_base::CritScope::~CritScope()
-  fun:talk_base::PosixSignalDeliveryDispatcher::ClearOwner(talk_base::PhysicalSocketServer*)
-  fun:talk_base::PhysicalSocketServer::~PhysicalSocketServer()
-  fun:scoped_ptr<talk_base::SocketServer>::~scoped_ptr()
-  fun:talk_base::MessageQueue::~MessageQueue()
-  fun:talk_base::Thread::~Thread()
-  fun:talk_base::ThreadManager::UnwrapCurrentThread()
-  fun:talk_base::ThreadManager::~ThreadManager()
+  fun:talk_base::CriticalSection::Leave*
+  fun:talk_base::CritScope::~CritScope*
+  fun:talk_base::PosixSignalDeliveryDispatcher::ClearOwner*
+  fun:talk_base::PhysicalSocketServer::~PhysicalSocketServer*
+  fun:scoped_ptr*::~scoped_ptr*
+  fun:talk_base::MessageQueue::~MessageQueue*
+  fun:talk_base::Thread::~Thread*
+  fun:talk_base::ThreadManager::UnwrapCurrentThread*
+  fun:talk_base::ThreadManager::~ThreadManager*
   fun:__tcf_0
   fun:exit
 }
@@ -492,6 +459,13 @@
 }
 
 {
+  fun:mktime
+  ThreadSanitizer:Race
+  ...
+  fun:mktime
+}
+
+{
   Benign race in nss (PR_EnterMonitor)
   ThreadSanitizer:Race
   fun:PR_EnterMonitor
@@ -509,4 +483,31 @@
   tsanbug_62b
   ThreadSanitizer:Race
   fun:__GI_memcpy
+}
+
+{
+  bug_70085a
+  ThreadSanitizer:Race
+  fun:WebCore::ResourceResponseBase::~ResourceResponseBase*
+  fun:WebCore::ResourceResponse::~ResourceResponse*
+  ...
+  fun:WebCore::DocumentLoader::~DocumentLoader*
+  fun:WebKit::WebDataSourceImpl::~WebDataSourceImpl*
+}
+
+{
+  bug_70085b
+  ThreadSanitizer:Race
+  ...
+  fun:WTF::ThreadSafeRefCounted*::deref*
+}
+
+{
+  bug_70085c
+  ThreadSanitizer:Race
+  fun:WebCore::WorkerScriptController::forbidExecution*
+  fun:WebCore::WorkerThread::stop*
+  fun:WebKit::WebWorkerBase::stopWorkerThread*
+  fun:WebKit::WebWorkerImpl::terminateWorkerContext*
+  fun:WebWorkerStub::OnTerminateWorkerContext*
 }

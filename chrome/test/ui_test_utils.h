@@ -8,19 +8,19 @@
 
 #include <map>
 #include <queue>
-#include <string>
 #include <set>
+#include <string>
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/message_loop.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_source.h"
 #include "chrome/test/automation/dom_element_proxy.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/native_widget_types.h"
@@ -109,8 +109,9 @@ void WaitForNewTab(Browser* browser);
 // Waits for a |browser_action| to be updated.
 void WaitForBrowserActionUpdated(ExtensionAction* browser_action);
 
-// Waits for a load stop for the specified |controller|.
-void WaitForLoadStop(NavigationController* controller);
+// Waits for a load stop for the specified |tab|'s controller, if the tab is
+// currently loading.  Otherwise returns immediately.
+void WaitForLoadStop(TabContents* tab);
 
 // Waits for a new browser to be created, returning the browser.
 Browser* WaitForNewBrowser();
@@ -121,9 +122,9 @@ Browser* WaitForNewBrowser();
 // called.
 Browser* WaitForNewBrowserWithCount(size_t start_count);
 
-// Opens |url| in an incognito browser window with the off the record profile of
+// Opens |url| in an incognito browser window with the incognito profile of
 // |profile|, blocking until the navigation finishes. This will create a new
-// browser if a browser with the off the record profile does not exist.
+// browser if a browser with the incognito profile does not exist.
 void OpenURLOffTheRecord(Profile* profile, const GURL& url);
 
 // Navigates the selected tab of |browser| to |url|, blocking until the
@@ -393,40 +394,42 @@ class TestNotificationObserver : public NotificationObserver {
 //   signal.Wait()
 class WindowedNotificationObserver : public NotificationObserver {
  public:
-  /* Register to listen for notifications of the given type from either
-   * a specific source, or from all sources if |source| is
-   * NotificationService::AllSources(). */
+  // Register to listen for notifications of the given type from either a
+  // specific source, or from all sources if |source| is
+  // NotificationService::AllSources().
   WindowedNotificationObserver(NotificationType notification_type,
                                const NotificationSource& source);
   virtual ~WindowedNotificationObserver();
 
-  /* Wait until the specified notification occurs. You must have specified a
-   * source in the arguments to the constructor in order to use this function.
-   * Otherwise, you should use WaitFor. */
+  // Wait until the specified notification occurs.  If the notification was
+  // emitted between the construction of this object and this call then it
+  // returns immediately.
   void Wait();
 
-  /* WaitFor waits until the given notification type is received from the
-   * given object. If the notification was emitted between the construction of
-   * this object and this call then it returns immediately.
-   *
-   * Beware that this is inheriently plagued by ABA issues. Consider:
-   *   WindowedNotificationObserver is created, listening for notifications from
-   *     all sources
-   *   Object A is created with address x and fires a notification
-   *   Object A is freed
-   *   Object B is created with the same address
-   *   WaitFor is called with the address of B
-   *
-   * In this case, WaitFor will return immediately because of the
-   * notification from A (because they shared an address), despite being
-   * different objects.
-   */
+  // WaitFor waits until the given notification type is received from the
+  // given object. If the notification was emitted between the construction of
+  // this object and this call then it returns immediately.
+  //
+  // Use this variant when you supply AllSources to the constructor but want
+  // to wait for notification from a specific observer.
+  //
+  // Beware that this is inheriently plagued by ABA issues. Consider:
+  //   WindowedNotificationObserver is created, listening for notifications from
+  //     all sources
+  //   Object A is created with address x and fires a notification
+  //   Object A is freed
+  //   Object B is created with the same address
+  //   WaitFor is called with the address of B
+  //
+  // In this case, WaitFor will return immediately because of the
+  // notification from A (because they shared an address), despite being
+  // different objects.
   void WaitFor(const NotificationSource& source);
 
   // NotificationObserver:
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
  private:
   bool seen_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@
 #include "base/gtest_prod_util.h"
 #include "base/message_loop.h"
 #include "build/build_config.h"
-#include "chrome/common/page_transition_types.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/common/page_transition_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace gfx {
@@ -58,6 +58,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual void DidBecomeSelected() {}
   virtual void WasHidden() {}
   virtual void SetSize(const gfx::Size& size) {}
+  virtual void SetBounds(const gfx::Rect& rect) {}
   virtual gfx::NativeView GetNativeView();
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) {}
@@ -140,8 +141,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual void AcceleratedCompositingActivated(bool activated) { }
 #endif
 
-  virtual gfx::PluginWindowHandle AcquireCompositingSurface();
-  virtual void ReleaseCompositingSurface(gfx::PluginWindowHandle surface) { }
+  virtual gfx::PluginWindowHandle GetCompositingSurface();
 
   virtual bool ContainsNativeView(gfx::NativeView native_view) const;
 
@@ -205,6 +205,10 @@ class TestRenderViewHost : public RenderViewHost {
   // False by default.
   void set_simulate_fetch_via_proxy(bool proxy);
 
+  // If set, future loads will have |mime_type| set as the mime type.
+  // If not set, the mime type will default to "text/html".
+  void set_contents_mime_type(const std::string& mime_type);
+
   // RenderViewHost overrides --------------------------------------------------
 
   virtual bool CreateRenderView(const string16& frame_name);
@@ -222,6 +226,9 @@ class TestRenderViewHost : public RenderViewHost {
 
   // See set_simulate_fetch_via_proxy() above.
   bool simulate_fetch_via_proxy_;
+
+  // See set_contents_mime_type() above.
+  std::string contents_mime_type_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRenderViewHost);
 };
@@ -266,7 +273,7 @@ class RenderViewHostTestHarness : public testing::Test {
   virtual ~RenderViewHostTestHarness();
 
   NavigationController& controller();
-  TestTabContents* contents();
+  virtual TestTabContents* contents();
   TestRenderViewHost* rvh();
   TestRenderViewHost* pending_rvh();
   TestRenderViewHost* active_rvh();
@@ -275,6 +282,10 @@ class RenderViewHostTestHarness : public testing::Test {
 
   // Frees the current tab contents for tests that want to test destruction.
   void DeleteContents();
+
+  // Sets the current tab contents for tests that want to alter it. Takes
+  // ownership of the TestTabContents passed.
+  void SetContents(TestTabContents* contents);
 
   // Creates a new TestTabContents. Ownership passes to the caller.
   TestTabContents* CreateTestTabContents();
@@ -301,6 +312,7 @@ class RenderViewHostTestHarness : public testing::Test {
   MockRenderProcessHostFactory rph_factory_;
   TestRenderViewHostFactory rvh_factory_;
 
+ private:
   scoped_ptr<TestTabContents> contents_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostTestHarness);

@@ -7,12 +7,14 @@
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 #include "chrome/browser/policy/dummy_configuration_policy_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "ui/base/clipboard/clipboard.h"
 
 TestingBrowserProcess::TestingBrowserProcess()
@@ -55,6 +57,10 @@ base::Thread* TestingBrowserProcess::db_thread() {
 }
 
 base::Thread* TestingBrowserProcess::cache_thread() {
+  return NULL;
+}
+
+base::Thread* TestingBrowserProcess::gpu_thread() {
   return NULL;
 }
 
@@ -113,6 +119,17 @@ TestingBrowserProcess::safe_browsing_detection_service() {
   return NULL;
 }
 
+net::URLRequestContextGetter* TestingBrowserProcess::system_request_context() {
+  return NULL;
+}
+
+#if defined(OS_CHROMEOS)
+chromeos::ProxyConfigServiceImpl*
+TestingBrowserProcess::chromeos_proxy_config_service_impl() {
+  return NULL;
+}
+#endif  // defined(OS_CHROMEOS)
+
 ui::Clipboard* TestingBrowserProcess::clipboard() {
   if (!clipboard_.get()) {
     // Note that we need a MessageLoop for the next call to work.
@@ -127,7 +144,10 @@ TestingBrowserProcess::extension_event_router_forwarder() {
 }
 
 NotificationUIManager* TestingBrowserProcess::notification_ui_manager() {
-  return NULL;
+  if (!notification_ui_manager_.get())
+    notification_ui_manager_.reset(
+        NotificationUIManager::Create(local_state()));
+  return notification_ui_manager_.get();
 }
 
 GoogleURLTracker* TestingBrowserProcess::google_url_tracker() {
@@ -192,10 +212,6 @@ base::WaitableEvent* TestingBrowserProcess::shutdown_event() {
 
 bool TestingBrowserProcess::plugin_finder_disabled() const {
   return false;
-}
-
-bool TestingBrowserProcess::have_inspector_files() const {
-  return true;
 }
 
 ChromeNetLog* TestingBrowserProcess::net_log() {

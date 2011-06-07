@@ -11,7 +11,7 @@
 
 #include "base/task.h"
 #include "chrome/renderer/page_click_listener.h"
-#include "chrome/renderer/render_view_observer.h"
+#include "content/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
@@ -40,11 +40,11 @@ class PasswordAutofillManager : public RenderViewObserver,
 
   // Fills the password associated with user name |value|. Returns true if the
   // username and password fields were filled, false otherwise.
-  bool DidAcceptAutoFillSuggestion(const WebKit::WebNode& node,
+  bool DidAcceptAutofillSuggestion(const WebKit::WebNode& node,
                                    const WebKit::WebString& value);
   // A no-op.  No filling happens for selection.  But this method returns
   // true when |node| is fillable by password Autofill.
-  bool DidSelectAutoFillSuggestion(const WebKit::WebNode& node);
+  bool DidSelectAutofillSuggestion(const WebKit::WebNode& node);
 
  private:
   friend class PasswordAutofillManagerTest;

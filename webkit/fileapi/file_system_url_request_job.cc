@@ -16,6 +16,8 @@
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/http/http_response_headers.h"
+#include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "webkit/fileapi/file_system_path_manager.h"
@@ -31,19 +33,34 @@ static const int kFileFlags = base::PLATFORM_FILE_OPEN |
                               base::PLATFORM_FILE_READ |
                               base::PLATFORM_FILE_ASYNC;
 
+static net::HttpResponseHeaders* CreateHttpResponseHeaders() {
+  // HttpResponseHeaders expects its input string to be terminated by two NULs.
+  static const char kStatus[] = "HTTP/1.1 200 OK\0";
+  static const size_t kStatusLen = arraysize(kStatus);
+
+  net::HttpResponseHeaders* headers =
+      new net::HttpResponseHeaders(std::string(kStatus, kStatusLen));
+
+  // Tell WebKit never to cache this content.
+  std::string cache_control(net::HttpRequestHeaders::kCacheControl);
+  cache_control.append(": no-cache");
+  headers->AddHeader(cache_control);
+
+  return headers;
+}
+
 FileSystemURLRequestJob::FileSystemURLRequestJob(
-    URLRequest* request, FileSystemPathManager* path_manager,
+    URLRequest* request, FileSystemContext* file_system_context,
     scoped_refptr<base::MessageLoopProxy> file_thread_proxy)
-    : URLRequestJob(request),
-      path_manager_(path_manager),
+    : FileSystemURLRequestJobBase(request, file_system_context,
+                                  file_thread_proxy),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           io_callback_(this, &FileSystemURLRequestJob::DidRead)),
       stream_(NULL),
       is_directory_(false),
-      remaining_bytes_(0),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)),
-      file_thread_proxy_(file_thread_proxy) {
+      remaining_bytes_(0) {
 }
 
 FileSystemURLRequestJob::~FileSystemURLRequestJob() {
@@ -64,7 +81,6 @@ void FileSystemURLRequestJob::Kill() {
     stream_->Close();
     stream_.reset(NULL);
   }
-
   URLRequestJob::Kill();
   callback_factory_.RevokeAll();
 }
@@ -130,32 +146,21 @@ void FileSystemURLRequestJob::SetExtraRequestHeaders(
   }
 }
 
-void FileSystemURLRequestJob::StartAsync() {
-  GURL origin_url;
-  FileSystemType type;
-  if (!CrackFileSystemURL(request_->url(), &origin_url, &type,
-                          &relative_file_path_)) {
-    NotifyFailed(net::ERR_INVALID_URL);
-    return;
-  }
-
-  path_manager_->GetFileSystemRootPath(
-      origin_url, type, false,  // create
-      callback_factory_.NewCallback(&FileSystemURLRequestJob::DidGetRootPath));
-}
-
-void FileSystemURLRequestJob::DidGetRootPath(bool success,
-                                             const FilePath& root_path,
-                                             const std::string& name) {
-  if (!success) {
-    NotifyFailed(net::ERR_FILE_NOT_FOUND);
-    return;
-  }
-
-  absolute_file_path_ = root_path.Append(relative_file_path_);
-
+void FileSystemURLRequestJob::DidGetLocalPath(const FilePath& local_path) {
+  absolute_file_path_ = local_path;
   base::FileUtilProxy::GetFileInfo(file_thread_proxy_, absolute_file_path_,
       callback_factory_.NewCallback(&FileSystemURLRequestJob::DidResolve));
+}
+
+void FileSystemURLRequestJob::GetResponseInfo(net::HttpResponseInfo* info) {
+  if (response_info_.get())
+    *info = *response_info_;
+}
+
+int FileSystemURLRequestJob::GetResponseCode() const {
+  if (response_info_.get())
+    return 200;
+  return URLRequestJob::GetResponseCode();
 }
 
 void FileSystemURLRequestJob::DidResolve(base::PlatformFileError error_code,
@@ -202,6 +207,9 @@ void FileSystemURLRequestJob::DidOpen(base::PlatformFileError error_code,
                      byte_range_.first_byte_position() + 1;
   DCHECK_GE(remaining_bytes_, 0);
 
+  // TODO(adamk): Please remove this ScopedAllowIO once we support async seek on
+  // FileStream.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   // Do the seek at the beginning of the request.
   if (remaining_bytes_ > 0 &&
       byte_range_.first_byte_position() != 0 &&
@@ -212,6 +220,9 @@ void FileSystemURLRequestJob::DidOpen(base::PlatformFileError error_code,
   }
 
   set_expected_content_size(remaining_bytes_);
+  response_info_.reset(new net::HttpResponseInfo());
+  response_info_->headers = CreateHttpResponseHeaders();
+
   NotifyHeadersComplete();
 }
 
@@ -244,10 +255,6 @@ bool FileSystemURLRequestJob::IsRedirectResponse(GURL* location,
   }
 
   return false;
-}
-
-void FileSystemURLRequestJob::NotifyFailed(int rv) {
-  NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, rv));
 }
 
 }  // namespace fileapi

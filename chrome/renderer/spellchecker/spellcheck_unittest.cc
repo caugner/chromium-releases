@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,8 @@ FilePath GetHunspellDirectory() {
   hunspell_directory = hunspell_directory.AppendASCII("hunspell_dictionaries");
   return hunspell_directory;
 }
+
+}  // namespace
 
 class SpellCheckTest : public testing::Test {
  public:
@@ -414,6 +416,11 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"Google's mission is to organise the world's information and make it "
       L"universally accessible and useful."
     }, {
+      // English (Canada)
+      "en-CA",
+      L"Google's mission is to organize the world's information and make it "
+      L"universally accessible and useful."
+    }, {
       // English (United Kingdom)
       "en-GB",
       L"Google's mission is to organise the world's information and make it "
@@ -546,9 +553,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
 #if !defined(OS_MACOSX)
       L"torn\x00E1-las "
 #endif
-      L"acess\x00EDveis e "
-      // L"\x00FAteis " - to be added.
-      L"em car\x00E1ter universal."
+      L"acess\x00EDveis e \x00FAteis em car\x00E1ter universal."
     }, {
       // Portuguese (Portugal)
       "pt-PT",
@@ -582,6 +587,11 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"\x0432\x0441\x0435\x0445."
       // A Russian word including U+0451. (Bug 15558 <http://crbug.com/15558>)
       L"\u0451\u043B\u043A\u0430"
+    }, {
+      // Serbo-Croatian (Serbian Latin)
+      "sh",
+      L"Google-ova misija je da organizuje sve informacije na svetu i "
+      L"u\x010dini ih univerzal-no dostupnim i korisnim."
     }, {
       // Serbian
       "sr",
@@ -682,7 +692,7 @@ TEST_F(SpellCheckTest, GetAutoCorrectionWord_EN_US) {
     {"noen", ""},
     {"what", ""},
   };
-  spell_check()->EnableAutoSpellCorrect(true);
+  spell_check()->OnEnableAutoSpellCorrect(true);
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
     string16 misspelled_word(UTF8ToUTF16(kTestCases[i].input));
@@ -695,5 +705,3 @@ TEST_F(SpellCheckTest, GetAutoCorrectionWord_EN_US) {
     EXPECT_EQ(expected_autocorrect_word, autocorrect_word);
   }
 }
-
-}  // namespace

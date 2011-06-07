@@ -20,6 +20,5 @@ include_rules = [
   "+third_party/cld/encodings/compact_lang_det/win",
   "+third_party/npapi/bindings",
   "+third_party/sqlite",
-  "+third_party/tcmalloc",
 ]
 

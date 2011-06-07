@@ -6,15 +6,17 @@
 
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
+#include "base/message_loop.h"
+#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
-#include "chrome/renderer/render_thread.h"
-#include "chrome/renderer/render_view.h"
+#include "content/renderer/render_thread.h"
+#include "content/renderer/render_view.h"
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
@@ -83,6 +85,8 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(AttachEvent);
     } else if (name->Equals(v8::String::New("DetachEvent"))) {
       return v8::FunctionTemplate::New(DetachEvent);
+    } else if (name->Equals(v8::String::New("GetExternalFileEntry"))) {
+      return v8::FunctionTemplate::New(GetExternalFileEntry);
     }
     return ExtensionBase::GetNativeFunction(name);
   }
@@ -108,8 +112,8 @@ class ExtensionImpl : public ExtensionBase {
 
       if (++listener_counts[event_name] == 1) {
         EventBindings::GetRenderThread()->Send(
-            new ViewHostMsg_ExtensionAddListener(context_info->extension_id,
-                                                 event_name));
+            new ExtensionHostMsg_AddListener(context_info->extension_id,
+                                             event_name));
       }
 
       if (++context_info->num_connected_events == 1)
@@ -135,8 +139,8 @@ class ExtensionImpl : public ExtensionBase {
       std::string event_name(*v8::String::AsciiValue(args[0]));
       if (--listener_counts[event_name] == 0) {
         EventBindings::GetRenderThread()->Send(
-            new ViewHostMsg_ExtensionRemoveListener(context_info->extension_id,
-                                                    event_name));
+            new ExtensionHostMsg_RemoveListener(context_info->extension_id,
+                                                event_name));
       }
 
       if (--context_info->num_connected_events == 0) {
@@ -145,6 +149,38 @@ class ExtensionImpl : public ExtensionBase {
     }
 
     return v8::Undefined();
+  }
+
+  // Attach an event name to an object.
+  static v8::Handle<v8::Value> GetExternalFileEntry(
+      const v8::Arguments& args) {
+  // TODO(zelidrag): Make this magic work on other platforms when file browser
+  // matures enough on ChromeOS.
+#if defined(OS_CHROMEOS)
+    DCHECK(args.Length() == 1);
+    DCHECK(args[0]->IsObject());
+    v8::Local<v8::Object> file_def = args[0]->ToObject();
+    std::string file_system_name(
+        *v8::String::Utf8Value(file_def->Get(
+            v8::String::New("fileSystemName"))));
+    std::string file_system_path(
+        *v8::String::Utf8Value(file_def->Get(
+            v8::String::New("fileSystemRoot"))));
+    std::string file_full_path(
+        *v8::String::Utf8Value(file_def->Get(
+            v8::String::New("fileFullPath"))));
+    bool is_directory =
+        file_def->Get(v8::String::New("fileIsDirectory"))->ToBoolean()->Value();
+    WebFrame* webframe = WebFrame::frameForCurrentContext();
+    return webframe->createFileEntry(
+        WebKit::WebFileSystem::TypeExternal,
+        WebKit::WebString::fromUTF8(file_system_name.c_str()),
+        WebKit::WebString::fromUTF8(file_system_path.c_str()),
+        WebKit::WebString::fromUTF8(file_full_path.c_str()),
+        is_directory);
+#else
+    return v8::Undefined();
+#endif
   }
 };
 
@@ -248,7 +284,10 @@ static void ContextWeakReferenceCallback(v8::Persistent<v8::Value> context,
   NOTREACHED();
 }
 
-void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
+void EventBindings::HandleContextCreated(
+    WebFrame* frame,
+    bool content_script,
+    ExtensionDispatcher* extension_dispatcher) {
   if (!bindings_registered)
     return;
 
@@ -265,7 +304,7 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
   if (!ds)
     ds = frame->dataSource();
   GURL url = ds->request().url();
-  const ExtensionSet* extensions = GetRenderThread()->GetExtensions();
+  const ExtensionSet* extensions = extension_dispatcher->extensions();
   std::string extension_id = extensions->GetIdByURL(url);
 
   if (!extensions->ExtensionBindingsAllowed(url) &&

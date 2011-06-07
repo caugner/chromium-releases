@@ -6,13 +6,13 @@
 
 (function() {
   // Indicates a pass to the C++ backend.
-  function pass(message) {
+  function pass() {
     chrome.send('Pass', []);
   }
 
   // Indicates a fail to the C++ backend.
   function fail(message) {
-    chrome.send('Fail', []);
+    chrome.send('Fail', [String(message)]);
   }
 
   // Asserts.
@@ -25,7 +25,7 @@
         message = test + '\n' + message;
       else
         message = test;
-      fail(message);
+      throw new Error(message);
     }
   }
 
@@ -39,37 +39,33 @@
 
   function assertEquals(expected, actual, message) {
     if (expected !== actual) {
-      fail('Test Error in ' + testName(currentTest) +
-           '\nActual: ' + actual + '\nExpected: ' + expected + '\n' + message);
+      throw new Error('Test Error in ' + testName(currentTest) +
+                      '\nActual: ' + actual + '\nExpected: ' + expected +
+                      '\n' + message);
     }
     if (typeof expected != typeof actual) {
-      fail('Test Error in ' + testName(currentTest) +
-           ' (type mismatch)\nActual Type: ' + typeof actual +
-           '\nExpected Type:' + typeof expected + '\n' + message);
+      throw new Error('Test Error in ' + testName(currentTest) +
+                      ' (type mismatch)\nActual Type: ' + typeof actual +
+                      '\nExpected Type:' + typeof expected + '\n' + message);
     }
   }
 
   function assertNotReached(message) {
-    fail(message);
+    throw new Error(message);
   }
 
-  // Call this method within your test script file to begin tests.
-  // Takes an array of functions; each function is a test.
-  function runTests(tests) {
-    var currentTest = tests.shift();
+  function runTest(currentTest) {
+    try {
+      console.log('Running test ' + currentTest.name);
+      currentTest.call();
+    } catch (e) {
+      console.error(
+          'Failed: ' + currentTest.name + '\nwith exception: ' + e.message);
 
-    while (currentTest) {
-      try {
-        console.log('Running test ' + currentTest.name);
-        currentTest.call();
-        currentTest = tests.shift();
-      } catch (e) {
-        console.log(
-            'Failed: ' + currentTest.name + '\nwith exception: ' + e.message);
-
-        fail();
-      }
+      fail(e.message);
+      return;
     }
+
 
     // All tests passed.
     pass('');
@@ -80,5 +76,5 @@
   window.assertFalse = assertFalse;
   window.assertEquals = assertEquals;
   window.assertNotReached = assertNotReached;
-  window.runTests = runTests;
+  window.runTest = runTest;
 })();

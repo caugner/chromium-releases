@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,11 +20,15 @@ class PlatformDevice : public SkDevice {
   // Returns if the preferred rendering engine is vectorial or bitmap based.
   virtual bool IsVectorial() = 0;
 
-  virtual PlatformSurface beginPlatformPaint() = 0;
+  // Returns if native platform APIs are allowed to render text to this device.
+  virtual bool IsNativeFontRenderingAllowed();
+
+  virtual PlatformSurface BeginPlatformPaint() = 0;
+  virtual void EndPlatformPaint();
 
  protected:
   // Forwards |bitmap| to SkDevice's constructor.
-  PlatformDevice(const SkBitmap& bitmap);
+  explicit PlatformDevice(const SkBitmap& bitmap);
 };
 
 }  // namespace skia

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,13 @@
 #include <atlmisc.h>
 
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/hwnd_util.h"
-#include "ui/gfx/native_theme_win.h"
 #include "views/background.h"
 #include "views/border.h"
 #include "views/controls/native/native_view_host.h"
@@ -281,7 +281,10 @@ void NativeControl::OnFocus() {
   if (container_) {
     DCHECK(container_->GetControl());
     ::SetFocus(container_->GetControl());
-    NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS, false);
+    if (GetWidget()) {
+      GetWidget()->NotifyAccessibilityEvent(
+          this, ui::AccessibilityTypes::EVENT_FOCUS, false);
+    }
   }
 }
 

@@ -97,12 +97,14 @@ void AddInstallerCopyTasks(const InstallerState& installer_state,
   FilePath exe_dst(installer_dir.Append(setup_path.BaseName()));
   FilePath archive_dst(installer_dir.Append(archive_path.BaseName()));
 
+  install_list->AddCopyTreeWorkItem(setup_path.value(), exe_dst.value(),
+                                    temp_path.value(), WorkItem::ALWAYS);
+
   // In the past, we copied rather than moved for system level installs so that
   // the permissions of %ProgramFiles% would be picked up.  Now that |temp_path|
   // is in %ProgramFiles% for system level installs (and in %LOCALAPPDATA%
-  // otherwise), there is no need to do this.
-  install_list->AddMoveTreeWorkItem(setup_path.value(), exe_dst.value(),
-                                    temp_path.value());
+  // otherwise), there is no need to do this for the archive.  Setup.exe, on
+  // the other hand, is created elsewhere so it must always be copied.
   install_list->AddMoveTreeWorkItem(archive_path.value(), archive_dst.value(),
                                     temp_path.value());
 }
@@ -264,81 +266,12 @@ void AddGoogleUpdateWorkItems(const InstallationState& original_state,
     return;
   }
 
-  // Update the "ap" value for the product being installed/updated. We get
-  // this via GetNonVersionedProductState since the product whose ap value
-  // we are querying may be in the process of being installed for the first
-  // time.
-  BrowserDistribution::Type client_state_distribution =
-      installer_state.state_type();
-  const ProductState* target_product_state =
-      original_state.GetNonVersionedProductState(
-          installer_state.system_install(), client_state_distribution);
-  ChannelInfo channel_info(target_product_state->channel());
-
-  // This is a multi-install product.
-  bool modified = channel_info.SetMultiInstall(true);
-
-  // Add the appropriate modifiers for all products and their options.
-  modified |= installer_state.SetChannelFlags(true, &channel_info);
-
-  VLOG(1) << "ap: " << channel_info.value();
-
-  const HKEY reg_root = installer_state.root_key();
-  const std::wstring& key_path(installer_state.state_key());
-
-  // Write the results if needed.
-  if (modified) {
-    install_list->AddSetRegValueWorkItem(reg_root, key_path,
-                                         google_update::kRegApField,
-                                         channel_info.value(), true);
-  } else {
-    VLOG(1) << "Channel flags not modified";
-  }
-
-  // Synchronize the other products and the package with this one.
-  std::vector<std::wstring> state_key_paths;
-
-  state_key_paths.reserve(installer_state.products().size());
-  std::wstring multi_key(
-      installer_state.multi_package_binaries_distribution()->GetStateKey());
-  if (multi_key != key_path)
-    state_key_paths.push_back(multi_key);
-
-  std::wstring other_key;
-  Products::const_iterator scan = installer_state.products().begin();
-  Products::const_iterator end = installer_state.products().end();
-  for (; scan != end; ++scan) {
-    other_key = (*scan)->distribution()->GetStateKey();
-    if (other_key != key_path)
-      state_key_paths.push_back(other_key);
-  }
-
-  RegKey key;
-  ChannelInfo other_info;
-  std::vector<std::wstring>::const_iterator kscan = state_key_paths.begin();
-  std::vector<std::wstring>::const_iterator kend = state_key_paths.end();
-  for (; kscan != kend; ++kscan) {
-    // Handle the case where the ClientState key doesn't exist by creating it.
-    // This takes care of the multi-installer's package key, which is not
-    // created by Google Update for us.
-    if ((key.Open(reg_root, kscan->c_str(), KEY_QUERY_VALUE) != ERROR_SUCCESS)
-        || (!other_info.Initialize(key))) {
-      other_info.set_value(std::wstring());
-    }
-    if (!other_info.Equals(channel_info)) {
-      if (!key.Valid()) {
-        install_list->AddCreateRegKeyWorkItem(reg_root, *kscan);
-      }
-      install_list->AddSetRegValueWorkItem(reg_root, *kscan,
-                                           google_update::kRegApField,
-                                           channel_info.value(), true);
-    }
-  }
-
   // Creating the ClientState key for binaries, if we're migrating to multi then
   // copy over Chrome's brand code if it has one. Chrome Frame currently never
   // has a brand code.
-  if (multi_key != key_path) {
+  if (installer_state.state_type() != BrowserDistribution::CHROME_BINARIES) {
+    std::wstring multi_key(
+        installer_state.multi_package_binaries_distribution()->GetStateKey());
     const ProductState* chrome_product_state =
         original_state.GetNonVersionedProductState(
             installer_state.system_install(),
@@ -346,9 +279,11 @@ void AddGoogleUpdateWorkItems(const InstallationState& original_state,
 
     const std::wstring& brand(chrome_product_state->brand());
     if (!brand.empty()) {
+      install_list->AddCreateRegKeyWorkItem(installer_state.root_key(),
+                                            multi_key);
       // Write Chrome's brand code to the multi key. Never overwrite the value
       // if one is already present (although this shouldn't happen).
-      install_list->AddSetRegValueWorkItem(reg_root,
+      install_list->AddSetRegValueWorkItem(installer_state.root_key(),
                                            multi_key,
                                            google_update::kRegBrandField,
                                            brand,
@@ -462,7 +397,7 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
       // However, as it stands, we don't have a way to know which distribution
       // will check the key and run the command, so we add it for all.
       // After the first run, the subsequent runs should just be noops.
-      // (see Upgrade::SwapNewChromeExeIfPresent).
+      // (see upgrade_utils::SwapNewChromeExeIfPresent).
       CommandLine product_rename_cmd(rename);
       products[i]->AppendProductFlags(&product_rename_cmd);
       in_use_update_work_items->AddSetRegValueWorkItem(
@@ -483,7 +418,7 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
           UTF8ToWide(current_version->GetString()),
           true);
       // TODO(tommi): We should move the rename command here. We also need to
-      // update Upgrade::SwapNewChromeExeIfPresent.
+      // update upgrade_utils::SwapNewChromeExeIfPresent.
     }
 
     post_install_task_list->AddWorkItem(in_use_update_work_items.release());
@@ -555,10 +490,20 @@ void AddInstallWorkItems(const InstallationState& original_state,
   install_list->AddCreateDirWorkItem(temp_path);
   install_list->AddCreateDirWorkItem(target_path);
 
+  if (current_version != NULL && current_version->get() != NULL) {
+    // Delete the archive from an existing install to save some disk space.  We
+    // make this an unconditional work item since there's no need to roll this
+    // back; if installation fails we'll be moved to the "-full" channel anyway.
+    FilePath old_installer_dir(
+        installer_state.GetInstallerDirectory(**current_version));
+    FilePath old_archive(old_installer_dir.Append(archive_path.BaseName()));
+    install_list->AddDeleteTreeWorkItem(old_archive, temp_path)
+        ->set_ignore_failure(true);
+  }
+
   // Delete any new_chrome.exe if present (we will end up creating a new one
   // if required) and then copy chrome.exe
-  FilePath new_chrome_exe(
-      target_path.Append(installer::kChromeNewExe));
+  FilePath new_chrome_exe(target_path.Append(installer::kChromeNewExe));
 
   install_list->AddDeleteTreeWorkItem(new_chrome_exe, temp_path);
   install_list->AddCopyTreeWorkItem(
@@ -569,7 +514,8 @@ void AddInstallWorkItems(const InstallationState& original_state,
   // Extra executable for 64 bit systems.
   // NOTE: We check for "not disabled" so that if the API call fails, we play it
   // safe and copy the executable anyway.
-  if (base::win::GetWOW64Status() != base::win::WOW64_DISABLED) {
+  if (base::win::OSInfo::GetInstance()->wow64_status() !=
+      base::win::OSInfo::WOW64_DISABLED) {
     install_list->AddMoveTreeWorkItem(
         src_path.Append(installer::kWowHelperExe).value(),
         target_path.Append(installer::kWowHelperExe).value(),

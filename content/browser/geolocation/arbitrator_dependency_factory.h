@@ -6,16 +6,19 @@
 #define CONTENT_BROWSER_GEOLOCATION_ARBITRATOR_DEPENDENCY_FACTORY_H_
 #pragma once
 
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "base/string16.h"
 
 class AccessTokenStore;
 class GURL;
 class LocationProviderBase;
-class URLRequestContextGetter;
 
 namespace base {
 class Time;
+}
+
+namespace net {
+class URLRequestContextGetter;
 }
 
 // Allows injection of factory methods for creating the location providers.
@@ -27,11 +30,11 @@ class GeolocationArbitratorDependencyFactory
   typedef base::Time (*GetTimeNow)();
 
   virtual GetTimeNow GetTimeFunction() = 0;
-  virtual URLRequestContextGetter* GetContextGetter() = 0;
+  virtual net::URLRequestContextGetter* GetContextGetter() = 0;
   virtual AccessTokenStore* NewAccessTokenStore() = 0;
   virtual LocationProviderBase* NewNetworkLocationProvider(
       AccessTokenStore* access_token_store,
-      URLRequestContextGetter* context,
+      net::URLRequestContextGetter* context,
       const GURL& url,
       const string16& access_token) = 0;
   virtual LocationProviderBase* NewSystemLocationProvider() = 0;
@@ -47,12 +50,12 @@ class DefaultGeolocationArbitratorDependencyFactory
     : public GeolocationArbitratorDependencyFactory {
  public:
   // GeolocationArbitratorDependencyFactory
-  virtual URLRequestContextGetter* GetContextGetter();
+  virtual net::URLRequestContextGetter* GetContextGetter();
   virtual GetTimeNow GetTimeFunction();
   virtual AccessTokenStore* NewAccessTokenStore();
   virtual LocationProviderBase* NewNetworkLocationProvider(
       AccessTokenStore* access_token_store,
-      URLRequestContextGetter* context,
+      net::URLRequestContextGetter* context,
       const GURL& url,
       const string16& access_token);
   virtual LocationProviderBase* NewSystemLocationProvider();

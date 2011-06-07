@@ -1,10 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/fileapi/file_writer_delegate.h"
 
 #include "base/message_loop.h"
+#include "base/threading/thread_restrictions.h"
 #include "net/base/net_errors.h"
 #include "webkit/fileapi/file_system_operation.h"
 
@@ -22,7 +23,8 @@ FileWriterDelegate::FileWriterDelegate(
       bytes_written_(0),
       bytes_read_(0),
       io_buffer_(new net::IOBufferWithSize(kReadBufSize)),
-      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      io_callback_(ALLOW_THIS_IN_INITIALIZER_LIST(this),
+                   &FileWriterDelegate::OnDataWritten),
       method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
@@ -67,6 +69,9 @@ void FileWriterDelegate::OnSSLCertificateError(
 
 void FileWriterDelegate::OnResponseStarted(net::URLRequest* request) {
   DCHECK_EQ(request_, request);
+  // file_stream_->Seek() blocks the IO thread.
+  // See http://crbug.com/75548.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (!request->status().is_success()) {
     OnError(base::PLATFORM_FILE_ERROR_FAILED);
     return;
@@ -115,10 +120,9 @@ void FileWriterDelegate::OnDataReceived(int bytes_read) {
 }
 
 void FileWriterDelegate::Write() {
-  int write_response = file_stream_->Write(
-        io_buffer_->data() + bytes_written_,
-        bytes_read_ - bytes_written_,
-        callback_factory_.NewCallback(&FileWriterDelegate::OnDataWritten));
+  int write_response = file_stream_->Write(io_buffer_->data() + bytes_written_,
+                                           bytes_read_ - bytes_written_,
+                                           &io_callback_);
   if (write_response > 0)
     MessageLoop::current()->PostTask(
         FROM_HERE,
@@ -164,4 +168,3 @@ void FileWriterDelegate::OnProgress(int bytes_read, bool done) {
 }
 
 }  // namespace fileapi
-

@@ -7,24 +7,24 @@
 
 #include <atlbase.h>
 #include <atlwin.h>
-#include <string>
 #include <map>
+#include <string>
 #include <vector>
 
-#include "base/ref_counted.h"
-#include "base/scoped_handle.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_handle.h"
 #include "base/stack_container.h"
 #include "base/synchronization/lock.h"
 #include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/timer.h"
-#include "chrome/common/page_zoom.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome_frame/chrome_frame_delegate.h"
 #include "chrome_frame/chrome_frame_histograms.h"
 #include "chrome_frame/plugin_url_request.h"
 #include "chrome_frame/sync_msg_reply_dispatcher.h"
+#include "content/common/page_zoom.h"
 
 // By a convoluated route, this timeout also winds up being the sync automation
 // message timeout. See the ChromeFrameAutomationProxyImpl ctor and the
@@ -343,33 +343,10 @@ class ChromeFrameAutomationClient
                                       const std::string& target);
   bool SetProxySettings(const std::string& json_encoded_proxy_settings);
 
-  virtual void SetEnableExtensionAutomation(
-      const std::vector<std::string>& functions_enabled);
-
   void FindInPage(const std::wstring& search_string,
                   FindInPageDirection forward,
                   FindInPageCase match_case,
                   bool find_next);
-
-  virtual void InstallExtension(const FilePath& crx_path, void* user_data);
-
-  virtual void LoadExpandedExtension(const FilePath& path, void* user_data);
-
-  // Starts a request to get the list of enabled extensions' base directories.
-  // Response comes back as ChromeFrameDelegate::OnEnabledExtensions().
-  virtual void GetEnabledExtensions(void* user_data);
-
-  virtual void InstallExtensionComplete(
-      const FilePath& path,
-      void* user_data,
-      AutomationMsg_ExtensionResponseValues res);
-
-  virtual void GetEnabledExtensionsComplete(
-      void* user_data,
-      std::vector<FilePath>* extension_directories);
-
-  // Returns the session ID used to identify a Tab in Chrome.
-  virtual int GetSessionId() const;
 
   virtual void OnChromeFrameHostMoved();
 
@@ -551,7 +528,7 @@ class ChromeFrameAutomationClient
   scoped_refptr<ChromeFrameLaunchParams> chrome_launch_params_;
 
   // Cache security manager for URL zone checking
-  ScopedComPtr<IInternetSecurityManager> security_manager_;
+  base::win::ScopedComPtr<IInternetSecurityManager> security_manager_;
 
   // When host network stack is used, this object is in charge of
   // handling network requests.

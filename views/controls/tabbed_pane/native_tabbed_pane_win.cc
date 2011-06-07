@@ -10,13 +10,15 @@
 #include "base/stl_util-inl.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/win/hwnd_util.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/native_theme_win.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
+#include "views/controls/tabbed_pane/tabbed_pane_listener.h"
 #include "views/layout/fill_layout.h"
 #include "views/widget/root_view.h"
-#include "views/widget/widget_win.h"
+#include "views/widget/widget.h"
 
 namespace views {
 
@@ -28,8 +30,8 @@ class TabBackground : public Background {
     // TMT_FILLCOLORHINT returns a color value that supposedly
     // approximates the texture drawn by PaintTabPanelBackground.
     SkColor tab_page_color =
-        gfx::NativeTheme::instance()->GetThemeColorWithDefault(
-            gfx::NativeTheme::TAB, TABP_BODY, 0, TMT_FILLCOLORHINT,
+        gfx::NativeThemeWin::instance()->GetThemeColorWithDefault(
+            gfx::NativeThemeWin::TAB, TABP_BODY, 0, TMT_FILLCOLORHINT,
             COLOR_3DFACE);
     SetNativeControlColor(tab_page_color);
   }
@@ -38,7 +40,7 @@ class TabBackground : public Background {
   virtual void Paint(gfx::Canvas* canvas, View* view) const {
     HDC dc = canvas->BeginPlatformPaint();
     RECT r = {0, 0, view->width(), view->height()};
-    gfx::NativeTheme::instance()->PaintTabPanelBackground(dc, &r);
+    gfx::NativeThemeWin::instance()->PaintTabPanelBackground(dc, &r);
     canvas->EndPlatformPaint();
   }
 
@@ -282,13 +284,15 @@ void NativeTabbedPaneWin::CreateNativeControl() {
                                       0, 0, width(), height(),
                                       GetWidget()->GetNativeView(), NULL, NULL,
                                       NULL);
+  ui::CheckWindowCreated(tab_control);
 
   HFONT font = ResourceBundle::GetSharedInstance().
       GetFont(ResourceBundle::BaseFont).GetNativeFont();
   SendMessage(tab_control, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
 
   // Create the view container which is a child of the TabControl.
-  content_window_ = new WidgetWin();
+  content_window_ = Widget::CreateWidget(
+      Widget::CreateParams(Widget::CreateParams::TYPE_CONTROL));
   content_window_->Init(tab_control, gfx::Rect());
 
   // Explicitly setting the WS_EX_LAYOUTRTL property for the HWND (see above
@@ -382,13 +386,11 @@ void NativeTabbedPaneWin::DoSelectTabAt(int index, boolean invoke_listener) {
 }
 
 void NativeTabbedPaneWin::ResizeContents() {
-  CRect content_bounds;
+  RECT content_bounds;
   if (!GetClientRect(native_view(), &content_bounds))
     return;
   TabCtrl_AdjustRect(native_view(), FALSE, &content_bounds);
-  content_window_->MoveWindow(content_bounds.left, content_bounds.top,
-                              content_bounds.Width(), content_bounds.Height(),
-                              TRUE);
+  content_window_->SetBounds(gfx::Rect(content_bounds));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

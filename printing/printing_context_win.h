@@ -10,7 +10,7 @@
 
 #include <string>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "printing/printing_context.h"
 #include "ui/gfx/native_widget_types.h"
@@ -28,7 +28,8 @@ class PrintingContextWin : public PrintingContext {
                                   bool has_selection,
                                   PrintSettingsCallback* callback);
   virtual Result UseDefaultSettings();
-  virtual Result UpdatePrintSettings(const PageRanges& ranges);
+  virtual Result UpdatePrintSettings(const DictionaryValue& job_settings,
+                                     const PageRanges& ranges);
   virtual Result InitWithSettings(const PrintSettings& settings);
   virtual Result NewDocument(const string16& document_name);
   virtual Result NewPage();

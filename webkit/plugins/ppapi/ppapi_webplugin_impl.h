@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/weak_ptr.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
 #include "ui/gfx/rect.h"
@@ -47,7 +47,6 @@ class WebPluginImpl : public WebKit::WebPlugin {
       const WebKit::WebRect& clip_rect,
       const WebKit::WebVector<WebKit::WebRect>& cut_outs_rects,
       bool is_visible);
-  virtual unsigned getBackingTextureId();
   virtual void updateFocus(bool focused);
   virtual void updateVisibility(bool visible);
   virtual bool acceptsInputEvents();

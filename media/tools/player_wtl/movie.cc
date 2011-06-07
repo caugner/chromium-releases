@@ -1,28 +1,30 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/tools/player_wtl/movie.h"
 
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "media/base/filter_collection.h"
 #include "media/base/message_loop_factory_impl.h"
 #include "media/base/pipeline_impl.h"
+#include "media/filters/adaptive_demuxer.h"
 #include "media/filters/audio_renderer_impl.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
-#include "media/filters/ffmpeg_demuxer.h"
+#include "media/filters/ffmpeg_demuxer_factory.h"
 #include "media/filters/ffmpeg_video_decoder.h"
-#include "media/filters/file_data_source.h"
+#include "media/filters/file_data_source_factory.h"
 #include "media/filters/null_audio_renderer.h"
 #include "media/tools/player_wtl/wtl_renderer.h"
 
+using media::AdaptiveDemuxerFactory;
 using media::AudioRendererImpl;
 using media::FFmpegAudioDecoder;
-using media::FFmpegDemuxer;
+using media::FFmpegDemuxerFactory;
 using media::FFmpegVideoDecoder;
-using media::FileDataSource;
+using media::FileDataSourceFactory;
 using media::FilterCollection;
 using media::PipelineImpl;
 
@@ -63,13 +65,16 @@ bool Movie::Open(const wchar_t* url, WtlVideoRenderer* video_renderer) {
 
   message_loop_factory_.reset(new media::MessageLoopFactoryImpl());
 
+  MessageLoop* pipeline_loop =
+      message_loop_factory_->GetMessageLoop("PipelineThread");
+  pipeline_ = new PipelineImpl(pipeline_loop);
+
   // Create filter collection.
   scoped_ptr<FilterCollection> collection(new FilterCollection());
-  collection->AddDataSource(new FileDataSource());
+  collection->SetDemuxerFactory(new AdaptiveDemuxerFactory(
+      new FFmpegDemuxerFactory(new FileDataSourceFactory(), pipeline_loop)));
   collection->AddAudioDecoder(new FFmpegAudioDecoder(
       message_loop_factory_->GetMessageLoop("AudioDecoderThread")));
-  collection->AddDemuxer(new FFmpegDemuxer(
-      message_loop_factory_->GetMessageLoop("DemuxThread")));
   collection->AddVideoDecoder(new FFmpegVideoDecoder(
       message_loop_factory_->GetMessageLoop("VideoDecoderThread"), NULL));
 
@@ -80,18 +85,14 @@ bool Movie::Open(const wchar_t* url, WtlVideoRenderer* video_renderer) {
   }
   collection->AddVideoRenderer(video_renderer);
 
-  pipeline_ = new PipelineImpl(
-      message_loop_factory_->GetMessageLoop("PipelineThread"));
-
   // Create and start our pipeline.
-  pipeline_->Start(collection.release(), WideToUTF8(std::wstring(url)), NULL);
-  while (true) {
-    base::PlatformThread::Sleep(100);
-    if (pipeline_->IsInitialized())
-      break;
-    if (pipeline_->GetError() != media::PIPELINE_OK)
-      return false;
-  }
+  media::PipelineStatusNotification note;
+  pipeline_->Start(collection.release(), WideToUTF8(std::wstring(url)),
+                   note.Callback());
+  // Wait until the pipeline is fully initialized.
+  note.Wait();
+  if (note.status() != PIPELINE_OK)
+    return false;
   pipeline_->SetPlaybackRate(play_rate_);
   return true;
 }

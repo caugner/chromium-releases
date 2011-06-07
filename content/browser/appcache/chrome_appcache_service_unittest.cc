@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
-#include "base/scoped_temp_dir.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/testing_browser_process.h"
 #include "chrome/test/testing_browser_process_test.h"
@@ -47,7 +47,7 @@ TEST_F(ChromeAppCacheServiceTest, KeepOnDestruction) {
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(appcache_service.get(),
                         &ChromeAppCacheService::InitializeOnIOThread,
-                        temp_dir_.path(), false,
+                        appcache_path,
                         scoped_refptr<HostContentSettingsMap>(NULL),
                         scoped_refptr<quota::SpecialStoragePolicy>(NULL),
                         false));
@@ -78,7 +78,7 @@ TEST_F(ChromeAppCacheServiceTest, RemoveOnDestruction) {
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(appcache_service.get(),
                         &ChromeAppCacheService::InitializeOnIOThread,
-                        temp_dir_.path(), false,
+                        appcache_path,
                         scoped_refptr<HostContentSettingsMap>(NULL),
                         scoped_refptr<quota::SpecialStoragePolicy>(NULL),
                         true));

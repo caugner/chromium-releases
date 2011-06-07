@@ -1,15 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/scoped_ptr.h"
-#include "chrome/common/geoposition.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/browser/geolocation/arbitrator_dependency_factory.h"
 #include "content/browser/geolocation/fake_access_token_store.h"
 #include "content/browser/geolocation/geolocation_observer.h"
 #include "content/browser/geolocation/location_arbitrator.h"
 #include "content/browser/geolocation/location_provider.h"
 #include "content/browser/geolocation/mock_location_provider.h"
+#include "content/common/geoposition.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -68,7 +68,7 @@ class MockDependencyFactory : public GeolocationArbitratorDependencyFactory {
   virtual GeolocationArbitrator::GetTimeNow GetTimeFunction() {
     return GetTimeNowForTest;
   }
-  virtual URLRequestContextGetter* GetContextGetter() {
+  virtual net::URLRequestContextGetter* GetContextGetter() {
     return NULL;
   }
   virtual AccessTokenStore* NewAccessTokenStore() {
@@ -76,7 +76,7 @@ class MockDependencyFactory : public GeolocationArbitratorDependencyFactory {
   }
   virtual LocationProviderBase* NewNetworkLocationProvider(
       AccessTokenStore* access_token_store,
-      URLRequestContextGetter* context,
+      net::URLRequestContextGetter* context,
       const GURL& url,
       const string16& access_token) {
     return new MockLocationProvider(&cell_);

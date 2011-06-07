@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,16 @@
 #include <vector>
 
 #include "base/file_path.h"
+#include "base/platform_file.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/browser_render_process_host.h"
-#include "chrome/common/net/url_request_context_getter.h"
+#include "content/browser/resource_context.h"
 #include "content/common/file_system_messages.h"
 #include "googleurl/src/gurl.h"
+#include "ipc/ipc_platform_file.h"
 #include "net/url_request/url_request_context.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_context.h"
@@ -45,9 +46,15 @@ class BrowserFileSystemCallbackDispatcher
     dispatcher_host_->Send(new FileSystemMsg_DidSucceed(request_id_));
   }
 
-  virtual void DidReadMetadata(const base::PlatformFileInfo& info) {
+  virtual void DidGetLocalPath(const FilePath& local_path) {
+    NOTREACHED();
+  }
+
+  virtual void DidReadMetadata(
+      const base::PlatformFileInfo& info,
+      const FilePath& platform_path) {
     dispatcher_host_->Send(new FileSystemMsg_DidReadMetadata(
-        request_id_, info));
+        request_id_, info, platform_path));
   }
 
   virtual void DidReadDirectory(
@@ -57,9 +64,10 @@ class BrowserFileSystemCallbackDispatcher
   }
 
   virtual void DidOpenFileSystem(const std::string& name,
-                                 const FilePath& path) {
+                                 const GURL& root) {
     dispatcher_host_->Send(
-        new FileSystemMsg_OpenComplete(request_id_, !path.empty(), name, path));
+        new FileSystemMsg_OpenComplete(
+            request_id_, root.is_valid(), name, root));
   }
 
   virtual void DidFail(base::PlatformFileError error_code) {
@@ -71,22 +79,53 @@ class BrowserFileSystemCallbackDispatcher
         request_id_, bytes, complete));
   }
 
+  virtual void DidOpenFile(
+      base::PlatformFile file,
+      base::ProcessHandle peer_handle) {
+    IPC::PlatformFileForTransit file_for_transit =
+        IPC::InvalidPlatformFileForTransit();
+    if (file != base::kInvalidPlatformFileValue) {
+#if defined(OS_WIN)
+      if (!::DuplicateHandle(::GetCurrentProcess(), file, peer_handle,
+                             &file_for_transit, 0, false,
+                             DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE))
+        file_for_transit = IPC::InvalidPlatformFileForTransit();
+#elif defined(OS_POSIX)
+      file_for_transit = base::FileDescriptor(file, true);
+#else
+  #error Not implemented.
+#endif
+    }
+    dispatcher_host_->Send(new FileSystemMsg_DidOpenFile(
+        request_id_, file_for_transit));
+  }
+
  private:
   scoped_refptr<FileSystemDispatcherHost> dispatcher_host_;
   int request_id_;
 };
 
-FileSystemDispatcherHost::FileSystemDispatcherHost(Profile* profile)
-    : context_(profile->GetFileSystemContext()),
-      host_content_settings_map_(profile->GetHostContentSettingsMap()),
-      request_context_getter_(profile->GetRequestContext()) {
+FileSystemDispatcherHost::FileSystemDispatcherHost(
+    const content::ResourceContext* resource_context,
+    HostContentSettingsMap* host_content_settings_map)
+    : context_(NULL),
+      host_content_settings_map_(host_content_settings_map),
+      resource_context_(resource_context),
+      request_context_(NULL) {
+  DCHECK(resource_context_);
+  DCHECK(host_content_settings_map_);
 }
 
 FileSystemDispatcherHost::FileSystemDispatcherHost(
-    ChromeURLRequestContext* context)
-    : context_(context->file_system_context()),
-      host_content_settings_map_(context->host_content_settings_map()),
-      request_context_(context) {
+    ChromeURLRequestContext* request_context,
+    fileapi::FileSystemContext* file_system_context)
+    : context_(file_system_context),
+      host_content_settings_map_(request_context->host_content_settings_map()),
+      resource_context_(NULL),
+      request_context_(request_context) {
+  DCHECK(request_context_);
+  DCHECK(host_content_settings_map_);
+  DCHECK(context_);
 }
 
 FileSystemDispatcherHost::~FileSystemDispatcherHost() {
@@ -95,11 +134,15 @@ FileSystemDispatcherHost::~FileSystemDispatcherHost() {
 void FileSystemDispatcherHost::OnChannelConnected(int32 peer_pid) {
   BrowserMessageFilter::OnChannelConnected(peer_pid);
 
-  if (request_context_getter_.get()) {
-    DCHECK(!request_context_.get());
-    request_context_ = request_context_getter_->GetURLRequestContext();
+  if (resource_context_) {
+    DCHECK(!request_context_);
+    request_context_ = resource_context_->request_context();
+    DCHECK(!context_);
+    context_ = resource_context_->file_system_context();
+    resource_context_ = NULL;
   }
-  DCHECK(request_context_.get());
+  DCHECK(request_context_);
+  DCHECK(context_);
 }
 
 bool FileSystemDispatcherHost::OnMessageReceived(
@@ -119,6 +162,7 @@ bool FileSystemDispatcherHost::OnMessageReceived(
     IPC_MESSAGE_HANDLER(FileSystemHostMsg_Truncate, OnTruncate)
     IPC_MESSAGE_HANDLER(FileSystemHostMsg_TouchFile, OnTouchFile)
     IPC_MESSAGE_HANDLER(FileSystemHostMsg_CancelWrite, OnCancel)
+    IPC_MESSAGE_HANDLER(FileSystemHostMsg_OpenFile, OnOpenFile)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
   return handled;
@@ -137,7 +181,7 @@ void FileSystemDispatcherHost::OnOpen(
     // TODO(kinuko): Need to notify the UI thread to indicate that
     // there's a blocked content.
     Send(new FileSystemMsg_OpenComplete(
-        request_id, false, std::string(), FilePath()));
+        request_id, false, std::string(), GURL()));
     return;
   }
 
@@ -145,27 +189,27 @@ void FileSystemDispatcherHost::OnOpen(
 }
 
 void FileSystemDispatcherHost::OnMove(
-    int request_id, const FilePath& src_path, const FilePath& dest_path) {
+    int request_id, const GURL& src_path, const GURL& dest_path) {
   GetNewOperation(request_id)->Move(src_path, dest_path);
 }
 
 void FileSystemDispatcherHost::OnCopy(
-    int request_id, const FilePath& src_path, const FilePath& dest_path) {
+    int request_id, const GURL& src_path, const GURL& dest_path) {
   GetNewOperation(request_id)->Copy(src_path, dest_path);
 }
 
 void FileSystemDispatcherHost::OnRemove(
-    int request_id, const FilePath& path, bool recursive) {
+    int request_id, const GURL& path, bool recursive) {
   GetNewOperation(request_id)->Remove(path, recursive);
 }
 
 void FileSystemDispatcherHost::OnReadMetadata(
-    int request_id, const FilePath& path) {
+    int request_id, const GURL& path) {
   GetNewOperation(request_id)->GetMetadata(path);
 }
 
 void FileSystemDispatcherHost::OnCreate(
-    int request_id, const FilePath& path, bool exclusive,
+    int request_id, const GURL& path, bool exclusive,
     bool is_directory, bool recursive) {
   if (is_directory)
     GetNewOperation(request_id)->CreateDirectory(path, exclusive, recursive);
@@ -174,7 +218,7 @@ void FileSystemDispatcherHost::OnCreate(
 }
 
 void FileSystemDispatcherHost::OnExists(
-    int request_id, const FilePath& path, bool is_directory) {
+    int request_id, const GURL& path, bool is_directory) {
   if (is_directory)
     GetNewOperation(request_id)->DirectoryExists(path);
   else
@@ -182,13 +226,13 @@ void FileSystemDispatcherHost::OnExists(
 }
 
 void FileSystemDispatcherHost::OnReadDirectory(
-    int request_id, const FilePath& path) {
+    int request_id, const GURL& path) {
   GetNewOperation(request_id)->ReadDirectory(path);
 }
 
 void FileSystemDispatcherHost::OnWrite(
     int request_id,
-    const FilePath& path,
+    const GURL& path,
     const GURL& blob_url,
     int64 offset) {
   GetNewOperation(request_id)->Write(
@@ -197,14 +241,14 @@ void FileSystemDispatcherHost::OnWrite(
 
 void FileSystemDispatcherHost::OnTruncate(
     int request_id,
-    const FilePath& path,
+    const GURL& path,
     int64 length) {
   GetNewOperation(request_id)->Truncate(path, length);
 }
 
 void FileSystemDispatcherHost::OnTouchFile(
     int request_id,
-    const FilePath& path,
+    const GURL& path,
     const base::Time& last_access_time,
     const base::Time& last_modified_time) {
   GetNewOperation(request_id)->TouchFile(
@@ -227,6 +271,11 @@ void FileSystemDispatcherHost::OnCancel(
   }
 }
 
+void FileSystemDispatcherHost::OnOpenFile(
+    int request_id, const GURL& path, int file_flags) {
+  GetNewOperation(request_id)->OpenFile(path, file_flags, peer_handle());
+}
+
 FileSystemOperation* FileSystemDispatcherHost::GetNewOperation(
     int request_id) {
   BrowserFileSystemCallbackDispatcher* dispatcher =
@@ -234,7 +283,8 @@ FileSystemOperation* FileSystemDispatcherHost::GetNewOperation(
   FileSystemOperation* operation = new FileSystemOperation(
       dispatcher,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-      context_);
+      context_,
+      NULL);
   operations_.AddWithID(operation, request_id);
   return operation;
 }

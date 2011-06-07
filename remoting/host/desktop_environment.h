@@ -6,59 +6,34 @@
 #define REMOTING_HOST_DESKTOP_ENVIRONMENT_H_
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
-#include "remoting/protocol/host_stub.h"
+#include "base/memory/scoped_ptr.h"
 
 namespace remoting {
 
-namespace protocol {
-class InputStub;
-}  // namespace protocol
-
 class Capturer;
+class Curtain;
+class EventExecutor;
 
-class DesktopEnvironment : public protocol::HostStub {
+class DesktopEnvironment {
  public:
-  // Callback interface for passing events to the ChromotingHost.
-  class EventHandler {
-   public:
-    virtual ~EventHandler() {}
-
-    // Called to signal that local login has succeeded and ChromotingHost can
-    // proceed with the next step.
-    virtual void LocalLoginSucceeded() = 0;
-
-    // Called to signal that local login has failed.
-    virtual void LocalLoginFailed() = 0;
-  };
-
-  DesktopEnvironment(Capturer* capturer, protocol::InputStub* input_stub);
+  // DesktopEnvironment takes ownership of all the objects passed the ctor.
+  DesktopEnvironment(Capturer* capturer, EventExecutor* event_executor,
+                     Curtain* curtain);
   virtual ~DesktopEnvironment();
 
   Capturer* capturer() const { return capturer_.get(); }
-  protocol::InputStub* input_stub() const { return input_stub_.get(); }
-  // Called by ChromotingHost constructor
-  void set_event_handler(EventHandler* event_handler) {
-    event_handler_ = event_handler;
-  }
-
-  // protocol::HostStub interface.
-  virtual void SuggestResolution(
-      const protocol::SuggestResolutionRequest* msg, Task* done);
-  virtual void BeginSessionRequest(
-      const protocol::LocalLoginCredentials* credentials, Task* done);
-
- protected:
-  // Allow access by DesktopEnvironmentFake for unittest.
-  EventHandler* event_handler_;
+  EventExecutor* event_executor() const { return event_executor_.get(); }
+  Curtain* curtain() const { return curtain_.get(); }
 
  private:
-  // Capturer to be used by ScreenRecorder. Once the ScreenRecorder is
-  // constructed this is set to NULL.
+  // Capturer to be used by ScreenRecorder.
   scoped_ptr<Capturer> capturer_;
 
-  // InputStub in the host executes input events received from the client.
-  scoped_ptr<protocol::InputStub> input_stub_;
+  // Executes input events received from the client.
+  scoped_ptr<EventExecutor> event_executor_;
+
+  // Curtain ensures privacy for the remote user.
+  scoped_ptr<Curtain> curtain_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopEnvironment);
 };

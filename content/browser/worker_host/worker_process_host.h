@@ -15,7 +15,13 @@
 #include "content/browser/worker_host/worker_document_set.h"
 #include "googleurl/src/gurl.h"
 
+class ResourceDispatcherHost;
+namespace content {
+class ResourceContext;
+}  // namespace content
+namespace net {
 class URLRequestContextGetter;
+}  // namespace net
 
 // The WorkerProcessHost is the interface that represents the browser side of
 // the browser <-> worker communication channel. There will be one
@@ -31,13 +37,18 @@ class WorkerProcessHost : public BrowserChildProcessHost {
    public:
     WorkerInstance(const GURL& url,
                    bool shared,
-                   bool off_the_record,
+                   bool incognito,
                    const string16& name,
                    int worker_route_id,
                    int parent_process_id,
                    int parent_appcache_host_id,
                    int64 main_resource_appcache_id,
-                   URLRequestContextGetter* request_context);
+                   const content::ResourceContext& resource_context);
+    // Used for pending instances. Rest of the parameters are ignored.
+    WorkerInstance(const GURL& url,
+                   bool shared,
+                   bool incognito,
+                   const string16& name);
     ~WorkerInstance();
 
     // Unique identifier for a worker client.
@@ -60,7 +71,7 @@ class WorkerProcessHost : public BrowserChildProcessHost {
     // (per the comparison algorithm in the WebWorkers spec). This API only
     // applies to shared workers.
     bool Matches(
-        const GURL& url, const string16& name, bool off_the_record) const;
+        const GURL& url, const string16& name, bool incognito) const;
 
     // Shares the passed instance's WorkerDocumentSet with this instance. This
     // instance's current WorkerDocumentSet is dereferenced (and freed if this
@@ -71,7 +82,7 @@ class WorkerProcessHost : public BrowserChildProcessHost {
 
     // Accessors
     bool shared() const { return shared_; }
-    bool off_the_record() const { return off_the_record_; }
+    bool incognito() const { return incognito_; }
     bool closed() const { return closed_; }
     void set_closed(bool closed) { closed_ = closed; }
     const GURL& url() const { return url_; }
@@ -85,29 +96,29 @@ class WorkerProcessHost : public BrowserChildProcessHost {
     WorkerDocumentSet* worker_document_set() const {
       return worker_document_set_;
     }
-    URLRequestContextGetter* request_context() const {
-      return request_context_;
+    const content::ResourceContext& resource_context() const {
+      return *resource_context_;
     }
 
    private:
     // Set of all filters (clients) associated with this worker.
     GURL url_;
     bool shared_;
-    bool off_the_record_;
+    bool incognito_;
     bool closed_;
     string16 name_;
     int worker_route_id_;
     int parent_process_id_;
     int parent_appcache_host_id_;
     int64 main_resource_appcache_id_;
-    scoped_refptr<URLRequestContextGetter> request_context_;
     FilterList filters_;
     scoped_refptr<WorkerDocumentSet> worker_document_set_;
+    const content::ResourceContext* const resource_context_;
   };
 
   WorkerProcessHost(
-      ResourceDispatcherHost* resource_dispatcher_host,
-      URLRequestContextGetter* request_context);
+      const content::ResourceContext* resource_context,
+      ResourceDispatcherHost* resource_dispatcher_host);
   ~WorkerProcessHost();
 
   // Starts the process.  Returns true iff it succeeded.
@@ -128,10 +139,6 @@ class WorkerProcessHost : public BrowserChildProcessHost {
   // documents.
   void DocumentDetached(WorkerMessageFilter* filter,
                         unsigned long long document_id);
-
-  URLRequestContextGetter* request_context() const {
-    return request_context_;
-  }
 
  protected:
   friend class WorkerService;
@@ -174,12 +181,14 @@ class WorkerProcessHost : public BrowserChildProcessHost {
 
   Instances instances_;
 
-  scoped_refptr<URLRequestContextGetter> request_context_;
+  const content::ResourceContext* const resource_context_;
 
   // A reference to the filter associated with this worker process.  We need to
   // keep this around since we'll use it when forward messages to the worker
   // process.
   scoped_refptr<WorkerMessageFilter> worker_message_filter_;
+
+  ResourceDispatcherHost* const resource_dispatcher_host_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkerProcessHost);
 };

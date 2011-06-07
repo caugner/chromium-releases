@@ -3,16 +3,12 @@
 // found in the LICENSE file.
 
 // IPC messages for resource loading.
-// Multiply-included message file, hence no include guard.
 
+// Multiply-included message file, hence no include guard.
 #include "base/shared_memory.h"
 #include "content/common/resource_response.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/upload_data.h"
-
-namespace net {
-class UploadData;
-}
 
 #define IPC_MESSAGE_START ResourceMsgStart
 
@@ -24,6 +20,7 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(charset)
   IPC_STRUCT_TRAITS_MEMBER(security_info)
   IPC_STRUCT_TRAITS_MEMBER(content_length)
+  IPC_STRUCT_TRAITS_MEMBER(encoded_data_length)
   IPC_STRUCT_TRAITS_MEMBER(appcache_id)
   IPC_STRUCT_TRAITS_MEMBER(appcache_manifest_url)
   IPC_STRUCT_TRAITS_MEMBER(connection_id)
@@ -95,15 +92,6 @@ IPC_STRUCT_BEGIN(ResourceHostMsg_Request)
 
   // True if the request was user initiated.
   IPC_STRUCT_MEMBER(bool, has_user_gesture)
-
-  // The following two members are specified if the request is initiated by
-  // a plugin like Gears.
-
-  // Contains the id of the host renderer.
-  IPC_STRUCT_MEMBER(int, host_renderer_id)
-
-  // Contains the id of the host render view.
-  IPC_STRUCT_MEMBER(int, host_render_view_id)
 IPC_STRUCT_END()
 
 // Resource messages sent from the browser to the renderer.
@@ -134,10 +122,11 @@ IPC_MESSAGE_ROUTED3(ResourceMsg_ReceivedRedirect,
 
 // Sent when some data from a resource request is ready. The handle should
 // already be mapped into the process that receives this message.
-IPC_MESSAGE_ROUTED3(ResourceMsg_DataReceived,
+IPC_MESSAGE_ROUTED4(ResourceMsg_DataReceived,
                     int /* request_id */,
                     base::SharedMemoryHandle /* data */,
-                    int /* data_len */)
+                    int /* data_len */,
+                    int /* encoded_data_length */)
 
 // Sent when some data from a resource request has been downloaded to
 // file. This is only called in the 'download_to_file' case and replaces

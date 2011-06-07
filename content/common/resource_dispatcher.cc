@@ -36,9 +36,7 @@ namespace webkit_glue {
 class IPCResourceLoaderBridge : public ResourceLoaderBridge {
  public:
   IPCResourceLoaderBridge(ResourceDispatcher* dispatcher,
-      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
-      int host_renderer_id,
-      int host_render_view_id);
+      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info);
   virtual ~IPCResourceLoaderBridge();
 
   // ResourceLoaderBridge
@@ -71,28 +69,15 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
 
   // The routing id used when sending IPC messages.
   int routing_id_;
-
-  // The following two members are specified if the request is initiated by
-  // a plugin like Gears.
-
-  // Contains the id of the host renderer.
-  int host_renderer_id_;
-
-  // Contains the id of the host render view.
-  int host_render_view_id_;
 };
 
 IPCResourceLoaderBridge::IPCResourceLoaderBridge(
     ResourceDispatcher* dispatcher,
-    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
-    int host_renderer_id,
-    int host_render_view_id)
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info)
     : peer_(NULL),
       dispatcher_(dispatcher),
       request_id_(-1),
-      routing_id_(request_info.routing_id),
-      host_renderer_id_(host_renderer_id),
-      host_render_view_id_(host_render_view_id) {
+      routing_id_(request_info.routing_id) {
   DCHECK(dispatcher_) << "no resource dispatcher";
   request_.method = request_info.method;
   request_.url = request_info.url;
@@ -106,8 +91,6 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   request_.appcache_host_id = request_info.appcache_host_id;
   request_.download_to_file = request_info.download_to_file;
   request_.has_user_gesture = request_info.has_user_gesture;
-  request_.host_renderer_id = host_renderer_id_;
-  request_.host_render_view_id = host_render_view_id_;
 }
 
 IPCResourceLoaderBridge::~IPCResourceLoaderBridge() {
@@ -229,6 +212,7 @@ void IPCResourceLoaderBridge::SyncLoad(SyncLoadResponse* response) {
   response->charset = result.charset;
   response->request_time = result.request_time;
   response->response_time = result.response_time;
+  response->encoded_data_length = result.encoded_data_length;
   response->connection_id = result.connection_id;
   response->connection_reused = result.connection_reused;
   response->load_timing = result.load_timing;
@@ -353,7 +337,8 @@ void ResourceDispatcher::OnReceivedCachedMetadata(
 void ResourceDispatcher::OnReceivedData(const IPC::Message& message,
                                         int request_id,
                                         base::SharedMemoryHandle shm_handle,
-                                        int data_len) {
+                                        int data_len,
+                                        int encoded_data_length) {
   // Acknowledge the reception of this data.
   message_sender()->Send(
       new ResourceHostMsg_DataReceived_ACK(message.routing_id(), request_id));
@@ -368,7 +353,7 @@ void ResourceDispatcher::OnReceivedData(const IPC::Message& message,
 
   if (data_len > 0 && shared_mem.Map(data_len)) {
     const char* data = static_cast<char*>(shared_mem.memory());
-    request_info->peer->OnReceivedData(data, data_len);
+    request_info->peer->OnReceivedData(data, data_len, encoded_data_length);
   }
 }
 
@@ -554,12 +539,8 @@ void ResourceDispatcher::FlushDeferredMessages(int request_id) {
 }
 
 webkit_glue::ResourceLoaderBridge* ResourceDispatcher::CreateBridge(
-    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
-    int host_renderer_id,
-    int host_render_view_id) {
-  return new webkit_glue::IPCResourceLoaderBridge(this, request_info,
-                                                  host_renderer_id,
-                                                  host_render_view_id);
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info) {
+  return new webkit_glue::IPCResourceLoaderBridge(this, request_info);
 }
 
 bool ResourceDispatcher::IsResourceDispatcherMessage(

@@ -11,8 +11,6 @@
     # features.gypi. Therefore, if an enable is listed in features.gypi
     # but not listed below, it will revert to its hardcoded webkit value.
     'feature_defines': [
-      # TODO(kbr): remove ENABLE_3D_CANVAS after renaming to ENABLE_WEBGL lands.
-      'ENABLE_3D_CANVAS=1',
       'ENABLE_3D_PLUGIN=1',
       'ENABLE_BLOB=1',
       'ENABLE_BLOB_SLICE=1',
@@ -21,6 +19,7 @@
       'ENABLE_DASHBOARD_SUPPORT=0',
       'ENABLE_DATABASE=1',
       'ENABLE_DATAGRID=0',
+      'ENABLE_DATA_TRANSFER_ITEMS=1',
       'ENABLE_DEVICE_ORIENTATION=1',
       'ENABLE_DIRECTORY_UPLOAD=1',
       'ENABLE_DOM_STORAGE=1',
@@ -35,9 +34,11 @@
       'ENABLE_INPUT_SPEECH=1',
       'ENABLE_JAVASCRIPT_DEBUGGER=1',
       'ENABLE_JSC_MULTIPLE_THREADS=0',
+      'ENABLE_LEVELDB=0',
       'ENABLE_LINK_PREFETCH=1',
       'ENABLE_METER_TAG=1',
       'ENABLE_MEDIA_STATISTICS=1',
+      'ENABLE_MEDIA_STREAM=1',
       'ENABLE_NOTIFICATIONS=1',
       'ENABLE_OFFLINE_WEB_APPLICATIONS=1',
       'ENABLE_OPENTYPE_SANITIZER=1',
@@ -65,6 +66,9 @@
       'ENABLE_XPATH=1',
       'ENABLE_XSLT=1',
       'WTF_USE_BUILTIN_UTF8_CODEC=1',
+      # WTF_USE_DYNAMIC_ANNOTATIONS=1 may be defined in build/common.gypi
+      # We can't define it here because it should be present only
+      # in Debug or release_valgrind_build=1 builds.
       'WTF_USE_WEBP=1',
       'WTF_USE_WEBKIT_IMAGE_DECODERS=1',
     ],
@@ -72,11 +76,13 @@
     # through GYP_DEFINES.
     'variables': {
       'use_accelerated_compositing%': 1,
+      'use_threaded_compositing%': 0,
       'enable_svg%': 1,
       'enable_touch_events%': 1,
       'use_skia_gpu%': 0,
     },
     'use_accelerated_compositing%': '<(use_accelerated_compositing)',
+    'use_threaded_compositing%': '<(use_threaded_compositing)',
     'enable_svg%': '<(enable_svg)',
     'enable_touch_events%': '<(enable_touch_events)',
     'conditions': [
@@ -87,6 +93,12 @@
           'ENABLE_ACCELERATED_2D_CANVAS=1',
         ],
         'use_accelerated_compositing': 1,
+      }],
+      ['use_accelerated_compositing==1 and use_threaded_compositing==1', {
+        'feature_defines': [
+          'WTF_USE_THREADED_COMPOSITING=1',
+        ],
+        'use_threaded_compositing': 1,
       }],
       ['OS=="mac"', {
         'feature_defines': [

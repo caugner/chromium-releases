@@ -27,6 +27,7 @@ class ChildProcessSecurityPolicyTest : public testing::Test {
 };
 
 static int kRendererID = 42;
+static int kWorkerRendererID = kRendererID + 1;
 
 TEST_F(ChildProcessSecurityPolicyTest, IsWebSafeSchemeTest) {
   ChildProcessSecurityPolicy* p = ChildProcessSecurityPolicy::GetInstance();
@@ -52,9 +53,25 @@ TEST_F(ChildProcessSecurityPolicyTest, IsPseudoSchemeTest) {
   EXPECT_TRUE(p->IsPseudoScheme(chrome::kJavaScriptScheme));
   EXPECT_TRUE(p->IsPseudoScheme(chrome::kViewSourceScheme));
 
-  EXPECT_FALSE(p->IsPseudoScheme("registered-psuedo-scheme"));
-  p->RegisterPseudoScheme("registered-psuedo-scheme");
-  EXPECT_TRUE(p->IsPseudoScheme("registered-psuedo-scheme"));
+  EXPECT_FALSE(p->IsPseudoScheme("registered-pseudo-scheme"));
+  p->RegisterPseudoScheme("registered-pseudo-scheme");
+  EXPECT_TRUE(p->IsPseudoScheme("registered-pseudo-scheme"));
+}
+
+TEST_F(ChildProcessSecurityPolicyTest, IsDisabledSchemeTest) {
+  ChildProcessSecurityPolicy* p = ChildProcessSecurityPolicy::GetInstance();
+
+  EXPECT_FALSE(p->IsDisabledScheme("evil-scheme"));
+  std::set<std::string> disabled_set;
+  disabled_set.insert("evil-scheme");
+  p->RegisterDisabledSchemes(disabled_set);
+  EXPECT_TRUE(p->IsDisabledScheme("evil-scheme"));
+  EXPECT_FALSE(p->IsDisabledScheme("good-scheme"));
+
+  disabled_set.clear();
+  p->RegisterDisabledSchemes(disabled_set);
+  EXPECT_FALSE(p->IsDisabledScheme("evil-scheme"));
+  EXPECT_FALSE(p->IsDisabledScheme("good-scheme"));
 }
 
 TEST_F(ChildProcessSecurityPolicyTest, StandardSchemesTest) {
@@ -161,6 +178,17 @@ TEST_F(ChildProcessSecurityPolicyTest, CanServiceCommandsTest) {
   p->GrantRequestURL(kRendererID, GURL("file:///etc/passwd"));
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("file:///etc/passwd")));
 
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("evil-scheme:/path")));
+  std::set<std::string> disabled_set;
+  disabled_set.insert("evil-scheme");
+  p->RegisterDisabledSchemes(disabled_set);
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("http://www.google.com")));
+  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("evil-scheme:/path")));
+  disabled_set.clear();
+  p->RegisterDisabledSchemes(disabled_set);
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("http://www.google.com")));
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("evil-scheme:/path")));
+
   // We should forget our state if we repeat a renderer id.
   p->Remove(kRendererID);
   p->Add(kRendererID);
@@ -211,6 +239,38 @@ TEST_F(ChildProcessSecurityPolicyTest, CanReadFiles) {
       FilePath(FILE_PATH_LITERAL("/etc/passwd"))));
   EXPECT_FALSE(p->CanReadFile(kRendererID,
       FilePath(FILE_PATH_LITERAL("/etc/shadow"))));
+
+  p->Remove(kRendererID);
+}
+
+TEST_F(ChildProcessSecurityPolicyTest, CanReadDirectories) {
+  ChildProcessSecurityPolicy* p = ChildProcessSecurityPolicy::GetInstance();
+
+  p->Add(kRendererID);
+
+  EXPECT_FALSE(p->CanReadDirectory(kRendererID,
+      FilePath(FILE_PATH_LITERAL("/etc/"))));
+  p->GrantReadDirectory(kRendererID, FilePath(FILE_PATH_LITERAL("/etc/")));
+  EXPECT_TRUE(p->CanReadDirectory(kRendererID,
+      FilePath(FILE_PATH_LITERAL("/etc/"))));
+  EXPECT_TRUE(p->CanReadFile(kRendererID,
+      FilePath(FILE_PATH_LITERAL("/etc/passwd"))));
+
+  p->Remove(kRendererID);
+  p->Add(kRendererID);
+
+  EXPECT_FALSE(p->CanReadDirectory(kRendererID,
+      FilePath(FILE_PATH_LITERAL("/etc/"))));
+  EXPECT_FALSE(p->CanReadFile(kRendererID,
+      FilePath(FILE_PATH_LITERAL("/etc/passwd"))));
+
+  // Just granting read permission as a file doesn't imply reading as a
+  // directory.
+  p->GrantReadFile(kRendererID, FilePath(FILE_PATH_LITERAL("/etc/")));
+  EXPECT_TRUE(p->CanReadFile(kRendererID,
+      FilePath(FILE_PATH_LITERAL("/etc/passwd"))));
+  EXPECT_FALSE(p->CanReadDirectory(kRendererID,
+      FilePath(FILE_PATH_LITERAL("/etc/"))));
 
   p->Remove(kRendererID);
 }
@@ -290,6 +350,28 @@ TEST_F(ChildProcessSecurityPolicyTest, FilePermissions) {
   EXPECT_FALSE(p->HasPermissionsForFile(kRendererID, file,
                                         base::PLATFORM_FILE_TEMPORARY));
   p->Remove(kRendererID);
+
+  // Grant file permissions for the file to main thread renderer process,
+  // make sure its worker thread renderer process inherits those.
+  p->Add(kRendererID);
+  p->GrantPermissionsForFile(kRendererID, file, base::PLATFORM_FILE_OPEN |
+                                                base::PLATFORM_FILE_READ);
+  EXPECT_TRUE(p->HasPermissionsForFile(kRendererID, file,
+                                       base::PLATFORM_FILE_OPEN |
+                                       base::PLATFORM_FILE_READ));
+  EXPECT_FALSE(p->HasPermissionsForFile(kRendererID, file,
+                                       base::PLATFORM_FILE_WRITE));
+  p->AddWorker(kWorkerRendererID, kRendererID);
+  EXPECT_TRUE(p->HasPermissionsForFile(kWorkerRendererID, file,
+                                       base::PLATFORM_FILE_OPEN |
+                                       base::PLATFORM_FILE_READ));
+  EXPECT_FALSE(p->HasPermissionsForFile(kWorkerRendererID, file,
+                                        base::PLATFORM_FILE_WRITE));
+  p->Remove(kRendererID);
+  EXPECT_FALSE(p->HasPermissionsForFile(kWorkerRendererID, file,
+                                        base::PLATFORM_FILE_OPEN |
+                                        base::PLATFORM_FILE_READ));
+  p->Remove(kWorkerRendererID);
 }
 
 TEST_F(ChildProcessSecurityPolicyTest, CanServiceWebUIBindings) {

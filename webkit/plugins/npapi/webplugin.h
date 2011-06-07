@@ -105,14 +105,6 @@ class WebPlugin {
   virtual std::string GetCookies(const GURL& url,
                                  const GURL& first_party_for_cookies) = 0;
 
-  // Shows a modal HTML dialog containing the given URL.  json_arguments are
-  // passed to the dialog via the DOM 'window.chrome.dialogArguments', and the
-  // retval is the string returned by 'window.chrome.send("DialogClose",
-  // retval)'.
-  virtual void ShowModalHTMLDialog(const GURL& url, int width, int height,
-                                   const std::string& json_arguments,
-                                   std::string* json_retval) = 0;
-
   // When a default plugin has downloaded the plugin list and finds it is
   // available, it calls this method to notify the renderer. Also it will update
   // the status when user clicks on the plugin to install.
@@ -138,7 +130,7 @@ class WebPlugin {
                                         const char* range_info,
                                         int range_request_id) = 0;
 
-  // Returns true iff in off the record (Incognito) mode.
+  // Returns true iff in incognito mode.
   virtual bool IsOffTheRecord() = 0;
 
   // Called when the WebPluginResourceClient instance is deleted.

@@ -154,6 +154,10 @@ TEST_F(PPAPITest, Var) {
   RunTest("Var");
 }
 
+TEST_F(PPAPITest, PostMessage) {
+  RunTest("PostMessage");
+}
+
 TEST_F(PPAPITest, FileIO) {
   RunTestViaHTTP("FileIO");
 }
@@ -167,6 +171,6 @@ TEST_F(PPAPITest, DISABLED_DirectoryReader) {
   RunTestViaHTTP("DirectoryReader");
 }
 
-TEST_F(PPAPITest, DISABLED_Transport) {
+TEST_F(PPAPITest, Transport) {
   RunTest("Transport");
 }

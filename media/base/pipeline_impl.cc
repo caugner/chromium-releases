@@ -5,21 +5,56 @@
 // TODO(scherkus): clean up PipelineImpl... too many crazy function names,
 // potential deadlocks, etc...
 
+#include "media/base/pipeline_impl.h"
+
+#include <algorithm>
+
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/stl_util-inl.h"
 #include "base/synchronization/condition_variable.h"
+#include "media/filters/rtc_video_decoder.h"
 #include "media/base/clock.h"
 #include "media/base/filter_collection.h"
 #include "media/base/media_format.h"
-#include "media/base/pipeline_impl.h"
 
 namespace media {
 
+PipelineStatusNotification::PipelineStatusNotification()
+    : cv_(&lock_), status_(PIPELINE_OK), notified_(false) {
+  callback_.reset(NewCallback(this, &PipelineStatusNotification::Notify));
+}
+
+PipelineStatusNotification::~PipelineStatusNotification() {
+  DCHECK(notified_);
+}
+
+media::PipelineStatusCallback* PipelineStatusNotification::Callback() {
+  return callback_.release();
+}
+
+void PipelineStatusNotification::Notify(media::PipelineStatus status) {
+  base::AutoLock auto_lock(lock_);
+  DCHECK(!notified_);
+  notified_ = true;
+  status_ = status;
+  cv_.Signal();
+}
+
+void PipelineStatusNotification::Wait() {
+  base::AutoLock auto_lock(lock_);
+  while (!notified_)
+    cv_.Wait();
+}
+
+media::PipelineStatus PipelineStatusNotification::status() {
+  base::AutoLock auto_lock(lock_);
+  DCHECK(notified_);
+  return status_;
+}
+
 class PipelineImpl::PipelineInitState {
  public:
-  scoped_refptr<DataSource> data_source_;
-  scoped_refptr<Demuxer> demuxer_;
   scoped_refptr<AudioDecoder> audio_decoder_;
   scoped_refptr<VideoDecoder> video_decoder_;
   scoped_refptr<CompositeFilter> composite_;
@@ -41,9 +76,9 @@ PipelineImpl::~PipelineImpl() {
   DCHECK(!seek_pending_);
 }
 
-void PipelineImpl::Init(PipelineCallback* ended_callback,
-                        PipelineCallback* error_callback,
-                        PipelineCallback* network_callback) {
+void PipelineImpl::Init(PipelineStatusCallback* ended_callback,
+                        PipelineStatusCallback* error_callback,
+                        PipelineStatusCallback* network_callback) {
   DCHECK(!IsRunning())
       << "Init() should be called before the pipeline has started";
   ended_callback_.reset(ended_callback);
@@ -54,9 +89,9 @@ void PipelineImpl::Init(PipelineCallback* ended_callback,
 // Creates the PipelineInternal and calls it's start method.
 bool PipelineImpl::Start(FilterCollection* collection,
                          const std::string& url,
-                         PipelineCallback* start_callback) {
+                         PipelineStatusCallback* start_callback) {
   base::AutoLock auto_lock(lock_);
-  scoped_ptr<PipelineCallback> callback(start_callback);
+  scoped_ptr<PipelineStatusCallback> callback(start_callback);
   scoped_ptr<FilterCollection> filter_collection(collection);
 
   if (running_) {
@@ -80,9 +115,9 @@ bool PipelineImpl::Start(FilterCollection* collection,
   return true;
 }
 
-void PipelineImpl::Stop(PipelineCallback* stop_callback) {
+void PipelineImpl::Stop(PipelineStatusCallback* stop_callback) {
   base::AutoLock auto_lock(lock_);
-  scoped_ptr<PipelineCallback> callback(stop_callback);
+  scoped_ptr<PipelineStatusCallback> callback(stop_callback);
   if (!running_) {
     VLOG(1) << "Media pipeline has already stopped";
     return;
@@ -94,9 +129,9 @@ void PipelineImpl::Stop(PipelineCallback* stop_callback) {
 }
 
 void PipelineImpl::Seek(base::TimeDelta time,
-                        PipelineCallback* seek_callback) {
+                        PipelineStatusCallback* seek_callback) {
   base::AutoLock auto_lock(lock_);
-  scoped_ptr<PipelineCallback> callback(seek_callback);
+  scoped_ptr<PipelineStatusCallback> callback(seek_callback);
   if (!running_) {
     VLOG(1) << "Media pipeline must be running";
     return;
@@ -135,11 +170,14 @@ bool PipelineImpl::IsNetworkActive() const {
   return network_activity_;
 }
 
-bool PipelineImpl::IsRendered(const std::string& major_mime_type) const {
+bool PipelineImpl::HasAudio() const {
   base::AutoLock auto_lock(lock_);
-  bool is_rendered = (rendered_mime_types_.find(major_mime_type) !=
-                      rendered_mime_types_.end());
-  return is_rendered;
+  return has_audio_;
+}
+
+bool PipelineImpl::HasVideo() const {
+  base::AutoLock auto_lock(lock_);
+  return has_video_;
 }
 
 float PipelineImpl::GetPlaybackRate() const {
@@ -177,6 +215,21 @@ void PipelineImpl::SetVolume(float volume) {
     message_loop_->PostTask(FROM_HERE,
         NewRunnableMethod(this, &PipelineImpl::VolumeChangedTask,
                           volume));
+  }
+}
+
+Preload PipelineImpl::GetPreload() const {
+  base::AutoLock auto_lock(lock_);
+  return preload_;
+}
+
+void PipelineImpl::SetPreload(Preload preload) {
+  base::AutoLock auto_lock(lock_);
+  preload_ = preload;
+  if (running_) {
+    message_loop_->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &PipelineImpl::PreloadChangedTask,
+                          preload));
   }
 }
 
@@ -269,11 +322,6 @@ bool PipelineImpl::IsLoaded() const {
   return loaded_;
 }
 
-PipelineError PipelineImpl::GetError() const {
-  base::AutoLock auto_lock(lock_);
-  return error_;
-}
-
 PipelineStatistics PipelineImpl::GetStatistics() const {
   base::AutoLock auto_lock(lock_);
   return statistics_;
@@ -310,6 +358,7 @@ void PipelineImpl::ResetState() {
   seek_pending_     = false;
   tearing_down_     = false;
   error_caused_teardown_ = false;
+  playback_rate_change_pending_ = false;
   duration_         = kZero;
   buffered_time_    = kZero;
   buffered_bytes_   = 0;
@@ -319,12 +368,15 @@ void PipelineImpl::ResetState() {
   video_width_      = 0;
   video_height_     = 0;
   volume_           = 1.0f;
+  preload_          = AUTO;
   playback_rate_    = 0.0f;
-  error_            = PIPELINE_OK;
+  pending_playback_rate_ = 0.0f;
+  status_           = PIPELINE_OK;
+  has_audio_        = false;
+  has_video_        = false;
   waiting_for_clock_update_ = false;
   audio_disabled_   = false;
   clock_->SetTime(kZero);
-  rendered_mime_types_.clear();
 }
 
 void PipelineImpl::set_state(State next_state) {
@@ -332,7 +384,8 @@ void PipelineImpl::set_state(State next_state) {
 }
 
 bool PipelineImpl::IsPipelineOk() {
-  return PIPELINE_OK == GetError();
+  base::AutoLock auto_lock(lock_);
+  return status_ == PIPELINE_OK;
 }
 
 bool PipelineImpl::IsPipelineStopped() {
@@ -365,7 +418,7 @@ void PipelineImpl::FinishInitialization() {
   // Execute the seek callback, if present.  Note that this might be the
   // initial callback passed into Start().
   if (seek_callback_.get()) {
-    seek_callback_->Run();
+    seek_callback_->Run(status_);
     seek_callback_.reset();
   }
 }
@@ -402,7 +455,7 @@ PipelineImpl::State PipelineImpl::FindNextState(State current) {
   }
 }
 
-void PipelineImpl::SetError(PipelineError error) {
+void PipelineImpl::SetError(PipelineStatus error) {
   DCHECK(IsRunning());
   DCHECK(error != PIPELINE_OK) << "PIPELINE_OK isn't an error!";
   VLOG(1) << "Media pipeline error: " << error;
@@ -509,18 +562,6 @@ void PipelineImpl::DisableAudioRenderer() {
       NewRunnableMethod(this, &PipelineImpl::DisableAudioRendererTask));
 }
 
-void PipelineImpl::InsertRenderedMimeType(const std::string& major_mime_type) {
-  DCHECK(IsRunning());
-  base::AutoLock auto_lock(lock_);
-  rendered_mime_types_.insert(major_mime_type);
-}
-
-bool PipelineImpl::HasRenderedMimeTypes() const {
-  DCHECK(IsRunning());
-  base::AutoLock auto_lock(lock_);
-  return !rendered_mime_types_.empty();
-}
-
 // Called from any thread.
 void PipelineImpl::OnFilterInitialize() {
   // Continue the initialize task by proceeding to the next stage.
@@ -550,7 +591,7 @@ void PipelineImpl::OnUpdateStatistics(const PipelineStatistics& stats) {
 
 void PipelineImpl::StartTask(FilterCollection* filter_collection,
                              const std::string& url,
-                             PipelineCallback* start_callback) {
+                             PipelineStatusCallback* start_callback) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK_EQ(kCreated, state_);
   filter_collection_.reset(filter_collection);
@@ -558,18 +599,28 @@ void PipelineImpl::StartTask(FilterCollection* filter_collection,
   seek_callback_.reset(start_callback);
 
   // Kick off initialization.
-  InitializeTask();
+  pipeline_init_state_.reset(new PipelineInitState());
+  pipeline_init_state_->composite_ = new CompositeFilter(message_loop_);
+  pipeline_init_state_->composite_->set_host(this);
+
+  if (RTCVideoDecoder::IsUrlSupported(url)) {
+    set_state(kInitVideoDecoder);
+    InitializeVideoDecoder(NULL);
+  } else {
+    set_state(kInitDemuxer);
+    InitializeDemuxer();
+  }
 }
 
 // Main initialization method called on the pipeline thread.  This code attempts
 // to use the specified filter factory to build a pipeline.
 // Initialization step performed in this method depends on current state of this
 // object, indicated by |state_|.  After each step of initialization, this
-// object transits to the next stage.  It starts by creating a DataSource,
-// connects it to a Demuxer, and then connects the Demuxer's audio stream to an
-// AudioDecoder which is then connected to an AudioRenderer.  If the media has
-// video, then it connects a VideoDecoder to the Demuxer's video stream, and
-// then connects the VideoDecoder to a VideoRenderer.
+// object transits to the next stage.  It starts by creating a Demuxer, and then
+// connects the Demuxer's audio stream to an AudioDecoder which is then
+// connected to an AudioRenderer.  If the media has video, then it connects a
+// VideoDecoder to the Demuxer's video stream, and then connects the
+// VideoDecoder to a VideoRenderer.
 //
 // When all required filters have been created and have called their
 // FilterHost's InitializationComplete() method, the pipeline will update its
@@ -582,43 +633,21 @@ void PipelineImpl::InitializeTask() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   // If we have received the stop or error signal, return immediately.
-  if (IsPipelineStopPending() ||
-      IsPipelineStopped() ||
-      PIPELINE_OK != GetError()) {
+  if (IsPipelineStopPending() || IsPipelineStopped() || !IsPipelineOk())
     return;
-  }
 
-  DCHECK(state_ == kCreated ||
-         state_ == kInitDataSource ||
-         state_ == kInitDemuxer ||
+  DCHECK(state_ == kInitDemuxer ||
          state_ == kInitAudioDecoder ||
          state_ == kInitAudioRenderer ||
          state_ == kInitVideoDecoder ||
          state_ == kInitVideoRenderer);
 
-  // Just created, create data source.
-  if (state_ == kCreated) {
-    set_state(kInitDataSource);
-    pipeline_init_state_.reset(new PipelineInitState());
-    pipeline_init_state_->composite_ = new CompositeFilter(message_loop_);
-    pipeline_init_state_->composite_->set_host(this);
-
-    InitializeDataSource();
-    return;
-  }
-
-  // Data source created, create demuxer.
-  if (state_ == kInitDataSource) {
-    set_state(kInitDemuxer);
-    InitializeDemuxer(pipeline_init_state_->data_source_);
-    return;
-  }
 
   // Demuxer created, create audio decoder.
   if (state_ == kInitDemuxer) {
     set_state(kInitAudioDecoder);
     // If this method returns false, then there's no audio stream.
-    if (InitializeAudioDecoder(pipeline_init_state_->demuxer_))
+    if (InitializeAudioDecoder(demuxer_))
       return;
   }
 
@@ -627,7 +656,8 @@ void PipelineImpl::InitializeTask() {
     set_state(kInitAudioRenderer);
     // Returns false if there's no audio stream.
     if (InitializeAudioRenderer(pipeline_init_state_->audio_decoder_)) {
-      InsertRenderedMimeType(mime_type::kMajorTypeAudio);
+      base::AutoLock auto_lock(lock_);
+      has_audio_ = true;
       return;
     }
   }
@@ -636,7 +666,7 @@ void PipelineImpl::InitializeTask() {
   if (state_ == kInitAudioRenderer) {
     // Then perform the stage of initialization, i.e. initialize video decoder.
     set_state(kInitVideoDecoder);
-    if (InitializeVideoDecoder(pipeline_init_state_->demuxer_))
+    if (InitializeVideoDecoder(demuxer_))
       return;
   }
 
@@ -644,13 +674,14 @@ void PipelineImpl::InitializeTask() {
   if (state_ == kInitVideoDecoder) {
     set_state(kInitVideoRenderer);
     if (InitializeVideoRenderer(pipeline_init_state_->video_decoder_)) {
-      InsertRenderedMimeType(mime_type::kMajorTypeVideo);
+      base::AutoLock auto_lock(lock_);
+      has_video_ = true;
       return;
     }
   }
 
   if (state_ == kInitVideoRenderer) {
-    if (!IsPipelineOk() || !HasRenderedMimeTypes()) {
+    if (!IsPipelineOk() || !(HasAudio() || HasVideo())) {
       SetError(PIPELINE_ERROR_COULD_NOT_RENDER);
       return;
     }
@@ -671,6 +702,7 @@ void PipelineImpl::InitializeTask() {
 
     // Initialization was successful, we are now considered paused, so it's safe
     // to set the initial playback rate and volume.
+    PreloadChangedTask(GetPreload());
     PlaybackRateChangedTask(GetPlaybackRate());
     VolumeChangedTask(GetVolume());
 
@@ -690,14 +722,14 @@ void PipelineImpl::InitializeTask() {
 // TODO(scherkus): beware!  this can get posted multiple times since we post
 // Stop() tasks even if we've already stopped.  Perhaps this should no-op for
 // additional calls, however most of this logic will be changing.
-void PipelineImpl::StopTask(PipelineCallback* stop_callback) {
+void PipelineImpl::StopTask(PipelineStatusCallback* stop_callback) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(!IsPipelineStopPending());
   DCHECK_NE(state_, kStopped);
 
   if (state_ == kStopped) {
     // Already stopped so just run callback.
-    stop_callback->Run();
+    stop_callback->Run(status_);
     delete stop_callback;
     return;
   }
@@ -708,7 +740,7 @@ void PipelineImpl::StopTask(PipelineCallback* stop_callback) {
     // the teardown in progress from an error teardown into one that acts
     // like the error never occurred.
     base::AutoLock auto_lock(lock_);
-    error_ = PIPELINE_OK;
+    status_ = PIPELINE_OK;
     error_caused_teardown_ = false;
   }
 
@@ -723,7 +755,7 @@ void PipelineImpl::StopTask(PipelineCallback* stop_callback) {
   }
 }
 
-void PipelineImpl::ErrorChangedTask(PipelineError error) {
+void PipelineImpl::ErrorChangedTask(PipelineStatus error) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK_NE(PIPELINE_OK, error) << "PIPELINE_OK isn't an error!";
 
@@ -735,7 +767,7 @@ void PipelineImpl::ErrorChangedTask(PipelineError error) {
   }
 
   base::AutoLock auto_lock(lock_);
-  error_ = error;
+  status_ = error;
 
   error_caused_teardown_ = true;
 
@@ -750,6 +782,14 @@ void PipelineImpl::ErrorChangedTask(PipelineError error) {
 
 void PipelineImpl::PlaybackRateChangedTask(float playback_rate) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
+
+  // Suppress rate change until after seeking.
+  if (IsPipelineSeeking()) {
+    pending_playback_rate_ = playback_rate;
+    playback_rate_change_pending_ = true;
+    return;
+  }
+
   {
     base::AutoLock auto_lock(lock_);
     clock_->SetPlaybackRate(playback_rate);
@@ -771,8 +811,14 @@ void PipelineImpl::VolumeChangedTask(float volume) {
   }
 }
 
+void PipelineImpl::PreloadChangedTask(Preload preload) {
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  if (demuxer_)
+    demuxer_->SetPreload(preload);
+}
+
 void PipelineImpl::SeekTask(base::TimeDelta time,
-                            PipelineCallback* seek_callback) {
+                            PipelineStatusCallback* seek_callback) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(!IsPipelineStopPending());
 
@@ -842,25 +888,22 @@ void PipelineImpl::NotifyEndedTask() {
   // Transition to ended, executing the callback if present.
   set_state(kEnded);
   if (ended_callback_.get()) {
-    ended_callback_->Run();
+    ended_callback_->Run(status_);
   }
 }
 
 void PipelineImpl::NotifyNetworkEventTask() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   if (network_callback_.get()) {
-    network_callback_->Run();
+    network_callback_->Run(status_);
   }
 }
 
 void PipelineImpl::DisableAudioRendererTask() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
 
-  // |rendered_mime_types_| is read through public methods so we need to lock
-  // this variable.
   base::AutoLock auto_lock(lock_);
-  rendered_mime_types_.erase(mime_type::kMajorTypeAudio);
-
+  has_audio_ = false;
   audio_disabled_ = true;
 
   // Notify all filters of disabled audio renderer. If the filter isn't
@@ -912,7 +955,7 @@ void PipelineImpl::FilterStateTransitionTask() {
           NewCallback(this, &PipelineImpl::OnFilterStateTransition));
     } else if (state_ == kStarting) {
       pipeline_filter_->Play(
-          NewCallback(this,&PipelineImpl::OnFilterStateTransition));
+          NewCallback(this, &PipelineImpl::OnFilterStateTransition));
     } else if (state_ == kStopping) {
       pipeline_filter_->Stop(
           NewCallback(this, &PipelineImpl::OnFilterStateTransition));
@@ -926,12 +969,17 @@ void PipelineImpl::FilterStateTransitionTask() {
     seek_timestamp_ = base::TimeDelta();
     seek_pending_ = false;
 
+    // If a playback rate change was requested during a seek, do it now that
+    // the seek has compelted.
+    if (playback_rate_change_pending_) {
+      playback_rate_change_pending_ = false;
+      PlaybackRateChangedTask(pending_playback_rate_);
+    }
+
     base::AutoLock auto_lock(lock_);
     // We use audio stream to update the clock. So if there is such a stream,
     // we pause the clock until we receive a valid timestamp.
-    waiting_for_clock_update_ =
-        rendered_mime_types_.find(mime_type::kMajorTypeAudio) !=
-        rendered_mime_types_.end();
+    waiting_for_clock_update_ = has_audio_;
     if (!waiting_for_clock_update_)
       clock_->Play();
 
@@ -946,7 +994,7 @@ void PipelineImpl::FilterStateTransitionTask() {
 
 void PipelineImpl::TeardownStateTransitionTask() {
   DCHECK(IsPipelineTearingDown());
-  switch(state_) {
+  switch (state_) {
     case kStopping:
       set_state(error_caused_teardown_ ? kError : kStopped);
       FinishDestroyingFiltersTask();
@@ -964,7 +1012,6 @@ void PipelineImpl::TeardownStateTransitionTask() {
 
     case kCreated:
     case kError:
-    case kInitDataSource:
     case kInitDemuxer:
     case kInitAudioDecoder:
     case kInitAudioRenderer:
@@ -986,24 +1033,23 @@ void PipelineImpl::FinishDestroyingFiltersTask() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(IsPipelineStopped());
 
-  // Clear renderer references.
+  // Clear filter references.
   audio_renderer_ = NULL;
   video_renderer_ = NULL;
+  demuxer_ = NULL;
 
   pipeline_filter_ = NULL;
 
-  if (error_caused_teardown_ && GetError() != PIPELINE_OK &&
-      error_callback_.get()) {
-    error_callback_->Run();
-  }
+  if (error_caused_teardown_ && !IsPipelineOk() && error_callback_.get())
+    error_callback_->Run(status_);
 
   if (stop_pending_) {
     stop_pending_ = false;
     ResetState();
-    scoped_ptr<PipelineCallback> stop_callback(stop_callback_.release());
+    scoped_ptr<PipelineStatusCallback> stop_callback(stop_callback_.release());
     // Notify the client that stopping has finished.
     if (stop_callback.get()) {
-      stop_callback->Run();
+      stop_callback->Run(status_);
     }
   }
 
@@ -1020,40 +1066,29 @@ bool PipelineImpl::PrepareFilter(scoped_refptr<Filter> filter) {
   return ret;
 }
 
-void PipelineImpl::InitializeDataSource() {
+void PipelineImpl::InitializeDemuxer() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(IsPipelineOk());
 
-  scoped_refptr<DataSource> data_source;
-  while (true) {
-    filter_collection_->SelectDataSource(&data_source);
-    if (!data_source || data_source->IsUrlSupported(url_))
-      break;
-  }
-
-  if (!data_source) {
-    SetError(PIPELINE_ERROR_REQUIRED_FILTER_MISSING);
-    return;
-  }
-
-  if (!PrepareFilter(data_source))
-    return;
-
-  pipeline_init_state_->data_source_ = data_source;
-  data_source->Initialize(
-      url_, NewCallback(this, &PipelineImpl::OnFilterInitialize));
+  filter_collection_->GetDemuxerFactory()->Build(url_,
+      NewCallback(this, &PipelineImpl::OnDemuxerBuilt));
 }
 
-void PipelineImpl::InitializeDemuxer(
-    const scoped_refptr<DataSource>& data_source) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
-  DCHECK(IsPipelineOk());
+void PipelineImpl::OnDemuxerBuilt(PipelineStatus status, Demuxer* demuxer) {
+  if (MessageLoop::current() != message_loop_) {
+    message_loop_->PostTask(FROM_HERE,
+                            NewRunnableMethod(this,
+                                              &PipelineImpl::OnDemuxerBuilt,
+                                              status,
+                                              make_scoped_refptr(demuxer)));
+    return;
+  }
 
-  scoped_refptr<Demuxer> demuxer;
+  if (status != PIPELINE_OK) {
+    SetError(status);
+    return;
+  }
 
-  CHECK(data_source);
-
-  filter_collection_->SelectDemuxer(&demuxer);
   if (!demuxer) {
     SetError(PIPELINE_ERROR_REQUIRED_FILTER_MISSING);
     return;
@@ -1062,9 +1097,8 @@ void PipelineImpl::InitializeDemuxer(
   if (!PrepareFilter(demuxer))
     return;
 
-  pipeline_init_state_->demuxer_ = demuxer;
-  demuxer->Initialize(data_source,
-                      NewCallback(this, &PipelineImpl::OnFilterInitialize));
+  demuxer_ = demuxer;
+  OnFilterInitialize();
 }
 
 bool PipelineImpl::InitializeAudioDecoder(
@@ -1073,7 +1107,7 @@ bool PipelineImpl::InitializeAudioDecoder(
   DCHECK(IsPipelineOk());
 
   scoped_refptr<DemuxerStream> stream =
-      FindDemuxerStream(demuxer, mime_type::kMajorTypeAudio);
+      demuxer->GetStream(DemuxerStream::AUDIO);
 
   if (!stream)
     return false;
@@ -1102,11 +1136,14 @@ bool PipelineImpl::InitializeVideoDecoder(
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(IsPipelineOk());
 
-  scoped_refptr<DemuxerStream> stream =
-      FindDemuxerStream(demuxer, mime_type::kMajorTypeVideo);
+  scoped_refptr<DemuxerStream> stream;
 
-  if (!stream)
-    return false;
+  if (demuxer) {
+    stream = demuxer->GetStream(DemuxerStream::VIDEO);
+
+    if (!stream)
+      return false;
+  }
 
   scoped_refptr<VideoDecoder> video_decoder;
   filter_collection_->SelectVideoDecoder(&video_decoder);
@@ -1173,23 +1210,6 @@ bool PipelineImpl::InitializeVideoRenderer(
   return true;
 }
 
-scoped_refptr<DemuxerStream> PipelineImpl::FindDemuxerStream(
-    const scoped_refptr<Demuxer>& demuxer,
-    std::string major_mime_type) {
-  DCHECK(demuxer);
-
-  const int num_outputs = demuxer->GetNumberOfStreams();
-  for (int i = 0; i < num_outputs; ++i) {
-    std::string value;
-    if (demuxer->GetStream(i)->media_format().GetAsString(
-        MediaFormat::kMimeType, &value) &&
-        !value.compare(0, major_mime_type.length(), major_mime_type)) {
-      return demuxer->GetStream(i);
-    }
-  }
-  return NULL;
-}
-
 void PipelineImpl::TearDownPipeline() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK_NE(kStopped, state_);
@@ -1201,7 +1221,7 @@ void PipelineImpl::TearDownPipeline() {
   // Mark that we already start tearing down operation.
   tearing_down_ = true;
 
-  switch(state_) {
+  switch (state_) {
     case kCreated:
     case kError:
       set_state(kStopped);
@@ -1211,7 +1231,6 @@ void PipelineImpl::TearDownPipeline() {
           NewRunnableMethod(this, &PipelineImpl::FinishDestroyingFiltersTask));
       break;
 
-    case kInitDataSource:
     case kInitDemuxer:
     case kInitAudioDecoder:
     case kInitAudioRenderer:
@@ -1220,6 +1239,7 @@ void PipelineImpl::TearDownPipeline() {
       // Make it look like initialization was successful.
       pipeline_filter_ = pipeline_init_state_->composite_;
       pipeline_init_state_.reset();
+      filter_collection_.reset();
 
       set_state(kStopping);
       pipeline_filter_->Stop(

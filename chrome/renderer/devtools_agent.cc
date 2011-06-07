@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,17 @@
 #include <map>
 
 #include "base/command_line.h"
+#include "base/message_loop.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/devtools_messages.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/renderer/devtools_agent_filter.h"
-#include "chrome/renderer/render_view.h"
-#include "grit/webkit_chromium_resources.h"
+#include "chrome/renderer/devtools_client.h"
+#include "content/common/view_messages.h"
+#include "content/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebDevToolsAgent;
 using WebKit::WebDevToolsAgentClient;
@@ -60,6 +60,8 @@ DevToolsAgent::DevToolsAgent(RenderView* render_view)
 
   CommandLine* cmd = CommandLine::ForCurrentProcess();
   expose_v8_debugger_protocol_ = cmd->HasSwitch(switches::kRemoteShellPort);
+
+  render_view->webview()->setDevToolsAgentClient(this);
 }
 
 DevToolsAgent::~DevToolsAgent() {
@@ -76,6 +78,7 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DispatchOnInspectorBackend,
                         OnDispatchOnInspectorBackend)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_InspectElement, OnInspectElement)
+    IPC_MESSAGE_HANDLER(DevToolsMsg_SetupDevToolsClient, OnSetupDevToolsClient)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -87,13 +90,13 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
 
 void DevToolsAgent::sendMessageToInspectorFrontend(
     const WebKit::WebString& message) {
-  Send(new ViewHostMsg_ForwardToDevToolsClient(
+  Send(new DevToolsHostMsg_ForwardToClient(
       routing_id(),
       DevToolsClientMsg_DispatchOnInspectorFrontend(message.utf8())));
 }
 
 void DevToolsAgent::sendDebuggerOutput(const WebKit::WebString& data) {
-  Send(new ViewHostMsg_ForwardToDevToolsClient(
+  Send(new DevToolsHostMsg_ForwardToClient(
       routing_id(),
       DevToolsClientMsg_DebuggerOutput(data.utf8())));
 }
@@ -105,7 +108,7 @@ int DevToolsAgent::hostIdentifier() {
 void DevToolsAgent::runtimeFeatureStateChanged(
     const WebKit::WebString& feature,
     bool enabled) {
-  Send(new ViewHostMsg_DevToolsRuntimePropertyChanged(
+  Send(new DevToolsHostMsg_RuntimePropertyChanged(
       routing_id(),
       feature.utf8(),
       enabled ? "true" : "false"));
@@ -114,16 +117,10 @@ void DevToolsAgent::runtimeFeatureStateChanged(
 void DevToolsAgent::runtimePropertyChanged(
     const WebKit::WebString& name,
     const WebKit::WebString& value) {
-  Send(new ViewHostMsg_DevToolsRuntimePropertyChanged(
+  Send(new DevToolsHostMsg_RuntimePropertyChanged(
       routing_id(),
       name.utf8(),
       value.utf8()));
-}
-
-WebCString DevToolsAgent::debuggerScriptSource() {
-  base::StringPiece debuggerScriptjs =
-      webkit_glue::GetDataResource(IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS);
-  return WebCString(debuggerScriptjs.data(), debuggerScriptjs.length());
 }
 
 WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
@@ -191,6 +188,10 @@ void DevToolsAgent::OnNavigate() {
   if (web_agent) {
     web_agent->didNavigate();
   }
+}
+
+void DevToolsAgent::OnSetupDevToolsClient() {
+  new DevToolsClient(render_view());
 }
 
 WebDevToolsAgent* DevToolsAgent::GetWebAgent() {

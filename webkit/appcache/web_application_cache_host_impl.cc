@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,7 @@ WebApplicationCacheHostImpl* WebApplicationCacheHostImpl::FromId(int id) {
 }
 
 WebApplicationCacheHostImpl* WebApplicationCacheHostImpl::FromFrame(
-    WebFrame* frame) {
+    const WebFrame* frame) {
   if (!frame)
     return NULL;
   WebDataSource* data_source = frame->dataSource();
@@ -156,7 +156,7 @@ void WebApplicationCacheHostImpl::OnErrorEventRaised(
 }
 
 void WebApplicationCacheHostImpl::willStartMainResourceRequest(
-    WebURLRequest& request) {
+    WebURLRequest& request, const WebFrame* frame) {
   request.setAppCacheHostID(host_id_);
 
   original_main_resource_url_ = ClearUrlRef(request.url());
@@ -164,6 +164,20 @@ void WebApplicationCacheHostImpl::willStartMainResourceRequest(
   std::string method = request.httpMethod().utf8();
   is_get_method_ = (method == kHttpGETMethod);
   DCHECK(method == StringToUpperASCII(method));
+
+  if (frame) {
+    const WebFrame* spawning_frame = frame->parent();
+    if (!spawning_frame)
+      spawning_frame = frame->opener();
+    if (!spawning_frame)
+      spawning_frame = frame;
+
+    WebApplicationCacheHostImpl* spawning_host = FromFrame(spawning_frame);
+    if (spawning_host && (spawning_host != this) &&
+        (spawning_host->status_ != UNCACHED)) {
+      backend_->SetSpawningHostId(host_id_, spawning_host->host_id());
+    }
+  }
 }
 
 void WebApplicationCacheHostImpl::willStartSubResourceRequest(

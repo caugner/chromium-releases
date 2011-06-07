@@ -7,14 +7,13 @@
 #include <cmath>
 
 #include "base/auto_reset.h"
+#include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_counters.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete_history_manager.h"
-#include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/blocked_content_container.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -23,32 +22,26 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/desktop_notification_handler.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_request_limiter.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/favicon_service.h"
-#include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/load_from_memory_cache_details.h"
 #include "chrome/browser/load_notification_details.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/omnibox_search_hint.h"
 #include "chrome/browser/pdf_unsupported_feature.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugin_observer.h"
-#include "chrome/browser/prerender/prerender_manager.h"
-#include "chrome/browser/prerender/prerender_plt_recorder.h"
-#include "chrome/browser/printing/print_preview_message_handler.h"
-#include "chrome/browser/printing/print_preview_tab_controller.h"
-#include "chrome/browser/printing/print_view_manager.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/renderer_preferences_util.h"
@@ -57,28 +50,22 @@
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents_ssl_helper.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
-#include "chrome/browser/translate/page_translated_details.h"
 #include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/common/bindings_policy.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_restriction.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/url_pattern.h"
-#include "chrome/common/navigation_types.h"
-#include "chrome/common/net/url_request_context_getter.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/icon_messages.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/child_process_security_policy.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
-#include "content/browser/modal_html_dialog_delegate.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
@@ -90,9 +77,15 @@
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/browser/webui/web_ui_factory.h"
+#include "content/common/bindings_policy.h"
+#include "content/common/content_client.h"
+#include "content/common/navigation_types.h"
+#include "content/common/notification_service.h"
+#include "content/common/view_messages.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domain.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -100,12 +93,8 @@
 #include "webkit/glue/webpreferences.h"
 
 #if defined(OS_MACOSX)
-#include "app/surface/io_surface_support_mac.h"
+#include "ui/gfx/surface/io_surface_support_mac.h"
 #endif  // defined(OS_MACOSX)
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/locale_change_guard.h"
-#endif  // defined(OS_CHROMEOS)
 
 // Cross-Site Navigations
 //
@@ -154,12 +143,6 @@ const int kQueryStateDelay = 5000;
 
 const int kSyncWaitDelay = 40;
 
-// If another javascript message box is displayed within
-// kJavascriptMessageExpectedDelay of a previous javascript message box being
-// dismissed, display an option to suppress future message boxes from this
-// contents.
-const int kJavascriptMessageExpectedDelay = 1000;
-
 // The list of prefs we want to observe.
 const char* kPrefsToObserve[] = {
   prefs::kAlternateErrorPagesEnabled,
@@ -178,7 +161,8 @@ const char* kPrefsToObserve[] = {
   prefs::kWebKitMinimumFontSize,
   prefs::kWebKitMinimumLogicalFontSize,
   prefs::kWebkitTabsToLinks,
-  prefs::kDefaultCharset
+  prefs::kDefaultCharset,
+  prefs::kEnableReferrers
 };
 
 const int kPrefsToObserveLength = arraysize(kPrefsToObserve);
@@ -193,23 +177,23 @@ BOOL CALLBACK InvalidateWindow(HWND hwnd, LPARAM lparam) {
 }
 #endif
 
-ViewMsg_Navigate_Params::NavigationType GetNavigationType(
+ViewMsg_Navigate_Type::Value GetNavigationType(
     Profile* profile, const NavigationEntry& entry,
     NavigationController::ReloadType reload_type) {
   switch (reload_type) {
     case NavigationController::RELOAD:
-      return ViewMsg_Navigate_Params::RELOAD;
+      return ViewMsg_Navigate_Type::RELOAD;
     case NavigationController::RELOAD_IGNORING_CACHE:
-      return ViewMsg_Navigate_Params::RELOAD_IGNORING_CACHE;
+      return ViewMsg_Navigate_Type::RELOAD_IGNORING_CACHE;
     case NavigationController::NO_RELOAD:
       break;  // Fall through to rest of function.
   }
 
   if (entry.restore_type() == NavigationEntry::RESTORE_LAST_SESSION &&
       profile->DidLastSessionExitCleanly())
-    return ViewMsg_Navigate_Params::RESTORE;
+    return ViewMsg_Navigate_Type::RESTORE;
 
-  return ViewMsg_Navigate_Params::NORMAL;
+  return ViewMsg_Navigate_Type::NORMAL;
 }
 
 void MakeNavigateParams(const NavigationEntry& entry,
@@ -257,9 +241,7 @@ TabContents::TabContents(Profile* profile,
       received_page_title_(false),
       blocked_contents_(NULL),
       all_contents_blocked_(false),
-      dont_notify_render_view_(false),
       displayed_insecure_content_(false),
-      extension_app_(NULL),
       capturing_contents_(false),
       is_being_destroyed_(false),
       notify_disconnection_(false),
@@ -268,21 +250,27 @@ TabContents::TabContents(Profile* profile,
 #endif
       suppress_javascript_messages_(false),
       is_showing_before_unload_dialog_(false),
-      opener_web_ui_type_(WebUIFactory::kNoWebUI),
-      language_state_(&controller_),
+      opener_web_ui_type_(WebUI::kNoWebUI),
       closed_by_user_gesture_(false),
       minimum_zoom_percent_(
           static_cast<int>(WebKit::WebView::minTextSizeMultiplier * 100)),
       maximum_zoom_percent_(
           static_cast<int>(WebKit::WebView::maxTextSizeMultiplier * 100)),
       temporary_zoom_settings_(false),
-      content_restrictions_(0),
-      was_prerendered_(false) {
+      content_restrictions_(0) {
   renderer_preferences_util::UpdateFromSystemSettings(
       &renderer_preferences_, profile);
 
   content_settings_delegate_.reset(
       new TabSpecificContentSettings(this, profile));
+
+  // Start the in-browser thumbnailing if the feature is enabled.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableInBrowserThumbnailing)) {
+    ThumbnailGenerator* generator = g_browser_process->GetThumbnailGenerator();
+    if (generator)
+      generator->StartThumbnailing();
+  }
 
   render_manager_.Init(profile, site_instance, routing_id);
 
@@ -311,12 +299,6 @@ TabContents::TabContents(Profile* profile,
 
   // Register for notifications about content setting changes.
   registrar_.Add(this, NotificationType::CONTENT_SETTINGS_CHANGED,
-                 NotificationService::AllSources());
-
-  // Listen for extension changes so we can update extension_for_current_page_.
-  registrar_.Add(this, NotificationType::EXTENSION_LOADED,
-                 NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
                  NotificationService::AllSources());
 
   // Listen for Google URL changes.
@@ -378,10 +360,8 @@ TabContents::~TabContents() {
   // NULL if this contents was part of a window that closed.
   if (GetNativeView()) {
     RenderViewHost* host = render_view_host();
-    if (host && host->view()) {
+    if (host && host->view())
       host->view()->WillWmDestroy();
-    }
-    ::DestroyWindow(GetNativeView());
   }
 #endif
 
@@ -397,14 +377,9 @@ TabContents::~TabContents() {
 }
 
 void TabContents::AddObservers() {
-  printing_.reset(new printing::PrintViewManager(this));
-  print_preview_.reset(new printing::PrintPreviewMessageHandler(this));
-  fav_icon_helper_.reset(new FavIconHelper(this));
-  autofill_manager_.reset(new AutofillManager(this));
-  autocomplete_history_manager_.reset(new AutocompleteHistoryManager(this));
-  prerender_plt_recorder_.reset(new prerender::PrerenderPLTRecorder(this));
-  desktop_notification_handler_.reset(
-      new DesktopNotificationHandlerForTC(this, GetRenderProcessHost()));
+  favicon_helper_.reset(new FaviconHelper(this, FaviconHelper::FAVICON));
+  if (browser_defaults::kEnableTouchIcon)
+    touch_icon_helper_.reset(new FaviconHelper(this, FaviconHelper::TOUCH));
   plugin_observer_.reset(new PluginObserver(this));
   safebrowsing_detection_host_.reset(new safe_browsing::ClientSideDetectionHost(
       this));
@@ -441,16 +416,7 @@ bool TabContents::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_PDFHasUnsupportedFeature,
                         OnPDFHasUnsupportedFeature)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GoToEntryAtOffset, OnGoToEntryAtOffset)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_DidGetApplicationInfo,
-                        OnDidGetApplicationInfo)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_InstallApplication,
-                        OnInstallApplication)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_PageContents, OnPageContents)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_PageTranslated, OnPageTranslated)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_SetSuggestions, OnSetSuggestions)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_InstantSupportDetermined,
-                        OnInstantSupportDetermined)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_RunFileChooser, OnRunFileChooser)
+    IPC_MESSAGE_HANDLER(IconHostMsg_UpdateFaviconURL, OnUpdateFaviconURL)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
 
@@ -475,39 +441,6 @@ TabContentsSSLHelper* TabContents::GetSSLHelper() {
 
 RenderProcessHost* TabContents::GetRenderProcessHost() const {
   return render_manager_.current_host()->process();
-}
-
-void TabContents::SetExtensionApp(const Extension* extension) {
-  DCHECK(!extension || extension->GetFullLaunchURL().is_valid());
-  extension_app_ = extension;
-
-  UpdateExtensionAppIcon(extension_app_);
-
-  NotificationService::current()->Notify(
-      NotificationType::TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
-      Source<TabContents>(this),
-      NotificationService::NoDetails());
-}
-
-void TabContents::SetExtensionAppById(const std::string& extension_app_id) {
-  if (extension_app_id.empty())
-    return;
-
-  ExtensionService* extension_service = profile()->GetExtensionService();
-  if (!extension_service || !extension_service->is_ready())
-    return;
-
-  const Extension* extension =
-      extension_service->GetExtensionById(extension_app_id, false);
-  if (extension)
-    SetExtensionApp(extension);
-}
-
-SkBitmap* TabContents::GetExtensionAppIcon() {
-  if (extension_app_icon_.empty())
-    return NULL;
-
-  return &extension_app_icon_;
 }
 
 const GURL& TabContents::GetURL() const {
@@ -578,7 +511,7 @@ bool TabContents::ShouldDisplayURL() {
   }
 
   // We always display the URL for non-WebUI URLs to prevent spoofing.
-  if (entry && !WebUIFactory::HasWebUIScheme(entry->url()))
+  if (entry && !content::WebUIFactory::Get()->HasWebUIScheme(entry->url()))
     return true;
 
   WebUI* web_ui = GetWebUIForCurrentState();
@@ -587,7 +520,7 @@ bool TabContents::ShouldDisplayURL() {
   return true;
 }
 
-SkBitmap TabContents::GetFavIcon() const {
+SkBitmap TabContents::GetFavicon() const {
   // Like GetTitle(), we also want to use the favicon for the last committed
   // entry rather than a pending navigation entry.
   NavigationEntry* entry = controller_.GetTransientEntry();
@@ -600,7 +533,7 @@ SkBitmap TabContents::GetFavIcon() const {
   return SkBitmap();
 }
 
-bool TabContents::FavIconIsValid() const {
+bool TabContents::FaviconIsValid() const {
   NavigationEntry* entry = controller_.GetTransientEntry();
   if (entry)
     return entry->favicon().is_valid();
@@ -612,7 +545,7 @@ bool TabContents::FavIconIsValid() const {
   return false;
 }
 
-bool TabContents::ShouldDisplayFavIcon() {
+bool TabContents::ShouldDisplayFavicon() {
   // Always display a throbber during pending loads.
   if (controller_.GetLastCommittedEntry() && controller_.pending_entry())
     return true;
@@ -640,10 +573,6 @@ void TabContents::SetIsCrashed(base::TerminationStatus status, int error_code) {
   NotifyNavigationStateChanged(INVALIDATE_TAB);
 }
 
-void TabContents::PageActionStateChanged() {
-  NotifyNavigationStateChanged(TabContents::INVALIDATE_PAGE_ACTIONS);
-}
-
 void TabContents::NotifyNavigationStateChanged(unsigned changed_flags) {
   if (delegate_)
     delegate_->NavigationStateChanged(this, changed_flags);
@@ -661,19 +590,6 @@ void TabContents::DidBecomeSelected() {
 
   WebCacheManager::GetInstance()->ObserveActivity(GetRenderProcessHost()->id());
   last_selected_time_ = base::TimeTicks::Now();
-}
-
-void TabContents::FadeForInstant(bool animate) {
-  RenderWidgetHostView* rwhv = GetRenderWidgetHostView();
-  SkColor whitish = SkColorSetARGB(192, 255, 255, 255);
-  if (rwhv)
-    rwhv->SetVisuallyDeemphasized(&whitish, animate);
-}
-
-void TabContents::CancelInstantFade() {
-  RenderWidgetHostView* rwhv = GetRenderWidgetHostView();
-  if (rwhv)
-    rwhv->SetVisuallyDeemphasized(NULL, false);
 }
 
 void TabContents::WasHidden() {
@@ -730,8 +646,12 @@ bool TabContents::NeedToFireBeforeUnload() {
 void TabContents::OpenURL(const GURL& url, const GURL& referrer,
                           WindowOpenDisposition disposition,
                           PageTransition::Type transition) {
-  if (delegate_)
+  if (delegate_) {
     delegate_->OpenURLFromTab(this, url, referrer, disposition, transition);
+    // Notify observers.
+    FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                      DidOpenURL(url, referrer, disposition, transition));
+  }
 }
 
 bool TabContents::NavigateToPendingEntry(
@@ -754,8 +674,9 @@ bool TabContents::NavigateToEntry(
   // For security, we should never send non-Web-UI URLs to a Web UI renderer.
   // Double check that here.
   int enabled_bindings = dest_render_view_host->enabled_bindings();
-  bool is_allowed_in_web_ui_renderer =
-      WebUIFactory::IsURLAcceptableForWebUI(profile(), entry.url());
+  bool is_allowed_in_web_ui_renderer = content::GetContentClient()->
+      browser()->GetWebUIFactory()->IsURLAcceptableForWebUI(profile(),
+                                                            entry.url());
   CHECK(!BindingsPolicy::is_web_ui_enabled(enabled_bindings) ||
         is_allowed_in_web_ui_renderer);
 
@@ -805,7 +726,7 @@ bool TabContents::NavigateToEntry(
 
 void TabContents::Stop() {
   render_manager_.Stop();
-  printing_->Stop();
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_, StopNavigation());
 }
 
 void TabContents::DisassociateFromPopupCount() {
@@ -820,8 +741,6 @@ TabContents* TabContents::Clone() {
                                     SiteInstance::CreateSiteInstance(profile()),
                                     MSG_ROUTING_NONE, this, NULL);
   tc->controller().CopyStateFrom(controller_);
-  tc->extension_app_ = extension_app_;
-  tc->extension_app_icon_ = extension_app_icon_;
   return tc;
 }
 
@@ -858,7 +777,8 @@ void TabContents::SaveFavicon() {
   }
   std::vector<unsigned char> image_data;
   gfx::PNGCodec::EncodeBGRASkBitmap(favicon.bitmap(), false, &image_data);
-  service->SetFavicon(entry->url(), favicon.url(), image_data);
+  service->SetFavicon(
+      entry->url(), favicon.url(), image_data, history::FAVICON);
 }
 
 ConstrainedWindow* TabContents::CreateConstrainedDialog(
@@ -884,15 +804,18 @@ void TabContents::BlockTabContent(bool blocked) {
   SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
   if (rwhv)
     rwhv->SetVisuallyDeemphasized(blocked ? &greyish : NULL, false);
-  render_view_host()->set_ignore_input_events(blocked);
+  // RenderViewHost may be NULL during shutdown.
+  if (render_view_host())
+    render_view_host()->set_ignore_input_events(blocked);
   if (delegate_)
     delegate_->SetTabContentBlocked(this, blocked);
 }
 
-void TabContents::AddNewContents(TabContents* new_contents,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture) {
+
+void TabContents::AddOrBlockNewContents(TabContents* new_contents,
+                                        WindowOpenDisposition disposition,
+                                        const gfx::Rect& initial_pos,
+                                        bool user_gesture) {
   if (all_contents_blocked_) {
     if (!blocked_contents_)
       blocked_contents_ = new BlockedContentContainer(this);
@@ -910,39 +833,19 @@ void TabContents::AddNewContents(TabContents* new_contents,
     // Unrequested popups from normal pages are constrained unless they're in
     // the whitelist.  The popup owner will handle checking this.
     delegate_->GetConstrainingContents(this)->AddPopup(
-        new_contents, initial_pos);
+        new_contents, initial_pos, user_gesture);
   } else {
-    new_contents->DisassociateFromPopupCount();
-    delegate_->AddNewContents(this, new_contents, disposition, initial_pos,
-                              user_gesture);
-    NotificationService::current()->Notify(
-        NotificationType::TAB_ADDED,
-        Source<TabContentsDelegate>(delegate_),
-        Details<TabContents>(this));
+    AddNewContents(new_contents, disposition, initial_pos, user_gesture);
   }
 
   // TODO(pkasting): Why is this necessary?
   PopupNotificationVisibilityChanged(blocked_contents_ != NULL);
 }
 
-bool TabContents::ExecuteCode(int request_id, const std::string& extension_id,
-                              bool is_js_code, const std::string& code_string,
-                              bool all_frames) {
-  RenderViewHost* host = render_view_host();
-  if (!host)
-    return false;
-
-  return host->Send(new ViewMsg_ExecuteCode(host->routing_id(),
-      ViewMsg_ExecuteCode_Params(request_id, extension_id,
-                                 is_js_code, code_string, all_frames)));
-}
-
 void TabContents::PopupNotificationVisibilityChanged(bool visible) {
   if (is_being_destroyed_)
     return;
   content_settings_delegate_->SetPopupsBlocked(visible);
-  if (!dont_notify_render_view_)
-    render_view_host()->AllowScriptToClose(!visible);
 }
 
 gfx::NativeView TabContents::GetContentNativeView() const {
@@ -1075,6 +978,9 @@ bool TabContents::ShouldShowBookmarkBar() {
   if (!browser_defaults::bookmarks_enabled)
     return false;
 
+  if (!profile()->GetPrefs()->GetBoolean(prefs::kEnableBookmarkBar))
+    return false;
+
   // See GetWebUIForCurrentState() comment for more info. This case is very
   // similar, but for non-first loads, we want to use the committed entry. This
   // is so the bookmarks bar disappears at the same time the page does.
@@ -1091,12 +997,6 @@ bool TabContents::ShouldShowBookmarkBar() {
     return render_manager_.pending_web_ui()->force_bookmark_bar_visible();
   return (render_manager_.web_ui() == NULL) ?
       false : render_manager_.web_ui()->force_bookmark_bar_visible();
-}
-
-void TabContents::ToolbarSizeChanged(bool is_animating) {
-  TabContentsDelegate* d = delegate();
-  if (d)
-    d->ToolbarSizeChanged(this, is_animating);
 }
 
 bool TabContents::CanDownload(int request_id) {
@@ -1138,77 +1038,12 @@ void TabContents::WillCloseBlockedContentContainer(
   PopupNotificationVisibilityChanged(false);
 }
 
-void TabContents::DidMoveOrResize(ConstrainedWindow* window) {
-#if defined(OS_WIN)
-  UpdateWindow(GetNativeView());
-#endif
-}
-
-void TabContents::OnSavePage() {
-  // If we can not save the page, try to download it.
-  if (!SavePackage::IsSavableContents(contents_mime_type())) {
-    DownloadManager* dlm = profile()->GetDownloadManager();
-    const GURL& current_page_url = GetURL();
-    if (dlm && current_page_url.is_valid())
-      dlm->DownloadUrl(current_page_url, GURL(), "", this);
-    return;
-  }
-
-  Stop();
-
-  // Create the save package and possibly prompt the user for the name to save
-  // the page as. The user prompt is an asynchronous operation that runs on
-  // another thread.
-  save_package_ = new SavePackage(this);
-  save_package_->GetSaveInfo();
-}
-
-// Used in automated testing to bypass prompting the user for file names.
-// Instead, the names and paths are hard coded rather than running them through
-// file name sanitation and extension / mime checking.
-bool TabContents::SavePage(const FilePath& main_file, const FilePath& dir_path,
-                           SavePackage::SavePackageType save_type) {
-  // Stop the page from navigating.
-  Stop();
-
-  save_package_ = new SavePackage(this, save_type, main_file, dir_path);
-  return save_package_->Init();
-}
-
 void TabContents::EmailPageLocation() {
   std::string title = EscapeQueryParamValue(UTF16ToUTF8(GetTitle()), false);
   std::string page_url = EscapeQueryParamValue(GetURL().spec(), false);
   std::string mailto = std::string("mailto:?subject=Fwd:%20") +
       title + "&body=%0A%0A" + page_url;
   platform_util::OpenExternal(GURL(mailto));
-}
-
-void TabContents::PrintPreview() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnablePrintPreview)) {
-    if (showing_interstitial_page())
-      return;
-
-    printing::PrintPreviewTabController* tab_controller =
-        printing::PrintPreviewTabController::GetInstance();
-    if (!tab_controller)
-      return;
-    tab_controller->GetOrCreatePreviewTab(this, controller().window_id().id());
-  } else {
-    PrintNow();
-  }
-}
-
-bool TabContents::PrintNow() {
-  // We can't print interstitial page for now.
-  if (showing_interstitial_page())
-    return false;
-
-  return render_view_host()->PrintPages();
-}
-
-void TabContents::PrintingDone(int document_cookie, bool success) {
-  render_view_host()->PrintingDone(document_cookie, success);
 }
 
 bool TabContents::IsActiveEntry(int32 page_id) {
@@ -1352,6 +1187,19 @@ void TabContents::ViewSource() {
   delegate_->ViewSourceForTab(this, active_entry->url());
 }
 
+void TabContents::ViewFrameSource(const GURL& url,
+                                  const std::string& content_state) {
+  if (!delegate_)
+    return;
+
+  delegate_->ViewSourceForFrame(this, url, content_state);
+}
+
+void TabContents::SetContentRestrictions(int restrictions) {
+  content_restrictions_ = restrictions;
+  delegate()->ContentRestrictionsChanged(this);
+}
+
 void TabContents::OnDidStartProvisionalLoadForFrame(int64 frame_id,
                                                     bool is_main_frame,
                                                     const GURL& url) {
@@ -1360,14 +1208,11 @@ void TabContents::OnDidStartProvisionalLoadForFrame(int64 frame_id,
   render_view_host()->FilterURL(ChildProcessSecurityPolicy::GetInstance(),
       GetRenderProcessHost()->id(), &validated_url);
 
-  ProvisionalLoadDetails details(
-      is_main_frame,
-      controller_.IsURLInPageNavigation(validated_url),
-      validated_url, std::string(), is_error_page, frame_id);
-  NotificationService::current()->Notify(
-      NotificationType::FRAME_PROVISIONAL_LOAD_START,
-      Source<NavigationController>(&controller_),
-      Details<ProvisionalLoadDetails>(&details));
+  // Notify observers about the start of the provisional load.
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                    DidStartProvisionalLoadForFrame(frame_id, is_main_frame,
+                    validated_url, is_error_page));
+
   if (is_main_frame) {
     // If we're displaying a network error page do not reset the content
     // settings delegate's cookies so the user has a chance to modify cookie
@@ -1375,18 +1220,19 @@ void TabContents::OnDidStartProvisionalLoadForFrame(int64 frame_id,
     if (!is_error_page)
       content_settings_delegate_->ClearCookieSpecificContentSettings();
     content_settings_delegate_->ClearGeolocationContentSettings();
-    // TODO(cbentzel): Should error pages still show prerendered icon?
-    set_was_prerendered(false);
 
-    // Check if the URL we are about to load has been prerendered by any chance,
-    // and use it if possible.
-    MaybeUsePreloadedPage(url);
+    // Notify observers about the provisional change in the main frame URL.
+    FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                      ProvisionalChangeToMainFrameUrl(url));
   }
 }
 
 void TabContents::OnDidRedirectProvisionalLoad(int32 page_id,
                                                const GURL& source_url,
                                                const GURL& target_url) {
+  // TODO(creis): Remove this method and have the pre-rendering code listen to
+  // the ResourceDispatcherHost's RESOURCE_RECEIVED_REDIRECT notification
+  // instead.  See http://crbug.com/78512.
   NavigationEntry* entry;
   if (page_id == -1)
     entry = controller_.pending_entry();
@@ -1394,11 +1240,10 @@ void TabContents::OnDidRedirectProvisionalLoad(int32 page_id,
     entry = controller_.GetEntryWithPageID(GetSiteInstance(), page_id);
   if (!entry || entry->url() != source_url)
     return;
-  entry->set_url(target_url);
 
-  // Check if the URL we are about to load has been prerendered by any chance,
-  // and use it if possible.
-  MaybeUsePreloadedPage(target_url);
+  // Notify observers about the provisional change in the main frame URL.
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                    ProvisionalChangeToMainFrameUrl(target_url));
 }
 
 void TabContents::OnDidFailProvisionalLoadWithError(
@@ -1464,12 +1309,16 @@ void TabContents::OnDidFailProvisionalLoadWithError(
       NotificationType::FAIL_PROVISIONAL_LOAD_WITH_ERROR,
       Source<NavigationController>(&controller_),
       Details<ProvisionalLoadDetails>(&details));
+
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                    DidFailProvisionalLoad(frame_id, is_main_frame,
+                    validated_url, error_code));
 }
 
 void TabContents::OnDidLoadResourceFromMemoryCache(
     const GURL& url,
     const std::string& security_info) {
-  static base::StatsCounter cache("WebKit.CacheHit");
+  base::StatsCounter cache("WebKit.CacheHit");
   cache.Increment();
 
   // Send out a notification that we loaded a resource from our memory cache.
@@ -1488,6 +1337,7 @@ void TabContents::OnDidLoadResourceFromMemoryCache(
 }
 
 void TabContents::OnDidDisplayInsecureContent() {
+  UserMetrics::RecordAction(UserMetricsAction("SSL.DisplayedInsecureContent"));
   displayed_insecure_content_ = true;
   SSLManager::NotifySSLInternalStateChanged();
 }
@@ -1496,27 +1346,23 @@ void TabContents::OnDidRunInsecureContent(
     const std::string& security_origin, const GURL& target_url) {
   LOG(INFO) << security_origin << " ran insecure content from "
             << target_url.possibly_invalid_spec();
+  UserMetrics::RecordAction(UserMetricsAction("SSL.RanInsecureContent"));
   controller_.ssl_manager()->DidRunInsecureContent(security_origin);
 }
 
 void TabContents::OnDocumentLoadedInFrame(int64 frame_id) {
   controller_.DocumentLoadedInFrame();
-  NotificationService::current()->Notify(
-      NotificationType::FRAME_DOM_CONTENT_LOADED,
-      Source<NavigationController>(&controller_),
-      Details<int64>(&frame_id));
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                    DocumentLoadedInFrame(frame_id));
 }
 
 void TabContents::OnDidFinishLoad(int64 frame_id) {
-  NotificationService::current()->Notify(
-      NotificationType::FRAME_DID_FINISH_LOAD,
-      Source<NavigationController>(&controller_),
-      Details<int64>(&frame_id));
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                    DidFinishLoad(frame_id));
 }
 
 void TabContents::OnUpdateContentRestrictions(int restrictions) {
-  content_restrictions_ = restrictions;
-  delegate()->ContentRestrictionsChanged(this);
+  SetContentRestrictions(restrictions);
 }
 
 void TabContents::OnPDFHasUnsupportedFeature() {
@@ -1556,8 +1402,22 @@ void TabContents::SetIsLoading(bool is_loading,
       det);
 }
 
+void TabContents::AddNewContents(TabContents* new_contents,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) {
+    new_contents->DisassociateFromPopupCount();
+    delegate_->AddNewContents(this, new_contents, disposition, initial_pos,
+                              user_gesture);
+    NotificationService::current()->Notify(
+        NotificationType::TAB_ADDED,
+        Source<TabContentsDelegate>(delegate_),
+        Details<TabContents>(this));
+}
+
 void TabContents::AddPopup(TabContents* new_contents,
-                           const gfx::Rect& initial_pos) {
+                           const gfx::Rect& initial_pos,
+                           bool user_gesture) {
   // A page can't spawn popups (or do anything else, either) until its load
   // commits, so when we reach here, the popup was spawned by the
   // NavigationController's last committed entry, not the active entry.  For
@@ -1571,12 +1431,18 @@ void TabContents::AddPopup(TabContents* new_contents,
   if (creator.is_valid() &&
       profile()->GetHostContentSettingsMap()->GetContentSetting(
           creator, CONTENT_SETTINGS_TYPE_POPUPS, "") == CONTENT_SETTING_ALLOW) {
-    AddNewContents(new_contents, NEW_POPUP, initial_pos, true);
+    AddNewContents(new_contents, NEW_POPUP, initial_pos, user_gesture);
   } else {
     if (!blocked_contents_)
       blocked_contents_ = new BlockedContentContainer(this);
-    blocked_contents_->AddTabContents(new_contents, NEW_POPUP, initial_pos,
-                                      true);
+    // Call blocked_contents_->AddTabContents with user_gesture == true
+    // so that the contents will not get blocked again.
+    // TODO(stevenjb): Remove user_gesture parameter from
+    // BlockedContentContainer::AddTabContents()?
+    blocked_contents_->AddTabContents(new_contents,
+                                      NEW_POPUP,
+                                      initial_pos,
+                                      true);  // user gesture
     content_settings_delegate_->OnContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS,
                                                  std::string());
   }
@@ -1640,23 +1506,27 @@ WebUI* TabContents::GetWebUIForCurrentState() {
   return render_manager_.web_ui();
 }
 
+WebUI::TypeID TabContents::GetWebUITypeForCurrentState() {
+  return content::WebUIFactory::Get()->GetWebUIType(profile(), GetURL());
+}
+
 void TabContents::DidNavigateMainFramePostCommit(
     const NavigationController::LoadCommittedDetails& details,
     const ViewHostMsg_FrameNavigate_Params& params) {
-  if (opener_web_ui_type_ != WebUIFactory::kNoWebUI) {
+  if (opener_web_ui_type_ != WebUI::kNoWebUI) {
     // If this is a window.open navigation, use the same WebUI as the renderer
     // that opened the window, as long as both renderers have the same
     // privileges.
-    if (opener_web_ui_type_ ==
-        WebUIFactory::GetWebUIType(profile(), GetURL())) {
-      WebUI* web_ui = WebUIFactory::CreateWebUIForURL(this, GetURL());
+    if (delegate_ && opener_web_ui_type_ == GetWebUITypeForCurrentState()) {
+      WebUI* web_ui = content::GetContentClient()->browser()->
+          GetWebUIFactory()->CreateWebUIForURL(this, GetURL());
       // web_ui might be NULL if the URL refers to a non-existent extension.
       if (web_ui) {
         render_manager_.SetWebUIPostCommit(web_ui);
         web_ui->RenderViewCreated(render_view_host());
       }
     }
-    opener_web_ui_type_ = WebUIFactory::kNoWebUI;
+    opener_web_ui_type_ = WebUI::kNoWebUI;
   }
 
   if (details.is_user_initiated_main_frame_load()) {
@@ -1673,36 +1543,16 @@ void TabContents::DidNavigateMainFramePostCommit(
   received_page_title_ = false;
 
   // Get the favicon, either from history or request it from the net.
-  fav_icon_helper_->FetchFavIcon(details.entry->url());
+  favicon_helper_->FetchFavicon(details.entry->url());
+
+  if (touch_icon_helper_.get())
+    touch_icon_helper_->FetchFavicon(details.entry->url());
 
   // Clear all page actions, blocked content notifications and browser actions
   // for this tab, unless this is an in-page navigation.
   if (!details.is_in_page) {
-    ExtensionService* service = profile()->GetExtensionService();
-    if (service) {
-      for (size_t i = 0; i < service->extensions()->size(); ++i) {
-        ExtensionAction* browser_action =
-            service->extensions()->at(i)->browser_action();
-        if (browser_action) {
-          browser_action->ClearAllValuesForTab(controller().session_id().id());
-          NotificationService::current()->Notify(
-              NotificationType::EXTENSION_BROWSER_ACTION_UPDATED,
-              Source<ExtensionAction>(browser_action),
-              NotificationService::NoDetails());
-        }
-
-        ExtensionAction* page_action =
-            service->extensions()->at(i)->page_action();
-        if (page_action) {
-          page_action->ClearAllValuesForTab(controller().session_id().id());
-          PageActionStateChanged();
-        }
-      }
-    }
-
     // Close blocked popups.
     if (blocked_contents_) {
-      AutoReset<bool> auto_reset(&dont_notify_render_view_, true);
       blocked_contents_->Destroy();
       blocked_contents_ = NULL;
     }
@@ -1738,9 +1588,6 @@ void TabContents::DidNavigateAnyFramePostCommit(
   // Notify observers about navigation.
   FOR_EACH_OBSERVER(TabContentsObserver, observers_,
                     DidNavigateAnyFramePostCommit(details, params));
-
-  // Let the LanguageState clear its state.
-  language_state_.DidNavigate(details);
 }
 
 void TabContents::CloseConstrainedWindows() {
@@ -1903,91 +1750,6 @@ void TabContents::OnGoToEntryAtOffset(int offset) {
   }
 }
 
-void TabContents::OnDidGetApplicationInfo(int32 page_id,
-                                          const WebApplicationInfo& info) {
-  web_app_info_ = info;
-
-  if (delegate())
-    delegate()->OnDidGetApplicationInfo(this, page_id);
-}
-
-void TabContents::OnInstallApplication(const WebApplicationInfo& info) {
-  if (delegate())
-    delegate()->OnInstallApplication(this, info);
-}
-
-void TabContents::OnPageContents(const GURL& url,
-                                 int32 page_id,
-                                 const string16& contents,
-                                 const std::string& language,
-                                 bool page_translatable) {
-  // Don't index any https pages. People generally don't want their bank
-  // accounts, etc. indexed on their computer, especially since some of these
-  // things are not marked cachable.
-  // TODO(brettw) we may want to consider more elaborate heuristics such as
-  // the cachability of the page. We may also want to consider subframes (this
-  // test will still index subframes if the subframe is SSL).
-  // TODO(zelidrag) bug chromium-os:2808 - figure out if we want to reenable
-  // content indexing for chromeos in some future releases.
-#if !defined(OS_CHROMEOS)
-  if (!url.SchemeIsSecure()) {
-    Profile* p = profile();
-    if (p && !p->IsOffTheRecord()) {
-      HistoryService* hs = p->GetHistoryService(Profile::IMPLICIT_ACCESS);
-      if (hs)
-        hs->SetPageContents(url, contents);
-    }
-  }
-#endif
-
-  language_state_.LanguageDetermined(language, page_translatable);
-
-  std::string lang = language;
-  NotificationService::current()->Notify(
-      NotificationType::TAB_LANGUAGE_DETERMINED,
-      Source<TabContents>(this),
-      Details<std::string>(&lang));
-
-  // Generate the thumbnail here if the in-browser thumbnailing is enabled.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableInBrowserThumbnailing)) {
-    ThumbnailGenerator::UpdateThumbnailIfNecessary(this, url);
-  }
-}
-
-void TabContents::OnPageTranslated(int32 page_id,
-                                   const std::string& original_lang,
-                                   const std::string& translated_lang,
-                                   TranslateErrors::Type error_type) {
-  language_state_.set_current_language(translated_lang);
-  language_state_.set_translation_pending(false);
-  PageTranslatedDetails details(original_lang, translated_lang, error_type);
-  NotificationService::current()->Notify(
-      NotificationType::PAGE_TRANSLATED,
-      Source<TabContents>(this),
-      Details<PageTranslatedDetails>(&details));
-}
-
-void TabContents::OnSetSuggestions(
-    int32 page_id,
-    const std::vector<std::string>& suggestions) {
-  if (delegate())
-    delegate()->OnSetSuggestions(page_id, suggestions);
-}
-
-void TabContents::OnInstantSupportDetermined(int32 page_id, bool result) {
-  if (delegate())
-    delegate()->OnInstantSupportDetermined(page_id, result);
-}
-
-void TabContents::OnRunFileChooser(
-    const ViewHostMsg_RunFileChooser_Params& params) {
-  if (file_select_helper_.get() == NULL)
-    file_select_helper_.reset(new FileSelectHelper(profile()));
-  file_select_helper_->RunFileChooser(render_view_host(), params);
-}
-
-
 void TabContents::OnContentSettingsAccessed(bool content_was_blocked) {
   if (delegate_)
     delegate_->OnContentSettingsChange(this);
@@ -2056,9 +1818,8 @@ void TabContents::RenderViewCreated(RenderViewHost* render_view_host) {
 
   // When we're creating views, we're still doing initial setup, so we always
   // use the pending Web UI rather than any possibly existing committed one.
-  if (render_manager_.pending_web_ui()) {
+  if (render_manager_.pending_web_ui())
     render_manager_.pending_web_ui()->RenderViewCreated(render_view_host);
-  }
 
   if (entry->IsViewSourceMode()) {
     // Put the renderer in view source mode.
@@ -2091,13 +1852,13 @@ void TabContents::RenderViewReady(RenderViewHost* rvh) {
 void TabContents::RenderViewGone(RenderViewHost* rvh,
                                  base::TerminationStatus status,
                                  int error_code) {
-  // Ask the print preview if this renderer was valuable.
-  if (!printing_->OnRenderViewGone(rvh))
-    return;
   if (rvh != render_view_host()) {
     // The pending page's RenderViewHost is gone.
     return;
   }
+
+  // Let observers know first and give them a chance to act.
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_, RenderViewGone());
 
   SetIsLoading(false, NULL);
   NotifyDisconnected();
@@ -2119,10 +1880,6 @@ void TabContents::RenderViewGone(RenderViewHost* rvh,
 }
 
 void TabContents::RenderViewDeleted(RenderViewHost* rvh) {
-  NotificationService::current()->Notify(
-      NotificationType::RENDER_VIEW_HOST_DELETED,
-      Source<TabContents>(this),
-      Details<RenderViewHost>(rvh));
   render_manager_.RenderViewDeleted(rvh);
 }
 
@@ -2131,10 +1888,6 @@ void TabContents::DidNavigate(RenderViewHost* rvh,
   int extra_invalidate_flags = 0;
 
   if (PageTransition::IsMainFrame(params.transition)) {
-    if (MaybeUsePreloadedPage(params.url)) {
-      return;
-    }
-
     bool was_bookmark_bar_visible = ShouldShowBookmarkBar();
 
     render_manager_.DidNavigateMainFrame(rvh);
@@ -2171,23 +1924,19 @@ void TabContents::DidNavigate(RenderViewHost* rvh,
     // tracking navigation events, we treat this event as a sub frame navigation
     // event.
     bool is_main_frame = did_navigate ? details.is_main_frame : false;
-    ProvisionalLoadDetails load_details(
-        is_main_frame, details.is_in_page, params.url, std::string(),
-        false, params.frame_id);
-    load_details.set_transition_type(params.transition);
+    PageTransition::Type transition_type = params.transition;
     // Whether or not a page transition was triggered by going backward or
     // forward in the history is only stored in the navigation controller's
     // entry list.
     if (did_navigate &&
         (controller_.GetActiveEntry()->transition_type() &
             PageTransition::FORWARD_BACK)) {
-      load_details.set_transition_type(
-          params.transition | PageTransition::FORWARD_BACK);
+      transition_type = params.transition | PageTransition::FORWARD_BACK;
     }
-    NotificationService::current()->Notify(
-        NotificationType::FRAME_PROVISIONAL_LOAD_COMMITTED,
-        Source<NavigationController>(&controller_),
-        Details<ProvisionalLoadDetails>(&load_details));
+    // Notify observers about the commit of the provisional load.
+    FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                      DidCommitProvisionalLoadForFrame(params.frame_id,
+                      is_main_frame, params.url, transition_type));
   }
 
   // Update history. Note that this needs to happen after the entry is complete,
@@ -2270,18 +2019,6 @@ void TabContents::UpdateTargetURL(int32 page_id, const GURL& url) {
     delegate()->UpdateTargetURL(this, url);
 }
 
-void TabContents::UpdateThumbnail(const GURL& url,
-                                  const SkBitmap& bitmap,
-                                  const ThumbnailScore& score) {
-  if (profile()->IsOffTheRecord())
-    return;
-
-  // Tell History about this thumbnail
-  history::TopSites* ts = profile()->GetTopSites();
-  if (ts)
-    ts->SetPageThumbnail(url, bitmap, score);
-}
-
 void TabContents::UpdateInspectorSetting(const std::string& key,
                                          const std::string& value) {
   RenderViewHostDelegateHelper::UpdateInspectorSetting(profile(), key, value);
@@ -2327,14 +2064,9 @@ void TabContents::RequestMove(const gfx::Rect& new_bounds) {
 void TabContents::DidStartLoading() {
   SetIsLoading(true, NULL);
 
-  if (delegate()) {
-    bool is_print_preview_tab =
-        printing::PrintPreviewTabController::IsPrintPreviewTab(this);
-    if (content_restrictions_ || is_print_preview_tab) {
-      content_restrictions_= is_print_preview_tab ?
-          CONTENT_RESTRICTION_PRINT : 0;
+  if (delegate() && content_restrictions_) {
+      content_restrictions_ = 0;
       delegate()->ContentRestrictionsChanged(this);
-    }
   }
 
   // Notify observers about navigation.
@@ -2401,11 +2133,13 @@ void TabContents::DomOperationResponse(const std::string& json_string,
 }
 
 void TabContents::ProcessWebUIMessage(
-    const ViewHostMsg_DomMessage_Params& params) {
+    const ExtensionHostMsg_DomMessage_Params& params) {
   if (!render_manager_.web_ui()) {
     // This can happen if someone uses window.open() to open an extension URL
     // from a non-extension context.
-    render_view_host()->BlockExtensionRequest(params.request_id);
+    render_view_host()->Send(new ExtensionMsg_Response(
+        render_view_host()->routing_id(), params.request_id, false, "",
+        "Access to extension API denied."));
     return;
   }
   render_manager_.web_ui()->ProcessWebUIMessage(params);
@@ -2448,7 +2182,8 @@ void TabContents::RunJavaScriptMessage(
     // Show a checkbox offering to suppress further messages if this message is
     // being displayed within kJavascriptMessageExpectedDelay of the last one.
     if (time_since_last_message <
-        base::TimeDelta::FromMilliseconds(kJavascriptMessageExpectedDelay))
+        base::TimeDelta::FromMilliseconds(
+            chrome::kJavascriptMessageExpectedDelay))
       show_suppress_checkbox = true;
 
     RunJavascriptMessageBox(profile(), this, frame_url, flags, message,
@@ -2471,17 +2206,6 @@ void TabContents::RunBeforeUnloadConfirm(const std::wstring& message,
   }
   is_showing_before_unload_dialog_ = true;
   RunBeforeUnloadDialog(this, message, reply_msg);
-}
-
-void TabContents::ShowModalHTMLDialog(const GURL& url, int width, int height,
-                                      const std::string& json_arguments,
-                                      IPC::Message* reply_msg) {
-  if (delegate()) {
-    HtmlDialogUIDelegate* dialog_delegate =
-        new ModalHtmlDialogDelegate(url, width, height, json_arguments,
-                                    reply_msg, this);
-    delegate()->ShowHtmlDialog(dialog_delegate, NULL);
-  }
 }
 
 GURL TabContents::GetAlternateErrorPageURL() const {
@@ -2626,6 +2350,23 @@ void TabContents::WorkerCrashed() {
     delegate()->WorkerCrashed();
 }
 
+void TabContents::RequestDesktopNotificationPermission(
+    const GURL& source_origin, int callback_context) {
+  DesktopNotificationService* service =
+      DesktopNotificationServiceFactory::GetForProfile(profile());
+  service->RequestPermission(
+      source_origin, GetRenderProcessHost()->id(),
+      render_view_host()->routing_id(), callback_context, this);
+}
+
+void TabContents::OnUpdateFaviconURL(
+    int32 page_id,
+    const std::vector<FaviconURL>& candidates) {
+  favicon_helper().OnUpdateFaviconURL(page_id, candidates);
+  if (touch_icon_helper_.get())
+    touch_icon_helper_->OnUpdateFaviconURL(page_id, candidates);
+}
+
 void TabContents::BeforeUnloadFiredFromRenderManager(
     bool proceed,
     bool* proceed_to_fire_unload) {
@@ -2664,7 +2405,7 @@ NavigationController& TabContents::GetControllerForRenderManager() {
 }
 
 WebUI* TabContents::CreateWebUIForRenderManager(const GURL& url) {
-  return WebUIFactory::CreateWebUIForURL(this, url);
+  return content::WebUIFactory::Get()->CreateWebUIForURL(this, url);
 }
 
 NavigationEntry*
@@ -2676,11 +2417,18 @@ bool TabContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host) {
   RenderWidgetHostView* rwh_view = view_->CreateViewForWidget(render_view_host);
 
+  // Now that the RenderView has been created, we need to tell it its size.
+  rwh_view->SetSize(view_->GetContainerSize());
+
   if (!render_view_host->CreateRenderView(string16()))
     return false;
 
-  // Now that the RenderView has been created, we need to tell it its size.
-  rwh_view->SetSize(view_->GetContainerSize());
+#if defined(OS_LINUX)
+  // Force a ViewMsg_Resize to be sent, needed to make plugins show up on
+  // linux. See crbug.com/83941.
+  if (RenderWidgetHost* render_widget_host = rwh_view->GetRenderWidgetHost())
+    render_widget_host->WasResized();
+#endif
 
   UpdateMaxPageIDIfNecessary(render_view_host->site_instance(),
                              render_view_host);
@@ -2701,6 +2449,10 @@ void TabContents::Observe(NotificationType type,
         UpdateWebPreferences();
       } else if (*pref_name_in == prefs::kDefaultZoomLevel) {
         UpdateZoomLevel();
+      } else if (*pref_name_in == prefs::kEnableReferrers) {
+        renderer_preferences_util::UpdateFromSystemSettings(
+            &renderer_preferences_, profile());
+        render_view_host()->SyncRendererPrefs();
       } else {
         NOTREACHED() << "unexpected pref change notification" << *pref_name_in;
       }
@@ -2747,53 +2499,12 @@ void TabContents::Observe(NotificationType type,
       break;
     }
 
-    case NotificationType::EXTENSION_LOADED:
-      break;
-
-    case NotificationType::EXTENSION_UNLOADED:
-      break;
-
     case NotificationType::GOOGLE_URL_UPDATED:
       UpdateAlternateErrorPageURL();
       break;
 
     default:
       NOTREACHED();
-  }
-}
-
-void TabContents::UpdateExtensionAppIcon(const Extension* extension) {
-  extension_app_icon_.reset();
-
-  if (extension) {
-    extension_app_image_loader_.reset(new ImageLoadingTracker(this));
-    extension_app_image_loader_->LoadImage(
-        extension,
-        extension->GetIconResource(Extension::EXTENSION_ICON_SMALLISH,
-                                   ExtensionIconSet::MATCH_EXACTLY),
-        gfx::Size(Extension::EXTENSION_ICON_SMALLISH,
-                  Extension::EXTENSION_ICON_SMALLISH),
-        ImageLoadingTracker::CACHE);
-  } else {
-    extension_app_image_loader_.reset(NULL);
-  }
-}
-
-const Extension* TabContents::GetExtensionContaining(const GURL& url) {
-  ExtensionService* extensions_service = profile()->GetExtensionService();
-  if (!extensions_service)
-    return NULL;
-
-  const Extension* extension = extensions_service->GetExtensionByURL(url);
-  return extension ?
-      extension : extensions_service->GetExtensionByWebExtent(url);
-}
-
-void TabContents::OnImageLoaded(SkBitmap* image, ExtensionResource resource,
-                                int index) {
-  if (image) {
-    extension_app_icon_ = *image;
-    NotifyNavigationStateChanged(INVALIDATE_TAB);
   }
 }
 
@@ -2832,11 +2543,6 @@ void TabContents::set_encoding(const std::string& encoding) {
   encoding_ = CharacterEncoding::GetCanonicalEncodingNameByAliasName(encoding);
 }
 
-void TabContents::SetAppIcon(const SkBitmap& app_icon) {
-  app_icon_ = app_icon;
-  NotifyNavigationStateChanged(INVALIDATE_TITLE);
-}
-
 void TabContents::SwapInRenderViewHost(RenderViewHost* rvh) {
   render_manager_.SwapInRenderViewHost(rvh);
 }
@@ -2849,13 +2555,4 @@ void TabContents::CreateViewAndSetSizeForRVH(RenderViewHost* rvh) {
 void TabContents::OnOnlineStateChanged(bool online) {
   render_view_host()->Send(new ViewMsg_NetworkStateChanged(
       render_view_host()->routing_id(), online));
-}
-
-bool TabContents::MaybeUsePreloadedPage(const GURL& url) {
-  prerender::PrerenderManager* pm = profile()->GetPrerenderManager();
-  if (pm != NULL) {
-    if (pm->MaybeUsePreloadedPage(this, url))
-      return true;
-  }
-  return false;
 }

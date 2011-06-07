@@ -4,8 +4,11 @@
 
 #include "remoting/protocol/jingle_session.h"
 
-#include "base/crypto/rsa_private_key.h"
 #include "base/message_loop.h"
+#include "crypto/rsa_private_key.h"
+#include "jingle/glue/channel_socket_adapter.h"
+#include "jingle/glue/stream_socket_adapter.h"
+#include "net/base/cert_status_flags.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
@@ -15,9 +18,7 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_server_socket.h"
 #include "remoting/base/constants.h"
-#include "remoting/jingle_glue/channel_socket_adapter.h"
 #include "remoting/jingle_glue/jingle_thread.h"
-#include "remoting/jingle_glue/stream_socket_adapter.h"
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/socket_wrapper.h"
 #include "third_party/libjingle/source/talk/base/thread.h"
@@ -53,13 +54,12 @@ net::SSLClientSocket* CreateSSLClientSocket(
     net::CertVerifier* cert_verifier) {
   net::SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
-  ssl_config.snap_start_enabled = false;
   ssl_config.ssl3_enabled = true;
   ssl_config.tls1_enabled = true;
 
   // Certificate provided by the host doesn't need authority.
   net::SSLConfig::CertAndStatus cert_and_status;
-  cert_and_status.cert_status = net::ERR_CERT_AUTHORITY_INVALID;
+  cert_and_status.cert_status = net::CERT_STATUS_AUTHORITY_INVALID;
   cert_and_status.cert = cert;
   ssl_config.allowed_bad_certs.push_back(cert_and_status);
 
@@ -83,13 +83,13 @@ JingleSession* JingleSession::CreateClientSession(
 JingleSession* JingleSession::CreateServerSession(
     JingleSessionManager* manager,
     scoped_refptr<net::X509Certificate> certificate,
-    base::RSAPrivateKey* key) {
+    crypto::RSAPrivateKey* key) {
   return new JingleSession(manager, certificate, key);
 }
 
 JingleSession::JingleSession(
     JingleSessionManager* jingle_session_manager,
-    scoped_refptr<net::X509Certificate> server_cert, base::RSAPrivateKey* key)
+    scoped_refptr<net::X509Certificate> server_cert, crypto::RSAPrivateKey* key)
     : jingle_session_manager_(jingle_session_manager),
       server_cert_(server_cert),
       state_(INITIALIZING),
@@ -105,7 +105,7 @@ JingleSession::JingleSession(
   if (key) {
     std::vector<uint8> key_bytes;
     CHECK(key->ExportPrivateKey(&key_bytes));
-    key_.reset(base::RSAPrivateKey::CreateFromPrivateKeyInfo(key_bytes));
+    key_.reset(crypto::RSAPrivateKey::CreateFromPrivateKeyInfo(key_bytes));
     CHECK(key_.get());
   }
 }
@@ -364,9 +364,9 @@ void JingleSession::OnInitiate() {
   }
 
   // Create video RTP channels.
-  video_rtp_channel_.reset(new TransportChannelSocketAdapter(
+  video_rtp_channel_.reset(new jingle_glue::TransportChannelSocketAdapter(
       cricket_session_->CreateChannel(content_name, kVideoRtpChannelName)));
-  video_rtcp_channel_.reset(new TransportChannelSocketAdapter(
+  video_rtcp_channel_.reset(new jingle_glue::TransportChannelSocketAdapter(
       cricket_session_->CreateChannel(content_name, kVideoRtcpChannelName)));
 
   // Create control channel.
@@ -375,7 +375,7 @@ void JingleSession::OnInitiate() {
   control_channel_->Connect(content_name, kControlChannelName);
   control_channel_->SetOption(PseudoTcp::OPT_NODELAY, kEnableNoDelay);
   control_channel_->SetOption(PseudoTcp::OPT_ACKDELAY, kDelayedAckTimeoutMs);
-  control_channel_adapter_.reset(new StreamSocketAdapter(
+  control_channel_adapter_.reset(new jingle_glue::StreamSocketAdapter(
       control_channel_->GetStream()));
 
   // Create event channel.
@@ -384,7 +384,7 @@ void JingleSession::OnInitiate() {
   event_channel_->Connect(content_name, kEventChannelName);
   event_channel_->SetOption(PseudoTcp::OPT_NODELAY, kEnableNoDelay);
   event_channel_->SetOption(PseudoTcp::OPT_ACKDELAY, kDelayedAckTimeoutMs);
-  event_channel_adapter_.reset(new StreamSocketAdapter(
+  event_channel_adapter_.reset(new jingle_glue::StreamSocketAdapter(
       event_channel_->GetStream()));
 
   // Create video channel.
@@ -394,7 +394,7 @@ void JingleSession::OnInitiate() {
   video_channel_->Connect(content_name, kVideoChannelName);
   video_channel_->SetOption(PseudoTcp::OPT_NODELAY, kEnableNoDelay);
   video_channel_->SetOption(PseudoTcp::OPT_ACKDELAY, kDelayedAckTimeoutMs);
-  video_channel_adapter_.reset(new StreamSocketAdapter(
+  video_channel_adapter_.reset(new jingle_glue::StreamSocketAdapter(
       video_channel_->GetStream()));
 
   if (!cricket_session_->initiator())

@@ -8,10 +8,7 @@
 #include "views/layout/box_layout.h"
 #include "views/layout/layout_manager.h"
 #include "views/view.h"
-
-#if defined(OS_LINUX)
-#include "views/widget/widget_gtk.h"
-#endif
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -79,9 +76,7 @@ void WidgetExample::BuildButton(views::View* container,
   container->AddChildView(button);
 }
 
-void WidgetExample::InitWidget(
-    views::Widget* widget,
-    const views::Widget::TransparencyParam transparency) {
+void WidgetExample::InitWidget(views::Widget* widget, bool transparent) {
   // Add view/native buttons to close the popup widget.
   views::TextButton* close_button = new views::TextButton(this, L"Close");
   close_button->set_tag(CLOSE_WIDGET);
@@ -102,7 +97,7 @@ void WidgetExample::InitWidget(
 
   widget->SetContentsView(widget_container);
 
-  if (transparency != views::Widget::Transparent) {
+  if (!transparent) {
     widget_container->set_background(
         views::Background::CreateStandardPanelBackground());
   }
@@ -112,13 +107,10 @@ void WidgetExample::InitWidget(
 }
 
 #if defined(OS_LINUX)
-void WidgetExample::CreateChild(
-    views::View* parent,
-    const views::Widget::TransparencyParam transparency) {
-  views::WidgetGtk* widget =
-      new views::WidgetGtk(views::WidgetGtk::TYPE_CHILD);
-  if (transparency == views::Widget::Transparent)
-    widget->MakeTransparent();
+void WidgetExample::CreateChild(views::View* parent, bool transparent) {
+  views::Widget::CreateParams params(views::Widget::CreateParams::TYPE_CONTROL);
+  params.transparent = transparent;
+  views::Widget* widget = views::Widget::CreateWidget(params);
   // Compute where to place the child widget.
   // We'll place it at the center of the root widget.
   views::Widget* parent_widget = parent->GetWidget();
@@ -128,18 +120,14 @@ void WidgetExample::CreateChild(
       200, 200);
   // Initialize the child widget with the computed bounds.
   widget->InitWithWidget(parent_widget, bounds);
-  InitWidget(widget, transparency);
+  InitWidget(widget, transparent);
 }
 #endif
 
-void WidgetExample::CreatePopup(
-    views::View* parent,
-    const views::Widget::TransparencyParam transparency) {
-  views::Widget* widget = views::Widget::CreatePopupWidget(
-      transparency,
-      views::Widget::AcceptEvents,
-      views::Widget::DeleteOnDestroy,
-      views::Widget::MirrorOriginInRTL);
+void WidgetExample::CreatePopup(views::View* parent, bool transparent) {
+  views::Widget::CreateParams params(views::Widget::CreateParams::TYPE_POPUP);
+  params.transparent = transparent;
+  views::Widget* widget = views::Widget::CreateWidget(params);
 
   // Compute where to place the popup widget.
   // We'll place it right below the create button.
@@ -151,24 +139,24 @@ void WidgetExample::CreatePopup(
   gfx::Rect bounds(point.x(), point.y(), 200, 300);
   // Initialize the popup widget with the computed bounds.
   widget->InitWithWidget(parent->GetWidget(), bounds);
-  InitWidget(widget, transparency);
+  InitWidget(widget, transparent);
 }
 
 void WidgetExample::ButtonPressed(views::Button* sender,
                                   const views::Event& event) {
   switch (sender->tag()) {
     case POPUP:
-      CreatePopup(sender, views::Widget::NotTransparent);
+      CreatePopup(sender, false);
       break;
     case TRANSPARENT_POPUP:
-      CreatePopup(sender, views::Widget::Transparent);
+      CreatePopup(sender, true);
       break;
 #if defined(OS_LINUX)
     case CHILD:
-      CreateChild(sender, views::Widget::NotTransparent);
+      CreateChild(sender, false);
       break;
     case TRANSPARENT_CHILD:
-      CreateChild(sender, views::Widget::Transparent);
+      CreateChild(sender, true);
       break;
 #endif
     case CLOSE_WIDGET:

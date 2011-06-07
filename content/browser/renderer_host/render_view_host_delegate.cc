@@ -4,10 +4,9 @@
 
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
-#include "chrome/common/renderer_preferences.h"
+#include "content/common/renderer_preferences.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/webpreferences.h"
@@ -70,5 +69,10 @@ WebPreferences RenderViewHostDelegate::GetWebkitPrefs() {
 }
 
 bool RenderViewHostDelegate::IsExternalTabContainer() const {
+  return false;
+}
+
+bool RenderViewHostDelegate::RequestDesktopNotificationPermission(
+    const GURL& source_origin, int callback_context) {
   return false;
 }

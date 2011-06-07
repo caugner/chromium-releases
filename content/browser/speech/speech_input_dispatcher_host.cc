@@ -5,7 +5,7 @@
 #include "content/browser/speech/speech_input_dispatcher_host.h"
 
 #include "base/lazy_instance.h"
-#include "chrome/common/speech_input_messages.h"
+#include "content/common/speech_input_messages.h"
 
 namespace speech_input {
 
@@ -140,6 +140,8 @@ bool SpeechInputDispatcherHost::OnMessageReceived(
                         OnStopRecording)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  if (handled)
+    may_have_pending_requests_ = true;
   return handled;
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #endif
 
 #include "skia/ext/skia_utils_win.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/gfx/canvas.h"
 #include "views/background.h"
 
@@ -38,13 +39,6 @@ SingleSplitView::SingleSplitView(View* leading,
 #endif
 }
 
-void SingleSplitView::OnBoundsChanged() {
-  divider_offset_ = CalculateDividerOffset(divider_offset_, previous_bounds_,
-                                           bounds());
-  View::OnBoundsChanged();
-  previous_bounds_ = bounds();
-}
-
 void SingleSplitView::Layout() {
   gfx::Rect leading_bounds;
   gfx::Rect trailing_bounds;
@@ -65,8 +59,9 @@ void SingleSplitView::Layout() {
   View::Layout();
 }
 
-AccessibilityTypes::Role SingleSplitView::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_GROUPING;
+void SingleSplitView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_GROUPING;
+  state->name = accessible_name_;
 }
 
 gfx::Size SingleSplitView::GetPreferredSize() {
@@ -150,6 +145,10 @@ void SingleSplitView::CalculateChildrenBounds(
   }
 }
 
+void SingleSplitView::SetAccessibleName(const string16& name) {
+  accessible_name_ = name;
+}
+
 bool SingleSplitView::OnMousePressed(const MouseEvent& event) {
   if (!IsPointInDivider(event.location()))
     return false;
@@ -183,15 +182,20 @@ bool SingleSplitView::OnMouseDragged(const MouseEvent& event) {
   return true;
 }
 
-void SingleSplitView::OnMouseReleased(const MouseEvent& event, bool canceled) {
+void SingleSplitView::OnMouseCaptureLost() {
   if (child_count() < 2)
     return;
 
-  if (canceled && drag_info_.initial_divider_offset != divider_offset_) {
+  if (drag_info_.initial_divider_offset != divider_offset_) {
     set_divider_offset(drag_info_.initial_divider_offset);
     if (!observer_ || observer_->SplitHandleMoved(this))
       Layout();
   }
+}
+
+void SingleSplitView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  divider_offset_ = CalculateDividerOffset(divider_offset_, previous_bounds,
+                                           bounds());
 }
 
 bool SingleSplitView::IsPointInDivider(const gfx::Point& p) {

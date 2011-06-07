@@ -1,10 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/context_group.h"
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
@@ -71,8 +71,9 @@ TEST_F(ContextGroupTest, Basic) {
 }
 
 TEST_F(ContextGroupTest, InitializeNoExtensions) {
-  TestHelper::SetupContextGroupInitExpectations(gl_.get(), "");
-  group_->Initialize("");
+  TestHelper::SetupContextGroupInitExpectations(gl_.get(),
+      DisallowedExtensions(), "");
+  group_->Initialize(DisallowedExtensions(), "");
   EXPECT_EQ(static_cast<uint32>(TestHelper::kNumVertexAttribs),
             group_->max_vertex_attribs());
   EXPECT_EQ(static_cast<uint32>(TestHelper::kNumTextureUnits),

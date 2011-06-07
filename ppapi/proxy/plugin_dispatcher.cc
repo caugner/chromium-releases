@@ -12,6 +12,7 @@
 #include "ipc/ipc_sync_channel.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/proxy/interface_proxy.h"
+#include "ppapi/proxy/plugin_message_filter.h"
 #include "ppapi/proxy/plugin_var_serialization_rules.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
@@ -33,11 +34,7 @@ InstanceToDispatcherMap* g_instance_to_dispatcher = NULL;
 
 PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
                                    GetInterfaceFunc get_interface)
-    : Dispatcher(remote_process_handle, get_interface)
-#if defined(OS_POSIX)
-    , renderer_fd_(-1)
-#endif
-    {
+    : Dispatcher(remote_process_handle, get_interface) {
   SetSerializationRules(new PluginVarSerializationRules);
 
   // As a plugin, we always support the PPP_Class interface. There's no
@@ -46,9 +43,6 @@ PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
 }
 
 PluginDispatcher::~PluginDispatcher() {
-#if defined(OS_POSIX)
-  CloseRendererFD();
-#endif
 }
 
 // static
@@ -69,11 +63,37 @@ const void* PluginDispatcher::GetInterfaceFromDispatcher(
   const InterfaceProxy::Info* info = GetPPBInterfaceInfo(interface);
   if (!info)
     return NULL;
-  return info->interface;
+  return info->interface_ptr;
+}
+
+bool PluginDispatcher::InitPluginWithChannel(
+    PluginDispatcher::Delegate* delegate,
+    const IPC::ChannelHandle& channel_handle,
+    bool is_client) {
+  if (!Dispatcher::InitWithChannel(delegate, channel_handle, is_client))
+    return false;
+
+  // The message filter will intercept and process certain messages directly
+  // on the I/O thread.
+  channel()->AddFilter(
+      new PluginMessageFilter(delegate->GetGloballySeenInstanceIDSet()));
+  return true;
 }
 
 bool PluginDispatcher::IsPlugin() const {
   return true;
+}
+
+bool PluginDispatcher::Send(IPC::Message* msg) {
+  // We always want plugin->renderer messages to arrive in-order. If some sync
+  // and some async messages are send in response to a synchronous
+  // renderer->plugin call, the sync reply will be processed before the async
+  // reply, and everything will be confused.
+  //
+  // Allowing all async messages to unblock the renderer means more reentrancy
+  // there but gives correct ordering.
+  msg->set_unblock(true);
+  return Dispatcher::Send(msg);
 }
 
 bool PluginDispatcher::OnMessageReceived(const IPC::Message& msg) {
@@ -131,8 +151,8 @@ bool PluginDispatcher::OnMessageReceived(const IPC::Message& msg) {
 void PluginDispatcher::OnChannelError() {
   Dispatcher::OnChannelError();
 
-  // The renderer has crashed. This channel and all instances associated with
-  // it are no longer valid.
+  // The renderer has crashed or exited. This channel and all instances
+  // associated with it are no longer valid.
   ForceFreeAllInstances();
   // TODO(brettw) free resources too!
   delete this;
@@ -167,22 +187,6 @@ InstanceData* PluginDispatcher::GetInstanceData(PP_Instance instance) {
   InstanceDataMap::iterator it = instance_map_.find(instance);
   return (it == instance_map_.end()) ? NULL : &it->second;
 }
-
-#if defined(OS_POSIX)
-int PluginDispatcher::GetRendererFD() {
-  if (renderer_fd_ == -1 && channel())
-    renderer_fd_ = channel()->GetClientFileDescriptor();
-  return renderer_fd_;
-}
-
-void PluginDispatcher::CloseRendererFD() {
-  if (renderer_fd_ != -1) {
-    if (HANDLE_EINTR(close(renderer_fd_)) < 0)
-      PLOG(ERROR) << "close";
-    renderer_fd_ = -1;
-  }
-}
-#endif
 
 void PluginDispatcher::ForceFreeAllInstances() {
   if (!g_instance_to_dispatcher)

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GdkRegion GdkRegion;
@@ -61,23 +61,21 @@ uint8_t* BGRAToRGBA(const uint8_t* pixels, int width, int height, int stride);
 
 }  // namespace gfx
 
-namespace {
-// A helper class that will g_object_unref |p| when it goes out of scope.
-// This never adds a ref, it only unrefs.
-template <typename Type>
-struct GObjectUnrefer {
-  void operator()(Type* ptr) const {
-    if (ptr)
-      g_object_unref(ptr);
-  }
-};
-}  // namespace
-
 // It's not legal C++ to have a templatized typedefs, so we wrap it in a
 // struct.  When using this, you need to include ::Type.  E.g.,
 // ScopedGObject<GdkPixbufLoader>::Type loader(gdk_pixbuf_loader_new());
 template<class T>
 struct ScopedGObject {
+  // A helper class that will g_object_unref |p| when it goes out of scope.
+  // This never adds a ref, it only unrefs.
+  template<class U>
+  struct GObjectUnrefer {
+    void operator()(U* ptr) const {
+      if (ptr)
+        g_object_unref(ptr);
+    }
+  };
+
   typedef scoped_ptr_malloc<T, GObjectUnrefer<T> > Type;
 };
 

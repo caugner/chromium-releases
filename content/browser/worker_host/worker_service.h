@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,20 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
+#include "base/threading/non_thread_safe.h"
 #include "content/browser/worker_host/worker_process_host.h"
 #include "googleurl/src/gurl.h"
 
+namespace content {
+class ResourceContext;
+}  // namespace content
+namespace net {
 class URLRequestContextGetter;
+}  // namespace net
 struct ViewHostMsg_CreateWorker_Params;
 
-// A singelton for managing HTML5 web workers.
+// A singleton for managing HTML5 web workers.
 class WorkerService {
  public:
   // Returns the WorkerService singleton.
@@ -24,11 +30,11 @@ class WorkerService {
   void CreateWorker(const ViewHostMsg_CreateWorker_Params& params,
                     int route_id,
                     WorkerMessageFilter* filter,
-                    URLRequestContextGetter* request_context);
+                    const content::ResourceContext& resource_context);
   void LookupSharedWorker(const ViewHostMsg_CreateWorker_Params& params,
                           int route_id,
                           WorkerMessageFilter* filter,
-                          bool off_the_record,
+                          bool incognito,
                           bool* exists,
                           bool* url_error);
   void CancelCreateDedicatedWorker(int route_id, WorkerMessageFilter* filter);
@@ -96,14 +102,14 @@ class WorkerService {
 
   // APIs for manipulating our set of pending shared worker instances.
   WorkerProcessHost::WorkerInstance* CreatePendingInstance(
-      const GURL& url, const string16& name, bool off_the_record);
+      const GURL& url, const string16& name, bool incognito);
   WorkerProcessHost::WorkerInstance* FindPendingInstance(
-      const GURL& url, const string16& name, bool off_the_record);
+      const GURL& url, const string16& name, bool incognito);
   void RemovePendingInstances(
-      const GURL& url, const string16& name, bool off_the_record);
+      const GURL& url, const string16& name, bool incognito);
 
   WorkerProcessHost::WorkerInstance* FindSharedWorkerInstance(
-      const GURL& url, const string16& name, bool off_the_record);
+      const GURL& url, const string16& name, bool incognito);
 
   NotificationRegistrar registrar_;
   int next_worker_route_id_;

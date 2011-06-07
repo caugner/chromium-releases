@@ -9,29 +9,61 @@
 
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 
 #include <algorithm>
 
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/sys_info.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#include "chrome/common/json_value_serializer.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
+#include "content/common/json_value_serializer.h"
 
 using base::win::RegKey;
 using installer::ProductState;
+
+namespace {
+
+const wchar_t kStageBinaryPatching[] = L"binary_patching";
+const wchar_t kStageBuilding[] = L"building";
+const wchar_t kStageEnsemblePatching[] = L"ensemble_patching";
+const wchar_t kStageExecuting[] = L"executing";
+const wchar_t kStageFinishing[] = L"finishing";
+const wchar_t kStagePreconditions[] = L"preconditions";
+const wchar_t kStageRollingback[] = L"rollingback";
+const wchar_t kStageUncompressing[] = L"uncompressing";
+const wchar_t kStageUnpacking[] = L"unpacking";
+
+const wchar_t* const kStages[] = {
+  NULL,
+  kStagePreconditions,
+  kStageUncompressing,
+  kStageEnsemblePatching,
+  kStageBinaryPatching,
+  kStageUnpacking,
+  kStageBuilding,
+  kStageExecuting,
+  kStageRollingback,
+  kStageFinishing
+};
+
+COMPILE_ASSERT(installer::NUM_STAGES == arraysize(kStages),
+               kStages_disagrees_with_Stage_comma_they_must_match_bang);
+
+}  // namespace
 
 bool InstallUtil::ExecuteExeAsAdmin(const CommandLine& cmd, DWORD* exit_code) {
   FilePath::StringType program(cmd.GetProgram().value());
@@ -105,15 +137,13 @@ Version* InstallUtil::GetChromeVersion(BrowserDistribution* dist,
 }
 
 bool InstallUtil::IsOSSupported() {
-  int major, minor;
-  base::win::Version version = base::win::GetVersion();
-  base::win::GetServicePackLevel(&major, &minor);
-
   // We do not support Win2K or older, or XP without service pack 2.
-  VLOG(1) << "Windows Version: " << version
-          << ", Service Pack: " << major << "." << minor;
+  VLOG(1) << base::SysInfo::OperatingSystemName() << ' '
+          << base::SysInfo::OperatingSystemVersion();
+  base::win::Version version = base::win::GetVersion();
   return (version > base::win::VERSION_XP) ||
-      (version == base::win::VERSION_XP && major >= 2);
+      ((version == base::win::VERSION_XP) &&
+       (base::win::OSInfo::GetInstance()->service_pack().major >= 2));
 }
 
 void InstallUtil::WriteInstallerResult(bool system_install,
@@ -144,6 +174,31 @@ void InstallUtil::WriteInstallerResult(bool system_install,
     LOG(ERROR) << "Failed to record installer error information in registry.";
 }
 
+void InstallUtil::UpdateInstallerStage(bool system_install,
+                                       const std::wstring& state_key_path,
+                                       installer::InstallerStage stage) {
+  DCHECK_LE(static_cast<installer::InstallerStage>(0), stage);
+  DCHECK_GT(installer::NUM_STAGES, stage);
+  const HKEY root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+  RegKey state_key;
+  LONG result = state_key.Open(root, state_key_path.c_str(),
+                               KEY_QUERY_VALUE | KEY_SET_VALUE);
+  if (result == ERROR_SUCCESS) {
+    // TODO(grt): switch to using Google Update's new InstallerExtraCode1 value
+    // once it exists.  In the meantime, encode the stage into the channel name.
+    installer::ChannelInfo channel_info;
+    // This will return false if the "ap" value isn't present, which is fine.
+    channel_info.Initialize(state_key);
+    if (channel_info.SetStage(kStages[stage]) &&
+        !channel_info.Write(&state_key)) {
+      LOG(ERROR) << "Failed writing installer stage to " << state_key_path;
+    }
+  } else {
+    LOG(ERROR) << "Failed opening " << state_key_path
+               << " to update installer stage; result: " << result;
+  }
+}
+
 bool InstallUtil::IsPerUserInstall(const wchar_t* const exe_path) {
   wchar_t program_files_path[MAX_PATH] = {0};
   if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_PROGRAM_FILES, NULL,
@@ -153,6 +208,14 @@ bool InstallUtil::IsPerUserInstall(const wchar_t* const exe_path) {
     NOTREACHED();
   }
   return true;
+}
+
+bool InstallUtil::IsMultiInstall(BrowserDistribution* dist,
+                                 bool system_install) {
+  DCHECK(dist);
+  ProductState state;
+  return state.Initialize(system_install, dist->GetType()) &&
+         state.is_multi_install();
 }
 
 bool CheckIsChromeSxSProcess() {
@@ -198,10 +261,10 @@ bool InstallUtil::BuildDLLRegistrationList(const std::wstring& install_path,
 // This method tries to delete a registry key and logs an error message
 // in case of failure. It returns true if deletion is successful,
 // otherwise false.
-bool InstallUtil::DeleteRegistryKey(RegKey& root_key,
+bool InstallUtil::DeleteRegistryKey(HKEY root_key,
                                     const std::wstring& key_path) {
   VLOG(1) << "Deleting registry key " << key_path;
-  LONG result = root_key.DeleteKey(key_path.c_str());
+  LONG result = ::SHDeleteKey(root_key, key_path.c_str());
   if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND) {
     LOG(ERROR) << "Failed to delete registry key: " << key_path
                << " error: " << result;
@@ -227,6 +290,56 @@ bool InstallUtil::DeleteRegistryValue(HKEY reg_root,
     }
   }
   return true;
+}
+
+// static
+bool InstallUtil::DeleteRegistryKeyIf(
+    HKEY root_key,
+    const std::wstring& key_to_delete_path,
+    const std::wstring& key_to_test_path,
+    const wchar_t* value_name,
+    const RegistryValuePredicate& predicate) {
+  DCHECK(root_key);
+  DCHECK(value_name);
+  RegKey key;
+  std::wstring actual_value;
+  if (key.Open(root_key, key_to_test_path.c_str(),
+               KEY_QUERY_VALUE) == ERROR_SUCCESS &&
+      key.ReadValue(value_name, &actual_value) == ERROR_SUCCESS &&
+      predicate.Evaluate(actual_value)) {
+    key.Close();
+    return DeleteRegistryKey(root_key, key_to_delete_path);
+  }
+  return true;
+}
+
+// static
+bool InstallUtil::DeleteRegistryValueIf(
+    HKEY root_key,
+    const wchar_t* key_path,
+    const wchar_t* value_name,
+    const RegistryValuePredicate& predicate) {
+  DCHECK(root_key);
+  DCHECK(key_path);
+  DCHECK(value_name);
+  RegKey key;
+  std::wstring actual_value;
+  if (key.Open(root_key, key_path,
+               KEY_QUERY_VALUE | KEY_SET_VALUE) == ERROR_SUCCESS &&
+      key.ReadValue(value_name, &actual_value) == ERROR_SUCCESS &&
+      predicate.Evaluate(actual_value)) {
+    LONG result = key.DeleteValue(value_name);
+    if (result != ERROR_SUCCESS) {
+      LOG(ERROR) << "Failed to delete registry value: " << value_name
+                 << " error: " << result;
+      return false;
+    }
+  }
+  return true;
+}
+
+bool InstallUtil::ValueEquals::Evaluate(const std::wstring& value) const {
+  return value == value_to_match_;
 }
 
 // static

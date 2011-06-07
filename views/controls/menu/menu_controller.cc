@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -377,7 +377,7 @@ void MenuController::Cancel(ExitType type) {
   MenuItemView* selected = state_.item;
   exit_type_ = type;
 
-  SendMouseReleaseToActiveView();
+  SendMouseCaptureLostToActiveView();
 
   // Hide windows immediately.
   SetSelection(NULL, SELECTION_UPDATE_IMMEDIATELY | SELECTION_EXIT);
@@ -400,7 +400,7 @@ void MenuController::OnMousePressed(SubmenuView* source,
 
   DCHECK(!active_mouse_view_);
 
-  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPart(source, event.location());
   if (part.is_scroll())
     return;  // Ignore presses on scroll buttons.
 
@@ -418,7 +418,18 @@ void MenuController::OnMousePressed(SubmenuView* source,
 #endif
 
     // And close.
-    Cancel(EXIT_ALL);
+    ExitType exit_type = EXIT_ALL;
+    if (!menu_stack_.empty()) {
+      // We're running nested menus. Only exit all if the mouse wasn't over one
+      // of the menus from the last run.
+      gfx::Point screen_loc(event.location());
+      View::ConvertPointToScreen(source->GetScrollViewContainer(), &screen_loc);
+      MenuPart last_part = GetMenuPartByScreenCoordinateUsingMenu(
+          menu_stack_.back().item, screen_loc);
+      if (last_part.type != MenuPart::NONE)
+        exit_type = EXIT_OUTERMOST;
+    }
+    Cancel(exit_type);
     return;
   }
 
@@ -441,7 +452,7 @@ void MenuController::OnMousePressed(SubmenuView* source,
 
 void MenuController::OnMouseDragged(SubmenuView* source,
                                     const MouseEvent& event) {
-  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPart(source, event.location());
   UpdateScrolling(part);
 
   if (!blocking_run_)
@@ -503,7 +514,7 @@ void MenuController::OnMouseReleased(SubmenuView* source,
   DCHECK(state_.item);
   possible_drag_ = false;
   DCHECK(blocking_run_);
-  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPart(source, event.location());
   if (event.IsRightMouseButton() && (part.type == MenuPart::MENU_ITEM &&
                                      part.menu)) {
     // Set the selection immediately, making sure the submenu is only open
@@ -518,7 +529,7 @@ void MenuController::OnMouseReleased(SubmenuView* source,
     // If we open a context menu just return now
     if (part.menu->GetDelegate()->ShowContextMenu(
             part.menu, part.menu->GetCommand(), loc, true)) {
-      SendMouseReleaseToActiveView(source, event, true);
+      SendMouseCaptureLostToActiveView();
       return;
     }
   }
@@ -530,7 +541,7 @@ void MenuController::OnMouseReleased(SubmenuView* source,
       !(part.menu->HasSubmenu() &&
         (event.flags() == ui::EF_LEFT_BUTTON_DOWN))) {
     if (active_mouse_view_) {
-      SendMouseReleaseToActiveView(source, event, false);
+      SendMouseReleaseToActiveView(source, event);
       return;
     }
     if (part.menu->GetDelegate()->IsTriggerableEvent(event)) {
@@ -542,7 +553,7 @@ void MenuController::OnMouseReleased(SubmenuView* source,
     SetSelection(part.menu ? part.menu : state_.item,
                  SELECTION_OPEN_SUBMENU | SELECTION_UPDATE_IMMEDIATELY);
   }
-  SendMouseReleaseToActiveView(source, event, true);
+  SendMouseCaptureLostToActiveView();
 }
 
 void MenuController::OnMouseMoved(SubmenuView* source,
@@ -550,7 +561,7 @@ void MenuController::OnMouseMoved(SubmenuView* source,
   if (showing_submenu_)
     return;
 
-  MenuPart part = GetMenuPartByScreenCoordinate(source, event.x(), event.y());
+  MenuPart part = GetMenuPart(source, event.location());
 
   UpdateScrolling(part);
 
@@ -578,6 +589,14 @@ void MenuController::OnMouseEntered(SubmenuView* source,
   // MouseEntered is always followed by a mouse moved, so don't need to
   // do anything here.
 }
+
+#if defined(OS_LINUX)
+bool MenuController::OnMouseWheel(SubmenuView* source,
+                                  const MouseWheelEvent& event) {
+  MenuPart part = GetMenuPart(source, event.location());
+  return part.submenu && part.submenu->OnMouseWheel(event);
+}
+#endif
 
 bool MenuController::GetDropFormats(
       SubmenuView* source,
@@ -766,8 +785,10 @@ void MenuController::SetSelection(MenuItemView* menu_item,
   // Notify an accessibility focus event on all menu items except for the root.
   if (menu_item &&
       (MenuDepth(menu_item) != 1 ||
-          menu_item->GetType() != MenuItemView::SUBMENU))
-    menu_item->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS);
+       menu_item->GetType() != MenuItemView::SUBMENU)) {
+    menu_item->GetWidget()->NotifyAccessibilityEvent(
+        menu_item, ui::AccessibilityTypes::EVENT_FOCUS, true);
+  }
 }
 
 // static
@@ -1007,7 +1028,7 @@ void MenuController::UpdateInitialLocation(
 
   // Calculate the bounds of the monitor we'll show menus on. Do this once to
   // avoid repeated system queries for the info.
-  pending_state_.monitor_bounds = Screen::GetMonitorAreaNearestPoint(
+  pending_state_.monitor_bounds = Screen::GetMonitorWorkAreaNearestPoint(
       bounds.origin());
 }
 
@@ -1023,13 +1044,14 @@ void MenuController::Accept(MenuItemView* item, int mouse_event_flags) {
   result_mouse_event_flags_ = mouse_event_flags;
 }
 
-bool MenuController::ShowSiblingMenu(SubmenuView* source, const MouseEvent& e) {
+bool MenuController::ShowSiblingMenu(SubmenuView* source,
+                                     const MouseEvent& event) {
   if (!menu_stack_.empty() || !menu_button_)
     return false;
 
   View* source_view = source->GetScrollViewContainer();
-  if (e.x() >= 0 && e.x() < source_view->width() && e.y() >= 0 &&
-      e.y() < source_view->height()) {
+  if (event.x() >= 0 && event.x() < source_view->width() && event.y() >= 0 &&
+      event.y() < source_view->height()) {
     // The mouse is over the menu, no need to continue.
     return false;
   }
@@ -1040,7 +1062,7 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source, const MouseEvent& e) {
 
   // The user moved the mouse outside the menu and over the owning window. See
   // if there is a sibling menu we should show.
-  gfx::Point screen_point(e.location());
+  gfx::Point screen_point(event.location());
   View::ConvertPointToScreen(source_view, &screen_point);
   MenuItemView::AnchorPosition anchor;
   bool has_mnemonics;
@@ -1140,25 +1162,26 @@ bool MenuController::IsScrollButtonAt(SubmenuView* source,
   return false;
 }
 
-MenuController::MenuPart MenuController::GetMenuPartByScreenCoordinate(
+MenuController::MenuPart MenuController::GetMenuPart(
     SubmenuView* source,
-    int source_x,
-    int source_y) {
-  MenuPart part;
-
-  gfx::Point screen_loc(source_x, source_y);
+    const gfx::Point& source_loc) {
+  gfx::Point screen_loc(source_loc);
   View::ConvertPointToScreen(source->GetScrollViewContainer(), &screen_loc);
+  return GetMenuPartByScreenCoordinateUsingMenu(state_.item, screen_loc);
+}
 
-  MenuItemView* item = state_.item;
+MenuController::MenuPart MenuController::GetMenuPartByScreenCoordinateUsingMenu(
+    MenuItemView* item,
+    const gfx::Point& screen_loc) {
+  MenuPart part;
   while (item) {
     if (item->HasSubmenu() && item->GetSubmenu()->IsShowing() &&
-        GetMenuPartByScreenCoordinateImpl(item->GetSubmenu(), screen_loc,
-                                          &part)) {
+        GetMenuPartByScreenCoordinateImpl(
+            item->GetSubmenu(), screen_loc, &part)) {
       return part;
     }
     item = item->GetParentMenuItem();
   }
-
   return part;
 }
 
@@ -1189,6 +1212,7 @@ bool MenuController::GetMenuPartByScreenCoordinateImpl(
     View::ConvertPointToView(NULL, menu, &menu_loc);
     part->menu = GetMenuItemAt(menu, menu_loc.x(), menu_loc.y());
     part->type = MenuPart::MENU_ITEM;
+    part->submenu = menu;
     if (!part->menu)
       part->parent = menu->GetMenuItem();
     return true;
@@ -1685,8 +1709,8 @@ void MenuController::RepostEvent(SubmenuView* source,
     SubmenuView* submenu = state_.item->GetRootMenuItem()->GetSubmenu();
     submenu->ReleaseCapture();
 
-    if (submenu->native_window() && submenu->native_window() &&
-        GetWindowThreadProcessId(submenu->native_window(), NULL) !=
+    if (submenu->GetWidget()->GetNativeView() &&
+        GetWindowThreadProcessId(submenu->GetWidget()->GetNativeView(), NULL) !=
         GetWindowThreadProcessId(window, NULL)) {
       // Even though we have mouse capture, windows generates a mouse event
       // if the other window is in a separate thread. Don't generate an event in
@@ -1784,13 +1808,7 @@ void MenuController::UpdateActiveMouseView(SubmenuView* event_source,
       target = NULL;
   }
   if (target != active_mouse_view_) {
-    if (active_mouse_view_) {
-      // Send a mouse release with cancel set to true.
-      MouseEvent release_event(ui::ET_MOUSE_RELEASED, -1, -1, 0);
-      active_mouse_view_->OnMouseReleased(release_event, true);
-
-      active_mouse_view_ = NULL;
-    }
+    SendMouseCaptureLostToActiveView();
     active_mouse_view_ = target;
     if (active_mouse_view_) {
       gfx::Point target_point(target_menu_loc);
@@ -1817,8 +1835,7 @@ void MenuController::UpdateActiveMouseView(SubmenuView* event_source,
 }
 
 void MenuController::SendMouseReleaseToActiveView(SubmenuView* event_source,
-                                                  const MouseEvent& event,
-                                                  bool cancel) {
+                                                  const MouseEvent& event) {
   if (!active_mouse_view_)
     return;
 
@@ -1828,23 +1845,22 @@ void MenuController::SendMouseReleaseToActiveView(SubmenuView* event_source,
   View::ConvertPointToView(NULL, active_mouse_view_, &target_loc);
   MouseEvent release_event(ui::ET_MOUSE_RELEASED, target_loc.x(),
                            target_loc.y(), event.flags());
-  // Reset the active_mouse_view_ before sending mouse released. That way if if
-  // calls back to use we aren't in a weird state.
+  // Reset the active_mouse_view_ before sending mouse released. That way if it
+  // calls back to us, we aren't in a weird state.
   View* active_view = active_mouse_view_;
   active_mouse_view_ = NULL;
-  active_view->OnMouseReleased(release_event, cancel);
+  active_view->OnMouseReleased(release_event);
 }
 
-void MenuController::SendMouseReleaseToActiveView() {
+void MenuController::SendMouseCaptureLostToActiveView() {
   if (!active_mouse_view_)
     return;
 
-  MouseEvent release_event(ui::ET_MOUSE_RELEASED, -1, -1, 0);
-  // Reset the active_mouse_view_ before sending mouse released. That way if if
-  // calls back to use we aren't in a weird state.
+  // Reset the active_mouse_view_ before sending mouse capture lost. That way if
+  // it calls back to us, we aren't in a weird state.
   View* active_view = active_mouse_view_;
   active_mouse_view_ = NULL;
-  active_view->OnMouseReleased(release_event, true);
+  active_view->OnMouseCaptureLost();
 }
 
 }  // namespace views

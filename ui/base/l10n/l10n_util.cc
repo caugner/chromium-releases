@@ -16,9 +16,8 @@
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_ptr.h"
-#include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/sys_string_conversions.h"
@@ -27,15 +26,12 @@
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
-#include "ui/gfx/canvas.h"
 #include "unicode/rbbi.h"
 #include "unicode/uloc.h"
 
-#if defined(OS_MACOSX)
-#include "ui/base/l10n/l10n_util_mac.h"
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
 #include "ui/base/l10n/l10n_util_win.h"
-#endif
+#endif  // OS_WIN
 
 namespace {
 
@@ -77,6 +73,7 @@ static const char* const kAcceptLanguageList[] = {
   // TODO(jungshik) : Do we want to list all es-Foo for Latin-American
   // Spanish speaking countries?
   "es",     // Spanish
+  "es-419", // Spanish (Latin America)
   "et",     // Estonian
   "eu",     // Basque
   "fa",     // Persian
@@ -189,6 +186,9 @@ bool IsDuplicateName(const std::string& locale_name) {
     "pt",
     "zh",
     "zh_hans_cn",
+    "zh_hant_hk",
+    "zh_hant_mo",
+    "zh_hans_sg",
     "zh_hant_tw"
   };
 
@@ -273,9 +273,9 @@ bool CheckAndResolveLocale(const std::string& locale,
     if (LowerCaseEqualsASCII(lang, "es") && !LowerCaseEqualsASCII(region, "es"))
       tmp_locale.append("-419");
     else if (LowerCaseEqualsASCII(lang, "zh")) {
-      // Map zh-HK and zh-MK to zh-TW. Otherwise, zh-FOO is mapped to zh-CN.
+      // Map zh-HK and zh-MO to zh-TW. Otherwise, zh-FOO is mapped to zh-CN.
      if (LowerCaseEqualsASCII(region, "hk") ||
-         LowerCaseEqualsASCII(region, "mk")) {
+         LowerCaseEqualsASCII(region, "mo")) { // Macao
        tmp_locale.append("-TW");
      } else {
        tmp_locale.append("-CN");
@@ -781,7 +781,8 @@ string16 TruncateString(const string16& string, size_t length) {
 
 string16 ToLower(const string16& string) {
   icu::UnicodeString lower_u_str(
-      icu::UnicodeString(string.c_str()).toLower(icu::Locale::getDefault()));
+      icu::UnicodeString(FALSE, string.c_str(), string.size()).toLower(
+          icu::Locale::getDefault()));
   string16 result;
   lower_u_str.extract(0, lower_u_str.length(),
                       WriteInto(&result, lower_u_str.length() + 1));
@@ -790,7 +791,8 @@ string16 ToLower(const string16& string) {
 
 string16 ToUpper(const string16& string) {
   icu::UnicodeString upper_u_str(
-      icu::UnicodeString(string.c_str()).toUpper(icu::Locale::getDefault()));
+      icu::UnicodeString(FALSE, string.c_str(), string.size()).toUpper(
+          icu::Locale::getDefault()));
   string16 result;
   upper_u_str.extract(0, upper_u_str.length(),
                       WriteInto(&result, upper_u_str.length() + 1));

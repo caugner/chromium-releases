@@ -4,8 +4,10 @@
 
 #include "remoting/jingle_glue/ssl_socket_adapter.h"
 
+#include "base/base64.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "jingle/glue/utils.h"
 #include "net/base/address_list.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/host_port_pair.h"
@@ -14,9 +16,35 @@
 #include "net/base/sys_addrinfo.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/url_request/url_request_context.h"
-#include "remoting/jingle_glue/utils.h"
 
 namespace remoting {
+
+namespace {
+
+// NSS doesn't load root certificates when running in sandbox, so we
+// need to have gmail's cert hardcoded.
+//
+// TODO(sergeyu): Remove this when we don't make XMPP connection from
+// inside of sandbox.
+const char kGmailCertBase64[] =
+    "MIIC2TCCAkKgAwIBAgIDBz+SMA0GCSqGSIb3DQEBBQUAME4xCzAJBgNVBAYTAlVT"
+    "MRAwDgYDVQQKEwdFcXVpZmF4MS0wKwYDVQQLEyRFcXVpZmF4IFNlY3VyZSBDZXJ0"
+    "aWZpY2F0ZSBBdXRob3JpdHkwHhcNMDcwNDExMTcxNzM4WhcNMTIwNDEwMTcxNzM4"
+    "WjBkMQswCQYDVQQGEwJVUzETMBEGA1UECBMKQ2FsaWZvcm5pYTEWMBQGA1UEBxMN"
+    "TW91bnRhaW4gVmlldzEUMBIGA1UEChMLR29vZ2xlIEluYy4xEjAQBgNVBAMTCWdt"
+    "YWlsLmNvbTCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA1Hds2jWwXAVGef06"
+    "7PeSJF/h9BnoYlTdykx0lBTDc92/JLvuq0lJkytqll1UR4kHmF4vwqQkwcqOK03w"
+    "k8qDK8fh6M13PYhvPEXP02ozsuL3vqE8hcCva2B9HVnOPY17Qok37rYQ+yexswN5"
+    "eh0+93nddEa1PyHgEQ8CDKCJaWUCAwEAAaOBrjCBqzAOBgNVHQ8BAf8EBAMCBPAw"
+    "HQYDVR0OBBYEFJcjzXEevMEDIEvuQiT7puEJY737MDoGA1UdHwQzMDEwL6AtoCuG"
+    "KWh0dHA6Ly9jcmwuZ2VvdHJ1c3QuY29tL2NybHMvc2VjdXJlY2EuY3JsMB8GA1Ud"
+    "IwQYMBaAFEjmaPkr0rKV10fYIyAQTzOYkJ/UMB0GA1UdJQQWMBQGCCsGAQUFBwMB"
+    "BggrBgEFBQcDAjANBgkqhkiG9w0BAQUFAAOBgQB74cGpjdENf9U+WEd29dfzY3Tz"
+    "JehnlY5cH5as8bOTe7PNPzj967OJ7TPWEycMwlS7CsqIsmfRGOFFfoHxo+iPugZ8"
+    "uO2Kd++QHCXL+MumGjkW4FcTFmceV/Q12Wdh3WApcqIZZciQ79MAeFh7bzteAYqf"
+    "wC98YQwylC9wVhf1yw==";
+
+}  // namespace
 
 SSLSocketAdapter* SSLSocketAdapter::Create(AsyncSocket* socket) {
   return new SSLSocketAdapter(socket);
@@ -67,6 +95,18 @@ int SSLSocketAdapter::BeginSSL() {
   // are correct for us, so we don't use the config service to initialize this
   // object.
   net::SSLConfig ssl_config;
+
+  std::string gmail_cert_binary;
+  base::Base64Decode(kGmailCertBase64, &gmail_cert_binary);
+  scoped_refptr<net::X509Certificate> gmail_cert =
+      net::X509Certificate::CreateFromBytes(gmail_cert_binary.data(),
+                                            gmail_cert_binary.size());
+  DCHECK(gmail_cert);
+  net::SSLConfig::CertAndStatus gmail_cert_status;
+  gmail_cert_status.cert = gmail_cert;
+  gmail_cert_status.cert_status = 0;
+  ssl_config.allowed_bad_certs.push_back(gmail_cert_status);
+
   transport_socket_->set_addr(talk_base::SocketAddress(hostname_, 0));
   ssl_socket_.reset(
       net::ClientSocketFactory::GetDefaultFactory()->CreateSSLClientSocket(
@@ -237,6 +277,15 @@ int TransportSocket::GetPeerAddress(net::AddressList* address) const {
   return net::OK;
 }
 
+int TransportSocket::GetLocalAddress(net::IPEndPoint* address) const {
+  talk_base::SocketAddress socket_address = socket_->GetLocalAddress();
+  if (jingle_glue::SocketAddressToIPEndPoint(socket_address, address)) {
+    return net::OK;
+  } else {
+    return net::ERR_FAILED;
+  }
+}
+
 const net::BoundNetLog& TransportSocket::NetLog() const {
   return net_log_;
 }
@@ -266,7 +315,7 @@ int TransportSocket::Read(net::IOBuffer* buf, int buf_len,
   DCHECK(!read_buffer_.get());
   int result = socket_->Recv(buf->data(), buf_len);
   if (result < 0) {
-    result = MapPosixToChromeError(socket_->GetError());
+    result = net::MapSystemError(socket_->GetError());
     if (result == net::ERR_IO_PENDING) {
       read_callback_ = callback;
       read_buffer_ = buf;
@@ -285,7 +334,7 @@ int TransportSocket::Write(net::IOBuffer* buf, int buf_len,
   DCHECK(!write_buffer_.get());
   int result = socket_->Send(buf->data(), buf_len);
   if (result < 0) {
-    result = MapPosixToChromeError(socket_->GetError());
+    result = net::MapSystemError(socket_->GetError());
     if (result == net::ERR_IO_PENDING) {
       write_callback_ = callback;
       write_buffer_ = buf;
@@ -320,7 +369,7 @@ void TransportSocket::OnReadEvent(talk_base::AsyncSocket* socket) {
 
     int result = socket_->Recv(buffer->data(), buffer_len);
     if (result < 0) {
-      result = MapPosixToChromeError(socket_->GetError());
+      result = net::MapSystemError(socket_->GetError());
       if (result == net::ERR_IO_PENDING) {
         read_callback_ = callback;
         read_buffer_ = buffer;
@@ -346,7 +395,7 @@ void TransportSocket::OnWriteEvent(talk_base::AsyncSocket* socket) {
 
     int result = socket_->Send(buffer->data(), buffer_len);
     if (result < 0) {
-      result = MapPosixToChromeError(socket_->GetError());
+      result = net::MapSystemError(socket_->GetError());
       if (result == net::ERR_IO_PENDING) {
         write_callback_ = callback;
         write_buffer_ = buffer;

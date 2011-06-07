@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,19 +36,20 @@ class NotificationsTest(pyauto.PyUITest):
       import pprint
       pp = pprint.PrettyPrinter(indent=2)
       pp.pprint(self.GetActiveNotifications())
+      pp.pprint(self._GetDefaultPermissionSetting())
 
   def _SetDefaultPermissionSetting(self, setting):
     """Sets the default setting for whether sites are allowed to create
     notifications.
     """
-    self.SetPrefs(pyauto.kDesktopNotificationDefaultContentSetting, setting)
+    self.SetPrefs(pyauto.kDefaultContentSettings, {u'notifications': setting})
 
   def _GetDefaultPermissionSetting(self):
     """Gets the default setting for whether sites are allowed to create
     notifications.
     """
     return self.GetPrefsInfo().Prefs(
-        pyauto.kDesktopNotificationDefaultContentSetting)
+        pyauto.kDefaultContentSettings)[u'notifications']
 
   def _GetDeniedOrigins(self):
     """Gets the list of origins that are explicitly denied to create
@@ -281,9 +282,9 @@ class NotificationsTest(pyauto.PyUITest):
 
   def testOriginPreferencesBasic(self):
     """Tests that we can allow and deny origins."""
-    altavista = 'www.altavista.com'
-    gmail = 'www.gmail.com'
-    yahoo = 'www.yahoo.com'
+    altavista = 'http://www.altavista.com'
+    gmail = 'http://www.gmail.com'
+    yahoo = 'http://www.yahoo.com'
     self._SetDeniedOrigins([altavista, gmail])
     self.assertEquals(altavista, self._GetDeniedOrigins()[0])
     self.assertEquals(gmail, self._GetDeniedOrigins()[1])

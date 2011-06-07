@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/ppb_graphics_2d.h"
+#include "ppapi/cpp/common.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/blit.h"
 #include "ui/gfx/point.h"
@@ -132,12 +133,15 @@ PP_Bool IsGraphics2D(PP_Resource resource) {
 }
 
 PP_Bool Describe(PP_Resource graphics_2d,
-              PP_Size* size,
-              PP_Bool* is_always_opaque) {
+                 PP_Size* size,
+                 PP_Bool* is_always_opaque) {
   scoped_refptr<PPB_Graphics2D_Impl> context(
       Resource::GetAs<PPB_Graphics2D_Impl>(graphics_2d));
-  if (!context)
+  if (!context) {
+    *size = PP_MakeSize(0, 0);
+    *is_always_opaque = PP_FALSE;
     return PP_FALSE;
+  }
   return context->Describe(size, is_always_opaque);
 }
 
@@ -255,7 +259,7 @@ PP_Bool PPB_Graphics2D_Impl::Describe(PP_Size* size,
                                       PP_Bool* is_always_opaque) {
   size->width = image_data_->width();
   size->height = image_data_->height();
-  *is_always_opaque = PP_FALSE;  // TODO(brettw) implement this.
+  *is_always_opaque = pp::BoolToPPBool(is_always_opaque_);
   return PP_TRUE;
 }
 
@@ -395,7 +399,7 @@ int32_t PPB_Graphics2D_Impl::Flush(const PP_CompletionCallback& callback) {
   } else {
     unpainted_flush_callback_.Set(callback);
   }
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 bool PPB_Graphics2D_Impl::ReadImageData(PP_Resource image,
@@ -680,4 +684,3 @@ bool PPB_Graphics2D_Impl::HasPendingFlush() const {
 
 }  // namespace ppapi
 }  // namespace webkit
-

@@ -13,21 +13,55 @@ const char kAllowFileAccessFromFiles[]      = "allow-file-access-from-files";
 // Allows debugging of sandboxed processes (see zygote_main_linux.cc).
 const char kAllowSandboxDebugging[]         = "allow-sandbox-debugging";
 
+// Path to the exe to run for the renderer and plugin subprocesses.
+const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
+
+// Disables client-visible 3D APIs, in particular WebGL and Pepper 3D.
+// This is controlled by policy and is kept separate from the other
+// enable/disable switches to avoid accidentally regressing the policy
+// support for controlling access to these APIs.
+const char kDisable3DAPIs[]                 = "disable-3d-apis";
+
+// Disables accelerated compositing.
+const char kDisableAcceleratedCompositing[] = "disable-accelerated-compositing";
+
+// Disable the ApplicationCache.
+const char kDisableApplicationCache[]       = "disable-application-cache";
+//
+// TODO(scherkus): remove --disable-audio when we have a proper fallback
+// mechanism.
+const char kDisableAudio[]                  = "disable-audio";
+
 // Disable limits on the number of backing stores. Can prevent blinking for
 // users with many windows/tabs and lots of memory.
 const char kDisableBackingStoreLimit[]      = "disable-backing-store-limit";
 
+// Disables HTML5 DB support.
+const char kDisableDatabases[]              = "disable-databases";
+
+// Disables data transfer items.
+const char kDisableDataTransferItems[]      = "disable-data-transfer-items";
+
+// Disables desktop notifications (default enabled on windows).
+const char kDisableDesktopNotifications[]   = "disable-desktop-notifications";
+
+// Disables device orientation events.
+const char kDisableDeviceOrientation[]      = "disable-device-orientation";
+
+// Disable experimental WebGL support.
+const char kDisableExperimentalWebGL[]      = "disable-webgl";
+
 // Disable FileSystem API.
 const char kDisableFileSystem[]             = "disable-file-system";
 
-// Temporary flag to disable hole punching for accelerated surfaces. This is
-// here to aid debugging eventual problems, it can be removed once hole punching
-// has been out there for a few dev channel releases without problems.
-const char kDisableHolePunching[]           = "disable-hole-punching";
+// Suppresses support for the Geolocation javascript API.
+const char kDisableGeolocation[]            = "disable-geolocation";
 
-// Force logging to be disabled.  Logging is enabled by default in debug
-// builds.
-const char kDisableLogging[]                = "disable-logging";
+// Disable GL multisampling.
+const char kDisableGLMultisampling[]        = "disable-gl-multisampling";
+
+// Disable the GLSL translator.
+const char kDisableGLSLTranslator[]         = "disable-glsl-translator";
 
 // Disable the GPU process sandbox.
 const char kDisableGpuSandbox[]             = "disable-gpu-sandbox";
@@ -35,6 +69,25 @@ const char kDisableGpuSandbox[]             = "disable-gpu-sandbox";
 // Disable the thread that crashes the GPU process if it stops responding to
 // messages.
 const char kDisableGpuWatchdog[]            = "disable-gpu-watchdog";
+
+// Disable the Indexed Database API.
+const char kDisableIndexedDatabase[]        = "disable-indexed-database";
+
+// Prevent Java from running.
+const char kDisableJava[]                   = "disable-java";
+
+// Don't execute JavaScript (browser JS like the new tab page still runs).
+const char kDisableJavaScript[]             = "disable-javascript";
+
+// Disable JavaScript I18N API.
+const char kDisableJavaScriptI18NAPI[]      = "disable-javascript-i18n-api";
+
+// Disable LocalStorage.
+const char kDisableLocalStorage[]           = "disable-local-storage";
+
+// Force logging to be disabled.  Logging is enabled by default in debug
+// builds.
+const char kDisableLogging[]                = "disable-logging";
 
 // Prevent plugins from running.
 const char kDisablePlugins[]                = "disable-plugins";
@@ -45,11 +98,32 @@ const char kDisablePopupBlocking[]          = "disable-popup-blocking";
 // Disable the seccomp sandbox (Linux only)
 const char kDisableSeccompSandbox[]         = "disable-seccomp-sandbox";
 
+// Disable session storage.
+const char kDisableSessionStorage[]         = "disable-session-storage";
+
+// Enable shared workers. Functionality not yet complete.
+const char kDisableSharedWorkers[]          = "disable-shared-workers";
+
+// Disables speech input.
+const char kDisableSpeechInput[]            = "disable-speech-input";
+
 // Disable Web Sockets support.
 const char kDisableWebSockets[]             = "disable-web-sockets";
 
+// Enable hardware accelerated page drawing.
+// Please note that this flag is honored only if chromium is compiled with
+// SKIA_GPU flag, which can be enabled by setting use_skia_gpu variable to 1
+// in build/features_override.gypi.
+const char kEnableAcceleratedDrawing[]      = "enable-accelerated-drawing";
+
+// Enables WebKit accessibility within the renderer process.
+const char kEnableAccessibility[]           = "enable-accessibility";
+
 // Enables the benchmarking extensions.
 const char kEnableBenchmarking[]            = "enable-benchmarking";
+
+// Enables device motion events.
+const char kEnableDeviceMotion[]            = "enable-device-motion";
 
 // Enable the GPU plugin and Pepper 3D rendering.
 const char kEnableGPUPlugin[]               = "enable-gpu-plugin";
@@ -62,6 +136,9 @@ const char kEnableLogging[]                 = "enable-logging";
 // This does NOT enable color management for images. The source is still
 // assumed to be sRGB.
 const char kEnableMonitorProfile[]          = "enable-monitor-profile";
+
+// Enable Pepper and JavaScript P2P API.
+const char kEnableP2PApi[]                  = "enable-p2papi";
 
 // Enable caching of pre-parsed JS script data.  See http://crbug.com/32407.
 const char kEnablePreparsedJsCaching[]      = "enable-preparsed-js-caching";
@@ -76,6 +153,17 @@ const char kEnableSeccompSandbox[]          = "enable-seccomp-sandbox";
 // Enables StatsTable, logging statistics to a global named shared memory table.
 const char kEnableStatsTable[]              = "enable-stats-table";
 
+// Enables support for fullscreen video. Current implementation is
+// incomplete and this flag is used for development and testing.
+const char kEnableVideoFullscreen[]         = "enable-video-fullscreen";
+
+// Enables video logging where video elements log playback performance data to
+// the debug log.
+const char kEnableVideoLogging[]            = "enable-video-logging";
+
+// Enable web audio API.
+const char kEnableWebAudio[]                = "enable-webaudio";
+
 // Enables experimental features for the geolocation API.
 // Current features:
 // - CoreLocation support for Mac OS X 10.6
@@ -85,6 +173,21 @@ const char kExperimentalLocationFeatures[]  = "experimental-location-features";
 
 // Load NPAPI plugins from the specified directory.
 const char kExtraPluginDir[]                = "extra-plugin-dir";
+
+// Causes the process to run as an extension subprocess.
+const char kExtensionProcess[]              = "extension";
+
+// Some field tests may rendomized in the browser, and the randomly selected
+// outcome needs to be propagated to the renderer.  For instance, this is used
+// to modify histograms recorded in the renderer, or to get the renderer to
+// also set of its state (initialize, or not initialize components) to match the
+// experiment(s).
+// The argument is a string-ized list of experiment names, and the associated
+// value that was randomly selected.  In the recent implementetaion, the
+// persistent representation generated by field_trial.cc and later decoded, is a
+// list of name and value pairs, separated by slashes. See field trial.cc for
+// current details.
+const char kForceFieldTestNameAndValue[]    = "force-fieldtest";
 
 // Extra command line options for launching the GPU process (normally used
 // for debugging). Use like renderer-cmd-prefix.
@@ -96,6 +199,21 @@ const char kGpuProcess[]                    = "gpu-process";
 // Causes the GPU process to display a dialog on launch.
 const char kGpuStartupDialog[]              = "gpu-startup-dialog";
 
+// Run the GPU process as a thread in the browser process.
+const char kInProcessGPU[]                  = "in-process-gpu";
+
+// Runs plugins inside the renderer process
+const char kInProcessPlugins[]              = "in-process-plugins";
+
+// Runs WebGL inside the renderer process.
+const char kInProcessWebGL[]                = "in-process-webgl";
+
+// Specifies the flags passed to JS engine
+const char kJavaScriptFlags[]               = "js-flags";
+
+// Use LevelDB as back-end for Indexed Database API.
+const char kLevelDBIndexedDatabase[]        = "indexeddb-use-leveldb";
+
 // Load an NPAPI plugin from the specified path.
 const char kLoadPlugin[]                    = "load-plugin";
 
@@ -106,11 +224,25 @@ const char kLoggingLevel[]                  = "log-level";
 // Make plugin processes log their sent and received messages to VLOG(1).
 const char kLogPluginMessages[]             = "log-plugin-messages";
 
-// Don't Sandbox the GPU process, does not affect other sandboxed processes.
-const char kNoGpuSandbox[]                  = "no-gpu-sandbox";
+// Causes the process to run as a NativeClient loader.
+const char kNaClLoaderProcess[]             = "nacl-loader";
+
+// Support a separate switch that enables the v8 playback extension.
+// The extension causes javascript calls to Date.now() and Math.random()
+// to return consistent values, such that subsequent loads of the same
+// page will result in consistent js-generated data and XHR requests.
+// Pages may still be able to generate inconsistent data from plugins.
+const char kNoJsRandomness[]                = "no-js-randomness";
 
 // Don't send HTTP-Referer headers.
 const char kNoReferrers[]                   = "no-referrers";
+
+// Disables the sandbox for all process types that are normally sandboxed.
+const char kNoSandbox[]                     = "no-sandbox";
+
+// Read previously recorded data from the cache. Only cached data is read.
+// See kRecordMode.
+const char kPlaybackMode[]                  = "playback-mode";
 
 // Specifies a command that should be used to launch the plugin process.  Useful
 // for running the plugin process through purify or quantify.  Ex:
@@ -125,6 +257,17 @@ const char kPluginProcess[]                 = "plugin";
 
 // Causes the plugin process to display a dialog on launch.
 const char kPluginStartupDialog[]           = "plugin-startup-dialog";
+
+// Argument to the process type that indicates a PPAPI broker process type.
+const char kPpapiBrokerProcess[]            = "ppapi-broker";
+
+// Use the PPAPI (Pepper) Flash found at the given path.
+const char kPpapiFlashPath[]                = "ppapi-flash-path";
+
+// Report the given version for the PPAPI (Pepper) Flash. The version should be
+// numbers separated by '.'s (e.g., "12.3.456.78"). If not specified, it
+// defaults to "10.2.999.999".
+const char kPpapiFlashVersion[]             = "ppapi-flash-version";
 
 // Runs PPAPI (Pepper) plugins out-of-process.
 const char kPpapiOutOfProcess[]             = "ppapi-out-of-process";
@@ -150,12 +293,24 @@ const char kProcessPerSite[]                = "process-per-site";
 // script connections to each other).
 const char kProcessPerTab[]                 = "process-per-tab";
 
+// Chrome supports a playback and record mode.  Record mode saves *everything*
+// to the cache.  Playback mode reads data exclusively from the cache.  This
+// allows us to record a session into the cache and then replay it at will.
+// See also kPlaybackMode.
+const char kRecordMode[]                    = "record-mode";
+
 // The value of this switch determines whether the process is started as a
 // renderer or plugin host.  If it's empty, it's the browser.
 const char kProcessType[]                   = "type";
 
-// Register pepper plugins that should be loaded into the renderer.
+// Causes the process to run as a profile import subprocess.
+const char kProfileImportProcess[]          = "profile-import";
+
+// Register Pepper plugins (see pepper_plugin_registry.cc for its format).
 const char kRegisterPepperPlugins[]         = "register-pepper-plugins";
+
+// Causes the renderer process to throw an assertion on launch.
+const char kRendererAssertTest[]            = "renderer-assert-test";
 
 // On POSIX only: the contents of this flag are prepended to the renderer
 // command line. Useful values might be "valgrind" or "xterm -e gdb --args".
@@ -172,6 +327,17 @@ const char kRendererStartupDialog[]         = "renderer-startup-dialog";
 
 // Runs the plugin processes inside the sandbox.
 const char kSafePlugins[]                   = "safe-plugins";
+
+// Causes the process to run as a service process.
+const char kServiceProcess[]                = "service";
+
+// Visibly render a border around paint rects in the web page to help debug
+// and study painting behavior.
+const char kShowPaintRects[]                = "show-paint-rects";
+//
+// TODO(scherkus): remove --simple-data-source when our media resource loading
+// is cleaned up and playback testing completed.
+const char kSimpleDataSource[]              = "simple-data-source";
 
 // Runs the renderer and plugins in the same process as the browser
 const char kSingleProcess[]                 = "single-process";
@@ -192,6 +358,13 @@ const char kUnlimitedQuotaForIndexedDB[]    = "unlimited-quota-for-indexeddb";
 
 // A string used to override the default user agent with a custom one.
 const char kUserAgent[]                     = "user-agent";
+
+// Causes the process to run as a utility subprocess.
+const char kUtilityProcess[]                = "utility";
+
+// The utility process is sandboxed, with access to one directory. This flag
+// specifies the directory that can be accessed.
+const char kUtilityProcessAllowedDir[]      = "utility-allowed-dir";
 
 // Will add kWaitForDebugger to every child processes. If a value is passed, it
 // will be used as a filter to determine if the child process should have the
@@ -217,4 +390,10 @@ const char kZygoteCmdPrefix[]               = "zygote-cmd-prefix";
 
 // Causes the process to run as a renderer zygote.
 const char kZygoteProcess[]                 = "zygote";
+
+#if !defined(OFFICIAL_BUILD)
+// Causes the renderer process to throw an assertion on launch.
+const char kRendererCheckFalseTest[]        = "renderer-check-false-test";
+#endif
+
 }  // namespace switches

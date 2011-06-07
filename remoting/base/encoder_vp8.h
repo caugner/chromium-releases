@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "remoting/base/encoder.h"
 #include "ui/gfx/rect.h"
 
@@ -26,8 +27,10 @@ class EncoderVp8 : public Encoder {
                       DataAvailableCallback* data_available_callback);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(EncoderVp8Test, AlignAndClipRect);
+
   // Initialize the encoder. Returns true if successful.
-  bool Init(int width, int height);
+  bool Init(const gfx::Size& size);
 
   // Prepare |image_| for encoding. Write updated rectangles into
   // |updated_rects|. Returns true if successful.
@@ -37,6 +40,15 @@ class EncoderVp8 : public Encoder {
   // Update the active map according to |updated_rects|. Active map is then
   // given to the encoder to speed up encoding.
   void PrepareActiveMap(const std::vector<gfx::Rect>& updated_rects);
+
+  // Align the sides of the rectangle to multiples of 2 (expanding outwards),
+  // but ensuring the result stays within the screen area (width, height).
+  // If |rect| falls outside the screen area, return an empty rect.
+  //
+  // TODO(lambroslambrou): Pull this out if it's useful for other things than
+  // VP8-encoding?
+  static gfx::Rect AlignAndClipRect(const gfx::Rect& rect,
+                                    int width, int height);
 
   // True if the encoder is initialized.
   bool initialized_;
@@ -51,9 +63,8 @@ class EncoderVp8 : public Encoder {
   // Buffer for storing the yuv image.
   scoped_array<uint8> yuv_image_;
 
-  // The current frame dimensions.
-  int width_;
-  int height_;
+  // The current frame size.
+  gfx::Size size_;
 
   DISALLOW_COPY_AND_ASSIGN(EncoderVp8);
 };

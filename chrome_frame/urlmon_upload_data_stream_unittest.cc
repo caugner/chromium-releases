@@ -1,11 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gtest/gtest.h"
 
-#include "base/ref_counted.h"
-#include "base/scoped_comptr_win.h"
+#include "base/memory/ref_counted.h"
+#include "base/win/scoped_comptr.h"
 #include "chrome_frame/urlmon_upload_data_stream.h"
 
 TEST(UrlmonUploadDataStreamTest, TestBasicRead) {
@@ -20,7 +20,7 @@ TEST(UrlmonUploadDataStreamTest, TestBasicRead) {
   ASSERT_TRUE(SUCCEEDED(hr));
 
   upload_stream->Initialize(upload_data.get());
-  ScopedComPtr<IStream> upload_istream(upload_stream);
+  base::win::ScopedComPtr<IStream> upload_istream(upload_stream);
 
   char buffer[500];
   memset(buffer, 0, 500);
@@ -55,7 +55,7 @@ TEST(UrlmonUploadDataStreamTest, TestBigRead) {
   ASSERT_TRUE(SUCCEEDED(hr));
 
   upload_stream->Initialize(upload_data.get());
-  ScopedComPtr<IStream> upload_istream(upload_stream);
+  base::win::ScopedComPtr<IStream> upload_istream(upload_stream);
 
   char big_rcv_buffer[kBigBufferLength];
   int write_pos = 0;
@@ -89,7 +89,7 @@ TEST(UrlmonUploadDataStreamTest, TestStat) {
   ASSERT_TRUE(SUCCEEDED(hr));
 
   upload_stream->Initialize(upload_data.get());
-  ScopedComPtr<IStream> upload_istream(upload_stream);
+  base::win::ScopedComPtr<IStream> upload_istream(upload_stream);
 
   STATSTG statstg;
   hr = upload_stream->Stat(&statstg, STATFLAG_NONAME);
@@ -110,7 +110,7 @@ TEST(UrlmonUploadDataStreamTest, TestRepeatedRead) {
   ASSERT_TRUE(SUCCEEDED(hr));
 
   upload_stream->Initialize(upload_data.get());
-  ScopedComPtr<IStream> upload_istream(upload_stream);
+  base::win::ScopedComPtr<IStream> upload_istream(upload_stream);
 
   char buffer[500];
   memset(buffer, 0, 500);
@@ -145,7 +145,7 @@ TEST(UrlmonUploadDataStreamTest, TestZeroRead) {
   ASSERT_TRUE(SUCCEEDED(hr));
 
   upload_stream->Initialize(upload_data.get());
-  ScopedComPtr<IStream> upload_istream(upload_stream);
+  base::win::ScopedComPtr<IStream> upload_istream(upload_stream);
 
   char buffer[500];
   memset(buffer, 0, 500);

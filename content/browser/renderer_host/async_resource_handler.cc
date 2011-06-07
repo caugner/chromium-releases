@@ -20,6 +20,7 @@
 #include "content/browser/renderer_host/resource_message_filter.h"
 #include "content/common/resource_response.h"
 #include "content/common/resource_messages.h"
+#include "content/common/view_messages.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_log.h"
@@ -215,8 +216,12 @@ bool AsyncResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
   // We just unmapped the memory.
   read_buffer_ = NULL;
 
+  net::URLRequest* request = rdh_->GetURLRequest(
+      GlobalRequestID(filter_->child_id(), request_id));
+  int encoded_data_length =
+      DevToolsNetLogObserver::GetAndResetEncodedDataLength(request);
   filter_->Send(new ResourceMsg_DataReceived(
-      routing_id_, request_id, handle, *bytes_read));
+      routing_id_, request_id, handle, *bytes_read, encoded_data_length));
 
   return true;
 }

@@ -10,7 +10,6 @@ FirefoxImporterTest.Firefox3NSS3Decryptor
 # http://crbug.com/69039
 ProcessInfoSnapshotMacTest.EffectiveVsRealUserIDTest
 
-
 # Following tests do not pass memcheck test.
 # See http://crbug.com/30393.
 NSMenuItemAdditionsTest.TestMOnDifferentLayouts
@@ -20,14 +19,10 @@ PrefsControllerTest.GetToolbarItemForPage
 PrefsControllerTest.ShowAndClose
 PrefsControllerTest.SwitchToPage
 
-# MultiProcessNotificationTests crash on the valgrind bot.
-# See http://crbug.com/69641.
-MultiProcessNotificationTest.BasicCreationTest
-MultiProcessNotificationTest.PostInProcessNotification
-MultiProcessNotificationTest.MultiListener
-MultiProcessNotificationTest.PostProfileNotification
-MultiProcessNotificationTest.PostUserNotification
-MultiProcessNotificationTest.PostSystemNotification
-MultiProcessNotificationTest.ProfileCrossDomainPosting
-MultiProcessNotificationTest.UserCrossDomainPosting
-MultiProcessNotificationTest.SystemCrossDomainPosting
+# Hangs
+# See http://crbug.com/75733
+BookmarkBarControllerTest.DeleteFromOffTheSideWhileItIsOpen
+
+# Hangs
+# See http://crbug.com/78521
+SyncBackendHostTest.InitShutdown

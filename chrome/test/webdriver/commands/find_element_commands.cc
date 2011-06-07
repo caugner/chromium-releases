@@ -37,6 +37,8 @@ void FindElementCommand::ExecutePost(Response* const response) {
   // TODO(jmikhail): The findElement(s) atom should handle this conversion.
   if (locator == "class name") {
     locator = LocatorType::kClassName;
+  } else if (locator == "css selector") {
+    locator = LocatorType::kCss;
   } else if (locator == "link text") {
     locator = LocatorType::kLinkText;
   } else if (locator == "partial link text") {
@@ -54,12 +56,14 @@ void FindElementCommand::ExecutePost(Response* const response) {
   ErrorCode code = kUnknownError;
   if (find_one_element_) {
     WebElementId element;
-    code = session_->FindElement(root_element, locator, query, &element);
+    code = session_->FindElement(
+        session_->current_target(), root_element, locator, query, &element);
     if (code == kSuccess)
       response->SetValue(element.ToValue());
   } else {
     std::vector<WebElementId> elements;
-    code = session_->FindElements(root_element, locator, query, &elements);
+    code = session_->FindElements(
+        session_->current_target(), root_element, locator, query, &elements);
     if (code == kSuccess) {
       ListValue* element_list = new ListValue();
       for (size_t i = 0; i < elements.size(); ++i)

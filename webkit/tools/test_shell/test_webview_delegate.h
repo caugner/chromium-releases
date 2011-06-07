@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
-#include "base/weak_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
@@ -247,11 +247,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       const webkit::npapi::WebPluginGeometry& move);
   virtual void DidStartLoadingForPlugin() {}
   virtual void DidStopLoadingForPlugin() {}
-  virtual void ShowModalHTMLDialogForPlugin(
-      const GURL& url,
-      const gfx::Size& size,
-      const std::string& json_arguments,
-      std::string* json_retval) {}
   virtual WebKit::WebCookieJar* GetCookieJar();
 
   TestWebViewDelegate(TestShell* shell);

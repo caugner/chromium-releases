@@ -37,6 +37,12 @@ class Canvas;
 class CanvasSkia : public skia::PlatformCanvas,
                    public Canvas {
  public:
+  enum TruncateFadeMode {
+    TruncateFadeTail,
+    TruncateFadeHead,
+    TruncateFadeHeadAndTail,
+  };
+
   // Creates an empty Canvas. Callers must use initialize before using the
   // canvas.
   CanvasSkia();
@@ -132,6 +138,19 @@ class CanvasSkia : public skia::PlatformCanvas,
                              const SkColor& color,
                              int x, int y, int w, int h,
                              int flags);
+#if defined(OS_WIN)
+  // Draws the given string with the beginning and/or the end using a fade
+  // gradient. When truncating the head
+  // |desired_characters_to_truncate_from_head| specifies the maximum number of
+  // characters that can be truncated.
+  virtual void DrawFadeTruncatingString(
+      const string16& text,
+      TruncateFadeMode truncate_mode,
+      size_t desired_characters_to_truncate_from_head,
+      const gfx::Font& font,
+      const SkColor& color,
+      const gfx::Rect& display_rect);
+#endif
   virtual void DrawFocusRect(int x, int y, int width, int height);
   virtual void TileImageInt(const SkBitmap& bitmap, int x, int y, int w, int h);
   virtual void TileImageInt(const SkBitmap& bitmap,
@@ -140,6 +159,7 @@ class CanvasSkia : public skia::PlatformCanvas,
   virtual gfx::NativeDrawingContext BeginPlatformPaint();
   virtual void EndPlatformPaint();
   virtual void Transform(const ui::Transform& transform);
+  virtual ui::TextureID GetTextureID();
   virtual CanvasSkia* AsCanvasSkia();
   virtual const CanvasSkia* AsCanvasSkia() const;
 

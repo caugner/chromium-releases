@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,14 +22,11 @@ namespace protocol {
 static const size_t kAverageUpdateStream = 10;
 
 ConnectionToClient::ConnectionToClient(MessageLoop* message_loop,
-                                       EventHandler* handler,
-                                       HostStub* host_stub,
-                                       InputStub* input_stub)
-    : client_authenticated_(false),
-      loop_(message_loop),
+                                       EventHandler* handler)
+    : loop_(message_loop),
       handler_(handler),
-      host_stub_(host_stub),
-      input_stub_(input_stub) {
+      host_stub_(NULL),
+      input_stub_(NULL) {
   DCHECK(loop_);
   DCHECK(handler_);
 }
@@ -74,6 +71,14 @@ VideoStub* ConnectionToClient::video_stub() {
 // Return pointer to ClientStub.
 ClientStub* ConnectionToClient::client_stub() {
   return client_stub_.get();
+}
+
+void ConnectionToClient::set_host_stub(protocol::HostStub* host_stub) {
+  host_stub_ = host_stub;
+}
+
+void ConnectionToClient::set_input_stub(protocol::InputStub* input_stub) {
+  input_stub_ = input_stub;
 }
 
 void ConnectionToClient::OnSessionStateChange(protocol::Session::State state) {
@@ -121,18 +126,6 @@ void ConnectionToClient::StateChangeTask(protocol::Session::State state) {
 
 // OnClosed() is used as a callback for protocol::Session::Close().
 void ConnectionToClient::OnClosed() {
-}
-
-void ConnectionToClient::OnClientAuthenticated() {
-  client_authenticated_ = true;
-
-  // Enable/disable each of the channels.
-  if (input_stub_)
-    input_stub_->OnAuthenticated();
-  if (host_stub_)
-    host_stub_->OnAuthenticated();
-  if (client_stub_.get())
-    client_stub_->OnAuthenticated();
 }
 
 }  // namespace protocol

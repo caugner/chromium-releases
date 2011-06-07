@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 using ::remoting::protocol::MockConnectionToClient;
 using ::remoting::protocol::MockConnectionToClientEventHandler;
 using ::remoting::protocol::MockHostStub;
-using ::remoting::protocol::MockInputStub;
 using ::remoting::protocol::MockVideoStub;
 
 using ::testing::_;
@@ -82,7 +81,7 @@ class ScreenRecorderTest : public testing::Test {
     encoder_ = new MockEncoder();
 
     connection_ = new MockConnectionToClient(&message_loop_, &handler_,
-                                             &host_stub_, &input_stub_);
+                                             &host_stub_, &event_executor_);
 
     record_ = new ScreenRecorder(
         &message_loop_, &message_loop_, &message_loop_,
@@ -94,7 +93,7 @@ class ScreenRecorderTest : public testing::Test {
 
   MockConnectionToClientEventHandler handler_;
   MockHostStub host_stub_;
-  MockInputStub input_stub_;
+  MockEventExecutor event_executor_;
   scoped_refptr<MockConnectionToClient> connection_;
 
   // The following mock objects are owned by ScreenRecorder.
@@ -115,10 +114,8 @@ TEST_F(ScreenRecorderTest, OneRecordCycle) {
     planes.data[i] = reinterpret_cast<uint8*>(i);
     planes.strides[i] = kWidth * 4;
   }
-  scoped_refptr<CaptureData> data(new CaptureData(planes, kWidth,
-                                                  kHeight, kFormat));
-  EXPECT_CALL(capturer_, width()).WillRepeatedly(Return(kWidth));
-  EXPECT_CALL(capturer_, height()).WillRepeatedly(Return(kHeight));
+  gfx::Size size(kWidth, kHeight);
+  scoped_refptr<CaptureData> data(new CaptureData(planes, size, kFormat));
   EXPECT_CALL(capturer_, InvalidateFullScreen());
 
   // First the capturer is called.
@@ -166,10 +163,9 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
     planes.data[i] = reinterpret_cast<uint8*>(i);
     planes.strides[i] = kWidth * 4;
   }
-  scoped_refptr<CaptureData> data(new CaptureData(planes, kWidth,
-                                                  kHeight, kFormat));
-  EXPECT_CALL(capturer_, width()).WillRepeatedly(Return(kWidth));
-  EXPECT_CALL(capturer_, height()).WillRepeatedly(Return(kHeight));
+
+  gfx::Size size(kWidth, kHeight);
+  scoped_refptr<CaptureData> data(new CaptureData(planes, size, kFormat));
   EXPECT_CALL(capturer_, InvalidateFullScreen());
 
   // First the capturer is called.

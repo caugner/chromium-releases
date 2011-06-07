@@ -10,7 +10,7 @@
 
 #include <stack>
 
-#include "base/scoped_comptr_win.h"
+#include "base/win/scoped_comptr.h"
 #include "ui/gfx/canvas.h"
 
 namespace gfx {
@@ -78,6 +78,7 @@ class CanvasDirect2D : public Canvas {
   virtual gfx::NativeDrawingContext BeginPlatformPaint();
   virtual void EndPlatformPaint();
   virtual void Transform(const ui::Transform& transform);
+  virtual ui::TextureID GetTextureID();
   virtual CanvasSkia* AsCanvasSkia();
   virtual const CanvasSkia* AsCanvasSkia() const;
 
@@ -85,8 +86,8 @@ class CanvasDirect2D : public Canvas {
   void SaveInternal(ID2D1Layer* layer);
 
   ID2D1RenderTarget* rt_;
-  ScopedComPtr<ID2D1GdiInteropRenderTarget> interop_rt_;
-  ScopedComPtr<ID2D1DrawingStateBlock> drawing_state_block_;
+  base::win::ScopedComPtr<ID2D1GdiInteropRenderTarget> interop_rt_;
+  base::win::ScopedComPtr<ID2D1DrawingStateBlock> drawing_state_block_;
   static ID2D1Factory* d2d1_factory_;
 
   // Every time Save* is called, a RenderState object is pushed onto the

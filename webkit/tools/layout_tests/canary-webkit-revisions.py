@@ -21,8 +21,19 @@ import urllib2
 
 _DEFAULT_BUILDERS = [
   "Webkit Win",
+  "Webkit Vista",
+  "Webkit Win7",
+  "Webkit Win (dbg)(1)",
+  "Webkit Win (dbg)(2)",
   "Webkit Mac10.5",
+  "Webkit Mac10.6",
+  "Webkit Mac10.5 (dbg)(1)",
+  "Webkit Mac10.5 (dbg)(2)",
+  "Webkit Mac10.6 (dbg)",
   "Webkit Linux",
+  "Webkit Linux 64",
+  "Webkit Linux (dbg)(1)",
+  "Webkit Linux (dbg)(2)",
 ]
 _DEFAULT_MAX_BUILDS = 10
 _TEST_PREFIX = "&tests="
@@ -61,7 +72,7 @@ def _ExtractFailingTests(build):
         prefix = text.find(_TEST_PREFIX)
         suffix = text.find(_TEST_SUFFIX)
         if prefix != -1 and suffix != -1:
-          return text[prefix + len(_TEST_PREFIX): suffix].split(",")
+          return sorted(text[prefix + len(_TEST_PREFIX): suffix].split(","))
 
 
 def _RetrieveBuildResult(builder, max_builds):
@@ -141,8 +152,9 @@ def _PrintFailingRevisions(results):
   print "**** Failing revisions *****"
   for result in results:
     if result.last_run_revision and result.failing_tests:
-      print ('The last run was at r%d on "%s" and the following tests failed' %
-             (result.last_run_revision, result.builder))
+      print ('The last run was at r%d on "%s" and the following %d tests'
+             ' failed' % (result.last_run_revision, result.builder,
+                          len(result.failing_tests)))
       for test in result.failing_tests:
         print "  " + test
 

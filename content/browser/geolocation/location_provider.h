@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // A location provider provides position information from a particular source
-// (GPS, network etc). The GearsGeolocation object uses a set of location
-// providers to obtain a position fix.
+// (GPS, network etc).
 //
 // This file declares a base class to be used by all location providers.
 // Primarily, this class declares interface methods to be implemented by
@@ -22,7 +21,10 @@
 class AccessTokenStore;
 struct Geoposition;
 class GURL;
+
+namespace net {
 class URLRequestContextGetter;
+}
 
 // The base class used by all location providers.
 class LocationProviderBase : public base::NonThreadSafe {
@@ -90,7 +92,7 @@ class LocationProviderBase : public base::NonThreadSafe {
 // over the platform-dependent implementations.
 LocationProviderBase* NewNetworkLocationProvider(
     AccessTokenStore* access_token_store,
-    URLRequestContextGetter* context,
+    net::URLRequestContextGetter* context,
     const GURL& url,
     const string16& access_token);
 LocationProviderBase* NewSystemLocationProvider();

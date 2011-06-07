@@ -1,18 +1,19 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/searchbox.h"
 
 #include "chrome/common/render_messages.h"
-#include "chrome/renderer/render_view.h"
 #include "chrome/renderer/searchbox_extension.h"
+#include "content/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using WebKit::WebView;
 
 SearchBox::SearchBox(RenderView* render_view)
     : RenderViewObserver(render_view),
+      RenderViewObserverTracker<SearchBox>(render_view),
       verbatim_(false),
       selection_start_(0),
       selection_end_(0) {
@@ -21,10 +22,12 @@ SearchBox::SearchBox(RenderView* render_view)
 SearchBox::~SearchBox() {
 }
 
-void SearchBox::SetSuggestions(const std::vector<std::string>& suggestions) {
+void SearchBox::SetSuggestions(const std::vector<std::string>& suggestions,
+                               InstantCompleteBehavior behavior) {
   // Explicitly allow empty vector to be sent to the browser.
   render_view()->Send(new ViewHostMsg_SetSuggestions(
-      render_view()->routing_id(), render_view()->page_id(), suggestions));
+      render_view()->routing_id(), render_view()->page_id(), suggestions,
+      behavior));
 }
 
 bool SearchBox::OnMessageReceived(const IPC::Message& message) {
@@ -58,18 +61,20 @@ void SearchBox::OnChange(const string16& value,
 void SearchBox::OnSubmit(const string16& value, bool verbatim) {
   value_ = value;
   verbatim_ = verbatim;
-  if (!render_view()->webview() || !render_view()->webview()->mainFrame())
-    return;
-  extensions_v8::SearchBoxExtension::DispatchSubmit(
-      render_view()->webview()->mainFrame());
+  if (render_view()->webview() && render_view()->webview()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchSubmit(
+        render_view()->webview()->mainFrame());
+  }
+  Reset();
 }
 
 void SearchBox::OnCancel() {
   verbatim_ = false;
-  if (!render_view()->webview() || !render_view()->webview()->mainFrame())
-    return;
-  extensions_v8::SearchBoxExtension::DispatchCancel(
-      render_view()->webview()->mainFrame());
+  if (render_view()->webview() && render_view()->webview()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchCancel(
+        render_view()->webview()->mainFrame());
+  }
+  Reset();
 }
 
 void SearchBox::OnResize(const gfx::Rect& bounds) {
@@ -92,4 +97,11 @@ void SearchBox::OnDetermineIfPageSupportsInstant(const string16& value,
       render_view()->webview()->mainFrame());
   render_view()->Send(new ViewHostMsg_InstantSupportDetermined(
       render_view()->routing_id(), render_view()->page_id(), result));
+}
+
+void SearchBox::Reset() {
+  verbatim_ = false;
+  value_ = string16();
+  selection_start_ = selection_end_ = 0;
+  rect_ = gfx::Rect();
 }

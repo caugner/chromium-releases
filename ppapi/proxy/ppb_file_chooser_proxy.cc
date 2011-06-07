@@ -77,7 +77,9 @@ PP_Resource Create(PP_Instance instance,
   HostResource result;
   dispatcher->Send(new PpapiHostMsg_PPBFileChooser_Create(
       INTERFACE_ID_PPB_FILE_CHOOSER, instance,
-      options->mode, options->accept_mime_types, &result));
+      options->mode,
+      options->accept_mime_types ? options->accept_mime_types : std::string(),
+      &result));
 
   if (result.is_null())
     return 0;
@@ -105,7 +107,7 @@ int32_t Show(PP_Resource chooser, struct PP_CompletionCallback callback) {
   dispatcher->Send(new PpapiHostMsg_PPBFileChooser_Show(
       INTERFACE_ID_PPB_FILE_CHOOSER,
       object->host_resource()));
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 PP_Resource GetNextChosenFile(PP_Resource chooser) {
@@ -187,7 +189,7 @@ void PPB_FileChooser_Proxy::OnMsgShow(const HostResource& chooser) {
 
   int32_t result = ppb_file_chooser_target()->Show(
       chooser.host_resource(), callback.pp_completion_callback());
-  if (result != PP_ERROR_WOULDBLOCK)
+  if (result != PP_OK_COMPLETIONPENDING)
     callback.Run(result);
 }
 

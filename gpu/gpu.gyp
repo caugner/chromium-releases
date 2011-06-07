@@ -25,6 +25,20 @@
   },
   'targets': [
     {
+      'target_name': 'gpu_common',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'common/gpu_trace_event.cc',
+        'common/gpu_trace_event.h',
+      ],
+    },
+    {
       'target_name': 'command_buffer_common',
       'type': 'static_library',
       'include_dirs': [
@@ -136,8 +150,17 @@
     {
       'target_name': 'command_buffer_client',
       'type': 'static_library',
+      'include_dirs': [
+        '..',
+      ],
+      'all_dependent_settings': {
+        'include_dirs': [
+          '..',
+        ],
+      },
       'dependencies': [
         'command_buffer_common',
+        'gpu_common',
       ],
       'sources': [
         'command_buffer/client/cmd_buffer_helper.cc',
@@ -163,9 +186,11 @@
       },
       'dependencies': [
         'command_buffer_common',
-        '../app/app.gyp:app_base',
+        'gpu_common',
         '../base/base.gyp:base',
-        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/gfx/gl/gl.gyp:gl',
+        '../ui/gfx/surface/surface.gyp:surface',
+        '../ui/ui.gyp:ui_gfx',
         '../third_party/angle/src/build_angle.gyp:translator_glsl',
       ],
       'sources': [
@@ -192,12 +217,12 @@
         'command_buffer/service/gles2_cmd_validation_autogen.h',
         'command_buffer/service/gles2_cmd_validation_implementation_autogen.h',
         'command_buffer/service/gl_utils.h',
-        'command_buffer/service/gpu_processor.h',
-        'command_buffer/service/gpu_processor.cc',
-        'command_buffer/service/gpu_processor_linux.cc',
-        'command_buffer/service/gpu_processor_mac.cc',
-        'command_buffer/service/gpu_processor_mock.h',
-        'command_buffer/service/gpu_processor_win.cc',
+        'command_buffer/service/gpu_scheduler.h',
+        'command_buffer/service/gpu_scheduler.cc',
+        'command_buffer/service/gpu_scheduler_linux.cc',
+        'command_buffer/service/gpu_scheduler_mac.cc',
+        'command_buffer/service/gpu_scheduler_mock.h',
+        'command_buffer/service/gpu_scheduler_win.cc',
         'command_buffer/service/id_manager.h',
         'command_buffer/service/id_manager.cc',
         'command_buffer/service/mocks.h',
@@ -228,9 +253,11 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gmock.gyp:gmock_main',
         '../testing/gtest.gyp:gtest',
+        '../ui/gfx/gl/gl.gyp:gl',
         'command_buffer_client',
         'command_buffer_common',
         'command_buffer_service',
+        'gpu_common',
         'gpu_unittest_utils',
         'gles2_implementation_client_side_arrays',
         'gles2_cmd_helper',
@@ -266,7 +293,7 @@
         'command_buffer/service/common_decoder_unittest.cc',
         'command_buffer/service/feature_info_unittest.cc',
         'command_buffer/service/framebuffer_manager_unittest.cc',
-        'command_buffer/service/gpu_processor_unittest.cc',
+        'command_buffer/service/gpu_scheduler_unittest.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest.cc',
@@ -290,9 +317,9 @@
       'target_name': 'gpu_unittest_utils',
       'type': 'static_library',
       'dependencies': [
-        '../app/app.gyp:app_base',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        '../ui/gfx/gl/gl.gyp:gl',
       ],
       'include_dirs': [
         '..',

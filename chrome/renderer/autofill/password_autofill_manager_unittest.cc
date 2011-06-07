@@ -65,7 +65,7 @@ class PasswordAutofillManagerTest : public RenderViewTest {
   // protected.
   void SimulateOnFillPasswordForm(
       const PasswordFormFillData& fill_data) {
-    AutoFillMsg_FillPasswordForm msg(0, fill_data);
+    AutofillMsg_FillPasswordForm msg(0, fill_data);
     password_autofill_->OnMessageReceived(msg);
   }
 
@@ -183,17 +183,51 @@ TEST_F(PasswordAutofillManagerTest, InitialAutocomplete) {
   // The form has been loaded, we should have sent the browser a message about
   // the form.
   const IPC::Message* msg = render_thread_.sink().GetFirstMessageMatching(
-      AutoFillHostMsg_PasswordFormsFound::ID);
+      AutofillHostMsg_PasswordFormsFound::ID);
   ASSERT_TRUE(msg != NULL);
 
   Tuple1<std::vector<PasswordForm> > forms;
-  AutoFillHostMsg_PasswordFormsFound::Read(msg, &forms);
+  AutofillHostMsg_PasswordFormsFound::Read(msg, &forms);
   ASSERT_EQ(1U, forms.a.size());
   PasswordForm password_form = forms.a[0];
   EXPECT_EQ(PasswordForm::SCHEME_HTML, password_form.scheme);
   EXPECT_EQ(ASCIIToUTF16(kUsernameName), password_form.username_element);
   EXPECT_EQ(ASCIIToUTF16(kPasswordName), password_form.password_element);
   */
+
+  // Simulate the browser sending back the login info, it triggers the
+  // autocomplete.
+  SimulateOnFillPasswordForm(fill_data_);
+
+  // The username and password should have been autocompleted.
+  CheckTextFieldsState(kAliceUsername, true, kAlicePassword, true);
+}
+
+// Tests that having a non-empty username precludes the autocomplete.
+TEST_F(PasswordAutofillManagerTest, InitialAutocompleteForEmptyAction) {
+  const char kEmptyActionFormHTML[] =
+      "<FORM name='LoginTestForm'>"
+      "  <INPUT type='text' id='username'/>"
+      "  <INPUT type='password' id='password'/>"
+      "  <INPUT type='submit' value='Login'/>"
+      "</FORM>";
+  LoadHTML(kEmptyActionFormHTML);
+
+  // Retrieve the input elements so the test can access them.
+  WebDocument document = GetMainFrame()->document();
+  WebElement element =
+      document.getElementById(WebString::fromUTF8(kUsernameName));
+  ASSERT_FALSE(element.isNull());
+  username_element_ = element.to<WebKit::WebInputElement>();
+  element = document.getElementById(WebString::fromUTF8(kPasswordName));
+  ASSERT_FALSE(element.isNull());
+  password_element_ = element.to<WebKit::WebInputElement>();
+
+  // Set the expected form origin and action URLs.
+  std::string origin("data:text/html;charset=utf-8,");
+  origin += kEmptyActionFormHTML;
+  fill_data_.basic_data.origin = GURL(origin);
+  fill_data_.basic_data.action = GURL(origin);
 
   // Simulate the browser sending back the login info, it triggers the
   // autocomplete.

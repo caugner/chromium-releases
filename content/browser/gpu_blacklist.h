@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
-#include "chrome/common/gpu_feature_flags.h"
+#include "content/common/gpu_feature_flags.h"
 
 class DictionaryValue;
-class GPUInfo;
 class Version;
+struct GPUInfo;
 
 class GpuBlacklist {
  public:
@@ -24,11 +24,12 @@ class GpuBlacklist {
     kOsLinux,
     kOsMacosx,
     kOsWin,
+    kOsChromeOS,
     kOsAny,
     kOsUnknown
   };
 
-  GpuBlacklist();
+  explicit GpuBlacklist(const std::string& browser_version_string);
   ~GpuBlacklist();
 
   // Loads blacklist information from a json file.
@@ -60,15 +61,37 @@ class GpuBlacklist {
                                 std::vector<uint32>& entry_ids) const;
 
 
-  // Returns an array of entries, each entry of which has
-  // description, cr_bugs, and webkit_bugs explaining reason for
-  // blacklisting, e.g.:
-  // [{
+  // Returns status information on the blacklist. This is two parted:
+  // {
+  //    featureStatus: []
+  //    problems: []
+  // }
+  //
+  // Each entry in feature_status has:
+  // {
+  //    name:  "name of feature"
+  //    status: "enabled" | "unavailable_software" | "unavailable_off" |
+  //            "software" | "disabled_off" | "disabled_softare";
+  // }
+  //
+  // The features reported are not 1:1 with GpuFeatureType. Rather, they are:
+  //    '2d_canvas'
+  //    '3d_css'
+  //    'composting',
+  //    'webgl',
+  //    'multisampling'
+  //
+  // Each problems has:
+  // {
   //    "description": "Your GPU is too old",
-  //    "cr_bugs": [1234],
-  //    "webkit_bugs": []
-  // }]
-  Value* GetBlacklistingReasons() const;
+  //    "crBugs": [1234],
+  //    "webkitBugs": []
+  // }
+  Value* GetFeatureStatus(bool gpu_access_allowed,
+                          bool disable_accelerated_compositing,
+                          bool enable_accelerated_2D_canvas,
+                          bool disable_experimental_webgl,
+                          bool disable_multisampling) const;
 
   // Return the largest entry id.  This is used for histogramming.
   uint32 max_entry_id() const;
@@ -244,13 +267,29 @@ class GpuBlacklist {
     std::vector<GpuBlacklistEntry*> exceptions_;
   };
 
+  enum BrowserVersionSupport {
+    kSupported,
+    kUnsupported,
+    kMalformed
+  };
+
   // Gets the current OS type.
   static OsType GetOsType();
 
   void Clear();
 
+  bool IsFeatureBlacklisted(GpuFeatureFlags::GpuFeatureType feature) const;
+
+  // Check if the entry is supported by the current version of browser.
+  // By default, if there is no browser version information in the entry,
+  // return kSupported;
+  BrowserVersionSupport IsEntrySupportedByCurrentBrowserVersion(
+      DictionaryValue* value);
+
   scoped_ptr<Version> version_;
   std::vector<GpuBlacklistEntry*> blacklist_;
+
+  scoped_ptr<Version> browser_version_;
 
   // This records all the blacklist entries that are appliable to the current
   // user machine.  It is updated everytime DetermineGpuFeatureFlags() is

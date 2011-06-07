@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,7 +67,7 @@ void TextureManager::Destroy(bool have_context) {
   while (!texture_infos_.empty()) {
     if (have_context) {
       TextureInfo* info = texture_infos_.begin()->second;
-      if (!info->IsDeleted()) {
+      if (!info->IsDeleted() && info->owned_) {
         GLuint service_id = info->service_id();
         glDeleteTextures(1, &service_id);
         info->MarkAsDeleted();
@@ -280,6 +280,13 @@ void TextureManager::TextureInfo::SetParameter(
 void TextureManager::TextureInfo::Update(const FeatureInfo* feature_info) {
   // Update npot status.
   npot_ = false;
+
+  if (level_infos_.empty()) {
+    texture_complete_ = false;
+    cube_complete_ = false;
+    return;
+  }
+
   for (size_t ii = 0; ii < level_infos_.size(); ++ii) {
     const TextureInfo::LevelInfo& info = level_infos_[ii][0];
     if (GLES2Util::IsNPOT(info.width) ||

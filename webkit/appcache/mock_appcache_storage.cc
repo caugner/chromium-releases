@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/appcache/mock_appcache_storage.h"
 
 #include "base/logging.h"
+#include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
 #include "base/stl_util-inl.h"
 #include "webkit/appcache/appcache.h"
 #include "webkit/appcache/appcache_entry.h"
@@ -83,8 +83,10 @@ void MockAppCacheStorage::StoreGroupAndNewestCache(
 }
 
 void MockAppCacheStorage::FindResponseForMainRequest(
-    const GURL& url, Delegate* delegate) {
+    const GURL& url, const GURL& preferred_manifest_url, Delegate* delegate) {
   DCHECK(delegate);
+
+  // Note: MockAppCacheStorage does not respect the preferred_manifest_url.
 
   // Always make this operation look async.
   ScheduleTask(method_factory_.NewRunnableMethod(

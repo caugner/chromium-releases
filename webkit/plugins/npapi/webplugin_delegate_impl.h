@@ -8,8 +8,8 @@
 #include <string>
 #include <list>
 
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "base/timer.h"
@@ -101,7 +101,6 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
                               const gfx::Rect& clip_rect);
   virtual void Paint(WebKit::WebCanvas* canvas, const gfx::Rect& rect);
-  virtual void Print(gfx::NativeDrawingContext context);
   virtual void SetFocus(bool focused);
   virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
                                 WebKit::WebCursorInfo* cursor_info);

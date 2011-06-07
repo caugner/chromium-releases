@@ -15,6 +15,7 @@
 #include "views/accelerator.h"
 #include "views/events/event.h"
 #include "views/focus/focus_manager.h"
+#include "views/ime/input_method.h"
 #include "views/touchui/touch_factory.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
@@ -23,7 +24,7 @@ namespace views {
 
 namespace {
 
-RootView* FindRootViewForGdkWindow(GdkWindow* gdk_window) {
+Widget* FindWidgetForGdkWindow(GdkWindow* gdk_window) {
   gpointer data = NULL;
   gdk_window_get_user_data(gdk_window, &data);
   GtkWidget* gtk_widget = reinterpret_cast<GtkWidget*>(data);
@@ -37,7 +38,7 @@ RootView* FindRootViewForGdkWindow(GdkWindow* gdk_window) {
     DLOG(WARNING) << "no WidgetGtk found for that GtkWidget";
     return NULL;
   }
-  return widget->GetWidget()->GetRootView();
+  return widget->GetWidget();
 }
 
 #if defined(HAVE_XINPUT2)
@@ -73,7 +74,8 @@ bool DispatchX2Event(RootView* root, XEvent* xev) {
     // Create a TouchEvent, and send it off to |root|. If the event
     // is processed by |root|, then return. Otherwise let it fall through so it
     // can be used (if desired) as a mouse event.
-    TouchEvent touch(xev);
+    Event::FromNativeEvent2 from_native;
+    TouchEvent touch(xev, from_native);
     if (root->OnTouchEvent(touch) != views::View::TOUCH_STATUS_UNKNOWN)
       return true;
   }
@@ -96,7 +98,8 @@ bool DispatchX2Event(RootView* root, XEvent* xev) {
         return root->OnMouseWheel(wheelev);
       }
 
-      MouseEvent mouseev(xev);
+      Event::FromNativeEvent2 from_native;
+      MouseEvent mouseev(xev, from_native);
       if (!touch_event) {
         // Show the cursor, and decide whether or not the cursor should be
         // automatically hidden after a certain time of inactivity.
@@ -128,7 +131,7 @@ bool DispatchX2Event(RootView* root, XEvent* xev) {
         case XI_ButtonPress:
           return root->OnMousePressed(mouseev);
         case XI_ButtonRelease:
-          root->OnMouseReleased(mouseev, false);
+          root->OnMouseReleased(mouseev);
           return true;
         case XI_Motion: {
           if (mouseev.type() == ui::ET_MOUSE_DRAGGED) {
@@ -160,13 +163,21 @@ bool DispatchXEvent(XEvent* xev) {
 #endif
 
   GdkWindow* gwind = gdk_window_lookup_for_display(gdisp, xwindow);
-
-  if (RootView* root = FindRootViewForGdkWindow(gwind)) {
+  Widget* widget = FindWidgetForGdkWindow(gwind);
+  if (widget) {
+    RootView* root = widget->GetRootView();
     switch (xev->type) {
       case KeyPress:
       case KeyRelease: {
         Event::FromNativeEvent2 from_native;
         KeyEvent keyev(xev, from_native);
+        InputMethod* ime = widget->GetInputMethod();
+        // Always dispatch key events to the input method first, to make sure
+        // that the input method's hotkeys work all time.
+        if (ime) {
+          ime->DispatchKeyEvent(keyev);
+          return true;
+        }
         return root->ProcessKeyEvent(keyev);
       }
 
@@ -178,11 +189,12 @@ bool DispatchXEvent(XEvent* xev) {
           MouseWheelEvent wheelev(xev, from_native);
           return root->OnMouseWheel(wheelev);
         } else {
-          MouseEvent mouseev(xev);
+          Event::FromNativeEvent2 from_native;
+          MouseEvent mouseev(xev, from_native);
           if (xev->type == ButtonPress) {
             return root->OnMousePressed(mouseev);
           } else {
-            root->OnMouseReleased(mouseev, false);
+            root->OnMouseReleased(mouseev);
             return true;  // Assume the event has been processed to make sure we
                           // don't process it twice.
           }
@@ -190,7 +202,8 @@ bool DispatchXEvent(XEvent* xev) {
       }
 
       case MotionNotify: {
-        MouseEvent mouseev(xev);
+        Event::FromNativeEvent2 from_native;
+        MouseEvent mouseev(xev, from_native);
         if (mouseev.type() == ui::ET_MOUSE_DRAGGED) {
           return root->OnMouseDragged(mouseev);
         } else {

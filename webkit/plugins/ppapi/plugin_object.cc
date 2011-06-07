@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/plugins/ppapi/plugin_object.h"
 
 #include "base/logging.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "third_party/npapi/bindings/npapi.h"
@@ -15,7 +15,6 @@
 #include "ppapi/c/dev/ppp_class_deprecated.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/c/ppb_class.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "webkit/plugins/ppapi/npapi_glue.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -23,7 +22,6 @@
 #include "webkit/plugins/ppapi/resource.h"
 #include "webkit/plugins/ppapi/string.h"
 #include "webkit/plugins/ppapi/var.h"
-#include "webkit/plugins/ppapi/var_object_class.h"
 
 using WebKit::WebBindings;
 
@@ -292,7 +290,14 @@ PP_Var PluginObject::Create(PluginInstance* instance,
   // We can just use a normal ObjectVar to refer to this object from the
   // plugin. It will hold a ref to the underlying NPObject which will in turn
   // hold our pluginObject.
-  return ObjectVar::NPObjectToPPVar(instance, wrapper);
+  PP_Var obj_var(ObjectVar::NPObjectToPPVar(instance, wrapper));
+
+  // Note that the ObjectVar constructor incremented the reference count, and so
+  // did WebBindings::createObject above. Now that the PP_Var has taken
+  // ownership, we need to release to balance out the createObject reference
+  // count bump.
+  WebBindings::releaseObject(wrapper);
+  return obj_var;
 }
 
 NPObject* PluginObject::GetNPObject() const {

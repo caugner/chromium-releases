@@ -18,8 +18,9 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/ref_counted_memory.h"
-#include "base/scoped_ptr.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -76,6 +77,9 @@ class ResourceBundle {
   // defined by the Cocoa UI (ie-NSBundle does the langange work).
   static std::string InitSharedInstance(const std::string& pref_locale);
 
+  // Initialize the ResourceBundle using given data pack path for testing.
+  static void InitSharedInstanceForTest(const FilePath& path);
+
   // Changes the locale for an already-initialized ResourceBundle.  Future
   // calls to get strings will return the strings for this new locale.  This
   // has no effect on existing or future image resources.  This has no effect
@@ -131,6 +135,10 @@ class ResourceBundle {
   // Returns the font for the specified style.
   const gfx::Font& GetFont(FontStyle style);
 
+  // Resets and reloads the cached fonts.  This is useful when the fonts of the
+  // system have changed, for example, when the locale has changed.
+  void ReloadFonts();
+
 #if defined(OS_WIN)
   // Loads and returns an icon from the app module.
   HICON LoadThemeIcon(int icon_id);
@@ -170,6 +178,8 @@ class ResourceBundle {
   static const SkColor toolbar_separator_color;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ResourceBundle, LoadDataResourceBytes);
+
   // Helper class for managing data packs.
   class LoadedDataPack {
    public:
@@ -210,6 +220,9 @@ class ResourceBundle {
   // Try to load the locale specific strings from an external data module.
   // Returns the locale that is loaded.
   std::string LoadLocaleResources(const std::string& pref_locale);
+
+  // Load test resources in given path.
+  void LoadTestResources(const FilePath& path);
 
   // Unload the locale specific strings and prepares to load new ones. See
   // comments for ReloadSharedInstance().

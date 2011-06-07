@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
 #include "base/timer.h"
 #include "remoting/base/encoder.h"
 #include "remoting/host/capturer.h"
@@ -193,6 +195,12 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
 
   // Number of captures to perform every second. Written on the capture thread.
   double max_rate_;
+
+  // Time when capture is started.
+  base::Time capture_start_time_;
+
+  // Time when encode is started.
+  base::Time encode_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenRecorder);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,16 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/scoped_vector.h"
+#include "base/memory/scoped_vector.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "ipc/ipc_test_sink.h"
 
 class MockRenderProcessHostFactory;
 class TransportDIB;
+
+namespace net {
 class URLRequestContextGetter;
+}
 
 // A mock render process host that has no corresponding renderer process.  All
 // IPC messages are sent into the message sink for inspection by tests.

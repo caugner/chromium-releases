@@ -5,6 +5,7 @@
 #include "content/common/file_system/file_system_dispatcher.h"
 
 #include "base/file_util.h"
+#include "base/process.h"
 #include "content/common/child_thread.h"
 #include "content/common/file_system_messages.h"
 
@@ -32,6 +33,7 @@ bool FileSystemDispatcher::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidReadMetadata, OnDidReadMetadata)
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidFail, OnDidFail)
     IPC_MESSAGE_HANDLER(FileSystemMsg_DidWrite, OnDidWrite)
+    IPC_MESSAGE_HANDLER(FileSystemMsg_DidOpenFile, OnDidOpenFile)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -52,8 +54,8 @@ bool FileSystemDispatcher::OpenFileSystem(
 }
 
 bool FileSystemDispatcher::Move(
-    const FilePath& src_path,
-    const FilePath& dest_path,
+    const GURL& src_path,
+    const GURL& dest_path,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   int request_id = dispatchers_.Add(dispatcher);
   if (!ChildThread::current()->Send(new FileSystemHostMsg_Move(
@@ -66,8 +68,8 @@ bool FileSystemDispatcher::Move(
 }
 
 bool FileSystemDispatcher::Copy(
-    const FilePath& src_path,
-    const FilePath& dest_path,
+    const GURL& src_path,
+    const GURL& dest_path,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   int request_id = dispatchers_.Add(dispatcher);
   if (!ChildThread::current()->Send(new FileSystemHostMsg_Copy(
@@ -80,7 +82,7 @@ bool FileSystemDispatcher::Copy(
 }
 
 bool FileSystemDispatcher::Remove(
-    const FilePath& path,
+    const GURL& path,
     bool recursive,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   int request_id = dispatchers_.Add(dispatcher);
@@ -94,7 +96,7 @@ bool FileSystemDispatcher::Remove(
 }
 
 bool FileSystemDispatcher::ReadMetadata(
-    const FilePath& path,
+    const GURL& path,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   int request_id = dispatchers_.Add(dispatcher);
   if (!ChildThread::current()->Send(
@@ -107,7 +109,7 @@ bool FileSystemDispatcher::ReadMetadata(
 }
 
 bool FileSystemDispatcher::Create(
-    const FilePath& path,
+    const GURL& path,
     bool exclusive,
     bool is_directory,
     bool recursive,
@@ -123,7 +125,7 @@ bool FileSystemDispatcher::Create(
 }
 
 bool FileSystemDispatcher::Exists(
-    const FilePath& path,
+    const GURL& path,
     bool is_directory,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   int request_id = dispatchers_.Add(dispatcher);
@@ -137,7 +139,7 @@ bool FileSystemDispatcher::Exists(
 }
 
 bool FileSystemDispatcher::ReadDirectory(
-    const FilePath& path,
+    const GURL& path,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
   int request_id = dispatchers_.Add(dispatcher);
   if (!ChildThread::current()->Send(
@@ -150,7 +152,7 @@ bool FileSystemDispatcher::ReadDirectory(
 }
 
 bool FileSystemDispatcher::Truncate(
-    const FilePath& path,
+    const GURL& path,
     int64 offset,
     int* request_id_out,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
@@ -167,7 +169,7 @@ bool FileSystemDispatcher::Truncate(
 }
 
 bool FileSystemDispatcher::Write(
-    const FilePath& path,
+    const GURL& path,
     const GURL& blob_url,
     int64 offset,
     int* request_id_out,
@@ -198,7 +200,7 @@ bool FileSystemDispatcher::Cancel(
 }
 
 bool FileSystemDispatcher::TouchFile(
-    const FilePath& path,
+    const GURL& path,
     const base::Time& last_access_time,
     const base::Time& last_modified_time,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
@@ -213,14 +215,29 @@ bool FileSystemDispatcher::TouchFile(
   return true;
 }
 
+bool FileSystemDispatcher::OpenFile(
+    const GURL& file_path,
+    int file_flags,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  int request_id = dispatchers_.Add(dispatcher);
+  if (!ChildThread::current()->Send(
+          new FileSystemHostMsg_OpenFile(
+              request_id, file_path, file_flags))) {
+    dispatchers_.Remove(request_id);  // destroys |dispatcher|
+    return false;
+  }
+
+  return true;
+}
+
 void FileSystemDispatcher::OnOpenComplete(
     int request_id, bool accepted, const std::string& name,
-    const FilePath& root_path) {
+    const GURL& root) {
   fileapi::FileSystemCallbackDispatcher* dispatcher =
       dispatchers_.Lookup(request_id);
   DCHECK(dispatcher);
   if (accepted)
-    dispatcher->DidOpenFileSystem(name, root_path);
+    dispatcher->DidOpenFileSystem(name, root);
   else
     dispatcher->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
   dispatchers_.Remove(request_id);
@@ -235,11 +252,12 @@ void FileSystemDispatcher::OnDidSucceed(int request_id) {
 }
 
 void FileSystemDispatcher::OnDidReadMetadata(
-    int request_id, const base::PlatformFileInfo& file_info) {
+    int request_id, const base::PlatformFileInfo& file_info,
+    const FilePath& platform_path) {
   fileapi::FileSystemCallbackDispatcher* dispatcher =
       dispatchers_.Lookup(request_id);
   DCHECK(dispatcher);
-  dispatcher->DidReadMetadata(file_info);
+  dispatcher->DidReadMetadata(file_info, platform_path);
   dispatchers_.Remove(request_id);
 }
 
@@ -271,4 +289,14 @@ void FileSystemDispatcher::OnDidWrite(
   dispatcher->DidWrite(bytes, complete);
   if (complete)
     dispatchers_.Remove(request_id);
+}
+
+void FileSystemDispatcher::OnDidOpenFile(
+    int request_id, IPC::PlatformFileForTransit file) {
+  fileapi::FileSystemCallbackDispatcher* dispatcher =
+      dispatchers_.Lookup(request_id);
+  DCHECK(dispatcher);
+  dispatcher->DidOpenFile(IPC::PlatformFileForTransitToPlatformFile(file),
+      base::kNullProcessHandle);
+  dispatchers_.Remove(request_id);
 }

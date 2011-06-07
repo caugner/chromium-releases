@@ -68,6 +68,11 @@ std::string ResourceBundle::LoadLocaleResources(
   return app_locale;
 }
 
+void ResourceBundle::LoadTestResources(const FilePath& path) {
+  // On Windows, the test resources are normally compiled into the binary
+  // itself.
+}
+
 void ResourceBundle::UnloadLocaleResources() {
   if (locale_resources_data_) {
     BOOL rv = FreeLibrary(locale_resources_data_);

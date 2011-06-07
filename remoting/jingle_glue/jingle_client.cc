@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "jingle/notifier/communicator/gaia_token_pre_xmpp_auth.h"
+#include "jingle/notifier/base/gaia_token_pre_xmpp_auth.h"
 #include "remoting/jingle_glue/http_port_allocator.h"
 #include "remoting/jingle_glue/iq_request.h"
 #include "remoting/jingle_glue/jingle_thread.h"
@@ -114,8 +114,11 @@ void XmppSignalStrategy::OnConnectionStateChanged(
 buzz::PreXmppAuth* XmppSignalStrategy::CreatePreXmppAuth(
     const buzz::XmppClientSettings& settings) {
   buzz::Jid jid(settings.user(), settings.host(), buzz::STR_EMPTY);
-  return new notifier::GaiaTokenPreXmppAuth(jid.Str(), settings.auth_cookie(),
-                                            settings.token_service());
+  return new notifier::GaiaTokenPreXmppAuth(
+      jid.Str(),
+      settings.auth_cookie(),
+      settings.token_service(),
+      notifier::GaiaTokenPreXmppAuth::kDefaultAuthMechanism);
 }
 
 
@@ -166,7 +169,8 @@ JingleClient::JingleClient(JingleThread* thread,
                            SignalStrategy* signal_strategy,
                            PortAllocatorSessionFactory* session_factory,
                            Callback* callback)
-    : thread_(thread),
+    : enable_nat_traversing_(false),
+      thread_(thread),
       state_(START),
       initialized_(false),
       closed_(false),
@@ -182,7 +186,8 @@ JingleClient::JingleClient(JingleThread* thread,
                            talk_base::PacketSocketFactory* socket_factory,
                            PortAllocatorSessionFactory* session_factory,
                            Callback* callback)
-    : thread_(thread),
+    : enable_nat_traversing_(false),
+      thread_(thread),
       state_(START),
       initialized_(false),
       closed_(false),
@@ -227,6 +232,10 @@ void JingleClient::DoInitialize() {
       new remoting::HttpPortAllocator(
           network_manager_.get(), socket_factory_.get(),
           port_allocator_session_factory_.get(), "transp2"));
+  if (!enable_nat_traversing_) {
+    port_allocator_->set_flags(cricket::PORTALLOCATOR_DISABLE_STUN |
+                               cricket::PORTALLOCATOR_DISABLE_RELAY);
+  }
 
   // TODO(ajwong): The strategy needs a "start" command or something.  Right
   // now, Init() implicitly starts processing events.  Thus, we must have the
@@ -234,12 +243,16 @@ void JingleClient::DoInitialize() {
   // may occur and callback into class before we're done initializing.
   signal_strategy_->Init(this);
 
-  jingle_info_request_.reset(
-      new JingleInfoRequest(signal_strategy_->CreateIqRequest()));
-  jingle_info_request_->SetCallback(
-      NewCallback(this, &JingleClient::OnJingleInfo));
-  jingle_info_request_->Run(
-      NewRunnableMethod(this, &JingleClient::DoStartSession));
+  if (enable_nat_traversing_) {
+    jingle_info_request_.reset(
+        new JingleInfoRequest(signal_strategy_->CreateIqRequest()));
+    jingle_info_request_->SetCallback(
+        NewCallback(this, &JingleClient::OnJingleInfo));
+    jingle_info_request_->Run(
+        NewRunnableMethod(this, &JingleClient::DoStartSession));
+  } else {
+    DoStartSession();
+  }
 }
 
 void JingleClient::DoStartSession() {

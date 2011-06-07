@@ -13,15 +13,15 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
 
 class FilePath;
 class GURL;
 
 // The ChildProcessSecurityPolicy class is used to grant and revoke security
-// capabilities for child porcesses.  For example, it restricts whether a child
-// process is permmitted to loaded file:// URLs based on whether the process
+// capabilities for child processes.  For example, it restricts whether a child
+// process is permitted to load file:// URLs based on whether the process
 // has ever been commanded to load file:// URLs by the browser.
 //
 // ChildProcessSecurityPolicy is a singleton that may be used on any thread.
@@ -53,9 +53,24 @@ class ChildProcessSecurityPolicy {
   // Returns true iff |scheme| has been registered as pseudo scheme.
   bool IsPseudoScheme(const std::string& scheme);
 
+  // Sets the list of disabled schemes.
+  // URLs using these schemes won't be loaded at all. The previous list of
+  // schemes is overwritten. An empty |schemes| disables this feature.
+  // Schemes listed as disabled take precedence over Web-safe schemes.
+  void RegisterDisabledSchemes(const std::set<std::string>& schemes);
+
+  // Returns true iff |scheme| is listed as a disabled scheme.
+  bool IsDisabledScheme(const std::string& scheme);
+
   // Upon creation, child processes should register themselves by calling this
   // this method exactly once.
   void Add(int child_id);
+
+  // Upon creation, worker thread child processes should register themselves by
+  // calling this this method exactly once. Workers that are not shared will
+  // inherit permissions from their parent renderer process identified with
+  // |main_render_process_id|.
+  void AddWorker(int worker_child_id, int main_render_process_id);
 
   // Upon destruction, child processess should unregister themselves by caling
   // this method exactly once.
@@ -70,6 +85,10 @@ class ChildProcessSecurityPolicy {
   // browser should call this function to grant the child process the capability
   // to upload the file to the web.
   void GrantReadFile(int child_id, const FilePath& file);
+
+  // Grants the child process permission to enumerate all the files in
+  // this directory and read those files.
+  void GrantReadDirectory(int child_id, const FilePath& directory);
 
   // Grants certain permissions to a file. |permissions| must be a bit-set of
   // base::PlatformFileFlags.
@@ -106,6 +125,10 @@ class ChildProcessSecurityPolicy {
   // capability to upload the requested file.
   bool CanReadFile(int child_id, const FilePath& file);
 
+  // Before servicing a child process's request to enumerate a directory
+  // the browser should call this method to check for the capability.
+  bool CanReadDirectory(int child_id, const FilePath& directory);
+
   // Determines if certain permissions were granted for a file. |permissions|
   // must be a bit-set of base::PlatformFileFlags.
   bool HasPermissionsForFile(int child_id,
@@ -134,12 +157,22 @@ class ChildProcessSecurityPolicy {
 
   typedef std::set<std::string> SchemeSet;
   typedef std::map<int, SecurityState*> SecurityStateMap;
+  typedef std::map<int, int> WorkerToMainProcessMap;
 
   // Obtain an instance of ChildProcessSecurityPolicy via GetInstance().
   ChildProcessSecurityPolicy();
   friend struct DefaultSingletonTraits<ChildProcessSecurityPolicy>;
 
-  // You must acquire this lock before reading or writing any members of this
+  // Adds child process during registration.
+  void AddChild(int child_id);
+
+  // Determines if certain permissions were granted for a file to given child
+  // process. |permissions| must be a bit-set of base::PlatformFileFlags.
+  bool ChildProcessHasPermissionsForFile(int child_id,
+                                         const FilePath& file,
+                                         int permissions);
+
+    // You must acquire this lock before reading or writing any members of this
   // class.  You must not block while holding this lock.
   base::Lock lock_;
 
@@ -152,11 +185,20 @@ class ChildProcessSecurityPolicy {
   // protected by |lock_|.
   SchemeSet pseudo_schemes_;
 
+  // These schemes are disabled by policy, and child processes are always
+  // denied permission to request them. This overrides |web_safe_schemes_|.
+  // This set is protected by |lock_|.
+  SchemeSet disabled_schemes_;
+
   // This map holds a SecurityState for each child process.  The key for the
   // map is the ID of the ChildProcessHost.  The SecurityState objects are
   // owned by this object and are protected by |lock_|.  References to them must
   // not escape this class.
   SecurityStateMap security_state_;
+
+  // This maps keeps the record of which js worker thread child process
+  // corresponds to which main js thread child process.
+  WorkerToMainProcessMap worker_map_;
 
   DISALLOW_COPY_AND_ASSIGN(ChildProcessSecurityPolicy);
 };

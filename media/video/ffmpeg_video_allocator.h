@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 #define MEDIA_VIDEO_FFMPEG_VIDEO_ALLOCATOR_H_
 
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "media/base/video_frame.h"
 #include "media/ffmpeg/ffmpeg_common.h"
-#include "media/ffmpeg/ffmpeg_util.h"
 
 #include <deque>
 #include <map>
@@ -27,7 +26,9 @@ class FFmpegVideoAllocator {
   virtual ~FFmpegVideoAllocator();
 
   struct RefCountedAVFrame {
-    RefCountedAVFrame() : usage_count_(0) {}
+    explicit RefCountedAVFrame(AVFrame* av_frame)
+        : av_frame_(*av_frame),
+          usage_count_(0) {}
 
     // TODO(jiesun): we had commented out "DCHECK_EQ(usage_count_, 0);" here.
     // Because the way FFMPEG-MT handle release buffer in delayed fashion.
@@ -43,6 +44,10 @@ class FFmpegVideoAllocator {
       return base::AtomicRefCountDecN(&usage_count_, 1);
     }
 
+    // Technically AVFrame should *always* be heap-allocated via
+    // avcodec_alloc_frame() otherwise (while rare) we can run into nasty binary
+    // mismatch incompatibility stuff if people swap binaries (which might
+    // happen with some Linux distributions). See http://crbug.com/77629.
     AVFrame av_frame_;
     base::AtomicRefCount usage_count_;
   };
@@ -80,15 +85,17 @@ class FFmpegVideoAllocator {
   // This map is used to map from AVCodecContext* to index to
   // |available_frames_|, because ffmpeg-mt maintain multiple
   // AVCodecContext (per thread).
-  std::map<void*, int> codec_index_map_;
+  std::map<AVCodecContext*, int> codec_index_map_;
 
-  // These function pointer store original ffmpeg AVCodecContext's
-  // get_buffer()/release_buffer() function pointer. We use these function
+  // These function pointers store the original AVCodecContext's
+  // get_buffer()/release_buffer() function pointers. We use these functions
   // to delegate the allocation request.
-  int (*get_buffer_)(struct AVCodecContext *c, AVFrame *pic);
-  void (*release_buffer_)(struct AVCodecContext *c, AVFrame *pic);
+  int (*get_buffer_)(AVCodecContext* c, AVFrame* pic);
+  void (*release_buffer_)(AVCodecContext* c, AVFrame* pic);
+
+  DISALLOW_COPY_AND_ASSIGN(FFmpegVideoAllocator);
 };
 
-} // namespace media
+}  // namespace media
 
 #endif  // MEDIA_VIDEO_FFMPEG_VIDEO_ALLOCATOR_H_

@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "ppapi/c/dev/ppb_file_chooser_dev.h"
 #include "webkit/plugins/ppapi/resource.h"
 
@@ -43,7 +43,7 @@ class PPB_FileChooser_Impl : public Resource {
   int32_t ValidateCallback(const PP_CompletionCallback& callback);
 
   // Sets up |callback| as the pending callback. This should only be called once
-  // it is certain that |PP_ERROR_WOULDBLOCK| will be returned.
+  // it is certain that |PP_OK_COMPLETIONPENDING| will be returned.
   void RegisterCallback(const PP_CompletionCallback& callback);
 
   void RunCallback(int32_t result);

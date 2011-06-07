@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <set>
 #include <vector>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/task.h"
 #include "content/browser/device_orientation/data_fetcher.h"
 #include "content/browser/device_orientation/orientation.h"
@@ -43,7 +43,8 @@ class ProviderImpl : public Provider {
 
   // Method for finding a suitable DataFetcher and starting the polling.
   // Runs on the polling_thread_.
-  void DoInitializePollingThread(std::vector<DataFetcherFactory> factories);
+  void DoInitializePollingThread(
+      const std::vector<DataFetcherFactory>& factories);
   void ScheduleInitializePollingThread();
 
   // Method for polling a DataFetcher. Runs on the polling_thread_.

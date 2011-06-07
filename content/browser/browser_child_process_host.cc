@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,14 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/plugin_messages.h"
-#include "chrome/common/process_watcher.h"
-#include "chrome/common/result_codes.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/resource_message_filter.h"
+#include "content/browser/trace_message_filter.h"
+#include "content/common/notification_service.h"
+#include "content/common/plugin_messages.h"
+#include "content/common/process_watcher.h"
+#include "content/common/result_codes.h"
 
 #if defined(OS_LINUX)
 #include "base/linux_util.h"
@@ -57,39 +59,11 @@ class ChildNotificationTask : public Task {
 
 }  // namespace
 
-
 BrowserChildProcessHost::BrowserChildProcessHost(
-    ChildProcessInfo::ProcessType type,
-    ResourceDispatcherHost* resource_dispatcher_host,
-    ResourceMessageFilter::URLRequestContextOverride*
-        url_request_context_override)
+    ChildProcessInfo::ProcessType type)
     : ChildProcessInfo(type, -1),
-      ALLOW_THIS_IN_INITIALIZER_LIST(client_(this)),
-      resource_dispatcher_host_(resource_dispatcher_host) {
-  Initialize(url_request_context_override);
-}
-
-BrowserChildProcessHost::BrowserChildProcessHost(
-    ChildProcessInfo::ProcessType type,
-    ResourceDispatcherHost* resource_dispatcher_host)
-    : ChildProcessInfo(type, -1),
-      ALLOW_THIS_IN_INITIALIZER_LIST(client_(this)),
-      resource_dispatcher_host_(resource_dispatcher_host) {
-  Initialize(NULL);
-}
-
-void BrowserChildProcessHost::Initialize(
-    ResourceMessageFilter::URLRequestContextOverride*
-        url_request_context_override) {
-  if (resource_dispatcher_host_) {
-    ResourceMessageFilter* resource_message_filter = new ResourceMessageFilter(
-        id(), type(), resource_dispatcher_host_);
-    if (url_request_context_override) {
-      resource_message_filter->set_url_request_context_override(
-        url_request_context_override);
-    }
-    AddFilter(resource_message_filter);
-  }
+      ALLOW_THIS_IN_INITIALIZER_LIST(client_(this)) {
+  AddFilter(new TraceMessageFilter);
 
   g_child_process_list.Get().push_back(this);
 }
@@ -169,7 +143,8 @@ void BrowserChildProcessHost::OnChildDied() {
     int exit_code;
     base::TerminationStatus status = GetChildTerminationStatus(&exit_code);
     switch (status) {
-      case base::TERMINATION_STATUS_PROCESS_CRASHED: {
+      case base::TERMINATION_STATUS_PROCESS_CRASHED:
+      case base::TERMINATION_STATUS_ABNORMAL_TERMINATION: {
         OnProcessCrashed(exit_code);
 
         // Report that this child process crashed.

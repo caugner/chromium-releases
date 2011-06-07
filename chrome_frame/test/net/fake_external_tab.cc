@@ -15,32 +15,38 @@
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/i18n/icu_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/threading/platform_thread.h"
+#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/browser/automation/automation_provider_list.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/net/test_automation_resource_message_filter.h"
 #include "chrome_frame/test/simulate_input.h"
-#include "chrome_frame/test_utils.h"
 #include "chrome_frame/test/win_event_receiver.h"
 #include "chrome_frame/utils.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/render_process_host.h"
+#include "content/common/content_client.h"
+#include "content/common/content_paths.h"
+#include "content/common/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -86,7 +92,7 @@ bool PromptAfterSetup() {
 // #pragma comment(lib, "oleacc.lib")).
 bool SetFocusToAccessibleWindow(HWND hwnd) {
   bool ret = false;
-  ScopedComPtr<IAccessible> acc;
+  base::win::ScopedComPtr<IAccessible> acc;
   AccessibleObjectFromWindow(hwnd, OBJID_WINDOW, IID_IAccessible,
       reinterpret_cast<void**>(acc.Receive()));
   if (acc) {
@@ -96,6 +102,22 @@ bool SetFocusToAccessibleWindow(HWND hwnd) {
   }
   return ret;
 }
+
+// Same as BrowserProcessImpl, but uses custom profile manager.
+class FakeBrowserProcessImpl : public BrowserProcessImpl {
+ public:
+  explicit FakeBrowserProcessImpl(const CommandLine& command_line)
+      : BrowserProcessImpl(command_line) {}
+
+  virtual ProfileManager* profile_manager() {
+    if (!profile_manager_.get())
+      profile_manager_.reset(new ProfileManagerWithoutInit);
+    return profile_manager_.get();
+  }
+
+ private:
+  scoped_ptr<ProfileManager> profile_manager_;
+};
 
 }  // namespace
 
@@ -187,14 +209,10 @@ void FakeExternalTab::Initialize() {
   DCHECK(g_browser_process == NULL);
   ui::SystemMonitor system_monitor;
 
-  // The gears plugin causes the PluginRequestInterceptor to kick in and it
-  // will cause problems when it tries to intercept URL requests.
-  PathService::Override(chrome::FILE_GEARS_PLUGIN, FilePath());
-
   icu_util::Initialize();
 
-  chrome::RegisterPathProvider();
   app::RegisterPathProvider();
+  content::RegisterPathProvider();
   ui::RegisterPathProvider();
 
   // Load Chrome.dll as our resource dll.
@@ -212,37 +230,22 @@ void FakeExternalTab::Initialize() {
   cmd->AppendSwitch(switches::kDisableWebResources);
   cmd->AppendSwitch(switches::kSingleProcess);
 
-  browser_process_.reset(new BrowserProcessImpl(*cmd));
+  browser_process_.reset(new FakeBrowserProcessImpl(*cmd));
   // BrowserProcessImpl's constructor should set g_browser_process.
   DCHECK(g_browser_process);
-  // Set the app locale and create the child threads.
   g_browser_process->SetApplicationLocale("en-US");
+
+  RenderProcessHost::set_run_renderer_in_process(true);
+  browser::RegisterLocalState(browser_process_->local_state());
+
+  FilePath profile_path(ProfileManager::GetDefaultProfileDir(user_data()));
+
+  Profile* profile =
+      g_browser_process->profile_manager()->GetProfile(profile_path);
+  // Create the child threads.
   g_browser_process->db_thread();
   g_browser_process->file_thread();
   g_browser_process->io_thread();
-
-  RenderProcessHost::set_run_renderer_in_process(true);
-
-  // Must register prefs before calling into the profile code.
-  PrefService* local_state = browser_process_->local_state();
-  local_state->RegisterStringPref(prefs::kApplicationLocale, "");
-  local_state->RegisterBooleanPref(prefs::kMetricsReportingEnabled, false);
-  browser::RegisterLocalState(local_state);
-
-  FilePath profile_path(ProfileManager::GetDefaultProfileDir(user_data()));
-  Profile* profile = g_browser_process->profile_manager()->GetProfile(
-      profile_path, false);
-  PrefService* prefs = profile->GetPrefs();
-  DCHECK(prefs != NULL);
-  WebCacheManager::RegisterPrefs(prefs);
-
-  // Override some settings to avoid hitting some preferences that have not
-  // been registered.
-  prefs->SetBoolean(prefs::kPasswordManagerEnabled, false);
-  prefs->SetBoolean(prefs::kAlternateErrorPagesEnabled, false);
-  prefs->SetBoolean(prefs::kSafeBrowsingEnabled, false);
-
-  profile->InitExtensions();
 }
 
 void FakeExternalTab::Shutdown() {
@@ -255,7 +258,8 @@ void FakeExternalTab::Shutdown() {
 
 CFUrlRequestUnittestRunner::CFUrlRequestUnittestRunner(int argc, char** argv)
     : NetTestSuite(argc, argv),
-      chrome_frame_html_("/chrome_frame", kChromeFrameHtml) {
+      chrome_frame_html_("/chrome_frame", kChromeFrameHtml),
+      registrar_(chrome_frame_test::GetTestBedType()) {
   // Register the main thread by instantiating it, but don't call any methods.
   main_thread_.reset(new BrowserThread(BrowserThread::UI,
                                        MessageLoop::current()));
@@ -505,15 +509,23 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  // Initialize the content client which that code uses to talk to Chrome.
+  chrome::ChromeContentClient chrome_content_client;
+  content::SetContentClient(&chrome_content_client);
+
+  // Override the default ContentBrowserClient to let Chrome participate in
+  // content logic.  Must be done before any tabs are created.
+  chrome::ChromeContentBrowserClient browser_client;
+  content::GetContentClient()->set_browser(&browser_client);
+
+  chrome::ChromeContentRendererClient renderer_client;
+  content::GetContentClient()->set_renderer(&renderer_client);
+
   // TODO(tommi): Stuff be broke. Needs a fixin'.
   // This is awkward: the TestSuite derived CFUrlRequestUnittestRunner contains
   // the instance of the AtExitManager that RegisterPathProvider() and others
   // below require. So we have to instantiate this first.
   CFUrlRequestUnittestRunner test_suite(argc, argv);
-
-  // Register paths needed by the ScopedChromeFrameRegistrar.
-  chrome::RegisterPathProvider();
-  ScopedChromeFrameRegistrar registrar(chrome_frame_test::GetTestBedType());
 
   WindowWatchdog watchdog;
   // See url_request_unittest.cc for these credentials.
@@ -521,7 +533,6 @@ int main(int argc, char** argv) {
   watchdog.AddObserver(&credentials, "Windows Security", "");
   testing::InitGoogleTest(&argc, argv);
   FilterDisabledTests();
-  PluginService::EnableChromePlugins(false);
   test_suite.RunMainUIThread();
   return 0;
 }

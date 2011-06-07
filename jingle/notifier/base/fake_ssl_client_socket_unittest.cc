@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "net/base/capturing_net_log.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_log.h"
@@ -56,6 +56,7 @@ class MockClientSocket : public net::ClientSocket {
   MOCK_CONST_METHOD0(IsConnected, bool());
   MOCK_CONST_METHOD0(IsConnectedAndIdle, bool());
   MOCK_CONST_METHOD1(GetPeerAddress, int(net::AddressList*));
+  MOCK_CONST_METHOD1(GetLocalAddress, int(net::IPEndPoint*));
   MOCK_CONST_METHOD0(NetLog, const net::BoundNetLog&());
   MOCK_METHOD0(SetSubresourceSpeculation, void());
   MOCK_METHOD0(SetOmniboxSpeculation, void());
@@ -87,7 +88,7 @@ class FakeSSLClientSocketTest : public testing::Test {
   virtual ~FakeSSLClientSocketTest() {}
 
   net::ClientSocket* MakeClientSocket() {
-    return mock_client_socket_factory_.CreateTCPClientSocket(
+    return mock_client_socket_factory_.CreateTransportClientSocket(
         net::AddressList(), &capturing_net_log_, net::NetLog::Source());
   }
 
@@ -96,8 +97,8 @@ class FakeSSLClientSocketTest : public testing::Test {
                std::vector<net::MockWrite>* writes) {
     static_socket_data_provider_.reset(
         new net::StaticSocketDataProvider(
-            &*reads->begin(), reads->size(),
-            &*writes->begin(), writes->size()));
+            reads->empty() ? NULL : &*reads->begin(), reads->size(),
+            writes->empty() ? NULL : &*writes->begin(), writes->size()));
     static_socket_data_provider_->set_connect_data(mock_connect);
     mock_client_socket_factory_.AddSocketDataProvider(
         static_socket_data_provider_.get());

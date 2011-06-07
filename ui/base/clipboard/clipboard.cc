@@ -5,7 +5,7 @@
 #include "ui/base/clipboard/clipboard.h"
 
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/size.h"
 
 namespace ui {
@@ -73,6 +73,10 @@ bool ValidateAndMapSharedBitmap(const Clipboard::ObjectMapParams& params,
 }
 
 }  // namespace
+
+const char Clipboard::kMimeTypeText[] = "text/plain";
+const char Clipboard::kMimeTypeHTML[] = "text/html";
+const char Clipboard::kMimeTypePNG[] = "image/png";
 
 void Clipboard::DispatchObject(ObjectType type, const ObjectMapParams& params) {
   // All types apart from CBF_WEBKIT need at least 1 non-empty param.

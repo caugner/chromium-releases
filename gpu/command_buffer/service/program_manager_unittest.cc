@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "gpu/command_buffer/common/gl_mock.h"
@@ -84,6 +84,27 @@ TEST_F(ProgramManagerTest, Destroy) {
   // Check the resources were released.
   info1 = manager_.GetProgramInfo(kClient1Id);
   ASSERT_TRUE(info1 == NULL);
+}
+
+TEST_F(ProgramManagerTest, DeleteBug) {
+  ShaderManager shader_manager;
+  const GLuint kClient1Id = 1;
+  const GLuint kClient2Id = 2;
+  const GLuint kService1Id = 11;
+  const GLuint kService2Id = 12;
+  // Check we can create program.
+  manager_.CreateProgramInfo(kClient1Id, kService1Id);
+  manager_.CreateProgramInfo(kClient2Id, kService2Id);
+  // Check program got created.
+  ProgramManager::ProgramInfo::Ref info1(manager_.GetProgramInfo(kClient1Id));
+  ProgramManager::ProgramInfo::Ref info2(manager_.GetProgramInfo(kClient2Id));
+  ASSERT_TRUE(info1.get() != NULL);
+  ASSERT_TRUE(info2.get() != NULL);
+  manager_.UseProgram(info1);
+  manager_.MarkAsDeleted(&shader_manager, info1);
+  manager_.MarkAsDeleted(&shader_manager, info2);
+  EXPECT_TRUE(manager_.IsOwned(info1));
+  EXPECT_FALSE(manager_.IsOwned(info2));
 }
 
 TEST_F(ProgramManagerTest, ProgramInfo) {
@@ -457,6 +478,8 @@ TEST_F(ProgramManagerWithShaderTest, AttachDetachShader) {
   EXPECT_FALSE(program_info->CanLink());
   fshader->SetStatus(true, "", NULL);
   EXPECT_TRUE(program_info->CanLink());
+  EXPECT_TRUE(program_info->DetachShader(&shader_manager, fshader));
+  EXPECT_FALSE(program_info->DetachShader(&shader_manager, fshader));
   shader_manager.Destroy(false);
 }
 
@@ -488,18 +511,27 @@ TEST_F(ProgramManagerWithShaderTest, GetUniformLocation) {
             program_info->GetUniformLocation("uniform3[2]"));
 }
 
-TEST_F(ProgramManagerWithShaderTest, GetUniformTypeByLocation) {
+TEST_F(ProgramManagerWithShaderTest, GetUniformInfoByLocation) {
   const GLint kInvalidLocation = 1234;
-  GLenum type = 0u;
+  const ProgramManager::ProgramInfo::UniformInfo* info;
   const ProgramManager::ProgramInfo* program_info =
       manager_.GetProgramInfo(kClientProgramId);
+  GLint array_index = -1;
   ASSERT_TRUE(program_info != NULL);
-  EXPECT_TRUE(program_info->GetUniformTypeByLocation(kUniform2Location, &type));
-  EXPECT_EQ(kUniform2Type, type);
-  type = 0u;
-  EXPECT_FALSE(program_info->GetUniformTypeByLocation(
-      kInvalidLocation, &type));
-  EXPECT_EQ(0u, type);
+  info = program_info->GetUniformInfoByLocation(
+      kUniform2Location, &array_index);
+  EXPECT_EQ(0, array_index);
+  ASSERT_TRUE(info != NULL);
+  EXPECT_EQ(kUniform2Type, info->type);
+  array_index = -1;
+  info = program_info->GetUniformInfoByLocation(
+      kInvalidLocation, &array_index);
+  EXPECT_TRUE(info == NULL);
+  EXPECT_EQ(-1, array_index);
+  GLint loc = program_info->GetUniformLocation("uniform2[2]");
+  info = program_info->GetUniformInfoByLocation(loc, &array_index);
+  ASSERT_TRUE(info != NULL);
+  EXPECT_EQ(2, array_index);
 }
 
 // Some GL drivers incorrectly return gl_DepthRange and possibly other uniforms

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <deque>
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "ipc/ipc_channel_handle.h"
@@ -28,6 +28,34 @@ class MessageReplyDeserializer;
 
 // This is similar to ChannelProxy, with the added feature of supporting sending
 // synchronous messages.
+//
+// Overview of how the sync channel works
+// --------------------------------------
+// When the sending thread sends a synchronous message, we create a bunch
+// of tracking info (created in SendWithTimeout, stored in the PendingSyncMsg
+// structure) associated with the message that we identify by the unique
+// "MessageId" on the SyncMessage. Among the things we save is the
+// "Deserializer" which is provided by the sync message. This object is in
+// charge of reading the parameters from the reply message and putting them in
+// the output variables provided by its caller.
+//
+// The info gets stashed in a queue since we could have a nested stack of sync
+// messages (each side could send sync messages in response to sync messages,
+// so it works like calling a function). The message is sent to the I/O thread
+// for dispatch and the original thread blocks waiting for the reply.
+//
+// SyncContext maintains the queue in a threadsafe way and listens for replies
+// on the I/O thread. When a reply comes in that matches one of the messages
+// it's looking for (using the unique message ID), it will execute the
+// deserializer stashed from before, and unblock the original thread.
+//
+//
+// Significant complexity results from the fact that messages are still coming
+// in while the original thread is blocked. Normal async messages are queued
+// and dispatched after the blocking call is complete. Sync messages must
+// be dispatched in a reentrant manner to avoid deadlock.
+//
+//
 // Note that care must be taken that the lifetime of the ipc_thread argument
 // is more than this object.  If the message loop goes away while this object
 // is running and it's used to send a message, then it will use the invalid
@@ -50,6 +78,17 @@ class SyncChannel : public ChannelProxy,
   void set_sync_messages_with_no_timeout_allowed(bool value) {
     sync_messages_with_no_timeout_allowed_ = value;
   }
+
+  // Sets this channel to only dispatch its incoming unblocking messages when it
+  // is itself blocked on sending a sync message, not when other channels are.
+  //
+  // Normally, any unblocking message coming from any channel can be dispatched
+  // when any (possibly other) channel is blocked on sending a message. This is
+  // needed in some cases to unblock certain loops (e.g. necessary when some
+  // processes share a window hierarchy), but may cause re-entrancy issues in
+  // some cases where such loops are not possible. This flags allows the tagging
+  // of some particular channels to not re-enter in such cases.
+  void SetRestrictDispatchToSameChannel(bool value);
 
  protected:
   class ReceivedSyncMsgQueue;
@@ -98,6 +137,9 @@ class SyncChannel : public ChannelProxy,
       return received_sync_msgs_;
     }
 
+    void set_restrict_dispatch(bool value) { restrict_dispatch_ = value; }
+    bool restrict_dispatch() const { return restrict_dispatch_; }
+
    private:
     ~SyncContext();
     // ChannelProxy methods that we override.
@@ -125,6 +167,7 @@ class SyncChannel : public ChannelProxy,
 
     base::WaitableEvent* shutdown_event_;
     base::WaitableEventWatcher shutdown_watcher_;
+    bool restrict_dispatch_;
   };
 
  private:

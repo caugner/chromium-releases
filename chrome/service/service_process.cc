@@ -10,8 +10,8 @@
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/singleton.h"
 #include "base/path_service.h"
-#include "base/singleton.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -36,6 +36,7 @@
 
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_util.h"
+#include <gtk/gtk.h>
 #endif
 
 #if defined(ENABLE_REMOTING)
@@ -125,11 +126,25 @@ ServiceProcess::ServiceProcess()
 }
 
 bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
-                                const CommandLine& command_line) {
+                                const CommandLine& command_line,
+                                ServiceProcessState* state) {
 #if defined(TOOLKIT_USES_GTK)
-  gfx::GtkInitFromCommandLine(command_line);
+  // TODO(jamiewalch): Calling GtkInitFromCommandLine here causes the process
+  // to abort if run headless. The correct fix for this is to refactor the
+  // service process to be more modular, a task that is currently underway.
+  // However, since this problem is blocking cloud print, the following quick
+  // hack will have to do. Note that the situation with this hack in place is
+  // no worse than it was when we weren't initializing GTK at all.
+  int argc = 1;
+  scoped_array<char*> argv(new char*[2]);
+  argv[0] = strdup(command_line.argv()[0].c_str());
+  argv[1] = NULL;
+  char **argv_pointer = argv.get();
+  gtk_init_check(&argc, &argv_pointer);
+  free(argv[0]);
 #endif
   main_message_loop_ = message_loop;
+  service_process_state_.reset(state);
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   base::Thread::Options options;
   options.message_loop_type = MessageLoop::TYPE_IO;
@@ -175,23 +190,14 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
 
 #if defined(ENABLE_REMOTING)
   // Load media codecs, required by the Chromoting host
-  bool initialized_media_library = false;
-#if defined(OS_MACOSX)
-  FilePath bundle_path = base::mac::MainAppBundlePath();
-
-  initialized_media_library =
-     media::InitializeMediaLibrary(bundle_path.Append("Libraries"));
-#else
   FilePath module_path;
-  initialized_media_library =
-      PathService::Get(base::DIR_MODULE, &module_path) &&
-      media::InitializeMediaLibrary(module_path);
-#endif
-
-  // Initialize chromoting host manager.
-  remoting_host_manager_ = new remoting::ChromotingHostManager(this);
-  remoting_host_manager_->Initialize(message_loop,
-                                     file_thread_->message_loop_proxy());
+  if (PathService::Get(chrome::DIR_MEDIA_LIBS, &module_path) &&
+      media::InitializeMediaLibrary(module_path)) {
+    // Initialize chromoting host manager.
+    remoting_host_manager_ = new remoting::ChromotingHostManager(this);
+    remoting_host_manager_->Initialize(message_loop,
+                                       file_thread_->message_loop_proxy());
+  }
 #endif // ENABLE_REMOTING
 
   // Enable Cloud Print if needed. First check the command-line.
@@ -208,8 +214,8 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   }
 
   VLOG(1) << "Starting Service Process IPC Server";
-  ServiceProcessState* state = ServiceProcessState::GetInstance();
-  ipc_server_.reset(new ServiceIPCServer(state->GetServiceProcessChannel()));
+  ipc_server_.reset(new ServiceIPCServer(
+      service_process_state_->GetServiceProcessChannel()));
   ipc_server_->Init();
 
   // After the IPC server has started we signal that the service process is
@@ -238,7 +244,7 @@ bool ServiceProcess::Teardown() {
   // might use it have been shut down.
   network_change_notifier_.reset();
 
-  ServiceProcessState::GetInstance()->SignalStopped();
+  service_process_state_->SignalStopped();
   return true;
 }
 
@@ -320,7 +326,10 @@ void ServiceProcess::OnServiceEnabled() {
   if ((1 == enabled_services_) &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kNoServiceAutorun)) {
-    ServiceProcessState::GetInstance()->AddToAutoRun();
+    if (!service_process_state_->AddToAutoRun()) {
+      // TODO(scottbyer/sanjeevr/dmaclach): Handle error condition
+      LOG(ERROR) << "Unable to AddToAutoRun";
+    }
   }
 }
 
@@ -328,7 +337,10 @@ void ServiceProcess::OnServiceDisabled() {
   DCHECK_NE(enabled_services_, 0);
   enabled_services_--;
   if (0 == enabled_services_) {
-    ServiceProcessState::GetInstance()->RemoveFromAutoRun();
+    if (!service_process_state_->RemoveFromAutoRun()) {
+      // TODO(scottbyer/sanjeevr/dmaclach): Handle error condition
+      LOG(ERROR) << "Unable to RemoveFromAutoRun";
+    }
     // We will wait for some time to respond to IPCs before shutting down.
     ScheduleShutdownCheck();
   }
@@ -359,7 +371,3 @@ ServiceProcess::~ServiceProcess() {
   Teardown();
   g_service_process = NULL;
 }
-
-// Disable refcounting for runnable method because it is really not needed
-// when we post tasks on the main message loop.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ServiceProcess);

@@ -9,16 +9,18 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/task.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "chrome/common/automation_constants.h"
+#include "chrome/test/webdriver/error_codes.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
 class AutomationProxy;
 class DictionaryValue;
 class FilePath;
 class GURL;
+class ListValue;
 class ProxyLauncher;
 struct WebKeyEvent;
 
@@ -27,6 +29,8 @@ class Point;
 }
 
 namespace webdriver {
+
+class FramePath;
 
 // Creates and controls the Chrome instance.
 // This class should be created and accessed on a single thread.
@@ -39,7 +43,7 @@ class Automation {
 
   // Creates a browser, using the exe found in |browser_dir|. If |browser_dir|
   // is empty, it will search in all the default locations.
-  void Init(const FilePath& browser_dir, bool* success);
+  void Init(const FilePath& browser_dir, ErrorCode* code);
 
   // Terminates this session and disconnects its automation proxy. After
   // invoking this method, the Automation can safely be deleted.
@@ -48,30 +52,49 @@ class Automation {
   // Executes the given |script| in the specified frame of the current
   // tab. |result| will be set to the JSON result. Returns true on success.
   void ExecuteScript(int tab_id,
-                     const std::string& frame_xpath,
+                     const FramePath& frame_path,
                      const std::string& script,
                      std::string* result,
                      bool* success);
 
-  // Sends a key event to the current browser. Waits until the key has
+  // Sends a webkit key event to the current browser. Waits until the key has
   // been processed by the web page.
-  void SendWebKeyEvent(int tab_id, const WebKeyEvent& key_event, bool* success);
+  void SendWebKeyEvent(int tab_id,
+                       const WebKeyEvent& key_event,
+                       bool* success);
+
+  // Sends an OS level key event to the current browser. Waits until the key
+  // has been processed by the browser.
+  void SendNativeKeyEvent(int tab_id,
+                          ui::KeyboardCode key_code,
+                          int modifiers,
+                          bool* success);
+
+  // Captures a snapshot of the tab to the specified path.  The  PNG will
+  // contain the entire page, including what is not in the current view
+  // on the  screen.
+  void CaptureEntirePageAsPNG(int tab_id, const FilePath& path, bool* success);
 
   void NavigateToURL(int tab_id, const std::string& url, bool* success);
   void GoForward(int tab_id, bool* success);
   void GoBack(int tab_id, bool* success);
   void Reload(int tab_id, bool* success);
-  void GetURL(int tab_id, std::string* url, bool* success);
-  void GetGURL(int tab_id, GURL* gurl, bool* success);
-  void GetTabTitle(int tab_id, std::string* tab_title, bool* success);
-  void GetCookies(
+
+  void GetCookies(const std::string& url, ListValue** cookies, bool* success);
+  void GetCookiesDeprecated(
       int tab_id, const GURL& gurl, std::string* cookies, bool* success);
-  void DeleteCookie(int tab_id,
-                    const GURL& gurl,
+  void DeleteCookie(const std::string& url,
                     const std::string& cookie_name,
                     bool* success);
+  void DeleteCookieDeprecated(int tab_id,
+                              const GURL& gurl,
+                              const std::string& cookie_name,
+                              bool* success);
   void SetCookie(
+      const std::string& url, DictionaryValue* cookie_dict, bool* success);
+  void SetCookieDeprecated(
       int tab_id, const GURL& gurl, const std::string& cookie, bool* success);
+
   void MouseMove(int tab_id, const gfx::Point& p, bool* success);
   void MouseClick(int tab_id,
                   const gfx::Point& p,
@@ -92,7 +115,11 @@ class Automation {
   void CloseTab(int tab_id, bool* success);
 
   // Gets the version of the runing browser.
-  void GetVersion(std::string* version);
+  void GetBrowserVersion(std::string* version);
+
+  // Gets the ChromeDriver automation version supported by the automation
+  // server.
+  void GetChromeDriverAutomationVersion(int* version, bool* success);
 
   // Waits for all tabs to stop loading.
   void WaitForAllTabsToStopLoading(bool* success);

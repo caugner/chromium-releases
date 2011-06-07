@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ class URLRequestInfo : public Resource {
 
   // PPB_URLRequestInfo methods:
   bool SetProperty(PP_URLRequestProperty property, const Var& value);
-  bool AppendDataToBody(const char* data, uint32_t len);
+  bool AppendDataToBody(const void* data, uint32_t len);
   bool AppendFileToBody(const FileRef_Dev& file_ref,
                         PP_Time expected_last_modified_time = 0);
   bool AppendFileRangeToBody(const FileRef_Dev& file_ref,
@@ -48,8 +48,35 @@ class URLRequestInfo : public Resource {
   bool SetFollowRedirects(bool enable) {
     return SetProperty(PP_URLREQUESTPROPERTY_FOLLOWREDIRECTS, enable);
   }
+  bool SetRecordDownloadProgress(bool enable) {
+    return SetProperty(PP_URLREQUESTPROPERTY_RECORDDOWNLOADPROGRESS, enable);
+  }
   bool SetRecordUploadProgress(bool enable) {
     return SetProperty(PP_URLREQUESTPROPERTY_RECORDUPLOADPROGRESS, enable);
+  }
+  // To use the default referrer, set url to an Undefined Var.
+  bool SetCustomReferrerURL(const Var& url) {
+    return SetProperty(PP_URLREQUESTPROPERTY_CUSTOMREFERRERURL, url);
+  }
+  bool SetAllowCrossOriginRequests(bool enable) {
+    return SetProperty(PP_URLREQUESTPROPERTY_ALLOWCROSSORIGINREQUESTS, enable);
+  }
+  bool SetAllowCredentials(bool enable) {
+    return SetProperty(PP_URLREQUESTPROPERTY_ALLOWCREDENTIALS, enable);
+  }
+  // To use the default content transfer encoding, set content_transfer_encoding
+  // to an Undefined Var.
+  bool SetCustomContentTransferEncoding(const Var& content_transfer_encoding) {
+    return SetProperty(PP_URLREQUESTPROPERTY_CUSTOMCONTENTTRANSFERENCODING,
+                       content_transfer_encoding);
+  }
+  bool SetPrefetchBufferUpperThreshold(int32_t size) {
+    return SetProperty(PP_URLREQUESTPROPERTY_PREFETCHBUFFERUPPERTHRESHOLD,
+                       size);
+  }
+  bool SetPrefetchBufferLowerThreshold(int32_t size) {
+    return SetProperty(PP_URLREQUESTPROPERTY_PREFETCHBUFFERLOWERTHRESHOLD,
+                       size);
   }
 };
 

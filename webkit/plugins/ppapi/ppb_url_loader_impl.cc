@@ -17,6 +17,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoader.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
@@ -32,6 +33,7 @@ using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebURLError;
 using WebKit::WebURLLoader;
+using WebKit::WebURLLoaderOptions;
 using WebKit::WebURLRequest;
 using WebKit::WebURLResponse;
 
@@ -122,7 +124,7 @@ PP_Resource GetResponseInfo(PP_Resource loader_id) {
 }
 
 int32_t ReadResponseBody(PP_Resource loader_id,
-                         char* buffer,
+                         void* buffer,
                          int32_t bytes_to_read,
                          PP_CompletionCallback callback) {
   scoped_refptr<PPB_URLLoader_Impl> loader(
@@ -188,7 +190,7 @@ const PPB_URLLoaderTrusted ppb_urlloadertrusted = {
   &SetStatusCallback
 };
 
-WebKit::WebFrame* GetFrame(PluginInstance* instance) {
+WebFrame* GetFrame(PluginInstance* instance) {
   return instance->container()->element().document().frame();
 }
 
@@ -205,7 +207,9 @@ PPB_URLLoader_Impl::PPB_URLLoader_Impl(PluginInstance* instance,
       total_bytes_to_be_received_(-1),
       user_buffer_(NULL),
       user_buffer_size_(0),
-      done_status_(PP_ERROR_WOULDBLOCK),
+      done_status_(PP_OK_COMPLETIONPENDING),
+      is_streaming_to_file_(false),
+      is_asynchronous_load_suspended_(false),
       has_universal_access_(false),
       status_callback_(NULL) {
 }
@@ -242,6 +246,9 @@ int32_t PPB_URLLoader_Impl::Open(PPB_URLRequestInfo_Impl* request,
   if (rv != PP_OK)
     return rv;
 
+  if (request->RequiresUniversalAccess() && !has_universal_access_)
+    return PP_ERROR_BADARGUMENT;
+
   if (loader_.get())
     return PP_ERROR_INPROGRESS;
 
@@ -250,21 +257,38 @@ int32_t PPB_URLLoader_Impl::Open(PPB_URLRequestInfo_Impl* request,
     return PP_ERROR_FAILED;
   WebURLRequest web_request(request->ToWebURLRequest(frame));
 
-  rv = CanRequest(frame, web_request.url());
-  if (rv != PP_OK)
-    return rv;
+  WebURLLoaderOptions options;
+  if (has_universal_access_) {
+    // Universal access allows cross-origin requests and sends credentials.
+    options.crossOriginRequestPolicy =
+        WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+    options.allowCredentials = true;
+  } else if (request->allow_cross_origin_requests()) {
+    // Otherwise, allow cross-origin requests with access control.
+    options.crossOriginRequestPolicy =
+        WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
+    options.allowCredentials = request->allow_credentials();
+  }
 
-  loader_.reset(frame->createAssociatedURLLoader());
+  is_asynchronous_load_suspended_ = false;
+  loader_.reset(frame->createAssociatedURLLoader(options));
   if (!loader_.get())
     return PP_ERROR_FAILED;
 
   loader_->loadAsynchronously(web_request, this);
+  // Check for immediate failure; The AssociatedURLLoader will call our
+  // didFail method synchronously for certain kinds of access violations
+  // so we must return an error to the caller.
+  // TODO(bbudge) Modify the underlying AssociatedURLLoader to only call
+  // back asynchronously.
+  if (done_status_ == PP_ERROR_FAILED)
+    return PP_ERROR_NOACCESS;
 
   request_info_ = scoped_refptr<PPB_URLRequestInfo_Impl>(request);
 
   // Notify completion when we receive a redirect or response headers.
   RegisterCallback(callback);
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 int32_t PPB_URLLoader_Impl::FollowRedirect(PP_CompletionCallback callback) {
@@ -274,13 +298,9 @@ int32_t PPB_URLLoader_Impl::FollowRedirect(PP_CompletionCallback callback) {
 
   WebURL redirect_url = GURL(response_info_->redirect_url());
 
-  rv = CanRequest(GetFrame(instance()), redirect_url);
-  if (rv != PP_OK)
-    return rv;
-
   loader_->setDefersLoading(false);  // Allow the redirect to continue.
   RegisterCallback(callback);
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 bool PPB_URLLoader_Impl::GetUploadProgress(int64_t* bytes_sent,
@@ -308,7 +328,7 @@ bool PPB_URLLoader_Impl::GetDownloadProgress(
   return true;
 }
 
-int32_t PPB_URLLoader_Impl::ReadResponseBody(char* buffer,
+int32_t PPB_URLLoader_Impl::ReadResponseBody(void* buffer,
                                              int32_t bytes_to_read,
                                              PP_CompletionCallback callback) {
   int32_t rv = ValidateCallback(callback);
@@ -319,21 +339,21 @@ int32_t PPB_URLLoader_Impl::ReadResponseBody(char* buffer,
   if (bytes_to_read <= 0 || !buffer)
     return PP_ERROR_BADARGUMENT;
 
-  user_buffer_ = buffer;
+  user_buffer_ = static_cast<char*>(buffer);
   user_buffer_size_ = bytes_to_read;
 
   if (!buffer_.empty())
     return FillUserBuffer();
 
   // We may have already reached EOF.
-  if (done_status_ != PP_ERROR_WOULDBLOCK) {
+  if (done_status_ != PP_OK_COMPLETIONPENDING) {
     user_buffer_ = NULL;
     user_buffer_size_ = 0;
     return done_status_;
   }
 
   RegisterCallback(callback);
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 int32_t PPB_URLLoader_Impl::FinishStreamingToFile(
@@ -345,12 +365,18 @@ int32_t PPB_URLLoader_Impl::FinishStreamingToFile(
     return PP_ERROR_FAILED;
 
   // We may have already reached EOF.
-  if (done_status_ != PP_ERROR_WOULDBLOCK)
+  if (done_status_ != PP_OK_COMPLETIONPENDING)
     return done_status_;
+
+  is_streaming_to_file_ = true;
+  if (is_asynchronous_load_suspended_) {
+    loader_->setDefersLoading(false);
+    is_asynchronous_load_suspended_ = false;
+  }
 
   // Wait for didFinishLoading / didFail.
   RegisterCallback(callback);
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 void PPB_URLLoader_Impl::Close() {
@@ -381,12 +407,6 @@ void PPB_URLLoader_Impl::willSendRequest(
     SaveResponse(redirect_response);
     loader_->setDefersLoading(true);
     RunCallback(PP_OK);
-  } else {
-    int32_t rv = CanRequest(GetFrame(instance()), new_request.url());
-    if (rv != PP_OK) {
-      loader_->setDefersLoading(true);
-      RunCallback(rv);
-    }
   }
 }
 
@@ -419,7 +439,8 @@ void PPB_URLLoader_Impl::didDownloadData(WebURLLoader* loader,
 
 void PPB_URLLoader_Impl::didReceiveData(WebURLLoader* loader,
                                         const char* data,
-                                        int data_length) {
+                                        int data_length,
+                                        int encoded_data_length) {
   bytes_received_ += data_length;
 
   buffer_.insert(buffer_.end(), data, data + data_length);
@@ -427,6 +448,22 @@ void PPB_URLLoader_Impl::didReceiveData(WebURLLoader* loader,
     RunCallback(FillUserBuffer());
   } else {
     DCHECK(!pending_callback_.get() || pending_callback_->completed());
+  }
+
+  // To avoid letting the network stack download an entire stream all at once,
+  // defer loading when we have enough buffer.
+  // Check the buffer size after potentially moving some to the user buffer.
+  DCHECK(!request_info_ ||
+         (request_info_->prefetch_buffer_lower_threshold() <
+          request_info_->prefetch_buffer_upper_threshold()));
+  if (!is_streaming_to_file_ &&
+      !is_asynchronous_load_suspended_ &&
+      request_info_ &&
+      (buffer_.size() >= static_cast<size_t>(
+          request_info_->prefetch_buffer_upper_threshold()))) {
+    DVLOG(1) << "Suspending async load - buffer size: " << buffer_.size();
+    loader->setDefersLoading(true);
+    is_asynchronous_load_suspended_ = true;
   }
 }
 
@@ -486,27 +523,27 @@ size_t PPB_URLLoader_Impl::FillUserBuffer() {
   std::copy(buffer_.begin(), buffer_.begin() + bytes_to_copy, user_buffer_);
   buffer_.erase(buffer_.begin(), buffer_.begin() + bytes_to_copy);
 
+  // If the buffer is getting too empty, resume asynchronous loading.
+  DCHECK(!is_asynchronous_load_suspended_ || request_info_);
+  if (is_asynchronous_load_suspended_ &&
+      buffer_.size() <= static_cast<size_t>(
+          request_info_->prefetch_buffer_lower_threshold())) {
+    DVLOG(1) << "Resuming async load - buffer size: " << buffer_.size();
+    loader_->setDefersLoading(false);
+    is_asynchronous_load_suspended_ = false;
+  }
+
   // Reset for next time.
   user_buffer_ = NULL;
   user_buffer_size_ = 0;
   return bytes_to_copy;
 }
 
-void PPB_URLLoader_Impl::SaveResponse(const WebKit::WebURLResponse& response) {
+void PPB_URLLoader_Impl::SaveResponse(const WebURLResponse& response) {
   scoped_refptr<PPB_URLResponseInfo_Impl> response_info(
       new PPB_URLResponseInfo_Impl(instance()));
   if (response_info->Initialize(response))
     response_info_ = response_info;
-}
-
-// Checks that the client can request the URL. Returns a PPAPI error code.
-int32_t PPB_URLLoader_Impl::CanRequest(const WebKit::WebFrame* frame,
-                              const WebKit::WebURL& url) {
-  if (!has_universal_access_ &&
-      !frame->securityOrigin().canRequest(url))
-    return PP_ERROR_NOACCESS;
-
-  return PP_OK;
 }
 
 void PPB_URLLoader_Impl::UpdateStatus() {

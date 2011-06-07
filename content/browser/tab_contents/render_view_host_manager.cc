@@ -6,14 +6,11 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_type.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
@@ -24,6 +21,10 @@
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/webui/web_ui.h"
 #include "content/browser/webui/web_ui_factory.h"
+#include "content/common/content_client.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_type.h"
+#include "content/common/view_messages.h"
 
 namespace base {
 class WaitableEvent;
@@ -61,10 +62,6 @@ void RenderViewHostManager::Init(Profile* profile,
   render_view_host_ = RenderViewHostFactory::Create(
       site_instance, render_view_delegate_, routing_id, delegate_->
       GetControllerForRenderManager().session_storage_namespace());
-  NotificationService::current()->Notify(
-      NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
-      Source<RenderViewHostManager>(this),
-      Details<RenderViewHost>(render_view_host_));
 }
 
 RenderWidgetHostView* RenderViewHostManager::GetRenderWidgetHostView() const {
@@ -301,13 +298,14 @@ bool RenderViewHostManager::ShouldSwapProcessesForNavigation(
   const GURL& current_url = (cur_entry) ? cur_entry->url() :
       render_view_host_->site_instance()->site();
   Profile* profile = delegate_->GetControllerForRenderManager().profile();
-  if (WebUIFactory::UseWebUIForURL(profile, current_url)) {
+  const content::WebUIFactory* web_ui_factory = content::WebUIFactory::Get();
+  if (web_ui_factory->UseWebUIForURL(profile, current_url)) {
     // Force swap if it's not an acceptable URL for Web UI.
-    if (!WebUIFactory::IsURLAcceptableForWebUI(profile, new_entry->url()))
+    if (!web_ui_factory->IsURLAcceptableForWebUI(profile, new_entry->url()))
       return true;
   } else {
     // Force swap if it's a Web UI URL.
-    if (WebUIFactory::UseWebUIForURL(profile, new_entry->url()))
+    if (web_ui_factory->UseWebUIForURL(profile, new_entry->url()))
       return true;
   }
 
@@ -384,8 +382,9 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
     // want to use the curr_instance if it has no site, since it will have a
     // RenderProcessHost of TYPE_NORMAL.  Create a new SiteInstance for this
     // URL instead (with the correct process type).
-    if (WebUIFactory::UseWebUIForURL(profile, dest_url))
+    if (content::WebUIFactory::Get()->UseWebUIForURL(profile, dest_url)) {
       return SiteInstance::CreateSiteInstanceForURL(profile, dest_url);
+    }
 
     // Normally the "site" on the SiteInstance is set lazily when the load
     // actually commits. This is to support better process sharing in case
@@ -463,10 +462,6 @@ bool RenderViewHostManager::CreatePendingRenderView(
   pending_render_view_host_ = RenderViewHostFactory::Create(
       instance, render_view_delegate_, MSG_ROUTING_NONE, delegate_->
       GetControllerForRenderManager().session_storage_namespace());
-  NotificationService::current()->Notify(
-      NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
-      Source<RenderViewHostManager>(this),
-      Details<RenderViewHost>(pending_render_view_host_));
 
   bool success = InitRenderView(pending_render_view_host_, entry);
   if (success) {
@@ -485,11 +480,10 @@ bool RenderViewHostManager::InitRenderView(RenderViewHost* render_view_host,
   if (pending_web_ui_.get())
     render_view_host->AllowBindings(pending_web_ui_->bindings());
 
-  // Tell the RenderView whether it will be used for an extension process.
+  // Give the embedder a chance to initialize the render view.
   Profile* profile = delegate_->GetControllerForRenderManager().profile();
-  bool is_extension_process = profile->GetExtensionService() &&
-      profile->GetExtensionService()->ExtensionBindingsAllowed(entry.url());
-  render_view_host->set_is_extension_process(is_extension_process);
+  content::GetContentClient()->browser()->PreCreateRenderView(
+      render_view_host, profile, entry.url());
 
   return delegate_->CreateRenderViewForRenderManager(render_view_host);
 }

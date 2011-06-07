@@ -7,13 +7,14 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/common/message_router.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
 class FileSystemDispatcher;
 class MessageLoop;
 class NotificationService;
+class QuotaDispatcher;
 class ResourceDispatcher;
 class SocketStreamDispatcher;
 
@@ -44,9 +45,7 @@ class ChildThread : public IPC::Channel::Listener,
   // Creates a ResourceLoaderBridge.
   // Tests can override this method if they want a custom loading behavior.
   virtual webkit_glue::ResourceLoaderBridge* CreateBridge(
-      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
-      int host_renderer_id,
-      int host_render_view_id);
+      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info);
 
   ResourceDispatcher* resource_dispatcher();
 
@@ -56,6 +55,10 @@ class ChildThread : public IPC::Channel::Listener,
 
   FileSystemDispatcher* file_system_dispatcher() const {
     return file_system_dispatcher_.get();
+  }
+
+  QuotaDispatcher* quota_dispatcher() const {
+    return quota_dispatcher_.get();
   }
 
   // Safe to call on any thread, as long as it's guaranteed that the thread's
@@ -123,6 +126,8 @@ class ChildThread : public IPC::Channel::Listener,
   scoped_ptr<NotificationService> notification_service_;
 
   scoped_ptr<FileSystemDispatcher> file_system_dispatcher_;
+
+  scoped_ptr<QuotaDispatcher> quota_dispatcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ChildThread);
 };

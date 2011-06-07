@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -23,14 +23,14 @@
     'chromium_dependencies': [
       'common',
       'browser',
-      'chrome_gpu',
-      'ppapi_plugin',
       'profile_import',
       'renderer',
       'syncapi',
       'utility',
-      'worker',
       'service',
+      '../content/content.gyp:content_gpu',
+      '../content/content.gyp:content_ppapi_plugin',
+      '../content/content.gyp:content_worker',
       '../printing/printing.gyp:printing',
       '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:inspector_resources',
     ],
@@ -42,36 +42,9 @@
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
-    'chrome_strings_grds': [
-      # Localizable resources.
-      'app/resources/locale_settings.grd',
-      'app/chromium_strings.grd',
-      'app/generated_resources.grd',
-      'app/google_chrome_strings.grd',
-    ],
-    'chrome_resources_grds': [
-      # Data resources.
-      'browser/autofill/autofill_resources.grd',
-      'browser/browser_resources.grd',
-      'common/common_resources.grd',
-      'renderer/renderer_resources.grd',
-    ],
-    'chrome_extra_resources_grds': [
-      # These resources end up in resources.pak because they are resources
-      # used by internal pages.  Putting them in a spearate pak file makes
-      # it easier for us to reference them internally.
-      'browser/resources/component_extension_resources.grd',
-      'browser/resources/net_internals_resources.grd',
-      'browser/resources/shared_resources.grd',
-      'browser/resources/sync_internals_resources.grd',
-    ],
-    'grit_info_cmd': ['python', '../tools/grit/grit_info.py',
-                      '<@(grit_defines)'],
-    'grit_cmd': ['python', '../tools/grit/grit.py'],
     'repack_locales_cmd': ['python', 'tools/build/repack_locales.py'],
     # TODO: remove this helper when we have loops in GYP
     'apply_locales_cmd': ['python', '<(DEPTH)/build/apply_locales.py'],
-    'directxsdk_exists': '<!(python <(DEPTH)/build/dir_exists.py ../third_party/directxsdk)',
     'conditions': [
       ['OS=="win"', {
         'nacl_defines': [
@@ -112,9 +85,13 @@
           ['branding=="Chrome"', {
             'mac_bundle_id': 'com.google.Chrome',
             'mac_creator': 'rimZ',
+            # The policy .grd file also needs the bundle id.
+            'grit_defines': ['-D', 'mac_bundle_id=com.google.Chrome'],
           }, {  # else: branding!="Chrome"
             'mac_bundle_id': 'org.chromium.Chromium',
             'mac_creator': 'Cr24',
+            # The policy .grd file also needs the bundle id.
+            'grit_defines': ['-D', 'mac_bundle_id=org.chromium.Chromium'],
           }],  # branding
         ],  # conditions
       }],  # OS=="mac"
@@ -161,68 +138,38 @@
       'target_name': 'chrome_resources',
       'type': 'none',
       'msvs_guid': 'B95AB527-F7DB-41E9-AD91-EB51EE0F56BE',
-      'variables': {
-        'chrome_resources_inputs': [
-          '<!@(<(grit_info_cmd) --inputs <(chrome_resources_grds))',
-        ],
-      },
-      'rules': [
+      'actions': [
+        # Data resources.
         {
-          'rule_name': 'grit',
-          'extension': 'grd',
+          'action_name': 'autofill_resources',
           'variables': {
-            'conditions': [
-              ['branding=="Chrome"', {
-                # TODO(mmoss) The .grd files look for _google_chrome, but for
-                # consistency they should look for GOOGLE_CHROME_BUILD like C++.
-                # Clean this up when Windows moves to gyp.
-                'chrome_build': '_google_chrome',
-                'branded_env': 'CHROMIUM_BUILD=google_chrome',
-              }, {  # else: branding!="Chrome"
-                'chrome_build': '_chromium',
-                'branded_env': 'CHROMIUM_BUILD=chromium',
-              }],
-            ],
+            'grit_grd_file': 'browser/autofill/autofill_resources.grd',
           },
-          'inputs': [
-            '<@(chrome_resources_inputs)',
-          ],
-          'outputs': [
-            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT).h',
-            '<(grit_out_dir)/<(RULE_INPUT_ROOT).pak',
-            # TODO(bradnelson): move to something like this instead
-            #'<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(chrome_resources_grds))',
-            # This currently cannot work because gyp only evaluates the
-            # outputs once (rather than per case where the rule applies).
-            # This means you end up with all the outputs from all the grd
-            # files, which angers scons and confuses vstudio.
-            # One alternative would be to turn this into several actions,
-            # but that would be rather verbose.
-          ],
-          'action': ['<@(grit_cmd)', '-i',
-            '<(RULE_INPUT_PATH)',
-            'build', '-o', '<(grit_out_dir)',
-            '-D', '<(chrome_build)',
-            '-E', '<(branded_env)',
-            '<@(grit_defines)',
-          ],
-          'message': 'Generating resources from <(RULE_INPUT_PATH)',
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'browser_resources',
+          'variables': {
+            'grit_grd_file': 'browser/browser_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'common_resources',
+          'variables': {
+            'grit_grd_file': 'common/common_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'renderer_resources',
+          'variables': {
+            'grit_grd_file': 'renderer/renderer_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
         },
       ],
-      'sources': [
-        '<@(chrome_resources_grds)',
-        '<@(chrome_resources_inputs)',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(grit_out_dir)',
-        ],
-      },
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': ['../build/win/system.gyp:cygwin'],
-        }],
-      ],
+      'includes': [ '../build/grit_target.gypi' ],
     },
     {
       # TODO(mark): It would be better if each static library that needed
@@ -231,6 +178,7 @@
       # generated headers.
       'target_name': 'chrome_strings',
       'msvs_guid': 'D9DDAF60-663F-49CC-90DC-3D08CC3D1B28',
+      'type': 'none',
       'conditions': [
         ['OS=="win"', {
           # HACK(nsylvain): We want to enforce a fake dependency on
@@ -240,67 +188,43 @@
           # the type and making sure we depend on installer_util_strings, it
           # will always get built before installer_util.
           'type': 'dummy_executable',
-          'dependencies': ['../build/win/system.gyp:cygwin',
-                           'installer_util_strings',],
-        }, {
-          'type': 'none',
+          'dependencies': ['installer_util_strings'],
         }],
       ],
-      'variables': {
-        'chrome_strings_inputs': [
-          '<!@(<(grit_info_cmd) --inputs <(chrome_strings_grds))',
-        ],
-      },
-      'rules': [
+      'actions': [
+        # Localizable resources.
         {
-          'rule_name': 'grit',
-          'extension': 'grd',
+          'action_name': 'locale_settings',
           'variables': {
-            'conditions': [
-              ['branding=="Chrome"', {
-                # TODO(mmoss) The .grd files look for _google_chrome, but for
-                # consistency they should look for GOOGLE_CHROME_BUILD like C++.
-                # Clean this up when Windows moves to gyp.
-                'chrome_build': '_google_chrome',
-              }, {  # else: branding!="Chrome"
-                'chrome_build': '_chromium',
-              }],
-            ],
+            'grit_grd_file': 'app/resources/locale_settings.grd',
           },
-          'inputs': [
-            '<@(chrome_strings_inputs)',
-          ],
-          'outputs': [
-            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT).h',
-            # TODO: remove this helper when we have loops in GYP
-            '>!@(<(apply_locales_cmd) \'<(grit_out_dir)/<(RULE_INPUT_ROOT)_ZZLOCALE.pak\' <(locales))',
-            # TODO(bradnelson): move to something like this
-            #'<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(chrome_strings_grds))',
-            # See comment in chrome_resources as to why.
-          ],
-          'action': ['<@(grit_cmd)', '-i',
-                    '<(RULE_INPUT_PATH)',
-                    'build', '-o', '<(grit_out_dir)',
-                    '-D', '<(chrome_build)',
-                    '<@(grit_defines)' ],
-          'message': 'Generating resources from <(RULE_INPUT_PATH)',
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'chromium_strings.grd',
+          'variables': {
+            'grit_grd_file': 'app/chromium_strings.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'generated_resources',
+          'variables': {
+            'grit_grd_file': 'app/generated_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'google_chrome_strings',
+          'variables': {
+            'grit_grd_file': 'app/google_chrome_strings.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
         },
       ],
-      'sources': [
-        '<@(chrome_strings_grds)',
-        '<@(chrome_strings_inputs)',
-      ],
-      'include_dirs': [
-        '<(grit_out_dir)',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(grit_out_dir)',
-        ],
-      },
+      'includes': [ '../build/grit_target.gypi' ],
     },
     {
-      # theme_resources also generates a .cc file, so it can't use the rules above.
       'target_name': 'theme_resources',
       'type': 'none',
       'msvs_guid' : 'A158FB0A-25E4-6523-6B5A-4BB294B73D31',
@@ -308,160 +232,92 @@
         {
           'action_name': 'theme_resources',
           'variables': {
-            'input_path': 'app/theme/theme_resources.grd',
-            'conditions': [
-              ['branding=="Chrome"', {
-                # TODO(mmoss) The .grd files look for _google_chrome, but for
-                # consistency they should look for GOOGLE_CHROME_BUILD like C++.
-                # Clean this up when Windows moves to gyp.
-                'chrome_build': '_google_chrome',
-              }, {  # else: branding!="Chrome"
-                'chrome_build': '_chromium',
-              }],
-            ],
+            'grit_grd_file': 'app/theme/theme_resources.grd',
           },
-          'inputs': [
-            '<!@(<(grit_info_cmd) --inputs <(input_path))',
-          ],
-          'outputs': [
-            '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(input_path))',
-          ],
-          'action': [
-            '<@(grit_cmd)',
-            '-i', '<(input_path)', 'build',
-            '-o', '<(grit_out_dir)',
-            '-D', '<(chrome_build)',
-            '<@(grit_defines)',
-          ],
-          'message': 'Generating resources from <(input_path)',
+          'includes': [ '../build/grit_action.gypi' ],
         },
       ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(grit_out_dir)',
-        ],
-      },
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': ['../build/win/system.gyp:cygwin'],
-        }],
-      ],
+      'includes': [ '../build/grit_target.gypi' ],
     },
     {
-      # locale_settings_<platform>.grd have slightly different outputs, so it
-      # can't use chrome_strings rules above.
       'target_name': 'platform_locale_settings',
       'type': 'none',
       'actions': [
         {
           'action_name': 'platform_locale_settings',
           'variables': {
-            'input_path': '<(platform_locale_settings_grd)',
-            'conditions': [
-              ['branding=="Chrome"', {
-                # TODO(mmoss) The .grd files look for _google_chrome, but for
-                # consistency they should look for GOOGLE_CHROME_BUILD like C++.
-                # Clean this up when Windows moves to gyp.
-                'chrome_build': '_google_chrome',
-              }, {  # else: branding!="Chrome"
-                'chrome_build': '_chromium',
-              }],
-            ],
+            'grit_grd_file': '<(platform_locale_settings_grd)',
           },
-          'inputs': [
-            '<!@(<(grit_info_cmd) --inputs <(input_path))',
-          ],
-          'outputs': [
-            '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(input_path))',
-          ],
-          'action': [
-            '<@(grit_cmd)',
-            '-i', '<(input_path)', 'build',
-            '-o', '<(grit_out_dir)',
-            '-D', '<(chrome_build)',
-            '<@(grit_defines)',
-          ],
-          'message': 'Generating resources from <(input_path)',
+          'includes': [ '../build/grit_action.gypi' ],
         },
       ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(grit_out_dir)',
-        ],
-      },
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': ['../build/win/system.gyp:cygwin'],
-        }],
-      ],
+      'includes': [ '../build/grit_target.gypi' ],
     },
     {
       'target_name': 'chrome_extra_resources',
       'type': 'none',
-      'variables': {
-        'chrome_extra_resources_inputs': [
-          '<!@(<(grit_info_cmd) --inputs <(chrome_extra_resources_grds))',
-        ],
-      },
-      'rules': [
+      'dependencies': [
+        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:generate_devtools_grd',
+      ],
+      # These resources end up in resources.pak because they are resources
+      # used by internal pages.  Putting them in a spearate pak file makes
+      # it easier for us to reference them internally.
+      'actions': [
         {
-          'rule_name': 'grit',
-          'extension': 'grd',
+          'action_name': 'component_extension_resources',
           'variables': {
-            'conditions': [
-              ['branding=="Chrome"', {
-                # TODO(mmoss) The .grd files look for _google_chrome, but for
-                # consistency they should look for GOOGLE_CHROME_BUILD like C++.
-                # Clean this up when Windows moves to gyp.
-                'chrome_build': '_google_chrome',
-                'branded_env': 'CHROMIUM_BUILD=google_chrome',
-              }, {  # else: branding!="Chrome"
-                'chrome_build': '_chromium',
-                'branded_env': 'CHROMIUM_BUILD=chromium',
-              }],
-            ],
+            'grit_grd_file': 'browser/resources/component_extension_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'net_internals_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/net_internals_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'shared_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/shared_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'sync_internals_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/sync_internals_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'devtools_resources',
+          # This can't use ../build/grit_action.gypi because the grd file
+          # is generated a build time, so the trick of using grit_info to get
+          # the real inputs/outputs at GYP time isn't possible.
+          'variables': {
+            'grit_cmd': ['python', '../tools/grit/grit.py'],
+            'grit_grd_file': '<(SHARED_INTERMEDIATE_DIR)/devtools/devtools_resources.grd',
           },
           'inputs': [
-            '<@(chrome_extra_resources_inputs)',
+            '<(grit_grd_file)',
           ],
           'outputs': [
-            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT).h',
-            '<(grit_out_dir)/<(RULE_INPUT_ROOT).pak',
-            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT)_map.cc',
-            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT)_map.h',
-            # TODO(bradnelson): move to something like this instead
-            #'<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(chrome_resources_grds))',
-            # This currently cannot work because gyp only evaluates the
-            # outputs once (rather than per case where the rule applies).
-            # This means you end up with all the outputs from all the grd
-            # files, which angers scons and confuses vstudio.
-            # One alternative would be to turn this into several actions,
-            # but that would be rather verbose.
+            '<(grit_out_dir)/grit/devtools_resources.h',
+            '<(grit_out_dir)/devtools_resources.pak',
+            '<(grit_out_dir)/grit/devtools_resources_map.cc',
+            '<(grit_out_dir)/grit/devtools_resources_map.h',
           ],
-          'action': ['<@(grit_cmd)', '-i',
-            '<(RULE_INPUT_PATH)',
-            'build', '-o', '<(grit_out_dir)',
-            '-D', '<(chrome_build)',
-            '-E', '<(branded_env)',
-            '<@(grit_defines)',
-          ],
-          'message': 'Generating resources from <(RULE_INPUT_PATH)',
+          'action': ['<@(grit_cmd)',
+                     '-i', '<(grit_grd_file)', 'build',
+                     '-o', '<(grit_out_dir)',
+                     '-D', 'SHARED_INTERMEDIATE_DIR=<(SHARED_INTERMEDIATE_DIR)',
+                     '<@(grit_defines)' ],
+          'message': 'Generating resources from <(grit_grd_file)',
         },
       ],
-      'sources': [
-        '<@(chrome_extra_resources_grds)',
-        '<@(chrome_extra_resources_inputs)',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(grit_out_dir)',
-        ],
-      },
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': ['../build/win/system.gyp:cygwin'],
-        }],
-      ],
+      'includes': [ '../build/grit_target.gypi' ],
     },
     {
       'target_name': 'default_extensions',
@@ -528,6 +384,8 @@
         'browser/debugger/devtools_remote_message.h',
         'browser/debugger/devtools_remote_service.cc',
         'browser/debugger/devtools_remote_service.h',
+        'browser/debugger/devtools_handler.cc',
+        'browser/debugger/devtools_handler.h',
         'browser/debugger/devtools_toggle_action.h',
         'browser/debugger/devtools_window.cc',
         'browser/debugger/devtools_window.h',
@@ -537,70 +395,6 @@
         'browser/debugger/inspectable_tab_proxy.h',
       ],
       'conditions': [
-        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
-          'dependencies': [
-            '../build/linux/system.gyp:gtk',
-          ],
-        }],
-      ],
-    },
-    {
-      'target_name': 'plugin',
-      'type': '<(library)',
-      'msvs_guid': '20A560A0-2CD0-4D9E-A58B-1F24B99C087A',
-      'dependencies': [
-        'common',
-        'chrome_resources',
-        'chrome_strings',
-        '../media/media.gyp:media',
-        '../skia/skia.gyp:skia',
-        '../third_party/icu/icu.gyp:icui18n',
-        '../third_party/icu/icu.gyp:icuuc',
-        '../third_party/npapi/npapi.gyp:npapi',
-        '../third_party/hunspell/hunspell.gyp:hunspell',
-        '../webkit/support/webkit_support.gyp:glue',
-      ],
-      'include_dirs': [
-        '<(INTERMEDIATE_DIR)',
-      ],
-      'sources': [
-        # All .cc, .h, .m, and .mm files under plugins except for tests and
-        # mocks.
-        'plugin/chrome_plugin_host.cc',
-        'plugin/chrome_plugin_host.h',
-        'plugin/npobject_base.h',
-        'plugin/npobject_proxy.cc',
-        'plugin/npobject_proxy.h',
-        'plugin/npobject_stub.cc',
-        'plugin/npobject_stub.h',
-        'plugin/npobject_util.cc',
-        'plugin/npobject_util.h',
-        'plugin/plugin_channel.cc',
-        'plugin/plugin_channel.h',
-        'plugin/plugin_channel_base.cc',
-        'plugin/plugin_channel_base.h',
-        'plugin/plugin_interpose_util_mac.mm',
-        'plugin/plugin_interpose_util_mac.h',
-        'plugin/plugin_main.cc',
-        'plugin/plugin_main_linux.cc',
-        'plugin/plugin_main_mac.mm',
-        'plugin/plugin_thread.cc',
-        'plugin/plugin_thread.h',
-        'plugin/webplugin_accelerated_surface_proxy_mac.cc',
-        'plugin/webplugin_accelerated_surface_proxy_mac.h',
-        'plugin/webplugin_delegate_stub.cc',
-        'plugin/webplugin_delegate_stub.h',
-        'plugin/webplugin_proxy.cc',
-        'plugin/webplugin_proxy.h',
-      ],
-      # These are layered in conditionals in the event other platforms
-      # end up using this module as well.
-      'conditions': [
-        ['OS=="win"', {
-          'include_dirs': [
-            '<(DEPTH)/third_party/wtl/include',
-          ],
-        }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
@@ -645,183 +439,18 @@
       ],
     },
     {
-      'target_name': 'chrome_gpu',
-      'type': '<(library)',
-      'msvs_guid': 'F10F1ECD-D84D-4C33-8468-9DDFE19F4D8A',
-      'dependencies': [
-        '../app/app.gyp:app_base',
-        '../base/base.gyp:base',
-        'common',
-        '../media/media.gyp:media',
-        '../skia/skia.gyp:skia',
-      ],
-      'sources': [
-        'gpu/gpu_channel.cc',
-        'gpu/gpu_channel.h',
-        'gpu/gpu_command_buffer_stub.cc',
-        'gpu/gpu_command_buffer_stub.h',
-        'gpu/gpu_config.h',
-        'gpu/gpu_dx_diagnostics_win.cc',
-        'gpu/gpu_info_collector_linux.cc',
-        'gpu/gpu_info_collector_mac.mm',
-        'gpu/gpu_info_collector_win.cc',
-        'gpu/gpu_info_collector.cc',
-        'gpu/gpu_info_collector.h',
-        'gpu/gpu_main.cc',
-        'gpu/gpu_process.cc',
-        'gpu/gpu_process.h',
-        'gpu/gpu_thread.cc',
-        'gpu/gpu_thread.h',
-        'gpu/gpu_video_decoder.cc',
-        'gpu/gpu_video_decoder.h',
-        'gpu/gpu_video_service.cc',
-        'gpu/gpu_video_service.h',
-        'gpu/gpu_watchdog_thread.cc',
-        'gpu/gpu_watchdog_thread.h',
-        'gpu/media/gpu_video_device.h',
-        'gpu/media/fake_gl_video_decode_engine.cc',
-        'gpu/media/fake_gl_video_decode_engine.h',
-        'gpu/media/fake_gl_video_device.cc',
-        'gpu/media/fake_gl_video_device.h',
-      ],
-      'include_dirs': [
-        '..',
-      ],
-      'conditions': [
-        ['OS=="win"', {
-          'include_dirs': [
-            '<(DEPTH)/third_party/angle/include',
-            '<(DEPTH)/third_party/angle/src',
-            '<(DEPTH)/third_party/wtl/include',
-            '$(DXSDK_DIR)/include',
-          ],
-          'dependencies': [
-            '../third_party/angle/src/build_angle.gyp:libEGL',
-            '../third_party/angle/src/build_angle.gyp:libGLESv2',
-          ],
-        }],
-        ['OS=="win" and directxsdk_exists=="True"', {
-          'actions': [
-            {
-              'action_name': 'extract_d3dx9',
-              'variables': {
-                'input': 'Aug2009_d3dx9_42_x86.cab',
-                'output': 'd3dx9_42.dll',
-              },
-              'inputs': [
-                '../third_party/directxsdk/files/Redist/<(input)',
-              ],
-              'outputs': [
-                '<(PRODUCT_DIR)/<(output)',
-              ],
-              'action': [
-                'python',
-                '../build/extract_from_cab.py',
-                '..\\third_party\\directxsdk\\files\\Redist\\<(input)',
-                '<(output)',
-                '<(PRODUCT_DIR)',
-              ],
-            },
-            {
-              'action_name': 'extract_d3dcompiler',
-              'variables': {
-                'input': 'Aug2009_D3DCompiler_42_x86.cab',
-                'output': 'D3DCompiler_42.dll',
-              },
-              'inputs': [
-                '../third_party/directxsdk/files/Redist/<(input)',
-              ],
-              'outputs': [
-                '<(PRODUCT_DIR)/<(output)',
-              ],
-              'action': [
-                'python',
-                '../build/extract_from_cab.py',
-                '..\\third_party\\directxsdk\\files\\Redist\\<(input)',
-                '<(output)',
-                '<(PRODUCT_DIR)',
-              ],
-            },
-          ],
-          'sources': [
-            'gpu/media/mft_angle_video_device.cc',
-            'gpu/media/mft_angle_video_device.h',
-          ],
-        }],
-        ['OS=="linux" and target_arch!="arm"', {
-          'sources': [
-            'gpu/x_util.cc',
-            'gpu/x_util.h',
-          ],
-        }],
-        ['enable_gpu==1', {
-          'dependencies': [
-            '../gpu/gpu.gyp:command_buffer_service',
-          ],
-        }],
-      ],
-    },
-    {
-      'target_name': 'ppapi_plugin',
-      'type': '<(library)',
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../ppapi/ppapi.gyp:ppapi_proxy',
-      ],
-      'sources': [
-        'ppapi_plugin/plugin_process_dispatcher.cc',
-        'ppapi_plugin/plugin_process_dispatcher.h',
-        'ppapi_plugin/ppapi_plugin_main.cc',
-        'ppapi_plugin/ppapi_process.cc',
-        'ppapi_plugin/ppapi_process.h',
-        'ppapi_plugin/ppapi_thread.cc',
-        'ppapi_plugin/ppapi_thread.h',
-      ],
-      'include_dirs': [
-        '..',
-      ],
-    },
-    {
-      'target_name': 'worker',
-      'type': '<(library)',
-      'msvs_guid': 'C78D02D0-A366-4EC6-A248-AA8E64C4BA18',
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../skia/skia.gyp:skia',
-        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
-      ],
-      'sources': [
-        'worker/websharedworker_stub.cc',
-        'worker/websharedworker_stub.h',
-        'worker/webworker_stub_base.cc',
-        'worker/webworker_stub_base.h',
-        'worker/webworker_stub.cc',
-        'worker/webworker_stub.h',
-        'worker/webworkerclient_proxy.cc',
-        'worker/webworkerclient_proxy.h',
-        'worker/worker_main.cc',
-        'worker/worker_thread.cc',
-        'worker/worker_thread.h',
-        'worker/worker_webapplicationcachehost_impl.cc',
-        'worker/worker_webapplicationcachehost_impl.h',
-        'worker/worker_webkitclient_impl.cc',
-        'worker/worker_webkitclient_impl.h',
-      ],
-      'include_dirs': [
-        '..',
-      ],
-    },
-    {
       # Provides a syncapi dynamic library target from checked-in binaries,
       # or from compiling a stub implementation.
       'target_name': 'syncapi',
       'type': '<(library)',
       'sources': [
+	'browser/sync/engine/http_post_provider_factory.h',
+	'browser/sync/engine/http_post_provider_interface.h',
         'browser/sync/engine/syncapi.cc',
+        'browser/sync/engine/syncapi.h',
       ],
       'include_dirs': [
         '..',
-        '<(protoc_out_dir)',
       ],
       'defines' : [
         '_CRT_SECURE_NO_WARNINGS',
@@ -832,7 +461,6 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../jingle/jingle.gyp:notifier',
         '../third_party/icu/icu.gyp:icuuc',
-        '../third_party/libjingle/libjingle.gyp:libjingle',
         '../third_party/sqlite/sqlite.gyp:sqlite',
         'app/policy/cloud_policy_codegen.gyp:policy',
         'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
@@ -841,42 +469,18 @@
         'sync',
         'sync_notifier',
       ],
-      'conditions': [
-        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
-          'dependencies': [
-            '../build/linux/system.gyp:nss'
-          ],
-        }],
+      'export_dependent_settings': [
+        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'sync',
       ],
+      # This target exports a hard dependency because syncapi.h includes
+      # generated proto header files from sync_proto_cpp.
+      'hard_dependency': 1,
     },
     {
       'target_name': 'sync',
       'type': '<(library)',
       'sources': [
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/encryption.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/encryption.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/app_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/app_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/autofill_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/autofill_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/bookmark_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/bookmark_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/extension_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/extension_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/nigori_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/nigori_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/password_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/password_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/session_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/session_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/theme_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/theme_specifics.pb.h',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/typed_url_specifics.pb.cc',
-        '<(protoc_out_dir)/chrome/browser/sync/protocol/typed_url_specifics.pb.h',
         'browser/sync/engine/all_status.cc',
         'browser/sync/engine/all_status.h',
         'browser/sync/engine/apply_updates_command.cc',
@@ -922,7 +526,6 @@
         'browser/sync/engine/resolve_conflicts_command.h',
         'browser/sync/engine/store_timestamps_command.cc',
         'browser/sync/engine/store_timestamps_command.h',
-        'browser/sync/engine/syncapi.h',
         'browser/sync/engine/syncer.cc',
         'browser/sync/engine/syncer.h',
         'browser/sync/engine/syncer_command.cc',
@@ -931,12 +534,9 @@
         'browser/sync/engine/syncer_end_command.h',
         'browser/sync/engine/syncer_proto_util.cc',
         'browser/sync/engine/syncer_proto_util.h',
-        'browser/sync/engine/syncer_thread_adapter.cc',
-        'browser/sync/engine/syncer_thread_adapter.h',
-        'browser/sync/engine/syncer_thread2.cc',
-        'browser/sync/engine/syncer_thread2.h',
         'browser/sync/engine/syncer_thread.cc',
         'browser/sync/engine/syncer_thread.h',
+        'browser/sync/engine/syncer_types.cc',
         'browser/sync/engine/syncer_types.h',
         'browser/sync/engine/syncer_util.cc',
         'browser/sync/engine/syncer_util.h',
@@ -975,11 +575,14 @@
         'browser/sync/syncable/dir_open_result.h',
         'browser/sync/syncable/directory_backing_store.cc',
         'browser/sync/syncable/directory_backing_store.h',
+        'browser/sync/syncable/directory_change_listener.h',
         'browser/sync/syncable/directory_event.h',
         'browser/sync/syncable/directory_manager.cc',
         'browser/sync/syncable/directory_manager.h',
         'browser/sync/syncable/model_type.cc',
         'browser/sync/syncable/model_type.h',
+        'browser/sync/syncable/model_type_payload_map.cc',
+        'browser/sync/syncable/model_type_payload_map.h',
         'browser/sync/syncable/nigori_util.cc',
         'browser/sync/syncable/nigori_util.h',
         'browser/sync/syncable/syncable-inl.h',
@@ -989,7 +592,8 @@
         'browser/sync/syncable/syncable_columns.h',
         'browser/sync/syncable/syncable_id.cc',
         'browser/sync/syncable/syncable_id.h',
-        'browser/sync/util/channel.h',
+        'browser/sync/syncable/syncable_enum_conversions.cc',
+        'browser/sync/syncable/syncable_enum_conversions.h',
         'browser/sync/util/crypto_helpers.cc',
         'browser/sync/util/crypto_helpers.h',
         'browser/sync/util/cryptographer.cc',
@@ -1006,7 +610,6 @@
       ],
       'include_dirs': [
         '..',
-        '<(protoc_out_dir)',
       ],
       'defines' : [
         'SYNC_ENGINE_VERSION_STRING="Unknown"',
@@ -1015,11 +618,19 @@
       ],
       'dependencies': [
         'common',
+        '../base/base.gyp:base',
+        '../crypto/crypto.gyp:crypto',
         '../skia/skia.gyp:skia',
-        '../third_party/libjingle/libjingle.gyp:libjingle',
         'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite#target',
       ],
+      'export_dependent_settings': [
+        '../base/base.gyp:base',
+        '../crypto/crypto.gyp:crypto',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+      ],
+      # This target exports a hard dependency because its header files include
+      # protobuf header files from sync_proto_cpp.
+      'hard_dependency': 1,
       'conditions': [
         ['OS=="win"', {
           'sources' : [
@@ -1030,7 +641,6 @@
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
-            '../build/linux/system.gyp:nss'
           ],
           'link_settings': {
             'libraries': [
@@ -1063,13 +673,21 @@
         'browser/sync/notifier/chrome_invalidation_client.h',
         'browser/sync/notifier/chrome_system_resources.cc',
         'browser/sync/notifier/chrome_system_resources.h',
+        'browser/sync/notifier/invalidation_notifier.h',
+        'browser/sync/notifier/invalidation_notifier.cc',
         'browser/sync/notifier/invalidation_util.cc',
         'browser/sync/notifier/invalidation_util.h',
+        'browser/sync/notifier/non_blocking_invalidation_notifier.h',
+        'browser/sync/notifier/non_blocking_invalidation_notifier.cc',
+        'browser/sync/notifier/p2p_notifier.h',
+        'browser/sync/notifier/p2p_notifier.cc',
         'browser/sync/notifier/registration_manager.cc',
         'browser/sync/notifier/registration_manager.h',
-        'browser/sync/notifier/server_notifier_thread.cc',
-        'browser/sync/notifier/server_notifier_thread.h',
         'browser/sync/notifier/state_writer.h',
+        'browser/sync/notifier/sync_notifier.h',
+        'browser/sync/notifier/sync_notifier_factory.h',
+        'browser/sync/notifier/sync_notifier_factory.cc',
+        'browser/sync/notifier/sync_notifier_callback.h',
       ],
       'include_dirs': [
         '..',
@@ -1096,6 +714,7 @@
         'common',
         'common_net',
         '../base/base.gyp:base',
+        '../jingle/jingle.gyp:notifier',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
         '../third_party/libjingle/libjingle.gyp:libjingle',
@@ -1192,6 +811,28 @@
             'service/remoting/chromoting_host_manager.h',
           ],
         }],
+      ],
+    },
+    {
+      'target_name': 'ipclist',
+      'type': 'executable',
+      'dependencies': [
+         'chrome',
+         'chrome_resources',
+         'chrome_strings',
+         'test_support_common',
+         'test_support_ui',
+         '../skia/skia.gyp:skia',
+         '../testing/gtest.gyp:gtest',
+         '../third_party/libxslt/libxslt.gyp:libxslt',
+         '../third_party/npapi/npapi.gyp:npapi',
+      ],
+      'include_dirs': [
+         '..',
+      ],
+      'sources': [
+        'tools/ipclist/all_messages.h',
+        'tools/ipclist/ipclist.cc',
       ],
     },
   ],
@@ -1521,6 +1162,7 @@
               'variables': {
                 'pak_inputs': [
                   '<(grit_out_dir)/component_extension_resources.pak',
+                  '<(grit_out_dir)/devtools_resources.pak',
                   '<(grit_out_dir)/net_internals_resources.pak',
                   '<(grit_out_dir)/shared_resources.pak',
                   '<(grit_out_dir)/sync_internals_resources.pak',
@@ -1638,7 +1280,7 @@
             '../third_party/qcms/qcms.gyp:*',
             '../third_party/sqlite/sqlite.gyp:*',
             '../third_party/zlib/zlib.gyp:*',
-            '../ui/gfx/gfx.gyp:*',
+            '../ui/ui.gyp:*',
             '../webkit/support/webkit_support.gyp:*',
             '../webkit/webkit.gyp:*',
 
@@ -1646,7 +1288,6 @@
 
             '../breakpad/breakpad.gyp:*',
             '../courgette/courgette.gyp:*',
-            '../gears/gears.gyp:*',
             '../rlz/rlz.gyp:*',
             '../sandbox/sandbox.gyp:*',
             '../tools/memory_watcher/memory_watcher.gyp:*',
@@ -1767,6 +1408,7 @@
           'msvs_guid': '1556EF78-C7E6-43C8-951F-F6B43AC0DD12',
           'dependencies': [
             'theme_resources',
+            '../base/base.gyp:test_support_base',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
           ],

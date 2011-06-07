@@ -4,11 +4,10 @@
 
 #include "jingle/notifier/listener/notification_defines.h"
 
-OutgoingNotificationData::OutgoingNotificationData()
-    : send_content(false),
-      priority(0),
-      require_subscription(false),
-      write_to_cache_only(false) {
+namespace notifier {
+
+std::string Notification::ToString() const {
+  return "{ channel: \"" + channel + "\", data: \"" + data + "\" }";
 }
 
-OutgoingNotificationData::~OutgoingNotificationData() {}
+}  // namespace notifier

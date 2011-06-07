@@ -1,9 +1,7 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/app_switches.h"
-#include "app/gfx/gl/gl_implementation.h"
 #include "base/at_exit.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -13,7 +11,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/icu_util.h"
-#include "base/memory_debug.h"
+#include "base/memory/memory_debug.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
@@ -31,7 +29,8 @@
 #include "net/url_request/url_request_context.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
-#include "ui/gfx/gfx_module.h"
+#include "ui/gfx/gl/gl_implementation.h"
+#include "ui/gfx/gl/gl_switches.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/window_open_disposition.h"
 #include "webkit/extensions/v8/gc_extension.h"
@@ -198,7 +197,6 @@ int main(int argc, char* argv[]) {
 
   // Config the modules that need access to a limited set of resources.
   net::NetModule::SetResourceProvider(TestShell::ResourceProvider);
-  gfx::GfxModule::SetResourceProvider(TestShell::ResourceProvider);
 
   platform.InitializeGUI();
 

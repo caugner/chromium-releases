@@ -10,28 +10,27 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/automation/ui_controls.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/notification_type.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
 #include "chrome/test/bookmark_load_observer.h"
 #include "content/browser/renderer_host/render_process_host.h"
@@ -39,6 +38,7 @@
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -61,14 +61,22 @@ class NavigationNotificationObserver : public NotificationObserver {
                                  int number_of_navigations)
       : navigation_started_(false),
         navigations_completed_(0),
-        number_of_navigations_(number_of_navigations) {
+        number_of_navigations_(number_of_navigations),
+        running_(false),
+        done_(false) {
     registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
                    Source<NavigationController>(controller));
     registrar_.Add(this, NotificationType::LOAD_START,
                    Source<NavigationController>(controller));
     registrar_.Add(this, NotificationType::LOAD_STOP,
                    Source<NavigationController>(controller));
-    RunMessageLoop();
+  }
+
+  void Run() {
+    if (!done_) {
+      running_ = true;
+      RunMessageLoop();
+    }
   }
 
   virtual void Observe(NotificationType type,
@@ -81,7 +89,9 @@ class NavigationNotificationObserver : public NotificationObserver {
       if (navigation_started_ &&
           ++navigations_completed_ == number_of_navigations_) {
         navigation_started_ = false;
-        MessageLoopForUI::current()->Quit();
+        done_ = true;
+        if (running_)
+          MessageLoopForUI::current()->Quit();
       }
     }
   }
@@ -98,6 +108,13 @@ class NavigationNotificationObserver : public NotificationObserver {
   // The number of navigations to wait for.
   int number_of_navigations_;
 
+  // Calls to Observe() can happen early, before the user calls Run(), or
+  // after.  When we've seen all the navigations we're looking for, we set
+  // done_ to true; then when Run() is called we'll never need to run the
+  // event loop.  Also, we don't need to quit the event loop when we're
+  // done if we never had to start an event loop.
+  bool running_;
+  bool done_;
   DISALLOW_COPY_AND_ASSIGN(NavigationNotificationObserver);
 };
 
@@ -167,7 +184,7 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
       // are currently observing. Removing has no effect if we are not currently
       // an observer.
       (*it)->RemoveObserver(this);
-      if ((*it)->state() != DownloadItem::COMPLETE) {
+      if ((*it)->IsInProgress()) {
         (*it)->AddObserver(this);
         still_waiting = true;
       }
@@ -186,12 +203,10 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
 
   // DownloadItem::Observer
   virtual void OnDownloadUpdated(DownloadItem* download) {
-    if (download->state() == DownloadItem::COMPLETE) {
+    if (download->IsComplete())
       CheckAllDownloadsComplete();
-    }
   }
 
-  virtual void OnDownloadFileCompleted(DownloadItem* download) { }
   virtual void OnDownloadOpened(DownloadItem* download) {}
 
   // DownloadManager::Observer
@@ -412,6 +427,7 @@ void WaitForNavigation(NavigationController* controller) {
 void WaitForNavigations(NavigationController* controller,
                         int number_of_navigations) {
   NavigationNotificationObserver observer(controller, number_of_navigations);
+  observer.Run();
 }
 
 void WaitForNewTab(Browser* browser) {
@@ -426,10 +442,14 @@ void WaitForBrowserActionUpdated(ExtensionAction* browser_action) {
                   Source<ExtensionAction>(browser_action));
 }
 
-void WaitForLoadStop(NavigationController* controller) {
+void WaitForLoadStop(TabContents* tab) {
+  // In many cases, the load may have finished before we get here.  Only wait if
+  // the tab still has a pending navigation.
+  if (!tab->is_loading() && !tab->render_manager()->pending_render_view_host())
+    return;
   TestNotificationObserver observer;
   RegisterAndWait(&observer, NotificationType::LOAD_STOP,
-                  Source<NavigationController>(controller));
+                  Source<NavigationController>(&tab->controller()));
 }
 
 Browser* WaitForNewBrowser() {
@@ -472,6 +492,10 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
     int number_of_navigations,
     WindowOpenDisposition disposition,
     int browser_test_flags) {
+  NavigationNotificationObserver
+      same_tab_observer(&browser->GetSelectedTabContents()->controller(),
+                        number_of_navigations);
+
   std::set<Browser*> initial_browsers;
   for (std::vector<Browser*>::const_iterator iter = BrowserList::begin();
        iter != BrowserList::end();
@@ -490,7 +514,7 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
   TabContents* tab_contents = NULL;
   if (disposition == NEW_BACKGROUND_TAB) {
     // We've opened up a new tab, but not selected it.
-    tab_contents = browser->GetTabContentsAt(browser->selected_index() + 1);
+    tab_contents = browser->GetTabContentsAt(browser->active_index() + 1);
     EXPECT_TRUE(tab_contents != NULL)
         << " Unable to wait for navigation to \"" << url.spec()
         << "\" because the new tab is not available yet";
@@ -501,7 +525,10 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
     // The currently selected tab is the right one.
     tab_contents = browser->GetSelectedTabContents();
   }
-  if (tab_contents) {
+  if (disposition == CURRENT_TAB) {
+    same_tab_observer.Run();
+    return;
+  } else if (tab_contents) {
     NavigationController* controller = &tab_contents->controller();
     WaitForNavigations(controller, number_of_navigations);
     return;
@@ -902,13 +929,10 @@ WindowedNotificationObserver::WindowedNotificationObserver(
 WindowedNotificationObserver::~WindowedNotificationObserver() {}
 
 void WindowedNotificationObserver::Wait() {
-  if (waiting_for_ == NotificationService::AllSources()) {
-    LOG(FATAL) << "Wait called when monitoring all sources. You must use "
-               << "WaitFor in this case.";
-  }
-
-  if (seen_)
+  if (seen_ || (waiting_for_ == NotificationService::AllSources() &&
+                !sources_seen_.empty())) {
     return;
+  }
 
   running_ = true;
   ui_test_utils::RunMessageLoop();
@@ -931,7 +955,8 @@ void WindowedNotificationObserver::WaitFor(const NotificationSource& source) {
 void WindowedNotificationObserver::Observe(NotificationType type,
                                            const NotificationSource& source,
                                            const NotificationDetails& details) {
-  if (waiting_for_ == source) {
+  if (waiting_for_ == source ||
+      (running_ && waiting_for_ == NotificationService::AllSources())) {
     seen_ = true;
     if (running_)
       MessageLoopForUI::current()->Quit();

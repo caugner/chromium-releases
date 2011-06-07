@@ -5,7 +5,7 @@
 // This file contains unit tests for ServiceResolverThunk.
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/win/windows_version.h"
 #include "sandbox/src/resolver.h"
 #include "sandbox/src/sandbox_utils.h"
@@ -120,7 +120,8 @@ NTSTATUS PatchNtdllWithResolver(const char* function, bool relaxed,
 }
 
 sandbox::ServiceResolverThunk* GetTestResolver(bool relaxed) {
-  if (base::win::GetWOW64Status() == base::win::WOW64_ENABLED)
+  if (base::win::OSInfo::GetInstance()->wow64_status() ==
+      base::win::OSInfo::WOW64_ENABLED)
     return new Wow64ResolverTest(relaxed);
   if (!sandbox::IsXPSP2OrLater())
     return new Win2kResolverTest(relaxed);

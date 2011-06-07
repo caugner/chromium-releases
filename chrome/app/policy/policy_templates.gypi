@@ -12,61 +12,32 @@
           'target_name': 'policy_templates',
           'type': 'none',
           'variables': {
-            'grd_path': 'policy_templates.grd',
-            'template_files': [
-              '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(grd_path))'
-            ],
+            'grit_grd_file': 'policy_templates.grd',
+            'grit_info_cmd': ['python', '<(DEPTH)/tools/grit/grit_info.py',
+                              '<@(grit_defines)'],
           },
+          'includes': [ '../../../build/grit_target.gypi' ],
           'actions': [
             {
               'action_name': 'policy_templates',
-              'variables': {
-                'conditions': [
-                  ['branding=="Chrome"', {
-                    # TODO(mmoss) The .grd files look for _google_chrome, but
-                    # for consistency they should look for GOOGLE_CHROME_BUILD
-                    # like C++.
-                    # Clean this up when Windows moves to gyp.
-                    'chrome_build': '_google_chrome',
-                  }, {  # else: branding!="Chrome"
-                    'chrome_build': '_chromium',
-                  }],
-                ],
-              },
-              'inputs': [
-                '<!@(<(grit_info_cmd) --inputs <(grd_path))',
-              ],
-              'outputs': [
-                '<@(template_files)'
-              ],
-              'action': [
-                '<@(grit_cmd)',
-                '-i', '<(grd_path)', 'build',
-                '-o', '<(grit_out_dir)',
-                '-D', '<(chrome_build)'
-              ],
-              'conditions': [
-                ['chromeos==1', {
-                  'action': ['-D', 'chromeos'],
-                }],
-                ['use_titlecase_in_grd_files==1', {
-                  'action': ['-D', 'use_titlecase'],
-                }],
-                ['OS == "mac"', {
-                  'action': ['-D', 'mac_bundle_id=<(mac_bundle_id)'],
-                }],
-              ],
-              'message': 'Generating policy templates from <(grd_path)',
+              'includes': [ '../../../build/grit_action.gypi' ],
             },
           ],
-          'direct_dependent_settings': {
-            'include_dirs': [
-              '<(grit_out_dir)',
-            ],
-          },
           'conditions': [
             ['OS=="win"', {
+              'variables': {
+                'version_path': '<(grit_out_dir)/app/policy/VERSION',
+                'template_files': [
+                  '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(grit_grd_file))'
+                ],
+              },
               'actions': [
+                {
+                  'action_name': 'add_version',
+                  'inputs': ['../../VERSION'],
+                  'outputs': ['<(version_path)'],
+                  'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
+                },
                 {
                   # Add all the templates generated at the previous step into
                   # a zip archive.
@@ -76,6 +47,7 @@
                         'tools/build/win/make_zip_with_relative_entries.py'
                   },
                   'inputs': [
+                    '<(version_path)',
                     '<@(template_files)',
                     '<(zip_script)'
                   ],
@@ -87,16 +59,14 @@
                     '<(zip_script)',
                     '<@(_outputs)',
                     '<(grit_out_dir)/app/policy',
-                    '<@(template_files)'
+                    '<@(template_files)',
+                    '<(version_path)'
                   ],
                   'message': 'Packing generated templates into <(_outputs)',
                 }
               ]
             }],
-            ['OS=="win"', {
-              'dependencies': ['../build/win/system.gyp:cygwin'],
-            }],
-          ],
+          ],  # conditions
         },
       ],  # 'targets'
     }],  # OS=="win" or OS=="mac" or OS=="linux"

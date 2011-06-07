@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,12 +14,12 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/scoped_vector.h"
+#include "base/memory/scoped_vector.h"
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/browser/sync/syncable/model_type_payload_map.h"
 
 namespace syncable {
 class DirectoryManager;
@@ -215,7 +215,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   }
 
   void ExpectGetUpdatesRequestPayloads(
-      const browser_sync::sessions::TypePayloadMap& payloads) {
+      const syncable::ModelTypePayloadMap& payloads) {
     expected_payloads_ = payloads;
   }
 
@@ -223,9 +223,8 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   void SetServerNotReachable();
 
-  // Const necessary to avoid any hidden copy-on-write issues that would break
-  // in multithreaded scenarios (see |set_store_birthday|).
-  const std::string& store_birthday() {
+  // Return by copy to be thread-safe.
+  const std::string store_birthday() {
     base::AutoLock lock(store_birthday_lock_);
     return store_birthday_;
   }
@@ -350,7 +349,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   std::bitset<syncable::MODEL_TYPE_COUNT> expected_filter_;
 
-  browser_sync::sessions::TypePayloadMap expected_payloads_;
+  syncable::ModelTypePayloadMap expected_payloads_;
 
   int num_get_updates_requests_;
 

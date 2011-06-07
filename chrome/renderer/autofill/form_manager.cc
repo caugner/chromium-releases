@@ -1,13 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/autofill/form_manager.h"
 
 #include "base/logging.h"
-#include "base/scoped_vector.h"
-#include "base/string_util.h"
+#include "base/memory/scoped_vector.h"
 #include "base/stl_util-inl.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
@@ -43,11 +43,15 @@ using WebKit::WebVector;
 
 namespace {
 
-// The number of fields required by AutoFill.  Ideally we could send the forms
-// to AutoFill no matter how many fields are in the forms; however, finding the
+// The number of fields required by Autofill.  Ideally we could send the forms
+// to Autofill no matter how many fields are in the forms; however, finding the
 // label for each field is a costly operation and we can't spare the cycles if
 // it's not necessary.
-const size_t kRequiredAutoFillFields = 3;
+const size_t kRequiredAutofillFields = 3;
+
+// The maximum number of form fields we are willing to parse, due to
+// computational costs.  This is a very conservative upper bound.
+const size_t kMaxParseableFields = 1000;
 
 // The maximum length allowed for form data.
 const size_t kMaxDataLength = 1024;
@@ -69,7 +73,7 @@ bool IsOptionElement(const WebElement& element) {
   return element.hasTagName("option");
 }
 
-bool IsAutoFillableElement(const WebFormControlElement& element) {
+bool IsAutofillableElement(const WebFormControlElement& element) {
   const WebInputElement* input_element = toWebInputElement(&element);
   return IsTextInput(input_element) || IsSelectElement(element);
 }
@@ -306,6 +310,16 @@ void GetOptionStringsFromElement(const WebSelectElement& select_element,
   }
 }
 
+// Returns the form's |name| attribute if non-empty; otherwise the form's |id|
+// attribute.
+const string16 GetFormIdentifier(const WebFormElement& form) {
+  string16 identifier = form.name();
+  if (identifier.empty())
+    identifier = form.getAttribute(WebString("id"));
+
+  return identifier;
+}
+
 }  // namespace
 
 namespace autofill {
@@ -334,23 +348,23 @@ void FormManager::WebFormControlElementToFormField(
   // The label is not officially part of a WebFormControlElement; however, the
   // labels for all form control elements are scraped from the DOM and set in
   // WebFormElementToFormData.
-  field->set_name(element.nameForAutofill());
-  field->set_form_control_type(element.formControlType());
+  field->name = element.nameForAutofill();
+  field->form_control_type = element.formControlType();
 
-  if (!IsAutoFillableElement(element))
+  if (!IsAutofillableElement(element))
     return;
 
   const WebInputElement* input_element = toWebInputElement(&element);
   if (IsTextInput(input_element)) {
-    field->set_max_length(input_element->maxLength());
-    field->set_autofilled(input_element->isAutofilled());
+    field->max_length = input_element->maxLength();
+    field->is_autofilled = input_element->isAutofilled();
   } else if (extract_mask & EXTRACT_OPTIONS) {
     // Set option strings on the field if available.
     DCHECK(IsSelectElement(element));
     const WebSelectElement select_element = element.toConst<WebSelectElement>();
     std::vector<string16> option_strings;
     GetOptionStringsFromElement(select_element, &option_strings);
-    field->set_option_strings(option_strings);
+    field->option_strings = option_strings;
   }
 
   if (!(extract_mask & EXTRACT_VALUE))
@@ -387,13 +401,13 @@ void FormManager::WebFormControlElementToFormField(
   if (value.size() > kMaxDataLength)
     value = value.substr(0, kMaxDataLength);
 
-  field->set_value(value);
+  field->value = value;
 }
 
 // static
 string16 FormManager::LabelForElement(const WebFormControlElement& element) {
   // Don't scrape labels for elements we can't possibly autofill anyway.
-  if (!IsAutoFillableElement(element))
+  if (!IsAutofillableElement(element))
     return string16();
 
   WebNodeList labels = element.document().getElementsByTagName("label");
@@ -422,7 +436,7 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
   if (requirements & REQUIRE_AUTOCOMPLETE && !element.autoComplete())
     return false;
 
-  form->name = element.name();
+  form->name = GetFormIdentifier(element);
   form->method = element.method();
   form->origin = frame->url();
   form->action = frame->document().completeURL(element.action());
@@ -450,7 +464,7 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
   for (size_t i = 0; i < control_elements.size(); ++i) {
     const WebFormControlElement& control_element = control_elements[i];
 
-    if (!IsAutoFillableElement(control_element))
+    if (!IsAutofillableElement(control_element))
       continue;
 
     const WebInputElement* input_element = toWebInputElement(&control_element);
@@ -468,7 +482,7 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
     // TODO(jhawkins): A label element is mapped to a form control element's id.
     // field->name() will contain the id only if the name does not exist.  Add
     // an id() method to WebFormControlElement and use that here.
-    name_map[field->name()] = field;
+    name_map[field->name] = field;
     fields_extracted[i] = true;
   }
 
@@ -493,8 +507,10 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
 
     std::map<string16, FormField*>::iterator iter =
         name_map.find(field_element.nameForAutofill());
+    // Concatenate labels because some sites might have multiple label
+    // candidates.
     if (iter != name_map.end())
-      iter->second->set_label(FindChildText(label));
+      iter->second->label += FindChildText(label);
   }
 
   // Loop through the form control elements, extracting the label text from the
@@ -509,8 +525,8 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
       continue;
 
     const WebFormControlElement& control_element = control_elements[i];
-    if (form_fields[field_idx]->label().empty())
-      form_fields[field_idx]->set_label(InferLabelForElement(control_element));
+    if (form_fields[field_idx]->label.empty())
+      form_fields[field_idx]->label = InferLabelForElement(control_element);
 
     ++field_idx;
   }
@@ -542,7 +558,7 @@ void FormManager::ExtractForms(const WebFrame* frame) {
     form_element->form_element.getFormControlElements(control_elements);
     for (size_t j = 0; j < control_elements.size(); ++j) {
       WebFormControlElement element = control_elements[j];
-      if (!IsAutoFillableElement(element))
+      if (!IsAutofillableElement(element))
         continue;
 
       form_element->control_elements.push_back(element);
@@ -567,6 +583,7 @@ void FormManager::GetFormsInFrame(const WebFrame* frame,
   DCHECK(frame);
   DCHECK(forms);
 
+  size_t num_fields_seen = 0;
   for (FormElementList::const_iterator form_iter = form_elements_.begin();
        form_iter != form_elements_.end(); ++form_iter) {
     FormElement* form_element = *form_iter;
@@ -574,9 +591,10 @@ void FormManager::GetFormsInFrame(const WebFrame* frame,
     if (form_element->form_element.document().frame() != frame)
       continue;
 
-    // We need at least |kRequiredAutoFillFields| fields before appending this
-    // form to |forms|.
-    if (form_element->control_elements.size() < kRequiredAutoFillFields)
+    // To avoid overly expensive computation, we impose both a minimum and a
+    // maximum number of allowable fields.
+    if (form_element->control_elements.size() < kRequiredAutofillFields ||
+        form_element->control_elements.size() > kMaxParseableFields)
       continue;
 
     if (requirements & REQUIRE_AUTOCOMPLETE &&
@@ -586,7 +604,12 @@ void FormManager::GetFormsInFrame(const WebFrame* frame,
     FormData form;
     WebFormElementToFormData(
         form_element->form_element, requirements, EXTRACT_VALUE, &form);
-    if (form.fields.size() >= kRequiredAutoFillFields)
+
+    num_fields_seen += form.fields.size();
+    if (num_fields_seen > kMaxParseableFields)
+      break;
+
+    if (form.fields.size() >= kRequiredAutofillFields)
       forms->push_back(form);
   }
 }
@@ -671,7 +694,7 @@ bool FormManager::ClearFormWithNode(const WebNode& node) {
       if (!input_element->isEnabled())
         continue;
 
-      input_element->setValue(string16());
+      input_element->setValue(string16(), true);
       input_element->setAutofilled(false);
 
       // Clearing the value in the focused node (above) can cause selection
@@ -683,7 +706,10 @@ bool FormManager::ClearFormWithNode(const WebNode& node) {
     } else {
       DCHECK(IsSelectElement(element));
       WebSelectElement select_element = element.to<WebSelectElement>();
-      select_element.setValue(form_element->control_values[i]);
+      if (select_element.value() != form_element->control_values[i]) {
+        select_element.setValue(form_element->control_values[i]);
+        select_element.dispatchFormControlChangeEvent();
+      }
     }
   }
 
@@ -719,14 +745,10 @@ bool FormManager::ClearPreviewedFormWithNode(const WebNode& node,
     // original value.
     input_element->setSuggestedValue(WebString());
     bool is_initiating_node = (node == *input_element);
-    if (is_initiating_node) {
-      // Call |setValue()| to force the renderer to update the field's displayed
-      // value.
-      input_element->setValue(input_element->value());
+    if (is_initiating_node)
       input_element->setAutofilled(was_autofilled);
-    } else {
+    else
       input_element->setAutofilled(false);
-    }
 
     // Clearing the suggested value in the focused node (above) can cause
     // selection to be lost. We force selection range to restore the text
@@ -754,7 +776,7 @@ void FormManager::ResetFrame(const WebFrame* frame) {
   }
 }
 
-bool FormManager::FormWithNodeIsAutoFilled(const WebNode& node) {
+bool FormManager::FormWithNodeIsAutofilled(const WebNode& node) {
   FormElement* form_element = NULL;
   if (!FindCachedFormElementWithNode(node, &form_element))
     return false;
@@ -802,7 +824,7 @@ bool FormManager::FindCachedFormElement(const FormData& form,
     // |true| -- WebKit distinguishes between a "null" string (lhs) and an
     // "empty" string (rhs).  We don't want that distinction, so forcing to
     // string16.
-    string16 element_name((*form_iter)->form_element.name());
+    string16 element_name = GetFormIdentifier((*form_iter)->form_element);
     GURL action(
         (*form_iter)->form_element.document().completeURL(
             (*form_iter)->form_element.action()));
@@ -833,38 +855,33 @@ void FormManager::ForEachMatchingFormField(FormElement* form,
 
     // Search forward in the |form| for a corresponding field.
     size_t k = j;
-    while (k < data.fields.size() && element_name != data.fields[k].name())
+    while (k < data.fields.size() && element_name != data.fields[k].name)
       k++;
 
     if (k >= data.fields.size())
       continue;
 
-    DCHECK_EQ(data.fields[k].name(), element_name);
+    DCHECK_EQ(data.fields[k].name, element_name);
 
     bool is_initiating_node = false;
 
-    // More than likely |requirements| will contain REQUIRE_AUTOCOMPLETE and/or
-    // REQUIRE_EMPTY, which both require text form control elements, so special-
-    // case this type of element.
     const WebInputElement* input_element = toWebInputElement(element);
     if (IsTextInput(input_element)) {
-
       // TODO(jhawkins): WebKit currently doesn't handle the autocomplete
       // attribute for select control elements, but it probably should.
-      if (requirements & REQUIRE_AUTOCOMPLETE && !input_element->autoComplete())
+      if (!input_element->autoComplete())
         continue;
 
       is_initiating_node = (*input_element == node);
-      // Don't require the node that initiated the auto-fill process to be
-      // empty.  The user is typing in this field and we should complete the
-      // value when the user selects a value to fill out.
-      if (requirements & REQUIRE_EMPTY &&
-          !is_initiating_node &&
-          !input_element->value().isEmpty())
+
+      // Only autofill empty fields and the field that initiated the filling,
+      // i.e. the field the user is currently editing and interacting with.
+      if (!is_initiating_node && !input_element->value().isEmpty())
         continue;
     }
 
-    if (requirements & REQUIRE_ENABLED && !element->isEnabled())
+    if (!element->isEnabled() || element->isReadOnly() ||
+        !element->isFocusable())
       continue;
 
     callback->Run(element, &data.fields[k], is_initiating_node);
@@ -880,7 +897,7 @@ void FormManager::FillFormField(WebFormControlElement* field,
                                 const FormField* data,
                                 bool is_initiating_node) {
   // Nothing to fill.
-  if (data->value().empty())
+  if (data->value.empty())
     return;
 
   WebInputElement* input_element = toWebInputElement(field);
@@ -888,7 +905,7 @@ void FormManager::FillFormField(WebFormControlElement* field,
     // If the maxlength attribute contains a negative value, maxLength()
     // returns the default maxlength value.
     input_element->setValue(
-        data->value().substr(0, input_element->maxLength()));
+        data->value.substr(0, input_element->maxLength()), true);
     input_element->setAutofilled(true);
     if (is_initiating_node) {
       int length = input_element->value().length();
@@ -897,7 +914,10 @@ void FormManager::FillFormField(WebFormControlElement* field,
   } else {
     DCHECK(IsSelectElement(*field));
     WebSelectElement select_element = field->to<WebSelectElement>();
-    select_element.setValue(data->value());
+    if (select_element.value() != data->value) {
+      select_element.setValue(data->value);
+      select_element.dispatchFormControlChangeEvent();
+    }
   }
 }
 
@@ -905,7 +925,7 @@ void FormManager::PreviewFormField(WebFormControlElement* field,
                                    const FormField* data,
                                    bool is_initiating_node) {
   // Nothing to preview.
-  if (data->value().empty())
+  if (data->value.empty())
     return;
 
   // Only preview input fields.
@@ -916,7 +936,7 @@ void FormManager::PreviewFormField(WebFormControlElement* field,
   // If the maxlength attribute contains a negative value, maxLength()
   // returns the default maxlength value.
   input_element->setSuggestedValue(
-      data->value().substr(0, input_element->maxLength()));
+      data->value.substr(0, input_element->maxLength()));
   input_element->setAutofilled(true);
   if (is_initiating_node) {
     // Select the part of the text that the user didn't type.

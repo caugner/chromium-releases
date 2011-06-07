@@ -7,6 +7,14 @@
 #include "skia/ext/bitmap_platform_device.h"
 #include "third_party/skia/include/core/SkTypes.h"
 
+namespace {
+skia::PlatformDevice* GetTopPlatformDevice(const SkCanvas* canvas) {
+  // All of our devices should be our special PlatformDevice.
+  SkCanvas::LayerIter iter(const_cast<SkCanvas*>(canvas), false);
+  return static_cast<skia::PlatformDevice*>(iter.device());
+}
+}
+
 namespace skia {
 
 PlatformCanvas::PlatformCanvas()
@@ -22,9 +30,7 @@ SkDevice* PlatformCanvas::setBitmapDevice(const SkBitmap&) {
 }
 
 PlatformDevice& PlatformCanvas::getTopPlatformDevice() const {
-  // All of our devices should be our special PlatformDevice.
-  SkCanvas::LayerIter iter(const_cast<PlatformCanvas*>(this), false);
-  return *static_cast<PlatformDevice*>(iter.device());
+  return *GetTopPlatformDevice(this);
 }
 
 // static
@@ -39,6 +45,31 @@ bool PlatformCanvas::initializeWithDevice(SkDevice* device) {
   setDevice(device);
   device->unref();  // Was created with refcount 1, and setDevice also refs.
   return true;
+}
+
+SkCanvas* CreateBitmapCanvas(int width, int height, bool is_opaque) {
+  return new PlatformCanvas(width, height, is_opaque);
+}
+
+void MakeOpaque(const SkIRect& region, SkCanvas* canvas) {
+  BitmapPlatformDevice* device = static_cast<BitmapPlatformDevice*>(
+      GetTopPlatformDevice(canvas));
+  device->makeOpaque(region.fLeft, region.fTop,
+                     region.width(), region.height());
+}
+
+bool SupportsPlatformPaint(const SkCanvas* canvas) {
+  // TODO(alokp): Rename PlatformDevice::IsNativeFontRenderingAllowed after
+  // removing these calls from WebKit.
+  return GetTopPlatformDevice(canvas)->IsNativeFontRenderingAllowed();
+}
+
+PlatformDevice::PlatformSurface BeginPlatformPaint(SkCanvas* canvas) {
+  return GetTopPlatformDevice(canvas)->BeginPlatformPaint();
+}
+
+void EndPlatformPaint(SkCanvas* canvas) {
+  GetTopPlatformDevice(canvas)->EndPlatformPaint();
 }
 
 }  // namespace skia

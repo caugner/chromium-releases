@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,20 @@
 #include "chrome/browser/accessibility/browser_accessibility_state.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/result_codes.h"
-#include "chrome/common/native_web_keyboard_event.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
+#include "chrome/common/spellcheck_messages.h"
+#include "content/browser/gpu_process_host.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/common/gpu_messages.h"
+#include "content/common/native_web_keyboard_event.h"
+#include "content/common/notification_service.h"
+#include "content/common/result_codes.h"
+#include "content/common/view_messages.h"
+#include "gpu/common/gpu_trace_event.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "webkit/glue/webcursor.h"
@@ -118,6 +122,12 @@ gfx::NativeViewId RenderWidgetHost::GetNativeViewId() {
   return 0;
 }
 
+gfx::PluginWindowHandle RenderWidgetHost::GetCompositingSurface() {
+  if (view_)
+    return view_->GetCompositingSurface();
+  return gfx::kNullPluginWindow;
+}
+
 bool RenderWidgetHost::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event,
     bool* is_keyboard_shortcut) {
@@ -130,7 +140,8 @@ void RenderWidgetHost::Init() {
   renderer_initialized_ = true;
 
   // Send the ack along with the information on placement.
-  Send(new ViewMsg_CreatingNew_ACK(routing_id_, GetNativeViewId()));
+  Send(new ViewMsg_CreatingNew_ACK(
+      routing_id_, GetNativeViewId(), GetCompositingSurface()));
   WasResized();
 }
 
@@ -218,6 +229,11 @@ void RenderWidgetHost::WasHidden() {
   // reduce its resource utilization.
   Send(new ViewMsg_WasHidden(routing_id_));
 
+  GpuProcessHost::SendOnIO(
+      0,
+      content::CAUSE_FOR_GPU_LAUNCH_NO_LAUNCH,
+      new GpuMsg_VisibilityChanged(routing_id_, process()->id(), false));
+
   // TODO(darin): what about constrained windows?  it doesn't look like they
   // see a message when their parent is hidden.  maybe there is something more
   // generic we can do at the TabContents API level instead of relying on
@@ -253,6 +269,11 @@ void RenderWidgetHost::WasRestored() {
     needs_repainting = false;
   }
   Send(new ViewMsg_WasRestored(routing_id_, needs_repainting));
+
+  GpuProcessHost::SendOnIO(
+      0,
+      content::CAUSE_FOR_GPU_LAUNCH_NO_LAUNCH,
+      new GpuMsg_VisibilityChanged(routing_id_, process()->id(), true));
 
   process_->WidgetRestored();
 
@@ -800,7 +821,7 @@ void RenderWidgetHost::OnMsgClose() {
 void RenderWidgetHost::OnMsgRequestMove(const gfx::Rect& pos) {
   // Note that we ignore the position.
   if (view_) {
-    view_->SetSize(pos.size());
+    view_->SetBounds(pos);
     Send(new ViewMsg_Move_ACK(routing_id_));
   }
 }
@@ -816,6 +837,7 @@ void RenderWidgetHost::OnMsgPaintAtSizeAck(int tag, const gfx::Size& size) {
 
 void RenderWidgetHost::OnMsgUpdateRect(
     const ViewHostMsg_UpdateRect_Params& params) {
+  GPU_TRACE_EVENT0("renderer_host", "RenderWidgetHost::OnMsgUpdateRect");
   TimeTicks paint_start = TimeTicks::Now();
 
   NotificationService::current()->Notify(
@@ -926,11 +948,6 @@ void RenderWidgetHost::OnMsgUpdateRect(
     // when something was actually changed.
     WasResized();
   }
-
-  NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
-      Source<RenderWidgetHost>(this),
-      NotificationService::NoDetails());
 
   // Log the time delta for processing a paint message.
   TimeDelta delta = TimeTicks::Now() - paint_start;
@@ -1198,7 +1215,7 @@ void RenderWidgetHost::ScrollBackingStoreRect(int dx, int dy,
 }
 
 void RenderWidgetHost::ToggleSpellPanel(bool is_currently_visible) {
-  Send(new ViewMsg_ToggleSpellPanel(routing_id(), is_currently_visible));
+  Send(new SpellCheckMsg_ToggleSpellPanel(routing_id(), is_currently_visible));
 }
 
 void RenderWidgetHost::Replace(const string16& word) {
@@ -1206,7 +1223,7 @@ void RenderWidgetHost::Replace(const string16& word) {
 }
 
 void RenderWidgetHost::AdvanceToNextMisspelling() {
-  Send(new ViewMsg_AdvanceToNextMisspelling(routing_id_));
+  Send(new SpellCheckMsg_AdvanceToNextMisspelling(routing_id_));
 }
 
 void RenderWidgetHost::EnableRendererAccessibility() {
@@ -1289,4 +1306,3 @@ void RenderWidgetHost::ActivateDeferredPluginHandles() {
 void RenderWidgetHost::StartUserGesture() {
   OnUserGesture();
 }
-

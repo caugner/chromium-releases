@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
-#include "base/ref_counted.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/appcache/appcache_group.h"
 #include "webkit/appcache/appcache_interfaces.h"
@@ -70,6 +70,22 @@ class AppCacheHost : public AppCacheStorage::Delegate,
                                void* callback_param);
   void SwapCacheWithCallback(SwapCacheCallback* callback,
                              void* callback_param);
+
+  // Called prior to the main resource load. When the system contains multiple
+  // candidates for a main resource load, the appcache preferred by the host
+  // that created this host is used to break ties.
+  void SetSpawningHostId(int spawning_process_id, int spawning_host_id);
+
+  // May return NULL if the spawning host context has been closed, or if a
+  // spawning host context was never identified.
+  const AppCacheHost* GetSpawningHost() const;
+
+  const GURL& preferred_manifest_url() const {
+    return preferred_manifest_url_;
+  }
+  void set_preferred_manifest_url(const GURL& url) {
+    preferred_manifest_url_ = url;
+  }
 
   // Support for loading resources out of the appcache.
   // May return NULL if the request isn't subject to retrieval from an appache.
@@ -148,6 +164,13 @@ class AppCacheHost : public AppCacheStorage::Delegate,
 
   // Identifies the corresponding appcache host in the child process.
   int host_id_;
+
+  // Information about the host that created this one; the manifest
+  // preferred by our creator influences which cache our main resource
+  // should be loaded from.
+  int spawning_host_id_;
+  int spawning_process_id_;
+  GURL preferred_manifest_url_;
 
   // Hosts for dedicated workers are special cased to shunt
   // request handling off to the dedicated worker's parent.

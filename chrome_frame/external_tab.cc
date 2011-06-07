@@ -46,6 +46,7 @@ bool ExternalTabProxy::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_NavigationFailed, OnNavigationFailed)
     IPC_MESSAGE_HANDLER(AutomationMsg_DidNavigate, OnDidNavigate)
     IPC_MESSAGE_HANDLER(AutomationMsg_TabLoaded, OnTabLoaded)
+    IPC_MESSAGE_HANDLER(AutomationMsg_MoveWindow, OnMoveWindow)
     IPC_MESSAGE_HANDLER(AutomationMsg_ForwardMessageToExternalHost,
                         OnMessageToHost)
     IPC_MESSAGE_HANDLER(AutomationMsg_ForwardContextMenuToExternalHost,
@@ -123,7 +124,7 @@ void ExternalTabProxy::UiConnected(ChromeProxy* proxy) {
   ExternalTabSettings settings;
   settings.parent = m_hWnd;
   settings.style = WS_CHILD;
-  settings.is_off_the_record = tab_params_.is_incognito;
+  settings.is_incognito = tab_params_.is_incognito;
   // TODO(stoyan): FIX this.
   settings.load_requests_via_automation = true;
   // TODO(stoyan): FIX this.
@@ -204,25 +205,6 @@ void ExternalTabProxy::ForwardMessageFromExternalHost(
   proxy_->Tab_PostMessage(tab_, message, origin, target);
 }
 
-void ExternalTabProxy::SetEnableExtensionAutomation(
-    const std::vector<std::string>& functions_enabled) {
-  proxy_->Tab_SetEnableExtensionAutomation(tab_, functions_enabled);
-}
-
-void ExternalTabProxy::InstallExtension(const FilePath& crx_path,
-                                        void* user_data) {
-  proxy_->InstallExtension(this, crx_path, new UserDataHolder(user_data));
-}
-
-void ExternalTabProxy::LoadExpandedExtension(const FilePath& path,
-                                             void* user_data) {
-  proxy_->LoadExtension(this, path, new UserDataHolder(user_data));
-}
-
-void ExternalTabProxy::GetEnabledExtensions(void* user_data) {
-  proxy_->GetEnabledExtensions(this, new UserDataHolder(user_data));
-}
-
 void ExternalTabProxy::ChromeFrameHostMoved() {
   proxy_->Tab_OnHostMoved(tab_);
 }
@@ -266,23 +248,6 @@ void ExternalTabProxy::Completed_Navigate(
   CHECK(0);
 }
 
-void ExternalTabProxy::Completed_InstallExtension(
-    bool success, enum AutomationMsg_ExtensionResponseValues res,
-    SyncMessageContext* ctx) {
-  CHECK(0);
-}
-
-void ExternalTabProxy::Completed_LoadExpandedExtension(
-    bool success, enum AutomationMsg_ExtensionResponseValues res,
-    SyncMessageContext* ctx) {
-  CHECK(0);
-}
-
-void ExternalTabProxy::Completed_GetEnabledExtensions(
-    bool success, const std::vector<FilePath>* extensions) {
-  CHECK(0);
-}
-
 void ExternalTabProxy::OnNavigationStateChanged(
     int flags, const NavigationInfo& nav_info) {
   ui_.PostTask(FROM_HERE, NewRunnableMethod(ui_delegate_,
@@ -297,6 +262,11 @@ void ExternalTabProxy::OnUpdateTargetUrl(const std::wstring& url) {
 void ExternalTabProxy::OnTabLoaded(const GURL& url) {
   ui_.PostTask(FROM_HERE, NewRunnableMethod(ui_delegate_,
       &UIDelegate::OnLoad, url));
+}
+
+void ExternalTabProxy::OnMoveWindow(const gfx::Rect& pos) {
+  ui_.PostTask(FROM_HERE, NewRunnableMethod(ui_delegate_,
+      &UIDelegate::OnMoveWindow, pos));
 }
 
 void ExternalTabProxy::OnMessageToHost(const std::string& message,

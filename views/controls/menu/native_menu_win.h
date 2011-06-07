@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 
 #include <vector>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/task.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "views/controls/menu/menu_wrapper.h"
 
@@ -48,6 +49,8 @@ class NativeMenuWin : public MenuWrapper {
   //            It is important to take this into consideration when editing the
   //            code in the functions in this class.
 
+  struct HighlightedMenuItemInfo;
+
   // Returns true if the item at the specified index is a separator.
   bool IsSeparatorItemAt(int menu_index) const;
 
@@ -85,15 +88,13 @@ class NativeMenuWin : public MenuWrapper {
   // Creates the host window that receives notifications from the menu.
   void CreateHostWindow();
 
-  // Given a menu that's currently popped-up, find the currently
-  // highlighted item and return whether or not that item has a parent
-  // (i.e. it's in a submenu), and whether or not that item leads to a
-  // submenu. Returns true if a highlighted item was found. This
-  // method is called to determine if the right and left arrow keys
-  // should be used to switch between menus, or to open and close
-  // submenus.
-  static bool GetHighlightedMenuItemInfo(
-      HMENU menu, bool* has_parent, bool* has_submenu);
+  // Callback from task to notify menu it was selected.
+  void DelayedSelect();
+
+  // Given a menu that's currently popped-up, find the currently highlighted
+  // item. Returns true if a highlighted item was found.
+  static bool GetHighlightedMenuItemInfo(HMENU menu,
+                                         HighlightedMenuItemInfo* info);
 
   // Hook to receive keyboard events while the menu is open.
   static LRESULT CALLBACK MenuMessageHook(
@@ -134,6 +135,19 @@ class NativeMenuWin : public MenuWrapper {
   // Keep track of whether the listeners have already been called at least
   // once.
   bool listeners_called_;
+
+  // See comment in MenuMessageHook for details on these.
+  NativeMenuWin* menu_to_select_;
+  int position_to_select_;
+  ScopedRunnableMethodFactory<NativeMenuWin> menu_to_select_factory_;
+
+  // If we're a submenu, this is our parent.
+  NativeMenuWin* parent_;
+
+  // If non-null the destructor sets this to true. This is set to non-null while
+  // the menu is showing. It is used to detect if the menu was deleted while
+  // running.
+  bool* destroyed_flag_;
 
   // Ugly: a static pointer to the instance of this class that currently
   // has a menu open, because our hook function that receives keyboard

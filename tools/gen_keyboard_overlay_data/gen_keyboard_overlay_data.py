@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,6 +16,9 @@ and output the data depending on the option.
 
   --js: Generates a JavaScript file used as
       chrome/browser/resources/keyboard_overlay/keyboard_overlay_data.js
+
+  --altgr: Generates a list of layouts to be inserted into
+      chrome/browser/chromeos/input_method/xkeyboard.cc
 
 
 These options can be specified at the same time, and the files are generated
@@ -62,6 +65,18 @@ CC_SNIPPET_TEMPLATE="""  localized_strings.SetString("%s",
       l10n_util::GetStringUTF16(%s));
 """
 
+ALTGR_TEMPLATE="""// These are the overlay names of layouts that shouldn't
+// remap the right alt key.
+const char* kKeepRightAltOverlays[] = {
+%s
+};
+
+// These are the overlay names with caps lock remapped
+const char* kCapsLockRemapped[] = {
+%s
+};
+
+"""
 
 def SplitBehavior(behavior):
   """Splits the behavior to compose a message or i18n-content value.
@@ -102,28 +117,19 @@ def ToKeys(hotkey):
   """Converts the action value to shortcut keys used from JavaScript.
 
   Examples:
-    'Ctrl - 9' => '9 CTRL'
-    'Ctrl - Shift - Tab' => 'tab CTRL SHIFT'
+    'Ctrl - 9' => '9<>CTRL'
+    'Ctrl - Shift - Tab' => 'tab<>CTRL<>SHIFT'
   """
-  values = hotkey.split(' ')
-  modifiers = []
-  keycode = -1
-  for i, value in enumerate(values):
-    if i == len(values) - 1:
-      pass
-    elif value == 'Shift':
-      modifiers.append('SHIFT')
-    elif value == 'Ctrl':
-      modifiers.append('CTRL')
-    elif value == 'Alt':
-      modifiers.append('ALT')
-    if value == '-' and i == len(values) - 2:
-      continue
-  modifiers.sort()
-  keycode = value.lower().rstrip()
-  if not modifiers and keycode not in ['backspace']:
+  values = hotkey.split(' - ')
+  modifiers = sorted(value.upper() for value in values
+                     if value in ['Shift', 'Ctrl', 'Alt'])
+  keycode = [value.lower() for value in values
+             if value not in ['Shift', 'Ctrl', 'Alt']]
+  # The keys which are highlighted even without modifier keys.
+  base_keys = ['backspace', 'power']
+  if not modifiers and (keycode and keycode[0] not in base_keys):
     return None
-  return ' '.join([keycode] + modifiers)
+  return '<>'.join(keycode + modifiers)
 
 
 def ParseOptions():
@@ -146,6 +152,8 @@ def ParseOptions():
                     help='Output resource file.')
   parser.add_option('--cc', dest='cc', default=False, action='store_true',
                     help='Output cc file.')
+  parser.add_option('--altgr', dest='altgr', default=False, action='store_true',
+                    help='Output altgr file.')
   parser.add_option('--out', dest='out', default='keyboard_overlay_data',
                     help='The output file name without extension.')
   (options, unused_args) = parser.parse_args()
@@ -154,8 +162,8 @@ def ParseOptions():
     print 'google.com account is necessary to use this script.'
     sys.exit(-1)
 
-  if (not (options.js or options.grd or options.cc)):
-    print 'Either --js, --grd or --cc needs to be specified.'
+  if (not (options.js or options.grd or options.cc or options.altgr)):
+    print 'Either --js, --grd, --cc or --altgr needs to be specified.'
     sys.exit(-1)
 
   # Get the password from the terminal, if needed.
@@ -221,9 +229,10 @@ def FetchSpreadsheetFeeds(client, key, sheets, cols):
 
 def FetchKeyboardGlyphData(client):
   """Fetches the keyboard glyph data from the spreadsheet."""
-  languages = ['en_US', 'en_US_colemak', 'en_US_dvorak', 'ar', 'ar_fr', 'bg',
-               'ca', 'cs', 'da', 'de', 'de_neo', 'el', 'en_fr_hybrid_CA',
-               'en_GB', 'es', 'es_419', 'et', 'fi', 'fil', 'fr', 'fr_CA', 'hi',
+  languages = ['en_US', 'en_US_colemak', 'en_US_dvorak', 'en_US_intl',
+               'en_US_altgr_intl', 'ar', 'ar_fr', 'bg', 'ca', 'cs', 'da',
+               'de', 'de_neo', 'el', 'en_fr_hybrid_CA', 'en_GB', 'en_GB_dvorak',
+               'es', 'es_419', 'et', 'fi', 'fil', 'fr', 'fr_CA', 'hi',
                'hr', 'hu', 'id', 'it', 'iw', 'ja', 'ko', 'lt', 'lv', 'nl', 'no',
                'pl', 'pt_BR', 'pt_PT', 'ro', 'ru', 'sk', 'sl', 'sr', 'sv', 'th',
                'tr', 'uk', 'vi', 'zh_CN', 'zh_TW']
@@ -332,20 +341,55 @@ def OutputCC(hotkey_data, outfile):
                                      ToMessageName(behavior)))
 
 
+def OutputAltGr(keyboard_glyph_data, outfile):
+  """Outputs the keyboard overlay data as a JSON file."""
+  print 'Generating: %s' % outfile
+
+  altgr_output = []
+  capslock_output = []
+
+  for layout in keyboard_glyph_data.keys():
+    try:
+      # If left and right alt have different values, this layout to the list of
+      # layouts that don't remap the right alt key.
+      right_alt = keyboard_glyph_data[layout]["keys"]["E0 38"]["label"].strip()
+      left_alt = keyboard_glyph_data[layout]["keys"]["38"]["label"].strip()
+      if right_alt.lower() != left_alt.lower():
+        altgr_output.append('  "%s",' % layout)
+    except KeyError:
+      pass
+
+    try:
+      caps_lock = keyboard_glyph_data[layout]["keys"]["E0 5B"]["label"].strip()
+      if caps_lock.lower() != "search":
+        capslock_output.append('  "%s",' % layout)
+    except KeyError:
+      pass
+
+  out = file(outfile, 'w')
+  out.write(ALTGR_TEMPLATE % (
+      "\n".join(altgr_output), "\n".join(capslock_output)))
+
+
+
 def main():
   options = ParseOptions()
   client = InitClient(options)
   hotkey_data = FetchHotkeyData(client)
 
+  if options.js or options.altgr:
+    keyboard_glyph_data = FetchKeyboardGlyphData(client)
+
   if options.js:
     layouts = FetchLayoutsData(client)
-    keyboard_glyph_data = FetchKeyboardGlyphData(client)
     OutputJson(keyboard_glyph_data, hotkey_data, layouts, 'keyboardOverlayData',
                options.out + '.js')
   if options.grd:
     OutputGrd(hotkey_data, options.out + '.grd')
   if options.cc:
     OutputCC(hotkey_data, options.out + '.cc')
+  if options.altgr:
+    OutputAltGr(keyboard_glyph_data, options.out + '.altgr')
 
 
 if __name__ == '__main__':

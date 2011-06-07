@@ -81,13 +81,13 @@
                 'chrome_dll_version',
                 'chrome_resources',
                 'installer_util_strings',
-                'worker',
+                '../content/content.gyp:content_worker',
+                '../crypto/crypto.gyp:crypto',
                 '../printing/printing.gyp:printing',
                 '../net/net.gyp:net_resources',
                 '../third_party/cld/cld.gyp:cld',
                 '../views/views.gyp:views',
                 '../webkit/support/webkit_support.gyp:webkit_resources',
-                '../gears/gears.gyp:gears',
               ],
               'sources': [
                 'app/chrome_command_ids.h',
@@ -199,9 +199,6 @@
                 'app/framework-Info.plist',
                 'app/nibs/About.xib',
                 'app/nibs/AboutIPC.xib',
-                'app/nibs/AutoFillAddressSheet.xib',
-                'app/nibs/AutoFillCreditCardSheet.xib',
-                'app/nibs/AutoFillDialog.xib',
                 'app/nibs/BookmarkAllTabs.xib',
                 'app/nibs/BookmarkBar.xib',
                 'app/nibs/BookmarkBarFolderWindow.xib',
@@ -209,9 +206,7 @@
                 'app/nibs/BookmarkEditor.xib',
                 'app/nibs/BookmarkNameFolder.xib',
                 'app/nibs/BrowserWindow.xib',
-                'app/nibs/ClearBrowsingData.xib',
                 'app/nibs/CollectedCookies.xib',
-                'app/nibs/Cookies.xib',
                 'app/nibs/CookieDetailsView.xib',
                 'app/nibs/ContentBlockedCookies.xib',
                 'app/nibs/ContentBlockedImages.xib',
@@ -219,36 +214,27 @@
                 'app/nibs/ContentBlockedPlugins.xib',
                 'app/nibs/ContentBlockedPopups.xib',
                 'app/nibs/ContentBubbleGeolocation.xib',
-                'app/nibs/ContentExceptionsWindow.xib',
-                'app/nibs/ContentSettings.xib',
                 'app/nibs/DownloadItem.xib',
                 'app/nibs/DownloadShelf.xib',
-                'app/nibs/EditSearchEngine.xib',
                 'app/nibs/ExtensionInstalledBubble.xib',
                 'app/nibs/ExtensionInstallPrompt.xib',
                 'app/nibs/ExtensionInstallPromptNoWarnings.xib',
                 'app/nibs/FindBar.xib',
                 'app/nibs/FirstRunBubble.xib',
                 'app/nibs/FirstRunDialog.xib',
-                'app/nibs/FontLanguageSettings.xib',
                 'app/nibs/HungRendererDialog.xib',
                 'app/nibs/HttpAuthLoginSheet.xib',
                 'app/nibs/ImportProgressDialog.xib',
-                'app/nibs/ImportSettingsDialog.xib',
                 'app/nibs/InfoBar.xib',
                 'app/nibs/InfoBarContainer.xib',
-                'app/nibs/InstantConfirm.xib',
                 'app/nibs/InstantOptIn.xib',
-                'app/nibs/KeywordEditor.xib',
                 'app/nibs/MainMenu.xib',
                 'app/nibs/Notification.xib',
-                'app/nibs/Preferences.xib',
                 'app/nibs/PreviewableContents.xib',
                 'app/nibs/ReportBug.xib',
                 'app/nibs/SaveAccessoryView.xib',
                 'app/nibs/SadTab.xib',
                 'app/nibs/SearchEngineDialog.xib',
-                'app/nibs/SimpleContentExceptionsWindow.xib',
                 'app/nibs/SpeechInputBubble.xib',
                 'app/nibs/TabView.xib',
                 'app/nibs/TaskManager.xib',
@@ -268,6 +254,7 @@
                 'app/theme/newtab.pdf',
                 'app/theme/newtab_h.pdf',
                 'app/theme/newtab_p.pdf',
+                'app/theme/omnibox_extension_app.pdf',
                 'app/theme/omnibox_history.pdf',
                 'app/theme/omnibox_http.pdf',
                 'app/theme/omnibox_https_invalid.pdf',
@@ -290,6 +277,7 @@
               'dependencies': [
                 # Bring in pdfsqueeze and run it on all pdfs
                 '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
+                '../crypto/crypto.gyp:crypto',
                 # On Mac, Flash gets put into the framework, so we need this
                 # dependency here. flash_player.gyp will copy the Flash bundle
                 # into PRODUCT_DIR.
@@ -388,6 +376,7 @@
                   'variables': {
                     'pak_inputs': [
                       '<(grit_out_dir)/component_extension_resources.pak',
+                      '<(grit_out_dir)/devtools_resources.pak',
                       '<(grit_out_dir)/net_internals_resources.pak',
                       '<(grit_out_dir)/shared_resources.pak',
                       '<(grit_out_dir)/sync_internals_resources.pak',
@@ -448,20 +437,6 @@
               ],
               'copies': [
                 {
-                  'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Resources',
-                  'files': [
-                    '<(PRODUCT_DIR)/resources/inspector/',
-                  ],
-                  'conditions': [
-                    ['mac_breakpad==1', {
-                      'files': [
-                        '<(PRODUCT_DIR)/crash_inspector',
-                        '<(PRODUCT_DIR)/crash_report_sender.app'
-                      ],
-                    }],
-                  ],
-                },
-                {
                   'destination':
                       '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
                   'files': [
@@ -472,11 +447,9 @@
                 },
                 {
                   'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Internet Plug-Ins',
-                  'files': [
-                    '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.plugin',
-                  ],
+                  'files': [],
                   'conditions': [
-                    [ 'branding == "Chrome"', {
+                    ['branding == "Chrome"', {
                       'files': [
                         '<(PRODUCT_DIR)/Flash Player Plugin for Chrome.plugin',
                         '<(PRODUCT_DIR)/plugin.vch',
@@ -486,6 +459,11 @@
                       'files': [
                         '<(PRODUCT_DIR)/PDF.plugin',
                       ],
+                    }],
+                    ['disable_nacl!=1', {
+                      'files': [
+                        '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.plugin',
+                      ],                    
                     }],
                   ],
                 },
@@ -509,6 +487,15 @@
                   'dependencies': [
                     '../breakpad/breakpad.gyp:breakpad',
                     'app/policy/cloud_policy_codegen.gyp:policy',
+                  ],
+                  'copies': [
+                    {
+                      'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Resources',
+                      'files': [
+                        '<(PRODUCT_DIR)/crash_inspector',
+                        '<(PRODUCT_DIR)/crash_report_sender.app'
+                      ],
+                    },
                   ],
                 }, {  # else: mac_breakpad!=1
                   # No Breakpad, put in the stubs.
@@ -609,12 +596,22 @@
             # content_common.gypi and common.gypi in nacl_win64_dependencies
             # and get rid of the common_constants.gypi which was added as a hack
             # to avoid making common compile on 64 bit on Windows.
+            '../chrome/common/chrome_content_client.cc',
+            '../chrome/common/chrome_content_plugin_client.cc',
             '../content/common/child_process.cc',
             '../content/common/child_thread.cc',
+            '../content/common/content_client.cc',
+            '../content/common/content_counters.cc',
+            '../content/common/content_message_generator.cc',
+            '../content/common/content_paths.cc',
             '../content/common/content_switches.cc',
+            '../content/common/debug_flags.cc',
+            '../content/common/hi_res_timer_manager_win.cc',
             '../content/common/notification_details.cc',
             '../content/common/notification_service.cc',
             '../content/common/notification_source.cc',
+            '../content/common/sandbox_init_wrapper_win.cc',
+            '../content/common/url_constants.cc',
           ],
           'msvs_settings': {
             'VCLinkerTool': {

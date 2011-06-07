@@ -21,6 +21,7 @@ void MockMediatorThread::Reset() {
   subscribe_calls = 0;
   listen_calls = 0;
   send_calls = 0;
+  update_settings_calls = 0;
 }
 
 void MockMediatorThread::AddObserver(Observer* observer) {
@@ -51,7 +52,7 @@ void MockMediatorThread::Start() {
 }
 
 void MockMediatorThread::SubscribeForUpdates(
-    const std::vector<std::string>& subscribed_services_list) {
+    const SubscriptionList& subscriptions) {
   subscribe_calls++;
   if (observer_) {
     observer_->OnSubscriptionStateChange(true);
@@ -62,7 +63,7 @@ void MockMediatorThread::ListenForUpdates() {
   listen_calls++;
 }
 
-void MockMediatorThread::SendNotification(const OutgoingNotificationData &) {
+void MockMediatorThread::SendNotification(const Notification &) {
   send_calls++;
   if (observer_) {
     observer_->OnOutgoingNotification();
@@ -70,10 +71,15 @@ void MockMediatorThread::SendNotification(const OutgoingNotificationData &) {
 }
 
 void MockMediatorThread::ReceiveNotification(
-    const IncomingNotificationData& data) {
+    const Notification& data) {
   if (observer_) {
     observer_->OnIncomingNotification(data);
   }
+}
+
+void MockMediatorThread::UpdateXmppSettings(
+    const buzz::XmppClientSettings& settings) {
+  update_settings_calls++;
 }
 
 }  // namespace notifier

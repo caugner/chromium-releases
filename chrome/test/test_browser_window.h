@@ -6,7 +6,7 @@
 #define CHROME_TEST_TEST_BROWSER_WINDOW_H_
 #pragma once
 
-#include "chrome/browser/browser_window.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/test/test_location_bar.h"
 
 // An implementation of BrowserWindow used for testing. TestBrowserWindow only
@@ -19,6 +19,7 @@ class TestBrowserWindow : public BrowserWindow {
 
   virtual void Init() {}
   virtual void Show() {}
+  virtual void ShowInactive() {}
   virtual void SetBounds(const gfx::Rect& bounds) {}
   virtual void Close() {}
   virtual void Activate() {}
@@ -28,7 +29,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual gfx::NativeWindow GetNativeHandle();
   virtual BrowserWindowTesting* GetBrowserWindowTesting();
   virtual StatusBubble* GetStatusBubble();
-  virtual void SelectedTabToolbarSizeChanged(bool is_animating) {}
+  virtual void ToolbarSizeChanged(bool is_animating) {}
   virtual void UpdateTitleBar() {}
   virtual void ShelfVisibilityChanged() {}
   virtual void UpdateDevTools() {}
@@ -54,7 +55,8 @@ class TestBrowserWindow : public BrowserWindow {
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
-  virtual void ShowCreateWebAppShortcutsDialog(TabContents* tab_contents) {}
+  virtual void ShowCreateWebAppShortcutsDialog(
+      TabContentsWrapper* tab_contents) {}
   virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,
                                                   const Extension* app) {}
 #if defined(TOOLKIT_VIEWS)
@@ -77,15 +79,8 @@ class TestBrowserWindow : public BrowserWindow {
   virtual bool IsDownloadShelfVisible() const;
   virtual DownloadShelf* GetDownloadShelf();
   virtual void ShowReportBugDialog() {}
-  virtual void ShowClearBrowsingDataDialog() {}
-  virtual void ShowImportDialog() {}
-  virtual void ShowSearchEnginesDialog() {}
-  virtual void ShowPasswordManager() {}
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) {}
-  virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
-                                         Profile* profile) {}
   virtual void ShowCollectedCookiesDialog(TabContents* tab_contents) {}
-  virtual void ShowProfileErrorDialog(int message_id) {}
   virtual void ShowThemeInstallBubble() {}
   virtual void ConfirmBrowserCloseWithPendingDownloads() {}
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
@@ -103,7 +98,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ToggleTabStripMode() {}
   virtual void OpenTabpose() {}
   virtual void PrepareForInstant() {}
-  virtual void ShowInstant(TabContents* preview_contents) {}
+  virtual void ShowInstant(TabContentsWrapper* preview_contents) {}
   virtual void HideInstant(bool instant_is_active) {}
   virtual gfx::Rect GetInstantBounds();
 

@@ -1,23 +1,21 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
 #include "chrome/browser/sessions/session_types.h"
-#include "chrome/common/notification_registrar.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
-#include "chrome/test/testing_profile.h"
 #include "chrome/test/test_notification_tracker.h"
+#include "chrome/test/testing_profile.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_controller.h"
@@ -25,6 +23,8 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/common/notification_registrar.h"
+#include "content/common/view_messages.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/webkit_glue.h"
@@ -142,6 +142,43 @@ void RegisterForAllNavNotifications(TestNotificationTracker* tracker,
   tracker->ListenFor(NotificationType::NAV_ENTRY_CHANGED,
                      Source<NavigationController>(controller));
 }
+
+class TestTabContentsDelegate : public TabContentsDelegate {
+ public:
+  explicit TestTabContentsDelegate() :
+      navigation_state_change_count_(0) {}
+
+  int navigation_state_change_count() {
+    return navigation_state_change_count_;
+  }
+
+  virtual void OpenURLFromTab(TabContents* source,
+                              const GURL& url, const GURL& referrer,
+                              WindowOpenDisposition disposition,
+                              PageTransition::Type transition) {}
+
+  // Keep track of whether the tab has notified us of a navigation state change.
+  virtual void NavigationStateChanged(const TabContents* source,
+                                      unsigned changed_flags) {
+    navigation_state_change_count_++;
+  }
+
+  virtual void AddNewContents(TabContents* source,
+                              TabContents* new_contents,
+                              WindowOpenDisposition disposition,
+                              const gfx::Rect& initial_pos,
+                              bool user_gesture) {}
+  virtual void ActivateContents(TabContents* contents) {}
+  virtual void DeactivateContents(TabContents* contents) {}
+  virtual void LoadingStateChanged(TabContents* source) {}
+  virtual void CloseContents(TabContents* source) {}
+  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
+  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
+
+ private:
+  // The number of times NavigationStateChanged has been called.
+  int navigation_state_change_count_;
+};
 
 // -----------------------------------------------------------------------------
 
@@ -388,6 +425,83 @@ TEST_F(NavigationControllerTest, LoadURL_ExistingPending) {
   EXPECT_EQ(kNewURL, controller().GetActiveEntry()->url());
 }
 
+// Tests navigating to an existing URL when there is a pending new navigation.
+// This will happen if the user enters a URL, but before that commits, the
+// current page fires history.back().
+TEST_F(NavigationControllerTest, LoadURL_BackPreemptsPending) {
+  TestNotificationTracker notifications;
+  RegisterForAllNavNotifications(&notifications, &controller());
+
+  // First make some history.
+  const GURL kExistingURL1("http://eh");
+  controller().LoadURL(kExistingURL1, GURL(), PageTransition::TYPED);
+  rvh()->SendNavigate(0, kExistingURL1);
+  EXPECT_TRUE(notifications.Check1AndReset(
+      NotificationType::NAV_ENTRY_COMMITTED));
+
+  const GURL kExistingURL2("http://bee");
+  controller().LoadURL(kExistingURL2, GURL(), PageTransition::TYPED);
+  rvh()->SendNavigate(1, kExistingURL2);
+  EXPECT_TRUE(notifications.Check1AndReset(
+      NotificationType::NAV_ENTRY_COMMITTED));
+
+  // Now make a pending new navigation.
+  const GURL kNewURL("http://see");
+  controller().LoadURL(kNewURL, GURL(), PageTransition::TYPED);
+  EXPECT_EQ(0U, notifications.size());
+  EXPECT_EQ(-1, controller().pending_entry_index());
+  EXPECT_EQ(1, controller().last_committed_entry_index());
+
+  // Before that commits, a back navigation from the renderer commits.
+  rvh()->SendNavigate(0, kExistingURL1);
+
+  // There should no longer be any pending entry, and the back navigation we
+  // just made should be committed.
+  EXPECT_TRUE(notifications.Check1AndReset(
+      NotificationType::NAV_ENTRY_COMMITTED));
+  EXPECT_EQ(-1, controller().pending_entry_index());
+  EXPECT_EQ(0, controller().last_committed_entry_index());
+  EXPECT_EQ(kExistingURL1, controller().GetActiveEntry()->url());
+}
+
+// Tests an ignored navigation when there is a pending new navigation.
+// This will happen if the user enters a URL, but before that commits, the
+// current blank page reloads.  See http://crbug.com/77507.
+TEST_F(NavigationControllerTest, LoadURL_IgnorePreemptsPending) {
+  TestNotificationTracker notifications;
+  RegisterForAllNavNotifications(&notifications, &controller());
+
+  // Set a TabContentsDelegate to listen for state changes.
+  scoped_ptr<TestTabContentsDelegate> delegate(new TestTabContentsDelegate());
+  EXPECT_FALSE(contents()->delegate());
+  contents()->set_delegate(delegate.get());
+
+  // Without any navigations, the renderer starts at about:blank.
+  const GURL kExistingURL("about:blank");
+
+  // Now make a pending new navigation.
+  const GURL kNewURL("http://eh");
+  controller().LoadURL(kNewURL, GURL(), PageTransition::TYPED);
+  EXPECT_EQ(0U, notifications.size());
+  EXPECT_EQ(-1, controller().pending_entry_index());
+  EXPECT_TRUE(controller().pending_entry());
+  EXPECT_EQ(-1, controller().last_committed_entry_index());
+  EXPECT_EQ(1, delegate->navigation_state_change_count());
+
+  // Before that commits, a document.write and location.reload can cause the
+  // renderer to send a FrameNavigate with page_id -1.
+  rvh()->SendNavigate(-1, kExistingURL);
+
+  // This should clear the pending entry and notify of a navigation state
+  // change, so that we do not keep displaying kNewURL.
+  EXPECT_EQ(-1, controller().pending_entry_index());
+  EXPECT_FALSE(controller().pending_entry());
+  EXPECT_EQ(-1, controller().last_committed_entry_index());
+  EXPECT_EQ(2, delegate->navigation_state_change_count());
+
+  contents()->set_delegate(NULL);
+}
+
 TEST_F(NavigationControllerTest, Reload) {
   TestNotificationTracker notifications;
   RegisterForAllNavNotifications(&notifications, &controller());
@@ -613,8 +727,8 @@ TEST_F(NavigationControllerTest, Back_OtherBackPending) {
   // match the pending one.
   rvh()->SendNavigate(0, kUrl1);
 
-  // The navigation should not have affected the pending entry.
-  EXPECT_EQ(1, controller().pending_entry_index());
+  // The committed navigation should clear the pending entry.
+  EXPECT_EQ(-1, controller().pending_entry_index());
 
   // But the navigated entry should be the last committed.
   EXPECT_EQ(0, controller().last_committed_entry_index());
@@ -1741,7 +1855,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune) {
   NavigationController& other_controller = other_contents->controller();
   SessionID other_id(other_controller.session_id());
   other_contents->NavigateAndCommit(url3);
-  other_controller.CopyStateFromAndPrune(&controller());
+  other_controller.CopyStateFromAndPrune(&controller(), false);
 
   // other_controller should now contain the 3 urls: url1, url2 and url3.
 
@@ -1773,7 +1887,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune2) {
   scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
   NavigationController& other_controller = other_contents->controller();
   SessionID other_id(other_controller.session_id());
-  other_controller.CopyStateFromAndPrune(&controller());
+  other_controller.CopyStateFromAndPrune(&controller(), false);
 
   // other_controller should now contain the 1 url: url1.
 
@@ -1804,7 +1918,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
   NavigationController& other_controller = other_contents->controller();
   SessionID other_id(other_controller.session_id());
   other_controller.LoadURL(url3, GURL(), PageTransition::TYPED);
-  other_controller.CopyStateFromAndPrune(&controller());
+  other_controller.CopyStateFromAndPrune(&controller(), false);
 
   // other_controller should now contain 1 entry for url1, and a pending entry
   // for url3.
@@ -1818,6 +1932,95 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
   // And there should be a pending entry for url3.
   ASSERT_TRUE(other_controller.pending_entry());
 
+  EXPECT_EQ(url3, other_controller.pending_entry()->url());
+
+  // Make sure session ids didn't change.
+  EXPECT_EQ(id.id(), controller().session_id().id());
+  EXPECT_EQ(other_id.id(), other_controller.session_id().id());
+}
+
+// Test CopyStateFromAndPrune with 1 url in source, nothing in target and
+// remove_first = true.
+TEST_F(NavigationControllerTest, CopyStateFromAndPrune4) {
+  SessionID id(controller().session_id());
+  const GURL url1("http://foo1");
+
+  NavigateAndCommit(url1);
+
+  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
+  NavigationController& other_controller = other_contents->controller();
+  SessionID other_id(other_controller.session_id());
+  other_controller.CopyStateFromAndPrune(&controller(), true);
+
+  // other_controller should now contain 1 entry for url1.
+
+  ASSERT_EQ(1, other_controller.entry_count());
+
+  EXPECT_EQ(0, other_controller.GetCurrentEntryIndex());
+
+  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
+
+  // And there should be a pending entry for url3.
+  ASSERT_FALSE(other_controller.pending_entry());
+
+  // Make sure session ids didn't change.
+  EXPECT_EQ(id.id(), controller().session_id().id());
+  EXPECT_EQ(other_id.id(), other_controller.session_id().id());
+}
+
+// Test CopyStateFromAndPrune with 1 url in source, 1 in target and
+// remove_first = true.
+TEST_F(NavigationControllerTest, CopyStateFromAndPrune5) {
+  SessionID id(controller().session_id());
+  const GURL url1("http://foo1");
+  const GURL url2("http://foo2");
+
+  NavigateAndCommit(url1);
+
+  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
+  NavigationController& other_controller = other_contents->controller();
+  SessionID other_id(other_controller.session_id());
+  other_contents->NavigateAndCommit(url2);
+  other_controller.CopyStateFromAndPrune(&controller(), true);
+
+  // other_controller should now contain 1 entry, url1.
+
+  ASSERT_EQ(1, other_controller.entry_count());
+  EXPECT_EQ(0, other_controller.GetCurrentEntryIndex());
+  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
+
+  // And there should be a pending entry for url3.
+  ASSERT_FALSE(other_controller.pending_entry());
+
+  // Make sure session ids didn't change.
+  EXPECT_EQ(id.id(), controller().session_id().id());
+  EXPECT_EQ(other_id.id(), other_controller.session_id().id());
+}
+
+// Test CopyStateFromAndPrune with 1 url in source, 2 in target and
+// remove_first = true.
+TEST_F(NavigationControllerTest, CopyStateFromAndPrune6) {
+  SessionID id(controller().session_id());
+  const GURL url1("http://foo1");
+  const GURL url2("http://foo2");
+  const GURL url3("http://foo2");
+
+  NavigateAndCommit(url1);
+
+  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
+  NavigationController& other_controller = other_contents->controller();
+  SessionID other_id(other_controller.session_id());
+  other_contents->NavigateAndCommit(url2);
+  other_controller.LoadURL(url3, GURL(), PageTransition::TYPED);
+  other_controller.CopyStateFromAndPrune(&controller(), true);
+
+  // other_controller should now contain 2 entries: url1, and url3.
+  ASSERT_EQ(1, other_controller.entry_count());
+  EXPECT_EQ(0, other_controller.GetCurrentEntryIndex());
+  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
+
+  // And there should be a pending entry for url3.
+  ASSERT_TRUE(other_controller.pending_entry());
   EXPECT_EQ(url3, other_controller.pending_entry()->url());
 
   // Make sure session ids didn't change.

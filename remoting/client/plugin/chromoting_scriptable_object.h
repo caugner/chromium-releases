@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,19 @@
 //
 //   // Connection status.
 //   readonly attribute unsigned short status;
+//
+//   // Statistics.
+//   // Video Bandwidth in bytes per second.
+//   readonly attribute float videoBandwidth;
+//   // Latency for capturing in milliseconds.
+//   readonly attribute int videoCaptureLatency;
+//   // Latency for video encoding in milliseconds.
+//   readonly attribute int videoEncodeLatency;
+//   // Latency for video decoding in milliseconds.
+//   readonly attribute int videoDecodeLatency;
+//   // Latency for rendering in milliseconds.
+//   readonly attribute int videoRenderLatency;
+//
 //   // Constants for connection status.
 //   const unsigned short STATUS_UNKNOWN = 0;
 //   const unsigned short STATUS_CONNECTING = 1;
@@ -76,7 +89,7 @@
 #include <string>
 #include <vector>
 
-#include "base/weak_ptr.h"
+#include "base/memory/weak_ptr.h"
 
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 #include "ppapi/cpp/var.h"

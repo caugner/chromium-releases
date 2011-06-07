@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,13 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/registry.h"
 #include "chrome/installer/util/delete_tree_work_item.h"
 #include "chrome/installer/util/helper.h"
+#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
@@ -391,7 +393,8 @@ FilePath InstallerState::GetInstallerDirectory(const Version& version) const {
 }
 
 void InstallerState::RemoveOldVersionDirectories(
-    const Version& latest_version,
+    const Version& new_version,
+    Version* existing_version,
     const FilePath& temp_path) const {
   file_util::FileEnumerator version_enum(target_path(), false,
       file_util::FileEnumerator::DIRECTORIES);
@@ -407,24 +410,30 @@ void InstallerState::RemoveOldVersionDirectories(
     VLOG(1) << "directory found: " << find_data.cFileName;
     version.reset(Version::GetVersionFromString(
                       WideToASCII(find_data.cFileName)));
-    if (version.get() && latest_version.CompareTo(*version) > 0) {
-      key_files.clear();
-      std::for_each(products_.begin(), products_.end(),
-                    std::bind2nd(std::mem_fun(&Product::AddKeyFiles),
-                                 &key_files));
-      const std::vector<FilePath>::iterator end = key_files.end();
-      for (std::vector<FilePath>::iterator scan = key_files.begin();
-           scan != end; ++scan) {
-        *scan = next_version.Append(*scan);
+    if (version.get()) {
+      // Delete the version folder if it is less than the new version and not
+      // equal to the old version (if we have an old version).
+      if (version->CompareTo(new_version) < 0 &&
+          (existing_version == NULL ||
+           version->CompareTo(*existing_version) != 0)) {
+        key_files.clear();
+        std::for_each(products_.begin(), products_.end(),
+                      std::bind2nd(std::mem_fun(&Product::AddKeyFiles),
+                                   &key_files));
+        const std::vector<FilePath>::iterator end = key_files.end();
+        for (std::vector<FilePath>::iterator scan = key_files.begin();
+             scan != end; ++scan) {
+          *scan = next_version.Append(*scan);
+        }
+
+        VLOG(1) << "Deleting directory: " << next_version.value();
+
+        scoped_ptr<WorkItem> item(
+            WorkItem::CreateDeleteTreeWorkItem(next_version, temp_path,
+                                               key_files));
+        if (!item->Do())
+          item->Rollback();
       }
-
-      VLOG(1) << "Deleting directory: " << next_version.value();
-
-      scoped_ptr<WorkItem> item(
-          WorkItem::CreateDeleteTreeWorkItem(next_version, temp_path,
-                                             key_files));
-      if (!item->Do())
-        item->Rollback();
     }
 
     next_version = version_enum.Next();
@@ -445,6 +454,79 @@ bool InstallerState::SetChannelFlags(bool set,
      modified |= (*scan)->SetChannelFlags(set, channel_info);
   }
   return modified;
+}
+
+void InstallerState::UpdateStage(installer::InstallerStage stage) const {
+  InstallUtil::UpdateInstallerStage(system_install(), state_key_, stage);
+}
+
+void InstallerState::UpdateChannels() const {
+  if (operation_ != MULTI_INSTALL && operation_ != MULTI_UPDATE) {
+    VLOG(1) << "InstallerState::UpdateChannels noop: " << operation_;
+    return;
+  }
+
+  // Update the "ap" value for the product being installed/updated.  We get the
+  // current value from the registry since the InstallationState instance used
+  // by the bulk of the installer does not track changes made by UpdateStage.
+  // Create the app's ClientState key if it doesn't exist.
+  ChannelInfo channel_info;
+  base::win::RegKey state_key;
+  LONG result = state_key.Create(root_key_, state_key_.c_str(),
+                                 KEY_QUERY_VALUE | KEY_SET_VALUE);
+  if (result == ERROR_SUCCESS) {
+    channel_info.Initialize(state_key);
+
+    // This is a multi-install product.
+    bool modified = channel_info.SetMultiInstall(true);
+
+    // Add the appropriate modifiers for all products and their options.
+    modified |= SetChannelFlags(true, &channel_info);
+
+    VLOG(1) << "ap: " << channel_info.value();
+
+    // Write the results if needed.
+    if (modified)
+      channel_info.Write(&state_key);
+
+    // Remove the -stage: modifier since we don't want to propagate that to the
+    // other app_guids.
+    channel_info.SetStage(NULL);
+
+    // Synchronize the other products and the package with this one.
+    ChannelInfo other_info;
+    for (int i = 0; i < BrowserDistribution::NUM_TYPES; ++i) {
+      BrowserDistribution::Type type =
+          static_cast<BrowserDistribution::Type>(i);
+      // Skip the app_guid we started with.
+      if (type == state_type_)
+        continue;
+      BrowserDistribution* dist = NULL;
+      // Always operate on the binaries.
+      if (i == BrowserDistribution::CHROME_BINARIES) {
+        dist = multi_package_distribution_;
+      } else {
+        const Product* product = FindProduct(type);
+        // Skip this one if it's for a product we're not operating on.
+        if (product == NULL)
+          continue;
+        dist = product->distribution();
+      }
+      result = state_key.Create(root_key_, dist->GetStateKey().c_str(),
+                                KEY_QUERY_VALUE | KEY_SET_VALUE);
+      if (result == ERROR_SUCCESS) {
+        other_info.Initialize(state_key);
+        if (!other_info.Equals(channel_info))
+          channel_info.Write(&state_key);
+      } else {
+        LOG(ERROR) << "Failed opening key " << dist->GetStateKey()
+                   << " to update app channels; result: " << result;
+      }
+    }
+  } else {
+    LOG(ERROR) << "Failed opening key " << state_key_
+               << " to update app channels; result: " << result;
+  }
 }
 
 }  // namespace installer

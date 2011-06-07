@@ -10,7 +10,7 @@
 
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/renderer/mock_printer.h"
-#include "chrome/renderer/render_thread.h"
+#include "content/renderer/render_thread.h"
 #include "ipc/ipc_test_sink.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 
@@ -18,9 +18,9 @@ namespace IPC {
 class MessageReplyDeserializer;
 }
 
-struct ViewMsg_Print_Params;
-struct ViewMsg_PrintPages_Params;
-struct ViewHostMsg_ScriptedPrint_Params;
+struct PrintMsg_Print_Params;
+struct PrintMsg_PrintPages_Params;
+struct PrintHostMsg_ScriptedPrint_Params;
 
 // This class is very simple mock of RenderThread. It simulates an IPC channel
 // which supports only two messages:
@@ -30,8 +30,6 @@ class MockRenderThread : public RenderThreadBase {
  public:
   MockRenderThread();
   virtual ~MockRenderThread();
-
-  virtual const ExtensionSet* GetExtensions() const;
 
   // Provides access to the messages that have been received by this thread.
   IPC::TestSink& sink() { return sink_; }
@@ -56,9 +54,7 @@ class MockRenderThread : public RenderThreadBase {
   virtual void WidgetHidden() { }
   virtual void WidgetRestored() { }
 
-  virtual bool IsExtensionProcess() const;
   virtual bool IsIncognitoProcess() const;
-  void SetExtensionProcess(bool value) { is_extension_process_ = value; }
 
   //////////////////////////////////////////////////////////////////////////
   // The following functions are called by the test itself.
@@ -82,6 +78,10 @@ class MockRenderThread : public RenderThreadBase {
 
   // Returns the pseudo-printer instance.
   MockPrinter* printer() const { return printer_.get(); }
+
+  // Call with |response| set to true if the user wants to print.
+  // False if the user decides to cancel.
+  void set_print_dialog_user_response(bool response);
 
  private:
   // This function operates as a regular IPC listener.
@@ -113,14 +113,14 @@ class MockRenderThread : public RenderThreadBase {
 #endif
 
   // The RenderView expects default print settings.
-  void OnGetDefaultPrintSettings(ViewMsg_Print_Params* setting);
+  void OnGetDefaultPrintSettings(PrintMsg_Print_Params* setting);
 
   // The RenderView expects final print settings from the user.
-  void OnScriptedPrint(const ViewHostMsg_ScriptedPrint_Params& params,
-                       ViewMsg_PrintPages_Params* settings);
+  void OnScriptedPrint(const PrintHostMsg_ScriptedPrint_Params& params,
+                       PrintMsg_PrintPages_Params* settings);
 
   void OnDidGetPrintedPagesCount(int cookie, int number_pages);
-  void OnDidPrintPage(const ViewHostMsg_DidPrintPage_Params& params);
+  void OnDidPrintPage(const PrintHostMsg_DidPrintPage_Params& params);
 
   IPC::TestSink sink_;
 
@@ -140,11 +140,8 @@ class MockRenderThread : public RenderThreadBase {
   // A mock printer device used for printing tests.
   scoped_ptr<MockPrinter> printer_;
 
-  // Contains extensions currently loaded by browser. This is usually empty
-  // for MockRenderThread.
-  ExtensionSet extensions_;
-
-  bool is_extension_process_;
+  // True to simulate user clicking print. False to cancel.
+  bool print_dialog_user_response_;
 };
 
 #endif  // CHROME_RENDERER_MOCK_RENDER_THREAD_H_

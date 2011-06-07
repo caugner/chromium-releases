@@ -13,7 +13,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "webkit/extensions/v8/gears_extension.h"
+#include "ui/gfx/gl/gl_bindings_skia_in_process.h"
+#include "v8/include/v8.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
 #if defined(OS_WIN)
@@ -30,12 +31,9 @@ TestShellWebKitInit::TestShellWebKitInit(bool layout_test_mode) {
   WebKit::WebSecurityPolicy::registerURLSchemeAsNoAccess(
       WebKit::WebString::fromUTF8("test-shell-resource"));
   WebKit::WebScriptController::enableV8SingleThreadMode();
-  WebKit::WebScriptController::registerExtension(
-      extensions_v8::GearsExtension::Get());
   WebKit::WebRuntimeFeatures::enableSockets(true);
   WebKit::WebRuntimeFeatures::enableApplicationCache(true);
   WebKit::WebRuntimeFeatures::enableDatabase(true);
-  WebKit::WebRuntimeFeatures::enableWebGL(true);
   WebKit::WebRuntimeFeatures::enablePushState(true);
   WebKit::WebRuntimeFeatures::enableNotifications(true);
   WebKit::WebRuntimeFeatures::enableTouch(true);
@@ -292,5 +290,6 @@ TestShellWebKitInit::sharedWorkerRepository() {
 }
 
 WebKit::WebGraphicsContext3D* TestShellWebKitInit::createGraphicsContext3D() {
+  gfx::BindSkiaToInProcessGL();
   return new webkit::gpu::WebGraphicsContext3DInProcessImpl();
 }

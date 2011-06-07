@@ -20,6 +20,7 @@ class Size;
 }
 
 class FilePath;
+class SkBitmap;
 
 #if defined(TOOLKIT_USES_GTK)
 typedef struct _GtkClipboard GtkClipboard;
@@ -139,6 +140,9 @@ class Clipboard {
   bool IsFormatAvailableByString(const std::string& format,
                                  Buffer buffer) const;
 
+  void ReadAvailableTypes(Buffer buffer, std::vector<string16>* types,
+                          bool* contains_filenames) const;
+
   // Reads UNICODE text from the clipboard, if available.
   void ReadText(Buffer buffer, string16* result) const;
 
@@ -147,6 +151,9 @@ class Clipboard {
 
   // Reads HTML from the clipboard, if available.
   void ReadHTML(Buffer buffer, string16* markup, std::string* src_url) const;
+
+  // Reads an image from the clipboard, if available.
+  SkBitmap ReadImage(Buffer buffer) const;
 
   // Reads a bookmark from the clipboard, if available.
   void ReadBookmark(string16* title, std::string* url) const;
@@ -267,6 +274,11 @@ class Clipboard {
   GtkClipboard* clipboard_;
   GtkClipboard* primary_selection_;
 #endif
+
+  // MIME type constants.
+  static const char kMimeTypeText[];
+  static const char kMimeTypeHTML[];
+  static const char kMimeTypePNG[];
 
   DISALLOW_COPY_AND_ASSIGN(Clipboard);
 };

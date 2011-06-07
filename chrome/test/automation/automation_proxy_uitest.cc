@@ -4,14 +4,13 @@
 
 #include <string>
 
-#include "app/app_switches.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/rtl.h"
-#include "base/scoped_temp_dir.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
@@ -24,7 +23,6 @@
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/json_value_serializer.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/autocomplete_edit_proxy.h"
 #include "chrome/test/automation/automation_proxy_uitest.h"
@@ -34,6 +32,7 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
+#include "content/common/json_value_serializer.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
@@ -722,7 +721,7 @@ void ExternalTabUITestMockClient::ServeHTMLData(int tab_handle,
           &ExternalTabUITestMockClient::ReplyEOF))));
 }
 
-void ExternalTabUITestMockClient::IgnoreFavIconNetworkRequest() {
+void ExternalTabUITestMockClient::IgnoreFaviconNetworkRequest() {
   // Ignore favicon.ico
   EXPECT_CALL(*this, OnRequestStart(_, testing::AllOf(
           testing::Field(&AutomationURLRequest::url,
@@ -749,7 +748,7 @@ void ExternalTabUITestMockClient::InvalidateHandle(
 const ExternalTabSettings ExternalTabUITestMockClient::default_settings(
     NULL, gfx::Rect(),  // will be replaced by CreateHostWindowAndTab
     WS_CHILD | WS_VISIBLE,
-    false,   // is_off_the_record
+    false,   // is_incognito
     true,    // load_requests_via_automation
     true,    // handle_top_level_requests
     GURL(),  // initial_url
@@ -957,7 +956,7 @@ TEST_F(ExternalTabUITest, FLAKY_IncognitoMode) {
 
   ExternalTabSettings incognito =
       ExternalTabUITestMockClient::default_settings;
-  incognito.is_off_the_record = true;
+  incognito.is_incognito = true;
   // SetCookie is a sync call and deadlock can happen if window is visible,
   // since it shares same thread with AutomationProxy.
   mock_->host_window_style_ &= ~WS_VISIBLE;
@@ -1278,7 +1277,7 @@ class ExternalTabUITestPopupEnabled : public ExternalTabUITest {
 TEST_F(ExternalTabUITestPopupEnabled, MAYBE_WindowDotOpen) {
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
-  mock_->IgnoreFavIconNetworkRequest();
+  mock_->IgnoreFaviconNetworkRequest();
   // Ignore navigation state changes.
   EXPECT_CALL(*mock_, OnNavigationStateChanged(_, _))
       .Times(testing::AnyNumber());
@@ -1343,7 +1342,7 @@ TEST_F(ExternalTabUITestPopupEnabled, MAYBE_WindowDotOpen) {
 TEST_F(ExternalTabUITestPopupEnabled, MAYBE_UserGestureTargetBlank) {
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
-  mock_->IgnoreFavIconNetworkRequest();
+  mock_->IgnoreFaviconNetworkRequest();
   // Ignore navigation state changes.
   EXPECT_CALL(*mock_, OnNavigationStateChanged(_, _))
       .Times(testing::AnyNumber());
@@ -1618,40 +1617,6 @@ class AutomationProxySnapshotTest : public UITest {
   FilePath snapshot_path_;
   ScopedTempDir snapshot_dir_;
 };
-
-// See http://crbug.com/63022.
-#if defined(OS_LINUX)
-#define MAYBE_ContentSmallerThanView FAILS_ContentSmallerThanView
-#else
-#define MAYBE_ContentSmallerThanView ContentSmallerThanView
-#endif
-// Tests that taking a snapshot when the content is smaller than the view
-// produces a snapshot equal to the view size.
-TEST_F(AutomationProxySnapshotTest, MAYBE_ContentSmallerThanView) {
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  ASSERT_TRUE(browser.get());
-
-  scoped_refptr<WindowProxy> window(browser->GetWindow());
-  ASSERT_TRUE(window.get());
-  ASSERT_TRUE(window->SetBounds(gfx::Rect(300, 400)));
-
-  scoped_refptr<TabProxy> tab(browser->GetTab(0));
-  ASSERT_TRUE(tab.get());
-
-  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
-            tab->NavigateToURL(GURL(chrome::kAboutBlankURL)));
-
-  gfx::Rect view_bounds;
-  ASSERT_TRUE(window->GetViewBounds(VIEW_ID_TAB_CONTAINER, &view_bounds,
-                                    false));
-
-  ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
-
-  SkBitmap bitmap;
-  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &bitmap));
-  ASSERT_EQ(view_bounds.width(), bitmap.width());
-  ASSERT_EQ(view_bounds.height(), bitmap.height());
-}
 
 // See http://crbug.com/63022.
 #if defined(OS_LINUX)

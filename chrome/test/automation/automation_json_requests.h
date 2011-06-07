@@ -14,7 +14,10 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 
 class AutomationMessageSender;
+class FilePath;
 class GURL;
+class DictionaryValue;
+class ListValue;
 class Value;
 
 struct WebKeyEvent {
@@ -37,6 +40,7 @@ struct WebKeyEvent {
 // completed successfully by the automation provider.
 bool SendAutomationJSONRequest(AutomationMessageSender* sender,
                                const std::string& request,
+                               int timeout_ms,
                                std::string* reply,
                                bool* success) WARN_UNUSED_RESULT;
 
@@ -98,6 +102,15 @@ bool SendReloadJSONRequest(
     int browser_index,
     int tab_index) WARN_UNUSED_RESULT;
 
+// Requests a snapshot of the entire page to be saved to the given path
+// in PNG format.
+// Returns true on success.
+bool SendCaptureEntirePageJSONRequest(
+    AutomationMessageSender* sender,
+    int browser_index,
+    int tab_index,
+    const FilePath& path) WARN_UNUSED_RESULT;
+
 // Requests the url of the specified tab. Returns true on success.
 bool SendGetTabURLJSONRequest(
     AutomationMessageSender* sender,
@@ -112,8 +125,18 @@ bool SendGetTabTitleJSONRequest(
     int tab_index,
     std::string* tab_title) WARN_UNUSED_RESULT;
 
-// Requests all the cookies for the given URL. Returns true on success.
+// Requests all the cookies for the given URL. On success returns true and
+// caller takes ownership of |cookies|, which is a list of all the cookies in
+// dictionary format.
 bool SendGetCookiesJSONRequest(
+    AutomationMessageSender* sender,
+    const std::string& url,
+    ListValue** cookies) WARN_UNUSED_RESULT;
+
+// Requests all the cookies for the given URL. Returns true on success.
+// Use |SendGetCookiesJSONRequest| for chrome versions greater than 11.
+// TODO(kkania): Remove this function when version 12 is stable.
+bool SendGetCookiesJSONRequestDeprecated(
     AutomationMessageSender* sender,
     int browser_index,
     const std::string& url,
@@ -123,13 +146,31 @@ bool SendGetCookiesJSONRequest(
 // on success.
 bool SendDeleteCookieJSONRequest(
     AutomationMessageSender* sender,
+    const std::string& url,
+    const std::string& cookie_name) WARN_UNUSED_RESULT;
+
+// Requests deletion of the cookie with the given name and URL. Returns true
+// on success. Use |SendDeleteCookieJSONRequest| for chrome versions greater
+// than 11.
+// TODO(kkania): Remove this function when version 12 is stable.
+bool SendDeleteCookieJSONRequestDeprecated(
+    AutomationMessageSender* sender,
     int browser_index,
     const std::string& url,
     const std::string& cookie_name) WARN_UNUSED_RESULT;
 
 // Requests setting the given cookie for the given URL. Returns true on
-// success.
+// success. The caller retains ownership of |cookie_dict|.
 bool SendSetCookieJSONRequest(
+    AutomationMessageSender* sender,
+    const std::string& url,
+    DictionaryValue* cookie_dict) WARN_UNUSED_RESULT;
+
+// Requests setting the given cookie for the given URL. Returns true on
+// success. Use |SendSetCookieJSONRequest| instead for chrome versions greater
+// than 11.
+// TODO(kkania): Remove this when version 12 is stable.
+bool SendSetCookieJSONRequestDeprecated(
     AutomationMessageSender* sender,
     int browser_index,
     const std::string& url,
@@ -190,8 +231,23 @@ bool SendWebKeyEventJSONRequest(
     int tab_index,
     const WebKeyEvent& key_event) WARN_UNUSED_RESULT;
 
+// Requests to send the key event for the given keycode+modifiers to a
+// browser window containing the specified tab. Returns true on success.
+bool SendNativeKeyEventJSONRequest(
+    AutomationMessageSender* sender,
+    int browser_index,
+    int tab_index,
+    ui::KeyboardCode key_code,
+    int modifiers) WARN_UNUSED_RESULT;
+
 // Requests to wait for all tabs to stop loading. Returns true on success.
 bool SendWaitForAllTabsToStopLoadingJSONRequest(
     AutomationMessageSender* sender) WARN_UNUSED_RESULT;
+
+// Requests the version of ChromeDriver automation supported by the automation
+// server. Returns true on success.
+bool SendGetChromeDriverAutomationVersion(
+    AutomationMessageSender* sender,
+    int* version) WARN_UNUSED_RESULT;
 
 #endif  // CHROME_TEST_AUTOMATION_AUTOMATION_JSON_REQUESTS_H_

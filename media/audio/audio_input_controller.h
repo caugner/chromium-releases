@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_AUDIO_AUDIO_INPUT_CONTROLLER_H_
 #define MEDIA_AUDIO_AUDIO_INPUT_CONTROLLER_H_
 
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "media/audio/audio_io.h"
@@ -34,9 +34,9 @@
 //
 namespace media {
 
-class AudioInputController :
-    public base::RefCountedThreadSafe<AudioInputController>,
-    public AudioInputStream::AudioInputCallback {
+class AudioInputController
+    : public base::RefCountedThreadSafe<AudioInputController>,
+      public AudioInputStream::AudioInputCallback {
  public:
   // An event handler that receives events from the AudioInputController. The
   // following methods are called on the audio input controller thread.
@@ -50,13 +50,30 @@ class AudioInputController :
                         uint32 size) = 0;
   };
 
+  // A synchronous writer interface used by AudioInputController for
+  // synchronous writing.
+  class SyncWriter {
+   public:
+    virtual ~SyncWriter() {}
+
+    // Notify the synchronous writer about the number of bytes in the
+    // AudioInputController which has been recorded.
+    virtual void UpdateRecordedBytes(uint32 bytes) = 0;
+
+    // Write certain amount of data from |data|. This method returns
+    // number of written bytes.
+    virtual uint32 Write(const void* data, uint32 size) = 0;
+
+    // Close this synchronous writer.
+    virtual void Close() = 0;
+  };
+
   // AudioInputController::Create uses the currently registered Factory to
   // create the AudioInputController. Factory is intended for testing.
   class Factory {
    public:
     virtual AudioInputController* Create(EventHandler* event_handler,
                                          AudioParameters params) = 0;
-
    protected:
     virtual ~Factory() {}
   };
@@ -70,6 +87,13 @@ class AudioInputController :
   static scoped_refptr<AudioInputController> Create(
       EventHandler* event_handler,
       AudioParameters params);
+
+  // Factory method for creating a low latency audio stream.
+  static scoped_refptr<AudioInputController> CreateLowLatency(
+      EventHandler* event_handler,
+      AudioParameters params,
+      // External synchronous reader for audio controller.
+      SyncWriter* sync_writer);
 
   // Sets the factory used by the static method Create. AudioInputController
   // does not take ownership of |factory|. A value of NULL results in an
@@ -89,6 +113,8 @@ class AudioInputController :
   // will have no effect.
   virtual void Close();
 
+  bool LowLatencyMode() const { return sync_writer_ != NULL; }
+
   ///////////////////////////////////////////////////////////////////////////
   // AudioInputCallback methods.
   virtual void OnData(AudioInputStream* stream, const uint8* src, uint32 size);
@@ -105,7 +131,7 @@ class AudioInputController :
     kError
   };
 
-  AudioInputController(EventHandler* handler);
+  AudioInputController(EventHandler* handler, SyncWriter* sync_writer);
 
   // The following methods are executed on the audio controller thread.
   void DoCreate(AudioParameters params);
@@ -126,6 +152,9 @@ class AudioInputController :
   // The audio input controller thread that this object runs on.
   base::Thread thread_;
 
+  // SyncWriter is used only in low latency mode for synchronous writing.
+  SyncWriter* sync_writer_;
+
   static Factory* factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioInputController);
@@ -133,4 +162,4 @@ class AudioInputController :
 
 }  // namespace media
 
-#endif  //  MEDIA_AUDIO_AUDIO_INPUT_CONTROLLER_H_
+#endif  // MEDIA_AUDIO_AUDIO_INPUT_CONTROLLER_H_

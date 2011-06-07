@@ -6,8 +6,8 @@
 
 #include "webkit/tools/test_shell/simple_socket_stream_bridge.h"
 
+#include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
 #include "googleurl/src/gurl.h"
 #include "net/socket_stream/socket_stream_job.h"
 #include "net/websockets/websocket_job.h"
@@ -156,7 +156,8 @@ void WebSocketStreamHandleBridgeImpl::OnClose(net::SocketStream* socket) {
 
 void WebSocketStreamHandleBridgeImpl::DoConnect(const GURL& url) {
   DCHECK(MessageLoop::current() == g_io_thread);
-  socket_ = net::SocketStreamJob::CreateSocketStreamJob(url, this);
+  socket_ = net::SocketStreamJob::CreateSocketStreamJob(
+      url, this, *g_request_context);
   socket_->set_context(g_request_context);
   socket_->Connect();
 }

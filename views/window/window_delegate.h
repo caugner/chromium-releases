@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 
 #include <string>
 
-#include "base/scoped_ptr.h"
-#include "views/accessibility/accessibility_types.h"
+#include "base/memory/scoped_ptr.h"
+#include "ui/base/accessibility/accessibility_types.h"
+#include "views/widget/widget_delegate.h"
 
 class SkBitmap;
 
@@ -33,7 +34,7 @@ class Window;
 //  it should be displayed and notify the delegate object of certain events.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class WindowDelegate {
+class WindowDelegate : public WidgetDelegate {
  public:
   WindowDelegate();
   virtual ~WindowDelegate();
@@ -46,13 +47,16 @@ class WindowDelegate {
   // Returns true if the window can ever be maximized.
   virtual bool CanMaximize() const;
 
+  // Returns true if the window can be activated.
+  virtual bool CanActivate() const;
+
   // Returns true if the dialog should be displayed modally to the window that
   // opened it. Only windows with WindowType == DIALOG can be modal.
   virtual bool IsModal() const;
 
-  virtual AccessibilityTypes::Role accessible_role() const;
+  virtual ui::AccessibilityTypes::Role GetAccessibleWindowRole() const;
 
-  virtual AccessibilityTypes::State accessible_state() const;
+  virtual ui::AccessibilityTypes::State GetAccessibleWindowState() const;
 
   // Returns the title to be read with screen readers.
   virtual std::wstring GetAccessibleWindowTitle() const;
@@ -104,13 +108,21 @@ class WindowDelegate {
   // Default is true.
   virtual bool ShouldRestoreWindowSize() const;
 
-  // Called when the window closes.
+  // Called when the window closes. The delegate MUST NOT delete itself during
+  // this call, since it can be called afterwards. See DeleteDelegate().
   virtual void WindowClosing() {}
 
   // Called when the window is destroyed. No events must be sent or received
   // after this point. The delegate can use this opportunity to delete itself at
   // this time if necessary.
   virtual void DeleteDelegate() {}
+
+  // Called when the window's activation state changes.
+  virtual void OnWindowActivationChanged(bool active) {}
+
+  // Called when the user begins/ends to change the bounds of the window.
+  virtual void OnWindowBeginUserBoundsChange() {}
+  virtual void OnWindowEndUserBoundsChange() {}
 
   // Returns the View that is contained within this Window.
   virtual View* GetContentsView();

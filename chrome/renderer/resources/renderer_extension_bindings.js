@@ -27,6 +27,10 @@ var chrome = chrome || {};
   // Map of port IDs to port object.
   var ports = {};
 
+  // Map of port IDs to chromeHidden.onUnload listeners. Keep track of these
+  // to free the onUnload listeners when ports are closed.
+  var portReleasers = {};
+
   // Change even to odd and vice versa, to get the other side of a given
   // channel.
   function getOppositePortId(portId) { return portId ^ 1; }
@@ -50,9 +54,9 @@ var chrome = chrome || {};
     }
     var port = new chrome.Port(portId, opt_name);
     ports[portId] = port;
-    chromeHidden.onUnload.addListener(function() {
-      PortRelease(portId);
-    });
+    portReleasers[portId] = PortRelease.partial(portId);
+    chromeHidden.onUnload.addListener(portReleasers[portId]);
+
     PortAddRef(portId);
     return port;
   };
@@ -87,6 +91,7 @@ var chrome = chrome || {};
         port.onMessage.addListener(function(request) {
           requestEvent.dispatch(request, sender, function(response) {
             port.postMessage(response);
+            port = null;
           });
         });
       }
@@ -121,8 +126,8 @@ var chrome = chrome || {};
       try {
         port.onDisconnect.dispatch(port);
       } finally {
+        port.destroy_();
         delete chrome.extension.lastError;
-        delete ports[portId];
       }
     }
   };
@@ -149,8 +154,21 @@ var chrome = chrome || {};
 
   // Disconnects the port from the other end.
   chrome.Port.prototype.disconnect = function() {
-    delete ports[this.portId_];
     CloseChannel(this.portId_, true);
+    this.destroy_();
+  };
+
+  chrome.Port.prototype.destroy_ = function() {
+    var portId = this.portId_;
+
+    this.onDisconnect.destroy_();
+    this.onMessage.destroy_();
+
+    PortRelease(portId);
+    chromeHidden.onUnload.removeListener(portReleasers[portId]);
+
+    delete ports[portId];
+    delete portReleasers[portId];
   };
 
   // This function is called on context initialization for both content scripts
@@ -209,13 +227,21 @@ var chrome = chrome || {};
       port.postMessage(request);
       port.onDisconnect.addListener(function() {
         // For onDisconnects, we only notify the callback if there was an error
-        if (chrome.extension.lastError && responseCallback)
-          responseCallback();
+        try {
+          if (chrome.extension.lastError && responseCallback)
+            responseCallback();
+        } finally {
+          port = null;
+        }
       });
       port.onMessage.addListener(function(response) {
-        if (responseCallback)
-          responseCallback(response);
-        port.disconnect();
+        try {
+          if (responseCallback)
+            responseCallback(response);
+        } finally {
+          port.disconnect();
+          port = null;
+        }
       });
     };
 
@@ -269,6 +295,7 @@ var chrome = chrome || {};
       // Entire namespaces.
       "bookmarks",
       "browserAction",
+      "chromeosInfoPrivate",
       "contextMenus",
       "cookies",
       "devtools",
@@ -277,6 +304,7 @@ var chrome = chrome || {};
       "experimental.clipboard",
       "experimental.contentSettings.misc",
       "experimental.extension",
+      "experimental.debugger",
       "experimental.infobars",
       "experimental.input",
       "experimental.metrics",
@@ -290,6 +318,9 @@ var chrome = chrome || {};
       "experimental.webRequest",
       "history",
       "idle",
+      "fileBrowserHandler",
+      "fileBrowserPrivate",
+      "fileSystem",
       "management",
       "omnibox",
       "pageAction",
@@ -305,6 +336,8 @@ var chrome = chrome || {};
       "extension.getExtensionTabs",
       "extension.getToolstrips",
       "extension.getViews",
+      "extension.isAllowedIncognitoAccess",
+      "extension.isAllowedFileSchemeAccess",
       "extension.onConnectExternal",
       "extension.onRequestExternal",
       "extension.setUpdateUrlData",

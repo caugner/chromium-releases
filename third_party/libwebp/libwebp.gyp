@@ -10,22 +10,50 @@
     ['use_system_libwebp==0', {
       'targets': [
         {
-          'target_name': 'libwebp',
+          'target_name': 'libwebp_enc',
           'type': '<(library)',
+          'include_dirs': ['.'],
           'sources': [
-            'bits.c',
-            'dsp.c',
-            'frame.c',
-            'quant.c',
-            'tree.c',
-            'vp8.c',
-            'webp.c',
-            'yuv.c',
+            'enc/analysis.c',
+            'enc/bit_writer.c',
+            'enc/config.c',
+            'enc/cost.c',
+            'enc/dsp.c',
+            'enc/filter.c',
+            'enc/frame.c',
+            'enc/iterator.c',
+            'enc/picture.c',
+            'enc/quant.c',
+            'enc/syntax.c',
+            'enc/tree.c',
+            'enc/webpenc.c'
+          ],
+        },
+        {
+          'target_name': 'libwebp_dec',
+          'type': '<(library)',
+          'include_dirs': ['.'],
+          'sources': [
+            'dec/bits.c',
+            'dec/dsp.c',
+            'dec/frame.c',
+            'dec/idec.c',
+            'dec/quant.c',
+            'dec/tree.c',
+            'dec/vp8.c',
+            'dec/webp.c',
+            'dec/yuv.c',
+          ],
+        },
+        {
+          'target_name': 'libwebp',
+          'type': 'none',
+          'dependencies' : [
+            'libwebp_enc',
+            'libwebp_dec',
           ],
           'direct_dependent_settings': {
-            'include_dirs': [
-              '.', './webp',
-            ],
+            'include_dirs': ['.'],
           },
           'conditions': [
             ['OS!="win"', {'product_name': 'webp'}],

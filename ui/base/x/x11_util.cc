@@ -231,7 +231,7 @@ bool GetWindowRect(XID window, gfx::Rect* rect) {
                     &width, &height, &border_width, &depth))
     return false;
 
-  if (!XTranslateCoordinates(GetSecondaryDisplay(), window, root,
+  if (!XTranslateCoordinates(GetXDisplay(), window, root,
                              0, 0, &x, &y, &child))
     return false;
 
@@ -828,7 +828,7 @@ void SetX11ErrorHandlers(XErrorHandler error_handler,
 }
 
 void LogErrorEventDescription(Display* dpy,
-                              XErrorEvent error_event) {
+                              const XErrorEvent& error_event) {
   char error_str[256];
   char request_str[256];
 

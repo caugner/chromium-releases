@@ -7,9 +7,9 @@
 
 #include "ui/base/win/window_impl.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
-#include "base/scoped_vector.h"
 #include "ui/views/widget/native_widget.h"
 
 namespace gfx {
@@ -236,10 +236,6 @@ class NativeWidgetWin : public NativeWidget,
                          bool non_client);
   void ProcessMouseMoved(const CPoint& point, UINT flags, bool is_nonclient);
   void ProcessMouseExited();
-
-  // Fills out a MSG struct with the supplied values.
-  void MakeMSG(MSG* msg, UINT message, WPARAM w_param, LPARAM l_param,
-               DWORD time = 0, LONG x = 0, LONG y = 0) const;
 
   void CloseNow();
 

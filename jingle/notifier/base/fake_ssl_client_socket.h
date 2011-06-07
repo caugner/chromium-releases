@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -20,9 +20,9 @@
 #include <cstddef>
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_piece.h"
-#include "base/ref_counted.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
 #include "net/socket/client_socket.h"
@@ -56,6 +56,7 @@ class FakeSSLClientSocket : public net::ClientSocket {
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
   virtual int GetPeerAddress(net::AddressList* address) const;
+  virtual int GetLocalAddress(net::IPEndPoint* address) const;
   virtual const net::BoundNetLog& NetLog() const;
   virtual void SetSubresourceSpeculation();
   virtual void SetOmniboxSpeculation();

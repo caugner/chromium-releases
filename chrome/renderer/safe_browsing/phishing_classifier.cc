@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,18 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/sha2.h"
+#include "base/message_loop.h"
 #include "base/string_util.h"
+#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/render_view.h"
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
 #include "chrome/renderer/safe_browsing/features.h"
 #include "chrome/renderer/safe_browsing/phishing_dom_feature_extractor.h"
 #include "chrome/renderer/safe_browsing/phishing_term_feature_extractor.h"
 #include "chrome/renderer/safe_browsing/phishing_url_feature_extractor.h"
 #include "chrome/renderer/safe_browsing/scorer.h"
+#include "content/renderer/render_view.h"
+#include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -28,8 +30,8 @@
 
 namespace safe_browsing {
 
-const double PhishingClassifier::kInvalidScore = -1.0;
-const double PhishingClassifier::kPhishyThreshold = 0.5;
+const float PhishingClassifier::kInvalidScore = -1.0;
+const float PhishingClassifier::kPhishyThreshold = 0.5;
 
 PhishingClassifier::PhishingClassifier(RenderView* render_view,
                                        FeatureExtractorClock* clock)
@@ -152,19 +154,37 @@ void PhishingClassifier::DOMExtractionFinished(bool success) {
 
 void PhishingClassifier::TermExtractionFinished(bool success) {
   if (success) {
+    WebKit::WebView* web_view = render_view_->webview();
+    if (!web_view) {
+      RunFailureCallback();
+      return;
+    }
+    WebKit::WebFrame* main_frame = web_view->mainFrame();
+    if (!main_frame) {
+      RunFailureCallback();
+      return;
+    }
+
     // Hash all of the features so that they match the model, then compute
     // the score.
     FeatureMap hashed_features;
+    ClientPhishingRequest verdict;
+    verdict.set_url(main_frame->url().spec());
     for (base::hash_map<std::string, double>::const_iterator it =
              features_->features().begin();
          it != features_->features().end(); ++it) {
+      VLOG(2) << "Feature: " << it->first << " = " << it->second;
       bool result = hashed_features.AddRealFeature(
-          base::SHA256HashString(it->first), it->second);
+          crypto::SHA256HashString(it->first), it->second);
       DCHECK(result);
+      ClientPhishingRequest::Feature* feature = verdict.add_feature_map();
+      feature->set_name(it->first);
+      feature->set_value(it->second);
     }
-
-    double score = scorer_->ComputeScore(hashed_features);
-    RunCallback(score >= kPhishyThreshold, score);
+    float score = static_cast<float>(scorer_->ComputeScore(hashed_features));
+    verdict.set_client_score(score);
+    verdict.set_is_phishing(score >= kPhishyThreshold);
+    RunCallback(verdict);
   } else {
     RunFailureCallback();
   }
@@ -179,13 +199,19 @@ void PhishingClassifier::CheckNoPendingClassification() {
   }
 }
 
-void PhishingClassifier::RunCallback(bool phishy, double phishy_score) {
-  done_callback_->Run(phishy, phishy_score);
+void PhishingClassifier::RunCallback(const ClientPhishingRequest& verdict) {
+  done_callback_->Run(verdict);
   Clear();
 }
 
 void PhishingClassifier::RunFailureCallback() {
-  RunCallback(false /* not phishy */, kInvalidScore);
+  ClientPhishingRequest verdict;
+  // In this case we're not guaranteed to have a valid URL.  Just set it
+  // to the empty string to make sure we have a valid protocol buffer.
+  verdict.set_url("");
+  verdict.set_client_score(kInvalidScore);
+  verdict.set_is_phishing(false);
+  RunCallback(verdict);
 }
 
 void PhishingClassifier::Clear() {

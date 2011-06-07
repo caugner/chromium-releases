@@ -7,14 +7,14 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "chrome/browser/automation/automation_resource_routing_delegate.h"
 #include "chrome/common/content_settings_types.h"
-#include "chrome/common/navigation_types.h"
-#include "chrome/common/page_transition_types.h"
+#include "chrome/common/instant_types.h"
 #include "content/browser/tab_contents/navigation_entry.h"
+#include "content/common/navigation_types.h"
+#include "content/common/page_transition_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -36,7 +36,6 @@ struct NativeWebKeyboardEvent;
 class Profile;
 class RenderViewHost;
 class TabContents;
-struct WebApplicationInfo;
 
 // Objects implement this interface to get notified about changes in the
 // TabContents and to provide necessary functionality.
@@ -118,10 +117,6 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
 
   // Invoked prior to the TabContents showing a constrained window.
   virtual void WillShowConstrainedWindow(TabContents* source);
-
-  // Notification that some of our content has changed size as
-  // part of an animation.
-  virtual void ToolbarSizeChanged(TabContents* source, bool is_animating) = 0;
 
   // Notification that the target URL has changed.
   virtual void UpdateTargetURL(TabContents* source, const GURL& url) = 0;
@@ -243,6 +238,11 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // page url.
   virtual void ViewSourceForTab(TabContents* source, const GURL& page_url);
 
+  // Opens source view for the given subframe.
+  virtual void ViewSourceForFrame(TabContents* source,
+                                  const GURL& url,
+                                  const std::string& content_state);
+
   // Allows delegates to handle keyboard events before sending to the renderer.
   // Returns true if the |event| was handled. Otherwise, if the |event| would be
   // handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
@@ -263,8 +263,8 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Shows the repost form confirmation dialog box.
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
 
-  // Shows the Content Settings dialog for a given content type.
-  virtual void ShowContentSettingsWindow(ContentSettingsType content_type);
+  // Shows the Content Settings page for a given content type.
+  virtual void ShowContentSettingsPage(ContentSettingsType content_type);
 
   // Shows the cookies collected in the tab contents.
   virtual void ShowCollectedCookiesDialog(TabContents* tab_contents);
@@ -278,14 +278,6 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
       NavigationType::Type navigation_type);
-
-  // Notification that a user's request to install an application has completed.
-  virtual void OnDidGetApplicationInfo(TabContents* tab_contents,
-                                       int32 page_id);
-
-  // Notification when an application programmatically requests installation.
-  virtual void OnInstallApplication(TabContents* tab_contents,
-                                    const WebApplicationInfo& app_info);
 
   // Returns the native window framing the view containing the tab contents.
   virtual gfx::NativeWindow GetFrameNativeWindow();
@@ -306,13 +298,6 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Notification that the preferred size of the contents has changed.
   // Only called if ShouldEnablePreferredSizeNotifications() returns true.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
-
-  // Notifies the delegate that the page has a suggest result.
-  virtual void OnSetSuggestions(int32 page_id,
-                                const std::vector<std::string>& result);
-
- // Notifies the delegate whether the page supports instant-style interaction.
-  virtual void OnInstantSupportDetermined(int32 page_id, bool result);
 
   // Notifies the delegate that the content restrictions for this tab has
   // changed.

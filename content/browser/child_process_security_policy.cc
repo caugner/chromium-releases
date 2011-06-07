@@ -9,8 +9,8 @@
 #include "base/platform_file.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
-#include "chrome/common/bindings_policy.h"
 #include "chrome/common/url_constants.h"
+#include "content/common/bindings_policy.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request.h"
 
@@ -19,6 +19,10 @@ static const int kReadFilePermissions =
     base::PLATFORM_FILE_READ |
     base::PLATFORM_FILE_EXCLUSIVE_READ |
     base::PLATFORM_FILE_ASYNC;
+
+static const int kEnumerateDirectoryPermissions =
+    kReadFilePermissions |
+    base::PLATFORM_FILE_ENUMERATE;
 
 // The SecurityState class is used to maintain per-child process security state
 // information.
@@ -132,7 +136,7 @@ ChildProcessSecurityPolicy::ChildProcessSecurityPolicy() {
   RegisterWebSafeScheme(chrome::kBlobScheme);
   RegisterWebSafeScheme(chrome::kFileSystemScheme);
 
-  // We know about the following psuedo schemes and treat them specially.
+  // We know about the following pseudo schemes and treat them specially.
   RegisterPseudoScheme(chrome::kAboutScheme);
   RegisterPseudoScheme(chrome::kJavaScriptScheme);
   RegisterPseudoScheme(chrome::kViewSourceScheme);
@@ -153,12 +157,14 @@ ChildProcessSecurityPolicy* ChildProcessSecurityPolicy::GetInstance() {
 
 void ChildProcessSecurityPolicy::Add(int child_id) {
   base::AutoLock lock(lock_);
-  if (security_state_.count(child_id) != 0) {
-    NOTREACHED() << "Add child process at most once.";
-    return;
-  }
+  AddChild(child_id);
+}
 
-  security_state_[child_id] = new SecurityState();
+void ChildProcessSecurityPolicy::AddWorker(int child_id,
+                                           int main_render_process_id) {
+  base::AutoLock lock(lock_);
+  AddChild(child_id);
+  worker_map_[child_id] = main_render_process_id;
 }
 
 void ChildProcessSecurityPolicy::Remove(int child_id) {
@@ -168,13 +174,14 @@ void ChildProcessSecurityPolicy::Remove(int child_id) {
 
   delete security_state_[child_id];
   security_state_.erase(child_id);
+  worker_map_.erase(child_id);
 }
 
 void ChildProcessSecurityPolicy::RegisterWebSafeScheme(
     const std::string& scheme) {
   base::AutoLock lock(lock_);
   DCHECK(web_safe_schemes_.count(scheme) == 0) << "Add schemes at most once.";
-  DCHECK(pseudo_schemes_.count(scheme) == 0) << "Web-safe implies not psuedo.";
+  DCHECK(pseudo_schemes_.count(scheme) == 0) << "Web-safe implies not pseudo.";
 
   web_safe_schemes_.insert(scheme);
 }
@@ -190,7 +197,7 @@ void ChildProcessSecurityPolicy::RegisterPseudoScheme(
   base::AutoLock lock(lock_);
   DCHECK(pseudo_schemes_.count(scheme) == 0) << "Add schemes at most once.";
   DCHECK(web_safe_schemes_.count(scheme) == 0) <<
-      "Psuedo implies not web-safe.";
+      "Pseudo implies not web-safe.";
 
   pseudo_schemes_.insert(scheme);
 }
@@ -199,6 +206,17 @@ bool ChildProcessSecurityPolicy::IsPseudoScheme(const std::string& scheme) {
   base::AutoLock lock(lock_);
 
   return (pseudo_schemes_.find(scheme) != pseudo_schemes_.end());
+}
+
+void ChildProcessSecurityPolicy::RegisterDisabledSchemes(
+    const std::set<std::string>& schemes) {
+  base::AutoLock lock(lock_);
+  disabled_schemes_ = schemes;
+}
+
+bool ChildProcessSecurityPolicy::IsDisabledScheme(const std::string& scheme) {
+  base::AutoLock lock(lock_);
+  return disabled_schemes_.find(scheme) != disabled_schemes_.end();
 }
 
 void ChildProcessSecurityPolicy::GrantRequestURL(
@@ -239,6 +257,11 @@ void ChildProcessSecurityPolicy::GrantRequestURL(
 void ChildProcessSecurityPolicy::GrantReadFile(int child_id,
                                                const FilePath& file) {
   GrantPermissionsForFile(child_id, file, kReadFilePermissions);
+}
+
+void ChildProcessSecurityPolicy::GrantReadDirectory(int child_id,
+                                                    const FilePath& directory) {
+  GrantPermissionsForFile(child_id, directory, kEnumerateDirectoryPermissions);
 }
 
 void ChildProcessSecurityPolicy::GrantPermissionsForFile(
@@ -325,6 +348,9 @@ bool ChildProcessSecurityPolicy::CanRequestURL(
   if (!url.is_valid())
     return false;  // Can't request invalid URLs.
 
+  if (IsDisabledScheme(url.scheme()))
+    return false; // The scheme is disabled by policy.
+
   if (IsWebSafeScheme(url.scheme()))
     return true;  // The scheme has been white-listed for every child process.
 
@@ -372,15 +398,28 @@ bool ChildProcessSecurityPolicy::CanReadFile(int child_id,
   return HasPermissionsForFile(child_id, file, kReadFilePermissions);
 }
 
+bool ChildProcessSecurityPolicy::CanReadDirectory(int child_id,
+                                                  const FilePath& directory) {
+  return HasPermissionsForFile(child_id,
+                               directory,
+                               kEnumerateDirectoryPermissions);
+}
+
 bool ChildProcessSecurityPolicy::HasPermissionsForFile(
     int child_id, const FilePath& file, int permissions) {
   base::AutoLock lock(lock_);
-
-  SecurityStateMap::iterator state = security_state_.find(child_id);
-  if (state == security_state_.end())
-    return false;
-
-  return state->second->HasPermissionsForFile(file, permissions);
+  bool result = ChildProcessHasPermissionsForFile(child_id, file, permissions);
+  if (!result) {
+    // If this is a worker thread that has no access to a given file,
+    // let's check that its renderer process has access to that file instead.
+    WorkerToMainProcessMap::iterator iter = worker_map_.find(child_id);
+    if (iter != worker_map_.end() && iter->second != 0) {
+      result = ChildProcessHasPermissionsForFile(iter->second,
+                                                 file,
+                                                 permissions);
+    }
+  }
+  return result;
 }
 
 bool ChildProcessSecurityPolicy::HasWebUIBindings(int child_id) {
@@ -411,4 +450,21 @@ bool ChildProcessSecurityPolicy::CanReadRawCookies(int child_id) {
     return false;
 
   return state->second->can_read_raw_cookies();
+}
+
+void ChildProcessSecurityPolicy::AddChild(int child_id) {
+  if (security_state_.count(child_id) != 0) {
+    NOTREACHED() << "Add child process at most once.";
+    return;
+  }
+
+  security_state_[child_id] = new SecurityState();
+}
+
+bool ChildProcessSecurityPolicy::ChildProcessHasPermissionsForFile(
+    int child_id, const FilePath& file, int permissions) {
+  SecurityStateMap::iterator state = security_state_.find(child_id);
+  if (state == security_state_.end())
+    return false;
+  return state->second->HasPermissionsForFile(file, permissions);
 }

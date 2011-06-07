@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/hash_tables.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process.h"
-#include "base/scoped_ptr.h"
 #include "build/build_config.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_instance.h"
@@ -35,7 +35,7 @@ class PluginDispatcher : public Dispatcher {
   // will be automatically called when requested by the renderer side. The
   // module ID will be set upon receipt of the InitializeModule message.
   //
-  // You must call Dispatcher::InitWithChannel after the constructor.
+  // You must call InitPluginWithChannel after the constructor.
   PluginDispatcher(base::ProcessHandle remote_process_handle,
                    GetInterfaceFunc get_interface);
   virtual ~PluginDispatcher();
@@ -48,8 +48,16 @@ class PluginDispatcher : public Dispatcher {
 
   static const void* GetInterfaceFromDispatcher(const char* interface);
 
+  // You must call this function before anything else. Returns true on success.
+  // The delegate pointer must outlive this class, ownership is not
+  // transferred.
+  virtual bool InitPluginWithChannel(Dispatcher::Delegate* delegate,
+                                     const IPC::ChannelHandle& channel_handle,
+                                     bool is_client);
+
   // Dispatcher overrides.
   virtual bool IsPlugin() const;
+  virtual bool Send(IPC::Message* msg);
 
   // IPC::Channel::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -64,12 +72,6 @@ class PluginDispatcher : public Dispatcher {
   // correspond to  a known instance.
   InstanceData* GetInstanceData(PP_Instance instance);
 
-#if defined(OS_POSIX)
-  // See renderer_fd_ below.
-  int GetRendererFD();
-  void CloseRendererFD();
-#endif
-
  private:
   friend class PluginDispatcherTest;
 
@@ -79,13 +81,6 @@ class PluginDispatcher : public Dispatcher {
 
   // IPC message handlers.
   void OnMsgSupportsInterface(const std::string& interface_name, bool* result);
-
-#if defined(OS_POSIX)
-  // FD for the renderer end of the socket. It is closed when the IPC layer
-  // indicates that the channel is connected, proving that the renderer has
-  // access to its side of the socket.
-  int renderer_fd_;
-#endif
 
   // All target proxies currently created. These are ones that receive
   // messages.

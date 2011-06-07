@@ -4,17 +4,7 @@
 
 {
   'variables': {
-    # TODO: remove this helper when we have loops in GYP
-    'apply_locales_cmd': ['python', '<(DEPTH)/build/apply_locales.py',],
     'chromium_code': 1,
-    'grit_info_cmd': ['python', '../tools/grit/grit_info.py',
-                      '<@(grit_defines)'],
-    'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/app',
-    'grit_cmd': ['python', '../tools/grit/grit.py'],
-    'localizable_resources': [
-      'resources/app_locale_settings.grd',
-      'resources/app_strings.grd',
-    ],
   },
   'includes': [
     'app_base.gypi',
@@ -50,12 +40,14 @@
         '../ui/base/models/tree_node_iterator_unittest.cc',
         '../ui/base/models/tree_node_model_unittest.cc',
         '../ui/base/resource/data_pack_unittest.cc',
+        '../ui/base/resource/resource_bundle_unittest.cc',
         '../ui/base/system_monitor/system_monitor_unittest.cc',
         '../ui/base/test/data/resource.h',
         '../ui/base/text/text_elider_unittest.cc',
         '../ui/base/view_prop_unittest.cc',
         'run_all_unittests.cc',
         'sql/connection_unittest.cc',
+        'sql/sqlite_features_unittest.cc',
         'sql/statement_unittest.cc',
         'sql/transaction_unittest.cc',
         'test_suite.cc',
@@ -70,9 +62,9 @@
             '../ui/base/dragdrop/gtk_dnd_util_unittest.cc',
           ],
           'dependencies': [
-            'app_unittest_strings',
             '../build/linux/system.gyp:gtk',
             '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+            '../ui/base/strings/ui_strings.gyp:ui_unittest_strings',
           ],
         }],
         ['OS!="win"', {
@@ -93,115 +85,23 @@
       ],
     },
     {
-      'target_name': 'app_strings',
-      'msvs_guid': 'AE9BF4A2-19C5-49D8-BB1A-F28496DD7051',
-      'type': 'none',
-      'rules': [
-        {
-          'rule_name': 'grit',
-          'extension': 'grd',
-          'inputs': [
-            '<!@(<(grit_info_cmd) --inputs <(localizable_resources))',
-          ],
-          'outputs': [
-            '<(grit_out_dir)/<(RULE_INPUT_ROOT)/grit/<(RULE_INPUT_ROOT).h',
-            # TODO: remove this helper when we have loops in GYP
-            '>!@(<(apply_locales_cmd) \'<(grit_out_dir)/<(RULE_INPUT_ROOT)/<(RULE_INPUT_ROOT)_ZZLOCALE.pak\' <(locales))',
-          ],
-          'action': ['<@(grit_cmd)', '-i', '<(RULE_INPUT_PATH)',
-            'build', '-o', '<(grit_out_dir)/<(RULE_INPUT_ROOT)',
-            '<@(grit_defines)'],
-          'message': 'Generating resources from <(RULE_INPUT_PATH)',
-        },
-      ],
-      'sources': [
-        '<@(localizable_resources)',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(grit_out_dir)/app_locale_settings',
-          '<(grit_out_dir)/app_strings',
-        ],
-      },
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': ['../build/win/system.gyp:cygwin'],
-        }],
-      ],
-    },
-    {
       'target_name': 'app_resources',
       'type': 'none',
       'msvs_guid': '3FBC4235-3FBD-46DF-AEDC-BADBBA13A095',
+      'variables': {
+        'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/app/app_resources',
+      },
       'actions': [
         {
           'action_name': 'app_resources',
           'variables': {
-            'input_path': 'resources/app_resources.grd',
+            'grit_grd_file': 'resources/app_resources.grd',
           },
-          'inputs': [
-            '<!@(<(grit_info_cmd) --inputs <(input_path))',
-          ],
-          'outputs': [
-            '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)/app_resources\' <(input_path))',
-          ],
-          'action': ['<@(grit_cmd)',
-                     '-i', '<(input_path)', 'build',
-                     '-o', '<(grit_out_dir)/app_resources',
-                     '<@(grit_defines)' ],
-          'message': 'Generating resources from <(input_path)',
+          'includes': [ '../build/grit_action.gypi' ],
         },
       ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(grit_out_dir)/app_resources',
-        ],
-      },
-      'conditions': [
-        ['OS=="win"', {
-          'dependencies': ['../build/win/system.gyp:cygwin'],
-        }],
-      ],
+      'includes': [ '../build/grit_target.gypi' ],
     },
-  ],
-  'conditions': [
-    ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
-      'targets': [{
-        'target_name': 'app_unittest_strings',
-        'type': 'none',
-        'variables': {
-          'repack_path': '<(DEPTH)/tools/data_pack/repack.py',
-        },
-        'actions': [
-          {
-            'action_name': 'repack_app_unittest_strings',
-            'variables': {
-              'pak_inputs': [
-                '<(grit_out_dir)/app_strings/app_strings_en-US.pak',
-                '<(grit_out_dir)/app_locale_settings/app_locale_settings_en-US.pak',
-              ],
-            },
-            'inputs': [
-              '<(repack_path)',
-              '<@(pak_inputs)',
-            ],
-            'outputs': [
-              '<(PRODUCT_DIR)/app_unittests_strings/en-US.pak',
-            ],
-            'action': ['python', '<(repack_path)', '<@(_outputs)',
-                       '<@(pak_inputs)'],
-          },
-        ],
-        'copies': [
-          {
-            'destination': '<(PRODUCT_DIR)/app_unittests_strings',
-            'files': [
-              '<(grit_out_dir)/app_resources/app_resources.pak',
-            ],
-          },
-        ],
-      }],
-    }],
   ],
 }
 

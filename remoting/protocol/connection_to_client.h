@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <deque>
 #include <vector>
 
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/video_writer.h"
 
@@ -47,13 +47,9 @@ class ConnectionToClient :
   // Constructs a ConnectionToClient object. |message_loop| is the message loop
   // that this object runs on. A viewer object receives events and messages from
   // a libjingle channel, these events are delegated to |handler|.
-  // It is guranteed that |handler| is called only on the |message_loop|.
+  // It is guaranteed that |handler| is called only on the |message_loop|.
   ConnectionToClient(MessageLoop* message_loop,
-                     EventHandler* handler,
-                     HostStub* host_stub,
-                     InputStub* input_stub);
-
-  virtual ~ConnectionToClient();
+                     EventHandler* handler);
 
   virtual void Init(Session* session);
 
@@ -72,8 +68,13 @@ class ConnectionToClient :
   // Return pointer to ClientStub.
   virtual ClientStub* client_stub();
 
-  // Called when the host accepts the client authentication.
-  void OnClientAuthenticated();
+  // These two setters should be called before Init().
+  virtual void set_host_stub(HostStub* host_stub);
+  virtual void set_input_stub(InputStub* input_stub);
+
+ protected:
+  friend class base::RefCountedThreadSafe<ConnectionToClient>;
+  virtual ~ConnectionToClient();
 
  private:
   // Callback for protocol Session.
@@ -83,11 +84,6 @@ class ConnectionToClient :
   void StateChangeTask(Session::State state);
 
   void OnClosed();
-
-  // Initially false, this is set to true once the client has authenticated
-  // properly. When this is false, many client messages (like input events)
-  // will be ignored.
-  bool client_authenticated_;
 
   // The libjingle channel used to send and receive data from the remote client.
   scoped_refptr<Session> session_;

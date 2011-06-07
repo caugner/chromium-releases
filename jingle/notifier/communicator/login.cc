@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,19 +33,18 @@ static const int kRedirectTimeoutMinutes = 5;
 Login::Login(Delegate* delegate,
              const buzz::XmppClientSettings& user_settings,
              const ConnectionOptions& options,
-             net::HostResolver* host_resolver,
-             net::CertVerifier* cert_verifier,
-             ServerInformation* server_list,
-             int server_count,
-             bool try_ssltcp_first)
+             const scoped_refptr<net::URLRequestContextGetter>&
+                request_context_getter,
+             const ServerList& servers,
+             bool try_ssltcp_first,
+             const std::string& auth_mechanism)
     : delegate_(delegate),
       login_settings_(new LoginSettings(user_settings,
                                         options,
-                                        host_resolver,
-                                        cert_verifier,
-                                        server_list,
-                                        server_count,
-                                        try_ssltcp_first)),
+                                        request_context_getter,
+                                        servers,
+                                        try_ssltcp_first,
+                                        auth_mechanism)),
       redirect_port_(0) {
   net::NetworkChangeNotifier::AddIPAddressObserver(this);
   ResetReconnectState();
@@ -71,6 +70,10 @@ void Login::StartConnection() {
   VLOG(1) << "Starting connection...";
 
   single_attempt_.reset(new SingleLoginAttempt(login_settings_.get(), this));
+}
+
+void Login::UpdateXmppSettings(const buzz::XmppClientSettings& user_settings) {
+  *(login_settings_->modifiable_user_settings()) = user_settings;
 }
 
 void Login::OnConnect(base::WeakPtr<talk_base::Task> base_task) {

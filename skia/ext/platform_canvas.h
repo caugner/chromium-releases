@@ -16,7 +16,7 @@ namespace skia {
 // This class is a specialization of the regular SkCanvas that is designed to
 // work with a PlatformDevice to manage platform-specific drawing. It allows
 // using both Skia operations and platform-specific operations.
-class PlatformCanvas : public SkCanvas {
+class SK_API PlatformCanvas : public SkCanvas {
  public:
   // If you use the version with no arguments, you MUST call initialize()
   PlatformCanvas();
@@ -69,8 +69,8 @@ class PlatformCanvas : public SkCanvas {
   // Call endPlatformPaint when you are done and want to use Skia operations
   // after calling the platform-specific beginPlatformPaint; this will
   // synchronize the bitmap to OS if necessary.
-  PlatformDevice::PlatformSurface beginPlatformPaint();
-  void endPlatformPaint();
+  PlatformDevice::PlatformSurface beginPlatformPaint() const;
+  void endPlatformPaint() const;
 
   // Returns the platform device pointer of the topmost rect with a non-empty
   // clip. In practice, this is usually either the top layer or nothing, since
@@ -113,6 +113,31 @@ class PlatformCanvas : public SkCanvas {
   PlatformCanvas(const PlatformCanvas&);
   PlatformCanvas& operator=(const PlatformCanvas&);
 };
+
+// Creates a canvas with raster bitmap backing.
+// Set is_opaque if you are going to erase the bitmap and not use
+// transparency: this will enable some optimizations.
+SK_API SkCanvas* CreateBitmapCanvas(int width, int height, bool is_opaque);
+
+// Sets the opacity of each pixel in the specified region to be opaque.
+SK_API void MakeOpaque(const SkIRect& region, SkCanvas* canvas);
+
+// Returns true if native platform routines can be used to draw on the
+// given canvas. If this function returns false, BeginPlatformPaint will
+// return NULL PlatformSurface.
+SK_API bool SupportsPlatformPaint(const SkCanvas* canvas);
+
+// These calls should surround calls to platform drawing routines, the
+// surface returned here can be used with the native platform routines.
+//
+// Call EndPlatformPaint when you are done and want to use skia operations
+// after calling the platform-specific BeginPlatformPaint; this will
+// synchronize the bitmap to OS if necessary.
+//
+// Note: These functions will eventually replace
+// PlatformCanvas::beginPlatformPaint and PlatformCanvas::endPlatformPaint.
+SK_API PlatformDevice::PlatformSurface BeginPlatformPaint(SkCanvas* canvas);
+SK_API void EndPlatformPaint(SkCanvas* canvas);
 
 }  // namespace skia
 

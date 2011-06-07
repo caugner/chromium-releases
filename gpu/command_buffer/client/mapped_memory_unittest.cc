@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 #include "base/callback.h"
 #include "base/message_loop.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
-#include "gpu/command_buffer/service/gpu_processor.h"
+#include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace gpu {
@@ -49,12 +49,12 @@ class MappedMemoryTestBase : public testing::Test {
                                 0,
                                 api_mock_.get());
 
-    gpu_processor_.reset(new GPUProcessor(
+    gpu_scheduler_.reset(new GpuScheduler(
         command_buffer_.get(), NULL, parser_, INT_MAX));
     command_buffer_->SetPutOffsetChangeCallback(NewCallback(
-        gpu_processor_.get(), &GPUProcessor::ProcessCommands));
+        gpu_scheduler_.get(), &GpuScheduler::ProcessCommands));
 
-    api_mock_->set_engine(gpu_processor_.get());
+    api_mock_->set_engine(gpu_scheduler_.get());
 
     helper_.reset(new CommandBufferHelper(command_buffer_.get()));
     helper_->Initialize(kBufferSize);
@@ -68,7 +68,7 @@ class MappedMemoryTestBase : public testing::Test {
   MessageLoop message_loop_;
   scoped_ptr<AsyncAPIMock> api_mock_;
   scoped_ptr<CommandBufferService> command_buffer_;
-  scoped_ptr<GPUProcessor> gpu_processor_;
+  scoped_ptr<GpuScheduler> gpu_scheduler_;
   CommandParser* parser_;
   scoped_ptr<CommandBufferHelper> helper_;
 };
@@ -94,7 +94,7 @@ class MemoryChunkTest : public MappedMemoryTestBase {
   }
 
   virtual void TearDown() {
-    // If the GPUProcessor posts any tasks, this forces them to run.
+    // If the GpuScheduler posts any tasks, this forces them to run.
     MessageLoop::current()->RunAllPending();
 
     MappedMemoryTestBase::TearDown();
@@ -145,7 +145,7 @@ class MappedMemoryManagerTest : public MappedMemoryTestBase {
   }
 
   virtual void TearDown() {
-    // If the GPUProcessor posts any tasks, this forces them to run.
+    // If the GpuScheduler posts any tasks, this forces them to run.
     MessageLoop::current()->RunAllPending();
     manager_.reset();
     MappedMemoryTestBase::TearDown();

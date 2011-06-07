@@ -13,7 +13,7 @@
 
 struct PP_CompletionCallback;
 
-#define PPB_CORE_INTERFACE "PPB_Core;0.3"
+#define PPB_CORE_INTERFACE "PPB_Core;0.4"
 
 /**
  * @file
@@ -54,11 +54,11 @@ struct PPB_Core {
   /**
    * MemAlloc is a pointer to a function that allocate memory.
    *
-   * @param[in] num_bytes A size_t number of bytes to allocate.
+   * @param[in] num_bytes A number of bytes to allocate.
    * @return A pointer to the memory if successful, NULL If the
    * allocation fails.
    */
-  void* (*MemAlloc)(size_t num_bytes);
+  void* (*MemAlloc)(uint32_t num_bytes);
 
   /**
    * MemFree is a pointer to a function that deallocates memory.
@@ -102,6 +102,10 @@ struct PPB_Core {
    * The |result| parameter will just be passed as the second argument to the
    * callback. Many applications won't need this, but it allows a plugin to
    * emulate calls of some callbacks which do use this value.
+   *
+   * NOTE: CallOnMainThread, even when used from the main thread with a delay
+   * of 0 milliseconds, will never directly invoke the callback.  Even in this
+   * case, the callback will be scheduled asynchronously.
    *
    * NOTE: If the browser is shutting down or if the plugin has no instances,
    * then the callback function may not be called.

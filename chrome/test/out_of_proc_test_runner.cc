@@ -9,12 +9,12 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
-#include "base/linked_ptr.h"
 #include "base/logging.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/memory/linked_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/test/test_suite.h"
@@ -401,6 +401,8 @@ int RunTest(const std::string& test_name, int default_timeout_ms) {
   }
 #endif
 
+  base::CloseProcessHandle(process_handle);
+
   return exit_code;
 }
 
@@ -576,6 +578,18 @@ int main(int argc, char** argv) {
 #endif
     return ChromeTestSuite(argc, argv).Run();
   }
+
+  // The exit manager is in charge of calling the dtors of singleton objects.
+  // On Windows, the call to ChromeMain() below will construct one for the
+  // chrome.dll module, but that global is not shared with this module, so if
+  // chrome.dll calls back out to this module and the called code uses a
+  // singleton, we'll need this.  On other platforms, ChromeMain() isn't called
+  // at all below, so this is the lone exit manager for any code after this
+  // point.
+  // NOTE: We can't init this atop main() because ChromeTestSuite, as a subclass
+  // of TestSuite, creates one.  So we wait until after the Run() call above to
+  // create the manager for the code path that _doesn't_ use ChromeTestSuite.
+  base::AtExitManager exit_manager;
 
 #if defined(OS_WIN)
   if (command_line->HasSwitch(switches::kProcessType)) {

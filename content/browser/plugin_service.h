@@ -14,26 +14,27 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/hash_tables.h"
-#include "base/scoped_vector.h"
-#include "base/singleton.h"
+#include "base/memory/scoped_vector.h"
+#include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "build/build_config.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/ppapi_plugin_process_host.h"
+#include "content/browser/ppapi_broker_process_host.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_handle.h"
 #include "webkit/plugins/npapi/webplugininfo.h"
 
 #if defined(OS_WIN)
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/win/registry.h"
 #endif
 
 #if defined(OS_LINUX)
-#include "chrome/browser/file_path_watcher/file_path_watcher.h"
+#include "base/files/file_path_watcher.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -76,15 +77,6 @@ class PluginService
   // Returns the PluginService singleton.
   static PluginService* GetInstance();
 
-  // Load all the plugins that should be loaded for the lifetime of the browser
-  // (ie, with the LoadOnStartup flag set).
-  void LoadChromePlugins(ResourceDispatcherHost* resource_dispatcher_host);
-
-  // Sets/gets the data directory that Chrome plugins should use to store
-  // persistent data.
-  void SetChromePluginDataDir(const FilePath& data_dir);
-  const FilePath& GetChromePluginDataDir();
-
   // Gets the browser's UI locale.
   const std::string& GetUILocale();
 
@@ -93,6 +85,7 @@ class PluginService
   // started.
   PluginProcessHost* FindNpapiPluginProcess(const FilePath& plugin_path);
   PpapiPluginProcessHost* FindPpapiPluginProcess(const FilePath& plugin_path);
+  PpapiBrokerProcessHost* FindPpapiBrokerProcess(const FilePath& broker_path);
 
   // Returns the plugin process host corresponding to the plugin process that
   // has been started by this service. This will start a process to host the
@@ -101,6 +94,8 @@ class PluginService
   PluginProcessHost* FindOrStartNpapiPluginProcess(
       const FilePath& plugin_path);
   PpapiPluginProcessHost* FindOrStartPpapiPluginProcess(
+      const FilePath& plugin_path);
+  PpapiBrokerProcessHost* FindOrStartPpapiBrokerProcess(
       const FilePath& plugin_path);
 
   // Opens a channel to a plugin process for the given mime type, starting
@@ -113,6 +108,8 @@ class PluginService
                                 PluginProcessHost::Client* client);
   void OpenChannelToPpapiPlugin(const FilePath& path,
                                 PpapiPluginProcessHost::Client* client);
+  void OpenChannelToPpapiBroker(const FilePath& path,
+                                PpapiBrokerProcessHost::Client* client);
 
   // Gets the first allowed plugin in the list of plugins that matches
   // the given url and mime type.  Must be called on the FILE thread.
@@ -123,21 +120,26 @@ class PluginService
                                  webkit::npapi::WebPluginInfo* info,
                                  std::string* actual_mime_type);
 
+  // Safe to be called from any thread.
+  void OverridePluginForTab(const OverriddenPlugin& plugin);
+
+  // Restricts the given plugin to the the scheme and host of the given url.
+  // Call with an empty url to reset this.
+  // Can be called on any thread.
+  void RestrictPluginToUrl(const FilePath& plugin_path, const GURL& url);
+
   // Returns true if the given plugin is allowed to be used by a page with
   // the given URL.
-  bool PrivatePluginAllowedForURL(const FilePath& plugin_path, const GURL& url);
+  // Can be called on any thread.
+  bool PluginAllowedForURL(const FilePath& plugin_path, const GURL& url);
 
-  // Safe to be called from any thread.
-  void OverridePluginForTab(OverriddenPlugin plugin);
+  // Tells all the renderer processes to throw away their cache of the plugin
+  // list, and optionally also reload all the pages with plugins.
+  // NOTE: can only be called on the UI thread.
+  static void PurgePluginListCache(bool reload_pages);
 
   // The UI thread's message loop
   MessageLoop* main_message_loop() { return main_message_loop_; }
-
-  ResourceDispatcherHost* resource_dispatcher_host() const {
-    return resource_dispatcher_host_;
-  }
-
-  static void EnableChromePlugins(bool enable);
 
  private:
   friend struct DefaultSingletonTraits<PluginService>;
@@ -156,6 +158,8 @@ class PluginService
 
   void RegisterPepperPlugins();
 
+  PepperPluginInfo* GetRegisteredPpapiPluginInfo(const FilePath& plugin_path);
+
   // Helper so we can do the plugin lookup on the FILE thread.
   void GetAllowedPluginForOpenChannelToPlugin(
       int render_process_id,
@@ -173,27 +177,21 @@ class PluginService
 #if defined(OS_LINUX)
   // Registers a new FilePathWatcher for a given path.
   static void RegisterFilePathWatcher(
-      FilePathWatcher* watcher,
+      base::files::FilePathWatcher* watcher,
       const FilePath& path,
-      FilePathWatcher::Delegate* delegate);
+      base::files::FilePathWatcher::Delegate* delegate);
 #endif
 
   // The main thread's message loop.
   MessageLoop* main_message_loop_;
 
-  // The IO thread's resource dispatcher host.
-  ResourceDispatcherHost* resource_dispatcher_host_;
-
-  // The data directory that Chrome plugins should use to store persistent data.
-  FilePath chrome_plugin_data_dir_;
-
   // The browser's UI locale.
   const std::string ui_locale_;
 
-  // Map of plugin paths to the origin they are restricted to.  Used for
-  // extension-only plugins.
-  typedef base::hash_map<FilePath, GURL> PrivatePluginMap;
-  PrivatePluginMap private_plugins_;
+  // Map of plugin paths to the origin they are restricted to.
+  base::Lock restricted_plugin_lock_;  // Guards access to restricted_plugin_.
+  typedef base::hash_map<FilePath, GURL> RestrictedPluginMap;
+  RestrictedPluginMap restricted_plugin_;
 
   NotificationRegistrar registrar_;
 
@@ -212,14 +210,11 @@ class PluginService
 #endif
 
 #if defined(OS_LINUX)
-  ScopedVector<FilePathWatcher> file_watchers_;
+  ScopedVector<base::files::FilePathWatcher> file_watchers_;
   scoped_refptr<PluginDirWatcherDelegate> file_watcher_delegate_;
 #endif
 
   std::vector<PepperPluginInfo> ppapi_plugins_;
-
-  // Set to true if chrome plugins are enabled. Defaults to true.
-  static bool enable_chrome_plugins_;
 
   std::vector<OverriddenPlugin> overridden_plugins_;
   base::Lock overridden_plugins_lock_;

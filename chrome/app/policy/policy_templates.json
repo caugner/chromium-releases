@@ -94,7 +94,14 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 79
+#   For your editing convenience: highest ID currently used: 85
+#
+# Placeholders:
+#   The following placeholder strings are automatically substituted:
+#     $1 -> Google Chrome / Chromium
+#     $2 -> Google Chrome OS / Chromium OS
+#     $3 -> Google Chrome Frame / Chromium Frame
+#     $6 is reserved for doc_writer
 #
   'policy_definitions': [
     {
@@ -211,8 +218,8 @@
       'features': {'dynamic_refresh': 1},
       'example_value': True,
       'id': 7,
-      'caption': '''Enable DNS prefetching''',
-      'desc': '''Enables DNS prefetching in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
+      'caption': '''Enable network prediction.''',
+      'desc': '''Enables network prediction in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
 
       If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
     },
@@ -225,6 +232,19 @@
       'id': 8,
       'caption': '''Disable SPDY protocol''',
       'desc': '''Disables use of the SPDY protocol in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+    },
+    {
+      'name': 'DisabledSchemes',
+      'type': 'list',
+      'supported_on': ['chrome.*:12-', 'chrome_os:0.11-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': ['file', 'mailto'],
+      'id': 85,
+      'caption': '''Disable URL protocol schemes''',
+      'desc': '''Disables the listed protocol schemes in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      URLs using a scheme from this list will not load and can not be navigated to.''',
+      'label': '''List of disabled protocol schemes''',
     },
     {
       'name': 'JavascriptEnabled',
@@ -486,11 +506,11 @@
       'features': {'dynamic_refresh': 1},
       'example_value': True,
       'id': 65,
-      'caption': '''Clear site date on browser shutdown''',
+      'caption': '''Clear site data on browser shutdown''',
       'desc': '''This policy is an override for the "Clear cookies and other site data when I close my browser" content settings option.
 
       When set to true <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will delete all locally stored data from the browser when it is shut down.''',
-      'label': '''Clear site date on browser shutdown''',
+      'label': '''Clear site data on browser shutdown''',
     },
     {
       'name': 'Proxy',
@@ -503,7 +523,7 @@
       If you choose to auto detect the proxy server, all other options are ignored.
 
       For detailed examples, visit:
-      <ph name="PROXY_HELP_URL">$2<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>
+      <ph name="PROXY_HELP_URL">http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>
 
       If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> ignores all proxy-related options specified from the command line.''',
       'policies': [
@@ -553,7 +573,7 @@
           If you choose to use a .pac proxy script, you must specify the URL to the script in 'URL to a proxy .pac file'.
 
           For detailed examples, visit:
-          <ph name="PROXY_HELP_URL">$2<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>
+          <ph name="PROXY_HELP_URL">http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>
 
           If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> ignores all proxy-related options specified from the command line.''',
         },
@@ -599,7 +619,7 @@
           If you choose manual proxy settings, you can specify further options in 'Address or URL of proxy server', 'URL to a proxy .pac file' and 'Comma-separated list of proxy bypass rules'.
 
           For detailed examples, visit:
-          <ph name="PROXY_HELP_URL">$2<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>
+          <ph name="PROXY_HELP_URL">http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>
 
           If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> ignores all proxy-related options specified from the command line.''',
         },
@@ -616,7 +636,7 @@
           This policy only takes effect if you have selected manual proxy settings at 'Choose how to specify proxy server settings'.
 
           For more options and detailed examples, visit:
-          <ph name="PROXY_HELP_URL">$2<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>''',
+          <ph name="PROXY_HELP_URL">http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>''',
         },
         {
           'name': 'ProxyPacUrl',
@@ -631,7 +651,7 @@
           This policy only takes effect if you have selected manual proxy settings at 'Choose how to specify proxy server settings'.
 
           For detailed examples, visit:
-          <ph name="PROXY_HELP_URL">$2<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>''',
+          <ph name="PROXY_HELP_URL">http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>''',
         },
         {
           'name': 'ProxyBypassList',
@@ -646,7 +666,7 @@
           This policy only takes effect if you have selected manual proxy settings at 'Choose how to specify proxy server settings'.
 
           For more detailed examples, visit:
-          <ph name="PROXY_HELP_URL">$2<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>''',
+          <ph name="PROXY_HELP_URL">http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>''',
           'label': '''Comma-separated list of proxy bypass rules''',
         },
       ],
@@ -851,7 +871,9 @@
 
           If you choose 'Open a list of URLs', the list of 'URLs to open on startup' will be opened when a user starts <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-          If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+          If you enable this setting, users cannot change or override it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+          Disabling this setting is equvalent to leaving it not configured. The user will still be able to change it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
         },
         {
           'name': 'RestoreOnStartupURLs',
@@ -899,7 +921,7 @@
 
           You can specify the default search provider to be used by setting the rest of the default search policies. If these are left empty, the user can choose the default provider.
 
-          If you diable this setting, no search is performed when the user enters non-URL text in the omnibox.
+          If you disable this setting, no search is performed when the user enters non-URL text in the omnibox.
 
           If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">
           $1<ex>Google Chrome</ex>
@@ -1378,7 +1400,7 @@
 
       If you disable this setting, users will not be asked for a password to wake ChromeOS devices from sleep.
 
-      If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome OS</ex></ph>.''',
+      If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph>.''',
     },
     {
       'name': 'InstantEnabled',
@@ -1395,6 +1417,84 @@
       If you disable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> Instant is disabled.
 
       If you enable or disable this setting, users cannot change or override this setting.''',
+    },
+    {
+      'name': 'TranslateEnabled',
+      'type': 'main',
+      'supported_on': ['chrome.*:12-', 'chrome_os:0.11-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 80,
+      'caption': '''Enable Translate''',
+      'desc': '''Enables the integrated Google Translate service on <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will show an integrated toolbar offering to translate the page for the user, when appropriate.
+
+      If you disable this setting, users will never see the translation bar.
+
+      If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+    },
+    {
+      'name': 'AllowOutdatedPlugins',
+      'type': 'main',
+      'supported_on': ['chrome.*:12-', 'chrome_os:0.11-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 81,
+      'caption': '''Allow running plugins that are outdated''',
+      'desc': '''Allows <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> to run plugins that are outdated.
+
+      If you enable this setting, outdated plugins are used as normal plugins.
+
+      If you disable this setting, outdated plugins will not be used and users will not be asked for permission to run them.
+
+      If this setting is not set, users will be asked for permission to run outdated plugins.''',
+    },
+    {
+      'name': 'BookmarkBarEnabled',
+      'type': 'main',
+      'supported_on': ['chrome.*:12-', 'chrome_os:0.12-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 82,
+      'caption': '''Enable Bookmark Bar''',
+      'desc': '''Enables the bookmark bar on the new tab page on <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will show a bookmark bar on the "New tab" page.
+
+      If you disable this setting, users will never see the bookmark bar.
+
+      If you enable or disable this setting, users cannot change or override it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+    },
+    {
+      'name': 'EditBookmarksEnabled',
+      'type': 'main',
+      'supported_on': ['chrome.*:12-', 'chrome_os:0.12-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': False,
+      'id': 83,
+      'caption': '''Enables or disables bookmark editing''',
+      'desc': '''Enables or disables editing bookmarks in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      If you enable this setting, bookmarks can be added, removed or modified. This is the default.
+
+      If you disable this setting, bookmarks can not be added, removed or modified. Existing bookmarks are still available.''',
+    },
+    {
+      'name': 'AllowFileSelectionDialogs',
+      'type': 'main',
+      'supported_on': ['chrome.*:12-', 'chrome_os:0.11-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 84,
+      'caption': '''Allow invocation of file selection dialogs.''',
+      'desc': '''Allows access to local files on the machine by allowing <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> to display file selection dialogs.
+
+      If you enable this setting, users can open file selection dialogs as normal.
+
+      If you disable this setting, whenever the user perfoms an action which would provoke a file selection dialog (like importing bookmarks, uploading files, saving links, etc.) a message is displayed instead and the user is assumed to have clicked Cancel on the file selection dialog.
+
+      If this setting is not set, users can open file selection dialogs as normal.''',
     },
   ],
   'messages': {
@@ -1448,7 +1548,7 @@
       'text': '''This is the list of policies that <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> respects.
 
       You don't need to change these settings by hand!  You can download easy-to-use templates from
-      <ph name="POLICY_TEMPLATE_DOWNLOAD_URL">$5<ex>
+      <ph name="POLICY_TEMPLATE_DOWNLOAD_URL">http://www.chromium.org/administrators/policy-templates<ex>
       http://www.chromium.org/administrators/policy-templates</ex></ph>.
 
       The list of supported policies is the same for Chromium and Google Chrome, but their Windows registry locations differ.
@@ -1484,20 +1584,5 @@
       'text': 'deprecated',
     }
   },
-  'placeholders': [
-    # Note: keys $1 and $3 are reserved for Chromium and Chromium Frame.
-    # Key $6 is reserved for doc_writer.
-    {
-      'key': '$2',
-      'value': 'http://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett'
-    },
-    {
-      'key': '$4',
-      'value': 'http://www.chromium.org/developers/how-tos/chrome-frame-getting-started'
-    },
-    {
-      'key': '$5',
-      'value': 'http://www.chromium.org/administrators/policy-templates'
-    },
-  ]
+  'placeholders': [],
 }

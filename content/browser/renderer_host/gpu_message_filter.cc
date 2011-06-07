@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,9 @@
 #include "content/browser/renderer_host/gpu_message_filter.h"
 
 #include "base/callback.h"
-#include "chrome/browser/gpu_process_host_ui_shim.h"
-#include "chrome/common/gpu_create_command_buffer_config.h"
-#include "chrome/common/gpu_messages.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/gpu_process_host.h"
+#include "content/common/gpu_messages.h"
 
 GpuMessageFilter::GpuMessageFilter(int render_process_id)
     : gpu_host_id_(0),
@@ -24,13 +22,6 @@ GpuMessageFilter::GpuMessageFilter(int render_process_id)
 // the same thread from which they were created.
 GpuMessageFilter::~GpuMessageFilter() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-}
-
-void GpuMessageFilter::OverrideThreadForMessage(
-    const IPC::Message& message,
-    BrowserThread::ID* thread) {
-  if (IPC_MESSAGE_CLASS(message) == GpuMsgStart)
-    *thread = BrowserThread::UI;
 }
 
 bool GpuMessageFilter::OnMessageReceived(
@@ -63,7 +54,6 @@ class EstablishChannelCallback
  public:
   explicit EstablishChannelCallback(GpuMessageFilter* filter):
       filter_(filter->AsWeakPtr()) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   }
 
   virtual void RunWithParams(const TupleType& params) {
@@ -71,31 +61,32 @@ class EstablishChannelCallback
   }
 
   void Send(const IPC::ChannelHandle& channel,
-            base::ProcessHandle gou_process_for_browser,
+            base::ProcessHandle gpu_process_for_browser,
             const GPUInfo& gpu_info) {
     if (!filter_)
       return;
 
     base::ProcessHandle renderer_process_for_gpu;
+    if (gpu_process_for_browser != 0) {
 #if defined(OS_WIN)
-    // Create a process handle that the renderer process can give to the GPU
-    // process to give it access to its handles.
-    DuplicateHandle(base::GetCurrentProcessHandle(),
-                    filter_->peer_handle(),
-                    gou_process_for_browser,
-                    &renderer_process_for_gpu,
-                    PROCESS_DUP_HANDLE,
-                    FALSE,
-                    0);
+      // Create a process handle that the renderer process can give to the GPU
+      // process to give it access to its handles.
+      DuplicateHandle(base::GetCurrentProcessHandle(),
+                      filter_->peer_handle(),
+                      gpu_process_for_browser,
+                      &renderer_process_for_gpu,
+                      PROCESS_DUP_HANDLE,
+                      FALSE,
+                      0);
 #else
-    renderer_process_for_gpu = filter_->peer_handle();
+      renderer_process_for_gpu = filter_->peer_handle();
 #endif
+    } else {
+      renderer_process_for_gpu = 0;
+    }
 
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    ViewMsg_GpuChannelEstablished* reply =
-        new ViewMsg_GpuChannelEstablished(channel,
-                                          renderer_process_for_gpu,
-                                          gpu_info);
+    IPC::Message* reply = new GpuMsg_GpuChannelEstablished(
+        channel, renderer_process_for_gpu, gpu_info);
 
     // If the renderer process is performing synchronous initialization,
     // it needs to handle this message before receiving the reply for
@@ -114,7 +105,6 @@ class SynchronizeCallback : public CallbackRunner<Tuple0> {
   SynchronizeCallback(GpuMessageFilter* filter, IPC::Message* reply):
       filter_(filter->AsWeakPtr()),
       reply_(reply) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   }
 
   virtual void RunWithParams(const TupleType& params) {
@@ -122,7 +112,6 @@ class SynchronizeCallback : public CallbackRunner<Tuple0> {
   }
 
   void Send() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     if (filter_)
       filter_->Send(reply_);
   }
@@ -138,7 +127,7 @@ class CreateCommandBufferCallback : public CallbackRunner<Tuple1<int32> > {
                               IPC::Message* reply) :
       filter_(filter->AsWeakPtr()),
       reply_(reply) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   }
 
   virtual void RunWithParams(const TupleType& params) {
@@ -146,7 +135,7 @@ class CreateCommandBufferCallback : public CallbackRunner<Tuple1<int32> > {
   }
 
   void Send(int32 route_id) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     GpuHostMsg_CreateViewCommandBuffer::WriteReplyParams(reply_, route_id);
     if (filter_)
       filter_->Send(reply_);
@@ -159,7 +148,8 @@ class CreateCommandBufferCallback : public CallbackRunner<Tuple1<int32> > {
 
 }  // namespace
 
-void GpuMessageFilter::OnEstablishGpuChannel() {
+void GpuMessageFilter::OnEstablishGpuChannel(
+    content::CauseForGpuLaunch cause_for_gpu_launch) {
   scoped_ptr<EstablishChannelCallback> callback(
       new EstablishChannelCallback(this));
 
@@ -170,26 +160,26 @@ void GpuMessageFilter::OnEstablishGpuChannel() {
   // terminates, the renderer process will not find itself unknowingly sending
   // IPCs to a newly launched GPU process. Also, I will rename this function
   // to something like OnCreateGpuProcess.
-  GpuProcessHostUIShim* ui_shim = GpuProcessHostUIShim::FromID(gpu_host_id_);
-  if (!ui_shim) {
-    ui_shim = GpuProcessHostUIShim::GetForRenderer(render_process_id_);
-    if (!ui_shim) {
+  GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
+  if (!host) {
+    host = GpuProcessHost::GetForRenderer(
+        render_process_id_, cause_for_gpu_launch);
+    if (!host) {
       callback->Run(IPC::ChannelHandle(),
                     static_cast<base::ProcessHandle>(NULL),
                     GPUInfo());
       return;
     }
 
-    gpu_host_id_ = ui_shim->host_id();
+    gpu_host_id_ = host->host_id();
   }
 
-  ui_shim->EstablishGpuChannel(render_process_id_,
-                               callback.release());
+  host->EstablishGpuChannel(render_process_id_, callback.release());
 }
 
 void GpuMessageFilter::OnSynchronizeGpu(IPC::Message* reply) {
-  GpuProcessHostUIShim* ui_shim = GpuProcessHostUIShim::FromID(gpu_host_id_);
-  if (!ui_shim) {
+  GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
+  if (!host) {
     // TODO(apatrick): Eventually, this IPC message will be routed to a
     // GpuProcessStub with a particular routing ID. The error will be set if
     // the GpuProcessStub with that routing ID is not in the MessageRouter.
@@ -198,15 +188,16 @@ void GpuMessageFilter::OnSynchronizeGpu(IPC::Message* reply) {
     return;
   }
 
-  ui_shim->Synchronize(new SynchronizeCallback(this, reply));
+  host->Synchronize(new SynchronizeCallback(this, reply));
 }
 
 void GpuMessageFilter::OnCreateViewCommandBuffer(
+    gfx::PluginWindowHandle compositing_surface,
     int32 render_view_id,
     const GPUCreateCommandBufferConfig& init_params,
     IPC::Message* reply) {
-  GpuProcessHostUIShim* ui_shim = GpuProcessHostUIShim::FromID(gpu_host_id_);
-  if (!ui_shim) {
+  GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
+  if (!host) {
     // TODO(apatrick): Eventually, this IPC message will be routed to a
     // GpuProcessStub with a particular routing ID. The error will be set if
     // the GpuProcessStub with that routing ID is not in the MessageRouter.
@@ -215,7 +206,8 @@ void GpuMessageFilter::OnCreateViewCommandBuffer(
     return;
   }
 
-  ui_shim->CreateViewCommandBuffer(
+  host->CreateViewCommandBuffer(
+      compositing_surface,
       render_view_id,
       render_process_id_,
       init_params,

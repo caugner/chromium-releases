@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task.h"
-#include "base/weak_ptr.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
@@ -26,7 +26,6 @@
 class WebViewDelegate;
 
 namespace WebKit {
-class WebDevToolsAgent;
 class WebFrame;
 class WebPluginContainer;
 class WebURLResponse;
@@ -77,7 +76,6 @@ class WebPluginImpl : public WebPlugin,
   virtual void updateGeometry(
       const WebKit::WebRect& frame_rect, const WebKit::WebRect& clip_rect,
       const WebKit::WebVector<WebKit::WebRect>& cut_outs, bool is_visible);
-  virtual unsigned getBackingTextureId();
   virtual void updateFocus(bool focused);
   virtual void updateVisibility(bool visible);
   virtual bool acceptsInputEvents();
@@ -124,9 +122,6 @@ class WebPluginImpl : public WebPlugin,
                          const std::string& cookie);
   virtual std::string GetCookies(const GURL& url,
                                  const GURL& first_party_for_cookies);
-  virtual void ShowModalHTMLDialog(const GURL& url, int width, int height,
-                                   const std::string& json_arguments,
-                                   std::string* json_retval);
   virtual void OnMissingPluginStatus(int status);
 
   virtual void URLRedirectResponse(bool allow, int resource_id);
@@ -208,8 +203,9 @@ class WebPluginImpl : public WebPlugin,
                            unsigned long long total_bytes_to_be_sent);
   virtual void didReceiveResponse(WebKit::WebURLLoader* loader,
                                   const WebKit::WebURLResponse& response);
+
   virtual void didReceiveData(WebKit::WebURLLoader* loader, const char *buffer,
-                              int length);
+                              int data_length, int encoded_data_length);
   virtual void didFinishLoading(WebKit::WebURLLoader* loader,
                                 double finishTime);
   virtual void didFail(WebKit::WebURLLoader* loader,
@@ -272,9 +268,6 @@ class WebPluginImpl : public WebPlugin,
 
   // Helper function to set the referrer on the request passed in.
   void SetReferrer(WebKit::WebURLRequest* request, Referrer referrer_flag);
-
-  // Returns DevToolsAgent for the frame or 0.
-  WebKit::WebDevToolsAgent* GetDevToolsAgent();
 
   // Check for invalid chars like @, ;, \ before the first / (in path).
   bool IsValidUrl(const GURL& url, Referrer referrer_flag);

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include <sstream>
 
-#include "base/win/scoped_variant.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_variant.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
 
 // Needed for CreateFunctor.
@@ -136,7 +136,12 @@ void MockIEEventSink::ExpectJavascriptWindowOpenNavigation(
 void MockIEEventSink::ExpectNewWindow(MockIEEventSink* new_window_mock) {
   DCHECK(new_window_mock);
 
-  EXPECT_CALL(*this, OnNewWindow3(_, _, _, _, _));
+  // IE8 seems to fire one of these events based on version.
+  EXPECT_CALL(*this, OnNewWindow2(_, _))
+      .Times(testing::AtMost(1));
+  EXPECT_CALL(*this, OnNewWindow3(_, _, _, _, _))
+      .Times(testing::AtMost(1));
+
   EXPECT_CALL(*this, OnNewBrowserWindow(_, _))
       .WillOnce(testing::WithArgs<0>(testing::Invoke(testing::CreateFunctor(
           new_window_mock, &MockIEEventSink::Attach))));
@@ -152,10 +157,10 @@ void MockIEEventSink::ExpectAnyNavigations() {
 }
 
 void MockIEEventSink::ExpectDocumentReadystate(int ready_state) {
-  ScopedComPtr<IWebBrowser2> browser(event_sink_->web_browser2());
+  base::win::ScopedComPtr<IWebBrowser2> browser(event_sink_->web_browser2());
   EXPECT_TRUE(browser != NULL);
   if (browser) {
-    ScopedComPtr<IDispatch> document;
+    base::win::ScopedComPtr<IDispatch> document;
     browser->get_Document(document.Receive());
     EXPECT_TRUE(document != NULL);
     if (document) {
@@ -192,6 +197,9 @@ void MockIEEventSinkTest::LaunchIEAndNavigate(const std::wstring& url) {
 
 void MockIEEventSinkTest::LaunchIENavigateAndLoop(const std::wstring& url,
                                                   int timeout) {
+  if (GetInstalledIEVersion() >= IE_8) {
+    chrome_frame_test::ClearIESessionHistory();
+  }
   hung_call_detector_ = HungCOMCallDetector::Setup(timeout);
   EXPECT_TRUE(hung_call_detector_ != NULL);
 

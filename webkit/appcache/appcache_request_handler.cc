@@ -137,6 +137,16 @@ AppCacheURLRequestJob* AppCacheRequestHandler::MaybeLoadFallbackForResponse(
     int code_major = request->GetResponseCode() / 100;
     if (code_major !=4 && code_major != 5)
       return NULL;
+
+    // Servers can override the fallback behavior with a response header.
+    const std::string kFallbackOverrideHeader(
+        "x-chromium-appcache-fallback-override");
+    const std::string kFallbackOverrideValue(
+        "disallow-fallback");
+    std::string header_value;
+    request->GetResponseHeaderByName(kFallbackOverrideHeader, &header_value);
+    if (header_value == kFallbackOverrideValue)
+      return NULL;
   }
 
   // 6.9.6, step 4: If this results in a 4xx or 5xx status code
@@ -188,11 +198,19 @@ void AppCacheRequestHandler::DeliverNetworkResponse() {
 
 void AppCacheRequestHandler::MaybeLoadMainResource(net::URLRequest* request) {
   DCHECK(!job_);
+  DCHECK(host_);
+
+  const AppCacheHost* spawning_host =
+      ResourceType::IsSharedWorker(resource_type_) ?
+          host_ : host_->GetSpawningHost();
+  GURL preferred_manifest_url = spawning_host ?
+      spawning_host->preferred_manifest_url() : GURL();
 
   // We may have to wait for our storage query to complete, but
   // this query can also complete syncrhonously.
   job_ = new AppCacheURLRequestJob(request, storage());
-  storage()->FindResponseForMainRequest(request->url(), this);
+  storage()->FindResponseForMainRequest(
+      request->url(), preferred_manifest_url, this);
 }
 
 void AppCacheRequestHandler::OnMainResponseFound(
@@ -216,6 +234,7 @@ void AppCacheRequestHandler::OnMainResponseFound(
       // in advance of subresource loads happening, secondly to prevent the
       // AppCache from falling out of the working set on frame navigations.
       host_->LoadMainResourceCache(cache_id);
+      host_->set_preferred_manifest_url(manifest_url);
     }
   } else {
     DCHECK(ResourceType::IsSharedWorker(resource_type_));

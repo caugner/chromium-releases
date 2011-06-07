@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,19 +14,19 @@
 #include "base/environment.h"
 #include "base/linux_util.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/pickle.h"
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/process_watcher.h"
-#include "chrome/common/result_codes.h"
-#include "chrome/common/unix_domain_socket_posix.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
+#include "content/common/process_watcher.h"
+#include "content/common/result_codes.h"
+#include "content/common/unix_domain_socket_posix.h"
 #include "sandbox/linux/suid/suid_unsafe_environment_variables.h"
 
 static void SaveSUIDUnsafeEnvironmentVariables() {
@@ -97,10 +97,14 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
     switches::kAllowSandboxDebugging,
     switches::kLoggingLevel,
     switches::kEnableLogging,  // Support, e.g., --enable-logging=stderr.
+    switches::kEnableRemoting,
     switches::kV,
     switches::kVModule,
     switches::kUserDataDir,  // Make logs go to the right file.
     // Load (in-process) Pepper plugins in-process in the zygote pre-sandbox.
+    switches::kPpapiFlashInProcess,
+    switches::kPpapiFlashPath,
+    switches::kPpapiFlashVersion,
     switches::kRegisterPepperPlugins,
     switches::kDisableSeccompSandbox,
     switches::kEnableSeccompSandbox,

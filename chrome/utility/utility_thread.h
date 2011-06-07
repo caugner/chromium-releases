@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,26 @@
 #include <string>
 #include <vector>
 
+#include "base/basictypes.h"
+#include "base/string16.h"
 #include "base/platform_file.h"
 #include "content/common/child_thread.h"
-#include "printing/native_metafile.h"
 
-class GURL;
+class FilePath;
 class IndexedDBKey;
 class SerializedScriptValue;
-class SkBitmap;
 
 namespace gfx {
 class Rect;
-}  // namespace gfx
+}
+
+namespace IPC {
+class Message;
+}
 
 namespace printing {
 struct PageRange;
-}  // namespace printing
+}
 
 // This class represents the background thread where the utility task runs.
 class UtilityThread : public ChildThread {
@@ -51,6 +55,9 @@ class UtilityThread : public ChildThread {
   // IPC for decoding an image.
   void OnDecodeImage(const std::vector<unsigned char>& encoded_data);
 
+  // IPC for decoding an image which is base64 encoded.
+  void OnDecodeImageBase64(const std::string& encoded_data);
+
   // IPC to render a PDF into a platform metafile.
   void OnRenderPDFPagesToMetafile(
       base::PlatformFile pdf_file,
@@ -68,7 +75,6 @@ class UtilityThread : public ChildThread {
     const gfx::Rect& render_area,
     int render_dpi,
     const std::vector<printing::PageRange>& page_ranges,
-    printing::NativeMetafile* metafile,
     int* highest_rendered_page_number);
 #endif   // defined(OS_WIN)
 
@@ -82,6 +88,9 @@ class UtilityThread : public ChildThread {
   void OnInjectIDBKey(const IndexedDBKey& key,
                       const SerializedScriptValue& value,
                       const string16& key_path);
+
+  // IPC for parsing a string of JSON into a Value.
+  void OnParseJSON(const std::string& json);
 
   // IPC to notify we'll be running in batch mode instead of quitting after
   // any of the IPCs above, we'll only quit during OnBatchModeFinished().

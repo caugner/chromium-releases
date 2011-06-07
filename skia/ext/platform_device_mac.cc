@@ -4,6 +4,7 @@
 
 #include "skia/ext/bitmap_platform_device_mac.h"
 
+#import <ApplicationServices/ApplicationServices.h>
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -34,6 +35,18 @@ bool constrain(int available_size, int* position, int *size) {
 
 PlatformDevice::PlatformDevice(const SkBitmap& bitmap)
     : SkDevice(NULL, bitmap, /*isForLayer=*/false) {
+}
+
+bool PlatformDevice::IsNativeFontRenderingAllowed() {
+    return true;
+}
+
+CGContextRef PlatformDevice::BeginPlatformPaint() {
+  return GetBitmapContext();
+}
+
+void PlatformDevice::EndPlatformPaint() {
+  // Flushing will be done in onAccessBitmap.
 }
 
 // Set up the CGContextRef for peaceful coexistence with Skia

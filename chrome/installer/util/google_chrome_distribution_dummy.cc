@@ -106,13 +106,21 @@ void GoogleChromeDistribution::UpdateInstallStatus(bool system_install,
   NOTREACHED();
 }
 
+bool GoogleChromeDistribution::GetExperimentDetails(
+    UserExperiment* experiment, int flavor) {
+  NOTREACHED();
+  return false;
+}
+
 void GoogleChromeDistribution::LaunchUserExperiment(
-    installer::InstallStatus status, const Version& version,
-    const installer::Product& installation, bool system_level) {
+    const FilePath& setup_path, installer::InstallStatus status,
+    const Version& version, const installer::Product& installation,
+    bool system_level) {
   NOTREACHED();
 }
 
 void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
+    const std::wstring& experiment_group,
     const installer::Product& installation,
     const FilePath& application_path) {
   NOTREACHED();

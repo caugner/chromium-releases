@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "ui/gfx/native_widget_types.h"
 #include "views/accelerator.h"
 
@@ -254,10 +254,11 @@ class FocusManager {
   // Returns true if an accelerator was activated.
   bool ProcessAccelerator(const Accelerator& accelerator);
 
-  // Called by a RootView when a view within its hierarchy is removed from its
-  // parent. This will only be called by a RootView in a hierarchy of Widgets
-  // that this FocusManager is attached to the parent Widget of.
-  void ViewRemoved(View* parent, View* removed);
+  // Called by a RootView when a view within its hierarchy is removed
+  // from its parent. This will only be called by a RootView in a
+  // hierarchy of Widgets that this FocusManager is attached to the
+  // parent Widget of.
+  void ViewRemoved(View* removed);
 
   // Adds/removes a listener.  The FocusChangeListener is notified every time
   // the focused view is about to change.

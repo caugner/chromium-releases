@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -56,9 +56,9 @@
 #include <map>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/browser/browser_thread.h"
@@ -67,7 +67,7 @@
 #include "media/audio/simple_sources.h"
 
 class AudioManager;
-struct ViewHostMsg_Audio_CreateStream_Params;
+struct AudioParameters;
 
 class AudioRendererHost : public BrowserMessageFilter,
                           public media::AudioOutputController::EventHandler {
@@ -143,7 +143,7 @@ class AudioRendererHost : public BrowserMessageFilter,
   // successful this object would keep an internal entry of the stream for the
   // required properties.
   void OnCreateStream(const IPC::Message& msg, int stream_id,
-                      const ViewHostMsg_Audio_CreateStream_Params& params,
+                      const AudioParameters& params,
                       bool low_latency);
 
   // Play the audio stream referenced by |stream_id|.

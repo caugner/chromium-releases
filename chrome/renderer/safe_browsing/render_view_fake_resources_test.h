@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -45,9 +45,10 @@
 #include <map>
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
-#include "chrome/renderer/render_view_visitor.h"
+#include "chrome/renderer/chrome_content_renderer_client.h"
+#include "content/renderer/render_view_visitor.h"
 #include "ipc/ipc_channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -62,6 +63,7 @@ struct ResourceHostMsg_Request;
 
 namespace WebKit {
 class WebFrame;
+class WebHistoryItem;
 }
 
 namespace safe_browsing {
@@ -97,6 +99,12 @@ class RenderViewFakeResourcesTest : public ::testing::Test,
   // Navigates the main frame back in session history.
   void GoBack();
 
+  // Navigates the main frame forward in session history.  Note that for
+  // forward navigations, the caller needs to capture the WebHistoryItem
+  // for the page to go forward to (before going back) and pass it to
+  // this method.  The WebHistoryItem is available from the WebFrame.
+  void GoForward(const WebKit::WebHistoryItem& history_item);
+
   // Returns the main WebFrame for our RenderView.
   WebKit::WebFrame* GetMainFrame();
 
@@ -119,6 +127,7 @@ class RenderViewFakeResourcesTest : public ::testing::Test,
   static const int32 kViewId;  // arbitrary id for our testing view
 
   MessageLoopForIO message_loop_;
+  chrome::ChromeContentRendererClient chrome_content_renderer_client_;
   // channel that the renderer uses to talk to the browser.
   // For this test, we will handle the browser end of the channel.
   scoped_ptr<IPC::Channel> channel_;
@@ -135,6 +144,9 @@ class RenderViewFakeResourcesTest : public ::testing::Test,
   std::map<std::string, std::string> responses_;
 
  private:
+  // A helper for GoBack and GoForward.
+  void GoToOffset(int offset, const WebKit::WebHistoryItem& history_item);
+
   DISALLOW_COPY_AND_ASSIGN(RenderViewFakeResourcesTest);
 };
 

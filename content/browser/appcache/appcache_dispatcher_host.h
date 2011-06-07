@@ -8,20 +8,18 @@
 
 #include <vector>
 
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "content/browser/appcache/appcache_frontend_proxy.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "webkit/appcache/appcache_backend_impl.h"
 
 class ChromeAppCacheService;
-class URLRequestContextGetter;
-
-namespace net {
-class URLRequestContext;
-}  // namespace net
+namespace content {
+class ResourceContext;
+}  // namespace content
 
 // Handles appcache related messages sent to the main browser process from
 // its child processes. There is a distinct host for each child process.
@@ -29,14 +27,8 @@ class URLRequestContext;
 // WorkerProcessHost create an instance and delegates calls to it.
 class AppCacheDispatcherHost : public BrowserMessageFilter {
  public:
-  // Constructor for use on the IO thread.
-  AppCacheDispatcherHost(net::URLRequestContext* request_context,
+  AppCacheDispatcherHost(const content::ResourceContext* resource_context,
                          int process_id);
-
-  // Constructor for use on the UI thread.
-  AppCacheDispatcherHost(URLRequestContextGetter* request_context_getter,
-                         int process_id);
-
   ~AppCacheDispatcherHost();
 
   // BrowserIOMessageFilter implementation
@@ -51,6 +43,7 @@ class AppCacheDispatcherHost : public BrowserMessageFilter {
   // IPC message handlers
   void OnRegisterHost(int host_id);
   void OnUnregisterHost(int host_id);
+  void OnSetSpawningHostId(int host_id, int spawning_host_id);
   void OnSelectCache(int host_id, const GURL& document_url,
                      int64 cache_document_was_loaded_from,
                      const GURL& opt_manifest_url);
@@ -79,8 +72,7 @@ class AppCacheDispatcherHost : public BrowserMessageFilter {
 
   // Temporary until OnChannelConnected() can be called from the IO thread,
   // which will extract the AppCacheService from the net::URLRequestContext.
-  scoped_refptr<net::URLRequestContext> request_context_;
-  scoped_refptr<URLRequestContextGetter> request_context_getter_;
+  const content::ResourceContext* resource_context_;
 
   scoped_ptr<appcache::GetStatusCallback> get_status_callback_;
   scoped_ptr<appcache::StartUpdateCallback> start_update_callback_;

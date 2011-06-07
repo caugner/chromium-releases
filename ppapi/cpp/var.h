@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,6 +60,8 @@ class Var {
 
   Var& operator=(const Var& other);
 
+  // For objects, dictionaries, and arrays, this operator compares object
+  // identity rather than value identity.
   bool operator==(const Var& other) const;
 
   bool is_undefined() const { return var_.type == PP_VARTYPE_UNDEFINED; }
@@ -171,10 +173,12 @@ class Var {
     OutException(Var* v)
         : output_(v),
           originally_had_exception_(v && v->is_null()) {
-      if (output_)
+      if (output_) {
         temp_ = output_->var_;
-      else
+      } else {
+        temp_.padding = 0;
         temp_.type = PP_VARTYPE_UNDEFINED;
+      }
     }
     ~OutException() {
       if (output_ && !originally_had_exception_)
@@ -193,14 +197,16 @@ class Var {
     PP_Var temp_;
   };
 
+ protected:
+  PP_Var var_;
+  bool needs_release_;
+
  private:
   // Prevent an arbitrary pointer argument from being implicitly converted to
   // a bool at Var construction. If somebody makes such a mistake, (s)he will
   // get a compilation error.
   Var(void* non_scriptable_object_pointer);
 
-  PP_Var var_;
-  bool needs_release_;
 };
 
 }  // namespace pp

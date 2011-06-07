@@ -5,20 +5,21 @@
 #include "chrome/test/render_view_test.h"
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/common/dom_storage_common.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/native_web_keyboard_event.h"
+#include "chrome/common/print_messages.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
-#include "chrome/common/renderer_preferences.h"
-#include "chrome/renderer/autofill/autofill_agent.h"
 #include "chrome/renderer/autofill/password_autofill_manager.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/mock_render_process.h"
-#include "chrome/renderer/renderer_main_platform_delegate.h"
+#include "content/common/dom_storage_common.h"
+#include "content/common/native_web_keyboard_event.h"
+#include "content/common/renderer_preferences.h"
+#include "content/common/view_messages.h"
+#include "content/renderer/renderer_main_platform_delegate.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
@@ -39,7 +40,7 @@ using WebKit::WebScriptController;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
-using autofill::AutoFillAgent;
+using autofill::AutofillAgent;
 using autofill::PasswordAutofillManager;
 
 namespace {
@@ -47,7 +48,7 @@ const int32 kRouteId = 5;
 const int32 kOpenerId = 7;
 }  // namespace
 
-RenderViewTest::RenderViewTest() {
+RenderViewTest::RenderViewTest() : extension_dispatcher_(NULL) {
 }
 
 RenderViewTest::~RenderViewTest() {
@@ -93,6 +94,9 @@ void RenderViewTest::LoadHTML(const char* html) {
 }
 
 void RenderViewTest::SetUp() {
+  content::GetContentClient()->set_renderer(&chrome_content_renderer_client_);
+  extension_dispatcher_ = new ExtensionDispatcher();
+  chrome_content_renderer_client_.SetExtensionDispatcher(extension_dispatcher_);
   sandbox_init_wrapper_.reset(new SandboxInitWrapper());
   command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
   params_.reset(new MainFunctionParams(*command_line_, *sandbox_init_wrapper_,
@@ -108,7 +112,8 @@ void RenderViewTest::SetUp() {
   WebScriptController::registerExtension(JsonSchemaJsV8Extension::Get());
   WebScriptController::registerExtension(EventBindings::Get());
   WebScriptController::registerExtension(ExtensionApiTestV8Extension::Get());
-  WebScriptController::registerExtension(ExtensionProcessBindings::Get());
+  WebScriptController::registerExtension(ExtensionProcessBindings::Get(
+      extension_dispatcher_));
   WebScriptController::registerExtension(RendererExtensionBindings::Get());
   EventBindings::SetRenderThread(&render_thread_);
 
@@ -129,6 +134,7 @@ void RenderViewTest::SetUp() {
   // This needs to pass the mock render thread to the view.
   view_ = RenderView::Create(&render_thread_,
                              0,
+                             gfx::kNullPluginWindow,
                              kOpenerId,
                              RendererPreferences(),
                              WebPreferences(),
@@ -141,10 +147,10 @@ void RenderViewTest::SetUp() {
   mock_keyboard_.reset(new MockKeyboard());
 
   // RenderView doesn't expose it's PasswordAutofillManager or
-  // AutoFillHelper objects, because it has no need to store them directly
+  // AutofillAgent objects, because it has no need to store them directly
   // (they're stored as RenderViewObserver*).  So just create another set.
   password_autofill_ = new PasswordAutofillManager(view_);
-  autofill_agent_ = new AutoFillAgent(view_, password_autofill_);
+  autofill_agent_ = new AutofillAgent(view_, password_autofill_);
 }
 
 void RenderViewTest::TearDown() {
@@ -177,6 +183,9 @@ void RenderViewTest::TearDown() {
   params_.reset();
   command_line_.reset();
   sandbox_init_wrapper_.reset();
+
+  extension_dispatcher_->OnRenderProcessShutdown();
+  extension_dispatcher_ = NULL;
 }
 
 int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
@@ -266,29 +275,31 @@ void RenderViewTest::VerifyPageCount(int count) {
 #else
   const IPC::Message* page_cnt_msg =
       render_thread_.sink().GetUniqueMessageMatching(
-          ViewHostMsg_DidGetPrintedPagesCount::ID);
+          PrintHostMsg_DidGetPrintedPagesCount::ID);
   ASSERT_TRUE(page_cnt_msg);
-  ViewHostMsg_DidGetPrintedPagesCount::Param post_page_count_param;
-  ViewHostMsg_DidGetPrintedPagesCount::Read(page_cnt_msg,
-                                            &post_page_count_param);
+  PrintHostMsg_DidGetPrintedPagesCount::Param post_page_count_param;
+  PrintHostMsg_DidGetPrintedPagesCount::Read(page_cnt_msg,
+                                             &post_page_count_param);
   EXPECT_EQ(count, post_page_count_param.b);
 #endif  // defined(OS_CHROMEOS)
 }
 
-void RenderViewTest::VerifyPagesPrinted() {
+void RenderViewTest::VerifyPagesPrinted(bool printed) {
 #if defined(OS_CHROMEOS)
-  const IPC::Message* did_print_msg =
-      render_thread_.sink().GetUniqueMessageMatching(
-          ViewHostMsg_TempFileForPrintingWritten::ID);
-  ASSERT_TRUE(did_print_msg);
+  bool did_print_msg = (NULL != render_thread_.sink().GetUniqueMessageMatching(
+      PrintHostMsg_TempFileForPrintingWritten::ID));
+  ASSERT_EQ(printed, did_print_msg);
 #else
-  const IPC::Message* did_print_msg =
+  const IPC::Message* print_msg =
       render_thread_.sink().GetUniqueMessageMatching(
-          ViewHostMsg_DidPrintPage::ID);
-  ASSERT_TRUE(did_print_msg);
-  ViewHostMsg_DidPrintPage::Param post_did_print_page_param;
-  ViewHostMsg_DidPrintPage::Read(did_print_msg, &post_did_print_page_param);
-  EXPECT_EQ(0, post_did_print_page_param.a.page_number);
+          PrintHostMsg_DidPrintPage::ID);
+  bool did_print_msg = (NULL != print_msg);
+  ASSERT_EQ(printed, did_print_msg);
+  if (printed) {
+    PrintHostMsg_DidPrintPage::Param post_did_print_page_param;
+    PrintHostMsg_DidPrintPage::Read(print_msg, &post_did_print_page_param);
+    EXPECT_EQ(0, post_did_print_page_param.a.page_number);
+  }
 #endif  // defined(OS_CHROMEOS)
 }
 

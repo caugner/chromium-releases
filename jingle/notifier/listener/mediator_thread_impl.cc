@@ -1,244 +1,319 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "jingle/notifier/listener/mediator_thread_impl.h"
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/observer_list_threadsafe.h"
+#include "base/threading/thread.h"
+#include "jingle/notifier/base/const_communicator.h"
+#include "jingle/notifier/base/notifier_options_util.h"
 #include "jingle/notifier/base/task_pump.h"
 #include "jingle/notifier/communicator/connection_options.h"
-#include "jingle/notifier/communicator/const_communicator.h"
+#include "jingle/notifier/communicator/login.h"
 #include "jingle/notifier/communicator/xmpp_connection_generator.h"
-#include "jingle/notifier/listener/listen_task.h"
-#include "jingle/notifier/listener/send_update_task.h"
-#include "jingle/notifier/listener/subscribe_task.h"
-#include "net/base/cert_verifier.h"
+#include "jingle/notifier/listener/push_notifications_listen_task.h"
+#include "jingle/notifier/listener/push_notifications_send_update_task.h"
+#include "jingle/notifier/listener/push_notifications_subscribe_task.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/host_resolver.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "talk/xmpp/xmppclientsettings.h"
 
 namespace notifier {
 
-MediatorThreadImpl::MediatorThreadImpl(const NotifierOptions& notifier_options)
+class MediatorThreadImpl::Core
+    : public base::RefCountedThreadSafe<MediatorThreadImpl::Core>,
+      public LoginDelegate,
+      public PushNotificationsListenTaskDelegate,
+      public PushNotificationsSubscribeTaskDelegate {
+ public:
+  // Invoked on the caller thread.
+  explicit Core(const NotifierOptions& notifier_options);
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
+
+  // Login::Delegate implementation. Called on I/O thread.
+  virtual void OnConnect(base::WeakPtr<talk_base::Task> base_task);
+  virtual void OnDisconnect();
+
+  // PushNotificationsListenTaskDelegate implementation. Called on I/O thread.
+  virtual void OnNotificationReceived(
+      const Notification& notification);
+  // PushNotificationsSubscribeTaskDelegate implementation. Called on I/O
+  // thread.
+  virtual void OnSubscribed();
+  virtual void OnSubscriptionError();
+
+  // Helpers invoked on I/O thread.
+  void Login(const buzz::XmppClientSettings& settings);
+  void Disconnect();
+  void ListenForPushNotifications();
+  void SubscribeForPushNotifications(
+      const SubscriptionList& subscriptions);
+  void SendNotification(const Notification& data);
+  void UpdateXmppSettings(const buzz::XmppClientSettings& settings);
+
+ private:
+  friend class base::RefCountedThreadSafe<MediatorThreadImpl::Core>;
+  // Invoked on either the caller thread or the I/O thread.
+  virtual ~Core();
+  scoped_refptr<ObserverListThreadSafe<Observer> > observers_;
+  base::WeakPtr<talk_base::Task> base_task_;
+
+  const NotifierOptions notifier_options_;
+
+  scoped_ptr<notifier::Login> login_;
+
+  std::vector<Notification> pending_notifications_to_send_;
+
+  DISALLOW_COPY_AND_ASSIGN(Core);
+};
+
+MediatorThreadImpl::Core::Core(
+    const NotifierOptions& notifier_options)
     : observers_(new ObserverListThreadSafe<Observer>()),
-      parent_message_loop_(MessageLoop::current()),
-      notifier_options_(notifier_options),
-      worker_thread_("MediatorThread worker thread") {
-  DCHECK(parent_message_loop_);
+      notifier_options_(notifier_options) {
+  DCHECK(notifier_options_.request_context_getter);
 }
 
-MediatorThreadImpl::~MediatorThreadImpl() {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  // If the worker thread is still around, we need to call Logout() so
-  // that all the variables living it get destroyed properly (i.e., on
-  // the worker thread).
-  if (worker_thread_.IsRunning()) {
-    Logout();
-  }
+MediatorThreadImpl::Core::~Core() {
 }
 
-void MediatorThreadImpl::AddObserver(Observer* observer) {
+void MediatorThreadImpl::Core::AddObserver(Observer* observer) {
   observers_->AddObserver(observer);
 }
 
-void MediatorThreadImpl::RemoveObserver(Observer* observer) {
+void MediatorThreadImpl::Core::RemoveObserver(Observer* observer) {
   observers_->RemoveObserver(observer);
 }
 
-void MediatorThreadImpl::Start() {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  // We create the worker thread as an IO thread in preparation for
-  // making this use Chrome sockets.
-  const base::Thread::Options options(MessageLoop::TYPE_IO, 0);
-  // TODO(akalin): Make this function return a bool and remove this
-  // CHECK().
-  CHECK(worker_thread_.StartWithOptions(options));
-}
-
-void MediatorThreadImpl::Login(const buzz::XmppClientSettings& settings) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  worker_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &MediatorThreadImpl::DoLogin, settings));
-}
-
-void MediatorThreadImpl::Logout() {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  worker_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &MediatorThreadImpl::DoDisconnect));
-  // TODO(akalin): Decomp this into a separate stop method.
-  worker_thread_.Stop();
-  // worker_thread_ should have cleaned this up.
-  CHECK(!login_.get());
-}
-
-void MediatorThreadImpl::ListenForUpdates() {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  worker_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &MediatorThreadImpl::DoListenForUpdates));
-}
-
-void MediatorThreadImpl::SubscribeForUpdates(
-    const std::vector<std::string>& subscribed_services_list) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  worker_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &MediatorThreadImpl::DoSubscribeForUpdates,
-          subscribed_services_list));
-}
-
-void MediatorThreadImpl::SendNotification(
-    const OutgoingNotificationData& data) {
-  DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
-  worker_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &MediatorThreadImpl::DoSendNotification,
-                        data));
-}
-
-MessageLoop* MediatorThreadImpl::worker_message_loop() {
-  MessageLoop* current_message_loop = MessageLoop::current();
-  DCHECK(current_message_loop);
-  MessageLoop* worker_message_loop = worker_thread_.message_loop();
-  DCHECK(worker_message_loop);
-  DCHECK(current_message_loop == parent_message_loop_ ||
-         current_message_loop == worker_message_loop);
-  return worker_message_loop;
-}
-
-
-void MediatorThreadImpl::DoLogin(
-    const buzz::XmppClientSettings& settings) {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
+void MediatorThreadImpl::Core::Login(const buzz::XmppClientSettings& settings) {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
   VLOG(1) << "P2P: Thread logging into talk network.";
 
+  // TODO(sanjeevr): Pass in the URLRequestContextGetter to Login.
   base_task_.reset();
-
-  // TODO(akalin): Use an existing HostResolver from somewhere (maybe
-  // the IOThread one).
-  // TODO(wtc): Sharing HostResolver and CertVerifier with the IO Thread won't
-  // work because HostResolver and CertVerifier are single-threaded.
-  host_resolver_.reset(
-      net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                    NULL, NULL));
-  cert_verifier_.reset(new net::CertVerifier);
-
-  notifier::ServerInformation server_list[2];
-  int server_list_count = 0;
-
-  // Override the default servers with a test notification server if one was
-  // provided.
-  if (!notifier_options_.xmpp_host_port.host().empty()) {
-    server_list[0].server = notifier_options_.xmpp_host_port;
-    server_list[0].special_port_magic = false;
-    server_list_count = 1;
-  } else {
-    // The default servers know how to serve over port 443 (that's the magic).
-    server_list[0].server = net::HostPortPair("talk.google.com",
-                                              notifier::kDefaultXmppPort);
-    server_list[0].special_port_magic = true;
-    server_list[1].server = net::HostPortPair("talkx.l.google.com",
-                                              notifier::kDefaultXmppPort);
-    server_list[1].special_port_magic = true;
-    server_list_count = 2;
-  }
-
-  // Autodetect proxy is on by default.
-  notifier::ConnectionOptions options;
-
   login_.reset(new notifier::Login(this,
                                    settings,
-                                   options,
-                                   host_resolver_.get(),
-                                   cert_verifier_.get(),
-                                   server_list,
-                                   server_list_count,
-                                   notifier_options_.try_ssltcp_first));
+                                   notifier::ConnectionOptions(),
+                                   notifier_options_.request_context_getter,
+                                   GetServerList(notifier_options_),
+                                   notifier_options_.try_ssltcp_first,
+                                   notifier_options_.auth_mechanism));
   login_->StartConnection();
 }
 
-void MediatorThreadImpl::DoDisconnect() {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
+void MediatorThreadImpl::Core::Disconnect() {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
   VLOG(1) << "P2P: Thread logging out of talk network.";
   login_.reset();
-  cert_verifier_.reset();
-  host_resolver_.reset();
   base_task_.reset();
 }
 
-void MediatorThreadImpl::DoSubscribeForUpdates(
-    const std::vector<std::string>& subscribed_services_list) {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  if (!base_task_.get()) {
+void MediatorThreadImpl::Core::ListenForPushNotifications() {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
+  if (!base_task_.get())
     return;
-  }
-  // Owned by |base_task_|.
-  SubscribeTask* subscription =
-      new SubscribeTask(base_task_, subscribed_services_list);
-  subscription->SignalStatusUpdate.connect(
-      this,
-      &MediatorThreadImpl::OnSubscriptionStateChange);
-  subscription->Start();
-}
-
-void MediatorThreadImpl::DoListenForUpdates() {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  if (!base_task_.get()) {
-    return;
-  }
-  // Owned by |base_task_|.
-  ListenTask* listener = new ListenTask(base_task_);
-  listener->SignalUpdateAvailable.connect(
-      this,
-      &MediatorThreadImpl::OnIncomingNotification);
+  PushNotificationsListenTask* listener =
+      new PushNotificationsListenTask(base_task_, this);
   listener->Start();
 }
 
-void MediatorThreadImpl::DoSendNotification(
-    const OutgoingNotificationData& data) {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
+void MediatorThreadImpl::Core::SubscribeForPushNotifications(
+    const SubscriptionList& subscriptions) {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
+  if (!base_task_.get())
+    return;
+  PushNotificationsSubscribeTask* subscribe_task =
+      new PushNotificationsSubscribeTask(base_task_, subscriptions, this);
+  subscribe_task->Start();
+}
+
+void MediatorThreadImpl::Core::OnSubscribed() {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
+  observers_->Notify(&Observer::OnSubscriptionStateChange, true);
+}
+
+void MediatorThreadImpl::Core::OnSubscriptionError() {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
+  observers_->Notify(&Observer::OnSubscriptionStateChange, false);
+}
+
+void MediatorThreadImpl::Core::OnNotificationReceived(
+    const Notification& notification) {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
+  observers_->Notify(&Observer::OnIncomingNotification, notification);
+}
+
+void MediatorThreadImpl::Core::SendNotification(const Notification& data) {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
   if (!base_task_.get()) {
+    VLOG(1) << "P2P: Cannot send notification " << data.ToString()
+            << "; sending later";
+    pending_notifications_to_send_.push_back(data);
     return;
   }
   // Owned by |base_task_|.
-  SendUpdateTask* task = new SendUpdateTask(base_task_, data);
-  task->SignalStatusUpdate.connect(
-      this,
-      &MediatorThreadImpl::OnOutgoingNotification);
+  PushNotificationsSendUpdateTask* task =
+      new PushNotificationsSendUpdateTask(base_task_, data);
   task->Start();
+  observers_->Notify(&Observer::OnOutgoingNotification);
 }
 
-void MediatorThreadImpl::OnIncomingNotification(
-    const IncomingNotificationData& notification_data) {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  observers_->Notify(&Observer::OnIncomingNotification, notification_data);
+void MediatorThreadImpl::Core::UpdateXmppSettings(
+    const buzz::XmppClientSettings& settings) {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
+  VLOG(1) << "P2P: Thread Updating login settings.";
+  // The caller should only call UpdateXmppSettings after a Login call.
+  if (login_.get())
+    login_->UpdateXmppSettings(settings);
+  else
+    NOTREACHED() <<
+        "P2P: Thread UpdateXmppSettings called when login_ was NULL";
 }
 
-void MediatorThreadImpl::OnOutgoingNotification(bool success) {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  if (success) {
-    observers_->Notify(&Observer::OnOutgoingNotification);
+void MediatorThreadImpl::Core::OnConnect(
+    base::WeakPtr<talk_base::Task> base_task) {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
+  base_task_ = base_task;
+  observers_->Notify(&Observer::OnConnectionStateChange, true);
+  std::vector<Notification> notifications_to_send;
+  notifications_to_send.swap(pending_notifications_to_send_);
+  for (std::vector<Notification>::const_iterator it =
+           notifications_to_send.begin();
+       it != notifications_to_send.end(); ++it) {
+    VLOG(1) << "P2P: Sending pending notification " << it->ToString();
+    SendNotification(*it);
   }
 }
 
-void MediatorThreadImpl::OnConnect(base::WeakPtr<talk_base::Task> base_task) {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  base_task_ = base_task;
-  observers_->Notify(&Observer::OnConnectionStateChange, true);
-}
-
-void MediatorThreadImpl::OnDisconnect() {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
+void MediatorThreadImpl::Core::OnDisconnect() {
+  DCHECK(notifier_options_.request_context_getter->GetIOMessageLoopProxy()->
+      BelongsToCurrentThread());
   base_task_.reset();
   observers_->Notify(&Observer::OnConnectionStateChange, false);
 }
 
-void MediatorThreadImpl::OnSubscriptionStateChange(bool success) {
-  DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  observers_->Notify(&Observer::OnSubscriptionStateChange, success);
+
+MediatorThreadImpl::MediatorThreadImpl(const NotifierOptions& notifier_options)
+    : core_(new Core(notifier_options)),
+      construction_message_loop_proxy_(
+          base::MessageLoopProxy::CreateForCurrentThread()),
+      io_message_loop_proxy_(
+          notifier_options.request_context_getter->GetIOMessageLoopProxy()) {
+}
+
+MediatorThreadImpl::~MediatorThreadImpl() {
+  DCHECK(construction_message_loop_proxy_->BelongsToCurrentThread());
+  LogoutImpl();
+}
+
+void MediatorThreadImpl::AddObserver(Observer* observer) {
+  CheckOrSetValidThread();
+  core_->AddObserver(observer);
+}
+
+void MediatorThreadImpl::RemoveObserver(Observer* observer) {
+  CheckOrSetValidThread();
+  core_->RemoveObserver(observer);
+}
+
+void MediatorThreadImpl::Start() {
+  DCHECK(construction_message_loop_proxy_->BelongsToCurrentThread());
+}
+
+void MediatorThreadImpl::Login(const buzz::XmppClientSettings& settings) {
+  CheckOrSetValidThread();
+  io_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(core_.get(),
+                        &MediatorThreadImpl::Core::Login,
+                        settings));
+}
+
+void MediatorThreadImpl::Logout() {
+  CheckOrSetValidThread();
+  LogoutImpl();
+}
+
+void MediatorThreadImpl::ListenForUpdates() {
+  CheckOrSetValidThread();
+  io_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(core_.get(),
+                        &MediatorThreadImpl::Core::ListenForPushNotifications));
+}
+
+void MediatorThreadImpl::SubscribeForUpdates(
+    const SubscriptionList& subscriptions) {
+  CheckOrSetValidThread();
+  io_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(
+          core_.get(),
+          &MediatorThreadImpl::Core::SubscribeForPushNotifications,
+          subscriptions));
+}
+
+void MediatorThreadImpl::SendNotification(
+    const Notification& data) {
+  CheckOrSetValidThread();
+  io_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(core_.get(),
+                        &MediatorThreadImpl::Core::SendNotification,
+                        data));
+}
+
+void MediatorThreadImpl::UpdateXmppSettings(
+    const buzz::XmppClientSettings& settings) {
+  CheckOrSetValidThread();
+  io_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(core_.get(),
+                        &MediatorThreadImpl::Core::UpdateXmppSettings,
+                        settings));
+}
+
+void MediatorThreadImpl::TriggerOnConnectForTest(
+    base::WeakPtr<talk_base::Task> base_task) {
+  CheckOrSetValidThread();
+  io_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(core_.get(),
+                        &MediatorThreadImpl::Core::OnConnect,
+                        base_task));
+}
+
+void MediatorThreadImpl::LogoutImpl() {
+  io_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(core_.get(),
+                        &MediatorThreadImpl::Core::Disconnect));
+}
+
+void MediatorThreadImpl::CheckOrSetValidThread() {
+  if (method_message_loop_proxy_) {
+    DCHECK(method_message_loop_proxy_->BelongsToCurrentThread());
+  } else {
+    method_message_loop_proxy_ =
+        base::MessageLoopProxy::CreateForCurrentThread();
+  }
 }
 
 }  // namespace notifier

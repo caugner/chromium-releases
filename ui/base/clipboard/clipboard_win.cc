@@ -14,10 +14,16 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/shared_memory.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_gdi_object.h"
+#include "base/win/scoped_hdc.h"
+#include "base/win/wrapped_window_proc.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard_util_win.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/size.h"
 
 namespace ui {
@@ -135,7 +141,7 @@ Clipboard::Clipboard() : create_window_(false) {
     // Make a dummy HWND to be the clipboard's owner.
     WNDCLASSEX wcex = {0};
     wcex.cbSize = sizeof(WNDCLASSEX);
-    wcex.lpfnWndProc = ClipboardOwnerWndProc;
+    wcex.lpfnWndProc = base::win::WrappedWindowProc<ClipboardOwnerWndProc>;
     wcex.hInstance = GetModuleHandle(NULL);
     wcex.lpszClassName = L"ClipboardOwnerWindowClass";
     ::RegisterClassEx(&wcex);
@@ -331,6 +337,26 @@ bool Clipboard::IsFormatAvailableByString(
   return ::IsClipboardFormatAvailable(format) != FALSE;
 }
 
+void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
+                                   std::vector<string16>* types,
+                                   bool* contains_filenames) const {
+  if (!types || !contains_filenames) {
+    NOTREACHED();
+    return;
+  }
+
+  const FORMATETC* textFormat = ClipboardUtil::GetPlainTextFormat();
+  const FORMATETC* htmlFormat = ClipboardUtil::GetHtmlFormat();
+  types->clear();
+  if (::IsClipboardFormatAvailable(textFormat->cfFormat))
+    types->push_back(UTF8ToUTF16(kMimeTypeText));
+  if (::IsClipboardFormatAvailable(htmlFormat->cfFormat))
+    types->push_back(UTF8ToUTF16(kMimeTypeHTML));
+  if (::IsClipboardFormatAvailable(CF_BITMAP))
+    types->push_back(UTF8ToUTF16(kMimeTypePNG));
+  *contains_filenames = false;
+}
+
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
   if (!result) {
@@ -402,6 +428,38 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
                               src_url);
   if (markup)
     markup->assign(UTF8ToWide(markup_utf8));
+}
+
+SkBitmap Clipboard::ReadImage(Buffer buffer) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
+
+  // Acquire the clipboard.
+  ScopedClipboard clipboard;
+  if (!clipboard.Acquire(GetClipboardWindow()))
+    return SkBitmap();
+
+  HBITMAP source_bitmap = static_cast<HBITMAP>(::GetClipboardData(CF_BITMAP));
+  if (!source_bitmap)
+    return SkBitmap();
+
+  base::win::ScopedHDC source_dc(::CreateCompatibleDC(NULL));
+  if (!source_dc)
+    return SkBitmap();
+  ::SelectObject(source_dc, source_bitmap);
+
+  // Get the dimensions of the bitmap.
+  BITMAPINFO bitmap_info = {};
+  bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
+  ::GetDIBits(source_dc, source_bitmap, 0, 0, 0, &bitmap_info, DIB_RGB_COLORS);
+  int width = bitmap_info.bmiHeader.biWidth;
+  int height = bitmap_info.bmiHeader.biHeight;
+
+  gfx::CanvasSkia canvas(width, height, false);
+
+  HDC destination_dc = canvas.beginPlatformPaint();
+  ::BitBlt(destination_dc, 0, 0, width, height, source_dc, 0, 0, SRCCOPY);
+  canvas.endPlatformPaint();
+  return canvas.ExtractBitmap();
 }
 
 void Clipboard::ReadBookmark(string16* title, std::string* url) const {

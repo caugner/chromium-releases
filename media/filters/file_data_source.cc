@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,10 +23,8 @@ FileDataSource::~FileDataSource() {
   DCHECK(!file_);
 }
 
-void FileDataSource::Initialize(const std::string& url,
-                                FilterCallback* callback) {
+PipelineStatus FileDataSource::Initialize(const std::string& url) {
   DCHECK(!file_);
-  scoped_ptr<FilterCallback> c(callback);
 #if defined(OS_WIN)
   FilePath file_path(UTF8ToWide(url));
 #else
@@ -37,16 +35,24 @@ void FileDataSource::Initialize(const std::string& url,
   }
   if (!file_) {
     file_size_ = 0;
-    host()->SetError(PIPELINE_ERROR_URL_NOT_FOUND);
-    callback->Run();
-    return;
+    return PIPELINE_ERROR_URL_NOT_FOUND;
   }
-  media_format_.SetAsString(MediaFormat::kMimeType,
-                            mime_type::kApplicationOctetStream);
   media_format_.SetAsString(MediaFormat::kURL, url);
-  host()->SetTotalBytes(file_size_);
-  host()->SetBufferedBytes(file_size_);
-  callback->Run();
+
+  if (host()) {
+    host()->SetTotalBytes(file_size_);
+    host()->SetBufferedBytes(file_size_);
+  }
+
+  return PIPELINE_OK;
+}
+
+void FileDataSource::set_host(FilterHost* filter_host) {
+  DataSource::set_host(filter_host);
+  if (file_) {
+    host()->SetTotalBytes(file_size_);
+    host()->SetBufferedBytes(file_size_);
+  }
 }
 
 void FileDataSource::Stop(FilterCallback* callback) {
@@ -109,5 +115,7 @@ bool FileDataSource::GetSize(int64* size_out) {
 bool FileDataSource::IsStreaming() {
   return false;
 }
+
+void FileDataSource::SetPreload(Preload preload) {}
 
 }  // namespace media

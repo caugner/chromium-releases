@@ -19,12 +19,12 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/common/child_process_info.h"
-#include "chrome/common/notification_type.h"
 #include "content/browser/renderer_host/resource_queue.h"
+#include "content/common/child_process_info.h"
+#include "content/common/notification_type.h"
 #include "ipc/ipc_message.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/resource_type.h"
@@ -41,7 +41,6 @@ class ResourceMessageFilter;
 class SafeBrowsingService;
 class SaveFileManager;
 class SSLClientAuthHandler;
-class UserScriptListener;
 class WebKitThread;
 struct DownloadSaveInfo;
 struct GlobalRequestID;
@@ -71,7 +70,8 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
                                     const GURL& new_url) = 0;
   };
 
-  ResourceDispatcherHost();
+  explicit ResourceDispatcherHost(
+      const ResourceQueue::DelegateSet& resource_queue_delegates);
   ~ResourceDispatcherHost();
 
   void Initialize();
@@ -271,6 +271,11 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   void AddPrerenderChildRoutePair(int child_id, int route_id);
   void RemovePrerenderChildRoutePair(int child_id, int route_id);
 
+  typedef std::set<std::pair<int, int> > PrerenderChildRouteIdPairs;
+  const PrerenderChildRouteIdPairs& prerender_child_route_id_pairs() const {
+    return prerender_child_route_pairs_;
+  }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
                            TestBlockedRequestsProcessDies);
@@ -278,10 +283,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
                            IncrementOutstandingRequestsMemoryCost);
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
                            CalculateApproximateMemoryCost);
-  FRIEND_TEST_ALL_PREFIXES(ApplyExtensionLocalizationFilterTest, WrongScheme);
-  FRIEND_TEST_ALL_PREFIXES(ApplyExtensionLocalizationFilterTest, GoodScheme);
-  FRIEND_TEST_ALL_PREFIXES(ApplyExtensionLocalizationFilterTest,
-                           GoodSchemeWrongResourceType);
 
   class ShutdownTask;
 
@@ -321,8 +322,10 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // Helper function for regular and download requests.
   void BeginRequestInternal(net::URLRequest* request);
 
-  // Helper function that cancels |request|.
-  void CancelRequestInternal(net::URLRequest* request, bool from_renderer);
+  // Helper function that cancels |request|.  Returns whether the
+  // request was actually cancelled.  If a renderer cancels a request
+  // for a download, we ignore the cancellation.
+  bool CancelRequestInternal(net::URLRequest* request, bool from_renderer);
 
   // Helper function that inserts |request| into the resource queue.
   void InsertIntoResourceQueue(
@@ -458,8 +461,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // We own the save file manager.
   scoped_refptr<SaveFileManager> save_file_manager_;
 
-  scoped_refptr<UserScriptListener> user_script_listener_;
-
   scoped_refptr<SafeBrowsingService> safe_browsing_;
 
   // We own the WebKit thread and see to its destruction.
@@ -507,7 +508,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   ResourceMessageFilter* filter_;
 
   static bool is_prefetch_enabled_;
-  typedef std::set<std::pair<int, int> > PrerenderChildRouteIdPairs;
   PrerenderChildRouteIdPairs prerender_child_route_pairs_;
 
 

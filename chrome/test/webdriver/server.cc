@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,8 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
-#include "base/scoped_ptr.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
@@ -26,6 +26,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/webdriver/dispatch.h"
 #include "chrome/test/webdriver/error_codes.h"
 #include "chrome/test/webdriver/session_manager.h"
@@ -37,6 +38,7 @@
 #include "chrome/test/webdriver/commands/implicit_wait_command.h"
 #include "chrome/test/webdriver/commands/navigate_commands.h"
 #include "chrome/test/webdriver/commands/mouse_commands.h"
+#include "chrome/test/webdriver/commands/screenshot_command.h"
 #include "chrome/test/webdriver/commands/session_with_id.h"
 #include "chrome/test/webdriver/commands/source_command.h"
 #include "chrome/test/webdriver/commands/speed_command.h"
@@ -74,27 +76,12 @@ signal_handler(int sig_num) {
 namespace webdriver {
 
 void InitCallbacks(struct mg_context* ctx, Dispatcher* dispatcher,
-                   base::WaitableEvent* shutdown_event) {
+                   base::WaitableEvent* shutdown_event,
+                   bool forbid_other_requests) {
   dispatcher->AddShutdown("/shutdown", shutdown_event);
+  dispatcher->AddStatus("/healthz");
 
-  dispatcher->Add<CreateSession>(       "/session");
-  dispatcher->Add<BackCommand>(         "/session/*/back");
-  dispatcher->Add<ExecuteCommand>(      "/session/*/execute");
-  dispatcher->Add<ForwardCommand>(      "/session/*/forward");
-  dispatcher->Add<SwitchFrameCommand>(  "/session/*/frame");
-  dispatcher->Add<RefreshCommand>(      "/session/*/refresh");
-  dispatcher->Add<SourceCommand>(       "/session/*/source");
-  dispatcher->Add<SpeedCommand>(        "/session/*/speed");
-  dispatcher->Add<TitleCommand>(        "/session/*/title");
-  dispatcher->Add<URLCommand>(          "/session/*/url");
-  dispatcher->Add<WindowCommand>(       "/session/*/window");
-  dispatcher->Add<WindowHandleCommand>( "/session/*/window_handle");
-  dispatcher->Add<WindowHandlesCommand>("/session/*/window_handles");
-  dispatcher->Add<ImplicitWaitCommand>( "/session/*/timeouts/implicit_wait");
-
-  // Cookie functions.
-  dispatcher->Add<CookieCommand>(     "/session/*/cookie");
-  dispatcher->Add<NamedCookieCommand>("/session/*/cookie/*");
+  dispatcher->Add<CreateSession>("/session");
 
   // WebElement commands
   dispatcher->Add<FindOneElementCommand>(  "/session/*/element");
@@ -119,23 +106,78 @@ void InitCallbacks(struct mg_context* ctx, Dispatcher* dispatcher,
   dispatcher->Add<ElementToggleCommand>(  "/session/*/element/*/toggle");
   dispatcher->Add<ElementValueCommand>(   "/session/*/element/*/value");
 
+  dispatcher->Add<ScreenshotCommand>("/session/*/screenshot");
+
   // Mouse Commands
   dispatcher->Add<ClickCommand>("/session/*/element/*/click");
   dispatcher->Add<DragCommand>( "/session/*/element/*/drag");
   dispatcher->Add<HoverCommand>("/session/*/element/*/hover");
 
+  // All session based commands should be listed after the element based
+  // commands to avoid potential mapping conflicts from an overzealous
+  // wildcard match. For example, /session/*/title maps to the handler to
+  // fetch the page title. If mapped first, this would overwrite the handler
+  // for /session/*/element/*/attribute/title, which should fetch the title
+  // attribute of the element.
+  dispatcher->Add<BackCommand>(         "/session/*/back");
+  dispatcher->Add<ExecuteCommand>(      "/session/*/execute");
+  dispatcher->Add<ForwardCommand>(      "/session/*/forward");
+  dispatcher->Add<SwitchFrameCommand>(  "/session/*/frame");
+  dispatcher->Add<RefreshCommand>(      "/session/*/refresh");
+  dispatcher->Add<SourceCommand>(       "/session/*/source");
+  dispatcher->Add<SpeedCommand>(        "/session/*/speed");
+  dispatcher->Add<TitleCommand>(        "/session/*/title");
+  dispatcher->Add<URLCommand>(          "/session/*/url");
+  dispatcher->Add<WindowCommand>(       "/session/*/window");
+  dispatcher->Add<WindowHandleCommand>( "/session/*/window_handle");
+  dispatcher->Add<WindowHandlesCommand>("/session/*/window_handles");
+  dispatcher->Add<ImplicitWaitCommand>( "/session/*/timeouts/implicit_wait");
+
+  // Cookie functions.
+  dispatcher->Add<CookieCommand>(     "/session/*/cookie");
+  dispatcher->Add<NamedCookieCommand>("/session/*/cookie/*");
+
   // Commands that have not been implemented yet. We list these out explicitly
   // so that tests that attempt to use them fail with a meaningful error.
   dispatcher->SetNotImplemented("/session/*/execute_async");
   dispatcher->SetNotImplemented("/session/*/timeouts/async_script");
-  dispatcher->SetNotImplemented("/session/*/screenshot");
 
   // Since the /session/* is a wild card that would match the above URIs, this
-  // line MUST be the last registered URI with the server.
+  // line MUST be after all other webdriver command callbacks.
   dispatcher->Add<SessionWithID>("/session/*");
+
+  if (forbid_other_requests)
+    dispatcher->ForbidAllOtherRequests();
 }
 
 }  // namespace webdriver
+
+// Initializes logging for ChromeDriver.
+void InitChromeDriverLogging(const CommandLine& command_line) {
+  bool success = InitLogging(
+      FILE_PATH_LITERAL("chromedriver.log"),
+      logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
+      logging::LOCK_LOG_FILE,
+      logging::DELETE_OLD_LOG_FILE,
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  if (!success) {
+    PLOG(ERROR) << "Unable to initialize logging";
+  }
+  logging::SetLogItems(false,  // enable_process_id
+                       false,  // enable_thread_id
+                       true,   // enable_timestamp
+                       false); // enable_tickcount
+  if (command_line.HasSwitch(switches::kLoggingLevel)) {
+    std::string log_level = command_line.GetSwitchValueASCII(
+        switches::kLoggingLevel);
+    int level = 0;
+    if (base::StringToInt(log_level, &level)) {
+      logging::SetMinLogLevel(level);
+    } else {
+      LOG(WARNING) << "Bad log level: " << log_level;
+    }
+  }
+}
 
 // Configures mongoose according to the given command line flags.
 // Returns true on success.
@@ -155,6 +197,7 @@ bool SetMongooseOptions(struct mg_context* ctx,
   mg_set_option(ctx, "idle_time", "1");
   return true;
 }
+
 
 // Sets up and runs the Mongoose HTTP server for the JSON over HTTP
 // protcol of webdriver.  The spec is located at:
@@ -176,6 +219,7 @@ int main(int argc, char *argv[]) {
   // built Chrome.
   chrome::RegisterPathProvider();
   TestTimeouts::Initialize();
+  InitChromeDriverLogging(*cmd_line);
 
   // Parse command line flags.
   std::string port = "9515";
@@ -184,8 +228,9 @@ int main(int argc, char *argv[]) {
   std::string url_base;
   if (cmd_line->HasSwitch("port"))
     port = cmd_line->GetSwitchValueASCII("port");
-  // By default, mongoose serves files from the current working directory. The
-  // 'root' flag allows the user to specify a different location to serve from.
+  // The 'root' flag allows the user to specify a location to serve files from.
+  // If it is not given, a callback will be registered to forbid all file
+  // requests.
   if (cmd_line->HasSwitch("root"))
     root = cmd_line->GetSwitchValueASCII("root");
   if (cmd_line->HasSwitch("chrome-dir"))
@@ -223,7 +268,7 @@ int main(int argc, char *argv[]) {
   }
 
   webdriver::Dispatcher dispatcher(ctx, url_base);
-  webdriver::InitCallbacks(ctx, &dispatcher, &shutdown_event);
+  webdriver::InitCallbacks(ctx, &dispatcher, &shutdown_event, root.empty());
 
   // The tests depend on parsing the first line ChromeDriver outputs,
   // so all other logging should happen after this.

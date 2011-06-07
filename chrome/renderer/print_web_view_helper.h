@@ -6,30 +6,26 @@
 #define CHROME_RENDERER_PRINT_WEB_VIEW_HELPER_H_
 #pragma once
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/time.h"
-#include "chrome/renderer/render_view_observer.h"
-#include "printing/native_metafile.h"
+#include "content/renderer/render_view_observer.h"
+#include "content/renderer/render_view_observer_tracker.h"
+#include "printing/metafile.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
 #include "ui/gfx/size.h"
 
 class DictionaryValue;
-
-namespace gfx {
-class Size;
-}
+struct PrintMsg_Print_Params;
+struct PrintMsg_PrintPage_Params;
+struct PrintMsg_PrintPages_Params;
 
 #if defined(USE_X11)
 namespace skia {
 class VectorCanvas;
 }
 #endif
-
-struct ViewMsg_Print_Params;
-struct ViewMsg_PrintPage_Params;
-struct ViewMsg_PrintPages_Params;
 
 // Class that calls the Begin and End print functions on the frame and changes
 // the size of the view temporarily to support full page printing..
@@ -39,7 +35,7 @@ class PrepareFrameAndViewForPrint {
  public:
   // Prints |frame|.  If |node| is not NULL, then only that node will be
   // printed.
-  PrepareFrameAndViewForPrint(const ViewMsg_Print_Params& print_params,
+  PrepareFrameAndViewForPrint(const PrintMsg_Print_Params& print_params,
                               WebKit::WebFrame* frame,
                               WebKit::WebNode* node,
                               WebKit::WebView* web_view);
@@ -74,86 +70,59 @@ class PrepareFrameAndViewForPrint {
 // We plan on making print asynchronous and that will require copying the DOM
 // of the document and creating a new WebView with the contents.
 class PrintWebViewHelper : public RenderViewObserver ,
+                           public RenderViewObserverTracker<PrintWebViewHelper>,
                            public WebKit::WebViewClient,
                            public WebKit::WebFrameClient {
  public:
   explicit PrintWebViewHelper(RenderView* render_view);
   virtual ~PrintWebViewHelper();
 
-  // Prints |frame|.
-  void PrintFrame(WebKit::WebFrame* frame,
-                  bool script_initiated,
-                  bool is_preview);
+ protected:
+  // WebKit::WebViewClient override:
+  virtual void didStopLoading();
 
-  // Message handlers.  Public for testing.
-  void OnPrintingDone(int document_cookie, bool success);
+ private:
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, BlockScriptInitiatedPrinting);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnPrintPages);
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, PrintLayoutTest);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, PrintWithIframe);
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+  // RenderViewObserver implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual void PrintPage(WebKit::WebFrame* frame);
+
+  // Message handlers ---------------------------------------------------------
+
+  // Print the document.
+  void OnPrintPages();
+
+  // Generate a print preview using |settings|.
+  void OnPrintPreview(const DictionaryValue& settings);
+
+  // Print / preview the node under the context menu.
+  void OnPrintNodeUnderContextMenu();
 
   // Print the pages for print preview. Do not display the native print dialog
   // for user settings. |job_settings| has new print job settings values.
   void OnPrintForPrintPreview(const DictionaryValue& job_settings);
 
-  void OnPrintPages();
-  void OnPrintPreview();
-  void OnPrintNodeUnderContextMenu();
+  void OnPrintingDone(int document_cookie, bool success);
 
- protected:
-  bool CopyAndPrint(WebKit::WebFrame* web_frame);
+  // Main printing code -------------------------------------------------------
 
-  // Prints the page listed in |params|.
-#if defined(USE_X11)
-  void PrintPage(const ViewMsg_PrintPage_Params& params,
-                 const gfx::Size& canvas_size,
-                 WebKit::WebFrame* frame,
-                 printing::NativeMetafile* metafile,
-                 scoped_ptr<skia::VectorCanvas>* canvas);
-#else
-  void PrintPage(const ViewMsg_PrintPage_Params& params,
-                 const gfx::Size& canvas_size,
-                 WebKit::WebFrame* frame);
-#endif
+  void Print(WebKit::WebFrame* frame, WebKit::WebNode* node);
 
-  // Prints all the pages listed in |params|.
-  // It will implicitly revert the document to display CSS media type.
-  void PrintPages(const ViewMsg_PrintPages_Params& params,
-                  WebKit::WebFrame* frame,
-                  WebKit::WebNode* node);
+  void PrintPreview(WebKit::WebFrame* frame,
+                    WebKit::WebNode* node,
+                    const DictionaryValue& settings);
 
-  // WebKit::WebViewClient override:
-  virtual void didStopLoading();
-
- private:
-  static void GetPageSizeAndMarginsInPoints(
-      WebKit::WebFrame* frame,
-      int page_index,
-      const ViewMsg_Print_Params& default_params,
-      double* content_width_in_points,
-      double* content_height_in_points,
-      double* margin_top_in_points,
-      double* margin_right_in_points,
-      double* margin_bottom_in_points,
-      double* margin_left_in_points);
-
-  // RenderViewObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-
-  // Common method for OnPrintPages() and OnPrintPreview().
-  void OnPrint(bool is_preview);
-
-  void PrintNode(WebKit::WebNode* node,
-                 bool script_initiated,
-                 bool is_preview);
-
-  // Notification when printing is done - signal teardown
+  // Notification when printing is done - signal teardown.
   void DidFinishPrinting(bool success);
 
-  void Print(WebKit::WebFrame* frame,
-             WebKit::WebNode* node,
-             bool script_initiated,
-             bool is_preview);
-
-  void UpdatePrintableSizeInPrintParameters(WebKit::WebFrame* frame,
-                                            WebKit::WebNode* node,
-                                            ViewMsg_Print_Params* params);
+  // Print Settings -----------------------------------------------------------
 
   // Initialize print page settings with default settings.
   bool InitPrintSettings(WebKit::WebFrame* frame,
@@ -164,57 +133,114 @@ class PrintWebViewHelper : public RenderViewObserver ,
   // copies, page range, etc.
   bool UpdatePrintSettings(const DictionaryValue& job_settings);
 
-  // Get the default printer settings.
-  bool GetDefaultPrintSettings(WebKit::WebFrame* frame,
-                               WebKit::WebNode* node,
-                               ViewMsg_Print_Params* params);
-
   // Get final print settings from the user.
   // Return false if the user cancels or on error.
   bool GetPrintSettingsFromUser(WebKit::WebFrame* frame,
                                 int expected_pages_count,
                                 bool use_browser_overlays);
 
+  // Page Printing / Rendering ------------------------------------------------
+
+  // Prints all the pages listed in |params|.
+  // It will implicitly revert the document to display CSS media type.
+  void PrintPages(const PrintMsg_PrintPages_Params& params,
+                  WebKit::WebFrame* frame,
+                  WebKit::WebNode* node);
+
+  // Prints the page listed in |params|.
+#if defined(USE_X11)
+  void PrintPageInternal(const PrintMsg_PrintPage_Params& params,
+                         const gfx::Size& canvas_size,
+                         WebKit::WebFrame* frame,
+                         printing::Metafile* metafile,
+                         scoped_ptr<skia::VectorCanvas>* canvas);
+#else
+  void PrintPageInternal(const PrintMsg_PrintPage_Params& params,
+                         const gfx::Size& canvas_size,
+                         WebKit::WebFrame* frame);
+#endif
+
   // Render the frame for printing.
-  void RenderPagesForPrint(WebKit::WebFrame* frame,
-                           WebKit::WebNode* node);
+  void RenderPagesForPrint(WebKit::WebFrame* frame, WebKit::WebNode* node);
 
   // Render the frame for preview.
-  void RenderPagesForPreview(WebKit::WebFrame* frame);
+  void RenderPagesForPreview(WebKit::WebFrame* frame, WebKit::WebNode* node);
 
   // Renders all the pages listed in |params| for preview.
-  // On Success, Send ViewHostMsg_PagesReadyForPreview message with a
+  // On success, Send PrintHostMsg_PagesReadyForPreview message with a
   // valid metafile data handle.
-  void CreatePreviewDocument(const ViewMsg_PrintPages_Params& params,
-      WebKit::WebFrame* frame);
+  void CreatePreviewDocument(const PrintMsg_PrintPages_Params& params,
+                             WebKit::WebFrame* frame,
+                             WebKit::WebNode* node);
 
   // Platform specific helper function for rendering page(s) to |metafile|.
 #if defined(OS_WIN)
-  void RenderPage(const ViewMsg_Print_Params& params, float* scale_factor,
+  void RenderPage(const PrintMsg_Print_Params& params, float* scale_factor,
                   int page_number, WebKit::WebFrame* frame,
-                  scoped_ptr<printing::NativeMetafile>* metafile);
+                  scoped_ptr<printing::Metafile>* metafile);
 #elif defined(OS_MACOSX)
   void RenderPage(const gfx::Size& page_size, const gfx::Point& content_origin,
                   const float& scale_factor, int page_number,
-                  WebKit::WebFrame* frame, printing::NativeMetafile* metafile);
+                  WebKit::WebFrame* frame, printing::Metafile* metafile);
 #elif defined(OS_POSIX)
-  bool RenderPages(const ViewMsg_PrintPages_Params& params,
+  bool RenderPages(const PrintMsg_PrintPages_Params& params,
                    WebKit::WebFrame* frame,
+                   WebKit::WebNode* node,
                    bool send_expected_page_count,
                    int* page_count,
-                   printing::NativeMetafile* metafile);
+                   printing::Metafile* metafile);
 #endif  // defined(OS_WIN)
 
-  bool CopyMetafileDataToSharedMem(printing::NativeMetafile* metafile,
+  // Helper methods -----------------------------------------------------------
+
+  bool CopyAndPrint(WebKit::WebFrame* web_frame);
+
+  bool CopyMetafileDataToSharedMem(printing::Metafile* metafile,
                                    base::SharedMemoryHandle* shared_mem_handle);
 
+  static void GetPageSizeAndMarginsInPoints(
+      WebKit::WebFrame* frame,
+      int page_index,
+      const PrintMsg_Print_Params& default_params,
+      double* content_width_in_points,
+      double* content_height_in_points,
+      double* margin_top_in_points,
+      double* margin_right_in_points,
+      double* margin_bottom_in_points,
+      double* margin_left_in_points);
+
+  void UpdatePrintableSizeInPrintParameters(WebKit::WebFrame* frame,
+                                            WebKit::WebNode* node,
+                                            PrintMsg_Print_Params* params);
+
+  bool GetPrintFrame(WebKit::WebFrame** frame);
+
+  // Script Initiated Printing ------------------------------------------------
+
+  // Returns true if script initiated printing occurs too often.
+  bool IsScriptInitiatedPrintTooFrequent(WebKit::WebFrame* frame);
+
+  // Reset the counter for script initiated printing.
+  // Scripted printing will be allowed to continue.
+  void ResetScriptedPrintCount();
+
+  // Increment the counter for script initiated printing.
+  // Scripted printing will be blocked for a limited amount of time.
+  void IncrementScriptedPrintCount();
+
   WebKit::WebView* print_web_view_;
-  scoped_ptr<ViewMsg_PrintPages_Params> print_pages_params_;
+
+  // The frame to print for script initiated print preview.
+  WebKit::WebFrame* script_initiated_preview_frame_;
+
+  // The node under the context menu to print preview.
+  scoped_ptr<WebKit::WebNode> context_menu_preview_node_;
+
+  scoped_ptr<PrintMsg_PrintPages_Params> print_pages_params_;
   base::Time last_cancelled_script_print_;
   int user_cancelled_scripted_print_count_;
   bool is_preview_;
 
- private:
   DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelper);
 };
 

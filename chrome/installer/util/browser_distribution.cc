@@ -220,13 +220,20 @@ void BrowserDistribution::UpdateInstallStatus(bool system_install,
     installer::InstallStatus install_status) {
 }
 
+bool BrowserDistribution::GetExperimentDetails(
+    UserExperiment* experiment, int flavor) {
+  return false;
+}
+
 void BrowserDistribution::LaunchUserExperiment(
-    installer::InstallStatus status, const Version& version,
-    const installer::Product& installation, bool system_level) {
+    const FilePath& setup_path, installer::InstallStatus status,
+    const Version& version, const installer::Product& installation,
+    bool system_level) {
 }
 
 
 void BrowserDistribution::InactiveUserToastExperiment(int flavor,
+    const std::wstring& experiment_group,
     const installer::Product& installation,
     const FilePath& application_path) {
 }

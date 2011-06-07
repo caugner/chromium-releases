@@ -13,16 +13,18 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/testing_browser_process.h"
+#include "content/common/content_paths.h"
 #include "net/base/net_errors.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
-#include "chrome/common/chrome_application_mac.h"
+#include "content/common/chrome_application_mac.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -95,12 +97,17 @@ void ChromeTestSuite::Initialize() {
 
   base::TestSuite::Initialize();
 
+  // Initialize the content client which that code uses to talk to Chrome.
+  content::SetContentClient(&chrome_content_client_);
+  content::GetContentClient()->set_browser(&chrome_browser_content_client_);
+
   chrome::RegisterChromeSchemes();
   host_resolver_proc_ = new LocalHostResolverProc();
   scoped_host_resolver_proc_.Init(host_resolver_proc_.get());
 
   chrome::RegisterPathProvider();
   app::RegisterPathProvider();
+  content::RegisterPathProvider();
   ui::RegisterPathProvider();
   g_browser_process = new TestingBrowserProcess;
 
@@ -120,6 +127,11 @@ void ChromeTestSuite::Initialize() {
   // Force unittests to run using en-US so if we test against string
   // output, it'll pass regardless of the system language.
   ResourceBundle::InitSharedInstance("en-US");
+  FilePath resources_pack_path;
+  PathService::Get(base::DIR_MODULE, &resources_pack_path);
+  resources_pack_path =
+      resources_pack_path.Append(FILE_PATH_LITERAL("resources.pak"));
+  ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
 
   // initialize the global StatsTable for unit_tests (make sure the file
   // doesn't exist before opening it so the test gets a clean slate)

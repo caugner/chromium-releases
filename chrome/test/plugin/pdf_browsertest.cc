@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,12 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_type.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_type.h"
 #include "net/test/test_server.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -192,16 +192,28 @@ class PDFBrowserTest : public InProcessBrowserTest,
   scoped_ptr<net::TestServer> pdf_test_server_;
 };
 
+#if defined(OS_CHROMEOS)
+// TODO(sanjeevr): http://crbug.com/79837
+#define MAYBE_Basic DISABLED_Basic
+#else
+#define MAYBE_Basic Basic
+#endif
 // Tests basic PDF rendering.  This can be broken depending on bad merges with
 // the vendor, so it's important that we have basic sanity checking.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Basic) {
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Basic) {
   ASSERT_NO_FATAL_FAILURE(Load());
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
   ASSERT_NO_FATAL_FAILURE(VerifySnapshot("pdf_browsertest.png"));
 }
 
+#if defined(OS_CHROMEOS)
+// TODO(sanjeevr): http://crbug.com/79837
+#define MAYBE_Scroll DISABLED_Scroll
+#else
+#define MAYBE_Scroll Scroll
+#endif
 // Tests that scrolling works.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Scroll) {
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Scroll) {
   ASSERT_NO_FATAL_FAILURE(Load());
 
   // We use wheel mouse event since that's the only one we can easily push to
@@ -224,7 +236,13 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Scroll) {
   ASSERT_GT(y_offset, 0);
 }
 
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FindAndCopy) {
+#if defined(OS_CHROMEOS)
+// TODO(sanjeevr): http://crbug.com/79837
+#define MAYBE_FindAndCopy DISABLED_FindAndCopy
+#else
+#define MAYBE_FindAndCopy FindAndCopy
+#endif
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
   ASSERT_NO_FATAL_FAILURE(Load());
   // Verifies that find in page works.
   ASSERT_EQ(3, ui_test_utils::FindInPage(
@@ -302,13 +320,18 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
       // nested message loop for the JS call.
       if (last_count != load_stop_notification_count())
         continue;
-      ui_test_utils::WaitForLoadStop(controller);
+      ui_test_utils::WaitForLoadStop(browser()->GetSelectedTabContents());
     }
   }
 }
 
 // Flaky as per http://crbug.com/74549.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_OnLoadAndReload) {
+#if defined(OS_MACOSX)
+#define MAYBE_OnLoadAndReload DISABLED_OnLoadAndReload
+#else
+#define MAYBE_OnLoadAndReload FLAKY_OnLoadAndReload
+#endif
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_OnLoadAndReload) {
   ASSERT_TRUE(pdf_test_server()->Start());
 
   GURL url = pdf_test_server()->GetURL("files/onload_reload.html");

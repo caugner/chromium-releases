@@ -1,10 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Interface of a host that receives commands from a Chromoting client.
 //
-// This interface handles control messages defined in contro.proto.
+// This interface handles control messages defined in control.proto.
 
 #ifndef REMOTING_PROTOCOL_HOST_STUB_H_
 #define REMOTING_PROTOCOL_HOST_STUB_H_
@@ -16,34 +16,20 @@ class Task;
 namespace remoting {
 namespace protocol {
 
-class SuggestResolutionRequest;
 class LocalLoginCredentials;
+class SuggestResolutionRequest;
 
 class HostStub {
  public:
-  HostStub();
-  virtual ~HostStub();
+  HostStub() {};
+  virtual ~HostStub() {};
 
   virtual void SuggestResolution(
       const SuggestResolutionRequest* msg, Task* done) = 0;
   virtual void BeginSessionRequest(
       const LocalLoginCredentials* credentials, Task* done) = 0;
 
-  // Called when the client has authenticated with the host to enable the
-  // client->host control channel.
-  // Before this is called, only a limited set of control messages will be
-  // processed.
-  void OnAuthenticated();
-
-  // Has the client successfully authenticated with the host?
-  // I.e., should we be processing control events?
-  bool authenticated();
-
  private:
-  // Initially false, this records whether the client has authenticated with
-  // the host.
-  bool authenticated_;
-
   DISALLOW_COPY_AND_ASSIGN(HostStub);
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include <string>
 #include <vector>
 
-#include "app/surface/transport_dib.h"
 #include "base/process_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -21,6 +20,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextInputType.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/surface/transport_dib.h"
 
 namespace gfx {
 class Rect;
@@ -95,6 +95,10 @@ class RenderWidgetHostView {
 
   // Tells the View to size itself to the specified size.
   virtual void SetSize(const gfx::Size& size) = 0;
+
+  // Tells the View to size and move itself to the specified size and point in
+  // screen space.
+  virtual void SetBounds(const gfx::Rect& rect) = 0;
 
   // Retrieves the native view used to contain plugins and identify the
   // renderer in IPC messages.
@@ -266,8 +270,7 @@ class RenderWidgetHostView {
   virtual void ShowCompositorHostWindow(bool show) = 0;
 #endif
 
-  virtual gfx::PluginWindowHandle AcquireCompositingSurface() = 0;
-  virtual void ReleaseCompositingSurface(gfx::PluginWindowHandle surface) = 0;
+  virtual gfx::PluginWindowHandle GetCompositingSurface() = 0;
 
   // Toggles visual muting of the render view area. This is on when a
   // constrained window is showing, for example. |color| is the shade of

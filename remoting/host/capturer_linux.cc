@@ -1,8 +1,8 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "remoting/host/capturer_linux.h"
+#include "remoting/host/capturer.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -10,59 +10,47 @@
 
 #include <set>
 
+#include "base/basictypes.h"
+#include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "remoting/base/types.h"
+#include "remoting/host/capturer_helper.h"
+#include "remoting/host/x_server_pixel_buffer.h"
 
 namespace remoting {
 
-static int IndexOfLowestBit(unsigned int mask) {
-  int i = 0;
+namespace {
 
-  // Extra-special do-while premature optimization, just to make dmaclach@
-  // happy.
-  do {
-    if (mask & 1) {
-      return i;
-    }
-    mask >>= 1;
-    ++i;
-  } while (mask);
-
-  NOTREACHED() << "mask should never be 0.";
-  return 0;
-}
-
-static bool IsRgb32(XImage* image) {
-  return (IndexOfLowestBit(image->red_mask) == 16) &&
-         (IndexOfLowestBit(image->green_mask) == 8) &&
-         (IndexOfLowestBit(image->blue_mask) == 0);
-}
-
-// Private Implementation pattern to avoid leaking the X11 types into the header
-// file.
-class CapturerLinuxPimpl {
+// A class to perform capturing for Linux.
+class CapturerLinux : public Capturer {
  public:
-  explicit CapturerLinuxPimpl(CapturerLinux* capturer);
-  ~CapturerLinuxPimpl();
+  CapturerLinux();
+  virtual ~CapturerLinux();
 
+
+  // Capturer interface.
+  virtual void ScreenConfigurationChanged() OVERRIDE;
+  virtual media::VideoFrame::Format pixel_format() const OVERRIDE;
+  virtual void ClearInvalidRects() OVERRIDE;
+  virtual void InvalidateRects(const InvalidRects& inval_rects) OVERRIDE;
+  virtual void InvalidateScreen(const gfx::Size& size) OVERRIDE;
+  virtual void InvalidateFullScreen() OVERRIDE;
+  virtual void CaptureInvalidRects(CaptureCompletedCallback* callback) OVERRIDE;
+  virtual const gfx::Size& size_most_recent() const OVERRIDE;
+
+ private:
   bool Init();  // TODO(ajwong): Do we really want this to be synchronous?
   void CalculateInvalidRects();
   void CaptureRects(const InvalidRects& rects,
                     Capturer::CaptureCompletedCallback* callback);
 
- private:
   void DeinitXlib();
   // We expose two forms of blitting to handle variations in the pixel format.
   // In FastBlit, the operation is effectively a memcpy.
-  void FastBlit(XImage* image, int dest_x, int dest_y,
-                CaptureData* capture_data);
-  void SlowBlit(XImage* image, int dest_x, int dest_y,
-                CaptureData* capture_data);
+  void FastBlit(uint8* image, const gfx::Rect& rect, CaptureData* capture_data);
+  void SlowBlit(uint8* image, const gfx::Rect& rect, CaptureData* capture_data);
 
   static const int kBytesPerPixel = 4;
-
-  // Reference to containing class so we can access friend functions.
-  // Not owned.
-  CapturerLinux* capturer_;
 
   // X11 graphics context.
   Display* display_;
@@ -76,10 +64,22 @@ class CapturerLinuxPimpl {
   int damage_event_base_;
   int damage_error_base_;
 
+  // Access to the X Server's pixel buffer.
+  XServerPixelBuffer x_server_pixel_buffer_;
+
+  // A thread-safe list of invalid rectangles, and the size of the most
+  // recently captured screen.
+  CapturerHelper helper_;
+
   // Capture state.
-  uint8* buffers_[CapturerLinux::kNumBuffers];
+  static const int kNumBuffers = 2;
+  uint8* buffers_[kNumBuffers];
+  int current_buffer_;
   int stride_;
   bool capture_fullscreen_;
+
+  // Format of pixels returned in buffer.
+  media::VideoFrame::Format pixel_format_;
 
   // Invalid rects in the last capture. This is used to synchronize current with
   // the previous buffer used.
@@ -87,36 +87,12 @@ class CapturerLinuxPimpl {
 
   // Last capture buffer used.
   uint8* last_buffer_;
+
+  DISALLOW_COPY_AND_ASSIGN(CapturerLinux);
 };
 
-CapturerLinux::CapturerLinux(MessageLoop* message_loop)
-    : Capturer(message_loop),
-      pimpl_(new CapturerLinuxPimpl(this)) {
-  // TODO(ajwong): This should be moved into an Init() method on Capturer
-  // itself.  Then we can remove the CHECK.
-  CHECK(pimpl_->Init());
-}
-
-CapturerLinux::~CapturerLinux() {
-}
-
-void CapturerLinux::ScreenConfigurationChanged() {
-  // TODO(ajwong): Support resolution changes.
-  NOTIMPLEMENTED();
-}
-
-void CapturerLinux::CalculateInvalidRects() {
-  pimpl_->CalculateInvalidRects();
-}
-
-void CapturerLinux::CaptureRects(const InvalidRects& rects,
-                                 CaptureCompletedCallback* callback) {
-  pimpl_->CaptureRects(rects, callback);
-}
-
-CapturerLinuxPimpl::CapturerLinuxPimpl(CapturerLinux* capturer)
-    : capturer_(capturer),
-      display_(NULL),
+CapturerLinux::CapturerLinux()
+    : display_(NULL),
       gc_(NULL),
       root_window_(BadValue),
       width_(0),
@@ -124,24 +100,27 @@ CapturerLinuxPimpl::CapturerLinuxPimpl(CapturerLinux* capturer)
       damage_handle_(BadValue),
       damage_event_base_(-1),
       damage_error_base_(-1),
+      current_buffer_(0),
       stride_(0),
       capture_fullscreen_(true),
+      pixel_format_(media::VideoFrame::RGB32),
       last_buffer_(NULL) {
-  for (int i = 0; i < CapturerLinux::kNumBuffers; i++) {
+  for (int i = 0; i < kNumBuffers; i++) {
     buffers_[i] = NULL;
   }
+  CHECK(Init());
 }
 
-CapturerLinuxPimpl::~CapturerLinuxPimpl() {
+CapturerLinux::~CapturerLinux() {
   DeinitXlib();
 
-  for (int i = 0; i < CapturerLinux::kNumBuffers; i++) {
+  for (int i = 0; i < kNumBuffers; i++) {
     delete [] buffers_[i];
     buffers_[i] = NULL;
   }
 }
 
-bool CapturerLinuxPimpl::Init() {
+bool CapturerLinux::Init() {
   // TODO(ajwong): We should specify the display string we are attaching to
   // in the constructor.
   display_ = XOpenDisplay(NULL);
@@ -149,6 +128,8 @@ bool CapturerLinuxPimpl::Init() {
     LOG(ERROR) << "Unable to open display";
     return false;
   }
+
+  x_server_pixel_buffer_.Init(display_);
 
   root_window_ = RootWindow(display_, DefaultScreen(display_));
   if (root_window_ == BadValue) {
@@ -192,15 +173,50 @@ bool CapturerLinuxPimpl::Init() {
   VLOG(1) << "Initialized with Geometry: " << width_ << "x" << height_;
 
   // Allocate the screen buffers.
-  for (int i = 0; i < CapturerLinux::kNumBuffers; i++) {
+  for (int i = 0; i < kNumBuffers; i++) {
     buffers_[i] = new uint8[width_ * height_ * kBytesPerPixel];
   }
 
   return true;
 }
 
-void CapturerLinuxPimpl::CalculateInvalidRects() {
-  if (capturer_->IsCaptureFullScreen(width_, height_))
+void CapturerLinux::ScreenConfigurationChanged() {
+  // TODO(ajwong): Support resolution changes.
+  NOTIMPLEMENTED();
+}
+
+media::VideoFrame::Format CapturerLinux::pixel_format() const {
+  return pixel_format_;
+}
+
+void CapturerLinux::ClearInvalidRects() {
+  helper_.ClearInvalidRects();
+}
+
+void CapturerLinux::InvalidateRects(const InvalidRects& inval_rects) {
+  helper_.InvalidateRects(inval_rects);
+}
+
+void CapturerLinux::InvalidateScreen(const gfx::Size& size) {
+  helper_.InvalidateScreen(size);
+}
+
+void CapturerLinux::InvalidateFullScreen() {
+  helper_.InvalidateFullScreen();
+}
+
+void CapturerLinux::CaptureInvalidRects(
+    CaptureCompletedCallback* callback) {
+  CalculateInvalidRects();
+
+  InvalidRects rects;
+  helper_.SwapInvalidRects(rects);
+
+  CaptureRects(rects, callback);
+}
+
+void CapturerLinux::CalculateInvalidRects() {
+  if (helper_.IsCaptureFullScreen(gfx::Size(width_, height_)))
     capture_fullscreen_ = true;
 
   // TODO(ajwong): The capture_fullscreen_ logic here is very ugly. Refactor.
@@ -235,23 +251,25 @@ void CapturerLinuxPimpl::CalculateInvalidRects() {
 
   if (capture_fullscreen_) {
     // TODO(hclam): Check the new dimension again.
-    capturer_->InvalidateFullScreen(width_, height_);
+    helper_.InvalidateScreen(gfx::Size(width_, height_));
     capture_fullscreen_ = false;
   } else {
-    capturer_->InvalidateRects(invalid_rects);
+    helper_.InvalidateRects(invalid_rects);
   }
 }
 
-void CapturerLinuxPimpl::CaptureRects(
+void CapturerLinux::CaptureRects(
     const InvalidRects& rects,
     Capturer::CaptureCompletedCallback* callback) {
-  uint8* buffer = buffers_[capturer_->current_buffer_];
+  scoped_ptr<CaptureCompletedCallback> callback_deleter(callback);
+
+  uint8* buffer = buffers_[current_buffer_];
   DataPlanes planes;
   planes.data[0] = buffer;
   planes.strides[0] = stride_;
 
-  scoped_refptr<CaptureData> capture_data(
-      new CaptureData(planes, width_, height_, media::VideoFrame::RGB32));
+  scoped_refptr<CaptureData> capture_data(new CaptureData(
+      planes, gfx::Size(width_, height_), media::VideoFrame::RGB32));
 
   // Synchronize the current buffer with the last one since we do not capture
   // the entire desktop. Note that encoder may be reading from the previous
@@ -273,21 +291,18 @@ void CapturerLinuxPimpl::CaptureRects(
   for (InvalidRects::const_iterator it = rects.begin();
        it != rects.end();
        ++it) {
-    XImage* image = XGetImage(display_, root_window_, it->x(), it->y(),
-                              it->width(), it->height(), AllPlanes, ZPixmap);
-
+    uint8* image = x_server_pixel_buffer_.CaptureRect(*it);
     // Check if we can fastpath the blit.
-    if ((image->depth == 24 || image->depth == 32) &&
-        image->bits_per_pixel == 32 &&
-        IsRgb32(image)) {
+    int depth = x_server_pixel_buffer_.GetDepth();
+    int bpp = x_server_pixel_buffer_.GetBitsPerPixel();
+    bool is_rgb = x_server_pixel_buffer_.IsRgb();
+    if ((depth == 24 || depth == 32) && bpp == 32 && is_rgb) {
       VLOG(3) << "Fast blitting";
-      FastBlit(image, it->x(), it->y(), capture_data);
+      FastBlit(image, *it, capture_data);
     } else {
       VLOG(3) << "Slow blitting";
-      SlowBlit(image, it->x(), it->y(), capture_data);
+      SlowBlit(image, *it, capture_data);
     }
-
-    XDestroyImage(image);
   }
 
   // TODO(ajwong): We should only repair the rects that were copied!
@@ -297,12 +312,13 @@ void CapturerLinuxPimpl::CaptureRects(
   last_invalid_rects_ = rects;
   last_buffer_ = buffer;
 
-  // TODO(ajwong): These completion signals back to the upper class are very
-  // strange.  Fix it.
-  capturer_->FinishCapture(capture_data, callback);
+  current_buffer_ = (current_buffer_ + 1) % kNumBuffers;
+  helper_.set_size_most_recent(capture_data->size());
+
+  callback->Run(capture_data);
 }
 
-void CapturerLinuxPimpl::DeinitXlib() {
+void CapturerLinux::DeinitXlib() {
   if (gc_) {
     XFreeGC(display_, gc_);
     gc_ = NULL;
@@ -314,66 +330,88 @@ void CapturerLinuxPimpl::DeinitXlib() {
   }
 }
 
-void CapturerLinuxPimpl::FastBlit(XImage* image, int dest_x, int dest_y,
+void CapturerLinux::FastBlit(uint8* image, const gfx::Rect& rect,
                                   CaptureData* capture_data) {
-  uint8* src_pos = reinterpret_cast<uint8*>(image->data);
+  uint8* src_pos = image;
+  int src_stride = x_server_pixel_buffer_.GetStride();
+  int dst_x = rect.x(), dst_y = rect.y();
 
   DataPlanes planes = capture_data->data_planes();
   uint8* dst_buffer = planes.data[0];
 
   const int dst_stride = planes.strides[0];
-  const int src_stride = image->bytes_per_line;
 
-  uint8* dst_pos = dst_buffer + dst_stride * dest_y;
-  dst_pos += dest_x * kBytesPerPixel;
+  uint8* dst_pos = dst_buffer + dst_stride * dst_y;
+  dst_pos += dst_x * kBytesPerPixel;
 
-  for (int y = 0; y < image->height; ++y) {
-    memcpy(dst_pos, src_pos, image->width * kBytesPerPixel);
-
+  int height = rect.height(), row_bytes = rect.width() * kBytesPerPixel;
+  for (int y = 0; y < height; ++y) {
+    memcpy(dst_pos, src_pos, row_bytes);
     src_pos += src_stride;
     dst_pos += dst_stride;
   }
 }
 
-void CapturerLinuxPimpl::SlowBlit(XImage* image, int dest_x, int dest_y,
+void CapturerLinux::SlowBlit(uint8* image, const gfx::Rect& rect,
                                   CaptureData* capture_data) {
   DataPlanes planes = capture_data->data_planes();
   uint8* dst_buffer = planes.data[0];
   const int dst_stride = planes.strides[0];
+  int src_stride = x_server_pixel_buffer_.GetStride();
+  int dst_x = rect.x(), dst_y = rect.y();
+  int width = rect.width(), height = rect.height();
 
-  unsigned int red_shift = IndexOfLowestBit(image->red_mask);
-  unsigned int blue_shift = IndexOfLowestBit(image->blue_mask);
-  unsigned int green_shift = IndexOfLowestBit(image->green_mask);
+  unsigned int red_mask = x_server_pixel_buffer_.GetRedMask();
+  unsigned int blue_mask = x_server_pixel_buffer_.GetBlueMask();
+  unsigned int green_mask = x_server_pixel_buffer_.GetGreenMask();
+  unsigned int red_shift = x_server_pixel_buffer_.GetRedShift();
+  unsigned int blue_shift = x_server_pixel_buffer_.GetBlueShift();
+  unsigned int green_shift = x_server_pixel_buffer_.GetGreenShift();
 
-  unsigned int max_red = image->red_mask >> red_shift;
-  unsigned int max_blue = image->blue_mask >> blue_shift;
-  unsigned int max_green = image->green_mask >> green_shift;
+  unsigned int max_red = red_mask >> red_shift;
+  unsigned int max_blue = blue_mask >> blue_shift;
+  unsigned int max_green = green_mask >> green_shift;
 
-  // Produce an upside-down image.
-  uint8* dst_pos = dst_buffer + dst_stride * (height_ - dest_y - 1);
-  dst_pos += dest_x * kBytesPerPixel;
-  // TODO(jamiewalch): Optimize, perhaps using MMX code or by converting to
+  unsigned int bits_per_pixel = x_server_pixel_buffer_.GetBitsPerPixel();
+
+  uint8* dst_pos = dst_buffer + dst_stride * dst_y;
+  uint8* src_pos = image;
+  dst_pos += dst_x * kBytesPerPixel;
+  // TODO(hclam): Optimize, perhaps using MMX code or by converting to
   // YUV directly
-  for (int y = 0; y < image->height; y++) {
+  for (int y = 0; y < height; y++) {
     uint32_t* dst_pos_32 = reinterpret_cast<uint32_t*>(dst_pos);
-    for (int x = 0; x < image->width; x++) {
-      unsigned long pixel = XGetPixel(image, x, y);
-      uint32_t r = (((pixel & image->red_mask) >> red_shift) * max_red) / 255;
-      uint32_t g =
-          (((pixel & image->green_mask) >> green_shift) * max_blue) / 255;
-      uint32_t b =
-          (((pixel & image->blue_mask) >> blue_shift) * max_green) / 255;
-
+    uint32_t* src_pos_32 = reinterpret_cast<uint32_t*>(src_pos);
+    uint16_t* src_pos_16 = reinterpret_cast<uint16_t*>(src_pos);
+    for (int x = 0; x < width; x++) {
+      // Dereference through an appropriately-aligned pointer.
+      uint32_t pixel;
+      if (bits_per_pixel == 32)
+        pixel = src_pos_32[x];
+      else if (bits_per_pixel == 16)
+        pixel = src_pos_16[x];
+      else
+        pixel = src_pos[x];
+      uint32_t r = (((pixel & red_mask) >> red_shift) * 255) / max_red;
+      uint32_t b = (((pixel & blue_mask) >> blue_shift) * 255) / max_blue;
+      uint32_t g = (((pixel & green_mask) >> green_shift) * 255) / max_green;
       // Write as 32-bit RGB.
       dst_pos_32[x] = r << 16 | g << 8 | b;
     }
-    dst_pos -= dst_stride;
+    dst_pos += dst_stride;
+    src_pos += src_stride;
   }
 }
 
+const gfx::Size& CapturerLinux::size_most_recent() const {
+  return helper_.size_most_recent();
+}
+
+}  // namespace
+
 // static
-Capturer* Capturer::Create(MessageLoop* message_loop) {
-  return new CapturerLinux(message_loop);
+Capturer* Capturer::Create() {
+  return new CapturerLinux();
 }
 
 }  // namespace remoting

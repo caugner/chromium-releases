@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include <map>
 
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -71,6 +71,11 @@ class GtkNativeViewManager {
   // id: a value previously returned from GetIdForWidget
   // returns: true if |id| is a valid id, false otherwise.
   bool GetPermanentXIDForId(XID* xid, gfx::NativeViewId id);
+
+  // Can be called from any thread.
+  // Will return false if the given XID isn't permanent or has already been
+  // released.
+  bool AddRefPermanentXID(XID xid);
 
   // Must be called from the UI thread because we may need to access a
   // GtkWidget or destroy a GdkWindow.

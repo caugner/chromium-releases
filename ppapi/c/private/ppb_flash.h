@@ -10,9 +10,10 @@
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/c/pp_time.h"
 #include "ppapi/c/pp_var.h"
 
-#define PPB_FLASH_INTERFACE "PPB_Flash;7"
+#define PPB_FLASH_INTERFACE "PPB_Flash;10"
 
 struct PPB_Flash {
   // Sets or clears the rendering hint that the given plugin instance is always
@@ -35,12 +36,11 @@ struct PPB_Flash {
   // be a string in PAC format, or an undefined var on error.
   struct PP_Var (*GetProxyForURL)(PP_Instance instance, const char* url);
 
-  // Navigate to URL. May open a new tab if target is not "_self". Return true
-  // if success. This differs from javascript:window.open() in that it bypasses
-  // the popup blocker, even when this is not called from an event handler.
-  PP_Bool (*NavigateToURL)(PP_Instance instance,
-                           const char* url,
-                           const char* target);
+  // Navigate to the URL given by the given URLRequestInfo. (This supports GETs,
+  // POSTs, and javascript: URLs.) May open a new tab if target is not "_self".
+  int32_t (*Navigate)(PP_Resource request_info,
+                      const char* target,
+                      bool from_user_action);
 
   // Runs a nested message loop. The plugin will be reentered from this call.
   // This function is used in places where Flash would normally enter a nested
@@ -52,6 +52,9 @@ struct PPB_Flash {
   // Posts a quit message for the outermost nested message loop. Use this to
   // exit and return back to the caller after you call RunMessageLoop.
   void (*QuitMessageLoop)(PP_Instance instance);
+
+  // Retrieves the local time zone offset from GM time for the given UTC time.
+  double (*GetLocalTimeZoneOffset)(PP_Instance instance, PP_Time t);
 };
 
 #endif  // PPAPI_C_PRIVATE_PPB_FLASH_H_

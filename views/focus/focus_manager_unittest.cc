@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,10 +22,10 @@
 #include "views/controls/label.h"
 #include "views/controls/link.h"
 #include "views/controls/native/native_view_host.h"
-#include "views/controls/textfield/textfield.h"
 #include "views/controls/scroll_view.h"
 #include "views/controls/tabbed_pane/native_tabbed_pane_wrapper.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
+#include "views/controls/textfield/textfield.h"
 #include "views/focus/accelerator_handler.h"
 #include "views/widget/root_view.h"
 #include "views/window/non_client_view.h"
@@ -39,8 +39,6 @@
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
 #include "views/window/window_gtk.h"
 #endif
-
-using ui::ComboboxModel;  // TODO(beng): remove
 
 namespace {
 const int kWindowWidth = 600;
@@ -132,7 +130,7 @@ class FocusManagerTest : public testing::Test, public WindowDelegate {
   virtual void TearDown() {
     if (focus_change_listener_)
       GetFocusManager()->RemoveFocusChangeListener(focus_change_listener_);
-    window_->Close();
+    window_->CloseWindow();
 
     // Flush the message loop to make Purify happy.
     message_loop()->RunAllPending();
@@ -292,18 +290,16 @@ class BorderView : public NativeViewHost {
 
     if (child == this && is_add) {
       if (!widget_) {
+        widget_ = Widget::CreateWidget(
+            Widget::CreateParams(Widget::CreateParams::TYPE_CONTROL));
 #if defined(OS_WIN)
-        WidgetWin* widget_win = new WidgetWin();
-        widget_win->Init(parent->GetRootView()->GetWidget()->GetNativeView(),
-                         gfx::Rect(0, 0, 0, 0));
-        widget_win->SetFocusTraversableParentView(this);
-        widget_ = widget_win;
-#else
-        WidgetGtk* widget_gtk = new WidgetGtk(WidgetGtk::TYPE_CHILD);
-        widget_gtk->Init(native_view(), gfx::Rect(0, 0, 0, 0));
-        widget_gtk->SetFocusTraversableParentView(this);
-        widget_ = widget_gtk;
+        gfx::NativeView parent_native_view =
+            parent->GetRootView()->GetWidget()->GetNativeView();
+#elif defined(TOOLKIT_USES_GTK)
+        gfx::NativeView parent_native_view = native_view();
 #endif
+        widget_->Init(parent_native_view, gfx::Rect(0, 0, 0, 0));
+        widget_->SetFocusTraversableParentView(this);
         widget_->SetContentsView(child_);
       }
 
@@ -322,7 +318,7 @@ class BorderView : public NativeViewHost {
   DISALLOW_COPY_AND_ASSIGN(BorderView);
 };
 
-class DummyComboboxModel : public ComboboxModel {
+class DummyComboboxModel : public ui::ComboboxModel {
  public:
   virtual int GetItemCount() { return 10; }
 
@@ -872,7 +868,11 @@ class TestNativeButton : public NativeButton {
       : NativeButton(NULL, text) {
   };
   virtual gfx::NativeView TestGetNativeControlView() {
+#if defined(TOUCH_UI)
+    return GetWidget()->GetNativeView();
+#else
     return native_wrapper_->GetTestingHandle();
+#endif
   }
 };
 
@@ -902,7 +902,7 @@ class TestTextfield : public Textfield {
   }
 };
 
-class TestCombobox : public Combobox, public ComboboxModel {
+class TestCombobox : public Combobox, public ui::ComboboxModel {
  public:
   TestCombobox() : Combobox(this) { }
   virtual gfx::NativeView TestGetNativeControlView() {
@@ -965,6 +965,11 @@ TEST_F(FocusManagerTest, FocusNativeControls) {
   FocusNativeView(tab_button->TestGetNativeControlView());
   EXPECT_EQ(tab_button, GetFocusManager()->GetFocusedView());
 }
+
+
+// On linux, we don't store/restore focused view because gtk handles
+// this (and pure views will be the same).
+#if defined(OS_WIN)
 
 // Test that when activating/deactivating the top window, the focus is stored/
 // restored properly.
@@ -1042,6 +1047,7 @@ TEST_F(FocusManagerTest, FocusStoreRestore) {
   EXPECT_TRUE(listener.focus_changes()[1] == ViewPair(null_view, view));
   */
 }
+#endif
 
 TEST_F(FocusManagerTest, ContainsView) {
   View* view = new View();
@@ -1702,7 +1708,7 @@ class FocusManagerDtorTest : public FocusManagerTest {
 
   virtual void TearDown() {
     if (window_) {
-      window_->Close();
+      window_->CloseWindow();
       message_loop()->RunAllPending();
     }
   }
@@ -1720,7 +1726,7 @@ TEST_F(FocusManagerDtorTest, FocusManagerDestructedLast) {
   tabbed_pane->AddTab(L"Awesome tab", button);
 
   // Close the window.
-  window_->Close();
+  window_->CloseWindow();
   message_loop()->RunAllPending();
 
   // Test window, button and focus manager should all be destructed.

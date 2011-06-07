@@ -14,9 +14,9 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -91,6 +91,9 @@ DWORD UnPackArchive(const FilePath& archive,
                     const FilePath& output_directory,
                     installer::ArchiveType* archive_type) {
   DCHECK(archive_type);
+
+  installer_state.UpdateStage(installer::UNCOMPRESSING);
+
   // First uncompress the payload. This could be a differential
   // update (patch.7z) or full archive (chrome.7z). If this uncompress fails
   // return with error.
@@ -120,15 +123,18 @@ DWORD UnPackArchive(const FilePath& archive,
         archive_version->GetString()));
     existing_archive = existing_archive.Append(installer::kInstallerDir);
     existing_archive = existing_archive.Append(installer::kChromeArchive);
-    if (int i = installer::ApplyDiffPatch(FilePath(existing_archive),
+    if (int i = installer::ApplyDiffPatch(existing_archive,
                                           FilePath(unpacked_file),
-                                          FilePath(uncompressed_archive))) {
+                                          uncompressed_archive,
+                                          &installer_state)) {
       LOG(ERROR) << "Binary patching failed with error " << i;
       return i;
     }
   } else {
     *archive_type = installer::FULL_ARCHIVE_TYPE;
   }
+
+  installer_state.UpdateStage(installer::UNPACKING);
 
   // Unpack the uncompressed archive.
   return LzmaUtil::UnPackArchive(uncompressed_archive.value(),
@@ -394,14 +400,15 @@ bool CheckPreInstallConditions(const InstallationState& original_state,
       }
     }
 
-    // Check to avoid simultaneous per-user and per-machine installs.
+    // Check to avoid attempting to lay down a user-level installation on top
+    // of a system-level one.
     const ProductState* other_state =
         original_state.GetProductState(!system_level, browser_dist->GetType());
-    if (other_state != NULL) {
+    if (other_state != NULL && !system_level) {
       LOG(ERROR) << "Already installed version "
                  << other_state->version().GetString()
                  << " conflicts with the current install mode.";
-      if (!system_level && is_first_install && product->is_chrome()) {
+      if (is_first_install && product->is_chrome()) {
         // This is user-level install and there is a system-level chrome
         // installation. Instruct Google Update to launch the existing one.
         // There should be no error dialog.
@@ -411,8 +418,10 @@ bool CheckPreInstallConditions(const InstallationState& original_state,
           // If we failed to construct install path. Give up.
           *status = installer::OS_ERROR;
           InstallUtil::WriteInstallerResult(system_level,
-              installer_state->state_key(), *status, IDS_INSTALL_OS_ERROR_BASE,
-              NULL);
+                                            installer_state->state_key(),
+                                            *status,
+                                            IDS_INSTALL_OS_ERROR_BASE,
+                                            NULL);
         } else {
           *status = installer::EXISTING_VERSION_LAUNCHED;
           chrome_exe = chrome_exe.Append(installer::kChromeExe);
@@ -426,20 +435,14 @@ bool CheckPreInstallConditions(const InstallationState& original_state,
         return false;
       }
 
-      // If the following compile assert fires it means that the InstallStatus
-      // enumeration changed which will break the contract between the old
-      // chrome installed and the new setup.exe that is trying to upgrade.
-      COMPILE_ASSERT(installer::CONFLICTING_CHANNEL_EXISTS == 39,
-                     dont_change_enum);
-
       // This is an update, not an install. Omaha should know the difference
       // and not show a dialog.
-      *status = system_level ? installer::USER_LEVEL_INSTALL_EXISTS :
-                               installer::SYSTEM_LEVEL_INSTALL_EXISTS;
-      int str_id = system_level ? IDS_INSTALL_USER_LEVEL_EXISTS_BASE :
-                                  IDS_INSTALL_SYSTEM_LEVEL_EXISTS_BASE;
+      *status = installer::SYSTEM_LEVEL_INSTALL_EXISTS;
       InstallUtil::WriteInstallerResult(system_level,
-          installer_state->state_key(), *status, str_id, NULL);
+                                        installer_state->state_key(),
+                                        *status,
+                                        IDS_INSTALL_SYSTEM_LEVEL_EXISTS_BASE,
+                                        NULL);
       return false;
     }
   }
@@ -507,7 +510,8 @@ installer::InstallStatus InstallProductsHelper(
   FilePath unpack_path(temp_path.path().Append(installer::kInstallSourceDir));
   if (UnPackArchive(archive, installer_state, temp_path.path(), unpack_path,
                     archive_type)) {
-    install_status = installer::UNCOMPRESSION_FAILED;
+    install_status = (*archive_type) == installer::INCREMENTAL_ARCHIVE_TYPE ?
+        installer::APPLY_DIFF_PATCH_FAILED : installer::UNCOMPRESSION_FAILED;
     InstallUtil::WriteInstallerResult(system_install,
         installer_state.state_key(), install_status,
         IDS_INSTALL_UNCOMPRESSION_FAILED_BASE, NULL);
@@ -631,6 +635,7 @@ installer::InstallStatus InstallProductsHelper(
         }
       }
     }
+
     // There might be an experiment (for upgrade usually) that needs to happen.
     // An experiment's outcome can include chrome's uninstallation. If that is
     // the case we would not do that directly at this point but in another
@@ -638,10 +643,19 @@ installer::InstallStatus InstallProductsHelper(
     //
     // There is another way to reach this same function if this is a system
     // level install. See HandleNonInstallCmdLineOptions().
-    for (size_t i = 0; i < products.size(); ++i) {
-      const Product* product = products[i];
-      product->distribution()->LaunchUserExperiment(install_status,
-          *installer_version, *product, system_install);
+    {
+      // If installation failed, use the path to the currently running setup.
+      // If installation succeeded, use the path to setup in the installer dir.
+      FilePath setup_path(cmd_line.GetProgram());
+      if (InstallUtil::GetInstallReturnCode(install_status) == 0) {
+        setup_path = installer_state.GetInstallerDirectory(*installer_version)
+            .Append(setup_path.BaseName());
+      }
+      for (size_t i = 0; i < products.size(); ++i) {
+        const Product* product = products[i];
+        product->distribution()->LaunchUserExperiment(setup_path,
+            install_status, *installer_version, *product, system_install);
+      }
     }
   }
 
@@ -671,16 +685,21 @@ installer::InstallStatus InstallProducts(
     const MasterPreferences& prefs,
     InstallerState* installer_state) {
   DCHECK(installer_state);
+  const bool system_install = installer_state->system_install();
   installer::InstallStatus install_status = installer::UNKNOWN_STATUS;
   installer::ArchiveType archive_type = installer::UNKNOWN_ARCHIVE_TYPE;
   bool incremental_install = false;
+  installer_state->UpdateStage(installer::PRECONDITIONS);
+  // The stage provides more fine-grained information than -multifail, so remove
+  // the -multifail suffix from the Google Update "ap" value.
+  BrowserDistribution::GetSpecificDistribution(installer_state->state_type())
+      ->UpdateInstallStatus(system_install, archive_type, install_status);
   if (CheckPreInstallConditions(original_state, installer_state,
                                 &install_status)) {
     install_status = InstallProductsHelper(
         original_state, cmd_line, prefs, *installer_state, &archive_type);
   }
 
-  const bool system_install = installer_state->system_install();
   const Products& products = installer_state->products();
 
   for (size_t i = 0; i < products.size(); ++i) {
@@ -693,6 +712,7 @@ installer::InstallStatus InstallProducts(
         system_install, archive_type, install_status);
   }
 
+  installer_state->UpdateStage(installer::NO_STAGE);
   return install_status;
 }
 
@@ -779,7 +799,8 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
             installer::switches::kNewSetupExe);
         if (!installer::ApplyDiffPatch(old_setup_exe,
                                        FilePath(uncompressed_patch),
-                                       new_setup_exe))
+                                       new_setup_exe,
+                                       installer_state))
           status = installer::NEW_VERSION_UPDATED;
       }
       if (!temp_path.Delete()) {
@@ -852,7 +873,7 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
     DCHECK(chrome_install);
     if (chrome_install) {
       installer::DeleteChromeRegistrationKeys(chrome_install->distribution(),
-          HKEY_LOCAL_MACHINE, suffix, tmp);
+          HKEY_LOCAL_MACHINE, suffix, installer_state->target_path(), &tmp);
     }
     *exit_code = tmp;
   } else if (cmd_line.HasSwitch(installer::switches::kInactiveUserToast)) {
@@ -860,6 +881,8 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
     int flavor = -1;
     base::StringToInt(cmd_line.GetSwitchValueNative(
         installer::switches::kInactiveUserToast), &flavor);
+    std::string experiment_group =
+        cmd_line.GetSwitchValueASCII(installer::switches::kExperimentGroup);
     DCHECK_NE(-1, flavor);
     if (flavor == -1) {
       *exit_code = installer::UNKNOWN_STATUS;
@@ -868,8 +891,9 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       for (size_t i = 0; i < products.size(); ++i) {
         const Product* product = products[i];
         BrowserDistribution* browser_dist = product->distribution();
-        browser_dist->InactiveUserToastExperiment(flavor, *product,
-            installer_state->target_path());
+        browser_dist->InactiveUserToastExperiment(flavor,
+            ASCIIToUTF16(experiment_group),
+            *product, installer_state->target_path());
       }
     }
   } else if (cmd_line.HasSwitch(installer::switches::kSystemLevelToast)) {
@@ -882,7 +906,8 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       scoped_ptr<Version> installed_version(
           InstallUtil::GetChromeVersion(browser_dist,
                                         installer_state->system_install()));
-      browser_dist->LaunchUserExperiment(installer::REENTRY_SYS_UPDATE,
+      browser_dist->LaunchUserExperiment(cmd_line.GetProgram(),
+                                         installer::REENTRY_SYS_UPDATE,
                                          *installed_version, *product, true);
     }
   } else if (cmd_line.HasSwitch(
@@ -1124,9 +1149,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   // If --uninstall option is given, uninstall the identified product(s)
   if (is_uninstall) {
     const Products& products = installer_state.products();
-    for (size_t i = 0; i < products.size(); ++i) {
-      install_status = UninstallProduct(original_state, installer_state,
+    // InstallerState::Initialize always puts Chrome first, and we rely on that
+    // here for this reason: if Chrome is in-use, the user will be prompted to
+    // confirm uninstallation.  Upon cancel, we should not continue with the
+    // other products.
+    DCHECK(products.size() < 2 || products[0]->is_chrome());
+    install_status = installer::UNINSTALL_SUCCESSFUL;  // I'm an optimist.
+    installer::InstallStatus prod_status = installer::UNKNOWN_STATUS;
+    for (size_t i = 0;
+         install_status != installer::UNINSTALL_CANCELLED &&
+             i < products.size();
+         ++i) {
+      prod_status = UninstallProduct(original_state, installer_state,
           cmd_line, *products[i]);
+      if (prod_status != installer::UNINSTALL_SUCCESSFUL)
+        install_status = prod_status;
     }
   } else {
     // If --uninstall option is not specified, we assume it is install case.

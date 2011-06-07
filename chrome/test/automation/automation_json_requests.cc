@@ -4,13 +4,15 @@
 
 #include "chrome/test/automation/automation_json_requests.h"
 
-#include "base/scoped_ptr.h"
+#include "base/file_path.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/test/test_timeouts.h"
 #include "chrome/common/automation_messages.h"
-#include "chrome/common/json_value_serializer.h"
 #include "chrome/test/automation/automation_proxy.h"
+#include "content/common/json_value_serializer.h"
 
 namespace {
 
@@ -20,7 +22,8 @@ bool SendAutomationJSONRequest(AutomationMessageSender* sender,
   std::string request, reply;
   base::JSONWriter::Write(&request_dict, false, &request);
   bool success = false;
-  if (!SendAutomationJSONRequest(sender, request, &reply, &success))
+  if (!SendAutomationJSONRequest(sender, request,
+          TestTimeouts::action_max_timeout_ms(), &reply, &success))
     return false;
   scoped_ptr<Value> value(base::JSONReader::Read(reply, true));
   if (!value.get() || !value->IsType(Value::TYPE_DICTIONARY)) {
@@ -57,10 +60,11 @@ WebKeyEvent::WebKeyEvent(automation::KeyEventTypes type,
 
 bool SendAutomationJSONRequest(AutomationMessageSender* sender,
                                const std::string& request,
+                               int timeout_ms,
                                std::string* reply,
                                bool* success) {
   return sender->Send(new AutomationMsg_SendJSONRequest(
-      -1, request, reply, success));
+      -1, request, reply, success), timeout_ms);
 }
 
 bool SendGetIndicesFromTabIdJSONRequest(
@@ -195,6 +199,21 @@ bool SendReloadJSONRequest(
   return SendAutomationJSONRequest(sender, dict, &reply_dict);
 }
 
+bool SendCaptureEntirePageJSONRequest(
+    AutomationMessageSender* sender,
+    int browser_index,
+    int tab_index,
+    const FilePath& path) {
+  DictionaryValue dict;
+  dict.SetString("command", "CaptureEntirePage");
+  dict.SetInteger("windex", browser_index);
+  dict.SetInteger("tab_index", tab_index);
+  dict.SetString("path", path.value());
+  DictionaryValue reply_dict;
+
+  return SendAutomationJSONRequest(sender, dict, &reply_dict);
+}
+
 bool SendGetTabURLJSONRequest(
     AutomationMessageSender* sender,
     int browser_index,
@@ -227,6 +246,26 @@ bool SendGetTabTitleJSONRequest(
 
 bool SendGetCookiesJSONRequest(
     AutomationMessageSender* sender,
+    const std::string& url,
+    ListValue** cookies) {
+  DictionaryValue dict;
+  dict.SetString("command", "GetCookies");
+  dict.SetString("url", url);
+  DictionaryValue reply_dict;
+  if (!SendAutomationJSONRequest(sender, dict, &reply_dict))
+    return false;
+  Value* cookies_unscoped_value;
+  if (!reply_dict.Remove("cookies", &cookies_unscoped_value))
+    return false;
+  scoped_ptr<Value> cookies_value(cookies_unscoped_value);
+  if (!cookies_value->IsType(Value::TYPE_LIST))
+    return false;
+  *cookies = static_cast<ListValue*>(cookies_value.release());
+  return true;
+}
+
+bool SendGetCookiesJSONRequestDeprecated(
+    AutomationMessageSender* sender,
     int browser_index,
     const std::string& url,
     std::string* cookies) {
@@ -242,6 +281,18 @@ bool SendGetCookiesJSONRequest(
 
 bool SendDeleteCookieJSONRequest(
     AutomationMessageSender* sender,
+    const std::string& url,
+    const std::string& cookie_name) {
+  DictionaryValue dict;
+  dict.SetString("command", "DeleteCookie");
+  dict.SetString("url", url);
+  dict.SetString("name", cookie_name);
+  DictionaryValue reply_dict;
+  return SendAutomationJSONRequest(sender, dict, &reply_dict);
+}
+
+bool SendDeleteCookieJSONRequestDeprecated(
+    AutomationMessageSender* sender,
     int browser_index,
     const std::string& url,
     const std::string& cookie_name) {
@@ -255,6 +306,18 @@ bool SendDeleteCookieJSONRequest(
 }
 
 bool SendSetCookieJSONRequest(
+    AutomationMessageSender* sender,
+    const std::string& url,
+    DictionaryValue* cookie_dict) {
+  DictionaryValue dict;
+  dict.SetString("command", "SetCookie");
+  dict.SetString("url", url);
+  dict.Set("cookie", cookie_dict->DeepCopy());
+  DictionaryValue reply_dict;
+  return SendAutomationJSONRequest(sender, dict, &reply_dict);
+}
+
+bool SendSetCookieJSONRequestDeprecated(
     AutomationMessageSender* sender,
     int browser_index,
     const std::string& url,
@@ -389,10 +452,36 @@ bool SendWebKeyEventJSONRequest(
   return SendAutomationJSONRequest(sender, dict, &reply_dict);
 }
 
+bool SendNativeKeyEventJSONRequest(
+    AutomationMessageSender* sender,
+    int browser_index,
+    int tab_index,
+    ui::KeyboardCode key_code,
+    int modifiers) {
+  DictionaryValue dict;
+  dict.SetString("command", "SendOSLevelKeyEventToTab");
+  dict.SetInteger("windex", browser_index);
+  dict.SetInteger("tab_index", tab_index);
+  dict.SetInteger("keyCode", key_code);
+  dict.SetInteger("modifiers", modifiers);
+  DictionaryValue reply_dict;
+  return SendAutomationJSONRequest(sender, dict, &reply_dict);
+}
+
 bool SendWaitForAllTabsToStopLoadingJSONRequest(
     AutomationMessageSender* sender) {
   DictionaryValue dict;
   dict.SetString("command", "WaitForAllTabsToStopLoading");
   DictionaryValue reply_dict;
   return SendAutomationJSONRequest(sender, dict, &reply_dict);
+}
+
+bool SendGetChromeDriverAutomationVersion(
+    AutomationMessageSender* sender, int* version) {
+  DictionaryValue dict;
+  dict.SetString("command", "GetChromeDriverAutomationVersion");
+  DictionaryValue reply_dict;
+  if (!SendAutomationJSONRequest(sender, dict, &reply_dict))
+    return false;
+  return reply_dict.GetInteger("version", version);
 }

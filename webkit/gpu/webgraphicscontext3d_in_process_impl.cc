@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include <algorithm>
 #include <string>
 
-#include "app/gfx/gl/gl_bindings.h"
-#include "app/gfx/gl/gl_context.h"
-#include "app/gfx/gl/gl_implementation.h"
 #include "base/logging.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/gfx/gl/gl_bindings.h"
+#include "ui/gfx/gl/gl_context.h"
+#include "ui/gfx/gl/gl_implementation.h"
 
 namespace webkit {
 namespace gpu {
@@ -652,6 +652,26 @@ void WebGraphicsContext3DInProcessImpl::copyTextureToParentTextureCHROMIUM(
                    0);  // border
   glBindTexture(GL_TEXTURE_2D, bound_texture_);
   glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, bound_fbo_);
+}
+
+void WebGraphicsContext3DInProcessImpl::getParentToChildLatchCHROMIUM(
+    WGC3Duint* latch_id)
+{
+}
+
+void WebGraphicsContext3DInProcessImpl::getChildToParentLatchCHROMIUM(
+    WGC3Duint* latch_id)
+{
+}
+
+void WebGraphicsContext3DInProcessImpl::waitLatchCHROMIUM(
+    WGC3Duint latch_id)
+{
+}
+
+void WebGraphicsContext3DInProcessImpl::setLatchCHROMIUM(
+    WGC3Duint latch_id)
+{
 }
 
 WebString WebGraphicsContext3DInProcessImpl::

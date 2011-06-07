@@ -13,6 +13,7 @@
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -27,19 +28,19 @@
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/testing_pref_store.h"
+#include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/ntp_resource_cache.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/net/url_request_context_getter.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/test_url_request_context_getter.h"
 #include "chrome/test/testing_pref_service.h"
@@ -47,15 +48,14 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/geolocation/geolocation_permission_context.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
+#include "content/browser/mock_resource_context.h"
+#include "content/common/notification_service.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/database/database_tracker.h"
-
-#if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/gtk/gtk_theme_provider.h"
-#endif
 
 using base::Time;
 using testing::NiceMock;
@@ -111,7 +111,7 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
                                    const BookmarkNode* node) {}
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
                                              const BookmarkNode* node) {}
-  virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
+  virtual void BookmarkNodeFaviconLoaded(BookmarkModel* model,
                                          const BookmarkNode* node) {}
 
  private:
@@ -128,7 +128,8 @@ class TestExtensionURLRequestContext : public net::URLRequestContext {
   }
 };
 
-class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
+class TestExtensionURLRequestContextGetter
+    : public net::URLRequestContextGetter {
  public:
   virtual net::URLRequestContext* GetURLRequestContext() {
     if (!context_)
@@ -143,15 +144,18 @@ class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
   scoped_refptr<net::URLRequestContext> context_;
 };
 
+ProfileKeyedService* CreateTestDesktopNotificationService(Profile* profile) {
+  return new DesktopNotificationService(profile, NULL);
+}
+
 }  // namespace
 
 TestingProfile::TestingProfile()
     : start_time_(Time::Now()),
       testing_prefs_(NULL),
-      created_theme_provider_(false),
-      has_history_service_(false),
-      off_the_record_(false),
-      last_session_exited_cleanly_(true) {
+      incognito_(false),
+      last_session_exited_cleanly_(true),
+      profile_dependency_manager_(ProfileDependencyManager::GetInstance()) {
   if (!temp_dir_.CreateUniqueTempDir()) {
     LOG(ERROR) << "Failed to create unique temporary directory.";
 
@@ -175,13 +179,24 @@ TestingProfile::TestingProfile()
       CHECK(temp_dir_.Set(system_tmp_dir));
     }
   }
+
+  // Install profile keyed service factory hooks for dummy/test services
+  BackgroundContentsServiceFactory::GetInstance()->ForceAssociationBetween(
+      this, NULL);
+  DesktopNotificationServiceFactory::GetInstance()->set_test_factory(
+      &CreateTestDesktopNotificationService);
+  DesktopNotificationServiceFactory::GetInstance()->ForceAssociationBetween(
+      this, NULL);
 }
 
 TestingProfile::~TestingProfile() {
   NotificationService::current()->Notify(
       NotificationType::PROFILE_DESTROYED,
-      Source<Profile>(this),
+      Source<Profile>(static_cast<Profile*>(this)),
       NotificationService::NoDetails());
+
+  profile_dependency_manager_->DestroyProfileServices(this);
+
   DestroyTopSites();
   DestroyHistoryService();
   // FaviconService depends on HistoryServce so destroying it later.
@@ -328,15 +343,10 @@ void TestingProfile::SetTemplateURLModel(TemplateURLModel* model) {
   template_url_model_.reset(model);
 }
 
-void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
-  theme_provider->Init(this);
-  created_theme_provider_ = true;
-  theme_provider_.reset(theme_provider);
-}
-
 ExtensionService* TestingProfile::CreateExtensionService(
     const CommandLine* command_line,
-    const FilePath& install_directory) {
+    const FilePath& install_directory,
+    bool autoupdate_enabled) {
   // Extension pref store, created for use by |extension_prefs_|.
 
   extension_pref_value_map_.reset(new ExtensionPrefValueMap);
@@ -352,7 +362,8 @@ ExtensionService* TestingProfile::CreateExtensionService(
                                              command_line,
                                              install_directory,
                                              extension_prefs_.get(),
-                                             false);
+                                             autoupdate_enabled,
+                                             true);
   return extensions_service_;
 }
 
@@ -373,19 +384,19 @@ ProfileId TestingProfile::GetRuntimeId() {
   }
 
 bool TestingProfile::IsOffTheRecord() {
-  return off_the_record_;
+  return incognito_;
 }
 
 void TestingProfile::SetOffTheRecordProfile(Profile* profile) {
-  off_the_record_profile_.reset(profile);
+  incognito_profile_.reset(profile);
 }
 
 Profile* TestingProfile::GetOffTheRecordProfile() {
-  return off_the_record_profile_.get();
+  return incognito_profile_.get();
 }
 
 bool TestingProfile::HasOffTheRecordProfile() {
-  return off_the_record_profile_.get() != NULL;
+  return incognito_profile_.get() != NULL;
 }
 
 Profile* TestingProfile::GetOriginalProfile() {
@@ -462,7 +473,8 @@ HistoryService* TestingProfile::GetHistoryServiceWithoutCreating() {
 net::CookieMonster* TestingProfile::GetCookieMonster() {
   if (!GetRequestContext())
     return NULL;
-  return GetRequestContext()->GetCookieStore()->GetCookieMonster();
+  return GetRequestContext()->GetURLRequestContext()->cookie_store()->
+      GetCookieMonster();
 }
 
 AutocompleteClassifier* TestingProfile::GetAutocompleteClassifier() {
@@ -479,27 +491,6 @@ WebDataService* TestingProfile::GetWebDataServiceWithoutCreating() {
 
 PasswordStore* TestingProfile::GetPasswordStore(ServiceAccessType access) {
   return NULL;
-}
-
-void TestingProfile::InitThemes() {
-  if (!created_theme_provider_) {
-#if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
-    theme_provider_.reset(new GtkThemeProvider);
-#else
-    theme_provider_.reset(new BrowserThemeProvider);
-#endif
-    theme_provider_->Init(this);
-    created_theme_provider_ = true;
-  }
-}
-
-const Extension* TestingProfile::GetTheme() {
-  return NULL;
-}
-
-BrowserThemeProvider* TestingProfile::GetThemeProvider() {
-  InitThemes();
-  return theme_provider_.get();
 }
 
 void TestingProfile::SetPrefService(PrefService* prefs) {
@@ -558,8 +549,16 @@ bool TestingProfile::HasCreatedDownloadManager() const {
   return false;
 }
 
-URLRequestContextGetter* TestingProfile::GetRequestContext() {
+net::URLRequestContextGetter* TestingProfile::GetRequestContext() {
   return request_context_.get();
+}
+
+net::URLRequestContextGetter* TestingProfile::GetRequestContextForPossibleApp(
+    const Extension* installed_app) {
+  if (installed_app != NULL && installed_app->is_storage_isolated())
+    return GetRequestContextForIsolatedApp(installed_app->id());
+
+  return GetRequestContext();
 }
 
 void TestingProfile::CreateRequestContext() {
@@ -571,11 +570,11 @@ void TestingProfile::ResetRequestContext() {
   request_context_ = NULL;
 }
 
-URLRequestContextGetter* TestingProfile::GetRequestContextForMedia() {
+net::URLRequestContextGetter* TestingProfile::GetRequestContextForMedia() {
   return NULL;
 }
 
-URLRequestContextGetter* TestingProfile::GetRequestContextForExtensions() {
+net::URLRequestContextGetter* TestingProfile::GetRequestContextForExtensions() {
   if (!extensions_request_context_)
       extensions_request_context_ = new TestExtensionURLRequestContextGetter();
   return extensions_request_context_.get();
@@ -587,6 +586,17 @@ net::SSLConfigService* TestingProfile::GetSSLConfigService() {
 
 UserStyleSheetWatcher* TestingProfile::GetUserStyleSheetWatcher() {
   return NULL;
+}
+
+net::URLRequestContextGetter* TestingProfile::GetRequestContextForIsolatedApp(
+    const std::string& app_id) {
+  // We don't test isolated app storage here yet, so returning the same dummy
+  // context is sufficient for now.
+  return GetRequestContext();
+}
+
+const content::ResourceContext& TestingProfile::GetResourceContext() {
+  return content::MockResourceContext::GetInstance();
 }
 
 FindBarState* TestingProfile::GetFindBarState() {
@@ -680,8 +690,12 @@ void TestingProfile::set_session_service(SessionService* session_service) {
 }
 
 WebKitContext* TestingProfile::GetWebKitContext() {
-  if (webkit_context_ == NULL)
-    webkit_context_ = new WebKitContext(this, false);
+  if (webkit_context_ == NULL) {
+    webkit_context_ = new WebKitContext(
+          IsOffTheRecord(), GetPath(),
+          GetExtensionSpecialStoragePolicy(),
+          false);
+  }
   return webkit_context_;
 }
 
@@ -693,20 +707,6 @@ NTPResourceCache* TestingProfile::GetNTPResourceCache() {
   if (!ntp_resource_cache_.get())
     ntp_resource_cache_.reset(new NTPResourceCache(this));
   return ntp_resource_cache_.get();
-}
-
-DesktopNotificationService* TestingProfile::GetDesktopNotificationService() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!desktop_notification_service_.get()) {
-    desktop_notification_service_.reset(new DesktopNotificationService(
-        this, NULL));
-  }
-  return desktop_notification_service_.get();
-}
-
-BackgroundContentsService*
-TestingProfile::GetBackgroundContentsService() const {
-  return NULL;
 }
 
 StatusTray* TestingProfile::GetStatusTray() {
@@ -787,11 +787,19 @@ ChromeURLDataManager* TestingProfile::GetChromeURLDataManager() {
 }
 
 prerender::PrerenderManager* TestingProfile::GetPrerenderManager() {
-  return NULL;
+  if (!prerender::PrerenderManager::IsPrerenderingPossible())
+    return NULL;
+  if (!prerender_manager_)
+    prerender_manager_ = new prerender::PrerenderManager(this);
+  return prerender_manager_;
 }
 
 PrefService* TestingProfile::GetOffTheRecordPrefs() {
   return NULL;
+}
+
+quota::SpecialStoragePolicy* TestingProfile::GetSpecialStoragePolicy() {
+  return GetExtensionSpecialStoragePolicy();
 }
 
 void TestingProfile::DestroyWebDataService() {

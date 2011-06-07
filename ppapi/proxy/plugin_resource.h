@@ -15,12 +15,14 @@
 #define FOR_ALL_PLUGIN_RESOURCES(F)                   \
   F(Audio) \
   F(AudioConfig) \
+  F(Broker) \
   F(Buffer) \
   F(Context3D) \
   F(FileChooser) \
   F(FileRef) \
   F(FileSystem) \
   F(FlashMenu) \
+  F(FlashNetConnector) \
   F(Font) \
   F(Graphics2D) \
   F(ImageData) \

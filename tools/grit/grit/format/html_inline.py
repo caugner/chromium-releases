@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -23,6 +23,12 @@ from grit.node import base
 DIST_DEFAULT = 'chromium'
 DIST_ENV_VAR = 'CHROMIUM_BUILD'
 DIST_SUBSTR = '%DISTRIBUTION%'
+
+# Matches beginning of an "if" block with trailing spaces.
+_BEGIN_IF_BLOCK = re.compile('<if [^>]*?expr="(?P<expression>[^"]*)"[^>]*?>\s*')
+
+# Matches ending of an "if" block with preceding spaces.
+_END_IF_BLOCK = re.compile('\s*</if>')
 
 def ReadFile(input_filename):
   """Helper function that returns input_filename as a string.
@@ -80,7 +86,7 @@ class InlinedData:
     self.inlined_data = inlined_data
     self.inlined_files = inlined_files
 
-def DoInline(input_filename, grd_node):
+def DoInline(input_filename, grd_node, allow_external_script=False):
   """Helper function that inlines the resources in a specified file.
 
   Reads input_filename, finds all the src attributes and attempts to
@@ -124,11 +130,42 @@ def DoInline(input_filename, grd_node):
     expression = src_match.group('expression')
     return grd_node is None or grd_node.EvaluateCondition(expression)
 
-  def CheckConditionalElements(src_match):
+  def CheckConditionalElements(str):
     """Helper function to conditionally inline inner elements"""
-    if not IsConditionSatisfied(src_match):
-      return ''
-    return src_match.group('content')
+    while True:
+      begin_if = _BEGIN_IF_BLOCK.search(str)
+      if begin_if is None:
+        return str
+
+      condition_satisfied = IsConditionSatisfied(begin_if)
+      leading = str[0:begin_if.start()]
+      content_start = begin_if.end()
+
+      # Find matching "if" block end.
+      count = 1
+      pos = begin_if.end()
+      while True:
+        end_if = _END_IF_BLOCK.search(str, pos)
+        if end_if is None:
+          raise Exception('Unmatched <if>')
+
+        next_if = _BEGIN_IF_BLOCK.search(str, pos)
+        if next_if is None or next_if.start() >= end_if.end():
+          count = count - 1
+          if count == 0:
+            break
+          pos = end_if.end()
+        else:
+          count = count + 1
+          pos = next_if.end()
+
+      content = str[content_start:end_if.start()]
+      trailing = str[end_if.end():]
+
+      if condition_satisfied:
+        str = leading + CheckConditionalElements(content) + trailing
+      else:
+        str = leading + trailing
 
   def InlineFileContents(src_match, pattern, inlined_files=inlined_files):
     """Helper function to inline external script and css files"""
@@ -171,16 +208,19 @@ def DoInline(input_filename, grd_node):
 
   def InlineCSSImages(text, filepath=input_filepath):
     """Helper function that inlines external images in CSS backgrounds."""
-    return re.sub('(?:content|background(?:-image)?):[ ]*url\((?:\'|\")' +
-                  '(?P<filename>[^"\'\)\(]*)(?:\'|\")',
+    return re.sub('(?:content|background(?:-image)?|border-image):[ ]*' +
+                  'url\((?:\'|\")(?P<filename>[^"\'\)\(]*)(?:\'|\")',
                   lambda m: SrcReplace(m, filepath),
                   text)
 
-  # We need to inline css and js before we inline images so that image
-  # references gets inlined in the css and js
-  flat_text = re.sub('<script .*?src="(?P<filename>[^"\']*)".*?></script>',
-                     InlineScript,
-                     ReadFile(input_filename))
+  flat_text = ReadFile(input_filename)
+
+  if not allow_external_script:
+    # We need to inline css and js before we inline images so that image
+    # references gets inlined in the css and js
+    flat_text = re.sub('<script .*?src="(?P<filename>[^"\']*)".*?></script>',
+                       InlineScript,
+                       flat_text)
 
   flat_text = re.sub(
       '<link rel="stylesheet".+?href="(?P<filename>[^"]*)".*?>',
@@ -193,13 +233,9 @@ def DoInline(input_filename, grd_node):
       flat_text)
 
   # Check conditional elements, remove unsatisfied ones from the file.
-  flat_text = re.sub('<if .*?expr="(?P<expression>[^"]*)".*?>\s*' +
-                     '(?P<content>([\s\S]+?))\s*</if>',
-                     CheckConditionalElements,
-                     flat_text)
+  flat_text = CheckConditionalElements(flat_text)
 
-  # TODO(glen): Make this regex not match src="" text that is not inside a tag
-  flat_text = re.sub('src="(?P<filename>[^"\']*)"',
+  flat_text = re.sub('<(?!script)[^>]+?src="(?P<filename>[^"\']*)"',
                      SrcReplace,
                      flat_text)
 
@@ -213,7 +249,7 @@ def DoInline(input_filename, grd_node):
   return InlinedData(flat_text, inlined_files)
 
 
-def InlineToString(input_filename, grd_node):
+def InlineToString(input_filename, grd_node, allow_external_script=False):
   """Inlines the resources in a specified file and returns it as a string.
 
   Args:
@@ -223,7 +259,9 @@ def InlineToString(input_filename, grd_node):
     the inlined data as a string
   """
   try:
-    return DoInline(input_filename, grd_node).inlined_data
+    return DoInline(input_filename,
+                    grd_node,
+                    allow_external_script=allow_external_script).inlined_data
   except IOError, e:
     raise Exception("Failed to open %s while trying to flatten %s. (%s)" %
                     (e.filename, input_filename, e.strerror))

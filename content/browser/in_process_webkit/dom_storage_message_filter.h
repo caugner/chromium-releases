@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,17 @@
 #define CONTENT_BROWSER_IN_PROCESS_WEBKIT_DOM_STORAGE_MESSAGE_FILTER_H_
 #pragma once
 
+#include "base/memory/ref_counted.h"
 #include "base/process.h"
-#include "base/ref_counted.h"
 #include "base/tracked.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/common/dom_storage_common.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/browser/in_process_webkit/dom_storage_area.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
-#include "ipc/ipc_message.h"
+#include "content/common/dom_storage_common.h"
 
 class DOMStorageContext;
 class GURL;
-class Profile;
 struct DOMStorageMsg_Event_Params;
 
 // This class handles the logistics of DOM Storage within the browser process.
@@ -27,7 +25,8 @@ struct DOMStorageMsg_Event_Params;
 class DOMStorageMessageFilter : public BrowserMessageFilter {
  public:
   // Only call the constructor from the UI thread.
-  DOMStorageMessageFilter(int process_id, Profile* profile);
+  DOMStorageMessageFilter(int process_id, WebKitContext* webkit_context,
+                          HostContentSettingsMap* host_content_settings_map);
 
   // BrowserMessageFilter implementation
   virtual void OnChannelConnected(int32 peer_pid);

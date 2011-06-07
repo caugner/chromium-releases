@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 #define CONTENT_BROWSER_RENDERER_HOST_SITE_INSTANCE_H_
 #pragma once
 
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
 #include "content/browser/renderer_host/render_process_host.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
 class BrowsingInstance;
@@ -149,10 +149,7 @@ class SiteInstance : public base::RefCounted<SiteInstance>,
   // GetRelatedSiteInstance instead.
   explicit SiteInstance(BrowsingInstance* browsing_instance);
 
-  // Get the effective URL for the given actual URL. If the URL is part of an
-  // installed app, the effective URL is an extension URL with the ID of that
-  // extension as the host. This has the effect of grouping apps together in
-  // a common SiteInstance.
+  // Get the effective URL for the given actual URL.
   static GURL GetEffectiveURL(Profile* profile, const GURL& url);
 
   // Returns the type of renderer process this instance belongs in, for grouping

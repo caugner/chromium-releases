@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/task.h"
 #include "webkit/appcache/appcache.h"
 #include "webkit/appcache/appcache_disk_cache.h"
@@ -34,7 +34,8 @@ class MockAppCacheStorage : public AppCacheStorage {
   virtual void LoadOrCreateGroup(const GURL& manifest_url, Delegate* delegate);
   virtual void StoreGroupAndNewestCache(
       AppCacheGroup* group, AppCache* newest_cache, Delegate* delegate);
-  virtual void FindResponseForMainRequest(const GURL& url, Delegate* delegate);
+  virtual void FindResponseForMainRequest(
+      const GURL& url, const GURL& preferred_manifest_url, Delegate* delegate);
   virtual void FindResponseForSubRequest(
       AppCache* cache, const GURL& url,
       AppCacheEntry* found_entry, AppCacheEntry* found_fallback_entry,

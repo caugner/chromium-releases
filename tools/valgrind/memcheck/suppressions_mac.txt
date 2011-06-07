@@ -147,14 +147,6 @@
    ...
    fun:pager_write
 }
-{
-   bug_32564
-   Memcheck:Free
-   fun:free
-   fun:_cache_free_block
-   fun:_cache_collect_free
-   fun:_cache_fill
-}
 
 # See http://www.openradar.me/8287193
 {
@@ -187,6 +179,43 @@
    fun:-[CIKernel initWithCString:noCopy:]
    ...
    fun:-[NSPopUpButtonCell _drawIndicatorWithFrame:inView:]
+}
+{
+   # Capturer on Mac uses OpenGL driver, which triggers several warnings.
+   # The check has to be quite generic, as different hardware graphics cards
+   # will cause different sets of warnings.
+   bug_75037
+   Memcheck:Cond
+   ...
+   fun:gl*
+   ...
+   fun:_ZN8remoting*CapturerMac*
+}
+{
+   # See also http://openradar.appspot.com/radar?id=1169404
+   bug_79533a
+   Memcheck:Value4
+   ...
+   fun:_Z*19cssm_DataAbortQuery17cssm_dl_db_handlel
+   fun:CSSM_DL_DataAbortQuery
+   fun:_ZN11SSDLSession14DataAbortQueryEll
+   fun:_Z*19cssm_DataAbortQuery17cssm_dl_db_handlel
+   fun:CSSM_DL_DataAbortQuery
+   fun:tpDbFindIssuerCrl
+   fun:tpVerifyCertGroupWithCrls
+}
+{
+   # See also http://openradar.appspot.com/radar?id=1169404
+   bug_79533b
+   Memcheck:Cond
+   ...
+   fun:_Z*19cssm_DataAbortQuery17cssm_dl_db_handlel
+   fun:CSSM_DL_DataAbortQuery
+   fun:_ZN11SSDLSession14DataAbortQueryEll
+   fun:_Z*19cssm_DataAbortQuery17cssm_dl_db_handlel
+   fun:CSSM_DL_DataAbortQuery
+   fun:tpDbFindIssuerCrl
+   fun:tpVerifyCertGroupWithCrls
 }
 
 # 2. Intentional unit test errors, stuff that is somehow a false positive
@@ -393,6 +422,16 @@
    fun:_ZN7history14HistoryBackend8InitImplEv
    fun:_ZN7history14HistoryBackend4InitEb
 }
+# Note: bug 31634 happens very sporatically.
+{
+   bug_31634
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:_CFRuntimeCreateInstance
+   fun:__CFDictionaryInit
+   fun:CFDictionaryCreate
+   fun:classDescription
+}
 {
    bug_35164
    Memcheck:Cond
@@ -431,7 +470,6 @@
    fun:_ZN4base6Thread5StartEv
    fun:_ZN14HistoryService4InitERK8FilePathP15BookmarkServiceb
    fun:_ZN14TestingProfile20CreateHistoryServiceEbb
-   fun:_ZN12_GLOBAL__N_127HistoryContentsProviderTest5SetUpEv
 }
 {
    bug_36605b
@@ -647,53 +685,6 @@
    fun:CGContextFillRect
    fun:NSRectFill
    fun:_ZN18FocusIndicationFix40currentOSHasSetFocusRingStyleInBitmapBugEv
-}
-{
-   bug_49250_a
-   Memcheck:Cond
-   fun:gleUpdateFogData
-   fun:gleUpdateState
-   fun:_ZN8remoting11CapturerMac12CaptureRectsERKSt6vectorIN3gfx4RectESaIS3_EEP14CallbackRunnerI6Tuple1I13scoped_refptrINS_8Capturer11CaptureDataEEEE
-   fun:_ZN8remoting8Capturer19CaptureInvalidRectsEP14CallbackRunnerI6Tuple1I13scoped_refptrINS0_11CaptureDataEEEE
-   fun:_ZN8remoting28CapturerMacTest_Capture_Test8TestBodyEv
-}
-{
-   bug_49250_b
-   Memcheck:Cond
-   fun:gleUpdateFogData
-   fun:gleUpdateState
-   fun:_ZN8remoting11CapturerMac12CaptureRectsERKSt6vectorIN3gfx4RectESaIS3_EEP14CallbackRunnerI6Tuple1I13scoped_refptrINS_8Capturer11CaptureDataEEEE
-   fun:_ZN8remoting8Capturer19CaptureInvalidRectsEP14CallbackRunnerI6Tuple1I13scoped_refptrINS0_11CaptureDataEEEE
-   fun:_ZN8remoting28CapturerMacTest_Capture_Test8TestBodyEv
-}
-{
-   bug_49250_c
-   Memcheck:Cond
-   fun:gleUpdateFogData
-   fun:gleUpdateState
-   fun:_ZN8remoting11CapturerMac12CaptureRectsERKSt3setIN3gfx4RectESt4lessIS3_ESaIS3_EEP14CallbackRunnerI6Tuple1I13scoped_refptrINS_11CaptureDataEEEE
-   fun:_ZN8remoting8Capturer19CaptureInvalidRectsEP14CallbackRunnerI6Tuple1I13scoped_refptrINS_11CaptureDataEEEE
-   fun:_ZN8remoting28CapturerMacTest_Capture_Test8TestBodyEv
-}
-{
-   bug_49250_d
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN8remoting12TraceContext3GetEv
-   fun:_ZN8remoting12TraceContext6tracerEv
-   fun:_ZN8remoting8Capturer19CaptureInvalidRectsEP14CallbackRunnerI6Tuple1I13scoped_refptrINS_11CaptureDataEEEE
-   fun:_ZN8remoting28CapturerMacTest_Capture_Test8TestBodyEv
-}
-{
-   bug_49250_e
-   Memcheck:Cond
-   ...
-   fun:gleUpdateState
-   fun:gleInitializeContext
-   fun:gliCreateContext
-   fun:CGLRestoreDispatchFunction
-   fun:CGLCreateContext
-   fun:_ZN8remoting11CapturerMac26ScreenConfigurationChangedEv
 }
 {
    bug_50286
@@ -1007,13 +998,8 @@
    fun:__cxa_get_globals
    fun:__cxa_allocate_exception
    fun:_ZN8Security9CssmError7throwMeEi
-   fun:_ZNK8Security9DbVersion9findTableEj
-   fun:_ZNK8Security9DbVersion12createCursorEPK10cssm_query
-   fun:_ZN8Security10DbModifier12createCursorEPK10cssm_query
-   fun:_ZN8Security13AppleDatabase12dataGetFirstERNS_9DbContextEPKNS_9CssmQueryEP29cssm_db_record_attribute_dataPNS_8CssmDataERP21cssm_db_unique_record
-   fun:_ZN8Security15DatabaseSession12DataGetFirstElPKNS_9CssmQueryEP29cssm_db_record_attribute_dataPNS_8CssmDataERP21cssm_db_unique_record
-   fun:_ZL17cssm_DataGetFirst17cssm_dl_db_handlePK10cssm_queryPlP29cssm_db_record_attribute_dataP9cssm_dataPP21cssm_db_unique_record
-   fun:CSSM_DL_DataGetFirst
+   ...
+   fun:SecTrustEvaluate
 }
 {
    bug_51682c
@@ -1260,69 +1246,6 @@
    fun:__NSFontInstanceInfoInitializeMetricsInfo
 }
 {
-   bug_68092
-   Memcheck:Addr1
-   fun:_CGSLockWindow
-   fun:CGSDeviceLock
-   fun:ripd_Lock
-   fun:ripl_BltShape
-   fun:ripc_Render
-   fun:ripc_DrawRects
-   fun:CGContextFillRects
-   fun:createTopShadowWindow
-   fun:MetalSheetProgress
-   fun:_NSMoveHelperTimerCallBack
-   fun:__CFRunLoopRun
-   fun:CFRunLoopRunSpecific
-   fun:CFRunLoopRunInMode
-   fun:-[NSMoveHelper _doAnimation]
-   fun:-[NSMoveHelper(NSSheets) _moveParent:andOpenSheet:]
-   fun:-[NSWindow(NSSheets) _orderFrontRelativeToWindow:]
-   fun:-[NSWindow _reallyDoOrderWindow:relativeTo:findKey:forCounter:force:isModal:]
-   fun:-[NSApplication _orderFrontModalWindow:relativeToWindow:]
-   fun:-[NSApplication _commonBeginModalSessionForWindow:relativeToWindow:modalDelegate:didEndSelector:contextInfo:]
-   fun:-[AutoFillDialogController editSelection:]
-   fun:_ZN12_GLOBAL__N_154AutoFillDialogControllerTest_AutoFillDataMutation_Test8TestBodyEv
-}
-{
-   bug_69757a
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN9__gnu_cxx13new_allocatorISt13_Rb_tree_nodeISt4pairIKSsPN3net13CookieMonster15CanonicalCookieEEEE8allocateEmPKv
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net13CookieMonster15CanonicalCookieEESt10_Select1stIS6_ESt4lessISsESaIS6_EE11_M_get_nodeEv
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net13CookieMonster15CanonicalCookieEESt10_Select1stIS6_ESt4lessISsESaIS6_EE14_M_create_nodeERKS6_
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net13CookieMonster15CanonicalCookieEESt10_Select1stIS6_ESt4lessISsESaIS6_EE9_M_insertEPSt18_Rb_tree_node_baseSE_RKS6_
-   fun:_ZNSt8_Rb_treeISsSt4pairIKSsPN3net13CookieMonster15CanonicalCookieEESt10_Select1stIS6_ESt4lessISsESaIS6_EE12insert_equalERKS6_
-   fun:_ZNSt8multimapISsPN3net13CookieMonster15CanonicalCookieESt4lessISsESaISt4pairIKSsS3_EEE6insertERKS8_
-   fun:_ZN3net13CookieMonster20InternalInsertCookieERKSsPNS0_15CanonicalCookieEb
-   fun:_ZN3net13CookieMonster18SetCanonicalCookieEP10scoped_ptrINS0_15CanonicalCookieEERKN4base4TimeERKNS_13CookieOptionsE
-   fun:_ZN3net13CookieMonster35SetCookieWithCreationTimeAndOptionsERK4GURLRKSsRKN4base4TimeERKNS_13CookieOptionsE
-   fun:_ZN3net13CookieMonster20SetCookieWithOptionsERK4GURLRKSsRKNS_13CookieOptionsE
-   fun:_ZN3net11CookieStore9SetCookieERK4GURLRKSs
-   fun:_ZN12_GLOBAL__N_*CookiesWindowControllerTest_*_Test8TestBodyEv
-}
-{
-   bug_69757b
-   Memcheck:Leak
-   fun:_Znw*
-   ...
-   fun:_ZN21TestURLRequestContext4InitEv
-   fun:_ZN21TestURLRequestContextC2Ev
-   fun:_ZN21TestURLRequestContextC1Ev
-   fun:_ZN27TestURLRequestContextGetter20GetURLRequestContextEv
-   fun:_ZN23URLRequestContextGetter14GetCookieStoreEv
-   fun:-[CookiesWindowController loadTreeModelFromProfile]
-   fun:-[CookiesWindowController initWithProfile:databaseHelper:storageHelper:appcacheHelper:indexedDBHelper:]
-   fun:_ZN12_GLOBAL__N_127CookiesWindowControllerTest5SetUpEv
-}
-{
-   bug_69757c
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN14TestingProfile20CreateRequestContextEv
-   fun:_ZN12_GLOBAL__N_127CookiesWindowControllerTest5SetUpEv
-}
-{
    bug_71111
    Memcheck:Leak
    fun:malloc_zone_malloc
@@ -1461,4 +1384,234 @@
    Memcheck:Addr4
    ...
    fun:CGContextShowGlyphsWithAdvances
+}
+{
+   bug_75714_a
+   Memcheck:Addr8
+   ...
+   fun:argb32_mark
+   fun:ripl_BltShape
+   ...
+   fun:ripc_Render*
+   ...
+   fun:-[NSView _drawRect:clip:]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   ...
+   fun:-[NSView _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSNextStepFrame _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSView _displayRectIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:]
+   fun:-[NSView displayIfNeeded]
+}
+{
+   bug_75714_b
+   Memcheck:Addr4
+   ...
+   fun:argb32_mark
+   fun:ripl_BltShape
+   fun:ripc_Render
+   ...
+   fun:-[NSView _drawRect:clip:]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   ...
+   fun:-[NSView _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSNextStepFrame _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSView _displayRectIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:]
+   fun:-[NSView displayIfNeeded]
+}
+{
+   bug_76370
+   Memcheck:Addr4
+   fun:get_bits
+   ...
+   fun:read_huffman_tree
+   fun:theora_decode_tables
+   fun:theora_decode_init
+   fun:avcodec_open
+   fun:_ZN5media23FFmpegVideoDecodeEngine10InitializeEP11MessageLoopPNS_17VideoDecodeEngine12EventHandlerEPNS_18VideoDecodeContextERKNS_16VideoCodecConfigE
+   fun:_ZN5media18FFmpegVideoDecoder10InitializeEPNS_13DemuxerStreamEP14CallbackRunnerI6Tuple0EPS3_I6Tuple1IRKNS_18PipelineStatisticsEEE
+}
+{
+   bug_77063
+   Memcheck:Free
+   fun:_ZdlPv
+   fun:_ZN15THFSPlusCatalogD2Ev
+   fun:_ZN5TNode10SetCatalogEP15THFSPlusCatalog
+   fun:_ZN15TMountPointList9AddVolumeEsb
+   fun:_ZN15TMountPointList4FindEsPN5TNode12StPopulatingE
+   fun:_ZN15TMountPointList20SupportsInvisibleBitEsPN5TNode12StPopulatingEb
+   fun:_ZNK21THFSPlusPropertyStore4OpenEbb
+   fun:_ZNK21THFSPlusPropertyStore13GetPropertiesEb
+   fun:_ZN16TFSCopyOperation22GetSourcePropertyStoreERK11THFSPlusRef
+   fun:_ZN16TFSCopyOperation13DoMoveToTrashERK11THFSPlusRef
+   fun:_ZN16TFSCopyOperation3RunEv
+   fun:_FSOperation
+   fun:_FSOperateOnObjectSync
+   fun:FSMoveObjectToTrashSync
+   fun:_Z9TrashFuncRK8FilePath
+   fun:_Z18DispatchToFunctionIPFvRK8FilePathES0_EvT_RK6Tuple1IT0_E
+   fun:_ZN16RunnableFunctionIPFvRK8FilePathE6Tuple1IS0_EE3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+}
+{
+   bug_77265_a
+   Memcheck:Leak
+   fun:calloc
+   ...
+   fun:-[BubbleView drawRect:]
+   fun:-[NSView _drawRect:clip:]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   fun:-[NSView _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSNextStepFrame _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSView _displayRectIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:]
+   fun:-[NSView displayIfNeeded]
+   fun:-[NSWindow _setFrameCommon:display:stashSize:]
+   fun:-[NSWindow setFrame:display:]
+   fun:-[NSWindow setValue:forKey:]
+   fun:-[NSObject(NSKeyValueCoding) setValue:forKeyPath:]
+   fun:-[NSInFlightAnimation advanceToTime:]
+   fun:-[NSAnimationManager animationTimerFired:]
+   fun:__NSFireTimer
+}
+{
+   bug_77265_b
+   Memcheck:Leak
+   fun:calloc
+   fun:CGClipStackCreateMutableCopy
+   fun:maybeCopyClipState
+   fun:CGGStateClipToRect
+   fun:CGContextClipToRect
+   fun:CGContextClipToRects
+   fun:NSRectClipList
+   fun:-[NSView _drawRect:clip:]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   fun:-[NSView _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSNextStepFrame _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSView _displayRectIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:]
+   fun:-[NSView displayIfNeeded]
+   fun:-[NSWindow _setFrameCommon:display:stashSize:]
+   fun:-[NSWindow setFrame:display:]
+   fun:-[NSWindow setValue:forKey:]
+   fun:-[NSObject(NSKeyValueCoding) setValue:forKeyPath:]
+   fun:-[NSInFlightAnimation advanceToTime:]
+   fun:-[NSAnimationManager animationTimerFired:]
+   fun:__NSFireTimer
+}
+{
+   bug_77265_c
+   Memcheck:Leak
+   fun:calloc
+   fun:CGClipStackCreateMutableCopy
+   fun:maybeCopyClipState
+   fun:CGGStateClipToRect
+   fun:CGContextClipToRect
+   fun:NSRectClip
+   fun:-[NSFocusState flush]
+   fun:-[NSView lockFocusIfCanDraw]
+   fun:-[NSView lockFocus]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   fun:-[NSView _recursiveDisplayAllDirtyWithLockFocus:visRect:]
+   fun:-[NSView _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSNextStepFrame _recursiveDisplayRectIfNeededIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:topView:]
+   fun:-[NSView _displayRectIgnoringOpacity:isVisibleRect:rectIsVisibleRectForView:]
+   fun:-[NSView displayIfNeeded]
+   fun:-[NSWindow _setFrameCommon:display:stashSize:]
+   fun:-[NSWindow setFrame:display:]
+   fun:-[NSWindow setValue:forKey:]
+   fun:-[NSObject(NSKeyValueCoding) setValue:forKeyPath:]
+   fun:-[NSInFlightAnimation advanceToTime:]
+   fun:-[NSAnimationManager animationTimerFired:]
+   fun:__NSFireTimer
+}
+{
+   bug_77388_a
+   Memcheck:Cond
+   ...
+   fun:PrivateMPEntryPoint
+   fun:_pthread_start
+   fun:thread_start
+}
+{
+   bug_77388_b
+   Memcheck:Value4
+   ...
+   fun:PrivateMPEntryPoint
+   fun:_pthread_start
+   fun:thread_start
+}
+{
+   bug_77388_c
+   Memcheck:Param
+   access_extended(entries)
+   fun:accessx_np
+   ...
+   fun:PrivateMPEntryPoint
+   fun:_pthread_start
+   fun:thread_start
+}
+
+{
+   bug_77388_d
+   Memcheck:Cond
+   fun:TestAndSetClear
+   fun:TestAndClear
+   fun:_ZN5TNode28UnregisterChangeNotificationERK11TCountedPtrI21TClientChangeNotifierEmb
+   fun:NodeUnregisterChangeNotification
+   fun:NodeUnRegisterChildChangedNotification
+   fun:-[NSNavFBENode _unregisterForChildChangedNotifications]
+   fun:_commonTearDown_NSNavFBENode
+   fun:-[NSNavFBENode dealloc]
+   fun:CFRelease
+   fun:__CFSetDeallocate
+   fun:_CFRelease
+   fun:-[NSOutlineView dealloc]
+   fun:-[NSTrackableOutlineView dealloc]
+}
+{
+   bug_77388_e
+   Memcheck:Cond
+   fun:TestAndSetClear
+   fun:TestAndSet
+   fun:_ZN5TNode17HandleSyncStartedEv
+   fun:_ZN5TNode24GetNetworkSidebarBrowserEv
+   fun:_ZN5TNode14GetNetworkNodeEm
+   fun:_ZN5TNode24GetSpecialNodeWithStatusEmRKP17OpaqueNodeRequestmR8TNodePtr
+   fun:NodeCopySpecialFolder
+   fun:+[NSNavFBENode _virtualNodeOfType:]
+   fun:+[NSNavFBENode copyStandardSidebarNodes]
+   fun:-[NSNavSidebarController load]
+   fun:-[NSNavView loadSidebar]
+   fun:-[NSSavePanel _initSidebarAndPopups]
+   fun:-[NSSavePanel _initPanelCommon]
+   fun:-[NSSavePanel initWithContentRect:styleMask:backing:defer:]
+   fun:+[NSSavePanel _crunchyRawUnbonedPanel]
+   fun:_ZN20SelectFileDialogImpl10SelectFileEN16SelectFileDialog4TypeERKSbItN4base20string16_char_traitsESaItEERK8FilePathPKNS0_12FileTypeInfoEiRKSsP8NSWindowPv
+   fun:_ZN15DownloadManager24OnPathExistenceAvailableEP18DownloadCreateInfo
+}
+{
+   bug_79655a
+   Memcheck:Addr1
+   ...
+   fun:dlopen
+   fun:_ZN20IOSurfaceSupportImplC2Ev
+   fun:_ZN20IOSurfaceSupportImplC1Ev
+   fun:_ZN22DefaultSingletonTraitsI20IOSurfaceSupportImplE3NewEv
+   fun:_ZN9SingletonI20IOSurfaceSupportImpl22DefaultSingletonTraitsIS0_ES0_E3getEv
+   fun:_ZN20IOSurfaceSupportImpl11GetInstanceEv
+   fun:_ZN16IOSurfaceSupport10InitializeEv
+   fun:_ZN11TabContents14GetWebkitPrefsEv
+}
+{
+   bug_79655b
+   Memcheck:Leak
+   ...
+   fun:dlopen
+   fun:_ZN20IOSurfaceSupportImplC2Ev
+   fun:_ZN20IOSurfaceSupportImplC1Ev
+   fun:_ZN22DefaultSingletonTraitsI20IOSurfaceSupportImplE3NewEv
+   fun:_ZN9SingletonI20IOSurfaceSupportImpl22DefaultSingletonTraitsIS0_ES0_E3getEv
+   fun:_ZN20IOSurfaceSupportImpl11GetInstanceEv
+   fun:_ZN16IOSurfaceSupport10InitializeEv
+   fun:_ZN11TabContents14GetWebkitPrefsEv
 }

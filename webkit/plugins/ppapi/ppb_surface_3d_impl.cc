@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,6 +78,8 @@ PPB_Surface3D_Impl::PPB_Surface3D_Impl(PluginInstance* instance)
 }
 
 PPB_Surface3D_Impl::~PPB_Surface3D_Impl() {
+  if (context_)
+    context_->BindSurfaces(NULL, NULL);
 }
 
 const PPB_Surface3D_Dev* PPB_Surface3D_Impl::GetInterface() {
@@ -143,7 +145,7 @@ int32_t PPB_Surface3D_Impl::SwapBuffers(PP_CompletionCallback callback) {
   if (impl) {
     context_->gles2_impl()->SwapBuffers();
   }
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 void PPB_Surface3D_Impl::ViewInitiatedPaint() {
@@ -190,6 +192,11 @@ void PPB_Surface3D_Impl::OnContextLost() {
 }
 
 void PPB_Surface3D_Impl::SendContextLost() {
+  // By the time we run this, the instance may have been deleted, or in the
+  // process of being deleted. Even in the latter case, we don't want to send a
+  // callback after DidDestroy.
+  if (!instance() || !instance()->container())
+    return;
   const PPP_Graphics3D_Dev* ppp_graphics_3d =
       static_cast<const PPP_Graphics3D_Dev*>(
           instance()->module()->GetPluginInterface(
@@ -200,4 +207,3 @@ void PPB_Surface3D_Impl::SendContextLost() {
 
 }  // namespace ppapi
 }  // namespace webkit
-

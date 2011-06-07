@@ -12,21 +12,20 @@
 #include <set>
 #include <vector>
 
-#include "app/app_switches.h"
-#include "app/gfx/gl/gl_implementation.h"
 #include "app/sql/connection.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/test/test_file_util.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -36,9 +35,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/debug_flags.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/json_value_serializer.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
@@ -49,8 +46,12 @@
 #include "chrome/test/chrome_process_util.h"
 #include "chrome/test/test_launcher_utils.h"
 #include "chrome/test/test_switches.h"
+#include "content/common/debug_flags.h"
+#include "content/common/json_value_serializer.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
+#include "ui/gfx/gl/gl_implementation.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -159,10 +160,13 @@ void UITestBase::TearDown() {
   EXPECT_EQ(expected_crashes_, actual_crashes) << error_msg;
 }
 
-// TODO(phajdan.jr): get rid of set_command_execution_timeout_ms.
-void UITestBase::set_command_execution_timeout_ms(int timeout) {
-  automation()->set_command_execution_timeout_ms(timeout);
-  VLOG(1) << "Automation command execution timeout set to " << timeout << " ms";
+int UITestBase::action_timeout_ms() {
+  return automation()->action_timeout_ms();
+}
+
+void UITestBase::set_action_timeout_ms(int timeout) {
+  automation()->set_action_timeout_ms(timeout);
+  VLOG(1) << "Automation action timeout set to " << timeout << " ms";
 }
 
 ProxyLauncher* UITestBase::CreateProxyLauncher() {
@@ -183,6 +187,9 @@ void UITestBase::SetLaunchSwitches() {
     launch_arguments_.AppendSwitchASCII(switches::kHomePage, homepage_);
   if (!test_name_.empty())
     launch_arguments_.AppendSwitchASCII(switches::kTestName, test_name_);
+#if defined(OS_CHROMEOS)
+  launch_arguments_.AppendSwitch(switches::kSkipChromeOSComponents);
+#endif
 }
 
 void UITestBase::LaunchBrowser() {
@@ -297,10 +304,6 @@ void UITestBase::NavigateToURLBlockUntilNavigationsComplete(
                 url, number_of_navigations)) << url.spec();
 }
 
-bool UITestBase::WaitForBrowserProcessToQuit(int timeout) {
-  return launcher_->WaitForBrowserProcessToQuit(timeout);
-}
-
 bool UITestBase::WaitForBookmarkBarVisibilityChange(BrowserProxy* browser,
                                                     bool wait_for_open) {
   const int kCycles = 10;
@@ -313,11 +316,7 @@ bool UITestBase::WaitForBookmarkBarVisibilityChange(BrowserProxy* browser,
       return true;  // Bookmark bar visibility change complete.
 
     // Give it a chance to catch up.
-    bool browser_survived = CrashAwareSleep(
-        TestTimeouts::action_timeout_ms() / kCycles);
-    EXPECT_TRUE(browser_survived);
-    if (!browser_survived)
-      return false;
+    base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms() / kCycles);
   }
 
   ADD_FAILURE() << "Timeout reached in WaitForBookmarkBarVisibilityChange";
@@ -365,10 +364,6 @@ bool UITestBase::IsBrowserRunning() {
   return launcher_->IsBrowserRunning();
 }
 
-bool UITestBase::CrashAwareSleep(int timeout_ms) {
-  return launcher_->CrashAwareSleep(timeout_ms);
-}
-
 int UITestBase::GetTabCount() {
   return GetTabCount(0);
 }
@@ -391,12 +386,10 @@ void UITestBase::WaitUntilTabCount(int tab_count) {
   const int kIntervalMs = TestTimeouts::action_timeout_ms() / kMaxIntervals;
 
   for (int i = 0; i < kMaxIntervals; ++i) {
-    bool browser_survived = CrashAwareSleep(kIntervalMs);
-    EXPECT_TRUE(browser_survived);
-    if (!browser_survived)
-      return;
     if (GetTabCount() == tab_count)
       return;
+
+    base::PlatformThread::Sleep(kIntervalMs);
   }
 
   ADD_FAILURE() << "Timeout reached in WaitUntilTabCount";
@@ -560,6 +553,15 @@ void UITest::StartHttpServerWithPort(const FilePath& root_directory,
   cmd_line->AppendSwitch("register_cygwin");
   cmd_line->AppendSwitchPath("root", root_directory);
 
+  FilePath layout_tests_dir;
+  PathService::Get(base::DIR_SOURCE_ROOT, &layout_tests_dir);
+  layout_tests_dir = layout_tests_dir.AppendASCII("chrome")
+                                     .AppendASCII("test")
+                                     .AppendASCII("data")
+                                     .AppendASCII("layout_tests")
+                                     .AppendASCII("LayoutTests");
+  cmd_line->AppendSwitchPath("layout_tests_dir", layout_tests_dir);
+
   // For Windows 7, if we start the lighttpd server on the foreground mode,
   // it will mess up with the command window and cause conhost.exe to crash. To
   // work around this, we start the http server on the background mode.
@@ -627,7 +629,7 @@ DictionaryValue* UITest::GetLocalState() {
 DictionaryValue* UITest::GetDefaultProfilePreferences() {
   FilePath path;
   PathService::Get(chrome::DIR_USER_DATA, &path);
-  path = path.AppendASCII(WideToUTF8(chrome::kNotSignedInProfile));
+  path = path.AppendASCII(chrome::kNotSignedInProfile);
   return LoadDictionaryValueFromPath(path.Append(chrome::kPreferencesFilename));
 }
 
@@ -718,11 +720,6 @@ bool UITest::WaitUntilJavaScriptCondition(TabProxy* tab,
 
   // Wait until the test signals it has completed.
   for (int i = 0; i < kMaxIntervals; ++i) {
-    bool browser_survived = CrashAwareSleep(kIntervalMs);
-    EXPECT_TRUE(browser_survived);
-    if (!browser_survived)
-      return false;
-
     bool done_value = false;
     bool success = tab->ExecuteAndExtractBool(frame_xpath, jscript,
                                               &done_value);
@@ -731,6 +728,8 @@ bool UITest::WaitUntilJavaScriptCondition(TabProxy* tab,
       return false;
     if (done_value)
       return true;
+
+    base::PlatformThread::Sleep(kIntervalMs);
   }
 
   ADD_FAILURE() << "Timeout reached in WaitUntilJavaScriptCondition";
@@ -747,14 +746,11 @@ bool UITest::WaitUntilCookieValue(TabProxy* tab,
 
   std::string cookie_value;
   for (int i = 0; i < kMaxIntervals; ++i) {
-    bool browser_survived = CrashAwareSleep(kIntervalMs);
-    EXPECT_TRUE(browser_survived);
-    if (!browser_survived)
-      return false;
-
     EXPECT_TRUE(tab->GetCookieByName(url, cookie_name, &cookie_value));
     if (cookie_value == expected_value)
       return true;
+
+    base::PlatformThread::Sleep(kIntervalMs);
   }
 
   ADD_FAILURE() << "Timeout reached in WaitUntilCookieValue";
@@ -769,15 +765,12 @@ std::string UITest::WaitUntilCookieNonEmpty(TabProxy* tab,
   const int kMaxIntervals = timeout_ms / kIntervalMs;
 
   for (int i = 0; i < kMaxIntervals; ++i) {
-    bool browser_survived = CrashAwareSleep(kIntervalMs);
-    EXPECT_TRUE(browser_survived);
-    if (!browser_survived)
-      return std::string();
-
     std::string cookie_value;
     EXPECT_TRUE(tab->GetCookieByName(url, cookie_name, &cookie_value));
     if (!cookie_value.empty())
       return cookie_value;
+
+    base::PlatformThread::Sleep(kIntervalMs);
   }
 
   ADD_FAILURE() << "Timeout reached in WaitUntilCookieNonEmpty";
@@ -803,11 +796,7 @@ bool UITest::WaitForFindWindowVisibilityChange(BrowserProxy* browser,
       return true;  // Find window visibility change complete.
 
     // Give it a chance to catch up.
-    bool browser_survived = CrashAwareSleep(
-        TestTimeouts::action_timeout_ms() / kCycles);
-    EXPECT_TRUE(browser_survived);
-    if (!browser_survived)
-      return false;
+    base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms() / kCycles);
   }
 
   ADD_FAILURE() << "Timeout reached in WaitForFindWindowVisibilityChange";
@@ -831,19 +820,6 @@ bool UITest::WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
   int incorrect_state_count = 0;
   base::Time start = base::Time::Now();
   for (int i = 0; i < kCycles; i++) {
-    // Give it a chance to catch up.
-    bool browser_survived = CrashAwareSleep(
-        TestTimeouts::action_timeout_ms() / kCycles);
-    EXPECT_TRUE(browser_survived);
-    if (!browser_survived) {
-      LOG(INFO) << "Elapsed time: " << (base::Time::Now() - start).InSecondsF()
-                << " seconds"
-                << " call failed " << fail_count << " times"
-                << " state was incorrect " << incorrect_state_count << " times";
-      ADD_FAILURE() << "Browser failed in " << __FUNCTION__;
-      return false;
-    }
-
     bool visible = !wait_for_open;
     if (!browser->IsShelfVisible(&visible)) {
       fail_count++;
@@ -857,6 +833,9 @@ bool UITest::WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
       return true;  // Got the download shelf.
     }
     incorrect_state_count++;
+
+    // Give it a chance to catch up.
+    base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms() / kCycles);
   }
 
   LOG(INFO) << "Elapsed time: " << (base::Time::Now() - start).InSecondsF()

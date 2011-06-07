@@ -11,7 +11,7 @@
 #include <shlobj.h>
 
 #include "base/file_path.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "chrome/browser/policy/policy_path_parser.h"
@@ -83,8 +83,7 @@ bool LoadUserDataDirPolicyFromRegistry(HKEY hive, FilePath* user_data_dir) {
 
   base::win::RegKey hklm_policy_key(hive, policy::kRegistrySubKey, KEY_READ);
   if (hklm_policy_key.ReadValue(key_name.c_str(), &value) == ERROR_SUCCESS) {
-    *user_data_dir = FilePath::FromWStringHack(
-        policy::path_parser::ExpandPathVariables(value));
+    *user_data_dir = FilePath(policy::path_parser::ExpandPathVariables(value));
     return true;
   }
   return false;

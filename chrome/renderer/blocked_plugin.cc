@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,14 @@
 #include "base/values.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/renderer/render_view.h"
+#include "content/common/view_messages.h"
+#include "content/renderer/render_view.h"
 #include "grit/generated_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMenuItemInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
@@ -57,12 +59,14 @@ BlockedPlugin::BlockedPlugin(RenderView* render_view,
                              const WebPreferences& preferences,
                              int template_id,
                              const string16& message,
-                             bool is_blocked_for_prerendering)
+                             bool is_blocked_for_prerendering,
+                             bool allow_loading)
     : RenderViewObserver(render_view),
       frame_(frame),
       plugin_params_(params),
       is_blocked_for_prerendering_(is_blocked_for_prerendering),
-      hidden_(false) {
+      hidden_(false),
+      allow_loading_(allow_loading) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(template_id));
 
@@ -104,6 +108,8 @@ void BlockedPlugin::ShowContextMenu(const WebKit::WebMouseEvent& event) {
 
   WebMenuItemInfo name_item;
   name_item.label = name_;
+  name_item.hasTextDirectionOverride = false;
+  name_item.textDirection =  WebKit::WebTextDirectionDefault;
   custom_items[0] = name_item;
 
   WebMenuItemInfo separator_item;
@@ -112,9 +118,12 @@ void BlockedPlugin::ShowContextMenu(const WebKit::WebMouseEvent& event) {
 
   WebMenuItemInfo run_item;
   run_item.action = kMenuActionLoad;
-  run_item.enabled = true;
+  // Disable this menu item if the plugin is blocked by policy.
+  run_item.enabled = allow_loading_;
   run_item.label = WebString::fromUTF8(
       l10n_util::GetStringUTF8(IDS_CONTENT_CONTEXT_PLUGIN_RUN).c_str());
+  run_item.hasTextDirectionOverride = false;
+  run_item.textDirection =  WebKit::WebTextDirectionDefault;
   custom_items[2] = run_item;
 
   WebMenuItemInfo hide_item;
@@ -122,6 +131,8 @@ void BlockedPlugin::ShowContextMenu(const WebKit::WebMouseEvent& event) {
   hide_item.enabled = true;
   hide_item.label = WebString::fromUTF8(
       l10n_util::GetStringUTF8(IDS_CONTENT_CONTEXT_PLUGIN_HIDE).c_str());
+  hide_item.hasTextDirectionOverride = false;
+  hide_item.textDirection =  WebKit::WebTextDirectionDefault;
   custom_items[3] = hide_item;
 
   menu_data.customItems.swap(custom_items);
@@ -164,6 +175,8 @@ void BlockedPlugin::LoadPlugin() {
   // This is not strictly necessary but is an important defense in case the
   // event propagation changes between "close" vs. "click-to-play".
   if (hidden_)
+    return;
+  if (!allow_loading_)
     return;
   WebPluginContainer* container = plugin_->container();
   WebPlugin* new_plugin =
@@ -236,4 +249,3 @@ void BlockedPlugin::HidePlugin() {
     }
   }
 }
-

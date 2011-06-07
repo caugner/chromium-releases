@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/support/test_webkit_client.h"
 
 #include "base/file_util.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -31,19 +31,19 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "ui/gfx/gl/gl_bindings_skia_in_process.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/database/vfs_backend.h"
 #include "webkit/extensions/v8/gc_extension.h"
-#include "webkit/extensions/v8/gears_extension.h"
 #include "webkit/glue/simple_webmimeregistry_impl.h"
 #include "webkit/glue/webclipboard_impl.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitclient_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
+#include "webkit/support/simple_database_system.h"
 #include "webkit/support/weburl_loader_mock_factory.h"
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
-#include "webkit/tools/test_shell/simple_database_system.h"
 #include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/simple_webcookiejar_impl.h"
@@ -73,12 +73,10 @@ TestWebKitClient::TestWebKitClient(bool unit_test_mode)
   WebKit::WebSecurityPolicy::registerURLSchemeAsNoAccess(
       WebKit::WebString::fromUTF8("test-shell-resource"));
   WebScriptController::enableV8SingleThreadMode();
-  WebScriptController::registerExtension(
-      extensions_v8::GearsExtension::Get());
   WebKit::WebRuntimeFeatures::enableSockets(true);
   WebKit::WebRuntimeFeatures::enableApplicationCache(true);
   WebKit::WebRuntimeFeatures::enableDatabase(true);
-  WebKit::WebRuntimeFeatures::enableWebGL(true);
+  WebKit::WebRuntimeFeatures::enableDataTransferItems(true);
   WebKit::WebRuntimeFeatures::enablePushState(true);
   WebKit::WebRuntimeFeatures::enableNotifications(true);
   WebKit::WebRuntimeFeatures::enableTouch(true);
@@ -354,5 +352,6 @@ WebKit::WebSharedWorkerRepository* TestWebKitClient::sharedWorkerRepository() {
 }
 
 WebKit::WebGraphicsContext3D* TestWebKitClient::createGraphicsContext3D() {
+  gfx::BindSkiaToInProcessGL();
   return new webkit::gpu::WebGraphicsContext3DInProcessImpl();
 }

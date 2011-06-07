@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,20 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
-#include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/process_watcher.h"
-#include "chrome/common/result_codes.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/chrome_descriptors.h"
+#include "content/common/process_watcher.h"
+#include "content/common/result_codes.h"
 
 #if defined(OS_WIN)
 #include "base/file_path.h"
 #include "chrome/common/sandbox_policy.h"
 #elif defined(OS_LINUX)
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "chrome/browser/crash_handler_host_linux.h"
 #include "content/browser/zygote_host_linux.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
@@ -111,11 +111,31 @@ class ChildProcessLauncher::Context
 #elif defined(OS_POSIX)
 
 #if defined(OS_LINUX)
+    // On Linux, we need to add some extra file descriptors for crash handling.
+    std::string process_type =
+        cmd_line->GetSwitchValueASCII(switches::kProcessType);
+    bool is_renderer = process_type == switches::kRendererProcess;
+    bool is_plugin = process_type == switches::kPluginProcess;
+    bool is_ppapi = process_type == switches::kPpapiPluginProcess;
+    bool is_gpu = process_type == switches::kGpuProcess;
+    int crash_signal_fd = -1;
+    if (is_renderer) {
+      crash_signal_fd =
+          RendererCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+    } else if (is_plugin) {
+      crash_signal_fd =
+          PluginCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+    } else if (is_ppapi) {
+      crash_signal_fd =
+          PpapiCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+    } else if (is_gpu) {
+      crash_signal_fd =
+          GpuCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+    }
+
     if (use_zygote) {
       base::GlobalDescriptors::Mapping mapping;
       mapping.push_back(std::pair<uint32_t, int>(kPrimaryIPCChannel, ipcfd));
-      const int crash_signal_fd =
-          RendererCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
       if (crash_signal_fd >= 0) {
         mapping.push_back(std::pair<uint32_t, int>(kCrashDumpSignal,
                                                    crash_signal_fd));
@@ -132,35 +152,10 @@ class ChildProcessLauncher::Context
           kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
 
 #if defined(OS_LINUX)
-      // On Linux, we need to add some extra file descriptors for crash handling
-      // and the sandbox.
-      bool is_renderer =
-          cmd_line->GetSwitchValueASCII(switches::kProcessType) ==
-          switches::kRendererProcess;
-      bool is_plugin =
-          cmd_line->GetSwitchValueASCII(switches::kProcessType) ==
-          switches::kPluginProcess;
-      bool is_gpu =
-          cmd_line->GetSwitchValueASCII(switches::kProcessType) ==
-          switches::kGpuProcess;
-
-      if (is_renderer || is_plugin || is_gpu) {
-        int crash_signal_fd;
-        if (is_renderer) {
-          crash_signal_fd = RendererCrashHandlerHostLinux::GetInstance()->
-              GetDeathSignalSocket();
-        } else if (is_plugin) {
-          crash_signal_fd = PluginCrashHandlerHostLinux::GetInstance()->
-              GetDeathSignalSocket();
-        } else {
-          crash_signal_fd = GpuCrashHandlerHostLinux::GetInstance()->
-              GetDeathSignalSocket();
-        }
-        if (crash_signal_fd >= 0) {
-          fds_to_map.push_back(std::make_pair(
-              crash_signal_fd,
-              kCrashDumpSignal + base::GlobalDescriptors::kBaseDescriptor));
-        }
+      if (crash_signal_fd >= 0) {
+        fds_to_map.push_back(std::make_pair(
+            crash_signal_fd,
+            kCrashDumpSignal + base::GlobalDescriptors::kBaseDescriptor));
       }
       if (is_renderer) {
         const int sandbox_fd =
@@ -243,6 +238,11 @@ class ChildProcessLauncher::Context
 #endif
             process_.handle()));
     process_.set_handle(base::kNullProcessHandle);
+  }
+
+  void SetProcessBackgrounded(bool background) {
+    DCHECK(!starting_);
+    process_.SetProcessBackgrounded(background);
   }
 
   static void TerminateInternal(
@@ -343,6 +343,10 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
 }
 
 void ChildProcessLauncher::SetProcessBackgrounded(bool background) {
-  DCHECK(!context_->starting_);
-  context_->process_.SetProcessBackgrounded(background);
+  BrowserThread::PostTask(
+      BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
+      NewRunnableMethod(
+          context_.get(),
+          &ChildProcessLauncher::Context::SetProcessBackgrounded,
+          background));
 }

@@ -113,4 +113,22 @@
 <translation id="9162230117499798906"><ph name="COUNT"/> изменение стиля</translation>
 <translation id="9219103736887031265">Изображения</translation>
 <translation id="964811242908289581"><ph name="COUNT"/> ошибка</translation>
+<translation id="1015536732094484178"><ph name="EVENT"/> - Подробности</translation>
+<translation id="1383876407941801731">Поиск</translation>
+<translation id="1451049628911401385">Следующая/предыдущая строка</translation>
+<translation id="1521283072525575706">Файловая система отключена</translation>
+<translation id="1639239467298939599">Загрузка</translation>
+<translation id="1768404365792104093">Следующая/предыдущая команда</translation>
+<translation id="1823768272150895732">Шрифт</translation>
+<translation id="2161656808144014275">Текст</translation>
+<translation id="1169028494908542778">Вернуться к этой ревизии</translation>
+<translation id="1272268244580491898">Включить точку остановки</translation>
+<translation id="1801042861827795142">Загрузка завершена</translation>
+<translation id="1946125830871712831">Ошибка при получении пути к корневой папке файловой системы.</translation>
+<translation id="2071167425364270751">&lt;исходный код не доступен&gt;</translation>
+<translation id="5552689477187388058">Таблица “<ph name="TABLE_NAME"/>”\n пуста.</translation>
+<translation id="1434836903656932448">Показать следующий скриптовой ресурс.</translation>
+<translation id="1436722359433789623">Узел удален</translation>
+<translation id="1507648903387903382">Новое правило стиля</translation>
+<translation id="1644861063548770358">Удалить узел</translation>
 </translationbundle>

@@ -6010,7 +6010,7 @@ struct TexSubImage2D {
   void Init(
       GLenum _target, GLint _level, GLint _xoffset, GLint _yoffset,
       GLsizei _width, GLsizei _height, GLenum _format, GLenum _type,
-      uint32 _pixels_shm_id, uint32 _pixels_shm_offset) {
+      uint32 _pixels_shm_id, uint32 _pixels_shm_offset, GLboolean _internal) {
     SetHeader();
     target = _target;
     level = _level;
@@ -6022,16 +6022,17 @@ struct TexSubImage2D {
     type = _type;
     pixels_shm_id = _pixels_shm_id;
     pixels_shm_offset = _pixels_shm_offset;
+    internal = _internal;
   }
 
   void* Set(
       void* cmd, GLenum _target, GLint _level, GLint _xoffset, GLint _yoffset,
       GLsizei _width, GLsizei _height, GLenum _format, GLenum _type,
-      uint32 _pixels_shm_id, uint32 _pixels_shm_offset) {
+      uint32 _pixels_shm_id, uint32 _pixels_shm_offset, GLboolean _internal) {
     static_cast<ValueType*>(
         cmd)->Init(
             _target, _level, _xoffset, _yoffset, _width, _height, _format,
-            _type, _pixels_shm_id, _pixels_shm_offset);
+            _type, _pixels_shm_id, _pixels_shm_offset, _internal);
     return NextCmdAddress<ValueType>(cmd);
   }
 
@@ -6046,10 +6047,11 @@ struct TexSubImage2D {
   uint32 type;
   uint32 pixels_shm_id;
   uint32 pixels_shm_offset;
+  uint32 internal;
 };
 
-COMPILE_ASSERT(sizeof(TexSubImage2D) == 44,
-               Sizeof_TexSubImage2D_is_not_44);
+COMPILE_ASSERT(sizeof(TexSubImage2D) == 48,
+               Sizeof_TexSubImage2D_is_not_48);
 COMPILE_ASSERT(offsetof(TexSubImage2D, header) == 0,
                OffsetOf_TexSubImage2D_header_not_0);
 COMPILE_ASSERT(offsetof(TexSubImage2D, target) == 4,
@@ -6072,6 +6074,8 @@ COMPILE_ASSERT(offsetof(TexSubImage2D, pixels_shm_id) == 36,
                OffsetOf_TexSubImage2D_pixels_shm_id_not_36);
 COMPILE_ASSERT(offsetof(TexSubImage2D, pixels_shm_offset) == 40,
                OffsetOf_TexSubImage2D_pixels_shm_offset_not_40);
+COMPILE_ASSERT(offsetof(TexSubImage2D, internal) == 44,
+               OffsetOf_TexSubImage2D_internal_not_44);
 
 struct TexSubImage2DImmediate {
   typedef TexSubImage2DImmediate ValueType;
@@ -6090,8 +6094,9 @@ struct TexSubImage2DImmediate {
 
   void Init(
       GLenum _target, GLint _level, GLint _xoffset, GLint _yoffset,
-      GLsizei _width, GLsizei _height, GLenum _format, GLenum _type) {
-    uint32 total_size = 0;  // TODO(gman): get correct size
+      GLsizei _width, GLsizei _height, GLenum _format, GLenum _type,
+      GLboolean _internal) {
+    uint32 total_size = 0;  // TODO(gman): get correct size.
     SetHeader(total_size);
     target = _target;
     level = _level;
@@ -6101,16 +6106,18 @@ struct TexSubImage2DImmediate {
     height = _height;
     format = _format;
     type = _type;
+    internal = _internal;
   }
 
   void* Set(
       void* cmd, GLenum _target, GLint _level, GLint _xoffset, GLint _yoffset,
-      GLsizei _width, GLsizei _height, GLenum _format, GLenum _type) {
-    uint32 total_size = 0;  // TODO(gman): get correct size
+      GLsizei _width, GLsizei _height, GLenum _format, GLenum _type,
+      GLboolean _internal) {
+    uint32 total_size = 0;  // TODO(gman): get correct size.
     static_cast<ValueType*>(
         cmd)->Init(
             _target, _level, _xoffset, _yoffset, _width, _height, _format,
-            _type);
+            _type, _internal);
     return NextImmediateCmdAddressTotalSize<ValueType>(cmd, total_size);
   }
 
@@ -6123,10 +6130,11 @@ struct TexSubImage2DImmediate {
   int32 height;
   uint32 format;
   uint32 type;
+  uint32 internal;
 };
 
-COMPILE_ASSERT(sizeof(TexSubImage2DImmediate) == 36,
-               Sizeof_TexSubImage2DImmediate_is_not_36);
+COMPILE_ASSERT(sizeof(TexSubImage2DImmediate) == 40,
+               Sizeof_TexSubImage2DImmediate_is_not_40);
 COMPILE_ASSERT(offsetof(TexSubImage2DImmediate, header) == 0,
                OffsetOf_TexSubImage2DImmediate_header_not_0);
 COMPILE_ASSERT(offsetof(TexSubImage2DImmediate, target) == 4,
@@ -6145,6 +6153,8 @@ COMPILE_ASSERT(offsetof(TexSubImage2DImmediate, format) == 28,
                OffsetOf_TexSubImage2DImmediate_format_not_28);
 COMPILE_ASSERT(offsetof(TexSubImage2DImmediate, type) == 32,
                OffsetOf_TexSubImage2DImmediate_type_not_32);
+COMPILE_ASSERT(offsetof(TexSubImage2DImmediate, internal) == 36,
+               OffsetOf_TexSubImage2DImmediate_internal_not_36);
 
 struct Uniform1f {
   typedef Uniform1f ValueType;
@@ -8900,6 +8910,74 @@ COMPILE_ASSERT(offsetof(RequestExtensionCHROMIUM, header) == 0,
                OffsetOf_RequestExtensionCHROMIUM_header_not_0);
 COMPILE_ASSERT(offsetof(RequestExtensionCHROMIUM, bucket_id) == 4,
                OffsetOf_RequestExtensionCHROMIUM_bucket_id_not_4);
+
+struct SetLatchCHROMIUM {
+  typedef SetLatchCHROMIUM ValueType;
+  static const CommandId kCmdId = kSetLatchCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _latch_id) {
+    SetHeader();
+    latch_id = _latch_id;
+  }
+
+  void* Set(void* cmd, GLuint _latch_id) {
+    static_cast<ValueType*>(cmd)->Init(_latch_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 latch_id;
+};
+
+COMPILE_ASSERT(sizeof(SetLatchCHROMIUM) == 8,
+               Sizeof_SetLatchCHROMIUM_is_not_8);
+COMPILE_ASSERT(offsetof(SetLatchCHROMIUM, header) == 0,
+               OffsetOf_SetLatchCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(SetLatchCHROMIUM, latch_id) == 4,
+               OffsetOf_SetLatchCHROMIUM_latch_id_not_4);
+
+struct WaitLatchCHROMIUM {
+  typedef WaitLatchCHROMIUM ValueType;
+  static const CommandId kCmdId = kWaitLatchCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _latch_id) {
+    SetHeader();
+    latch_id = _latch_id;
+  }
+
+  void* Set(void* cmd, GLuint _latch_id) {
+    static_cast<ValueType*>(cmd)->Init(_latch_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 latch_id;
+};
+
+COMPILE_ASSERT(sizeof(WaitLatchCHROMIUM) == 8,
+               Sizeof_WaitLatchCHROMIUM_is_not_8);
+COMPILE_ASSERT(offsetof(WaitLatchCHROMIUM, header) == 0,
+               OffsetOf_WaitLatchCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(WaitLatchCHROMIUM, latch_id) == 4,
+               OffsetOf_WaitLatchCHROMIUM_latch_id_not_4);
 
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_

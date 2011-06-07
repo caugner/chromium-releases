@@ -9,12 +9,14 @@
 #include <string>
 #include <vector>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/threading/thread.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/test/webdriver/automation.h"
 #include "chrome/test/webdriver/error_codes.h"
+#include "chrome/test/webdriver/frame_path.h"
+#include "chrome/test/webdriver/web_element_id.h"
 
 class DictionaryValue;
 class FilePath;
@@ -28,11 +30,20 @@ class WaitableEvent;
 
 namespace gfx {
 class Point;
+class Rect;
+class Size;
 }
 
 namespace webdriver {
 
-class WebElementId;
+// A window ID and frame path combination that uniquely identifies a specific
+// frame within a session.
+struct FrameId {
+  FrameId(int window_id, const FramePath& frame_path);
+  FrameId& operator=(const FrameId& other);
+  int window_id;
+  FramePath frame_path;
+};
 
 // Every connection made by WebDriver maps to a session object.
 // This object creates the chrome instance and keeps track of the
@@ -40,6 +51,8 @@ class WebElementId;
 // A session manages its own lifetime.
 class Session {
  public:
+  enum Speed { kSlow, kMedium, kFast, kUnknown };
+
   // Adds this |Session| to the |SessionManager|. The session manages its own
   // lifetime. Do not call delete.
   Session();
@@ -49,19 +62,18 @@ class Session {
   // Starts the session thread and a new browser, using the exe found in
   // |browser_dir|. If |browser_dir| is empty, it will search in all the default
   // locations. Returns true on success. On failure, the session will delete
-  // itself and return false.
-  bool Init(const FilePath& browser_dir);
+  // itself and return an error code.
+  ErrorCode Init(const FilePath& browser_dir);
 
   // Terminates this session and deletes itself.
   void Terminate();
 
-  // Executes the given |script| in the context of the given window and frame.
+  // Executes the given |script| in the context of the given frame.
   // The |script| should be in the form of a function body
   // (e.g. "return arguments[0]"), where |args| is the list of arguments to
   // pass to the function. The caller is responsible for the script result
   // |value|.
-  ErrorCode ExecuteScript(int window_id,
-                          const std::string& frame_xpath,
+  ErrorCode ExecuteScript(const FrameId& frame_id,
                           const std::string& script,
                           const ListValue* const args,
                           Value** value);
@@ -76,7 +88,7 @@ class Session {
   ErrorCode SendKeys(const WebElementId& element, const string16& keys);
 
   // Clicks the mouse at the given location using the given button.
-  void MouseClick(const gfx::Point& click, automation::MouseButton button);
+  bool MouseClick(const gfx::Point& click, automation::MouseButton button);
   bool MouseMove(const gfx::Point& location);
   bool MouseDrag(const gfx::Point& start, const gfx::Point& end);
 
@@ -84,14 +96,20 @@ class Session {
   bool GoForward();
   bool GoBack();
   bool Reload();
-  bool GetURL(GURL* url);
-  bool GetURL(std::string* url);
-  bool GetTabTitle(std::string* tab_title);
-  bool GetCookies(const GURL& url, std::string* cookies);
-  bool GetCookieByName(const GURL& url, const std::string& cookie_name,
-             std::string* cookie);
-  bool DeleteCookie(const GURL& url, const std::string& cookie_name);
-  bool SetCookie(const GURL& url, const std::string& cookie);
+  ErrorCode GetURL(std::string* url);
+  ErrorCode GetURL(GURL* url);
+  ErrorCode GetTitle(std::string* tab_title);
+  bool GetScreenShot(std::string* png);
+
+  bool GetCookies(const std::string& url, ListValue** cookies);
+  bool GetCookiesDeprecated(const GURL& url, std::string* cookies);
+  bool GetCookieByNameDeprecated(const GURL& url,
+                                 const std::string& cookie_name,
+                                 std::string* cookie);
+  bool DeleteCookie(const std::string& url, const std::string& cookie_name);
+  bool DeleteCookieDeprecated(const GURL& url, const std::string& cookie_name);
+  bool SetCookie(const std::string& url, DictionaryValue* cookie_dict);
+  bool SetCookieDeprecated(const GURL& url, const std::string& cookie);
 
   // Gets all the currently existing window IDs. Returns true on success.
   bool GetWindowIds(std::vector<int>* window_ids);
@@ -107,33 +125,45 @@ class Session {
   // Switches the frame used by default. |index| is the zero-based frame index.
   ErrorCode SwitchToFrameWithIndex(int index);
 
+  // Switches to the frame identified by the given |element|. The element must
+  // be either an IFRAME or FRAME element.
+  ErrorCode SwitchToFrameWithElement(const WebElementId& element);
+
+  // Switches the target frame to the topmost frame.
+  void SwitchToTopFrame();
+
+  // Switches the target frame to the topmost frame if the current frame is
+  // invalid.
+  void SwitchToTopFrameIfCurrentFrameInvalid();
+
   // Closes the current window. Returns true on success.
   // Note: The session will be deleted if this closes the last window in the
   // session.
   bool CloseWindow();
 
   // Gets the version of the running browser.
-  std::string GetVersion();
+  std::string GetBrowserVersion();
 
-  // Finds a single element in the given window and frame, starting at the given
+  // Gets whether the running browser's version is newer or equal to the given
+  // version. Returns true on successful comparison. For example, in the version
+  // 11.0.632.4, 632 is the build number and 4 is the patch number.
+  bool CompareBrowserVersion(int build_no,
+                             int patch_no,
+                             bool* is_newer_or_equal);
+
+  // Finds a single element in the given frame, starting at the given
   // |root_element|, using the given locator strategy. |locator| should be a
   // constant from |LocatorType|. Returns an error code. If successful,
   // |element| will be set as the found element.
-  ErrorCode FindElementInFrame(int window_id,
-                               const std::string& frame_xpath,
-                               const WebElementId& root_element,
-                               const std::string& locator,
-                               const std::string& query,
-                               WebElementId* element);
-
-  // Same as above, but uses the current window and frame.
-  ErrorCode FindElement(const WebElementId& root_element,
+  ErrorCode FindElement(const FrameId& frame_id,
+                        const WebElementId& root_element,
                         const std::string& locator,
                         const std::string& query,
                         WebElementId* element);
 
   // Same as above, but finds multiple elements.
-  ErrorCode FindElements(const WebElementId& root_element,
+  ErrorCode FindElements(const FrameId& frame_id,
+                         const WebElementId& root_element,
                          const std::string& locator,
                          const std::string& query,
                          std::vector<WebElementId>* elements);
@@ -141,74 +171,102 @@ class Session {
   // Scroll the element into view and get its location relative to the client's
   // viewport.
   ErrorCode GetElementLocationInView(
-      const WebElementId& element, int* x, int* y);
+      const WebElementId& element, gfx::Point* location);
+
+  // Gets the size of the element from the given window and frame, even if
+  // its display is none.
+  ErrorCode GetElementSize(const FrameId& frame_id,
+                           const WebElementId& element,
+                           gfx::Size* size);
+
+  // Gets the element's effective style for the given property.
+  ErrorCode GetElementEffectiveStyle(
+      const FrameId& frame_id,
+      const WebElementId& element,
+      const std::string& prop,
+      std::string* value);
+
+  // Gets the top and left element border widths for the given frame.
+  ErrorCode GetElementBorder(const FrameId& frame_id,
+                             const WebElementId& element,
+                             int* border_left,
+                             int* border_top);
+
+  // Gets whether the element is currently displayed.
+  ErrorCode IsElementDisplayed(const FrameId& frame_id,
+                               const WebElementId& element,
+                               bool* is_visible);
+
+  // Gets whether the element is currently enabled.
+  ErrorCode IsElementEnabled(const FrameId& frame_id,
+                             const WebElementId& element,
+                             bool* is_enabled);
 
   // Waits for all tabs to stop loading. Returns true on success.
   bool WaitForAllTabsToStopLoading();
 
-  inline const std::string& id() const { return id_; }
+  const std::string& id() const;
 
-  inline int implicit_wait() const { return implicit_wait_; }
-  inline void set_implicit_wait(const int& timeout) {
-    implicit_wait_ = timeout > 0 ? timeout : 0;
-  }
+  const FrameId& current_target() const;
 
-  enum Speed { kSlow, kMedium, kFast, kUnknown };
-  inline Speed speed() { return speed_; }
-  inline void set_speed(Speed speed) {
-    speed_ = speed;
-  }
+  void set_implicit_wait(const int& timeout);
+  int implicit_wait() const;
 
-  inline const std::string& current_frame_xpath() const {
-    return current_frame_xpath_;
-  }
+  void set_speed(Speed speed);
+  Speed speed() const;
 
-  inline void set_current_frame_xpath(const std::string& xpath) {
-    current_frame_xpath_ = xpath;
-  }
+  void set_screenshot_on_error(bool error);
+  bool screenshot_on_error() const;
 
-  inline int current_window_id() const { return current_window_id_; }
+  void set_use_native_events(bool use_native_events);
+  bool use_native_events() const;
 
  private:
   void RunSessionTask(Task* task);
   void RunSessionTaskOnSessionThread(
       Task* task,
       base::WaitableEvent* done_event);
-  void InitOnSessionThread(const FilePath& browser_dir, bool* success);
+  void InitOnSessionThread(const FilePath& browser_dir, ErrorCode* code);
   void TerminateOnSessionThread();
   void SendKeysOnSessionThread(const string16& keys, bool* success);
   ErrorCode SwitchToFrameWithJavaScriptLocatedFrame(
       const std::string& script,
       ListValue* args);
-  ErrorCode FindElementsHelper(int window_id,
-                               const std::string& frame_xpath,
+  ErrorCode FindElementsHelper(const FrameId& frame_id,
                                const WebElementId& root_element,
                                const std::string& locator,
                                const std::string& query,
                                bool find_one,
                                std::vector<WebElementId>* elements);
-  ErrorCode GetLocationInViewHelper(int window_id,
-                                    const std::string& frame_xpath,
+  ErrorCode GetLocationInViewHelper(const FrameId& frame_id,
                                     const WebElementId& element,
-                                    int* offset_x,
-                                    int* offset_y);
+                                    const gfx::Rect& region,
+                                    gfx::Point* location);
 
   const std::string id_;
+  FrameId current_target_;
 
   scoped_ptr<Automation> automation_;
   base::Thread thread_;
 
+  // Time (in ms) of how long to wait while searching for a single element.
   int implicit_wait_;
+
   Speed speed_;
 
-  // The XPath to the frame within this session's active tab which all
-  // commands should be directed to. XPath strings can represent a frame deep
-  // down the tree (across multiple frame DOMs).
-  // Example, /html/body/table/tbody/tr/td/iframe\n/frameset/frame[1]
-  // should break into 2 xpaths
-  // /html/body/table/tbody/tr/td/iframe & /frameset/frame[1].
-  std::string current_frame_xpath_;
-  int current_window_id_;
+  // Since screenshots can be very large when in base64 PNG format; the
+  // client is allowed to dyamically enable/disable screenshots on error
+  // during the lifetime of the session.
+  bool screenshot_on_error_;
+
+  // True if the session should simulate OS-level input. Currently only applies
+  // to keyboard input.
+  bool use_native_events_;
+
+  // Vector of the |WebElementId|s for each frame of the current target frame
+  // path. The first refers to the first frame element in the root document.
+  // If the target frame is window.top, this will be empty.
+  std::vector<WebElementId> frame_elements_;
 
   DISALLOW_COPY_AND_ASSIGN(Session);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,9 +21,9 @@
 #include "base/file_util.h"
 #include "base/global_descriptors_posix.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/singleton.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
-#include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "ipc/ipc_descriptors.h"
@@ -116,7 +116,7 @@ class PipeMap {
   // mapping if one already exists for the given channel_id
   void Insert(const std::string& channel_id, int fd) {
     base::AutoLock locked(lock_);
-    DCHECK(fd != -1);
+    DCHECK_NE(-1, fd);
 
     ChannelToFDMap::const_iterator i = map_.find(channel_id);
     CHECK(i == map_.end()) << "Creating second IPC server (fd " << fd << ") "
@@ -188,19 +188,6 @@ bool CreateServerUnixDomainSocket(const std::string& pipe_name,
   if (bind(fd, reinterpret_cast<const sockaddr*>(&unix_addr),
            unix_addr_len) != 0) {
     PLOG(ERROR) << "bind " << pipe_name;
-    if (HANDLE_EINTR(close(fd)) < 0)
-      PLOG(ERROR) << "close " << pipe_name;
-    return false;
-  }
-
-  // Explicitly set file system permissions on socket, mainly as a precaution
-  // for Chrome OS.
-  // Do not rely on these file permissions to provide security - the file is
-  // created during the above bind() call so there is still a window for
-  // malicious abuse because the file exists between bind() and chmod(). Also,
-  // the file permissions may not be enforced for unix sockets on all platforms.
-  if (chmod(pipe_name.c_str(), 0600)) {
-    PLOG(ERROR) << "chmod " << pipe_name;
     if (HANDLE_EINTR(close(fd)) < 0)
       PLOG(ERROR) << "close " << pipe_name;
     return false;
@@ -569,7 +556,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
         if (cmsg->cmsg_level == SOL_SOCKET &&
             cmsg->cmsg_type == SCM_RIGHTS) {
           const unsigned payload_len = cmsg->cmsg_len - CMSG_LEN(0);
-          DCHECK(payload_len % sizeof(int) == 0);
+          DCHECK_EQ(0U, payload_len % sizeof(int));
           wire_fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
           num_wire_fds = payload_len / 4;
 
@@ -649,7 +636,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
                 if (cmsg->cmsg_level == SOL_SOCKET &&
                     cmsg->cmsg_type == SCM_RIGHTS) {
                   const unsigned payload_len = cmsg->cmsg_len - CMSG_LEN(0);
-                  DCHECK(payload_len % sizeof(int) == 0);
+                  DCHECK_EQ(0U, payload_len % sizeof(int));
                   wire_fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
                   num_wire_fds = payload_len / 4;
 
@@ -782,7 +769,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
     Message* msg = output_queue_.front();
 
     size_t amt_to_write = msg->size() - message_send_bytes_written_;
-    DCHECK(amt_to_write != 0);
+    DCHECK_NE(0U, amt_to_write);
     const char* out_bytes = reinterpret_cast<const char*>(msg->data()) +
         message_send_bytes_written_;
 
@@ -938,6 +925,33 @@ bool Channel::ChannelImpl::HasAcceptedConnection() const {
   return AcceptsConnections() && pipe_ != -1;
 }
 
+bool Channel::ChannelImpl::GetClientEuid(uid_t* client_euid) const {
+  DCHECK(HasAcceptedConnection());
+#if defined(OS_MACOSX)
+  uid_t peer_euid;
+  gid_t peer_gid;
+  if (getpeereid(pipe_, &peer_euid, &peer_gid) != 0) {
+    PLOG(ERROR) << "getpeereid " << pipe_;
+    return false;
+  }
+  *client_euid = peer_euid;
+  return true;
+#else
+  struct ucred cred;
+  socklen_t cred_len = sizeof(cred);
+  if (getsockopt(pipe_, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0) {
+    PLOG(ERROR) << "getsockopt " << pipe_;
+    return false;
+  }
+  if (cred_len < sizeof(cred)) {
+    NOTREACHED() << "Truncated ucred from SO_PEERCRED?";
+    return false;
+  }
+  *client_euid = cred.uid;
+  return true;
+#endif
+}
+
 void Channel::ChannelImpl::ResetToAcceptingConnectionState() {
   // Unregister libevent for the unix domain socket and close it.
   read_watcher_.StopWatchingFileDescriptor();
@@ -997,6 +1011,21 @@ void Channel::ChannelImpl::OnFileCanReadWithoutBlocking(int fd) {
     }
     pipe_ = new_pipe;
 
+    if ((mode_ & MODE_OPEN_ACCESS_FLAG) == 0) {
+      // Verify that the IPC channel peer is running as the same user.
+      uid_t client_euid;
+      if (!GetClientEuid(&client_euid)) {
+        LOG(ERROR) << "Unable to query client euid";
+        ResetToAcceptingConnectionState();
+        return;
+      }
+      if (client_euid != geteuid()) {
+        LOG(WARNING) << "Client euid is not authorised";
+        ResetToAcceptingConnectionState();
+        return;
+      }
+    }
+
     if (!AcceptConnection()) {
       NOTREACHED() << "AcceptConnection should not fail on server";
     }
@@ -1028,7 +1057,7 @@ void Channel::ChannelImpl::OnFileCanReadWithoutBlocking(int fd) {
 
 // Called by libevent when we can write to the pipe without blocking.
 void Channel::ChannelImpl::OnFileCanWriteWithoutBlocking(int fd) {
-  DCHECK(fd == pipe_);
+  DCHECK_EQ(pipe_, fd);
   is_blocked_on_write_ = false;
   if (!ProcessOutgoingMessages()) {
     ClosePipeOnError();
@@ -1159,6 +1188,10 @@ bool Channel::AcceptsConnections() const {
 
 bool Channel::HasAcceptedConnection() const {
   return channel_impl_->HasAcceptedConnection();
+}
+
+bool Channel::GetClientEuid(uid_t* client_euid) const {
+  return channel_impl_->GetClientEuid(client_euid);
 }
 
 void Channel::ResetToAcceptingConnectionState() {

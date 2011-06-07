@@ -4,12 +4,11 @@
 
 #include "chrome/service/service_utility_process_host.h"
 
-#include "app/app_switches.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_temp_dir.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/utility_messages.h"
 #include "ipc/ipc_switches.h"
@@ -18,10 +17,9 @@
 #include "ui/gfx/rect.h"
 
 #if defined(OS_WIN)
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/win/scoped_handle.h"
-#include "printing/native_metafile_factory.h"
-#include "printing/native_metafile.h"
+#include "printing/emf_win.h"
 #endif
 
 ServiceUtilityProcessHost::ServiceUtilityProcessHost(
@@ -159,7 +157,7 @@ bool ServiceUtilityProcessHost::MessageForClient(const IPC::Message& message) {
 }
 
 #if defined(OS_WIN)  // This hack is Windows-specific.
-void ServiceUtilityProcessHost::OnPreCacheFont(LOGFONT font) {
+void ServiceUtilityProcessHost::OnPreCacheFont(const LOGFONT& font) {
   PreCacheFont(font);
 }
 #endif  // OS_WIN
@@ -204,15 +202,15 @@ void ServiceUtilityProcessHost::Client::MetafileAvailable(
   if (!scratch_metafile_dir.Set(metafile_path.DirName()))
     LOG(WARNING) << "Unable to set scratch metafile directory";
 #if defined(OS_WIN)
-  scoped_ptr<printing::NativeMetafile> metafile(
-      printing::NativeMetafileFactory::CreateMetafile());
-  if (!metafile->CreateFromFile(metafile_path)) {
+  // It's important that metafile is declared after scratch_metafile_dir so
+  // that the metafile destructor closes the file before the ScopedTempDir
+  // destructor tries to remove the directory.
+  printing::Emf metafile;
+  if (!metafile.InitFromFile(metafile_path)) {
     OnRenderPDFPagesToMetafileFailed();
   } else {
-    OnRenderPDFPagesToMetafileSucceeded(*metafile,
+    OnRenderPDFPagesToMetafileSucceeded(metafile,
                                         highest_rendered_page_number);
-    // Close it so that ScopedTempDir can delete the folder.
-    metafile->CloseEmf();
   }
 #endif  // defined(OS_WIN)
 }

@@ -1,21 +1,88 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "remoting/host/capturer_mac.h"
+#include "remoting/host/capturer.h"
+
+#include <ApplicationServices/ApplicationServices.h>
+#include <OpenGL/CGLMacro.h>
+#include <OpenGL/OpenGL.h>
 
 #include <stddef.h>
 
-#include <OpenGL/CGLMacro.h>
+#include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "remoting/host/capturer_helper.h"
 
 namespace remoting {
 
-CapturerMac::CapturerMac(MessageLoop* message_loop)
-    : Capturer(message_loop),
-      cgl_context_(NULL),
+namespace {
+// A class to perform capturing for mac.
+class CapturerMac : public Capturer {
+ public:
+  CapturerMac();
+  virtual ~CapturerMac();
+
+  // Capturer interface.
+  virtual void ScreenConfigurationChanged() OVERRIDE;
+  virtual media::VideoFrame::Format pixel_format() const OVERRIDE;
+  virtual void ClearInvalidRects() OVERRIDE;
+  virtual void InvalidateRects(const InvalidRects& inval_rects) OVERRIDE;
+  virtual void InvalidateScreen(const gfx::Size& size) OVERRIDE;
+  virtual void InvalidateFullScreen() OVERRIDE;
+  virtual void CaptureInvalidRects(CaptureCompletedCallback* callback) OVERRIDE;
+  virtual const gfx::Size& size_most_recent() const OVERRIDE;
+
+ private:
+  void CaptureRects(const InvalidRects& rects,
+                    CaptureCompletedCallback* callback);
+
+  void ScreenRefresh(CGRectCount count, const CGRect *rect_array);
+  void ScreenUpdateMove(CGScreenUpdateMoveDelta delta,
+                                size_t count,
+                                const CGRect *rect_array);
+  static void ScreenRefreshCallback(CGRectCount count,
+                                    const CGRect *rect_array,
+                                    void *user_parameter);
+  static void ScreenUpdateMoveCallback(CGScreenUpdateMoveDelta delta,
+                                       size_t count,
+                                       const CGRect *rect_array,
+                                       void *user_parameter);
+  static void DisplaysReconfiguredCallback(CGDirectDisplayID display,
+                                           CGDisplayChangeSummaryFlags flags,
+                                           void *user_parameter);
+
+  void ReleaseBuffers();
+  CGLContextObj cgl_context_;
+  static const int kNumBuffers = 2;
+  scoped_array<uint8> buffers_[kNumBuffers];
+
+  // A thread-safe list of invalid rectangles, and the size of the most
+  // recently captured screen.
+  CapturerHelper helper_;
+
+  // Screen size.
+  int width_;
+  int height_;
+
+  int bytes_per_row_;
+
+  // The current buffer with valid data for reading.
+  int current_buffer_;
+
+  // Format of pixels returned in buffer.
+  media::VideoFrame::Format pixel_format_;
+
+  DISALLOW_COPY_AND_ASSIGN(CapturerMac);
+};
+
+CapturerMac::CapturerMac()
+    : cgl_context_(NULL),
       width_(0),
       height_(0),
-      bytes_per_row_(0) {
+      bytes_per_row_(0),
+      current_buffer_(0),
+      pixel_format_(media::VideoFrame::RGB32) {
   // TODO(dmaclach): move this initialization out into session_manager,
   // or at least have session_manager call into here to initialize it.
   CGError err =
@@ -29,6 +96,7 @@ CapturerMac::CapturerMac(MessageLoop* message_loop)
       CapturerMac::DisplaysReconfiguredCallback, this);
   DCHECK_EQ(err, kCGErrorSuccess);
   ScreenConfigurationChanged();
+  InvalidateScreen(gfx::Size(width_, height_));
 }
 
 CapturerMac::~CapturerMac() {
@@ -58,7 +126,6 @@ void CapturerMac::ScreenConfigurationChanged() {
   for (int i = 0; i < kNumBuffers; ++i) {
     buffers_[i].reset(new uint8[buffer_size]);
   }
-  flip_buffer_.reset(new uint8[buffer_size]);
   CGLPixelFormatAttribute attributes[] = {
     kCGLPFAFullScreen,
     kCGLPFADisplayMask,
@@ -78,14 +145,30 @@ void CapturerMac::ScreenConfigurationChanged() {
   CGLSetCurrentContext(cgl_context_);
 }
 
-void CapturerMac::CalculateInvalidRects() {
-  // Since the Mac gets its list of invalid rects via calls to InvalidateRect(),
-  // this step only needs to perform post-processing optimizations on the rect
-  // list (if needed).
+media::VideoFrame::Format CapturerMac::pixel_format() const {
+  return pixel_format_;
 }
 
-void CapturerMac::CaptureRects(const InvalidRects& rects,
-                               CaptureCompletedCallback* callback) {
+void CapturerMac::ClearInvalidRects() {
+  helper_.ClearInvalidRects();
+}
+
+void CapturerMac::InvalidateRects(const InvalidRects& inval_rects) {
+  helper_.InvalidateRects(inval_rects);
+}
+
+void CapturerMac::InvalidateScreen(const gfx::Size& size) {
+  helper_.InvalidateScreen(size);
+}
+
+void CapturerMac::InvalidateFullScreen() {
+  helper_.InvalidateFullScreen();
+}
+
+void CapturerMac::CaptureInvalidRects(CaptureCompletedCallback* callback) {
+  InvalidRects rects;
+  helper_.SwapInvalidRects(rects);
+
   CGLContextObj CGL_MACRO_CONTEXT = cgl_context_;
   glReadBuffer(GL_FRONT);
   glPushClientAttrib(GL_CLIENT_PIXEL_STORE_BIT);
@@ -96,28 +179,28 @@ void CapturerMac::CaptureRects(const InvalidRects& rects,
   glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
 
   // Read a block of pixels from the frame buffer.
-  uint8* flip_buffer = flip_buffer_.get();
   uint8* current_buffer = buffers_[current_buffer_].get();
-  glReadPixels(0, 0, width_, height_, GL_BGRA, GL_UNSIGNED_BYTE, flip_buffer);
+  glReadPixels(0, 0, width_, height_, GL_BGRA, GL_UNSIGNED_BYTE,
+               current_buffer);
   glPopClientAttrib();
 
-  // OpenGL reads with a vertical flip, and sadly there is no optimized
-  // way to get it flipped automatically.
-  for (int y = 0; y < height_; ++y) {
-    uint8* flip_row = &(flip_buffer[y * bytes_per_row_]);
-    uint8* current_row =
-        &(current_buffer[(height_ - (y + 1)) * bytes_per_row_]);
-    memcpy(current_row, flip_row, bytes_per_row_);
-  }
-
   DataPlanes planes;
-  planes.data[0] = buffers_[current_buffer_].get();
-  planes.strides[0] = bytes_per_row_;
+  planes.data[0] = buffers_[current_buffer_].get() + height_ * bytes_per_row_;
+  planes.strides[0] = -bytes_per_row_;
 
   scoped_refptr<CaptureData> data(
-      new CaptureData(planes, width_, height_, pixel_format()));
+      new CaptureData(planes, gfx::Size(width_, height_), pixel_format()));
   data->mutable_dirty_rects() = rects;
-  FinishCapture(data, callback);
+
+  current_buffer_ = (current_buffer_ + 1) % kNumBuffers;
+  helper_.set_size_most_recent(data->size());
+
+  callback->Run(data);
+  delete callback;
+}
+
+const gfx::Size& CapturerMac::size_most_recent() const {
+  return helper_.size_most_recent();
 }
 
 void CapturerMac::ScreenRefresh(CGRectCount count, const CGRect *rect_array) {
@@ -167,9 +250,11 @@ void CapturerMac::DisplaysReconfiguredCallback(
   }
 }
 
+}  // namespace
+
 // static
-Capturer* Capturer::Create(MessageLoop* message_loop) {
-  return new CapturerMac(message_loop);
+Capturer* Capturer::Create() {
+  return new CapturerMac();
 }
 
 }  // namespace remoting

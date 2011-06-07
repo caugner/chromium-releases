@@ -3,15 +3,15 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/memory/ref_counted.h"
 #include "base/message_loop_proxy.h"
-#include "base/ref_counted.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
-#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/service/cloud_print/cloud_print_url_fetcher.h"
 #include "chrome/service/service_process.h"
 #include "googleurl/src/gurl.h"
 #include "net/test/test_server.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
 #include "net/url_request/url_request_throttler_manager.h"
@@ -25,7 +25,7 @@ namespace {
 const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
 
 int g_request_context_getter_instances = 0;
-class TestURLRequestContextGetter : public URLRequestContextGetter {
+class TestURLRequestContextGetter : public net::URLRequestContextGetter {
  public:
   explicit TestURLRequestContextGetter(
       base::MessageLoopProxy* io_message_loop_proxy)
@@ -59,7 +59,7 @@ class TestCloudPrintURLFetcher : public CloudPrintURLFetcher {
           : io_message_loop_proxy_(io_message_loop_proxy) {
   }
 
-  virtual URLRequestContextGetter* GetRequestContextGetter() {
+  virtual net::URLRequestContextGetter* GetRequestContextGetter() {
     return new TestURLRequestContextGetter(io_message_loop_proxy_.get());
   }
  private:
@@ -285,9 +285,8 @@ CloudPrintURLFetcherRetryBackoffTest::HandleRawData(const URLFetcher* source,
 }
 
 void CloudPrintURLFetcherRetryBackoffTest::OnRequestGiveUp() {
-  const TimeDelta one_second = TimeDelta::FromMilliseconds(1000);
-  // It takes more than 1 second to finish all 11 requests.
-  EXPECT_TRUE(Time::Now() - start_time_ >= one_second);
+  // It takes more than 200 ms to finish all 11 requests.
+  EXPECT_TRUE(Time::Now() - start_time_ >= TimeDelta::FromMilliseconds(200));
   io_message_loop_proxy()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
 }
 
@@ -319,10 +318,11 @@ TEST_F(CloudPrintURLFetcherOverloadTest, Protect) {
 
   // Registers an entry for test url. It only allows 3 requests to be sent
   // in 200 milliseconds.
+  net::URLRequestThrottlerManager* manager =
+      net::URLRequestThrottlerManager::GetInstance();
   scoped_refptr<net::URLRequestThrottlerEntry> entry(
-      new net::URLRequestThrottlerEntry(200, 3, 1, 0, 2.0, 0.0, 256));
-  net::URLRequestThrottlerManager::GetInstance()->OverrideEntryForTests(
-      url, entry);
+      new net::URLRequestThrottlerEntry(manager, 200, 3, 1, 2.0, 0.0, 256));
+  manager->OverrideEntryForTests(url, entry);
 
   CreateFetcher(url, 11);
 
@@ -342,10 +342,11 @@ TEST_F(CloudPrintURLFetcherRetryBackoffTest, FLAKY_GiveUp) {
   //     new_backoff = 2.0 * old_backoff + 0
   // and maximum backoff time is 256 milliseconds.
   // Maximum retries allowed is set to 11.
+  net::URLRequestThrottlerManager* manager =
+      net::URLRequestThrottlerManager::GetInstance();
   scoped_refptr<net::URLRequestThrottlerEntry> entry(
-      new net::URLRequestThrottlerEntry(200, 3, 1, 0, 2.0, 0.0, 256));
-  net::URLRequestThrottlerManager::GetInstance()->OverrideEntryForTests(
-      url, entry);
+      new net::URLRequestThrottlerEntry(manager, 200, 3, 1, 2.0, 0.0, 256));
+  manager->OverrideEntryForTests(url, entry);
 
   CreateFetcher(url, 11);
 

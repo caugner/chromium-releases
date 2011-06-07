@@ -64,6 +64,7 @@
           'dependencies': [
             'installer_util',
             'installer_util_strings',
+            '../content/content.gyp:content_common',
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/base/base.gyp:base_i18n',
             '<(DEPTH)/base/base.gyp:test_support_base',
@@ -341,6 +342,12 @@
           # below into a separate lib and then link both setup.exe and
           # setup_unittests.exe against that.
           'sources': [
+            'installer/mini_installer/decompress.cc',
+            'installer/mini_installer/decompress.h',
+            'installer/mini_installer/decompress_test.cc',
+            'installer/mini_installer/mini_string.cc',
+            'installer/mini_installer/mini_string.h',
+            'installer/mini_installer/mini_string_test.cc',
             'installer/setup/install_worker.cc',    # Move to lib
             'installer/setup/install_worker.h',     # Move to lib
             'installer/setup/install_worker_unittest.cc',
@@ -882,6 +889,9 @@
                 }],  # mac_keystone
                 ['branding=="Chrome" and buildtype=="Official"', {
                   'files': [
+                    'app/theme/google_chrome/app_canary.icns',
+                    'installer/mac/internal/chrome_canary_dmg_dsstore',
+                    'installer/mac/internal/chrome_canary_dmg_icon.icns',
                     'installer/mac/internal/chrome_dmg_background.png',
                     'installer/mac/internal/chrome_dmg_dsstore',
                     'installer/mac/internal/chrome_dmg_icon.icns',

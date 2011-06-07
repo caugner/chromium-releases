@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <set>
 
 #include "base/hash_tables.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "third_party/angle/include/GLSLANG/ShaderLang.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
@@ -88,6 +88,11 @@ class WebGraphicsContext3DInProcessImpl : public WebGraphicsContext3D {
   virtual void unmapTexSubImage2DCHROMIUM(const void*);
   virtual void copyTextureToParentTextureCHROMIUM(
       WebGLId texture, WebGLId parentTexture);
+
+  virtual void getParentToChildLatchCHROMIUM(WGC3Duint* latch_id);
+  virtual void getChildToParentLatchCHROMIUM(WGC3Duint* latch_id);
+  virtual void waitLatchCHROMIUM(WGC3Duint latch_id);
+  virtual void setLatchCHROMIUM(WGC3Duint latch_id);
 
   virtual WebString getRequestableExtensionsCHROMIUM();
   virtual void requestExtensionCHROMIUM(const char*);

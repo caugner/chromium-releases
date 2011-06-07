@@ -8,7 +8,43 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
-#include "webkit/glue/resource_loader_bridge.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/rect.h"
+
+namespace {
+
+struct SkBitmap_Data {
+  // The configuration for the bitmap (bits per pixel, etc).
+  SkBitmap::Config fConfig;
+
+  // The width of the bitmap in pixels.
+  uint32 fWidth;
+
+  // The height of the bitmap in pixels.
+  uint32 fHeight;
+
+  void InitSkBitmapDataForTransfer(const SkBitmap& bitmap) {
+    fConfig = bitmap.config();
+    fWidth = bitmap.width();
+    fHeight = bitmap.height();
+  }
+
+  // Returns whether |bitmap| successfully initialized.
+  bool InitSkBitmapFromData(SkBitmap* bitmap, const char* pixels,
+                            size_t total_pixels) const {
+    if (total_pixels) {
+      bitmap->setConfig(fConfig, fWidth, fHeight, 0);
+      if (!bitmap->allocPixels())
+        return false;
+      if (total_pixels != bitmap->getSize())
+        return false;
+      memcpy(bitmap->getPixels(), pixels, total_pixels);
+    }
+    return true;
+  }
+};
+
+}  // namespace
 
 namespace IPC {
 
@@ -30,7 +66,6 @@ bool ParamTraits<GURL>::Read(const Message* m, void** iter, GURL* p) {
 void ParamTraits<GURL>::Log(const GURL& p, std::string* l) {
   l->append(p.spec());
 }
-
 
 void ParamTraits<ResourceType::Type>::Write(Message* m, const param_type& p) {
   m->WriteInt(p);
@@ -55,6 +90,18 @@ void ParamTraits<ResourceType::Type>::Log(const param_type& p, std::string* l) {
     case ResourceType::SUB_FRAME:
       type = "SUB_FRAME";
       break;
+    case ResourceType::STYLESHEET:
+      type = "STYLESHEET";
+      break;
+    case ResourceType::SCRIPT:
+      type = "SCRIPT";
+      break;
+    case ResourceType::IMAGE:
+      type = "IMAGE";
+      break;
+    case ResourceType::FONT_RESOURCE:
+      type = "FONT_RESOURCE";
+      break;
     case ResourceType::SUB_RESOURCE:
       type = "SUB_RESOURCE";
       break;
@@ -63,6 +110,18 @@ void ParamTraits<ResourceType::Type>::Log(const param_type& p, std::string* l) {
       break;
     case ResourceType::MEDIA:
       type = "MEDIA";
+      break;
+    case ResourceType::WORKER:
+      type = "WORKER";
+      break;
+    case ResourceType::SHARED_WORKER:
+      type = "SHARED_WORKER";
+      break;
+    case ResourceType::PREFETCH:
+      type = "PREFETCH";
+      break;
+    case ResourceType::FAVICON:
+      type = "FAVICON";
       break;
     default:
       type = "UNKNOWN";
@@ -315,116 +374,23 @@ void ParamTraits<scoped_refptr<net::HttpResponseHeaders> >::Log(
   l->append("<HttpResponseHeaders>");
 }
 
-void ParamTraits<webkit_glue::ResourceLoadTimingInfo>::Write(
-    Message* m, const param_type& p) {
-  WriteParam(m, p.base_time.is_null());
-  if (p.base_time.is_null())
-    return;
-  WriteParam(m, p.base_time);
-  WriteParam(m, p.proxy_start);
-  WriteParam(m, p.proxy_end);
-  WriteParam(m, p.dns_start);
-  WriteParam(m, p.dns_end);
-  WriteParam(m, p.connect_start);
-  WriteParam(m, p.connect_end);
-  WriteParam(m, p.ssl_start);
-  WriteParam(m, p.ssl_end);
-  WriteParam(m, p.send_start);
-  WriteParam(m, p.send_end);
-  WriteParam(m, p.receive_headers_start);
-  WriteParam(m, p.receive_headers_end);
+void ParamTraits<net::IPEndPoint>::Write(Message* m, const param_type& p) {
+  WriteParam(m, p.address());
+  WriteParam(m, p.port());
 }
 
-bool ParamTraits<webkit_glue::ResourceLoadTimingInfo>::Read(
-    const Message* m, void** iter, param_type* r) {
-  bool is_null;
-  if (!ReadParam(m, iter, &is_null))
+bool ParamTraits<net::IPEndPoint>::Read(const Message* m, void** iter,
+                                        param_type* p) {
+  net::IPAddressNumber address;
+  int port;
+  if (!ReadParam(m, iter, &address) || !ReadParam(m, iter, &port))
     return false;
-  if (is_null)
-    return true;
-
-  return
-      ReadParam(m, iter, &r->base_time) &&
-      ReadParam(m, iter, &r->proxy_start) &&
-      ReadParam(m, iter, &r->proxy_end) &&
-      ReadParam(m, iter, &r->dns_start) &&
-      ReadParam(m, iter, &r->dns_end) &&
-      ReadParam(m, iter, &r->connect_start) &&
-      ReadParam(m, iter, &r->connect_end) &&
-      ReadParam(m, iter, &r->ssl_start) &&
-      ReadParam(m, iter, &r->ssl_end) &&
-      ReadParam(m, iter, &r->send_start) &&
-      ReadParam(m, iter, &r->send_end) &&
-      ReadParam(m, iter, &r->receive_headers_start) &&
-      ReadParam(m, iter, &r->receive_headers_end);
+  *p = net::IPEndPoint(address, port);
+  return true;
 }
 
-void ParamTraits<webkit_glue::ResourceLoadTimingInfo>::Log(const param_type& p,
-                                                           std::string* l) {
-  l->append("(");
-  LogParam(p.base_time, l);
-  l->append(", ");
-  LogParam(p.proxy_start, l);
-  l->append(", ");
-  LogParam(p.proxy_end, l);
-  l->append(", ");
-  LogParam(p.dns_start, l);
-  l->append(", ");
-  LogParam(p.dns_end, l);
-  l->append(", ");
-  LogParam(p.connect_start, l);
-  l->append(", ");
-  LogParam(p.connect_end, l);
-  l->append(", ");
-  LogParam(p.ssl_start, l);
-  l->append(", ");
-  LogParam(p.ssl_end, l);
-  l->append(", ");
-  LogParam(p.send_start, l);
-  l->append(", ");
-  LogParam(p.send_end, l);
-  l->append(", ");
-  LogParam(p.receive_headers_start, l);
-  l->append(", ");
-  LogParam(p.receive_headers_end, l);
-  l->append(")");
-}
-
-void ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> >::Write(
-    Message* m, const param_type& p) {
-  WriteParam(m, p.get() != NULL);
-  if (p.get()) {
-    WriteParam(m, p->http_status_code);
-    WriteParam(m, p->http_status_text);
-    WriteParam(m, p->request_headers);
-    WriteParam(m, p->response_headers);
-  }
-}
-
-bool ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> >::Read(
-    const Message* m, void** iter, param_type* r) {
-  bool has_object;
-  if (!ReadParam(m, iter, &has_object))
-    return false;
-  if (!has_object)
-    return true;
-  *r = new webkit_glue::ResourceDevToolsInfo();
-  return
-      ReadParam(m, iter, &(*r)->http_status_code) &&
-      ReadParam(m, iter, &(*r)->http_status_text) &&
-      ReadParam(m, iter, &(*r)->request_headers) &&
-      ReadParam(m, iter, &(*r)->response_headers);
-}
-
-void ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> >::Log(
-    const param_type& p, std::string* l) {
-  l->append("(");
-  if (p) {
-    LogParam(p->request_headers, l);
-    l->append(", ");
-    LogParam(p->response_headers, l);
-  }
-  l->append(")");
+void ParamTraits<net::IPEndPoint>::Log(const param_type& p, std::string* l) {
+  LogParam("IPEndPoint:" + p.ToString(), l);
 }
 
 void ParamTraits<base::PlatformFileInfo>::Write(
@@ -468,6 +434,110 @@ void ParamTraits<base::PlatformFileInfo>::Log(
   l->append(",");
   LogParam(p.creation_time.ToDoubleT(), l);
   l->append(")");
+}
+
+void ParamTraits<gfx::Point>::Write(Message* m, const gfx::Point& p) {
+  m->WriteInt(p.x());
+  m->WriteInt(p.y());
+}
+
+bool ParamTraits<gfx::Point>::Read(const Message* m, void** iter,
+                                   gfx::Point* r) {
+  int x, y;
+  if (!m->ReadInt(iter, &x) ||
+      !m->ReadInt(iter, &y))
+    return false;
+  r->set_x(x);
+  r->set_y(y);
+  return true;
+}
+
+void ParamTraits<gfx::Point>::Log(const gfx::Point& p, std::string* l) {
+  l->append(base::StringPrintf("(%d, %d)", p.x(), p.y()));
+}
+
+void ParamTraits<gfx::Size>::Write(Message* m, const gfx::Size& p) {
+  m->WriteInt(p.width());
+  m->WriteInt(p.height());
+}
+
+bool ParamTraits<gfx::Size>::Read(const Message* m, void** iter, gfx::Size* r) {
+  int w, h;
+  if (!m->ReadInt(iter, &w) ||
+      !m->ReadInt(iter, &h))
+    return false;
+  r->set_width(w);
+  r->set_height(h);
+  return true;
+}
+
+void ParamTraits<gfx::Size>::Log(const gfx::Size& p, std::string* l) {
+  l->append(base::StringPrintf("(%d, %d)", p.width(), p.height()));
+}
+
+void ParamTraits<gfx::Rect>::Write(Message* m, const gfx::Rect& p) {
+  m->WriteInt(p.x());
+  m->WriteInt(p.y());
+  m->WriteInt(p.width());
+  m->WriteInt(p.height());
+}
+
+bool ParamTraits<gfx::Rect>::Read(const Message* m, void** iter, gfx::Rect* r) {
+  int x, y, w, h;
+  if (!m->ReadInt(iter, &x) ||
+      !m->ReadInt(iter, &y) ||
+      !m->ReadInt(iter, &w) ||
+      !m->ReadInt(iter, &h))
+    return false;
+  r->set_x(x);
+  r->set_y(y);
+  r->set_width(w);
+  r->set_height(h);
+  return true;
+}
+
+void ParamTraits<gfx::Rect>::Log(const gfx::Rect& p, std::string* l) {
+  l->append(base::StringPrintf("(%d, %d, %d, %d)", p.x(), p.y(),
+                               p.width(), p.height()));
+}
+
+void ParamTraits<SkBitmap>::Write(Message* m, const SkBitmap& p) {
+  size_t fixed_size = sizeof(SkBitmap_Data);
+  SkBitmap_Data bmp_data;
+  bmp_data.InitSkBitmapDataForTransfer(p);
+  m->WriteData(reinterpret_cast<const char*>(&bmp_data),
+               static_cast<int>(fixed_size));
+  size_t pixel_size = p.getSize();
+  SkAutoLockPixels p_lock(p);
+  m->WriteData(reinterpret_cast<const char*>(p.getPixels()),
+               static_cast<int>(pixel_size));
+}
+
+bool ParamTraits<SkBitmap>::Read(const Message* m, void** iter, SkBitmap* r) {
+  const char* fixed_data;
+  int fixed_data_size = 0;
+  if (!m->ReadData(iter, &fixed_data, &fixed_data_size) ||
+     (fixed_data_size <= 0)) {
+    NOTREACHED();
+    return false;
+  }
+  if (fixed_data_size != sizeof(SkBitmap_Data))
+    return false;  // Message is malformed.
+
+  const char* variable_data;
+  int variable_data_size = 0;
+  if (!m->ReadData(iter, &variable_data, &variable_data_size) ||
+     (variable_data_size < 0)) {
+    NOTREACHED();
+    return false;
+  }
+  const SkBitmap_Data* bmp_data =
+      reinterpret_cast<const SkBitmap_Data*>(fixed_data);
+  return bmp_data->InitSkBitmapFromData(r, variable_data, variable_data_size);
+}
+
+void ParamTraits<SkBitmap>::Log(const SkBitmap& p, std::string* l) {
+  l->append("<SkBitmap>");
 }
 
 }  // namespace IPC

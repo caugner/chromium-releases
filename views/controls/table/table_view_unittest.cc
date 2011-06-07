@@ -1,8 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <vector>
+// For WinDDK ATL compatibility, these ATL headers must come first.
+#include "build/build_config.h"
+#if defined(OS_WIN)
+#include <atlbase.h>  // NOLINT
+#include <atlwin.h>  // NOLINT
+#endif
+
+#include <vector>  // NOLINT
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
@@ -21,7 +28,7 @@
 #endif
 
 using ui::TableModel;
-using ui::TableModelObserver; // TODO(beng): remove these
+using ui::TableModelObserver;  // TODO(beng): remove these
 
 // Put the tests in the views namespace to make it easier to declare them as
 // friend classes.
@@ -189,7 +196,7 @@ void TableViewTest::SetUp() {
 }
 
 void TableViewTest::TearDown() {
-  window_->Close();
+  window_->CloseWindow();
   // Temporary workaround to avoid leak of RootView::pending_paint_task_.
   message_loop_.RunAllPending();
   OleUninitialize();
@@ -511,7 +518,7 @@ void TableView2Test::SetUp() {
 }
 
 void TableView2Test::TearDown() {
-  window_->Close();
+  window_->CloseWindow();
   // Temporary workaround to avoid leak of RootView::pending_paint_task_.
   message_loop_.RunAllPending();
 #if defined(OS_WIN)

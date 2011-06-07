@@ -72,6 +72,9 @@ class FFmpegDemuxerTest : public testing::Test {
     demuxer_->set_host(&host_);
     data_source_ = new StrictMock<MockDataSource>();
 
+    EXPECT_CALL(*data_source_, Stop(NotNull()))
+        .WillRepeatedly(Invoke(&RunStopFilterCallback));
+
     // Initialize FFmpeg fixtures.
     memset(&format_context_, 0, sizeof(format_context_));
     memset(&input_format_, 0, sizeof(input_format_));
@@ -137,7 +140,8 @@ class FFmpegDemuxerTest : public testing::Test {
         base::TimeDelta::FromMicroseconds(kDurations[AV_STREAM_AUDIO]);
     EXPECT_CALL(host_, SetDuration(expected_duration));
 
-    demuxer_->Initialize(data_source_.get(), NewExpectedCallback());
+    demuxer_->Initialize(data_source_.get(),
+                         NewExpectedStatusCallback(PIPELINE_OK));
     message_loop_.RunAllPending();
   }
 
@@ -175,9 +179,9 @@ TEST_F(FFmpegDemuxerTest, Initialize_OpenFails) {
   // Simulate av_open_input_file() failing.
   EXPECT_CALL(mock_ffmpeg_, AVOpenInputFile(_, _, NULL, 0, NULL))
       .WillOnce(Return(-1));
-  EXPECT_CALL(host_, SetError(DEMUXER_ERROR_COULD_NOT_OPEN));
 
-  demuxer_->Initialize(data_source_.get(), NewExpectedCallback());
+  demuxer_->Initialize(data_source_.get(),
+                       NewExpectedStatusCallback(DEMUXER_ERROR_COULD_NOT_OPEN));
   message_loop_.RunAllPending();
 }
 
@@ -188,9 +192,10 @@ TEST_F(FFmpegDemuxerTest, Initialize_ParseFails) {
   EXPECT_CALL(mock_ffmpeg_, AVFindStreamInfo(&format_context_))
       .WillOnce(Return(AVERROR_IO));
   EXPECT_CALL(mock_ffmpeg_, AVCloseInputFile(&format_context_));
-  EXPECT_CALL(host_, SetError(DEMUXER_ERROR_COULD_NOT_PARSE));
 
-  demuxer_->Initialize(data_source_.get(), NewExpectedCallback());
+  demuxer_->Initialize(
+      data_source_.get(),
+      NewExpectedStatusCallback(DEMUXER_ERROR_COULD_NOT_PARSE));
   message_loop_.RunAllPending();
 }
 
@@ -200,10 +205,11 @@ TEST_F(FFmpegDemuxerTest, Initialize_NoStreams) {
     SCOPED_TRACE("");
     InitializeDemuxerMocks();
   }
-  EXPECT_CALL(host_, SetError(DEMUXER_ERROR_NO_SUPPORTED_STREAMS));
   format_context_.nb_streams = 0;
 
-  demuxer_->Initialize(data_source_.get(), NewExpectedCallback());
+  demuxer_->Initialize(
+      data_source_.get(),
+      NewExpectedStatusCallback(DEMUXER_ERROR_NO_SUPPORTED_STREAMS));
   message_loop_.RunAllPending();
 }
 
@@ -213,11 +219,12 @@ TEST_F(FFmpegDemuxerTest, Initialize_DataStreamOnly) {
     SCOPED_TRACE("");
     InitializeDemuxerMocks();
   }
-  EXPECT_CALL(host_, SetError(DEMUXER_ERROR_NO_SUPPORTED_STREAMS));
   EXPECT_EQ(format_context_.streams[0], &streams_[AV_STREAM_DATA]);
   format_context_.nb_streams = 1;
 
-  demuxer_->Initialize(data_source_.get(), NewExpectedCallback());
+  demuxer_->Initialize(
+      data_source_.get(),
+      NewExpectedStatusCallback(DEMUXER_ERROR_NO_SUPPORTED_STREAMS));
   message_loop_.RunAllPending();
 }
 
@@ -227,31 +234,18 @@ TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
     InitializeDemuxer();
   }
 
-  // Verify that our demuxer streams were created from our AVStream structures.
-  EXPECT_EQ(DS_STREAM_MAX, static_cast<int>(demuxer_->GetNumberOfStreams()));
-
   // First stream should be video and support the FFmpegDemuxerStream interface.
-  scoped_refptr<DemuxerStream> stream = demuxer_->GetStream(DS_STREAM_VIDEO);
-  AVStreamProvider* av_stream_provider = NULL;
+  scoped_refptr<DemuxerStream> stream =
+      demuxer_->GetStream(DemuxerStream::VIDEO);
   ASSERT_TRUE(stream);
-  std::string mime_type;
-  EXPECT_TRUE(
-      stream->media_format().GetAsString(MediaFormat::kMimeType, &mime_type));
-  EXPECT_STREQ(mime_type::kFFmpegVideo, mime_type.c_str());
-  EXPECT_TRUE(stream->QueryInterface(&av_stream_provider));
-  EXPECT_TRUE(av_stream_provider);
-  EXPECT_EQ(&streams_[AV_STREAM_VIDEO], av_stream_provider->GetAVStream());
+  EXPECT_EQ(DemuxerStream::VIDEO, stream->type());
+  EXPECT_EQ(&streams_[AV_STREAM_VIDEO], stream->GetAVStream());
 
   // Other stream should be audio and support the FFmpegDemuxerStream interface.
-  stream = demuxer_->GetStream(DS_STREAM_AUDIO);
-  av_stream_provider = NULL;
+  stream = demuxer_->GetStream(DemuxerStream::AUDIO);
   ASSERT_TRUE(stream);
-  EXPECT_TRUE(stream->media_format().GetAsString(MediaFormat::kMimeType,
-              &mime_type));
-  EXPECT_STREQ(mime_type::kFFmpegAudio, mime_type.c_str());
-  EXPECT_TRUE(stream->QueryInterface(&av_stream_provider));
-  EXPECT_TRUE(av_stream_provider);
-  EXPECT_EQ(&streams_[AV_STREAM_AUDIO], av_stream_provider->GetAVStream());
+  EXPECT_EQ(DemuxerStream::AUDIO, stream->type());
+  EXPECT_EQ(&streams_[AV_STREAM_AUDIO], stream->GetAVStream());
 }
 
 TEST_F(FFmpegDemuxerTest, Read_DiscardUninteresting) {
@@ -275,7 +269,8 @@ TEST_F(FFmpegDemuxerTest, Read_DiscardUninteresting) {
       .WillOnce(Return(AVERROR_IO));
 
   // Attempt a read from the audio stream and run the message loop until done.
-  scoped_refptr<DemuxerStream> audio = demuxer_->GetStream(DS_STREAM_AUDIO);
+  scoped_refptr<DemuxerStream> audio =
+      demuxer_->GetStream(DemuxerStream::AUDIO);
   scoped_refptr<DemuxerStreamReader> reader(new DemuxerStreamReader());
   reader->Read(audio);
   message_loop_.RunAllPending();
@@ -305,7 +300,8 @@ TEST_F(FFmpegDemuxerTest, Read_Audio) {
       .WillOnce(Return(0));
 
   // Attempt a read from the audio stream and run the message loop until done.
-  scoped_refptr<DemuxerStream> audio = demuxer_->GetStream(DS_STREAM_AUDIO);
+  scoped_refptr<DemuxerStream> audio =
+      demuxer_->GetStream(DemuxerStream::AUDIO);
   scoped_refptr<DemuxerStreamReader> reader(new DemuxerStreamReader());
   reader->Read(audio);
   message_loop_.RunAllPending();
@@ -336,7 +332,8 @@ TEST_F(FFmpegDemuxerTest, Read_Video) {
       .WillOnce(Return(0));
 
   // Attempt a read from the video stream and run the message loop until done.
-  scoped_refptr<DemuxerStream> video = demuxer_->GetStream(DS_STREAM_VIDEO);
+  scoped_refptr<DemuxerStream> video =
+      demuxer_->GetStream(DemuxerStream::VIDEO);
   scoped_refptr<DemuxerStreamReader> reader(new DemuxerStreamReader());
   reader->Read(video);
   message_loop_.RunAllPending();
@@ -364,7 +361,8 @@ TEST_F(FFmpegDemuxerTest, Read_EndOfStream) {
       .WillOnce(Return(AVERROR_IO));
 
   // We should now expect an end of stream buffer.
-  scoped_refptr<DemuxerStream> audio = demuxer_->GetStream(DS_STREAM_AUDIO);
+  scoped_refptr<DemuxerStream> audio =
+      demuxer_->GetStream(DemuxerStream::AUDIO);
   scoped_refptr<DemuxerStreamReader> reader(new DemuxerStreamReader());
   reader->Read(audio);
   message_loop_.RunAllPending();
@@ -387,8 +385,10 @@ TEST_F(FFmpegDemuxerTest, Seek) {
   }
 
   // Get our streams.
-  scoped_refptr<DemuxerStream> video = demuxer_->GetStream(DS_STREAM_VIDEO);
-  scoped_refptr<DemuxerStream> audio = demuxer_->GetStream(DS_STREAM_AUDIO);
+  scoped_refptr<DemuxerStream> video =
+      demuxer_->GetStream(DemuxerStream::VIDEO);
+  scoped_refptr<DemuxerStream> audio =
+      demuxer_->GetStream(DemuxerStream::AUDIO);
   ASSERT_TRUE(video);
   ASSERT_TRUE(audio);
 
@@ -550,10 +550,15 @@ TEST_F(FFmpegDemuxerTest, Stop) {
       new StrictMock<MockReadCallback>());
 
   // Get our stream.
-  scoped_refptr<DemuxerStream> audio = demuxer_->GetStream(DS_STREAM_AUDIO);
+  scoped_refptr<DemuxerStream> audio =
+      demuxer_->GetStream(DemuxerStream::AUDIO);
   ASSERT_TRUE(audio);
 
-  // Stop the demuxer.
+  // Stop the demuxer, overriding the default expectation to assert that
+  // data_source_ really is Stop()'d.
+  EXPECT_CALL(*data_source_, Stop(_))
+      .WillOnce(Invoke(&RunStopFilterCallback))
+      .RetiresOnSaturation();
   demuxer_->Stop(NewExpectedCallback());
 
   // Expect all calls in sequence.
@@ -601,7 +606,8 @@ TEST_F(FFmpegDemuxerTest, DisableAudioStream) {
       .WillOnce(Return(AVERROR_IO));
 
   // Get our streams.
-  scoped_refptr<DemuxerStream> video = demuxer_->GetStream(DS_STREAM_VIDEO);
+  scoped_refptr<DemuxerStream> video =
+      demuxer_->GetStream(DemuxerStream::VIDEO);
   ASSERT_TRUE(video);
 
   // Attempt a read from the video stream and run the message loop until done.

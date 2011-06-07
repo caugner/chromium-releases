@@ -1,11 +1,10 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/process_util.h"
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#include "chrome/browser/first_run/first_run.h"
-#endif
+#include "build/build_config.h"
+#include "chrome/browser/first_run/upgrade_util.h"
 
 // The entry point for all invocations of Chromium, browser and renderer. On
 // windows, this does nothing but load chrome.dll and invoke its entry point in
@@ -20,10 +19,8 @@ extern "C" {
 int ChromeMain(int argc, const char** argv);
 
 #if defined(OS_LINUX) && defined(USE_TCMALLOC)
-
 int tc_set_new_mode(int mode);
-
-#endif  // defined(OS_LINUX) && defined(USE_TCMALLOC)
+#endif
 }
 
 int main(int argc, const char** argv) {
@@ -51,7 +48,7 @@ int main(int argc, const char** argv) {
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // Launch a new instance if we're shutting down because we detected an
   // upgrade in the persistent mode.
-  Upgrade::RelaunchChromeBrowserWithNewCommandLineIfNeeded();
+  upgrade_util::RelaunchChromeBrowserWithNewCommandLineIfNeeded();
 #endif
 
   return return_code;

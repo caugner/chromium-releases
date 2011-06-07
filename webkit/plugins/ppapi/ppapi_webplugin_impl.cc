@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,14 @@
 #include <cmath>
 
 #include "base/message_loop.h"
+#include "googleurl/src/gurl.h"
 #include "ppapi/c/pp_var.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "webkit/plugins/ppapi/message_channel.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
@@ -35,6 +38,7 @@ struct WebPluginImpl::InitData {
   base::WeakPtr<PluginDelegate> delegate;
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_values;
+  GURL url;
 };
 
 WebPluginImpl::WebPluginImpl(
@@ -50,6 +54,7 @@ WebPluginImpl::WebPluginImpl(
     init_data_->arg_names.push_back(params.attributeNames[i].utf8());
     init_data_->arg_values.push_back(params.attributeValues[i].utf8());
   }
+  init_data_->url = params.url;
 }
 
 WebPluginImpl::~WebPluginImpl() {
@@ -67,6 +72,7 @@ bool WebPluginImpl::initialize(WebPluginContainer* container) {
   bool success = instance_->Initialize(container,
                                        init_data_->arg_names,
                                        init_data_->arg_values,
+                                       init_data_->url,
                                        full_frame_);
   if (!success) {
     instance_->Delete();
@@ -90,9 +96,15 @@ void WebPluginImpl::destroy() {
 NPObject* WebPluginImpl::scriptableObject() {
   scoped_refptr<ObjectVar> object(
       ObjectVar::FromPPVar(instance_->GetInstanceObject()));
-  if (object)
-    return object->np_object();
-  return NULL;
+  // If there's an InstanceObject, tell the Instance's MessageChannel to pass
+  // any non-postMessage calls to it.
+  if (object) {
+    instance_->message_channel().SetPassthroughObject(object->np_object());
+  }
+  NPObject* message_channel_np_object(instance_->message_channel().np_object());
+  // The object is expected to be retained before it is returned.
+  WebKit::WebBindings::retainObject(message_channel_np_object);
+  return message_channel_np_object;
 }
 
 void WebPluginImpl::paint(WebCanvas* canvas, const WebRect& rect) {
@@ -108,10 +120,6 @@ void WebPluginImpl::updateGeometry(
   plugin_rect_ = window_rect;
   if (!instance_->IsFullscreenOrPending())
     instance_->ViewChanged(plugin_rect_, clip_rect);
-}
-
-unsigned WebPluginImpl::getBackingTextureId() {
-  return instance_->GetBackingTextureId();
 }
 
 void WebPluginImpl::updateFocus(bool focused) {
@@ -145,7 +153,7 @@ void WebPluginImpl::didReceiveResponse(
 
 void WebPluginImpl::didReceiveData(const char* data, int data_length) {
   if (document_loader_)
-    document_loader_->didReceiveData(NULL, data, data_length);
+    document_loader_->didReceiveData(NULL, data, data_length, data_length);
 }
 
 void WebPluginImpl::didFinishLoading() {
@@ -226,4 +234,3 @@ void WebPluginImpl::printEnd() {
 
 }  // namespace ppapi
 }  // namespace webkit
-

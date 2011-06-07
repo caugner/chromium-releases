@@ -1,15 +1,17 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/menu/submenu_view.h"
 
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/gfx/canvas.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/menu_controller.h"
 #include "views/controls/menu/menu_host.h"
 #include "views/controls/menu/menu_scroll_view_container.h"
 #include "views/widget/root_view.h"
+#include "views/widget/widget.h"
 
 // Height of the drop indicator. This should be an even number.
 static const int kDropIndicatorHeight = 2;
@@ -121,12 +123,11 @@ gfx::Size SubmenuView::GetPreferredSize() {
                    height + insets.height());
 }
 
-void SubmenuView::OnBoundsChanged() {
-  SchedulePaint();
-}
-
-AccessibilityTypes::Role SubmenuView::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_MENUPOPUP;
+void SubmenuView::GetAccessibleState(ui::AccessibleViewState* state) {
+  // Inherit most of the state from the parent menu item, except the role.
+  if (GetMenuItem())
+    GetMenuItem()->GetAccessibleState(state);
+  state->role = ui::AccessibilityTypes::ROLE_MENUPOPUP;
 }
 
 void SubmenuView::PaintChildren(gfx::Canvas* canvas) {
@@ -229,24 +230,32 @@ void SubmenuView::ShowAt(gfx::NativeWindow parent,
   if (host_) {
     host_->ShowMenuHost(do_capture);
 
-    GetScrollViewContainer()->NotifyAccessibilityEvent(
-        AccessibilityTypes::EVENT_MENUSTART);
-
-    NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPSTART);
+    GetScrollViewContainer()->GetWidget()->NotifyAccessibilityEvent(
+        GetScrollViewContainer(),
+        ui::AccessibilityTypes::EVENT_MENUSTART,
+        true);
+    GetWidget()->NotifyAccessibilityEvent(
+        this,
+        ui::AccessibilityTypes::EVENT_MENUPOPUPSTART,
+        true);
     return;
   }
 
-  host_ = MenuHost::Create(this);
+  host_ = new MenuHost(this);
   // Force construction of the scroll view container.
   GetScrollViewContainer();
   // Make sure the first row is visible.
   ScrollRectToVisible(gfx::Rect(gfx::Point(), gfx::Size(1, 1)));
   host_->InitMenuHost(parent, bounds, scroll_view_container_, do_capture);
 
-  GetScrollViewContainer()->NotifyAccessibilityEvent(
-      AccessibilityTypes::EVENT_MENUSTART);
-
-  NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPSTART);
+  GetScrollViewContainer()->GetWidget()->NotifyAccessibilityEvent(
+      GetScrollViewContainer(),
+      ui::AccessibilityTypes::EVENT_MENUSTART,
+      true);
+  GetWidget()->NotifyAccessibilityEvent(
+      this,
+      ui::AccessibilityTypes::EVENT_MENUPOPUPSTART,
+      true);
 }
 
 void SubmenuView::Reposition(const gfx::Rect& bounds) {
@@ -256,10 +265,14 @@ void SubmenuView::Reposition(const gfx::Rect& bounds) {
 
 void SubmenuView::Close() {
   if (host_) {
-    NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPEND);
-
-    GetScrollViewContainer()->NotifyAccessibilityEvent(
-        AccessibilityTypes::EVENT_MENUEND);
+    GetWidget()->NotifyAccessibilityEvent(
+        this,
+        ui::AccessibilityTypes::EVENT_MENUPOPUPEND,
+        true);
+    GetScrollViewContainer()->GetWidget()->NotifyAccessibilityEvent(
+        GetScrollViewContainer(),
+        ui::AccessibilityTypes::EVENT_MENUEND,
+        true);
 
     host_->DestroyMenuHost();
     host_ = NULL;
@@ -304,18 +317,8 @@ MenuScrollViewContainer* SubmenuView::GetScrollViewContainer() {
     scroll_view_container_ = new MenuScrollViewContainer(this);
     // Otherwise MenuHost would delete us.
     scroll_view_container_->set_parent_owned(false);
-
-    // Use the parent menu item accessible name for the menu view.
-    string16 accessible_name;
-    GetMenuItem()->GetAccessibleName(&accessible_name);
-    scroll_view_container_->SetAccessibleName(accessible_name);
-    SetAccessibleName(accessible_name);
   }
   return scroll_view_container_;
-}
-
-gfx::NativeWindow SubmenuView::native_window() const {
-  return host_ ? host_->GetMenuHostWindow() : NULL;
 }
 
 void SubmenuView::MenuHostDestroyed() {
@@ -325,6 +328,10 @@ void SubmenuView::MenuHostDestroyed() {
 
 std::string SubmenuView::GetClassName() const {
   return kViewClassName;
+}
+
+void SubmenuView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  SchedulePaint();
 }
 
 void SubmenuView::PaintDropIndicator(gfx::Canvas* canvas,

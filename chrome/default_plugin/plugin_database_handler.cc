@@ -1,6 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+// For WinDDK ATL compatibility, these ATL headers must come first.
+#include <atlbase.h>
+#include <atlwin.h>
 
 #include "chrome/default_plugin/plugin_database_handler.h"
 
@@ -48,7 +52,7 @@ bool PluginDatabaseHandler::DownloadPluginsFileIfNeeded(
   plugins_file_ = module_path.Append(L"chrome_plugins_file.xml").value();
 
   bool initiate_download = false;
-  if (!file_util::PathExists(FilePath::FromWStringHack(plugins_file_))) {
+  if (!file_util::PathExists(FilePath(plugins_file_))) {
     initiate_download = true;
   } else {
     SYSTEMTIME creation_system_time = {0};
@@ -118,7 +122,7 @@ int32 PluginDatabaseHandler::Write(NPStream* stream, int32 offset,
                                         FILE_SHARE_READ, NULL, CREATE_ALWAYS,
                                         FILE_ATTRIBUTE_NORMAL, NULL);
     if (plugin_downloads_file_ == INVALID_HANDLE_VALUE) {
-      unsigned long error = ::GetLastError();
+      DWORD error = ::GetLastError();
       if (error == ERROR_SHARING_VIOLATION) {
         // File may have been downloaded by another plugin instance on this
         // page.

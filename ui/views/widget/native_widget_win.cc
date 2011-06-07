@@ -4,7 +4,7 @@
 
 #include "ui/views/widget/native_widget_win.h"
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/base/system_monitor/system_monitor.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/hwnd_util.h"
@@ -349,15 +349,13 @@ void NativeWidgetWin::OnInitMenuPopup(HMENU menu, UINT position,
 
 LRESULT NativeWidgetWin::OnKeyDown(UINT message, WPARAM w_param,
                                    LPARAM l_param) {
-  MSG msg;
-  MakeMSG(&msg, message, w_param, l_param);
+  MSG msg = { message, w_param, l_param };
   SetMsgHandled(listener_->OnKeyEvent(KeyEvent(msg)));
   return 0;
 }
 
 LRESULT NativeWidgetWin::OnKeyUp(UINT message, WPARAM w_param, LPARAM l_param) {
-  MSG msg;
-  MakeMSG(&msg, message, w_param, l_param);
+  MSG msg = { message, w_param, l_param };
   SetMsgHandled(listener_->OnKeyEvent(KeyEvent(msg)));
   return 0;
 }
@@ -376,8 +374,7 @@ LRESULT NativeWidgetWin::OnMouseActivate(HWND window, UINT hittest_code,
 LRESULT NativeWidgetWin::OnMouseLeave(UINT message, WPARAM w_param,
                                       LPARAM l_param) {
   // TODO(beng): tooltip
-  MSG msg;
-  MakeMSG(&msg, message, w_param, l_param);
+  MSG msg = { message, w_param, l_param };
   SetMsgHandled(listener_->OnMouseEvent(MouseEvent(msg)));
 
   // Reset our tracking flag so that future mouse movement over this WidgetWin
@@ -463,11 +460,12 @@ void NativeWidgetWin::OnPaint(HDC dc) {
     GetWindowRect(hwnd(), &wr);
     SIZE size = {wr.right - wr.left, wr.bottom - wr.top};
     POINT position = {wr.left, wr.top};
-    HDC dib_dc = window_contents_->getTopPlatformDevice().getBitmapDC();
+    HDC dib_dc = window_contents_->beginPlatformPaint();
     POINT zero = {0, 0};
     BLENDFUNCTION blend = {AC_SRC_OVER, 0, 125, AC_SRC_ALPHA};
     UpdateLayeredWindow(hwnd(), NULL, &position, &size, dib_dc, &zero,
                         RGB(0xFF, 0xFF, 0xFF), &blend, ULW_ALPHA);
+    window_contents_->endPlatformPaint();
   } else {
     scoped_ptr<gfx::CanvasPaint> canvas(
         gfx::CanvasPaint::CreateCanvasPaint(hwnd()));
@@ -594,8 +592,7 @@ void NativeWidgetWin::TrackMouseEvents(DWORD mouse_tracking_flags) {
 
 bool NativeWidgetWin::ProcessMouseRange(UINT message, WPARAM w_param,
                                         LPARAM l_param, bool non_client) {
-  MSG msg;
-  MakeMSG(&msg, message, w_param, l_param);
+  MSG msg = { message, w_param, l_param };
   if (message == WM_MOUSEWHEEL) {
     // Reroute the mouse-wheel to the window under the mouse pointer if
     // applicable.
@@ -610,17 +607,6 @@ bool NativeWidgetWin::ProcessMouseRange(UINT message, WPARAM w_param,
   if (!has_capture_)
     TrackMouseEvents(non_client ? TME_NONCLIENT | TME_LEAVE : TME_LEAVE);
   return listener_->OnMouseEvent(MouseEvent(msg));
-}
-
-void NativeWidgetWin::MakeMSG(MSG* msg, UINT message, WPARAM w_param,
-    LPARAM l_param, DWORD time, LONG x, LONG y) const {
-  msg->hwnd = hwnd();
-  msg->message = message;
-  msg->wParam = w_param;
-  msg->lParam = l_param;
-  msg->time = time;
-  msg->pt.x = x;
-  msg->pt.y = y;
 }
 
 void NativeWidgetWin::CloseNow() {
@@ -645,8 +631,6 @@ NativeWidget* NativeWidget::CreateNativeWidget(
 // static
 NativeWidget* NativeWidget::GetNativeWidgetForNativeView(
     gfx::NativeView native_view) {
-  if (!WindowImpl::IsWindowImpl(native_view))
-    return NULL;
   return reinterpret_cast<internal::NativeWidgetWin*>(
       ViewProp::GetValue(native_view, internal::kNativeWidgetKey));
 }

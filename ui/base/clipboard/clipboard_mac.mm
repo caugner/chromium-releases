@@ -10,10 +10,12 @@
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/scoped_nsobject.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/size.h"
 
 namespace ui {
@@ -177,6 +179,24 @@ bool Clipboard::IsFormatAvailable(const Clipboard::FormatType& format,
   return [types containsObject:format_ns];
 }
 
+void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
+                                   std::vector<string16>* types,
+                                   bool* contains_filenames) const {
+  if (!types || !contains_filenames) {
+    NOTREACHED();
+    return;
+  }
+
+  types->clear();
+  if (IsFormatAvailable(Clipboard::GetPlainTextFormatType(), buffer))
+    types->push_back(UTF8ToUTF16(kMimeTypeText));
+  if (IsFormatAvailable(Clipboard::GetHtmlFormatType(), buffer))
+    types->push_back(UTF8ToUTF16(kMimeTypeHTML));
+  if ([NSImage canInitWithPasteboard:GetPasteboard()])
+    types->push_back(UTF8ToUTF16(kMimeTypePNG));
+  *contains_filenames = false;
+}
+
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
   NSPasteboard* pb = GetPasteboard();
@@ -220,6 +240,32 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
   // TODO(avi): src_url?
   if (src_url)
     src_url->clear();
+}
+
+SkBitmap Clipboard::ReadImage(Buffer buffer) const {
+  DCHECK_EQ(buffer, BUFFER_STANDARD);
+
+  scoped_nsobject<NSImage> image(
+      [[NSImage alloc] initWithPasteboard:GetPasteboard()]);
+  if (image.get()) {
+    [image setFlipped:YES];
+    int width = [image size].width;
+    int height = [image size].height;
+
+    gfx::CanvasSkia canvas(width, height, false);
+    CGContextRef gc = canvas.beginPlatformPaint();
+    NSGraphicsContext* cocoa_gc =
+        [NSGraphicsContext graphicsContextWithGraphicsPort:gc flipped:NO];
+    [NSGraphicsContext setCurrentContext:cocoa_gc];
+    [image drawInRect:NSMakeRect(0, 0, width, height)
+             fromRect:NSZeroRect
+            operation:NSCompositeCopy
+             fraction:1.0];
+    [NSGraphicsContext restoreGraphicsState];
+    canvas.endPlatformPaint();
+    return canvas.ExtractBitmap();
+  }
+  return SkBitmap();
 }
 
 void Clipboard::ReadBookmark(string16* title, std::string* url) const {

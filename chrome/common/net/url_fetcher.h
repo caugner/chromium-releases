@@ -1,7 +1,7 @@
 // Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
+
 // This file contains URLFetcher, a wrapper around net::URLRequest that handles
 // low-level details like thread safety, ref counting, and incremental buffer
 // reading.  This is useful for callers who simply want to get the data from a
@@ -18,23 +18,23 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
 #include "base/time.h"
 
 class GURL;
 typedef std::vector<std::string> ResponseCookies;
-class URLFetcher;
-class URLRequestContextGetter;
 
 namespace net {
 class HttpResponseHeaders;
+class URLRequestContextGetter;
 class URLRequestStatus;
 }  // namespace net
 
 // To use this class, create an instance with the desired URL and a pointer to
 // the object to be notified when the URL has been loaded:
-//   URLFetcher* fetcher = new URLFetcher("http://www.google.com", this);
+//   URLFetcher* fetcher = new URLFetcher("http://www.google.com",
+//                                        URLFetcher::GET, this);
 //
 // Then, optionally set properties on this object, like the request context or
 // extra headers:
@@ -160,7 +160,7 @@ class URLFetcher {
   // Set the net::URLRequestContext on the request.  Must be called before the
   // request is started.
   void set_request_context(
-      URLRequestContextGetter* request_context_getter);
+      net::URLRequestContextGetter* request_context_getter);
 
   // If |retry| is false, 5xx responses will be propagated to the observer,
   // if it is true URLFetcher will automatically re-execute the request,
@@ -196,7 +196,7 @@ class URLFetcher {
   // Reports that the received content was malformed.
   void ReceivedContentWasMalformed();
 
-  // Cancels all existing URLRequests.  Will notify the URLFetcher::Delegates.
+  // Cancels all existing URLFetchers.  Will notify the URLFetcher::Delegates.
   // Note that any new URLFetchers created while this is running will not be
   // cancelled.  Typically, one would call this in the CleanUp() method of an IO
   // thread, so that no new URLRequests would be able to start on the IO thread
@@ -212,6 +212,12 @@ class URLFetcher {
   const std::string& upload_data() const;
 
  private:
+  friend class URLFetcherTest;
+
+  // Only used by URLFetcherTest, returns the number of URLFetcher::Core objects
+  // actively running.
+  static int GetNumFetcherCores();
+
   class Core;
 
   scoped_refptr<Core> core_;

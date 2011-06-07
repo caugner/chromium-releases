@@ -10,111 +10,87 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "printing/native_metafile_win.h"
+#include "printing/metafile.h"
 
 class FilePath;
 
 namespace gfx {
+class Point;
 class Rect;
+class Size;
 }
 
 namespace printing {
 
 // Simple wrapper class that manage an EMF data stream and its virtual HDC.
-class Emf : public NativeMetafile {
+class Emf : public Metafile {
  public:
   class Record;
   class Enumerator;
   struct EnumerationContext;
 
+  // Generates a virtual HDC that will record every GDI commands and compile
+  // it in a EMF data stream.
+  Emf();
   virtual ~Emf();
 
-  // Initializes the Emf with the data in |src_buffer|. Returns true on success.
-  virtual bool Init(const void* src_buffer, uint32 src_buffer_size);
+  // Generates a new metafile that will record every GDI command, and will
+  // be saved to |metafile_path|.
+  virtual bool InitToFile(const FilePath& metafile_path);
 
-  // Generates a virtual HDC that will record every GDI commands and compile it
-  // in a EMF data stream.
-  // hdc is used to setup the default DPI and color settings. hdc is optional.
-  // rect specifies the dimensions (in .01-millimeter units) of the EMF. rect is
-  // optional.
-  virtual bool CreateDc(HDC sibling, const RECT* rect);
+  // Initializes the Emf with the data in |metafile_path|.
+  virtual bool InitFromFile(const FilePath& metafile_path);
 
-  // Similar to the above method but the metafile is backed by a file.
-  virtual bool CreateFileBackedDc(HDC sibling,
-                                  const RECT* rect,
-                                  const FilePath& path);
+  // Metafile methods.
+  virtual bool Init();
+  virtual bool InitFromData(const void* src_buffer, uint32 src_buffer_size);
 
-    // Load an EMF file.
-  virtual bool CreateFromFile(const FilePath& metafile_path);
+  virtual skia::PlatformDevice* StartPageForVectorCanvas(
+      const gfx::Size& page_size, const gfx::Point& content_origin,
+      const float& scale_factor);
+  // Inserts a custom GDICOMMENT records indicating StartPage/EndPage calls
+  // (since StartPage and EndPage do not work in a metafile DC). Only valid
+  // when hdc_ is non-NULL. |page_size| and |content_origin| are ignored.
+  // |scale_factor|  must be 1.0.
+  virtual bool StartPage(const gfx::Size& page_size,
+                         const gfx::Point& content_origin,
+                         const float& scale_factor);
+  virtual bool FinishPage();
+  virtual bool FinishDocument();
 
-  // TODO(maruel): CreateFromFile(). If ever used. Maybe users would like to
-  // have the ability to save web pages to an EMF file? Afterward, it is easy to
-  // convert to PDF or PS.
-
-  // Closes the HDC created by CreateDc() and generates the compiled EMF
-  // data.
-  virtual bool CloseDc();
-
-  // Closes the EMF data handle when it is not needed anymore.
-  virtual void CloseEmf();
-
-  // "Plays" the EMF buffer in a HDC. It is the same effect as calling the
-  // original GDI function that were called when recording the EMF. |rect| is in
-  // "logical units" and is optional. If |rect| is NULL, the natural EMF bounds
-  // are used.
-  // Note: Windows has been known to have stack buffer overflow in its GDI
-  // functions, whether used directly or indirectly through precompiled EMF
-  // data. We have to accept the risk here. Since it is used only for printing,
-  // it requires user intervention.
-  virtual bool Playback(HDC hdc, const RECT* rect) const;
-
-  // The slow version of Playback(). It enumerates all the records and play them
-  // back in the HDC. The trick is that it skip over the records known to have
-  // issue with some printers. See Emf::Record::SafePlayback implementation for
-  // details.
-  virtual bool SafePlayback(HDC hdc) const;
-
-  // Retrieves the bounds of the painted area by this EMF buffer. This value
-  // should be passed to Playback to keep the exact same size.
-  virtual gfx::Rect GetBounds() const;
-
-  // Retrieves the EMF stream size.
   virtual uint32 GetDataSize() const;
-
-  // Retrieves the EMF stream.
   virtual bool GetData(void* buffer, uint32 size) const;
 
-  // Retrieves the EMF stream. It is an helper function.
-  virtual bool GetData(std::vector<uint8>* buffer) const;
+  // Saves the EMF data to a file as-is. It is recommended to use the .emf file
+  // extension but it is not enforced. This function synchronously writes to the
+  // file. For testing only.
+  virtual bool SaveTo(const FilePath& file_path) const;
+
+  // Should be passed to Playback to keep the exact same size.
+  virtual gfx::Rect GetPageBounds(unsigned int page_number) const;
+
+  virtual unsigned int GetPageCount() const {
+    return page_count_;
+  }
+
+  virtual HDC context() const {
+    return hdc_;
+  }
+
+  virtual bool Playback(HDC hdc, const RECT* rect) const;
+  virtual bool SafePlayback(HDC hdc) const;
 
   virtual HENHMETAFILE emf() const {
     return emf_;
   }
 
-  virtual HDC hdc() const {
-    return hdc_;
-  }
-
-  // Inserts a custom GDICOMMENT records indicating StartPage/EndPage calls
-  // (since StartPage and EndPage do not work in a metafile DC). Only valid
-  // when hdc_ is non-NULL.
-  virtual bool StartPage();
-  virtual bool EndPage();
-
-  // Saves the EMF data to a file as-is. It is recommended to use the .emf file
-  // extension but it is not enforced. This function synchronously writes to the
-  // file. For testing only.
-  virtual bool SaveTo(const std::wstring& filename) const;
-
- protected:
-  Emf();
-
  private:
-  friend class NativeMetafileFactory;
   FRIEND_TEST_ALL_PREFIXES(EmfTest, DC);
-  FRIEND_TEST_ALL_PREFIXES(EmfTest, FileBackedDC);
-  FRIEND_TEST_ALL_PREFIXES(EmfPrintingTest, Enumerate);
   FRIEND_TEST_ALL_PREFIXES(EmfPrintingTest, PageBreak);
+  FRIEND_TEST_ALL_PREFIXES(EmfTest, FileBackedEmf);
+
+  // Retrieves the underlying data stream. It is a helper function.
+  bool GetDataAsVector(std::vector<uint8>* buffer) const;
 
   // Playbacks safely one EMF record.
   static int CALLBACK SafePlaybackProc(HDC hdc,
@@ -128,6 +104,8 @@ class Emf : public NativeMetafile {
 
   // Valid when generating EMF data through a virtual HDC.
   HDC hdc_;
+
+  int page_count_;
 
   DISALLOW_COPY_AND_ASSIGN(Emf);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -220,7 +220,11 @@ PPB_Audio_Impl::PPB_Audio_Impl(PluginInstance* instance)
 }
 
 PPB_Audio_Impl::~PPB_Audio_Impl() {
-  // Calling ShutDown() makes sure StreamCreated cannot be called anymore.
+  // Calling ShutDown() makes sure StreamCreated cannot be called anymore and
+  // releases the audio data associated with the pointer. Note however, that
+  // until ShutDown returns, StreamCreated may still be called. This will be
+  // OK since we'll just immediately clean up the data it stored later in this
+  // destructor.
   if (audio_) {
     audio_->ShutDown();
     audio_ = NULL;
@@ -306,7 +310,7 @@ int32_t PPB_Audio_Impl::Open(PluginDelegate* plugin_delegate,
   // once and only once.
   create_callback_ = create_callback;
   create_callback_pending_ = true;
-  return PP_ERROR_WOULDBLOCK;
+  return PP_OK_COMPLETIONPENDING;
 }
 
 int32_t PPB_Audio_Impl::GetSyncSocket(int* sync_socket) {
@@ -369,4 +373,3 @@ void PPB_Audio_Impl::StreamCreated(
 
 }  // namespace ppapi
 }  // namespace webkit
-

@@ -625,8 +625,6 @@ WebKit::WebGeolocationClientMock* TestShell::geolocation_client_mock() {
 
 namespace webkit_glue {
 
-void PrecacheUrl(const char16* url, int url_length) {}
-
 void AppendToLog(const char* file, int line, const char* msg) {
   logging::LogMessage(file, line).stream() << msg;
 }
@@ -651,8 +649,8 @@ bool IsDefaultPluginEnabled() {
   FilePath exe_path;
 
   if (PathService::Get(base::FILE_EXE, &exe_path)) {
-    std::wstring exe_name = exe_path.BaseName().ToWStringHack();
-    if (StartsWith(exe_name, L"test_shell_tests", false))
+    std::string exe_name = exe_path.BaseName().MaybeAsASCII();
+    if (StartsWithASCII(exe_name, "test_shell_tests", false))
       return true;
   }
   return false;
@@ -680,6 +678,14 @@ void SetCacheMode(bool enabled) {
 }
 
 void ClearCache(bool preserve_ssl_entries) {
+  // Used in benchmarking,  Ignored for test_shell.
+}
+
+void ClearHostResolverCache() {
+  // Used in benchmarking,  Ignored for test_shell.
+}
+
+void ClearPredictorCache() {
   // Used in benchmarking,  Ignored for test_shell.
 }
 

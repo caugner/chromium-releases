@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,24 @@
 #define CHROME_RENDERER_SEARCHBOX_H_
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "base/string16.h"
-#include "chrome/renderer/render_view_observer.h"
+#include "chrome/common/instant_types.h"
+#include "content/renderer/render_view_observer.h"
+#include "content/renderer/render_view_observer_tracker.h"
 #include "ui/gfx/rect.h"
 
-class SearchBox : public RenderViewObserver {
+class SearchBox : public RenderViewObserver,
+                  public RenderViewObserverTracker<SearchBox> {
  public:
   explicit SearchBox(RenderView* render_view);
   ~SearchBox();
 
   // Sends ViewHostMsg_SetSuggestions to the browser.
-  void SetSuggestions(const std::vector<std::string>& suggestions);
+  void SetSuggestions(const std::vector<std::string>& suggestions,
+                      InstantCompleteBehavior behavior);
 
   const string16& value() { return value_; }
   bool verbatim() { return verbatim_; }
@@ -41,6 +46,9 @@ class SearchBox : public RenderViewObserver {
                                         bool verbatim,
                                         int selection_start,
                                         int selection_end);
+
+  // Sets the searchbox values to their initial value.
+  void Reset();
 
   string16 value_;
   bool verbatim_;

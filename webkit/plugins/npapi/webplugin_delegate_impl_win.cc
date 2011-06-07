@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "app/win/iat_patch_function.h"
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
-#include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
@@ -462,28 +462,13 @@ void WebPluginDelegateImpl::PlatformDestroyInstance() {
   }
 }
 
-void WebPluginDelegateImpl::Paint(skia::PlatformCanvas* canvas,
+void WebPluginDelegateImpl::Paint(WebKit::WebCanvas* canvas,
                                   const gfx::Rect& rect) {
   if (windowless_) {
-    HDC hdc = canvas->beginPlatformPaint();
+    HDC hdc = skia::BeginPlatformPaint(canvas);
     WindowlessPaint(hdc, rect);
-    canvas->endPlatformPaint();
+    skia::EndPlatformPaint(canvas);
   }
-}
-
-void WebPluginDelegateImpl::Print(HDC hdc) {
-  // Disabling the call to NPP_Print as it causes a crash in
-  // flash in some cases. In any case this does not work as expected
-  // as the EMF meta file dc passed in needs to be created with the
-  // the plugin window dc as its sibling dc and the window rect
-  // in .01 mm units.
-#if 0
-  NPPrint npprint;
-  npprint.mode = NP_EMBED;
-  npprint.print.embedPrint.platformPrint = reinterpret_cast<void*>(hdc);
-  npprint.print.embedPrint.window = window_;
-  instance()->NPP_Print(&npprint);
-#endif
 }
 
 void WebPluginDelegateImpl::InstallMissingPlugin() {
@@ -686,6 +671,7 @@ LRESULT CALLBACK WebPluginDelegateImpl::FlashWindowlessWndProc(HWND hwnd,
                                              lparam);
       return TRUE;
     }
+
     default: {
       break;
     }
@@ -874,9 +860,13 @@ LRESULT CALLBACK WebPluginDelegateImpl::DummyWindowProc(
 // Returns true if the message passed in corresponds to a user gesture.
 static bool IsUserGestureMessage(unsigned int message) {
   switch (message) {
+    case WM_LBUTTONDOWN:
     case WM_LBUTTONUP:
+    case WM_RBUTTONDOWN:
     case WM_RBUTTONUP:
+    case WM_MBUTTONDOWN:
     case WM_MBUTTONUP:
+    case WM_KEYDOWN:
     case WM_KEYUP:
       return true;
 
@@ -1040,7 +1030,7 @@ void WebPluginDelegateImpl::WindowlessPaint(HDC hdc,
   // NOTE: NPAPI is not 64bit safe.  It puts pointers into 32bit values.
   paint_event.wParam = PtrToUlong(hdc);
   paint_event.lParam = PtrToUlong(&damage_rect_win);
-  static base::StatsRate plugin_paint("Plugin.Paint");
+  base::StatsRate plugin_paint("Plugin.Paint");
   base::StatsScope<base::StatsRate> scope(plugin_paint);
   instance()->NPP_HandleEvent(&paint_event);
   window_.window = old_dc;
@@ -1216,6 +1206,8 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     }
   }
 
+  HWND last_focus_window = NULL;
+
   if (ShouldTrackEventForModalLoops(&np_event)) {
     // A windowless plugin can enter a modal loop in a NPP_HandleEvent call.
     // For e.g. Flash puts up a context menu when we right click on the
@@ -1227,11 +1219,17 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     handle_event_message_filter_hook_ =
         SetWindowsHookEx(WH_MSGFILTER, HandleEventMessageFilterHook, NULL,
                          GetCurrentThreadId());
+    // To ensure that the plugin receives keyboard events we set focus to the
+    // dummy window.
+    // TODO(iyengar) We need a framework in the renderer to identify which
+    // windowless plugin is under the mouse and to handle this. This would
+    // also require some changes in RenderWidgetHost to detect this in the
+    // WM_MOUSEACTIVATE handler and inform the renderer accordingly.
+    last_focus_window = ::SetFocus(dummy_window_for_activation_);
   }
 
   bool old_task_reentrancy_state =
       MessageLoop::current()->NestableTasksAllowed();
-
 
   // Maintain a local/global stack for the g_current_plugin_instance variable
   // as this may be a nested invocation.
@@ -1241,7 +1239,18 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
 
   handle_event_depth_++;
 
+  bool popups_enabled = false;
+
+  if (IsUserGestureMessage(np_event.event)) {
+    instance()->PushPopupsEnabledState(true);
+    popups_enabled = true;
+  }
+
   bool ret = instance()->NPP_HandleEvent(&np_event) != 0;
+
+  if (popups_enabled) {
+    instance()->PopPopupsEnabledState();
+  }
 
   // Flash and SilverLight always return false, even when they swallow the
   // event.  Flash does this because it passes the event to its window proc,
@@ -1260,8 +1269,6 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
 
   g_current_plugin_instance = last_plugin_instance;
 
-  MessageLoop::current()->SetNestableTasksAllowed(old_task_reentrancy_state);
-
   // We could have multiple NPP_HandleEvent calls nested together in case
   // the plugin enters a modal loop. Reset the pump messages event when
   // the outermost NPP_HandleEvent call unwinds.
@@ -1269,6 +1276,33 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     ResetEvent(handle_event_pump_messages_event_);
   }
 
+  if (::IsWindow(last_focus_window)) {
+    // Restore the nestable tasks allowed state in the message loop and reset
+    // the os modal loop state as the plugin returned from the TrackPopupMenu
+    // API call.
+    MessageLoop::current()->SetNestableTasksAllowed(old_task_reentrancy_state);
+    MessageLoop::current()->set_os_modal_loop(false);
+    // The Flash plugin at times sets focus to its hidden top level window
+    // with class name SWFlash_PlaceholderX. This causes the chrome browser
+    // window to receive a WM_ACTIVATEAPP message as a top level window from
+    // another thread is now active. We end up in a state where the chrome
+    // browser window is not active even though the user clicked on it.
+    // Our workaround for this is to send over a raw
+    // WM_LBUTTONDOWN/WM_LBUTTONUP combination to the last focus window, which
+    // does the trick.
+    if (dummy_window_for_activation_ != ::GetFocus()) {
+      INPUT input_info = {0};
+      input_info.type = INPUT_MOUSE;
+      input_info.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+      ::SendInput(1, &input_info, sizeof(INPUT));
+
+      input_info.type = INPUT_MOUSE;
+      input_info.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+      ::SendInput(1, &input_info, sizeof(INPUT));
+    } else {
+      ::SetFocus(last_focus_window);
+    }
+  }
   return ret;
 }
 
@@ -1278,6 +1312,7 @@ void WebPluginDelegateImpl::OnModalLoopEntered() {
   SetEvent(handle_event_pump_messages_event_);
 
   MessageLoop::current()->SetNestableTasksAllowed(true);
+  MessageLoop::current()->set_os_modal_loop(true);
 
   UnhookWindowsHookEx(handle_event_message_filter_hook_);
   handle_event_message_filter_hook_ = NULL;
@@ -1298,8 +1333,6 @@ BOOL WINAPI WebPluginDelegateImpl::TrackPopupMenuPatch(
     HMENU menu, unsigned int flags, int x, int y, int reserved,
     HWND window, const RECT* rect) {
 
-  HWND last_focus_window = NULL;
-
   if (g_current_plugin_instance) {
     unsigned long window_process_id = 0;
     unsigned long window_thread_id =
@@ -1309,45 +1342,9 @@ BOOL WINAPI WebPluginDelegateImpl::TrackPopupMenuPatch(
     if (::GetCurrentThreadId() != window_thread_id) {
       window = g_current_plugin_instance->dummy_window_for_activation_;
     }
-
-    // To ensure that the plugin receives keyboard events we set focus to the
-    // dummy window.
-    // TODO(iyengar) We need a framework in the renderer to identify which
-    // windowless plugin is under the mouse and to handle this. This would
-    // also require some changes in RenderWidgetHost to detect this in the
-    // WM_MOUSEACTIVATE handler and inform the renderer accordingly.
-    if (g_current_plugin_instance->dummy_window_for_activation_) {
-      last_focus_window =
-          ::SetFocus(g_current_plugin_instance->dummy_window_for_activation_);
-    }
   }
 
   BOOL result = TrackPopupMenu(menu, flags, x, y, reserved, window, rect);
-
-  if (IsWindow(last_focus_window)) {
-    // The Flash plugin at times sets focus to its hidden top level window
-    // with class name SWFlash_PlaceholderX. This causes the chrome browser
-    // window to receive a WM_ACTIVATEAPP message as a top level window from
-    // another thread is now active. We end up in a state where the chrome
-    // browser window is not active even though the user clicked on it.
-    // Our workaround for this is to send over a raw
-    // WM_LBUTTONDOWN/WM_LBUTTONUP combination to the last focus window, which
-    // does the trick.
-    if (g_current_plugin_instance->dummy_window_for_activation_ !=
-        ::GetFocus()) {
-      INPUT input_info = {0};
-      input_info.type = INPUT_MOUSE;
-      input_info.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-      ::SendInput(1, &input_info, sizeof(INPUT));
-
-      input_info.type = INPUT_MOUSE;
-      input_info.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-      ::SendInput(1, &input_info, sizeof(INPUT));
-    } else {
-      ::SetFocus(last_focus_window);
-    }
-  }
-
   return result;
 }
 

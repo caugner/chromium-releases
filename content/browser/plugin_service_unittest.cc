@@ -5,7 +5,6 @@
 #include "content/browser/plugin_service.h"
 
 #include "base/auto_reset.h"
-#include "base/command_line.h"
 #include "chrome/test/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,17 +41,6 @@ class PluginServiceTest : public testing::Test {
 
   DISALLOW_COPY_AND_ASSIGN(PluginServiceTest);
 };
-
-TEST_F(PluginServiceTest, SetGetChromePluginDataDir) {
-  // Check that after setting the same plugin dir we just read it is set
-  // correctly.
-  FilePath plugin_data_dir = plugin_service_->GetChromePluginDataDir();
-  FilePath new_plugin_data_dir(FILE_PATH_LITERAL("/a/bogus/dir"));
-  plugin_service_->SetChromePluginDataDir(new_plugin_data_dir);
-  EXPECT_EQ(new_plugin_data_dir, plugin_service_->GetChromePluginDataDir());
-  plugin_service_->SetChromePluginDataDir(plugin_data_dir);
-  EXPECT_EQ(plugin_data_dir, plugin_service_->GetChromePluginDataDir());
-}
 
 TEST_F(PluginServiceTest, GetUILocale) {
   // Check for a non-empty locale string.

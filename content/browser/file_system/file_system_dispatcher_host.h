@@ -12,34 +12,40 @@
 #include "content/browser/browser_message_filter.h"
 #include "webkit/fileapi/file_system_types.h"
 
-namespace base {
-class Time;
-}
-
 class ChromeURLRequestContext;
-class FilePath;
 class GURL;
 class HostContentSettingsMap;
 class Profile;
 class Receiver;
 class RenderMessageFilter;
-class URLRequestContextGetter;
 
-namespace net {
-class URLRequestContext;
-}  // namespace net
+namespace base {
+class Time;
+}
+
+namespace content {
+class ResourceContext;
+}
 
 namespace fileapi {
 class FileSystemContext;
 class FileSystemOperation;
 }
 
+namespace net {
+class URLRequestContext;
+class URLRequestContextGetter;
+}  // namespace net
+
 class FileSystemDispatcherHost : public BrowserMessageFilter {
  public:
   // Used by the renderer.
-  explicit FileSystemDispatcherHost(Profile* profile);
+  FileSystemDispatcherHost(
+      const content::ResourceContext* resource_context,
+      HostContentSettingsMap* host_content_settings_map);
   // Used by the worker, since it has the context handy already.
-  explicit FileSystemDispatcherHost(ChromeURLRequestContext* context);
+  FileSystemDispatcherHost(ChromeURLRequestContext* request_context,
+                           fileapi::FileSystemContext* file_system_context);
   ~FileSystemDispatcherHost();
 
   // BrowserMessageFilter implementation.
@@ -56,35 +62,36 @@ class FileSystemDispatcherHost : public BrowserMessageFilter {
               int64 requested_size,
               bool create);
   void OnMove(int request_id,
-              const FilePath& src_path,
-              const FilePath& dest_path);
+              const GURL& src_path,
+              const GURL& dest_path);
   void OnCopy(int request_id,
-              const FilePath& src_path,
-              const FilePath& dest_path);
-  void OnRemove(int request_id, const FilePath& path, bool recursive);
-  void OnReadMetadata(int request_id, const FilePath& path);
+              const GURL& src_path,
+              const GURL& dest_path);
+  void OnRemove(int request_id, const GURL& path, bool recursive);
+  void OnReadMetadata(int request_id, const GURL& path);
   void OnCreate(int request_id,
-                const FilePath& path,
+                const GURL& path,
                 bool exclusive,
                 bool is_directory,
                 bool recursive);
-  void OnExists(int request_id, const FilePath& path, bool is_directory);
-  void OnReadDirectory(int request_id, const FilePath& path);
+  void OnExists(int request_id, const GURL& path, bool is_directory);
+  void OnReadDirectory(int request_id, const GURL& path);
   void OnWrite(int request_id,
-               const FilePath& path,
+               const GURL& path,
                const GURL& blob_url,
                int64 offset);
-  void OnTruncate(int request_id, const FilePath& path, int64 length);
+  void OnTruncate(int request_id, const GURL& path, int64 length);
   void OnTouchFile(int request_id,
-                   const FilePath& path,
+                   const GURL& path,
                    const base::Time& last_access_time,
                    const base::Time& last_modified_time);
   void OnCancel(int request_id, int request_to_cancel);
+  void OnOpenFile(int request_id, const GURL& path, int file_flags);
 
   // Creates a new FileSystemOperation.
   fileapi::FileSystemOperation* GetNewOperation(int request_id);
 
-  scoped_refptr<fileapi::FileSystemContext> context_;
+  fileapi::FileSystemContext* context_;
 
   // Used to look up permissions.
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
@@ -93,10 +100,10 @@ class FileSystemDispatcherHost : public BrowserMessageFilter {
   typedef IDMap<fileapi::FileSystemOperation> OperationsMap;
   OperationsMap operations_;
 
-  // This holds the URLRequestContextGetter until Init() can be called from the
+  // This holds the ResourceContext until Init() can be called from the
   // IO thread, which will extract the net::URLRequestContext from it.
-  scoped_refptr<URLRequestContextGetter> request_context_getter_;
-  scoped_refptr<net::URLRequestContext> request_context_;
+  const content::ResourceContext* resource_context_;
+  net::URLRequestContext* request_context_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemDispatcherHost);
 };

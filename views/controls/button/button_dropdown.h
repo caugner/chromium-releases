@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,30 +25,27 @@ class ButtonDropDown : public ImageButton {
   ButtonDropDown(ButtonListener* listener, ui::MenuModel* model);
   virtual ~ButtonDropDown();
 
-  // Accessibility accessors, overridden from View.
-  virtual string16 GetAccessibleDefaultAction() OVERRIDE;
-  virtual AccessibilityTypes::Role GetAccessibleRole() OVERRIDE;
-  virtual AccessibilityTypes::State GetAccessibleState() OVERRIDE;
-
- private:
-  // Overridden from CustomButton
-  virtual bool OnMousePressed(const MouseEvent& e);
-  virtual void OnMouseReleased(const MouseEvent& e, bool canceled);
-  virtual bool OnMouseDragged(const MouseEvent& e);
-  virtual void OnMouseExited(const MouseEvent& e);
-
-  // Overridden from View. Used to display the right-click menu, as triggered
-  // by the keyboard, for instance. Using the member function ShowDropDownMenu
-  // for the actual display.
+  // Overridden from views::View
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  // Showing the drop down results in a MouseCaptureLost, we need to ignore it.
+  virtual void OnMouseCaptureLost() OVERRIDE {}
+  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
+  // Display the right-click menu, as triggered by the keyboard, for instance.
+  // Using the member function ShowDropDownMenu for the actual display.
   virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture);
+                               bool is_mouse_gesture) OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
+ protected:
   // Overridden from CustomButton. Returns true if the button should become
   // pressed when a user holds the mouse down over the button. For this
   // implementation, both left and right mouse buttons can trigger a change
   // to the PUSHED state.
-  virtual bool ShouldEnterPushedState(const MouseEvent& e);
+  virtual bool ShouldEnterPushedState(const MouseEvent& event) OVERRIDE;
 
+ private:
   // Internal function to show the dropdown menu
   void ShowDropDownMenu(gfx::NativeView window);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,17 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "base/scoped_ptr.h"
 #include "base/time.h"
+#include "skia/ext/vector_platform_device_emf_win.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/gdi_util.h"
+#include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 namespace {
 const int kCustomGdiCommentSignature = 0xdeadbabe;
@@ -46,46 +49,44 @@ bool DIBFormatNativelySupported(HDC dc, uint32 escape, const BYTE* bits,
   return !!supported;
 }
 
-Emf::Emf() : emf_(NULL), hdc_(NULL) {
+Emf::Emf() : emf_(NULL), hdc_(NULL), page_count_(0) {
 }
 
 Emf::~Emf() {
-  CloseEmf();
-  DCHECK(!emf_ && !hdc_);
+  DCHECK(!hdc_);
+  if (emf_)
+    DeleteEnhMetaFile(emf_);
 }
 
-bool Emf::Init(const void* src_buffer, uint32 src_buffer_size) {
+bool Emf::InitToFile(const FilePath& metafile_path) {
   DCHECK(!emf_ && !hdc_);
-  emf_ = SetEnhMetaFileBits(src_buffer_size,
-                            reinterpret_cast<const BYTE*>(src_buffer));
-  return emf_ != NULL;
-}
-
-bool Emf::CreateDc(HDC sibling, const RECT* rect) {
-  DCHECK(!emf_ && !hdc_);
-  hdc_ = CreateEnhMetaFile(sibling, NULL, rect, NULL);
+  hdc_ = CreateEnhMetaFile(NULL, metafile_path.value().c_str(), NULL, NULL);
   DCHECK(hdc_);
   return hdc_ != NULL;
 }
 
-bool Emf::CreateFileBackedDc(HDC sibling, const RECT* rect,
-                             const FilePath& path) {
-  DCHECK(!emf_ && !hdc_);
-  DCHECK(!path.empty());
-  hdc_ = CreateEnhMetaFile(sibling, path.value().c_str(), rect, NULL);
-  DCHECK(hdc_);
-  return hdc_ != NULL;
-}
-
-bool Emf::CreateFromFile(const FilePath& metafile_path) {
+bool Emf::InitFromFile(const FilePath& metafile_path) {
   DCHECK(!emf_ && !hdc_);
   emf_ = GetEnhMetaFile(metafile_path.value().c_str());
   DCHECK(emf_);
   return emf_ != NULL;
 }
 
+bool Emf::Init() {
+  DCHECK(!emf_ && !hdc_);
+  hdc_ = CreateEnhMetaFile(NULL, NULL, NULL, NULL);
+  DCHECK(hdc_);
+  return hdc_ != NULL;
+}
 
-bool Emf::CloseDc() {
+bool Emf::InitFromData(const void* src_buffer, uint32 src_buffer_size) {
+  DCHECK(!emf_ && !hdc_);
+  emf_ = SetEnhMetaFileBits(src_buffer_size,
+                            reinterpret_cast<const BYTE*>(src_buffer));
+  return emf_ != NULL;
+}
+
+bool Emf::FinishDocument() {
   DCHECK(!emf_ && hdc_);
   emf_ = CloseEnhMetaFile(hdc_);
   DCHECK(emf_);
@@ -93,20 +94,12 @@ bool Emf::CloseDc() {
   return emf_ != NULL;
 }
 
-void Emf::CloseEmf() {
-  DCHECK(!hdc_);
-  if (emf_) {
-    DeleteEnhMetaFile(emf_);
-    emf_ = NULL;
-  }
-}
-
 bool Emf::Playback(HDC hdc, const RECT* rect) const {
   DCHECK(emf_ && !hdc_);
   RECT bounds;
   if (!rect) {
     // Get the natural bounds of the EMF buffer.
-    bounds = GetBounds().ToRECT();
+    bounds = GetPageBounds(1).ToRECT();
     rect = &bounds;
   }
   return PlayEnhMetaFile(hdc, emf_, rect) != 0;
@@ -123,11 +116,12 @@ bool Emf::SafePlayback(HDC context) const {
                          emf_,
                          &Emf::SafePlaybackProc,
                          reinterpret_cast<void*>(&base_matrix),
-                         &GetBounds().ToRECT()) != 0;
+                         &GetPageBounds(1).ToRECT()) != 0;
 }
 
-gfx::Rect Emf::GetBounds() const {
+gfx::Rect Emf::GetPageBounds(unsigned int page_number) const {
   DCHECK(emf_ && !hdc_);
+  DCHECK_EQ(1U, page_number);
   ENHMETAHEADER header;
   if (GetEnhMetaFileHeader(emf_, sizeof(header), &header) != sizeof(header)) {
     NOTREACHED();
@@ -162,7 +156,7 @@ bool Emf::GetData(void* buffer, uint32 size) const {
   return size2 == size && size2 != 0;
 }
 
-bool Emf::GetData(std::vector<uint8>* buffer) const {
+bool Emf::GetDataAsVector(std::vector<uint8>* buffer) const {
   uint32 size = GetDataSize();
   if (!size)
     return false;
@@ -173,8 +167,8 @@ bool Emf::GetData(std::vector<uint8>* buffer) const {
   return true;
 }
 
-bool Emf::SaveTo(const std::wstring& filename) const {
-  HANDLE file = CreateFile(filename.c_str(), GENERIC_WRITE,
+bool Emf::SaveTo(const FilePath& file_path) const {
+  HANDLE file = CreateFile(file_path.value().c_str(), GENERIC_WRITE,
                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                            CREATE_ALWAYS, 0, NULL);
   if (file == INVALID_HANDLE_VALUE)
@@ -182,7 +176,7 @@ bool Emf::SaveTo(const std::wstring& filename) const {
 
   bool success = false;
   std::vector<uint8> buffer;
-  if (GetData(&buffer)) {
+  if (GetDataAsVector(&buffer)) {
     DWORD written = 0;
     if (WriteFile(file, &*buffer.begin(), static_cast<DWORD>(buffer.size()),
                   &written, NULL) &&
@@ -409,16 +403,31 @@ bool Emf::Record::SafePlayback(const XFORM* base_matrix) const {
   return res;
 }
 
-bool Emf::StartPage() {
+skia::PlatformDevice* Emf::StartPageForVectorCanvas(
+    const gfx::Size& page_size, const gfx::Point& content_origin,
+    const float& scale_factor) {
+  if (!StartPage(page_size, content_origin, scale_factor))
+    return NULL;
+
+  return skia::VectorPlatformDeviceEmfFactory::CreateDevice(page_size.width(),
+                                                            page_size.height(),
+                                                            true, hdc_);
+}
+
+bool Emf::StartPage(const gfx::Size& /*page_size*/,
+                    const gfx::Point& /*content_origin*/,
+                    const float& scale_factor) {
+  DCHECK_EQ(1.0f, scale_factor);  // We don't support scaling here.
   DCHECK(hdc_);
   if (!hdc_)
     return false;
+  page_count_++;
   PageBreakRecord record(PageBreakRecord::START_PAGE);
   return !!GdiComment(hdc_, sizeof(record),
                       reinterpret_cast<const BYTE *>(&record));
 }
 
-bool Emf::EndPage() {
+bool Emf::FinishPage() {
   DCHECK(hdc_);
   if (!hdc_)
     return false;
@@ -426,7 +435,6 @@ bool Emf::EndPage() {
   return !!GdiComment(hdc_, sizeof(record),
                       reinterpret_cast<const BYTE *>(&record));
 }
-
 
 Emf::Enumerator::Enumerator(const Emf& emf, HDC context, const RECT* rect) {
   context_.handle_table = NULL;

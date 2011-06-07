@@ -31,8 +31,7 @@ class MediatorThread {
 
     virtual void OnSubscriptionStateChange(bool subscribed) = 0;
 
-    virtual void OnIncomingNotification(
-        const IncomingNotificationData& notification_data) = 0;
+    virtual void OnIncomingNotification(const Notification& notification) = 0;
 
     virtual void OnOutgoingNotification() = 0;
   };
@@ -47,10 +46,16 @@ class MediatorThread {
   virtual void Login(const buzz::XmppClientSettings& settings) = 0;
   virtual void Logout() = 0;
   virtual void Start() = 0;
-  virtual void SubscribeForUpdates(
-      const std::vector<std::string>& subscribed_services_list) = 0;
+  virtual void SubscribeForUpdates(const SubscriptionList& subscriptions) = 0;
   virtual void ListenForUpdates() = 0;
-  virtual void SendNotification(const OutgoingNotificationData& data) = 0;
+  virtual void SendNotification(const Notification& data) = 0;
+  // UpdateXmppSettings is used to update the user information (typically the
+  // auth token) AFTER a call to Login and BEFORE a call to Logout(). This will
+  // not cause an immediate reconnect. The updated settings will be used the
+  // next time we attempt a reconnect because of a broken connection.
+  // The typical use-case for this is to update OAuth2 access tokens which
+  // expire every hour.
+  virtual void UpdateXmppSettings(const buzz::XmppClientSettings& settings) = 0;
 };
 
 }  // namespace notifier

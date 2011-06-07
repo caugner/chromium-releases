@@ -39,14 +39,15 @@ class MockMediatorThread : public MediatorThread {
 
   virtual void Start();
 
-  virtual void SubscribeForUpdates(
-      const std::vector<std::string>& subscribed_services_list);
+  virtual void SubscribeForUpdates(const SubscriptionList& subscriptions);
 
   virtual void ListenForUpdates();
 
-  virtual void SendNotification(const OutgoingNotificationData &);
+  virtual void SendNotification(const Notification &);
+  virtual void UpdateXmppSettings(const buzz::XmppClientSettings& settings);
 
-  void ReceiveNotification(const IncomingNotificationData& data);
+
+  void ReceiveNotification(const Notification& data);
 
   Observer* observer_;
   // Internal State
@@ -56,6 +57,7 @@ class MockMediatorThread : public MediatorThread {
   int subscribe_calls;
   int listen_calls;
   int send_calls;
+  int update_settings_calls;
 };
 
 }  // namespace notifier

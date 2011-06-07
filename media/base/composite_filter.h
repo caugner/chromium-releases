@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@ class CompositeFilter : public Filter {
   bool AddFilter(scoped_refptr<Filter> filter);
 
   // media::Filter methods.
-  virtual const char* major_mime_type() const;
   virtual void set_host(FilterHost* host);
   virtual FilterHost* host();
   virtual void Play(FilterCallback* play_callback);
@@ -39,7 +38,7 @@ class CompositeFilter : public Filter {
  protected:
   virtual ~CompositeFilter();
 
-  void SetError(PipelineError error);
+  void SetError(PipelineStatus error);
 
  private:
   class FilterHostImpl;
@@ -90,10 +89,10 @@ class CompositeFilter : public Filter {
   void OnCallSequenceDone();
 
   // Helper function for sending an error to the FilterHost.
-  void SendErrorToHost(PipelineError error);
+  void SendErrorToHost(PipelineStatus error);
 
   // Helper function for handling errors during call sequences.
-  void HandleError(PipelineError error);
+  void HandleError(PipelineStatus error);
 
   // Creates a callback that can be called from any thread, but is guaranteed
   // to call the specified method on the thread associated with this filter.
@@ -131,8 +130,8 @@ class CompositeFilter : public Filter {
   // object.
   scoped_ptr<FilterHostImpl> host_impl_;
 
-  // Error passed in the last SetError() call.
-  PipelineError error_;
+  // PIPELINE_OK, or last error passed to SetError().
+  PipelineStatus status_;
 
   scoped_ptr<ScopedRunnableMethodFactory<CompositeFilter> > runnable_factory_;
 

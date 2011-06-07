@@ -9,10 +9,11 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/singleton.h"
 #include "base/platform_file.h"
-#include "base/ref_counted.h"
-#include "base/singleton.h"
 #include "base/tracked_objects.h"
+#include "webkit/fileapi/file_system_types.h"
 
 namespace base {
 struct PlatformFileInfo;
@@ -24,7 +25,6 @@ namespace fileapi {
 
 using base::PlatformFile;
 using base::PlatformFileError;
-
 class FileSystemOperationContext;
 
 // A large part of this implementation is taken from base::FileUtilProxy.
@@ -64,11 +64,21 @@ class FileSystemFileUtil {
       FileSystemOperationContext* context,
       const FilePath& file_path, bool* created);
 
-  // Retrieves the information about a file. It is invalid to pass NULL for the
+  // Maps |virtual_path| given |context| into |local_path| which represents
+  // physical file location on the host OS. This may not always make sense for
+  // all subclasses.
+  virtual PlatformFileError GetLocalFilePath(
+      FileSystemOperationContext* context,
+      const FilePath& virtual_path,
+      FilePath* local_path);
+
+  // Retrieves the information about a file.  It is invalid to pass NULL for the
   // callback.
   virtual PlatformFileError GetFileInfo(
       FileSystemOperationContext* context,
-      const FilePath& file_, base::PlatformFileInfo* file_info);
+      const FilePath& file_,
+      base::PlatformFileInfo* file_info,
+      FilePath* platform_path);
 
   virtual PlatformFileError ReadDirectory(
       FileSystemOperationContext* context,
@@ -83,19 +93,24 @@ class FileSystemFileUtil {
       bool exclusive,
       bool recursive);
 
+  // TODO(dmikurube): Make this method non-virtual if it's possible.
+  // It conflicts with LocalFileSystemFileUtil for now.
+  //
   // Copies a file or a directory from |src_file_path| to |dest_file_path|
   // Error cases:
-  // If destination file doesn't exist or destination's parent
-  // doesn't exists.
+  // If destination's parent doesn't exist.
   // If source dir exists but destination path is an existing file.
   // If source file exists but destination path is an existing directory.
   // If source is a parent of destination.
-  // If source doesn't exists.
+  // If source doesn't exist.
   virtual PlatformFileError Copy(
       FileSystemOperationContext* context,
       const FilePath& src_file_path,
       const FilePath& dest_file_path);
 
+  // TODO(dmikurube): Make this method non-virtual if it's possible.
+  // It conflicts with LocalFileSystemFileUtil for now.
+  //
   // Moves a file or a directory from src_file_path to dest_file_path.
   // Error cases are similar to Copy method's error cases.
   virtual PlatformFileError Move(
@@ -125,8 +140,64 @@ class FileSystemFileUtil {
       const FilePath& path,
       int64 length);
 
+  // It will be implemented by each subclass such as FileSystemFileEnumerator.
+  class AbstractFileEnumerator {
+   public:
+    virtual ~AbstractFileEnumerator() {}
+
+    // Returns an empty string if there are no more results.
+    virtual FilePath Next() = 0;
+
+    virtual bool IsDirectory() = 0;
+  };
+
  protected:
   FileSystemFileUtil() { }
+
+  // This also removes the destination directory if it's non-empty and all
+  // other checks are passed (so that the copy/move correctly overwrites the
+  // destination).
+  // This method is non-virtual, not to be overridden.
+  PlatformFileError PerformCommonCheckAndPreparationForMoveAndCopy(
+      FileSystemOperationContext* unused,
+      const FilePath& src_file_path,
+      const FilePath& dest_file_path);
+
+  virtual bool PathExists(
+      FileSystemOperationContext* unused,
+      const FilePath& file_path);
+
+  virtual bool DirectoryExists(
+      FileSystemOperationContext* unused,
+      const FilePath& file_path);
+
+  virtual bool IsDirectoryEmpty(
+      FileSystemOperationContext* unused,
+      const FilePath& file_path);
+
+  // Copies or moves a single file.
+  virtual PlatformFileError CopyOrMoveFile(
+      FileSystemOperationContext* context,
+      const FilePath& src_file_path,
+      const FilePath& dest_file_path,
+      bool copy);
+
+  // Performs recursive copy by calling CopyOrMoveFile for individual files.
+  // Operations for recursive traversal are encapsulated in this method.
+  // It assumes src_file_path and dest_file_path have passed
+  // PerformCommonCheckAndPreparationForMoveAndCopy().
+  // This method is non-virtual, not to be overridden.
+  PlatformFileError CopyDirectory(
+      FileSystemOperationContext* context,
+      const FilePath& src_file_path,
+      const FilePath& dest_file_path);
+
+  // Returns a pointer to a new instance of AbstractFileEnumerator which is
+  // implemented for each FileUtil subclass. The instance needs to be freed
+  // by the caller.
+  virtual AbstractFileEnumerator* CreateFileEnumerator(
+      const FilePath& root_path);
+
   friend struct DefaultSingletonTraits<FileSystemFileUtil>;
   DISALLOW_COPY_AND_ASSIGN(FileSystemFileUtil);
 };

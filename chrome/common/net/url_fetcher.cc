@@ -8,12 +8,11 @@
 
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
-#include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/base/io_buffer.h"
@@ -22,11 +21,10 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_throttler_manager.h"
 
 static const int kBufferSize = 4096;
-
-bool URLFetcher::g_interception_enabled = false;
 
 class URLFetcher::Core
     : public base::RefCountedThreadSafe<URLFetcher::Core>,
@@ -35,7 +33,7 @@ class URLFetcher::Core
   // For POST requests, set |content_type| to the MIME type of the content
   // and set |content| to the data to upload.  |flags| are flags to apply to
   // the load operation--these should be one or more of the LOAD_* flags
-  // defined in url_request.h.
+  // defined in net/base/load_flags.h.
   Core(URLFetcher* fetcher,
        const GURL& original_url,
        RequestType request_type,
@@ -77,13 +75,17 @@ class URLFetcher::Core
 
     void CancelAll();
 
+    int size() const {
+      return fetchers_.size();
+    }
+
    private:
     std::set<Core*> fetchers_;
 
     DISALLOW_COPY_AND_ASSIGN(Registry);
   };
 
-  ~Core();
+  virtual ~Core();
 
   // Wrapper functions that allow us to ensure actions happen on the right
   // thread.
@@ -125,7 +127,7 @@ class URLFetcher::Core
   std::string data_;                 // Results of the request
   scoped_refptr<net::IOBuffer> buffer_;
                                      // Read buffer
-  scoped_refptr<URLRequestContextGetter> request_context_getter_;
+  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
                                      // Cookie/cache info for the request
   ResponseCookies cookies_;          // Response cookies
   net::HttpRequestHeaders extra_request_headers_;
@@ -181,12 +183,8 @@ void URLFetcher::Core::Registry::RemoveURLFetcherCore(Core* core) {
 }
 
 void URLFetcher::Core::Registry::CancelAll() {
-  std::set<Core*> fetchers;
-  fetchers.swap(fetchers_);
-
-  for (std::set<Core*>::iterator it = fetchers.begin();
-       it != fetchers.end(); ++it)
-    (*it)->CancelURLRequest();
+  while (!fetchers_.empty())
+    (*fetchers_.begin())->CancelURLRequest();
 }
 
 // static
@@ -195,6 +193,9 @@ base::LazyInstance<URLFetcher::Core::Registry>
 
 // static
 URLFetcher::Factory* URLFetcher::factory_ = NULL;
+
+// static
+bool URLFetcher::g_interception_enabled = false;
 
 URLFetcher::URLFetcher(const GURL& url,
                        RequestType request_type,
@@ -550,7 +551,7 @@ void URLFetcher::set_extra_request_headers(
 }
 
 void URLFetcher::set_request_context(
-    URLRequestContextGetter* request_context_getter) {
+    net::URLRequestContextGetter* request_context_getter) {
   core_->request_context_getter_ = request_context_getter;
 }
 
@@ -577,6 +578,11 @@ void URLFetcher::ReceivedContentWasMalformed() {
 // static
 void URLFetcher::CancelAll() {
   Core::CancelAll();
+}
+
+// static
+int URLFetcher::GetNumFetcherCores() {
+  return Core::g_registry.Get().size();
 }
 
 URLFetcher::Delegate* URLFetcher::delegate() const {

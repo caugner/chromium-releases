@@ -22,7 +22,10 @@ class ChannelInfo {
  public:
 
   // Initialize an instance from the "ap" value in a given registry key.
-  // Returns false if the value could not be read from the registry.
+  // Returns false if the value is present but could not be read from the
+  // registry. Returns true if the value was not present or could be read.
+  // Also returns true if the key is not valid.
+  // An absent "ap" value is treated identically to an empty "ap" value.
   bool Initialize(const base::win::RegKey& key);
 
   // Writes the info to the "ap" value in a given registry key.
@@ -79,6 +82,15 @@ class ChannelInfo {
   // Adds or removes the -readymode modifier, returning true if the value is
   // modified.
   bool SetReadyMode(bool value);
+
+  // Adds the -stage: modifier with the given string (if |stage| is non-NULL) or
+  // removes the -stage: modifier (otherwise), returning true if the value is
+  // modified.
+  bool SetStage(const wchar_t* stage);
+
+  // Returns the string identifying the current stage, or an empty string if the
+  // -stage: modifier is not present in the value.
+  std::wstring GetStage() const;
 
   // Returns true if the -full suffix is present in the value.
   bool HasFullSuffix() const;
