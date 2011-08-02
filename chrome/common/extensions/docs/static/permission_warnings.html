@@ -211,24 +211,24 @@ that trigger them.
     <!-- HasEffectiveAccessToAllHosts() -->
     Any of the following:
     <ul>
-      <li> "proxy" permission </li>
       <li> "debugger" permission </li>
+      <li> "proxy" permission </li>
       <li> A match pattern in the "permissions" field
         that matches all hosts </li>
       <li> A&nbsp;"content_scripts" field with a "matches" entry
         that matches all hosts </li>
-      <li> "devtools_page" (experimental) </li>
+      <li> "devtools_page" </li>
     </ul>
   </td>
   <td>
     <p>
-      The "proxy" permission is required by the
-      <a href="experimental.proxy.html">experimental proxy</a> module.
+      The "debugger" permission is required by the experimental
+      <a href="experimental.debugger.html">debugger</a> module.
     </p>
 
     <p>
-      The "debugger" permission is required by the
-      <a href="experimental.debugger.html">experimental debugger</a> module.
+      The "proxy" permission is required by the
+      <a href="proxy.html"><code>chrome.proxy</code></a> module.
     </p>
 
     <p>
@@ -312,6 +312,24 @@ that trigger them.
     without prompting the user for permission.
   </td>
 </tr>
+
+<tr>
+  <td style="font-weight:bold">
+    <!-- IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD-->
+    Data you copy and paste
+  </td>
+  <td>
+    "clipboardRead" permission
+  </td>
+  <td>
+    Allows the extension to use the following editing commands with
+    <code>document.execCommand()</code>:
+    <ul>
+      <li> <code>"copy"</code> </li>
+      <li> <code>"cut"</code> </li>
+    </ul>
+  </td>
+</tr>
 </table>
 </p>
 
@@ -324,6 +342,7 @@ The following permissions don't result in a warning:
 
 <ul>
   <li>"chrome://favicon/"</li>
+  <li>"clipboardWrite"</li>
   <li>"contextMenus"</li>
   <li>"cookies"</li>
   <li>"experimental"</li>
