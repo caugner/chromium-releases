@@ -7,7 +7,6 @@
     {
       'target_name': 'gtest',
       'type': 'static_library',
-      'msvs_guid': 'BFE8E2A7-3B3B-43B0-A994-3058B852DB8B',
       'sources': [
         'gtest/include/gtest/gtest-death-test.h',
         'gtest/include/gtest/gtest-message.h',
@@ -133,9 +132,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

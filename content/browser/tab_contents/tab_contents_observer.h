@@ -18,28 +18,6 @@ struct ViewHostMsg_FrameNavigate_Params;
 class TabContentsObserver : public IPC::Channel::Listener,
                             public IPC::Message::Sender {
  public:
-  // Use this as a member variable in a class that uses the empty constructor
-  // version of this interface.  On destruction of TabContents being observed,
-  // the registrar must either be destroyed or explicitly set to observe
-  // another TabContents.
-  class Registrar {
-   public:
-    explicit Registrar(TabContentsObserver* observer);
-    ~Registrar();
-
-    // Call this to start observing a tab.  Passing in NULL resets it.
-    // This can only be used to watch one tab at a time.  If you call this and
-    // you're already observing another tab, the old tab won't be observed
-    // afterwards.
-    void Observe(TabContents* tab);
-
-   private:
-    TabContentsObserver* observer_;
-    TabContents* tab_;
-
-    DISALLOW_COPY_AND_ASSIGN(Registrar);
-  };
-
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual void NavigateToPendingEntry(
       const GURL& url,
@@ -89,7 +67,7 @@ class TabContentsObserver : public IPC::Channel::Listener,
 
   // Notifies the delegate that this contents is starting or is done loading
   // some resource. The delegate should use this notification to represent
-  // loading feedback. See TabContents::is_loading()
+  // loading feedback. See TabContents::IsLoading()
   virtual void LoadingStateChanged(TabContents* contents) { }
   // Called to inform the delegate that the tab content's navigation state
   // changed. The |changed_flags| indicates the parts of the navigation state
@@ -99,17 +77,24 @@ class TabContentsObserver : public IPC::Channel::Listener,
                                       unsigned changed_flags) { }
 #endif
 
+  // IPC::Message::Sender implementation.
+  virtual bool Send(IPC::Message* message);
+  int routing_id() const;
+
  protected:
   // Use this constructor when the object is tied to a single TabContents for
   // its entire lifetime.
   explicit TabContentsObserver(TabContents* tab_contents);
 
   // Use this constructor when the object wants to observe a TabContents for
-  // part of its lifetime.  It can use a TabContentsRegistrar member variable
-  // to start and stop observing.
+  // part of its lifetime.  It can then call Observe() to start and stop
+  // observing.
   TabContentsObserver();
 
   virtual ~TabContentsObserver();
+
+  // Start observing a different TabContents; used with the default constructor.
+  void Observe(TabContents* tab_contents);
 
   // Invoked when the TabContents is being destroyed. Gives subclasses a chance
   // to cleanup. At the time this is invoked |tab_contents()| returns NULL.
@@ -119,17 +104,7 @@ class TabContentsObserver : public IPC::Channel::Listener,
   // IPC::Channel::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message);
 
-  // IPC::Message::Sender implementation.
-  virtual bool Send(IPC::Message* message);
-
   TabContents* tab_contents() const { return tab_contents_; }
-  int routing_id() const;
-
- protected:
-  friend class Registrar;
-
-  // Called from TabContents in response to having |this| added as an observer.
-  void SetTabContents(TabContents* tab_contents);
 
  private:
   friend class TabContents;

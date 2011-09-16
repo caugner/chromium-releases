@@ -37,7 +37,11 @@
           'common/child_process_logging_linux.cc',
           'common/child_process_logging_mac.mm',
           'common/child_process_logging_win.cc',
+          'common/chrome_notification_types.h',
           'common/chrome_version_info.cc',
+          'common/chrome_version_info_linux.cc',
+          'common/chrome_version_info_mac.mm',
+          'common/chrome_version_info_win.cc',
           'common/chrome_version_info.h',
           'common/content_settings.cc',
           'common/content_settings.h',
@@ -73,8 +77,6 @@
           'common/switch_utils.h',
           'common/time_format.cc',
           'common/time_format.h',
-          'common/win_safe_util.cc',
-          'common/win_safe_util.h',
         ],
       }],
     ],
@@ -83,7 +85,6 @@
     {
       'target_name': 'common',
       'type': 'static_library',
-      'msvs_guid': '899F1280-3441-4D1F-BA04-CCD6208D9146',
       'variables': {
         'chrome_common_target': 1,
       },
@@ -105,10 +106,9 @@
         'common_net',
         'default_plugin/default_plugin.gyp:default_plugin',
         'safe_browsing_csd_proto',
+        'safe_browsing_proto',
         'theme_resources',
         'theme_resources_standard',
-        '../app/app.gyp:app_base',
-        '../app/app.gyp:app_resources',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:base_static',
@@ -122,8 +122,10 @@
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libxml/libxml.gyp:libxml',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../third_party/sqlite/sqlite.gyp:sqlite',
         '../third_party/zlib/zlib.gyp:zlib',
+        '../ui/ui.gyp:ui_resources',
         '../webkit/support/webkit_support.gyp:glue',
       ],
       'sources': [
@@ -144,11 +146,12 @@
         'common/cloud_print/cloud_print_proxy_info.cc',
         'common/cloud_print/cloud_print_proxy_info.h',
         'common/common_api.h',
-        'common/common_glue.cc',
         'common/common_message_generator.cc',
         'common/common_message_generator.h',
         'common/common_param_traits.cc',
         'common/common_param_traits.h',
+        'common/custom_handlers/protocol_handler.cc',
+        'common/custom_handlers/protocol_handler.h',
         'common/default_plugin.cc',
         'common/default_plugin.h',
         'common/deprecated/event_sys-inl.h',
@@ -173,6 +176,8 @@
         'common/extensions/extension_message_bundle.h',
         'common/extensions/extension_messages.cc',
         'common/extensions/extension_messages.h',
+        'common/extensions/extension_permission_set.cc',
+        'common/extensions/extension_permission_set.h',
         'common/extensions/extension_resource.cc',
         'common/extensions/extension_resource.h',
         'common/extensions/extension_set.cc',
@@ -215,6 +220,9 @@
         'common/random.h',
         'common/render_messages.cc',
         'common/render_messages.h',
+        'common/scoped_co_mem.h',
+        '<(protoc_out_dir)/chrome/common/safe_browsing/client_model.pb.cc',
+        '<(protoc_out_dir)/chrome/common/safe_browsing/client_model.pb.h',
         '<(protoc_out_dir)/chrome/common/safe_browsing/csd.pb.cc',
         '<(protoc_out_dir)/chrome/common/safe_browsing/csd.pb.h',
         'common/search_provider.h',
@@ -231,7 +239,6 @@
         'common/spellcheck_messages.h',
         'common/sqlite_utils.cc',
         'common/sqlite_utils.h',
-        'common/text_input_client_messages.cc',
         'common/text_input_client_messages.h',
         'common/thumbnail_score.cc',
         'common/thumbnail_score.h',
@@ -334,9 +341,15 @@
           ],
         }],
       ],
+      # This target exports a hard_dependency because its include files
+      # include generated header files from safe_browsing_csd_proto and
+      # safe_browsing_proto.
+      'hard_dependency': 1,
       'export_dependent_settings': [
-        '../app/app.gyp:app_base',
         '../base/base.gyp:base',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+        'safe_browsing_csd_proto',
+        'safe_browsing_proto',
       ],
     },
     {
@@ -355,8 +368,12 @@
         'common/net/gaia/gaia_authenticator.h',
         'common/net/gaia/gaia_oauth_client.cc',
         'common/net/gaia/gaia_oauth_client.h',
+        'common/net/gaia/gaia_urls.cc',
+        'common/net/gaia/gaia_urls.h',
         'common/net/gaia/google_service_auth_error.cc',
         'common/net/gaia/google_service_auth_error.h',
+        'common/net/gaia/oauth_request_signer.cc',
+        'common/net/gaia/oauth_request_signer.h',
         'common/net/x509_certificate_model.cc',
         'common/net/x509_certificate_model_nss.cc',
         'common/net/x509_certificate_model_openssl.cc',
@@ -365,8 +382,8 @@
       'dependencies': [
         'chrome_resources',
         'chrome_strings',
-        '../app/app.gyp:app_base',
         '../base/base.gyp:base',
+        '../crypto/crypto.gyp:crypto',
         '../gpu/gpu.gyp:gpu_ipc',
         '../net/net.gyp:net_resources',
         '../net/net.gyp:net',
@@ -398,6 +415,51 @@
           },
         ],
        ],
+    },
+    {
+      # Protobuf compiler / generator for the safebrowsing client model proto.
+      'target_name': 'safe_browsing_proto',
+      'type': 'none',
+      'sources': [ 'common/safe_browsing/client_model.proto' ],
+      'rules': [
+        {
+          'rule_name': 'genproto',
+          'extension': 'proto',
+          'inputs': [
+            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+          ],
+          'variables': {
+            # The protoc compiler requires a proto_path argument with the
+            # directory containing the .proto file.
+            # There's no generator variable that corresponds to this, so fake
+            # it.
+            'rule_input_relpath': 'common/safe_browsing',
+          },
+          'outputs': [
+            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.h',
+            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.cc',
+          ],
+          'action': [
+            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+            '--proto_path=./<(rule_input_relpath)',
+            './<(rule_input_relpath)/<(RULE_INPUT_ROOT)<(RULE_INPUT_EXT)',
+            '--cpp_out=<(protoc_out_dir)/chrome/<(rule_input_relpath)',
+          ],
+          'message': 'Generating C++ code from <(RULE_INPUT_PATH)',
+        },
+      ],
+      'dependencies': [
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+        '../third_party/protobuf/protobuf.gyp:protoc#host',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(protoc_out_dir)',
+        ]
+      },
+      'export_dependent_settings': [
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+      ],
     },
     {
       # Protobuf compiler / generator for the safebrowsing client-side detection
@@ -445,7 +507,6 @@
       'export_dependent_settings': [
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
       ],
-      'hard_dependency': 1,
     },
   ],
   'conditions': [
@@ -454,7 +515,6 @@
         {
           'target_name': 'common_nacl_win64',
           'type': 'static_library',
-          'msvs_guid': '3AB5C5E9-470C-419B-A0AE-C7381FB632FA',
           'variables': {
             'chrome_common_target': 1,
           },
@@ -466,11 +526,11 @@
             'chrome_strings',
             'common_constants_win64',
             'app/policy/cloud_policy_codegen.gyp:policy_win64',
-            '../app/app.gyp:app_base_nacl_win64',
-            '../app/app.gyp:app_resources',
             '../base/base.gyp:base_nacl_win64',
             '../ipc/ipc.gyp:ipc_win64',
             '../third_party/libxml/libxml.gyp:libxml',
+            '../ui/ui.gyp:ui_nacl_win64',
+            '../ui/ui.gyp:ui_resources',
           ],
           'include_dirs': [
             '../third_party/icu/public/i18n',

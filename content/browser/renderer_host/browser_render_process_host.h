@@ -59,9 +59,11 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual void WidgetHidden();
   virtual int VisibleWidgetCount() const;
   virtual bool FastShutdownIfPossible();
-  virtual bool SendWithTimeout(IPC::Message* msg, int timeout_ms);
   virtual base::ProcessHandle GetHandle();
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id);
+  virtual void SetCompositingSurface(
+      int render_widget_id,
+      gfx::PluginWindowHandle compositing_surface);
 
   // IPC::Channel::Sender via RenderProcessHost.
   virtual bool Send(IPC::Message* msg);
@@ -85,6 +87,7 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   void SuddenTerminationChanged(bool enabled);
   void OnUserMetricsRecordAction(const std::string& action);
   void OnRevealFolderInOS(const FilePath& path);
+  void OnSavedPageAsMHTML(int job_id, bool success);
 
   // Generates a command line to be used to spawn a renderer and appends the
   // results to |*command_line|.

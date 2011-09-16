@@ -9,11 +9,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ssl/ssl_add_cert_handler.h"
-#include "chrome/browser/ssl/ssl_client_auth_handler.h"
 #include "chrome/browser/ssl_client_certificate_selector.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/tab_contents/infobar.h"
 #include "chrome/browser/tab_contents/simple_alert_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
 #include "grit/generated_resources.h"
@@ -89,7 +91,7 @@ string16 SSLCertAddedInfoBarDelegate::GetButtonLabel(
 }
 
 bool SSLCertAddedInfoBarDelegate::Accept() {
-  ShowCertificateViewer(tab_contents_->GetMessageBoxRootWindow(), cert_);
+  ShowCertificateViewer(tab_contents_->GetDialogRootWindow(), cert_);
   return false;  // Hiding the infobar just as the dialog opens looks weird.
 }
 
@@ -113,7 +115,7 @@ class TabContentsSSLHelper::SSLAddCertData : public NotificationObserver {
 
  private:
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -128,9 +130,11 @@ TabContentsSSLHelper::SSLAddCertData::SSLAddCertData(
     TabContentsWrapper* tab_contents)
     : tab_contents_(tab_contents),
       infobar_delegate_(NULL) {
-  Source<TabContents> source(tab_contents_->tab_contents());
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_INFOBAR_REMOVED, source);
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_INFOBAR_REPLACED, source);
+  Source<TabContentsWrapper> source(tab_contents_);
+  registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
+                 source);
+  registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REPLACED,
+                 source);
 }
 
 TabContentsSSLHelper::SSLAddCertData::~SSLAddCertData() {
@@ -152,14 +156,15 @@ void TabContentsSSLHelper::SSLAddCertData::ShowErrorInfoBar(
 }
 
 void TabContentsSSLHelper::SSLAddCertData::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  typedef std::pair<InfoBarDelegate*, InfoBarDelegate*> InfoBarDelegatePair;
+  DCHECK(type == chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED ||
+         type == chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REPLACED);
   if (infobar_delegate_ ==
-      ((type.value == NotificationType::TAB_CONTENTS_INFOBAR_REMOVED) ?
-          Details<InfoBarDelegate>(details).ptr() :
-          Details<InfoBarDelegatePair>(details).ptr()->first))
+      ((type == chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED) ?
+          Details<InfoBarRemovedDetails>(details)->first :
+          Details<InfoBarReplacedDetails>(details)->first))
     infobar_delegate_ = NULL;
 }
 

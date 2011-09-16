@@ -13,7 +13,7 @@
 
 namespace installer {
 class ChannelInfo;
-class InstallerState;
+class InstallationState;
 }
 
 // This class provides accessors to the Google Update 'ClientState' information
@@ -46,7 +46,7 @@ class GoogleUpdateSettings {
 
   // Sets the machine-wide EULA consented flag required on OEM installs.
   // Returns false if the setting could not be recorded.
-  static bool SetEULAConsent(const installer::InstallerState& installer_state,
+  static bool SetEULAConsent(const installer::InstallationState& machine_state,
                              bool consented);
 
   // Returns the last time chrome was run in days. It uses a recorded value
@@ -76,6 +76,11 @@ class GoogleUpdateSettings {
   // Returns in |brand| the RLZ brand code or distribution tag that has been
   // assigned to a partner. Returns false if the information is not available.
   static bool GetBrand(std::wstring* brand);
+
+  // Returns in |brand| the RLZ reactivation brand code or distribution tag
+  // that has been assigned to a partner for reactivating a dormant chrome
+  // install. Returns false if the information is not available.
+  static bool GetReactivationBrand(std::wstring* brand);
 
   // Returns in |client| the google_update client field, which is currently
   // used to track experiments. Returns false if the entry does not exist.

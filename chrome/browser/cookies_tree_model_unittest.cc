@@ -7,21 +7,22 @@
 #include <string>
 
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/content_settings/stub_settings_observer.h"
+#include "chrome/browser/content_settings/mock_settings_observer.h"
 #include "chrome/browser/mock_browsing_data_appcache_helper.h"
 #include "chrome/browser/mock_browsing_data_database_helper.h"
 #include "chrome/browser/mock_browsing_data_file_system_helper.h"
 #include "chrome/browser/mock_browsing_data_indexed_db_helper.h"
 #include "chrome/browser/mock_browsing_data_local_storage_helper.h"
 #include "chrome/test/testing_profile.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
-#include "content/common/notification_type.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "base/utf_string_conversions.h"
 
+using ::testing::_;
 
 namespace {
 
@@ -120,7 +121,7 @@ class CookiesTreeModelTest : public testing::Test {
   std::string GetNodesOfChildren(
       const CookieTreeNode* node,
       CookieTreeNode::DetailedInfo::NodeType node_type) {
-    if (node->child_count()) {
+    if (!node->empty()) {
       std::string retval;
       for (int i = 0; i < node->child_count(); ++i) {
         retval += GetNodesOfChildren(node->GetChild(i), node_type);
@@ -840,8 +841,6 @@ TEST_F(CookiesTreeModelTest, OriginOrdering) {
 
 TEST_F(CookiesTreeModelTest, ContentSettings) {
   GURL host("http://example.com/");
-  ContentSettingsPattern pattern =
-      ContentSettingsPattern::FromString("[*.]example.com");
   net::CookieMonster* monster = profile_->GetCookieMonster();
   monster->SetCookie(host, "A=1");
 
@@ -857,7 +856,7 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
   TestingProfile profile;
   HostContentSettingsMap* content_settings =
       profile.GetHostContentSettingsMap();
-  StubSettingsObserver observer;
+  MockSettingsObserver observer;
 
   CookieTreeRootNode* root =
       static_cast<CookieTreeRootNode*>(cookies_model.GetRoot());
@@ -865,11 +864,23 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
 
   EXPECT_EQ(1, origin->child_count());
   EXPECT_TRUE(origin->CanCreateContentException());
+  EXPECT_CALL(observer,
+              OnContentSettingsChanged(
+                  content_settings,
+                  CONTENT_SETTINGS_TYPE_COOKIES,
+                  false,
+                  ContentSettingsPattern::FromURLNoWildcard(host),
+                  ContentSettingsPattern::Wildcard(),
+                  false));
+  EXPECT_CALL(observer,
+              OnContentSettingsChanged(content_settings,
+                  CONTENT_SETTINGS_TYPE_COOKIES,
+                  false,
+                  ContentSettingsPattern::FromURL(host),
+                  ContentSettingsPattern::Wildcard(),
+                  false));
   origin->CreateContentException(
       content_settings, CONTENT_SETTING_SESSION_ONLY);
-
-  EXPECT_EQ(2, observer.counter);
-  EXPECT_EQ(pattern, observer.last_pattern);
   EXPECT_EQ(CONTENT_SETTING_SESSION_ONLY,
       content_settings->GetCookieContentSetting(host, host, true));
 }

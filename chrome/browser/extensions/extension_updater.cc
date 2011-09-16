@@ -13,7 +13,7 @@
 #include "base/memory/scoped_handle.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
@@ -29,13 +29,15 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/utility_process_host.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/utility_process_host.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -640,7 +642,7 @@ class SafeManifestParser : public UtilityProcessHost::Client {
     if (use_utility_process) {
       UtilityProcessHost* host = new UtilityProcessHost(
           this, BrowserThread::UI);
-      host->StartUpdateManifestParse(xml_);
+      host->Send(new UtilityMsg_ParseUpdateManifest(xml_));
     } else {
       UpdateManifest manifest;
       if (manifest.Parse(xml_)) {
@@ -663,8 +665,20 @@ class SafeManifestParser : public UtilityProcessHost::Client {
     }
   }
 
-  // Callback from the utility process when parsing succeeded.
-  virtual void OnParseUpdateManifestSucceeded(
+  // UtilityProcessHost::Client
+  virtual bool OnMessageReceived(const IPC::Message& message) {
+    bool handled = true;
+    IPC_BEGIN_MESSAGE_MAP(SafeManifestParser, message)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseUpdateManifest_Succeeded,
+                          OnParseUpdateManifestSucceeded)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseUpdateManifest_Failed,
+                          OnParseUpdateManifestFailed)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_END_MESSAGE_MAP()
+    return handled;
+  }
+
+  void OnParseUpdateManifestSucceeded(
       const UpdateManifest::Results& results) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     if (!updater_) {
@@ -673,8 +687,7 @@ class SafeManifestParser : public UtilityProcessHost::Client {
     updater_->HandleManifestResults(*fetch_data_, &results);
   }
 
-  // Callback from the utility process when parsing failed.
-  virtual void OnParseUpdateManifestFailed(const std::string& error_message) {
+  void OnParseUpdateManifestFailed(const std::string& error_message) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     if (!updater_) {
       return;
@@ -882,7 +895,7 @@ bool ExtensionUpdater::MaybeInstallCRXFile() {
       // Source parameter ensures that we only see the completion event for the
       // the installer we started.
       registrar_.Add(this,
-                     NotificationType::CRX_INSTALLER_DONE,
+                     chrome::NOTIFICATION_CRX_INSTALLER_DONE,
                      Source<CrxInstaller>(installer));
     }
     in_progress_ids_.erase(crx_file.id);
@@ -893,14 +906,14 @@ bool ExtensionUpdater::MaybeInstallCRXFile() {
   return crx_install_is_running_;
 }
 
-void ExtensionUpdater::Observe(NotificationType type,
+void ExtensionUpdater::Observe(int type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
-  DCHECK(type == NotificationType::CRX_INSTALLER_DONE);
+  DCHECK(type == chrome::NOTIFICATION_CRX_INSTALLER_DONE);
 
   // No need to listen for CRX_INSTALLER_DONE anymore.
   registrar_.Remove(this,
-                    NotificationType::CRX_INSTALLER_DONE,
+                    chrome::NOTIFICATION_CRX_INSTALLER_DONE,
                     source);
   crx_install_is_running_ = false;
   // If any files are available to update, start one.
@@ -1195,14 +1208,14 @@ void ExtensionUpdater::FetchUpdatedExtension(const std::string& id,
 
 void ExtensionUpdater::NotifyStarted() {
   NotificationService::current()->Notify(
-      NotificationType::EXTENSION_UPDATING_STARTED,
+      chrome::NOTIFICATION_EXTENSION_UPDATING_STARTED,
       Source<Profile>(profile_),
       NotificationService::NoDetails());
 }
 
 void ExtensionUpdater::NotifyUpdateFound(const std::string& extension_id) {
   NotificationService::current()->Notify(
-      NotificationType::EXTENSION_UPDATE_FOUND,
+      chrome::NOTIFICATION_EXTENSION_UPDATE_FOUND,
       Source<Profile>(profile_),
       Details<const std::string>(&extension_id));
 }
@@ -1210,7 +1223,7 @@ void ExtensionUpdater::NotifyUpdateFound(const std::string& extension_id) {
 void ExtensionUpdater::NotifyIfFinished() {
   if (in_progress_ids_.empty()) {
     NotificationService::current()->Notify(
-        NotificationType::EXTENSION_UPDATING_FINISHED,
+        chrome::NOTIFICATION_EXTENSION_UPDATING_FINISHED,
         Source<Profile>(profile_),
         NotificationService::NoDetails());
     VLOG(1) << "Sending EXTENSION_UPDATING_FINISHED";

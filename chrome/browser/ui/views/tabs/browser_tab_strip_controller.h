@@ -16,6 +16,7 @@
 class BaseTab;
 class BaseTabStrip;
 class Browser;
+class TabStripSelectionModel;
 
 struct TabRendererData;
 
@@ -64,6 +65,7 @@ class BrowserTabStripController : public TabStripController,
   virtual bool IsCompatibleWith(BaseTabStrip* other) const OVERRIDE;
   virtual void CreateNewTab() OVERRIDE;
   virtual void ClickActiveTab(int index) OVERRIDE;
+  virtual bool SizeTabButtonToTopOfTabStrip() OVERRIDE;
 
   // TabStripModelObserver implementation:
   virtual void TabInsertedAt(TabContentsWrapper* contents,
@@ -71,10 +73,8 @@ class BrowserTabStripController : public TabStripController,
                              bool active) OVERRIDE;
   virtual void TabDetachedAt(TabContentsWrapper* contents,
                              int model_index) OVERRIDE;
-  virtual void ActiveTabChanged(TabContentsWrapper* old_contents,
-                                TabContentsWrapper* contents,
-                                int model_index,
-                                bool user_gesture) OVERRIDE;
+  virtual void TabSelectionChanged(
+      const TabStripSelectionModel& old_model) OVERRIDE;
   virtual void TabMoved(TabContentsWrapper* contents,
                         int from_model_index,
                         int to_model_index) OVERRIDE;
@@ -93,9 +93,28 @@ class BrowserTabStripController : public TabStripController,
                                       int model_index) OVERRIDE;
 
   // NotificationObserver implementation:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
+
+ protected:
+  // The context in which SetTabRendererDataFromModel is being called.
+  enum TabStatus {
+    NEW_TAB,
+    EXISTING_TAB
+  };
+
+  // Sets the TabRendererData from the TabStripModel.
+  virtual void SetTabRendererDataFromModel(TabContents* contents,
+                                           int model_index,
+                                           TabRendererData* data,
+                                           TabStatus tab_status);
+
+  Profile* profile() const { return model_->profile(); }
+
+  const BaseTabStrip* tabstrip() const { return tabstrip_; }
+
+  const Browser* browser() const { return browser_; }
 
  private:
   class TabContextMenuContents;
@@ -103,19 +122,12 @@ class BrowserTabStripController : public TabStripController,
   // Invokes tabstrip_->SetTabData.
   void SetTabDataAt(TabContentsWrapper* contents, int model_index);
 
-  // Sets the TabRendererData from the TabStripModel.
-  void SetTabRendererDataFromModel(TabContents* contents,
-                                   int model_index,
-                                   TabRendererData* data);
-
   void StartHighlightTabsForCommand(
       TabStripModel::ContextMenuCommand command_id,
       BaseTab* tab);
   void StopHighlightTabsForCommand(
       TabStripModel::ContextMenuCommand command_id,
       BaseTab* tab);
-
-  Profile* profile() const { return model_->profile(); }
 
   TabStripModel* model_;
 

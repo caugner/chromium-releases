@@ -11,6 +11,7 @@
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/browser/cancelable_request.h"
 
 namespace {
 
@@ -52,7 +53,8 @@ class GetTypedUrlsTask : public HistoryDBTask {
 }  // namespace
 
 LiveTypedUrlsSyncTest::LiveTypedUrlsSyncTest(TestType test_type)
-    : LiveSyncTest(test_type) {}
+    : LiveSyncTest(test_type),
+      timestamp_(base::Time::Now()) {}
 
 LiveTypedUrlsSyncTest::~LiveTypedUrlsSyncTest() {}
 
@@ -65,16 +67,27 @@ LiveTypedUrlsSyncTest::GetTypedUrlsFromClient(int index) {
 
 std::vector<history::URLRow>
 LiveTypedUrlsSyncTest::GetTypedUrlsFromHistoryService(HistoryService *service) {
+  CancelableRequestConsumer cancelable_consumer;
   std::vector<history::URLRow> rows;
   base::WaitableEvent wait_event(true, false);
   service->ScheduleDBTask(new GetTypedUrlsTask(&rows, &wait_event),
-                          &cancelable_consumer_);
+                          &cancelable_consumer);
   wait_event.Wait();
   return rows;
 }
 
+base::Time LiveTypedUrlsSyncTest::GetTimestamp() {
+  // The history subsystem doesn't like identical timestamps for page visits,
+  // and it will massage the visit timestamps if we try to use identical
+  // values, which can lead to spurious errors. So make sure all timestamps
+  // are unique.
+  base::Time original = timestamp_;
+  timestamp_ += base::TimeDelta::FromMilliseconds(1);
+  return original;
+}
+
 void LiveTypedUrlsSyncTest::AddUrlToHistory(int index, const GURL& url) {
-  base::Time timestamp = base::Time::Now();
+  base::Time timestamp = GetTimestamp();
   AddToHistory(GetProfile(index)->GetHistoryServiceWithoutCreating(),
                url,
                timestamp);
@@ -100,7 +113,6 @@ void LiveTypedUrlsSyncTest::AddToHistory(HistoryService* service,
                    history::RedirectList(),
                    history::SOURCE_BROWSED,
                    false);
-  service->SetPageTitle(url, ASCIIToUTF16(url.spec()));
 }
 
 void LiveTypedUrlsSyncTest::DeleteUrlFromHistory(int index, const GURL& url) {
@@ -110,11 +122,12 @@ void LiveTypedUrlsSyncTest::DeleteUrlFromHistory(int index, const GURL& url) {
 }
 
 void LiveTypedUrlsSyncTest::WaitForHistoryDBThread(int index) {
+  CancelableRequestConsumer cancelable_consumer;
   HistoryService* service =
       GetProfile(index)->GetHistoryServiceWithoutCreating();
   base::WaitableEvent wait_event(true, false);
   service->ScheduleDBTask(new FlushHistoryDBQueueTask(&wait_event),
-                          &cancelable_consumer_);
+                          &cancelable_consumer);
   wait_event.Wait();
 }
 

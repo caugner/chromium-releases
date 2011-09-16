@@ -13,6 +13,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
+#include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
@@ -20,13 +21,14 @@
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_helper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -41,6 +43,7 @@ struct ContentSettingsTypeNameEntry {
 const char* kDisplayPattern = "displayPattern";
 const char* kSetting = "setting";
 const char* kOrigin = "origin";
+const char* kSource = "source";
 const char* kEmbeddingOrigin = "embeddingOrigin";
 
 const ContentSettingsTypeNameEntry kContentSettingsTypeGroupNames[] = {
@@ -123,7 +126,8 @@ std::string GeolocationExceptionToString(const GURL& origin,
 // Ownership of the pointer is passed to the caller.
 DictionaryValue* GetExceptionForPage(
     const ContentSettingsPattern& pattern,
-    ContentSetting setting) {
+    ContentSetting setting,
+    std::string provider_name) {
   DictionaryValue* exception = new DictionaryValue();
   exception->Set(
       kDisplayPattern,
@@ -131,6 +135,9 @@ DictionaryValue* GetExceptionForPage(
   exception->Set(
       kSetting,
       new StringValue(ContentSettingToString(setting)));
+  exception->Set(
+      kSource,
+      new StringValue(provider_name));
   return exception;
 }
 
@@ -231,7 +238,7 @@ void ContentSettingsHandler::GetLocalizedValues(
     { "plugins_ask", IDS_PLUGIN_ASK_RADIO },
     { "plugins_allow", IDS_PLUGIN_LOAD_RADIO },
     { "plugins_block", IDS_PLUGIN_NOLOAD_RADIO },
-    { "disable_individual_plugins", IDS_PLUGIN_SELECTIVE_DISABLE },
+    { "disableIndividualPlugins", IDS_PLUGIN_SELECTIVE_DISABLE },
     // Pop-ups filter.
     { "popups_tab_label", IDS_POPUP_TAB_LABEL },
     { "popups_header", IDS_POPUP_HEADER },
@@ -261,58 +268,52 @@ void ContentSettingsHandler::GetLocalizedValues(
 
 void ContentSettingsHandler::Initialize() {
   const HostContentSettingsMap* settings_map = GetContentSettingsMap();
-  scoped_ptr<Value> block_3rd_party(Value::CreateBooleanValue(
-      settings_map->BlockThirdPartyCookies()));
-  web_ui_->CallJavascriptFunction("ContentSettings.setBlockThirdPartyCookies",
-                                  *block_3rd_party.get());
-
   notification_registrar_.Add(
-      this, NotificationType::OTR_PROFILE_CREATED,
+      this, chrome::NOTIFICATION_PROFILE_CREATED,
       NotificationService::AllSources());
   notification_registrar_.Add(
-      this, NotificationType::PROFILE_DESTROYED,
+      this, chrome::NOTIFICATION_PROFILE_DESTROYED,
       NotificationService::AllSources());
 
   UpdateHandlersEnabledRadios();
   UpdateAllExceptionsViewsFromModel();
   notification_registrar_.Add(
-      this, NotificationType::CONTENT_SETTINGS_CHANGED,
+      this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
+      Source<HostContentSettingsMap>(settings_map));
+  notification_registrar_.Add(
+      this, chrome::NOTIFICATION_DESKTOP_NOTIFICATION_DEFAULT_CHANGED,
       NotificationService::AllSources());
   notification_registrar_.Add(
-      this, NotificationType::DESKTOP_NOTIFICATION_DEFAULT_CHANGED,
+      this, chrome::NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
       NotificationService::AllSources());
   notification_registrar_.Add(
-      this, NotificationType::DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
-      NotificationService::AllSources());
-  notification_registrar_.Add(
-      this, NotificationType::PROTOCOL_HANDLER_REGISTRY_CHANGED,
+      this, chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
       NotificationService::AllSources());
 
   PrefService* prefs = web_ui_->GetProfile()->GetPrefs();
   pref_change_registrar_.Init(prefs);
-  pref_change_registrar_.Add(prefs::kGeolocationDefaultContentSetting, this);
   pref_change_registrar_.Add(prefs::kGeolocationContentSettings, this);
 }
 
-void ContentSettingsHandler::Observe(NotificationType type,
+void ContentSettingsHandler::Observe(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::PROFILE_DESTROYED: {
-      Profile* profile = static_cast<Source<Profile> >(source).ptr();
-      if (profile->IsOffTheRecord()) {
+  switch (type) {
+    case chrome::NOTIFICATION_PROFILE_DESTROYED: {
+      if (Source<Profile>(source).ptr()->IsOffTheRecord()) {
         web_ui_->CallJavascriptFunction(
             "ContentSettingsExceptionsArea.OTRProfileDestroyed");
       }
       break;
     }
 
-    case NotificationType::OTR_PROFILE_CREATED: {
-      UpdateAllOTRExceptionsViewsFromModel();
+    case chrome::NOTIFICATION_PROFILE_CREATED: {
+      if (Source<Profile>(source).ptr()->IsOffTheRecord())
+        UpdateAllOTRExceptionsViewsFromModel();
       break;
     }
 
-    case NotificationType::CONTENT_SETTINGS_CHANGED: {
+    case chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED: {
       const ContentSettingsDetails* settings_details =
           Details<const ContentSettingsDetails>(details).ptr();
 
@@ -324,26 +325,24 @@ void ContentSettingsHandler::Observe(NotificationType type,
       break;
     }
 
-    case NotificationType::PREF_CHANGED: {
+    case chrome::NOTIFICATION_PREF_CHANGED: {
       const std::string& pref_name = *Details<std::string>(details).ptr();
-      if (pref_name == prefs::kGeolocationDefaultContentSetting)
-        UpdateSettingDefaultFromModel(CONTENT_SETTINGS_TYPE_GEOLOCATION);
-      else if (pref_name == prefs::kGeolocationContentSettings)
+      if (pref_name == prefs::kGeolocationContentSettings)
         UpdateGeolocationExceptionsView();
       break;
     }
 
-    case NotificationType::DESKTOP_NOTIFICATION_DEFAULT_CHANGED: {
+    case chrome::NOTIFICATION_DESKTOP_NOTIFICATION_DEFAULT_CHANGED: {
       UpdateSettingDefaultFromModel(CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
       break;
     }
 
-    case NotificationType::DESKTOP_NOTIFICATION_SETTINGS_CHANGED: {
+    case chrome::NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED: {
       UpdateNotificationExceptionsView();
       break;
     }
 
-    case NotificationType::PROTOCOL_HANDLER_REGISTRY_CHANGED: {
+    case chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED: {
       UpdateHandlersEnabledRadios();
       break;
     }
@@ -368,14 +367,12 @@ void ContentSettingsHandler::UpdateSettingDefaultFromModel(
 std::string ContentSettingsHandler::GetSettingDefaultFromModel(
     ContentSettingsType type) {
   ContentSetting default_setting;
-  if (type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-    default_setting = web_ui_->GetProfile()->
-        GetGeolocationContentSettingsMap()->GetDefaultContentSetting();
-  } else if (type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+  if (type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
     default_setting = DesktopNotificationServiceFactory::GetForProfile(
         web_ui_->GetProfile())->GetDefaultContentSetting();
   } else {
-    default_setting = GetContentSettingsMap()->GetDefaultContentSetting(type);
+    default_setting = web_ui_->GetProfile()->
+        GetHostContentSettingsMap()->GetDefaultContentSetting(type);
   }
 
   return ContentSettingToString(default_setting);
@@ -383,10 +380,7 @@ std::string ContentSettingsHandler::GetSettingDefaultFromModel(
 
 bool ContentSettingsHandler::GetDefaultSettingManagedFromModel(
     ContentSettingsType type) {
-  if (type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-    return web_ui_->GetProfile()->
-        GetGeolocationContentSettingsMap()->IsDefaultContentSettingManaged();
-  } else if (type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+  if (type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
     return DesktopNotificationServiceFactory::GetForProfile(
         web_ui_->GetProfile())->IsDefaultContentSettingManaged();
   } else {
@@ -401,7 +395,7 @@ void ContentSettingsHandler::UpdateHandlersEnabledRadios() {
 
   web_ui_->CallJavascriptFunction("ContentSettings.updateHandlersEnabledRadios",
       handlers_enabled);
-#endif // defined(ENABLE_REGISTER_PROTOCOL_HANDLER)
+#endif  // defined(ENABLE_REGISTER_PROTOCOL_HANDLER)
 }
 
 void ContentSettingsHandler::UpdateAllExceptionsViewsFromModel() {
@@ -427,12 +421,6 @@ void ContentSettingsHandler::UpdateExceptionsViewFromModel(
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
       UpdateNotificationExceptionsView();
       break;
-    case CONTENT_SETTINGS_TYPE_PRERENDER:
-      // Prerender is currently (02/24/2011) an experimental feature which is
-      // only turned on via about:flags. There is intentionally no UI in
-      // chrome://preferences for CONTENT_SETTINGS_TYPE_PRERENDER.
-      // TODO(cbentzel): Change once prerender moves out of about:flags.
-      break;
     default:
       UpdateExceptionsViewFromHostContentSettingsMap(type);
       break;
@@ -444,7 +432,6 @@ void ContentSettingsHandler::UpdateOTRExceptionsViewFromModel(
   switch (type) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-    case CONTENT_SETTINGS_TYPE_PRERENDER:
       break;
     default:
       UpdateExceptionsViewFromOTRHostContentSettingsMap(type);
@@ -530,7 +517,8 @@ void ContentSettingsHandler::UpdateExceptionsViewFromHostContentSettingsMap(
 
   ListValue exceptions;
   for (size_t i = 0; i < entries.size(); ++i) {
-    exceptions.Append(GetExceptionForPage(entries[i].first, entries[i].second));
+    exceptions.Append(
+        GetExceptionForPage(entries[i].a, entries[i].c, entries[i].d));
   }
 
   StringValue type_string(ContentSettingsTypeToGroupName(type));
@@ -555,8 +543,9 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
 
   ListValue otr_exceptions;
   for (size_t i = 0; i < otr_entries.size(); ++i) {
-    otr_exceptions.Append(GetExceptionForPage(otr_entries[i].first,
-                                              otr_entries[i].second));
+    otr_exceptions.Append(GetExceptionForPage(otr_entries[i].a,
+                                              otr_entries[i].c,
+                                              otr_entries[i].d));
   }
 
   StringValue type_string(ContentSettingsTypeToGroupName(type));
@@ -568,9 +557,6 @@ void ContentSettingsHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("setContentFilter",
       NewCallback(this,
                   &ContentSettingsHandler::SetContentFilter));
-  web_ui_->RegisterMessageCallback("setAllowThirdPartyCookies",
-      NewCallback(this,
-                  &ContentSettingsHandler::SetAllowThirdPartyCookies));
   web_ui_->RegisterMessageCallback("removeException",
       NewCallback(this,
                   &ContentSettingsHandler::RemoveException));
@@ -593,23 +579,13 @@ void ContentSettingsHandler::SetContentFilter(const ListValue* args) {
 
   ContentSetting default_setting = ContentSettingFromString(setting);
   ContentSettingsType content_type = ContentSettingsTypeFromGroupName(group);
-  if (content_type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-    web_ui_->GetProfile()->GetGeolocationContentSettingsMap()->
-        SetDefaultContentSetting(default_setting);
-  } else if (content_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+  if (content_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
     DesktopNotificationServiceFactory::GetForProfile(web_ui_->GetProfile())->
         SetDefaultContentSetting(default_setting);
   } else {
     GetContentSettingsMap()->
         SetDefaultContentSetting(content_type, default_setting);
   }
-}
-
-void ContentSettingsHandler::SetAllowThirdPartyCookies(const ListValue* args) {
-  string16 allow = ExtractStringValue(args);
-
-  GetContentSettingsMap()->SetBlockThirdPartyCookies(
-      LowerCaseEqualsASCII(allow, "true"));
 }
 
 void ContentSettingsHandler::RemoveException(const ListValue* args) {
@@ -662,7 +638,8 @@ void ContentSettingsHandler::RemoveException(const ListValue* args) {
     // got destroyed before we received this message.
     if (settings_map) {
       settings_map->SetContentSetting(
-          ContentSettingsPattern::LegacyFromString(pattern),
+          ContentSettingsPattern::FromString(pattern),
+          ContentSettingsPattern::Wildcard(),
           ContentSettingsTypeFromGroupName(type_string),
           "",
           CONTENT_SETTING_DEFAULT);
@@ -696,9 +673,8 @@ void ContentSettingsHandler::SetException(const ListValue* args) {
   // got destroyed before we received this message.
   if (!settings_map)
     return;
-
-  settings_map->SetContentSetting(ContentSettingsPattern::LegacyFromString(
-                                      pattern),
+  settings_map->SetContentSetting(ContentSettingsPattern::FromString(pattern),
+                                  ContentSettingsPattern::Wildcard(),
                                   type,
                                   "",
                                   ContentSettingFromString(setting));
@@ -715,7 +691,7 @@ void ContentSettingsHandler::CheckExceptionPatternValidity(
   CHECK(args->GetString(arg_i++, &pattern_string));
 
   ContentSettingsPattern pattern =
-      ContentSettingsPattern::LegacyFromString(pattern_string);
+      ContentSettingsPattern::FromString(pattern_string);
 
   scoped_ptr<Value> mode_value(Value::CreateStringValue(mode_string));
   scoped_ptr<Value> pattern_value(Value::CreateStringValue(pattern_string));

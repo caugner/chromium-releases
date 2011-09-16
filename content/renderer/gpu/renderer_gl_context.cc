@@ -14,10 +14,8 @@
 #include "content/common/view_messages.h"
 #include "content/renderer/gpu/command_buffer_proxy.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
-#include "content/renderer/gpu/gpu_video_service_host.h"
 #include "content/renderer/gpu/transport_texture_host.h"
 #include "content/renderer/gpu/transport_texture_service.h"
-#include "content/renderer/media/gles2_video_decode_context.h"
 #include "content/renderer/render_thread.h"
 #include "content/renderer/render_widget.h"
 #include "googleurl/src/gurl.h"
@@ -147,6 +145,24 @@ bool LatchAllocator::FreeLatch(uint32 latch_id) {
 static base::LazyInstance<GLES2Initializer> g_gles2_initializer(
     base::LINKER_INITIALIZED);
 
+////////////////////////////////////////////////////////////////////////////////
+
+#if defined(ENABLE_GPU)
+RendererGLContext::ContextLostReason ConvertReason(
+    gpu::error::ContextLostReason reason) {
+  switch (reason) {
+  case gpu::error::kGuilty:
+    return RendererGLContext::kGuilty;
+  case gpu::error::kInnocent:
+    return RendererGLContext::kInnocent;
+  case gpu::error::kUnknown:
+    return RendererGLContext::kUnknown;
+  }
+  NOTREACHED();
+  return RendererGLContext::kUnknown;
+}
+#endif
+
 }  // namespace anonymous
 
 RendererGLContext::~RendererGLContext() {
@@ -155,16 +171,14 @@ RendererGLContext::~RendererGLContext() {
 
 RendererGLContext* RendererGLContext::CreateViewContext(
     GpuChannelHost* channel,
-    gfx::PluginWindowHandle render_surface,
     int render_view_id,
     const char* allowed_extensions,
     const int32* attrib_list,
     const GURL& active_url) {
 #if defined(ENABLE_GPU)
-  scoped_ptr<RendererGLContext> context(new RendererGLContext(channel, NULL));
+  scoped_ptr<RendererGLContext> context(new RendererGLContext(channel));
   if (!context->Initialize(
       true,
-      render_surface,
       render_view_id,
       gfx::Size(),
       allowed_extensions,
@@ -188,16 +202,14 @@ void RendererGLContext::ResizeOnscreen(const gfx::Size& size) {
 
 RendererGLContext* RendererGLContext::CreateOffscreenContext(
     GpuChannelHost* channel,
-    RendererGLContext* parent,
     const gfx::Size& size,
     const char* allowed_extensions,
     const int32* attrib_list,
     const GURL& active_url) {
 #if defined(ENABLE_GPU)
-  scoped_ptr<RendererGLContext> context(new RendererGLContext(channel, parent));
+  scoped_ptr<RendererGLContext> context(new RendererGLContext(channel));
   if (!context->Initialize(
       false,
-      gfx::kNullPluginWindow,
       0,
       size,
       allowed_extensions,
@@ -209,6 +221,54 @@ RendererGLContext* RendererGLContext::CreateOffscreenContext(
 #else
   return NULL;
 #endif
+}
+
+bool RendererGLContext::SetParent(RendererGLContext* new_parent) {
+  if (parent_.get() == new_parent)
+    return true;
+
+  // Allocate a texture ID with respect to the parent and change the parent.
+  uint32 new_parent_texture_id = 0;
+  if (command_buffer_) {
+    if (new_parent) {
+      TRACE_EVENT0("gpu", "RendererGLContext::SetParent::flushParent");
+      // Flush any remaining commands in the parent context to make sure the
+      // texture id accounting stays consistent.
+      int32 token = new_parent->gles2_helper_->InsertToken();
+      new_parent->gles2_helper_->WaitForToken(token);
+      new_parent_texture_id =
+        new_parent->gles2_implementation_->MakeTextureId();
+
+      if (!command_buffer_->SetParent(new_parent->command_buffer_,
+                                      new_parent_texture_id)) {
+        new_parent->gles2_implementation_->FreeTextureId(parent_texture_id_);
+        return false;
+      }
+    } else {
+      if (!command_buffer_->SetParent(NULL, 0))
+        return false;
+    }
+  }
+
+  // Free the previous parent's texture ID.
+  if (parent_.get() && parent_texture_id_ != 0) {
+    // Flush any remaining commands in the parent context to make sure the
+    // texture id accounting stays consistent.
+    gpu::gles2::GLES2Implementation* parent_gles2 =
+        parent_->GetImplementation();
+    parent_gles2->helper()->CommandBufferHelper::Finish();
+    parent_gles2->FreeTextureId(parent_texture_id_);
+  }
+
+  if (new_parent) {
+    parent_ = new_parent->AsWeakPtr();
+    parent_texture_id_ = new_parent_texture_id;
+  } else {
+    parent_.reset();
+    parent_texture_id_ = 0;
+  }
+
+  return true;
 }
 
 void RendererGLContext::ResizeOffscreen(const gfx::Size& size) {
@@ -269,7 +329,8 @@ void RendererGLContext::SetSwapBuffersCallback(Callback0::Type* callback) {
   swap_buffers_callback_.reset(callback);
 }
 
-void RendererGLContext::SetContextLostCallback(Callback0::Type* callback) {
+void RendererGLContext::SetContextLostCallback(
+    Callback1<ContextLostReason>::Type* callback) {
   context_lost_callback_.reset(callback);
 }
 
@@ -302,16 +363,6 @@ bool RendererGLContext::SwapBuffers() {
 
   gles2_implementation_->SwapBuffers();
   return true;
-}
-
-media::VideoDecodeEngine* RendererGLContext::CreateVideoDecodeEngine() {
-  return channel_->gpu_video_service_host()->CreateVideoDecoder(
-      command_buffer_->route_id());
-}
-
-media::VideoDecodeContext* RendererGLContext::CreateVideoDecodeContext(
-    MessageLoop* message_loop, bool hardware_decoder) {
-  return new Gles2VideoDecodeContext(message_loop, hardware_decoder, this);
 }
 
 scoped_refptr<TransportTextureHost>
@@ -352,11 +403,9 @@ gpu::gles2::GLES2Implementation* RendererGLContext::GetImplementation() {
   return gles2_implementation_;
 }
 
-RendererGLContext::RendererGLContext(GpuChannelHost* channel,
-                                     RendererGLContext* parent)
+RendererGLContext::RendererGLContext(GpuChannelHost* channel)
     : channel_(channel),
-      parent_(parent ?
-          parent->AsWeakPtr() : base::WeakPtr<RendererGLContext>()),
+      parent_(base::WeakPtr<RendererGLContext>()),
       parent_texture_id_(0),
       child_to_parent_latch_(gpu::kInvalidLatchId),
       parent_to_child_latch_(gpu::kInvalidLatchId),
@@ -371,7 +420,6 @@ RendererGLContext::RendererGLContext(GpuChannelHost* channel,
 }
 
 bool RendererGLContext::Initialize(bool onscreen,
-                                   gfx::PluginWindowHandle render_surface,
                                    int render_view_id,
                                    const gfx::Size& size,
                                    const char* allowed_extensions,
@@ -386,15 +434,6 @@ bool RendererGLContext::Initialize(bool onscreen,
 
   // Ensure the gles2 library is initialized first in a thread safe way.
   g_gles2_initializer.Get();
-
-  // Allocate a frame buffer ID with respect to the parent.
-  if (parent_.get()) {
-    // Flush any remaining commands in the parent context to make sure the
-    // texture id accounting stays consistent.
-    int32 token = parent_->gles2_helper_->InsertToken();
-    parent_->gles2_helper_->WaitForToken(token);
-    parent_texture_id_ = parent_->gles2_implementation_->MakeTextureId();
-  }
 
   std::vector<int32> attribs;
   while (attrib_list) {
@@ -426,26 +465,18 @@ bool RendererGLContext::Initialize(bool onscreen,
 
   // Create a proxy to a command buffer in the GPU process.
   if (onscreen) {
-    if (render_surface == gfx::kNullPluginWindow) {
-      LOG(ERROR) << "Invalid surface handle for onscreen context.";
-      command_buffer_ = NULL;
-    } else {
-      command_buffer_ = channel_->CreateViewCommandBuffer(
-          render_surface,
-          render_view_id,
-          allowed_extensions,
-          attribs,
-          active_url);
-    }
+    TRACE_EVENT0("gpu",
+                 "RendererGLContext::Initialize::CreateViewCommandBuffer");
+    command_buffer_ = channel_->CreateViewCommandBuffer(
+        render_view_id,
+        allowed_extensions,
+        attribs,
+        active_url);
   } else {
-    CommandBufferProxy* parent_command_buffer =
-        parent_.get() ? parent_->command_buffer_ : NULL;
     command_buffer_ = channel_->CreateOffscreenCommandBuffer(
-        parent_command_buffer,
         size,
         allowed_extensions,
         attribs,
-        parent_texture_id_,
         active_url);
   }
   if (!command_buffer_) {
@@ -453,10 +484,14 @@ bool RendererGLContext::Initialize(bool onscreen,
     return false;
   }
 
-  // Initiaize the command buffer.
-  if (!command_buffer_->Initialize(kCommandBufferSize)) {
-    Destroy();
-    return false;
+  {
+    TRACE_EVENT0("gpu",
+                 "RendererGLContext::Initialize::InitializeCommandBuffer");
+    // Initiaize the command buffer.
+    if (!command_buffer_->Initialize(kCommandBufferSize)) {
+      Destroy();
+      return false;
+    }
   }
 
   command_buffer_->SetSwapBuffersCallback(
@@ -472,14 +507,16 @@ bool RendererGLContext::Initialize(bool onscreen,
     return false;
   }
 
-  // Create a transfer buffer used to copy resources between the renderer
-  // process and the GPU process.
-  transfer_buffer_id_ =
-      command_buffer_->CreateTransferBuffer(kTransferBufferSize,
-                                            gpu::kCommandBufferSharedMemoryId);
-  if (transfer_buffer_id_ < 0) {
-    Destroy();
-    return false;
+  {
+    TRACE_EVENT0("gpu", "RendererGLContext::Initialize::CreateTransferBuffer");
+    // Create a transfer buffer used to copy resources between the renderer
+    // process and the GPU process.
+    transfer_buffer_id_ = command_buffer_->CreateTransferBuffer(
+        kTransferBufferSize, gpu::kCommandBufferSharedMemoryId);
+    if (transfer_buffer_id_ < 0) {
+      Destroy();
+      return false;
+    }
   }
 
   // Map the buffer into the renderer process's address space.
@@ -502,12 +539,10 @@ bool RendererGLContext::Initialize(bool onscreen,
 
   // If this is a child context, setup latches for synchronization between child
   // and parent.
-  if (parent_.get()) {
-    if (!CreateLatch(&child_to_parent_latch_) ||
-        !CreateLatch(&parent_to_child_latch_)) {
-      Destroy();
-      return false;
-    }
+  if (!CreateLatch(&child_to_parent_latch_) ||
+      !CreateLatch(&parent_to_child_latch_)) {
+    Destroy();
+    return false;
   }
 
   // Create the object exposing the OpenGL API.
@@ -524,10 +559,8 @@ bool RendererGLContext::Initialize(bool onscreen,
 }
 
 void RendererGLContext::Destroy() {
-  if (parent_.get() && parent_texture_id_ != 0) {
-    parent_->gles2_implementation_->FreeTextureId(parent_texture_id_);
-    parent_texture_id_ = 0;
-  }
+  TRACE_EVENT0("gpu", "RendererGLContext::Destroy");
+  SetParent(NULL);
 
   delete gles2_implementation_;
   gles2_implementation_ = NULL;
@@ -566,8 +599,14 @@ void RendererGLContext::OnSwapBuffers() {
 }
 
 void RendererGLContext::OnContextLost() {
-  if (context_lost_callback_.get())
-    context_lost_callback_->Run();
+  if (context_lost_callback_.get()) {
+    RendererGLContext::ContextLostReason reason = kUnknown;
+    if (command_buffer_) {
+      reason = ConvertReason(
+          command_buffer_->GetLastState().context_lost_reason);
+    }
+    context_lost_callback_->Run(reason);
+  }
 }
 
 bool RendererGLContext::CreateLatch(uint32* ret_latch) {
@@ -579,17 +618,11 @@ bool RendererGLContext::DestroyLatch(uint32 latch) {
 }
 
 bool RendererGLContext::GetParentToChildLatch(uint32* parent_to_child_latch) {
-  if (parent_.get()) {
-    *parent_to_child_latch = parent_to_child_latch_;
-    return true;
-  }
-  return false;
+  *parent_to_child_latch = parent_to_child_latch_;
+  return true;
 }
 
 bool RendererGLContext::GetChildToParentLatch(uint32* child_to_parent_latch) {
-  if (parent_.get()) {
-    *child_to_parent_latch = child_to_parent_latch_;
-    return true;
-  }
-  return false;
+  *child_to_parent_latch = child_to_parent_latch_;
+  return true;
 }

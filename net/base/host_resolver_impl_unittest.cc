@@ -16,12 +16,14 @@
 #include "base/time.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
+#include "net/base/host_cache.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log_unittest.h"
 #include "net/base/net_util.h"
 #include "net/base/sys_addrinfo.h"
 #include "net/base/test_completion_callback.h"
+#include "net/base/test_host_resolver_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // TODO(eroman):
@@ -33,19 +35,12 @@ namespace net {
 using base::TimeDelta;
 using base::TimeTicks;
 
-HostCache* CreateDefaultCache() {
-  return new HostCache(
-      100,  // max cache entries.
-      base::TimeDelta::FromMinutes(1),
-      base::TimeDelta::FromSeconds(0));
-}
-
 static const size_t kMaxJobs = 10u;
 static const size_t kMaxRetryAttempts = 4u;
 
 HostResolverImpl* CreateHostResolverImpl(HostResolverProc* resolver_proc) {
-  return new HostResolverImpl(resolver_proc, CreateDefaultCache(), kMaxJobs,
-                              kMaxRetryAttempts, NULL);
+  return new HostResolverImpl(resolver_proc, HostCache::CreateDefaultCache(),
+                              kMaxJobs, kMaxRetryAttempts, NULL);
 }
 
 // Helper to create a HostResolver::RequestInfo.
@@ -450,7 +445,7 @@ TEST_F(HostResolverImplTest, CanceledAsynchronousLookup) {
   {
     scoped_ptr<HostResolver> host_resolver(
         new HostResolverImpl(resolver_proc,
-                             CreateDefaultCache(),
+                             HostCache::CreateDefaultCache(),
                              kMaxJobs,
                              kMaxRetryAttempts,
                              &net_log));
@@ -979,73 +974,6 @@ TEST_F(HostResolverImplTest, BypassCache) {
   MessageLoop::current()->Run();
 }
 
-bool operator==(const HostResolver::RequestInfo& a,
-                const HostResolver::RequestInfo& b) {
-   return a.hostname() == b.hostname() &&
-          a.port() == b.port() &&
-          a.allow_cached_response() == b.allow_cached_response() &&
-          a.priority() == b.priority() &&
-          a.is_speculative() == b.is_speculative() &&
-          a.referrer() == b.referrer();
-}
-
-// Observer that just makes note of how it was called. The test code can then
-// inspect to make sure it was called with the right parameters.
-class CapturingObserver : public HostResolver::Observer {
- public:
-  // DnsResolutionObserver methods:
-  virtual void OnStartResolution(int id,
-                                 const HostResolver::RequestInfo& info) {
-    start_log.push_back(StartOrCancelEntry(id, info));
-  }
-
-  virtual void OnFinishResolutionWithStatus(
-      int id,
-      bool was_resolved,
-      const HostResolver::RequestInfo& info) {
-    finish_log.push_back(FinishEntry(id, was_resolved, info));
-  }
-
-  virtual void OnCancelResolution(int id,
-                                  const HostResolver::RequestInfo& info) {
-    cancel_log.push_back(StartOrCancelEntry(id, info));
-  }
-
-  // Tuple (id, info).
-  struct StartOrCancelEntry {
-    StartOrCancelEntry(int id, const HostResolver::RequestInfo& info)
-        : id(id), info(info) {}
-
-    bool operator==(const StartOrCancelEntry& other) const {
-      return id == other.id && info == other.info;
-    }
-
-    int id;
-    HostResolver::RequestInfo info;
-  };
-
-  // Tuple (id, was_resolved, info).
-  struct FinishEntry {
-    FinishEntry(int id, bool was_resolved,
-                const HostResolver::RequestInfo& info)
-        : id(id), was_resolved(was_resolved), info(info) {}
-
-    bool operator==(const FinishEntry& other) const {
-      return id == other.id &&
-             was_resolved == other.was_resolved &&
-             info == other.info;
-    }
-
-    int id;
-    bool was_resolved;
-    HostResolver::RequestInfo info;
-  };
-
-  std::vector<StartOrCancelEntry> start_log;
-  std::vector<FinishEntry> finish_log;
-  std::vector<StartOrCancelEntry> cancel_log;
-};
-
 // Test that registering, unregistering, and notifying of observers works.
 // Does not test the cancellation notification since all resolves are
 // synchronous.
@@ -1053,7 +981,7 @@ TEST_F(HostResolverImplTest, Observers) {
   scoped_ptr<HostResolver> host_resolver(
       CreateHostResolverImpl(NULL));
 
-  CapturingObserver observer;
+  TestHostResolverObserver observer;
 
   host_resolver->AddObserver(&observer);
 
@@ -1078,9 +1006,9 @@ TEST_F(HostResolverImplTest, Observers) {
   EXPECT_EQ(1U, observer.finish_log.size());
   EXPECT_EQ(0U, observer.cancel_log.size());
   EXPECT_TRUE(observer.start_log[0] ==
-              CapturingObserver::StartOrCancelEntry(0, info1));
+              TestHostResolverObserver::StartOrCancelEntry(0, info1));
   EXPECT_TRUE(observer.finish_log[0] ==
-              CapturingObserver::FinishEntry(0, true, info1));
+              TestHostResolverObserver::FinishEntry(0, true, info1));
 
   // Resolve "host1" again -- this time it  will be served from cache, but it
   // should still notify of completion.
@@ -1092,9 +1020,9 @@ TEST_F(HostResolverImplTest, Observers) {
   EXPECT_EQ(2U, observer.finish_log.size());
   EXPECT_EQ(0U, observer.cancel_log.size());
   EXPECT_TRUE(observer.start_log[1] ==
-              CapturingObserver::StartOrCancelEntry(1, info1));
+              TestHostResolverObserver::StartOrCancelEntry(1, info1));
   EXPECT_TRUE(observer.finish_log[1] ==
-              CapturingObserver::FinishEntry(1, true, info1));
+              TestHostResolverObserver::FinishEntry(1, true, info1));
 
   // Resolve "host2", setting referrer to "http://foobar.com"
   HostResolver::RequestInfo info2(HostPortPair("host2", 70));
@@ -1106,9 +1034,9 @@ TEST_F(HostResolverImplTest, Observers) {
   EXPECT_EQ(3U, observer.finish_log.size());
   EXPECT_EQ(0U, observer.cancel_log.size());
   EXPECT_TRUE(observer.start_log[2] ==
-              CapturingObserver::StartOrCancelEntry(2, info2));
+              TestHostResolverObserver::StartOrCancelEntry(2, info2));
   EXPECT_TRUE(observer.finish_log[2] ==
-              CapturingObserver::FinishEntry(2, true, info2));
+              TestHostResolverObserver::FinishEntry(2, true, info2));
 
   // Unregister the observer.
   host_resolver->RemoveObserver(&observer);
@@ -1128,7 +1056,7 @@ TEST_F(HostResolverImplTest, Observers) {
 //  (1) Delete the HostResolver while job is outstanding.
 //  (2) Call HostResolver::CancelRequest() while a request is outstanding.
 TEST_F(HostResolverImplTest, CancellationObserver) {
-  CapturingObserver observer;
+  TestHostResolverObserver observer;
   {
     // Create a host resolver and attach an observer.
     scoped_ptr<HostResolver> host_resolver(
@@ -1155,7 +1083,7 @@ TEST_F(HostResolverImplTest, CancellationObserver) {
     EXPECT_EQ(0U, observer.cancel_log.size());
 
     EXPECT_TRUE(observer.start_log[0] ==
-                CapturingObserver::StartOrCancelEntry(0, info1));
+                TestHostResolverObserver::StartOrCancelEntry(0, info1));
 
     // Cancel the request.
     host_resolver->CancelRequest(req);
@@ -1165,7 +1093,7 @@ TEST_F(HostResolverImplTest, CancellationObserver) {
     EXPECT_EQ(1U, observer.cancel_log.size());
 
     EXPECT_TRUE(observer.cancel_log[0] ==
-                CapturingObserver::StartOrCancelEntry(0, info1));
+                TestHostResolverObserver::StartOrCancelEntry(0, info1));
 
     // Start an async request for (host2:60)
     HostResolver::RequestInfo info2(HostPortPair("host2", 60));
@@ -1179,7 +1107,7 @@ TEST_F(HostResolverImplTest, CancellationObserver) {
     EXPECT_EQ(1U, observer.cancel_log.size());
 
     EXPECT_TRUE(observer.start_log[1] ==
-                CapturingObserver::StartOrCancelEntry(1, info2));
+                TestHostResolverObserver::StartOrCancelEntry(1, info2));
 
     // Upon exiting this scope, HostResolver is destroyed, so all requests are
     // implicitly cancelled.
@@ -1194,13 +1122,13 @@ TEST_F(HostResolverImplTest, CancellationObserver) {
 
   HostResolver::RequestInfo info(HostPortPair("host2", 60));
   EXPECT_TRUE(observer.cancel_log[1] ==
-              CapturingObserver::StartOrCancelEntry(1, info));
+              TestHostResolverObserver::StartOrCancelEntry(1, info));
 }
 
 // Test that IP address changes flush the cache.
 TEST_F(HostResolverImplTest, FlushCacheOnIPAddressChange) {
   scoped_ptr<HostResolver> host_resolver(
-      new HostResolverImpl(NULL, CreateDefaultCache(), kMaxJobs,
+      new HostResolverImpl(NULL, HostCache::CreateDefaultCache(), kMaxJobs,
                            kMaxRetryAttempts, NULL));
 
   AddressList addrlist;
@@ -1233,7 +1161,7 @@ TEST_F(HostResolverImplTest, FlushCacheOnIPAddressChange) {
 TEST_F(HostResolverImplTest, AbortOnIPAddressChanged) {
   scoped_refptr<WaitingHostResolverProc> resolver_proc(
       new WaitingHostResolverProc(NULL));
-  HostCache* cache = CreateDefaultCache();
+  HostCache* cache = HostCache::CreateDefaultCache();
   scoped_ptr<HostResolver> host_resolver(
       new HostResolverImpl(resolver_proc, cache, kMaxJobs, kMaxRetryAttempts,
                            NULL));
@@ -1361,10 +1289,10 @@ TEST_F(HostResolverImplTest, HigherPriorityRequestsStartedFirst) {
   size_t kMaxJobs = 1u;
   const size_t kRetryAttempts = 0u;
   scoped_ptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, CreateDefaultCache(), kMaxJobs,
-                           kRetryAttempts, NULL));
+      new HostResolverImpl(resolver_proc, HostCache::CreateDefaultCache(),
+                           kMaxJobs, kRetryAttempts, NULL));
 
-  CapturingObserver observer;
+  TestHostResolverObserver observer;
   host_resolver->AddObserver(&observer);
 
   // Note that at this point the CapturingHostResolverProc is blocked, so any
@@ -1447,8 +1375,8 @@ TEST_F(HostResolverImplTest, CancelPendingRequest) {
   const size_t kMaxJobs = 1u;
   const size_t kRetryAttempts = 0u;
   scoped_ptr<HostResolver> host_resolver(
-      new HostResolverImpl(resolver_proc, CreateDefaultCache(), kMaxJobs,
-                           kRetryAttempts, NULL));
+      new HostResolverImpl(resolver_proc, HostCache::CreateDefaultCache(),
+                           kMaxJobs, kRetryAttempts, NULL));
 
   // Note that at this point the CapturingHostResolverProc is blocked, so any
   // requests we make will not complete.
@@ -1511,8 +1439,8 @@ TEST_F(HostResolverImplTest, QueueOverflow) {
   const size_t kMaxOutstandingJobs = 1u;
   const size_t kRetryAttempts = 0u;
   scoped_ptr<HostResolverImpl> host_resolver(new HostResolverImpl(
-      resolver_proc, CreateDefaultCache(), kMaxOutstandingJobs, kRetryAttempts,
-      NULL));
+      resolver_proc, HostCache::CreateDefaultCache(), kMaxOutstandingJobs,
+      kRetryAttempts, NULL));
 
   // Only allow up to 3 requests to be enqueued at a time.
   const size_t kMaxPendingRequests = 3u;
@@ -1591,8 +1519,8 @@ TEST_F(HostResolverImplTest, SetDefaultAddressFamily_IPv4) {
   const size_t kMaxOutstandingJobs = 1u;
   const size_t kRetryAttempts = 0u;
   scoped_ptr<HostResolverImpl> host_resolver(new HostResolverImpl(
-      resolver_proc, CreateDefaultCache(), kMaxOutstandingJobs, kRetryAttempts,
-      NULL));
+      resolver_proc, HostCache::CreateDefaultCache(), kMaxOutstandingJobs,
+      kRetryAttempts, NULL));
 
   host_resolver->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
 
@@ -1661,8 +1589,8 @@ TEST_F(HostResolverImplTest, SetDefaultAddressFamily_IPv6) {
   const size_t kMaxOutstandingJobs = 1u;
   const size_t kRetryAttempts = 0u;
   scoped_ptr<HostResolverImpl> host_resolver(new HostResolverImpl(
-      resolver_proc, CreateDefaultCache(), kMaxOutstandingJobs, kRetryAttempts,
-      NULL));
+      resolver_proc, HostCache::CreateDefaultCache(), kMaxOutstandingJobs,
+      kRetryAttempts, NULL));
 
   host_resolver->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV6);
 
@@ -1727,7 +1655,8 @@ TEST_F(HostResolverImplTest, SetDefaultAddressFamily_Synchronous) {
       new CapturingHostResolverProc(new EchoingHostResolverProc));
 
   scoped_ptr<HostResolverImpl> host_resolver(new HostResolverImpl(
-      resolver_proc, CreateDefaultCache(), kMaxJobs, kMaxRetryAttempts, NULL));
+      resolver_proc, HostCache::CreateDefaultCache(), kMaxJobs,
+      kMaxRetryAttempts, NULL));
 
   host_resolver->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
 
@@ -1824,7 +1753,7 @@ TEST_F(HostResolverImplTest, MultipleAttempts) {
   scoped_refptr<LookupAttemptHostResolverProc> resolver_proc(
       new LookupAttemptHostResolverProc(
           NULL, kAttemptNumberToResolve, kTotalAttempts));
-  HostCache* cache = CreateDefaultCache();
+  HostCache* cache = HostCache::CreateDefaultCache();
   scoped_ptr<HostResolverImpl> host_resolver(
       new HostResolverImpl(resolver_proc, cache, kMaxJobs, kMaxRetryAttempts,
                            NULL));

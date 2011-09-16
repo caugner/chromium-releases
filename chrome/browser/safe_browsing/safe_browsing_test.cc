@@ -145,9 +145,13 @@ class SafeBrowsingTestServer {
     cmd_line.AppendArgNative(FILE_PATH_LITERAL("--datafile=") +
                              datafile.value());
 
-    if (!base::LaunchApp(cmd_line, false, true, &server_handle_)) {
+    base::LaunchOptions options;
+#if defined(OS_WIN)
+    options.start_hidden = true;
+#endif
+    if (!base::LaunchProcess(cmd_line, options, &server_handle_)) {
       LOG(ERROR) << "Failed to launch server: "
-                 << cmd_line.command_line_string();
+                 << cmd_line.GetCommandLineString();
       return false;
     }
     return true;
@@ -281,8 +285,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
 
  protected:
   bool InitSafeBrowsingService() {
-    safe_browsing_service_ =
-        g_browser_process->resource_dispatcher_host()->safe_browsing_service();
+    safe_browsing_service_ = g_browser_process->safe_browsing_service();
     return safe_browsing_service_ != NULL;
   }
 
@@ -523,7 +526,8 @@ class SafeBrowsingServiceTestHelper
   net::URLRequestStatus::Status FetchUrl(const GURL& url) {
     url_fetcher_.reset(new URLFetcher(url, URLFetcher::GET, this));
     url_fetcher_->set_load_flags(net::LOAD_DISABLE_CACHE);
-    url_fetcher_->set_request_context(Profile::GetDefaultRequestContext());
+    url_fetcher_->set_request_context(
+        Profile::Deprecated::GetDefaultRequestContext());
     url_fetcher_->Start();
     ui_test_utils::RunMessageLoop();
     return response_status_;

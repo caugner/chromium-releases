@@ -6,13 +6,16 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/common/url_constants.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 RegisterProtocolHandlerInfoBarDelegate::RegisterProtocolHandlerInfoBarDelegate(
     TabContents* tab_contents,
     ProtocolHandlerRegistry* registry,
-    ProtocolHandler handler)
+    const ProtocolHandler& handler)
     : ConfirmInfoBarDelegate(tab_contents),
       tab_contents_(tab_contents),
       registry_(registry),
@@ -28,7 +31,7 @@ bool RegisterProtocolHandlerInfoBarDelegate::ShouldExpire(
 }
 
 InfoBarDelegate::Type
-    RegisterProtocolHandlerInfoBarDelegate::GetInfoBarType() const {
+RegisterProtocolHandlerInfoBarDelegate::GetInfoBarType() const {
   return PAGE_ACTION_TYPE;
 }
 
@@ -37,10 +40,19 @@ string16 RegisterProtocolHandlerInfoBarDelegate::GetMessageText() const {
   return !old_handler.IsEmpty() ?
       l10n_util::GetStringFUTF16(IDS_REGISTER_PROTOCOL_HANDLER_CONFIRM_REPLACE,
           handler_.title(), UTF8ToUTF16(handler_.url().host()),
-          UTF8ToUTF16(handler_.protocol()), old_handler.title()) :
+          GetProtocolName(handler_), old_handler.title()) :
       l10n_util::GetStringFUTF16(IDS_REGISTER_PROTOCOL_HANDLER_CONFIRM,
           handler_.title(), UTF8ToUTF16(handler_.url().host()),
-          UTF8ToUTF16(handler_.protocol()));
+          GetProtocolName(handler_));
+}
+
+string16 RegisterProtocolHandlerInfoBarDelegate::GetProtocolName(
+    const ProtocolHandler& handler) const {
+  if (handler.protocol() == "mailto")
+    return l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_MAILTO_NAME);
+  if (handler.protocol() == "webcal")
+    return l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_WEBCAL_NAME);
+  return UTF8ToUTF16(handler.protocol());
 }
 
 string16 RegisterProtocolHandlerInfoBarDelegate::GetButtonLabel(
@@ -52,21 +64,29 @@ string16 RegisterProtocolHandlerInfoBarDelegate::GetButtonLabel(
 }
 
 bool RegisterProtocolHandlerInfoBarDelegate::Accept() {
+  UserMetrics::RecordAction(
+      UserMetricsAction("RegisterProtocolHandler.Infobar_Accept"));
   registry_->OnAcceptRegisterProtocolHandler(handler_);
   return true;
 }
 
 bool RegisterProtocolHandlerInfoBarDelegate::Cancel() {
-  registry_->OnDenyRegisterProtocolHandler(handler_);
+  UserMetrics::RecordAction(
+      UserMetricsAction("RegisterProtocolHandler.InfoBar_Deny"));
+  registry_->OnIgnoreRegisterProtocolHandler(handler_);
   return true;
 }
 
-string16 RegisterProtocolHandlerInfoBarDelegate::GetLinkText() {
-  // TODO(koz): Make this a 'learn more' link.
-  return string16();
+string16 RegisterProtocolHandlerInfoBarDelegate::GetLinkText() const {
+  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
 }
 
 bool RegisterProtocolHandlerInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
+  UserMetrics::RecordAction(
+      UserMetricsAction("RegisterProtocolHandler.InfoBar_LearnMore"));
+  // Ignore the click dispostion and always open in a new top level tab.
+  tab_contents_->OpenURL(GURL(chrome::kLearnMoreRegisterProtocolHandlerURL),
+                         GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
   return false;
 }

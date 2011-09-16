@@ -30,6 +30,7 @@
 #include "chrome/common/libxml_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automated_ui_tests/automated_ui_tests.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
@@ -113,7 +114,7 @@ std::string GetChromeRevision() {
   file_info.reset(
       FileVersionInfo::CreateFileVersionInfo(FilePath(kChromeDll)));
   last_change = WideToASCII(file_info->last_change());
-#elif defined(OS_LINUX) || defined(OS_MACOSX)
+#elif defined(OS_POSIX)
   chrome::VersionInfo version_info;
   last_change = version_info.LastChange();
 #endif // !defined(OS_WIN)

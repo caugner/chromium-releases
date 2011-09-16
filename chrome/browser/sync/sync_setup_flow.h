@@ -61,13 +61,12 @@ class SyncSetupFlow {
       ProfileSyncService* service,
       DictionaryValue* args);
 
-  // Fills |args| for the enter passphrase screen.
-  static void GetArgsForEnterPassphrase(
-      bool tried_creating_explicit_passphrase,
-      bool tried_setting_explicit_passphrase,
-      DictionaryValue* args);
+  // Attaches the |handler| to this flow. Returns true if successful and false
+  // if a handler has already been attached.
+  bool AttachSyncSetupHandler(SyncSetupFlowHandler* handler);
 
-  void AttachSyncSetupHandler(SyncSetupFlowHandler* handler);
+  // Returns true if a handler is attached to this flow.
+  bool IsAttached() const;
 
   // Triggers a state machine transition to advance_state.
   void Advance(SyncSetupWizard::State advance_state);
@@ -90,8 +89,6 @@ class SyncSetupFlow {
   // The user canceled the passphrase entry without supplying a passphrase.
   void OnPassphraseCancel();
 
-  void OnGoToDashboard();
-
   void OnDialogClosed(const std::string& json_retval);
 
  private:
@@ -106,6 +103,8 @@ class SyncSetupFlow {
   FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest,
                            DiscreteRunChooseDataTypesAbortedByPendingClear);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, EnterPassphraseRequired);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, NonFatalError);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, CrosAuthSetup);
 
   // Use static Run method to get an instance.
   SyncSetupFlow(SyncSetupWizard::State start_state,

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_perf_test.h"
@@ -39,7 +40,7 @@ class NewTabUIStartupTest : public UIPerfTest {
     PrintResultList("new_tab", "", label, times, "ms", important);
   }
 
-  void InitProfile(ProxyLauncher::ProfileType profile_type) {
+  void InitProfile(UITestBase::ProfileType profile_type) {
     profile_type_ = profile_type;
 
     // Install the location of the test profile file.
@@ -55,7 +56,7 @@ class NewTabUIStartupTest : public UIPerfTest {
   // |want_warm| is true if we should output warm-disk timings, false if
   // we should report cold timings.
   void RunStartupTest(const char* label, bool want_warm, bool important,
-                      ProxyLauncher::ProfileType profile_type) {
+                      UITestBase::ProfileType profile_type) {
     InitProfile(profile_type);
 
     TimeDelta timings[kNumCycles];
@@ -103,7 +104,7 @@ class NewTabUIStartupTest : public UIPerfTest {
   }
 
   void RunNewTabTimingTest() {
-    InitProfile(ProxyLauncher::DEFAULT_THEME);
+    InitProfile(UITestBase::DEFAULT_THEME);
 
     TimeDelta scriptstart_times[kNumCycles];
     TimeDelta domcontentloaded_times[kNumCycles];
@@ -164,33 +165,33 @@ class NewTabUIStartupTest : public UIPerfTest {
 TEST_F(NewTabUIStartupTest, FLAKY_PerfRefCold) {
   UseReferenceBuild();
   RunStartupTest("tab_cold_ref", false /* cold */, true /* important */,
-                 ProxyLauncher::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
 TEST_F(NewTabUIStartupTest, FLAKY_PerfCold) {
   RunStartupTest("tab_cold", false /* cold */, true /* important */,
-                 ProxyLauncher::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
 TEST_F(NewTabUIStartupTest, FLAKY_PerfRefWarm) {
   UseReferenceBuild();
   RunStartupTest("tab_warm_ref", true /* warm */, true /* not important */,
-                 ProxyLauncher::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
 TEST_F(NewTabUIStartupTest, FLAKY_PerfWarm) {
   RunStartupTest("tab_warm", true /* warm */, true /* not important */,
-                 ProxyLauncher::DEFAULT_THEME);
+                 UITestBase::DEFAULT_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
 TEST_F(NewTabUIStartupTest, FLAKY_ComplexThemeCold) {
   RunStartupTest("tab_complex_theme_cold", false /* cold */,
                  false /* not important */,
-                 ProxyLauncher::COMPLEX_THEME);
+                 UITestBase::COMPLEX_THEME);
 }
 
 // FLAKY: http://crbug.com/69940
@@ -198,23 +199,23 @@ TEST_F(NewTabUIStartupTest, FLAKY_NewTabTimingTestsCold) {
   RunNewTabTimingTest();
 }
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 TEST_F(NewTabUIStartupTest, GtkThemeCold) {
   RunStartupTest("tab_gtk_theme_cold", false /* cold */,
                  false /* not important */,
-                 ProxyLauncher::NATIVE_THEME);
+                 UITestBase::NATIVE_THEME);
 }
 
 TEST_F(NewTabUIStartupTest, NativeFrameCold) {
   RunStartupTest("tab_custom_frame_cold", false /* cold */,
                  false /* not important */,
-                 ProxyLauncher::CUSTOM_FRAME);
+                 UITestBase::CUSTOM_FRAME);
 }
 
 TEST_F(NewTabUIStartupTest, NativeFrameGtkThemeCold) {
   RunStartupTest("tab_custom_frame_gtk_theme_cold", false /* cold */,
                  false /* not important */,
-                 ProxyLauncher::CUSTOM_FRAME_NATIVE_THEME);
+                 UITestBase::CUSTOM_FRAME_NATIVE_THEME);
 }
 #endif
 

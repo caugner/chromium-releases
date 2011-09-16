@@ -1,5 +1,4 @@
 html,
-.section > h2 span,
 #most-visited-settings {
   background-attachment: fixed;
   background-color: $2; /* COLOR_NTP_BACKGROUND */
@@ -29,35 +28,7 @@ body {
 :link,
 :visited,
 .link {
-  color: $$5; /* COLOR_NTP_LINK_UNDERLINE */
-}
-
-.section > h2,
-#closed-sections-bar > button {
-  color: $$7; /* COLOR_NTP_SECTION_HEADER_TEXT */
-}
-
-.section:not(.hidden) > h2 {
-  color: $$8; /* COLOR_NTP_SECTION_HEADER_TEXT_HOVER */
-}
-
-.section.hidden:not([noexpand]) > h2:hover,
-#closed-sections-bar > button:hover {
-  color: $$8; /* COLOR_NTP_SECTION_HEADER_TEXT_HOVER */
-}
-
-.section > h2 .back,
-#closed-sections-bar[chromeos] {
-  border-top: 1px solid $$1; /* COLOR_NTP_SECTION  */
-}
-
-.section.hidden > h2 .back {
-  background: none;
-  border-color-top: $$$1; /* COLOR_NTP_SECTION_HEADER_RULE_LIGHT */
-}
-
-.section.hidden:hover > h2 .back {
-  border-color-top: $$9; /* COLOR_NTP_SECTION_HEADER_RULE */
+  color: $14; /* COLOR_NTP_LINK_UNDERLINE */
 }
 
 .app span,
@@ -67,39 +38,31 @@ body {
 
 .app:hover > a,
 .app.dragging > a {
-  color: $$3; /* COLOR_NTP_SECTION_TEXT */
-  background-color: $$1; /* COLOR_NTP_SECTION */;
+  color: $12; /* COLOR_NTP_SECTION_TEXT */
+  background-color: $10; /* COLOR_NTP_SECTION */;
+}
+
+.tile-page-scrollbar {
+  background-color: $21; /* COLOR_NTP_TEXT_LIGHT */
 }
 
 /* Footer *********************************************************************/
 
 #footer-border {
   background: -webkit-linear-gradient(left,
-      rgba(255, 255, 255, 0),
-      $$2 5%, /* COLOR_NTP_SECTION_BORDER */
-      $$2 95%, /* COLOR_NTP_SECTION_BORDER */
-      rgba(255, 255, 255, 0));
+      rgba($22, 0.2), /* COLOR_NTP_SECTION_BORDER */
+      rgba($22, 0.3) 20%, /* COLOR_NTP_SECTION_BORDER */
+      rgba($22, 0.3) 80%, /* COLOR_NTP_SECTION_BORDER */
+      rgba($22, 0.2)); /* COLOR_NTP_SECTION_BORDER */
 }
 
-.dot {
-  border-color: $$2; /* COLOR_NTP_SECTION_BORDER */
-}
-
-.dot.selected {
-  border-color: $6; /* COLOR_NTP_HEADER */
-}
-
-.dot:hover {
-  background-color: $$2; /* COLOR_NTP_SECTION_BORDER */
-}
-
-.dot span:focus {
+.dot input:focus {
   background-color: $2; /* COLOR_NTP_BACKGROUND */
 }
 
 .tile-page-title,
 #footer-content span {
-  color: $$$3; /* COLOR_NTP_TEXT_LIGHT */
+  color: $21; /* COLOR_NTP_TEXT_LIGHT */
 }
 
 .disclosure-triangle {
@@ -114,7 +77,7 @@ body {
 }
 
 .most-visited:focus:not(.filler) .thumbnail-wrapper,
-.most-visited:hover .thumbnail-wrapper {
+.most-visited:hover:not(.filler) .thumbnail-wrapper {
   background-color: $6; /* COLOR_NTP_HEADER */
 }
 
@@ -126,13 +89,9 @@ body {
 
 .thumbnail-wrapper {
   /* This shows through at the (rounded) thumbnail's corners. */
-  background-color: $$2; /* COLOR_NTP_SECTION_BORDER */
+  background-color: $11; /* COLOR_NTP_SECTION_BORDER */
 }
 
 .filler .thumbnail {
   border-color: $2; /* COLOR_NTP_BACKGROUND */
-}
-
-.thumbnail-shield {
-  background-color: $2; /* COLOR_NTP_BACKGROUND */
 }

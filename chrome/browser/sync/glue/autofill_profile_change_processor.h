@@ -16,10 +16,10 @@
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/web_database.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 
 namespace browser_sync {
 
@@ -43,7 +43,7 @@ class AutofillProfileChangeProcessor : public ChangeProcessor,
   virtual void CommitChangesFromSyncModel();
 
   // Virtual method implemented for the observer class.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -80,19 +80,7 @@ class AutofillProfileChangeProcessor : public ChangeProcessor,
       sync_api::ReadNode& autofill_root);
 
  private:
-
-  // This ensures that startobsrving gets called after stopobserving even
-  // if there is an early return in the function.
-  // TODO(lipalani) - generalize this and add it to other change processors.
-  class ScopedStopObserving {
-   public:
-    explicit ScopedStopObserving(AutofillProfileChangeProcessor* processor);
-    ~ScopedStopObserving();
-
-   private:
-    ScopedStopObserving() {}
-    AutofillProfileChangeProcessor* processor_;
-  };
+  friend class ScopedStopObserving<AutofillProfileChangeProcessor>;
 
   void StartObserving();
   void StopObserving();
@@ -118,4 +106,3 @@ class AutofillProfileChangeProcessor : public ChangeProcessor,
 }  // namespace browser_sync
 
 #endif  // CHROME_BROWSER_SYNC_GLUE_AUTOFILL_PROFILE_CHANGE_PROCESSOR_H_
-

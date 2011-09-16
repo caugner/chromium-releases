@@ -11,6 +11,8 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
@@ -36,8 +38,43 @@
 #include "chrome/browser/browser_about_handler.h"
 #endif
 
+#if defined(OS_WIN)
+// These includes are only necessary for the PluginInfobarExperiment.
+#include "chrome/common/attrition_experiments.h"
+#include "chrome/installer/util/google_update_settings.h"
+#endif
+
 using WebKit::WebCache;
 using WebKit::WebSecurityOrigin;
+
+namespace {
+// Override the behavior of the security infobars for plugins. Only
+// operational on windows and only for a small slice of the of the
+// UMA opted-in population.
+void PluginInfobarExperiment(ContentSetting* outdated_policy,
+                             ContentSetting* authorize_policy) {
+#if !defined(OS_WIN)
+  return;
+#else
+ std::wstring client_value;
+ if (!GoogleUpdateSettings::GetClient(&client_value))
+   return;
+ if (client_value == attrition_experiments::kPluginNoBlockNoOOD) {
+   *authorize_policy = CONTENT_SETTING_ALLOW;
+   *outdated_policy = CONTENT_SETTING_ALLOW;
+ } else if (client_value == attrition_experiments::kPluginNoBlockDoOOD) {
+   *authorize_policy = CONTENT_SETTING_ALLOW;
+   *outdated_policy = CONTENT_SETTING_BLOCK;
+ } else if (client_value == attrition_experiments::kPluginDoBlockNoOOD) {
+   *authorize_policy = CONTENT_SETTING_ASK;
+   *outdated_policy = CONTENT_SETTING_ALLOW;
+ } else if (client_value == attrition_experiments::kPluginDoBlockDoOOD) {
+   *authorize_policy = CONTENT_SETTING_ASK;
+   *outdated_policy = CONTENT_SETTING_BLOCK;
+ }
+#endif
+}
+}  // namespace
 
 ChromeRenderMessageFilter::ChromeRenderMessageFilter(
     int render_process_id,
@@ -45,7 +82,9 @@ ChromeRenderMessageFilter::ChromeRenderMessageFilter(
     net::URLRequestContextGetter* request_context)
     : render_process_id_(render_process_id),
       profile_(profile),
-      request_context_(request_context) {
+      request_context_(request_context),
+      extension_info_map_(profile->GetExtensionInfoMap()),
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   allow_outdated_plugins_.Init(prefs::kPluginsAllowOutdated,
                                profile_->GetPrefs(), NULL);
   allow_outdated_plugins_.MoveToThread(BrowserThread::IO);
@@ -78,6 +117,8 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RemoveListener,
                         OnExtensionRemoveListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_CloseChannel, OnExtensionCloseChannel)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestForIOThread,
+                        OnExtensionRequestForIOThread)
 #if defined(USE_TCMALLOC)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RendererTcmalloc, OnRendererTcmalloc)
 #endif
@@ -113,6 +154,11 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
 }
 
 void ChromeRenderMessageFilter::OnDestruct() const {
+  const_cast<ChromeRenderMessageFilter*>(this)->
+      weak_ptr_factory_.DetachFromThread();
+  const_cast<ChromeRenderMessageFilter*>(this)->
+      weak_ptr_factory_.InvalidateWeakPtrs();
+
   // Destroy on the UI thread because we contain a PrefMember.
   BrowserThread::DeleteOnUIThread::Destruct(this);
 }
@@ -127,10 +173,9 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
     case ExtensionHostMsg_AddListener::ID:
     case ExtensionHostMsg_RemoveListener::ID:
     case ExtensionHostMsg_CloseChannel::ID:
-      *thread = BrowserThread::UI;
-      break;
     case ViewHostMsg_UpdatedCacheStats::ID:
       *thread = BrowserThread::UI;
+      break;
     default:
       break;
   }
@@ -252,13 +297,14 @@ void ChromeRenderMessageFilter::OpenChannelToTabOnUIThread(
 
 void ChromeRenderMessageFilter::OnGetExtensionMessageBundle(
     const std::string& extension_id, IPC::Message* reply_msg) {
-  ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
-      request_context_->GetURLRequestContext());
-
-  FilePath extension_path =
-      context->extension_info_map()->GetPathForExtension(extension_id);
-  std::string default_locale =
-      context->extension_info_map()->GetDefaultLocaleForExtension(extension_id);
+  const Extension* extension =
+      extension_info_map_->extensions().GetByID(extension_id);
+  FilePath extension_path;
+  std::string default_locale;
+  if (extension) {
+    extension_path = extension->path();
+    default_locale = extension->default_locale();
+  }
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
@@ -327,6 +373,15 @@ void ChromeRenderMessageFilter::OnExtensionCloseChannel(int port_id) {
     profile_->GetExtensionMessageService()->CloseChannel(port_id);
 }
 
+void ChromeRenderMessageFilter::OnExtensionRequestForIOThread(
+    int routing_id,
+    const ExtensionHostMsg_Request_Params& params) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  ExtensionFunctionDispatcher::DispatchOnIOThread(
+      extension_info_map_, profile_, render_process_id_,
+      weak_ptr_factory_.GetWeakPtr(), routing_id, params);
+}
 
 #if defined(USE_TCMALLOC)
 void ChromeRenderMessageFilter::OnRendererTcmalloc(base::ProcessId pid,
@@ -348,6 +403,8 @@ void ChromeRenderMessageFilter::OnGetPluginPolicies(
 
   *authorize_policy = always_authorize_plugins_.GetValue() ?
       CONTENT_SETTING_ALLOW : CONTENT_SETTING_ASK;
+
+  PluginInfobarExperiment(outdated_policy, authorize_policy);
 }
 
 void ChromeRenderMessageFilter::OnAllowDatabase(int render_view_id,
@@ -426,26 +483,29 @@ void ChromeRenderMessageFilter::OnGetPluginContentSetting(
     const std::string& resource,
     ContentSetting* setting) {
   *setting = host_content_settings_map_->GetContentSetting(
-      policy_url, CONTENT_SETTINGS_TYPE_PLUGINS, resource);
+      policy_url,
+      policy_url,
+      CONTENT_SETTINGS_TYPE_PLUGINS,
+      resource);
 }
 
 void ChromeRenderMessageFilter::OnCanTriggerClipboardRead(const GURL& url,
                                                           bool* allowed) {
-  ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
-      request_context_->GetURLRequestContext());
-  *allowed = context->extension_info_map()->CheckURLAccessToExtensionPermission(
-      url, Extension::kClipboardReadPermission);
+  const Extension* extension =
+      extension_info_map_->extensions().GetByURL(url);
+  *allowed = extension &&
+      extension->HasAPIPermission(ExtensionAPIPermission::kClipboardRead);
 }
 
 void ChromeRenderMessageFilter::OnCanTriggerClipboardWrite(const GURL& url,
                                                            bool* allowed) {
-  ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
-      request_context_->GetURLRequestContext());
   // Since all extensions could historically write to the clipboard, preserve it
   // for compatibility.
+  const Extension* extension =
+      extension_info_map_->extensions().GetByURL(url);
   *allowed = url.SchemeIs(chrome::kExtensionScheme) ||
-      context->extension_info_map()->CheckURLAccessToExtensionPermission(
-          url, Extension::kClipboardWritePermission);
+      (extension &&
+       extension->HasAPIPermission(ExtensionAPIPermission::kClipboardWrite));
 }
 
 void ChromeRenderMessageFilter::OnClearPredictorCache(int* result) {

@@ -18,9 +18,8 @@
 
 namespace base {
 template <typename T> struct DefaultLazyInstanceTraits;
-}
-
 class Value;
+}
 
 namespace chromeos {
 
@@ -37,14 +36,14 @@ class CrosSettings : public base::NonThreadSafe {
 
   // Sets |in_value| to given |path| in cros settings.
   // Note that this takes ownership of |in_value|.
-  void Set(const std::string& path, Value* in_value);
+  void Set(const std::string& path, base::Value* in_value);
 
   // Fires system setting change notification.
   void FireObservers(const char* path);
 
   // Gets settings value of given |path| to |out_value|.
   // Note that the caller owns |out_value| returned.
-  bool Get(const std::string& path, Value** out_value) const;
+  bool Get(const std::string& path, base::Value** out_value) const;
 
   // Convenience forms of Set().  These methods will replace any existing
   // value at that path, even if it has a different type.
@@ -70,6 +69,9 @@ class CrosSettings : public base::NonThreadSafe {
   void AddSettingsObserver(const char* path, NotificationObserver* obs);
   void RemoveSettingsObserver(const char* path, NotificationObserver* obs);
 
+  // Returns the provider that handles settings with the path or prefix.
+  CrosSettingsProvider* GetProvider(const std::string& path) const;
+
  private:
   // List of ChromeOS system settings providers.
   std::vector<CrosSettingsProvider*> providers_;
@@ -83,7 +85,6 @@ class CrosSettings : public base::NonThreadSafe {
 
   CrosSettings();
   ~CrosSettings();
-  CrosSettingsProvider* GetProvider(const std::string& path) const;
   friend struct base::DefaultLazyInstanceTraits<CrosSettings>;
 
   DISALLOW_COPY_AND_ASSIGN(CrosSettings);

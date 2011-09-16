@@ -15,12 +15,12 @@
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -295,14 +295,10 @@ void SimUnlockUIHTMLSource::StartDataRequest(const std::string& path,
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_SIM_UNLOCK_HTML));
 
-  const std::string& full_html = jstemplate_builder::GetI18nTemplateHtml(
-      html, &strings);
+  std::string full_html = jstemplate_builder::GetI18nTemplateHtml(html,
+                                                                  &strings);
 
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes());
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
+  SendResponse(request_id, base::RefCountedString::TakeString(&full_html));
 }
 
 // SimUnlockHandler ------------------------------------------------------------
@@ -444,14 +440,14 @@ void SimUnlockHandler::EnterCode(const std::string& code,
 
 void SimUnlockHandler::NotifyOnEnterPinEnded(bool cancelled) {
   NotificationService::current()->Notify(
-      NotificationType::ENTER_PIN_ENDED,
+      chrome::NOTIFICATION_ENTER_PIN_ENDED,
       NotificationService::AllSources(),
       Details<bool>(&cancelled));
 }
 
 void SimUnlockHandler::NotifyOnRequirePinChangeEnded(bool new_value) {
   NotificationService::current()->Notify(
-      NotificationType::REQUIRE_PIN_SETTING_CHANGE_ENDED,
+      chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED,
       NotificationService::AllSources(),
       Details<bool>(&new_value));
 }
@@ -653,7 +649,7 @@ void SimUnlockHandler::UpdatePage(const chromeos::NetworkDevice* cellular,
 
 // SimUnlockUI -----------------------------------------------------------------
 
-SimUnlockUI::SimUnlockUI(TabContents* contents) : WebUI(contents) {
+SimUnlockUI::SimUnlockUI(TabContents* contents) : ChromeWebUI(contents) {
   SimUnlockHandler* handler = new SimUnlockHandler();
   AddMessageHandler((handler)->Attach(this));
   handler->Init(contents);

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "grit/app_strings.h"
+#include "grit/ui_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace views {
@@ -111,7 +111,7 @@ string16 Accelerator::GetShortcutText() const {
   string16 shortcut_rtl;
   bool adjust_shortcut_for_rtl = false;
   if (base::i18n::IsRTL() && shortcut.length() == 1 &&
-      !IsAsciiAlpha(shortcut.at(0)) && !IsAsciiDigit(shortcut.at(0))) {
+      !IsAsciiAlpha(shortcut[0]) && !IsAsciiDigit(shortcut[0])) {
     adjust_shortcut_for_rtl = true;
     shortcut_rtl.assign(shortcut);
   }

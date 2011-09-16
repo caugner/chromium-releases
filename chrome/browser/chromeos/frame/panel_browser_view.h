@@ -31,11 +31,16 @@ class PanelBrowserView : public ::BrowserView,
   virtual void ShowInactive() OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void Close() OVERRIDE;
+  virtual void FlashFrame() OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual bool GetSavedWindowBounds(gfx::Rect* bounds) const OVERRIDE;
-  virtual void OnWindowActivationChanged(bool active) OVERRIDE;
+  virtual bool GetSavedMaximizedState(bool* maximized) const OVERRIDE;
+
+  // views::Widget::Observer overrides.
+  virtual void OnWidgetActivationChanged(views::Widget* widget,
+                                         bool active) OVERRIDE;
 
   // BrowserView : TabStripModelObserver overrides.
   virtual void TabChangedAt(TabContentsWrapper* contents,

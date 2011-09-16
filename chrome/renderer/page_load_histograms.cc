@@ -16,6 +16,7 @@
 #include "content/renderer/navigation_state.h"
 #include "content/renderer/render_view.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPerformance.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -96,7 +97,8 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
     return;
 
   // Only dump for supported schemes.
-  URLPattern::SchemeMasks scheme_type = GetSupportedSchemeType(frame->url());
+  URLPattern::SchemeMasks scheme_type =
+      GetSupportedSchemeType(frame->document().url());
   if (scheme_type == 0)
     return;
 
@@ -731,27 +733,6 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
                     start_to_finish_all_loads);
       UMA_HISTOGRAM_ENUMERATION("PLT.Abandoned.NoProxy.http",
                                 abandoned_page ? 1 : 0, 2);
-    }
-  }
-
-  static const bool false_start_trial =
-      base::FieldTrialList::TrialExists("SSLFalseStart");
-  if (false_start_trial) {
-    if (scheme_type == URLPattern::SCHEME_HTTPS) {
-      switch (load_type) {
-        case NavigationState::LINK_LOAD_NORMAL:
-          PLT_HISTOGRAM(base::FieldTrial::MakeName(
-              "PLT.BeginToFinish_LinkLoadNormal", "SSLFalseStart"),
-              begin_to_finish_all_loads);
-          break;
-        case NavigationState::NORMAL_LOAD:
-          PLT_HISTOGRAM(base::FieldTrial::MakeName(
-              "PLT.BeginToFinish_NormalLoad", "SSLFalseStart"),
-              begin_to_finish_all_loads);
-          break;
-        default:
-          break;
-      }
     }
   }
 

@@ -98,14 +98,23 @@ class PluginsTest(pyauto.PyUITest):
       if re.search(plugin_name, plugin['name']):
          return plugin['enabled']
 
+  def _PluginNeedsAuthorization(self, plugin_name):
+    # These plug-ins seek permission to run
+    return plugin_name in ['Java', 'Quicktime', 'Windows Media']
+
   def testKillAndReloadAllPlugins(self):
     """Verify plugin processes and check if they can reload after killing."""
     for fname, plugin_name in self._ObtainPluginsList():
-      if plugin_name == 'Java':  # crbug.com/71223
-        continue
+      if plugin_name == 'Shockwave Flash':
+        continue  # cannot reload file:// flash URL - crbug.com/47249
       url = self.GetFileURLForPath(
           os.path.join(self.DataDir(), 'plugin', fname))
       self.NavigateToURL(url)
+      if self._PluginNeedsAuthorization(plugin_name):
+        self.assertTrue(self.WaitForInfobarCount(1))
+        self.PerformActionOnInfobar('accept', 0)
+      self.WaitUntil(
+          lambda: self._GetPluginPID(plugin_name) is not None )
       pid = self._GetPluginPID(plugin_name)
       self.assertTrue(pid, 'No plugin process for %s' % plugin_name)
       self.Kill(pid)
@@ -147,7 +156,11 @@ class PluginsTest(pyauto.PyUITest):
       # Enable
       self._TogglePlugin(plugin_name)
       self.GetBrowserWindow(0).GetTab(0).Reload()
-      self.assertTrue(self._GetPluginPID(plugin_name=plugin_name))
+      if self._PluginNeedsAuthorization(plugin_name):
+        self.assertTrue(self.WaitForInfobarCount(1))
+        self.PerformActionOnInfobar('accept', 0)
+      self.assertTrue(self.WaitUntil(
+          lambda: self._GetPluginPID(plugin_name=plugin_name)))
       self.assertTrue(self._IsEnabled(plugin_name), plugin_name)
 
   def testBlockAllPlugins(self):
@@ -188,7 +201,7 @@ class PluginsTest(pyauto.PyUITest):
 
     # Add an exception to allow plugins on hulu.com.
     self.SetPrefs(pyauto.kContentSettingsPatterns,
-                 {'[*.]hulu.com': {'plugins': 1}})
+                 {'[*.]hulu.com,*': {'plugins': 1}})
     self.AppendTab(pyauto.GURL('http://www.hulu.com'))
     self.assertTrue(self._GetPluginPID('Shockwave Flash'),
                     msg='No plugin process for Shockwave Flash')
@@ -210,7 +223,7 @@ class PluginsTest(pyauto.PyUITest):
 
     # Add an exception to block plugins on localhost.
     self.SetPrefs(pyauto.kContentSettingsPatterns,
-                 {'[*.]127.0.0.1': {'plugins': 2}})
+                 {'[*.]127.0.0.1,*': {'plugins': 2}})
     self.GetBrowserWindow(0).GetTab(0).Reload()
     self.assertFalse(self._GetPluginPID('Shockwave Flash'),
                      msg='Shockwave Flash Plug-in not blocked.')

@@ -44,11 +44,18 @@ class IsolatedAppApiTest : public ExtensionApiTest {
 
 // Tests that cookies set within an isolated app are not visible to normal
 // pages or other apps.
-IN_PROC_BROWSER_TEST_F(IsolatedAppApiTest, CookieIsolation) {
+//
+// Flaky on Mac/Win.  http://crbug.com/86562
+#if defined(OS_WIN) || defined(OS_MACOSX)
+#define MAYBE_CookieIsolation DISABLED_CookieIsolation
+#else
+#define MAYBE_CookieIsolation CookieIsolation
+#endif
+IN_PROC_BROWSER_TEST_F(IsolatedAppApiTest, MAYBE_CookieIsolation) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
   CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalAppManifests);
+      switches::kEnableExperimentalExtensionApis);
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
@@ -105,17 +112,19 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppApiTest, CookieIsolation) {
   ASSERT_FALSE(HasCookie(tab3, "nonAppFrame"));
 }
 
-// Without the --enable-experimental-app-manifests flag, all the tabs
-// should see each others' cookies.
-IN_PROC_BROWSER_TEST_F(IsolatedAppApiTest, CookieIsolationRequiresFlag) {
+// Ensure that cookies are not isolated if the isolated apps are not installed.
+#if defined(OS_WIN)
+// Disabled due to http://crbug.com/89090.
+#define MAYBE_NoCookieIsolationWithoutApp DISABLED_NoCookieIsolationWithoutApp
+#else
+#define MAYBE_NoCookieIsolationWithoutApp NoCookieIsolationWithoutApp
+#endif
+IN_PROC_BROWSER_TEST_F(IsolatedAppApiTest, NoCookieIsolationWithoutApp) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
-
-  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("isolated_apps/app1")));
-  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("isolated_apps/app2")));
 
   // The app under test acts on URLs whose host is "localhost",
   // so the URLs we navigate to must have host "localhost".

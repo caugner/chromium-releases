@@ -23,6 +23,7 @@
 class FilePath;
 interface IBrowserService;
 interface IWebBrowser2;
+struct ContextMenuModel;
 
 // utils.h : Various utility functions and classes
 
@@ -34,7 +35,6 @@ extern const wchar_t kChromeFrameAccessibleMode[];
 extern const wchar_t kChromeFrameUnpinnedMode[];
 extern const wchar_t kAllowUnsafeURLs[];
 extern const wchar_t kEnableBuggyBhoIntercept[];
-extern const wchar_t kEnableFirefoxPrivilegeMode[];
 extern const wchar_t kChromeMimeType[];
 extern const wchar_t kChromeFrameAttachTabPattern[];
 extern const wchar_t kChromeFrameConfigKey[];
@@ -74,15 +74,9 @@ HRESULT UtilRegisterTypeLib(ITypeLib* typelib,
 HRESULT UtilUnRegisterTypeLib(ITypeLib* typelib,
                               bool for_current_user_only);
 
-// Utility function to tell if the NPAPI plugin is registered.
-bool UtilIsNPAPIPluginRegistered();
-
-// Sets or clears a marker that causes NPAPI registration to persist across
-// updates. The marker is added if set is true and is deleted otherwise.
-bool UtilChangePersistentNPAPIMarker(bool set);
-
-// Returns true if the persistent NPAPI marker is set, false otherwise.
-bool UtilIsPersistentNPAPIMarkerSet();
+// Clears a marker that causes legacy NPAPI registration to persist across
+// updates. Returns false if the marker could not be removed.
+bool UtilRemovePersistentNPAPIMarker();
 
 // Given an HTML fragment, this function looks for the
 // <meta http-equiv="X-UA-Compatible"> tag and extracts the value of the
@@ -156,8 +150,6 @@ typedef enum BrowserType {
   BROWSER_INVALID = -1,
   BROWSER_UNKNOWN,
   BROWSER_IE,
-  BROWSER_FIREFOX,
-  BROWSER_OPERA,
 };
 
 BrowserType GetBrowserType();
@@ -234,9 +226,8 @@ bool IsIEInPrivate();
 // Calls [ieframe|shdocvw]!DoFileDownload to initiate a download.
 HRESULT DoFileDownloadInIE(const wchar_t* url);
 
-// Creates a copy of a menu. We need this when original menu comes from
-// a process with higher integrity.
-HMENU UtilCloneContextMenu(HMENU original_menu);
+// Construct a menu from the model sent from Chrome.
+HMENU BuildContextMenu(const ContextMenuModel& menu_model);
 
 // Uses GURL internally to append 'relative' to 'document'
 std::string ResolveURL(const std::string& document,
@@ -302,7 +293,8 @@ HRESULT DoQueryService(const IID& service_id, IUnknown* unk, T** service) {
 // |headers| can be NULL.
 HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
                                  const wchar_t* headers, IBindCtx* bind_ctx,
-                                 const wchar_t* fragment, IStream* post_data);
+                                 const wchar_t* fragment, IStream* post_data,
+                                 VARIANT* flags);
 
 // Raises a flag on the current thread (using TLS) to indicate that an
 // in-progress navigation should be rendered in chrome frame.

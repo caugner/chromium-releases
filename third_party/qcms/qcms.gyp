@@ -6,7 +6,6 @@
   'targets': [
     {
       'target_name': 'qcms',
-      'product_name': 'qcms',
       'type': 'static_library',
       'sources': [
         'qcms.h',
@@ -33,9 +32,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

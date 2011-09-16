@@ -11,10 +11,10 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "content/browser/webui/web_ui.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/notification_type.h"
 
 class GURL;
 class PrefService;
@@ -31,7 +31,7 @@ class OptionsPageUIHandler : public WebUIMessageHandler,
   virtual bool IsEnabled();
 
   // Collects localized strings for options page.
-  virtual void GetLocalizedValues(DictionaryValue* localized_strings) = 0;
+  virtual void GetLocalizedValues(base::DictionaryValue* localized_strings) = 0;
 
   // Initialize the page.  Called once the DOM is available for manipulation.
   // This will be called only once.
@@ -44,7 +44,7 @@ class OptionsPageUIHandler : public WebUIMessageHandler,
   virtual void RegisterMessages() {}
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {}
 
@@ -58,12 +58,12 @@ class OptionsPageUIHandler : public WebUIMessageHandler,
     int id;
   };
   // A helper for simplifying the process of registering strings in WebUI.
-  static void RegisterStrings(DictionaryValue* localized_strings,
+  static void RegisterStrings(base::DictionaryValue* localized_strings,
                               const OptionsStringResource* resources,
                               size_t length);
 
   // Registers string resources for a page's header and tab title.
-  static void RegisterTitle(DictionaryValue* localized_strings,
+  static void RegisterTitle(base::DictionaryValue* localized_strings,
                             const std::string& variable_name,
                             int title_id);
 
@@ -81,7 +81,7 @@ class OptionsPageUIHandlerHost {
 };
 
 // The WebUI for chrome:settings.
-class OptionsUI : public WebUI,
+class OptionsUI : public ChromeWebUI,
                   public OptionsPageUIHandlerHost {
  public:
   explicit OptionsUI(TabContents* contents);
@@ -98,7 +98,7 @@ class OptionsUI : public WebUI,
 
  private:
   // Adds OptionsPageUiHandler to the handlers list if handler is enabled.
-  void AddOptionsPageUIHandler(DictionaryValue* localized_strings,
+  void AddOptionsPageUIHandler(base::DictionaryValue* localized_strings,
                                OptionsPageUIHandler* handler);
 
   bool initialized_handlers_;

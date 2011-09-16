@@ -19,11 +19,18 @@ class ChildProcessSecurityPolicyTest : public testing::Test {
   // testing::Test
   virtual void SetUp() {
     // In the real world, "chrome:" is a handled scheme.
-    net::URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme,
-                                             &net::URLRequestTestJob::Factory);
+    RegisterProtocolFactory(chrome::kChromeUIScheme,
+                            &net::URLRequestTestJob::Factory);
   }
   virtual void TearDown() {
-    net::URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme, NULL);
+    RegisterProtocolFactory(chrome::kChromeUIScheme, NULL);
+  }
+
+  static net::URLRequest::ProtocolFactory* RegisterProtocolFactory(
+      const std::string& scheme,
+      net::URLRequest::ProtocolFactory* factory) {
+    return net::URLRequest::Deprecated::RegisterProtocolFactory(
+        scheme, factory);
   }
 };
 
@@ -45,6 +52,8 @@ TEST_F(ChildProcessSecurityPolicyTest, IsWebSafeSchemeTest) {
   EXPECT_FALSE(p->IsWebSafeScheme("registered-web-safe-scheme"));
   p->RegisterWebSafeScheme("registered-web-safe-scheme");
   EXPECT_TRUE(p->IsWebSafeScheme("registered-web-safe-scheme"));
+
+  EXPECT_FALSE(p->IsWebSafeScheme(chrome::kChromeUIScheme));
 }
 
 TEST_F(ChildProcessSecurityPolicyTest, IsPseudoSchemeTest) {
@@ -57,6 +66,8 @@ TEST_F(ChildProcessSecurityPolicyTest, IsPseudoSchemeTest) {
   EXPECT_FALSE(p->IsPseudoScheme("registered-pseudo-scheme"));
   p->RegisterPseudoScheme("registered-pseudo-scheme");
   EXPECT_TRUE(p->IsPseudoScheme("registered-pseudo-scheme"));
+
+  EXPECT_FALSE(p->IsPseudoScheme(chrome::kChromeUIScheme));
 }
 
 TEST_F(ChildProcessSecurityPolicyTest, IsDisabledSchemeTest) {
@@ -119,6 +130,7 @@ TEST_F(ChildProcessSecurityPolicyTest, AboutTest) {
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("about:CrASh")));
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("abOuT:cAChe")));
 
+  // These requests for about: pages should be denied.
   p->GrantRequestURL(kRendererID, GURL(chrome::kTestMemoryURL));
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL(chrome::kTestMemoryURL)));
 
@@ -130,6 +142,16 @@ TEST_F(ChildProcessSecurityPolicyTest, AboutTest) {
 
   p->GrantRequestURL(kRendererID, GURL(chrome::kTestHangURL));
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL(chrome::kTestHangURL)));
+
+  // These requests for chrome:// pages should be granted.
+  p->GrantRequestURL(kRendererID, GURL(chrome::kTestNewTabURL));
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL(chrome::kTestNewTabURL)));
+
+  p->GrantRequestURL(kRendererID, GURL(chrome::kTestHistoryURL));
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL(chrome::kTestHistoryURL)));
+
+  p->GrantRequestURL(kRendererID, GURL(chrome::kTestBookmarksURL));
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL(chrome::kTestBookmarksURL)));
 
   p->Remove(kRendererID);
 }
@@ -155,8 +177,7 @@ TEST_F(ChildProcessSecurityPolicyTest, RegisterWebSafeSchemeTest) {
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   // Once we register a ProtocolFactory for "asdf", we default to deny.
-  net::URLRequest::RegisterProtocolFactory("asdf",
-                                           &net::URLRequestTestJob::Factory);
+  RegisterProtocolFactory("asdf", &net::URLRequestTestJob::Factory);
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   // We can allow new schemes by adding them to the whitelist.
@@ -164,7 +185,7 @@ TEST_F(ChildProcessSecurityPolicyTest, RegisterWebSafeSchemeTest) {
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   // Cleanup.
-  net::URLRequest::RegisterProtocolFactory("asdf", NULL);
+  RegisterProtocolFactory("asdf", NULL);
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   p->Remove(kRendererID);

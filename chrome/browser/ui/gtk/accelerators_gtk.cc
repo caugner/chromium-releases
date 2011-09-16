@@ -46,6 +46,8 @@ const struct AcceleratorMapping {
   { GDK_n, IDC_NEW_WINDOW, GDK_CONTROL_MASK },
   { GDK_n, IDC_NEW_INCOGNITO_WINDOW,
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
+  { GDK_w, IDC_CLOSE_WINDOW,
+    GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
 
   { GDK_1, IDC_SELECT_TAB_0, GDK_CONTROL_MASK },
   { GDK_2, IDC_SELECT_TAB_1, GDK_CONTROL_MASK },
@@ -158,6 +160,8 @@ const struct AcceleratorMapping {
   { GDK_p, IDC_PRINT, GDK_CONTROL_MASK },
   { GDK_b, IDC_SHOW_BOOKMARK_BAR,
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
+  { GDK_o, IDC_SHOW_BOOKMARK_MANAGER,
+    GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
   { GDK_F11, IDC_FULLSCREEN, GdkModifierType(0) },
   { GDK_Delete, IDC_CLEAR_BROWSING_DATA,
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
@@ -175,23 +179,6 @@ const struct AcceleratorMapping {
 
 }  // namespace
 
-AcceleratorsGtk::AcceleratorsGtk() {
-  for (size_t i = 0; i < arraysize(kAcceleratorMap); ++i) {
-    int command_id = kAcceleratorMap[i].command_id;
-    ui::AcceleratorGtk accelerator(kAcceleratorMap[i].keyval,
-                                      kAcceleratorMap[i].modifier_type);
-    all_accelerators_.push_back(
-        std::pair<int, ui::AcceleratorGtk>(command_id, accelerator));
-
-    if (primary_accelerators_.find(command_id) ==
-        primary_accelerators_.end()) {
-      primary_accelerators_[command_id] = accelerator;
-    }
-  }
-}
-
-AcceleratorsGtk::~AcceleratorsGtk() {}
-
 // static
 AcceleratorsGtk* AcceleratorsGtk::GetInstance() {
   return Singleton<AcceleratorsGtk>::get();
@@ -199,11 +186,21 @@ AcceleratorsGtk* AcceleratorsGtk::GetInstance() {
 
 const ui::AcceleratorGtk* AcceleratorsGtk::GetPrimaryAcceleratorForCommand(
     int command_id) {
-  base::hash_map<int, ui::AcceleratorGtk>::const_iterator iter =
-      primary_accelerators_.find(command_id);
-
-  if (iter == primary_accelerators_.end())
-    return NULL;
-
-  return &iter->second;
+  AcceleratorGtkMap::const_iterator i(primary_accelerators_.find(command_id));
+  return i != primary_accelerators_.end() ? &i->second : NULL;
 }
+
+AcceleratorsGtk::AcceleratorsGtk() {
+  for (size_t i = 0; i < arraysize(kAcceleratorMap); ++i) {
+    const AcceleratorMapping& entry = kAcceleratorMap[i];
+    ui::AcceleratorGtk accelerator(entry.keyval, entry.modifier_type);
+    all_accelerators_.push_back(std::make_pair(entry.command_id, accelerator));
+
+    if (primary_accelerators_.find(entry.command_id) ==
+        primary_accelerators_.end()) {
+      primary_accelerators_[entry.command_id] = accelerator;
+    }
+  }
+}
+
+AcceleratorsGtk::~AcceleratorsGtk() {}

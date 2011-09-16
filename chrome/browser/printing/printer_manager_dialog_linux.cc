@@ -47,9 +47,8 @@ void DetectAndOpenPrinterConfigDialog() {
 
   std::vector<std::string> argv;
   argv.push_back(command);
-  base::file_handle_mapping_vector no_files;
   base::ProcessHandle handle;
-  if (!base::LaunchApp(argv, no_files, false, &handle)) {
+  if (!base::LaunchProcess(argv, base::LaunchOptions(), &handle)) {
     LOG(ERROR) << "Failed to open printer manager dialog ";
     return;
   }

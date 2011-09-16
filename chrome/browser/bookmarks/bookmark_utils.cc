@@ -22,13 +22,14 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
-#include "grit/app_strings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/ui_strings.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -70,10 +71,10 @@ class NewBrowserPageNavigator : public PageNavigator {
 
   Browser* browser() const { return browser_; }
 
-  virtual void OpenURL(const GURL& url,
-                       const GURL& referrer,
-                       WindowOpenDisposition disposition,
-                       PageTransition::Type transition) OVERRIDE {
+  virtual TabContents* OpenURL(const GURL& url,
+                               const GURL& referrer,
+                               WindowOpenDisposition disposition,
+                               PageTransition::Type transition) OVERRIDE {
     if (!browser_) {
       Profile* profile = (disposition == OFF_THE_RECORD) ?
           profile_->GetOffTheRecordProfile() : profile_;
@@ -81,7 +82,7 @@ class NewBrowserPageNavigator : public PageNavigator {
       // Always open the first tab in the foreground.
       disposition = NEW_FOREGROUND_TAB;
     }
-    browser_->OpenURL(url, referrer, NEW_FOREGROUND_TAB, transition);
+    return browser_->OpenURL(url, referrer, NEW_FOREGROUND_TAB, transition);
   }
 
  private:
@@ -117,6 +118,18 @@ int ChildURLCount(const BookmarkNode* node) {
   return result;
 }
 
+// Returns the total number of descendants nodes.
+int ChildURLCountTotal(const BookmarkNode* node) {
+  int result = 0;
+  for (int i = 0; i < node->child_count(); ++i) {
+    const BookmarkNode* child = node->GetChild(i);
+    result++;
+    if (child->is_folder())
+      result += ChildURLCountTotal(child);
+  }
+  return result;
+}
+
 // Implementation of OpenAll. Opens all nodes of type URL and any children of
 // |node| that are of type URL. |navigator| is the PageNavigator used to open
 // URLs. After the first url is opened |opened_url| is set to true and
@@ -126,6 +139,7 @@ int ChildURLCount(const BookmarkNode* node) {
 void OpenAllImpl(const BookmarkNode* node,
                  WindowOpenDisposition initial_disposition,
                  PageNavigator** navigator,
+                 Profile* profile,
                  bool* opened_url) {
   if (node->is_url()) {
     WindowOpenDisposition disposition;
@@ -133,13 +147,13 @@ void OpenAllImpl(const BookmarkNode* node,
       disposition = NEW_BACKGROUND_TAB;
     else
       disposition = initial_disposition;
-    (*navigator)->OpenURL(node->GetURL(), GURL(), disposition,
+    (*navigator)->OpenURL(node->url(), GURL(), disposition,
                           PageTransition::AUTO_BOOKMARK);
     if (!*opened_url) {
       *opened_url = true;
       // We opened the first URL which may have opened a new window or clobbered
       // the current page, reset the navigator just to be sure.
-      Browser* new_browser = BrowserList::GetLastActive();
+      Browser* new_browser = BrowserList::GetLastActiveWithProfile(profile);
       if (new_browser) {
         TabContents* current_tab = new_browser->GetSelectedTabContents();
         DCHECK(new_browser && current_tab);
@@ -152,7 +166,8 @@ void OpenAllImpl(const BookmarkNode* node,
     for (int i = 0; i < node->child_count(); ++i) {
       const BookmarkNode* child_node = node->GetChild(i);
       if (child_node->is_url())
-        OpenAllImpl(child_node, initial_disposition, navigator, opened_url);
+        OpenAllImpl(child_node, initial_disposition, navigator, profile,
+                    opened_url);
     }
   }
 }
@@ -197,9 +212,9 @@ bool DoesBookmarkContainWords(const BookmarkNode* node,
       DoesBookmarkTextContainWords(
           base::i18n::ToLower(node->GetTitle()), words) ||
       DoesBookmarkTextContainWords(
-          base::i18n::ToLower(UTF8ToUTF16(node->GetURL().spec())), words) ||
+          base::i18n::ToLower(UTF8ToUTF16(node->url().spec())), words) ||
       DoesBookmarkTextContainWords(base::i18n::ToLower(
-          net::FormatUrl(node->GetURL(), languages, net::kFormatUrlOmitNothing,
+          net::FormatUrl(node->url(), languages, net::kFormatUrlOmitNothing,
                          UnescapeRule::NORMAL, NULL, NULL, NULL)), words);
 }
 
@@ -340,10 +355,9 @@ void DragBookmarks(Profile* profile,
   bool was_nested = MessageLoop::current()->IsNested();
   MessageLoop::current()->SetNestableTasksAllowed(true);
 
-  views::NativeWidget* native_widget =
-      views::NativeWidget::GetNativeWidgetForNativeView(view);
-  if (native_widget) {
-    native_widget->GetWidget()->RunShellDrag(NULL, data,
+  views::Widget* widget = views::Widget::GetWidgetForNativeView(view);
+  if (widget) {
+    widget->RunShellDrag(NULL, data,
         ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
         ui::DragDropTypes::DRAG_LINK);
   }
@@ -383,8 +397,12 @@ void OpenAll(gfx::NativeWindow parent,
   }
 
   bool opened_url = false;
+  if (initial_disposition == OFF_THE_RECORD)
+    profile = profile->GetOffTheRecordProfile();
+
   for (size_t i = 0; i < nodes.size(); ++i)
-    OpenAllImpl(nodes[i], initial_disposition, &navigator, &opened_url);
+    OpenAllImpl(nodes[i], initial_disposition, &navigator, profile,
+                &opened_url);
 }
 
 void OpenAll(gfx::NativeWindow parent,
@@ -470,9 +488,9 @@ std::vector<const BookmarkNode*> GetMostRecentlyModifiedFolders(
 
   if (nodes.size() < max_count) {
     // Add the bookmark bar and other nodes if there is space.
-    if (find(nodes.begin(), nodes.end(), model->GetBookmarkBarNode()) ==
+    if (find(nodes.begin(), nodes.end(), model->bookmark_bar_node()) ==
         nodes.end()) {
-      nodes.push_back(model->GetBookmarkBarNode());
+      nodes.push_back(model->bookmark_bar_node());
     }
 
     if (nodes.size() < max_count &&
@@ -623,7 +641,7 @@ void ToggleWhenVisible(Profile* profile) {
   // And notify the notification service.
   Source<Profile> source(profile);
   NotificationService::current()->Notify(
-      NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+      chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
       source,
       NotificationService::NoDetails());
 }
@@ -644,7 +662,18 @@ void GetURLAndTitleToBookmark(TabContents* tab_contents,
   *title = tab_contents->GetTitle();
 }
 
-void GetURLsForOpenTabs(Browser* browser,
+void GetURLAndTitleToBookmarkFromCurrentTab(Profile* profile,
+                                            GURL* url,
+                                            string16* title) {
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+  TabContents* tab_contents = browser ? browser->GetSelectedTabContents()
+                                        : NULL;
+  if (tab_contents)
+    GetURLAndTitleToBookmark(tab_contents, url, title);
+}
+
+void GetURLsForOpenTabs(
+    Browser* browser,
     std::vector<std::pair<GURL, string16> >* urls) {
   for (int i = 0; i < browser->tab_count(); ++i) {
     std::pair<GURL, string16> entry;
@@ -690,6 +719,30 @@ bool NodeHasURLs(const BookmarkNode* node) {
       return true;
   }
   return false;
+}
+
+bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
+                               gfx::NativeWindow window) {
+  DCHECK(node && node->is_folder() && !node->empty());
+  return platform_util::SimpleYesNoBox(window,
+      l10n_util::GetStringUTF16(IDS_DELETE),
+      l10n_util::GetStringFUTF16Int(IDS_BOOMARK_EDITOR_CONFIRM_DELETE,
+                                    ChildURLCountTotal(node)));
+}
+
+void DeleteBookmarkFolders(BookmarkModel* model,
+                           const std::vector<int64>& ids) {
+  // Remove the folders that were removed. This has to be done after all the
+  // other changes have been committed.
+  for (std::vector<int64>::const_iterator iter = ids.begin();
+       iter != ids.end();
+       ++iter) {
+    const BookmarkNode* node = model->GetNodeByID(*iter);
+    if (!node)
+      continue;
+    const BookmarkNode* parent = node->parent();
+    model->Remove(parent, parent->GetIndexOf(node));
+  }
 }
 
 }  // namespace bookmark_utils

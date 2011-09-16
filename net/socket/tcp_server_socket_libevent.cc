@@ -14,11 +14,6 @@
 #if defined(OS_POSIX)
 #include <netinet/in.h>
 #endif
-#if defined(USE_SYSTEM_LIBEVENT)
-#include <event.h>
-#else
-#include "third_party/libevent/event.h"
-#endif
 
 #include "base/eintr_wrapper.h"
 #include "net/base/ip_endpoint.h"
@@ -177,6 +172,8 @@ int TCPServerSocketLibevent::AcceptInternal(
 
 void TCPServerSocketLibevent::Close() {
   if (socket_ != kInvalidSocket) {
+    bool ok = accept_socket_watcher_.StopWatchingFileDescriptor();
+    DCHECK(ok);
     if (HANDLE_EINTR(close(socket_)) < 0)
       PLOG(ERROR) << "close";
     socket_ = kInvalidSocket;
@@ -191,6 +188,8 @@ void TCPServerSocketLibevent::OnFileCanReadWithoutBlocking(int fd) {
     CompletionCallback* c = accept_callback_;
     accept_callback_ = NULL;
     accept_socket_ = NULL;
+    bool ok = accept_socket_watcher_.StopWatchingFileDescriptor();
+    DCHECK(ok);
     c->Run(result);
   }
 }

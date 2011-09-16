@@ -16,17 +16,28 @@
 #include "ppapi/proxy/ppb_audio_proxy.h"
 #include "ppapi/proxy/ppb_buffer_proxy.h"
 #include "ppapi/proxy/ppb_broker_proxy.h"
+#include "ppapi/proxy/ppb_context_3d_proxy.h"
 #include "ppapi/proxy/ppb_file_chooser_proxy.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
+#include "ppapi/proxy/ppb_flash_menu_proxy.h"
+#include "ppapi/proxy/ppb_flash_net_connector_proxy.h"
+#include "ppapi/proxy/ppb_flash_tcp_socket_proxy.h"
 #include "ppapi/proxy/ppb_font_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
+#include "ppapi/proxy/ppb_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
+#include "ppapi/proxy/ppb_input_event_proxy.h"
+#include "ppapi/proxy/ppb_surface_3d_proxy.h"
+#include "ppapi/proxy/ppb_url_loader_proxy.h"
+#include "ppapi/proxy/ppb_url_request_info_proxy.h"
 #include "ppapi/shared_impl/font_impl.h"
 #include "ppapi/shared_impl/function_group_base.h"
+#include "ppapi/shared_impl/input_event_impl.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_image_data_api.h"
 
+using ppapi::InputEventData;
 using ppapi::thunk::ResourceCreationAPI;
 
 namespace pp {
@@ -39,8 +50,7 @@ ResourceCreationProxy::ResourceCreationProxy(Dispatcher* dispatcher)
 ResourceCreationProxy::~ResourceCreationProxy() {
 }
 
-::ppapi::thunk::ResourceCreationAPI*
-ResourceCreationProxy::AsResourceCreationAPI() {
+ResourceCreationAPI* ResourceCreationProxy::AsResourceCreationAPI() {
   return this;
 }
 
@@ -75,9 +85,28 @@ PP_Resource ResourceCreationProxy::CreateBuffer(PP_Instance instance,
   return PPB_Buffer_Proxy::CreateProxyResource(instance, size);
 }
 
+PP_Resource ResourceCreationProxy::CreateContext3D(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  return PPB_Context3D_Proxy::Create(instance, config, share_context,
+                                     attrib_list);
+}
+
+PP_Resource ResourceCreationProxy::CreateContext3DRaw(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  // Not proxied. The raw creation function is used only in the implementation
+  // of the proxy on the host side.
+  return 0;
+}
+
 PP_Resource ResourceCreationProxy::CreateDirectoryReader(
     PP_Resource directory_ref) {
-  // Not proxied yet.
+  NOTIMPLEMENTED();  // Not proxied yet.
   return 0;
 }
 
@@ -88,7 +117,7 @@ PP_Resource ResourceCreationProxy::CreateFileChooser(
 }
 
 PP_Resource ResourceCreationProxy::CreateFileIO(PP_Instance instance) {
-  // Not proxied yet.
+  NOTIMPLEMENTED();  // Not proxied yet.
   return 0;
 }
 
@@ -99,8 +128,24 @@ PP_Resource ResourceCreationProxy::CreateFileRef(PP_Resource file_system,
 
 PP_Resource ResourceCreationProxy::CreateFileSystem(
     PP_Instance instance,
-    PP_FileSystemType_Dev type) {
+    PP_FileSystemType type) {
   return PPB_FileSystem_Proxy::CreateProxyResource(instance, type);
+}
+
+PP_Resource ResourceCreationProxy::CreateFlashMenu(
+    PP_Instance instance,
+    const PP_Flash_Menu* menu_data) {
+  return PPB_Flash_Menu_Proxy::CreateProxyResource(instance, menu_data);
+}
+
+PP_Resource ResourceCreationProxy::CreateFlashNetConnector(
+    PP_Instance instance) {
+  return PPB_Flash_NetConnector_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateFlashTCPSocket(
+    PP_Instance instance) {
+  return PPB_Flash_TCPSocket_Proxy::CreateProxyResource(instance);
 }
 
 PP_Resource ResourceCreationProxy::CreateFontObject(
@@ -145,6 +190,135 @@ PP_Resource ResourceCreationProxy::CreateImageData(PP_Instance instance,
 
   linked_ptr<ImageData> object(new ImageData(result, desc, image_handle));
   return PluginResourceTracker::GetInstance()->AddResource(object);
+}
+
+PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
+    PP_Instance instance,
+    PP_InputEvent_Type type,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    uint32_t key_code,
+    struct PP_Var character_text) {
+  if (type != PP_INPUTEVENT_TYPE_RAWKEYDOWN &&
+      type != PP_INPUTEVENT_TYPE_KEYDOWN &&
+      type != PP_INPUTEVENT_TYPE_KEYUP &&
+      type != PP_INPUTEVENT_TYPE_CHAR)
+    return 0;
+  PluginVarTracker* tracker = PluginVarTracker::GetInstance();
+
+  ppapi::InputEventData data;
+  data.event_type = type;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.key_code = key_code;
+  if (character_text.type == PP_VARTYPE_STRING)
+    data.character_text = *tracker->GetExistingString(character_text);
+
+  return PPB_InputEvent_Proxy::CreateProxyResource(instance, data);
+}
+
+PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
+    PP_Instance instance,
+    PP_InputEvent_Type type,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    PP_InputEvent_MouseButton mouse_button,
+    const PP_Point* mouse_position,
+    int32_t click_count) {
+  if (type != PP_INPUTEVENT_TYPE_MOUSEDOWN &&
+      type != PP_INPUTEVENT_TYPE_MOUSEUP &&
+      type != PP_INPUTEVENT_TYPE_MOUSEMOVE &&
+      type != PP_INPUTEVENT_TYPE_MOUSEENTER &&
+      type != PP_INPUTEVENT_TYPE_MOUSELEAVE)
+    return 0;
+
+  ppapi::InputEventData data;
+  data.event_type = type;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.mouse_button = mouse_button;
+  data.mouse_position = *mouse_position;
+  data.mouse_click_count = click_count;
+
+  return PPB_InputEvent_Proxy::CreateProxyResource(instance, data);
+}
+
+PP_Resource ResourceCreationProxy::CreateGraphics3D(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  return PPB_Graphics3D_Proxy::CreateProxyResource(
+      instance, config, share_context, attrib_list);
+}
+
+PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  // Not proxied. The raw creation function is used only in the implementation
+  // of the proxy on the host side.
+  return 0;
+}
+
+PP_Resource ResourceCreationProxy::CreateScrollbar(PP_Instance instance,
+                                                   PP_Bool vertical) {
+  NOTIMPLEMENTED();  // Not proxied yet.
+  return 0;
+}
+
+PP_Resource ResourceCreationProxy::CreateSurface3D(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    const int32_t* attrib_list) {
+  return PPB_Surface3D_Proxy::CreateProxyResource(instance, config,
+                                                  attrib_list);
+}
+
+PP_Resource ResourceCreationProxy::CreateTransport(PP_Instance instance,
+                                                   const char* name,
+                                                   const char* proto) {
+  NOTIMPLEMENTED();  // Not proxied yet.
+  return 0;
+}
+
+PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
+  return PPB_URLLoader_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateURLRequestInfo(PP_Instance instance) {
+  return PPB_URLRequestInfo_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateVideoDecoder(PP_Instance instance) {
+  NOTIMPLEMENTED();
+  return 0;
+}
+
+PP_Resource ResourceCreationProxy::CreateVideoLayer(
+    PP_Instance instance,
+    PP_VideoLayerMode_Dev mode) {
+  NOTIMPLEMENTED();
+  return 0;
+}
+
+PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
+    PP_Instance instance,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    const PP_FloatPoint* wheel_delta,
+    const PP_FloatPoint* wheel_ticks,
+    PP_Bool scroll_by_page) {
+  ppapi::InputEventData data;
+  data.event_type = PP_INPUTEVENT_TYPE_WHEEL;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.wheel_delta = *wheel_delta;
+  data.wheel_ticks = *wheel_ticks;
+  data.wheel_scroll_by_page = PP_ToBool(scroll_by_page);
+
+  return PPB_InputEvent_Proxy::CreateProxyResource(instance, data);
 }
 
 bool ResourceCreationProxy::Send(IPC::Message* msg) {

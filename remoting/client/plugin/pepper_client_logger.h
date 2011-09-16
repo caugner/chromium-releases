@@ -5,7 +5,7 @@
 #ifndef REMOTING_CLIENT_PLUGIN_PEPPER_CLIENT_LOGGER_H_
 #define REMOTING_CLIENT_PLUGIN_PEPPER_CLIENT_LOGGER_H_
 
-#include "remoting/client/client_logger.h"
+#include "remoting/base/logger.h"
 
 #include "base/task.h"
 
@@ -15,26 +15,19 @@ namespace remoting {
 
 class ChromotingInstance;
 
-class PepperClientLogger : public ClientLogger {
+class PepperClientLogger : public Logger {
  public:
-  PepperClientLogger(ChromotingInstance* instance);
+  explicit PepperClientLogger(ChromotingInstance* instance);
   virtual ~PepperClientLogger();
 
-  virtual void va_Log(logging::LogSeverity severity, const char* format,
-                      va_list ap);
-  virtual void va_VLog(int verboselevel, const char* format, va_list ap);
+  virtual void LogToUI(const std::string& message);
 
  private:
-  void LogToClientUI(const std::string& message);
-
   ChromotingInstance* instance_;
-  MessageLoop* message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperClientLogger);
 };
 
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::PepperClientLogger);
 
 #endif  // REMOTING_CLIENT_PLUGIN_PEPPER_CLIENT_LOGGER_H_

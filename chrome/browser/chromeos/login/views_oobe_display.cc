@@ -5,15 +5,17 @@
 #include <vector>
 
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/login/views_enterprise_enrollment_screen_actor.h"
 #include "chrome/browser/chromeos/login/views_eula_screen_actor.h"
-#include "chrome/browser/chromeos/login/views_oobe_display.h"
 #include "chrome/browser/chromeos/login/views_network_screen_actor.h"
+#include "chrome/browser/chromeos/login/views_oobe_display.h"
 #include "chrome/browser/chromeos/login/views_update_screen_actor.h"
+#include "chrome/browser/chromeos/login/views_user_image_screen_actor.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "views/view.h"
 #include "views/widget/widget.h"
 
@@ -62,7 +64,7 @@ class ContentView : public views::View {
 
   ~ContentView() {
     NotificationService::current()->Notify(
-        NotificationType::WIZARD_CONTENT_VIEW_DESTROYED,
+        chrome::NOTIFICATION_WIZARD_CONTENT_VIEW_DESTROYED,
         NotificationService::AllSources(),
         NotificationService::NoDetails());
   }
@@ -101,7 +103,7 @@ class ContentView : public views::View {
 
   virtual void Layout() {
     for (int i = 0; i < child_count(); ++i) {
-      views::View* cur = GetChildViewAt(i);
+      views::View* cur = child_at(i);
       if (cur->IsVisible())
         cur->SetBounds(0, 0, width(), height());
     }
@@ -178,31 +180,44 @@ void ViewsOobeDisplay::HideScreen(WizardScreen* screen) {
   contents_->SchedulePaint();
 }
 
-UpdateScreenActor* ViewsOobeDisplay::CreateUpdateScreenActor() {
-  return new ViewsUpdateScreenActor(this);
+UpdateScreenActor* ViewsOobeDisplay::GetUpdateScreenActor() {
+  if (update_screen_actor_ == NULL)
+    update_screen_actor_.reset(new ViewsUpdateScreenActor(this));
+  return update_screen_actor_.get();
 }
 
-NetworkScreenActor* ViewsOobeDisplay::CreateNetworkScreenActor() {
-  return new ViewsNetworkScreenActor(this);
+NetworkScreenActor* ViewsOobeDisplay::GetNetworkScreenActor() {
+  if (network_screen_actor_ == NULL)
+    network_screen_actor_.reset(new ViewsNetworkScreenActor(this));
+  return network_screen_actor_.get();
 }
 
-EulaScreenActor* ViewsOobeDisplay::CreateEulaScreenActor() {
-  return new ViewsEulaScreenActor(this);
+EulaScreenActor* ViewsOobeDisplay::GetEulaScreenActor() {
+  if (eula_screen_actor_ == NULL)
+    eula_screen_actor_.reset(new ViewsEulaScreenActor(this));
+  return eula_screen_actor_.get();
 }
 
-ViewScreenDelegate* ViewsOobeDisplay::CreateEnterpriseEnrollmentScreenActor() {
+EnterpriseEnrollmentScreenActor* ViewsOobeDisplay::
+    GetEnterpriseEnrollmentScreenActor() {
+  if (enterprise_enrollment_screen_actor_ == NULL) {
+    enterprise_enrollment_screen_actor_.reset(
+        new ViewsEnterpriseEnrollmentScreenActor(this));
+  }
+  return enterprise_enrollment_screen_actor_.get();
+}
+
+UserImageScreenActor* ViewsOobeDisplay::GetUserImageScreenActor() {
+  if (user_image_screen_actor_ == NULL)
+    user_image_screen_actor_.reset(new ViewsUserImageScreenActor(this));
+  return user_image_screen_actor_.get();
+}
+
+ViewScreenDelegate* ViewsOobeDisplay::GetRegistrationScreenActor() {
   return this;
 }
 
-ViewScreenDelegate* ViewsOobeDisplay::CreateUserImageScreenActor() {
-  return this;
-}
-
-ViewScreenDelegate* ViewsOobeDisplay::CreateRegistrationScreenActor() {
-  return this;
-}
-
-ViewScreenDelegate* ViewsOobeDisplay::CreateHTMLPageScreenActor() {
+ViewScreenDelegate* ViewsOobeDisplay::GetHTMLPageScreenActor() {
   return this;
 }
 
@@ -210,7 +225,7 @@ views::Widget* ViewsOobeDisplay::CreateScreenWindow(
     const gfx::Rect& bounds, bool initial_show) {
   widget_ = new views::Widget;
   views::Widget::InitParams widget_params(
-      views::Widget::InitParams::TYPE_WINDOW);
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   // Window transparency makes background flicker through controls that
   // are constantly updating its contents (like image view with video
   // stream). Hence enabling double buffer.

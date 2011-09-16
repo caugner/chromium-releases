@@ -4,7 +4,6 @@
 
 #include "views/examples/examples_main.h"
 
-#include "app/app_paths.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
@@ -22,7 +21,6 @@
 #include "views/examples/native_theme_button_example.h"
 #include "views/examples/native_theme_checkbox_example.h"
 #include "views/examples/native_widget_views_example.h"
-#include "views/examples/native_window_views_example.h"
 #include "views/examples/radio_button_example.h"
 #include "views/examples/scroll_view_example.h"
 #include "views/examples/single_split_view_example.h"
@@ -33,9 +31,8 @@
 #include "views/examples/widget_example.h"
 #include "views/focus/accelerator_handler.h"
 #include "views/layout/grid_layout.h"
-#include "views/widget/widget.h"
-#include "views/window/window.h"
 #include "views/test/test_views_delegate.h"
+#include "views/widget/widget.h"
 
 #if defined(OS_WIN)
 // TableView is not yet ported to Linux.
@@ -60,6 +57,14 @@ void ExamplesMain::WindowClosing() {
   MessageLoopForUI::current()->Quit();
 }
 
+views::Widget* ExamplesMain::GetWidget() {
+  return contents_->GetWidget();
+}
+
+const views::Widget* ExamplesMain::GetWidget() const {
+  return contents_->GetWidget();
+}
+
 void ExamplesMain::SetStatus(const std::wstring& status) {
   status_label_->SetText(status);
 }
@@ -70,9 +75,7 @@ void ExamplesMain::Run() {
   // The exit manager is in charge of calling the dtors of singleton objects.
   base::AtExitManager exit_manager;
 
-  app::RegisterPathProvider();
   ui::RegisterPathProvider();
-
   icu_util::Initialize();
 
   ResourceBundle::InitSharedInstance("en-US");
@@ -101,8 +104,8 @@ void ExamplesMain::Run() {
 
   // TODO(satorux): The window is getting wide.  Eventually, we would have
   // the second tabbed pane.
-  views::Window* window =
-      views::Window::CreateChromeWindow(NULL, gfx::Rect(0, 0, 850, 300), this);
+  views::Widget* window =
+      views::Widget::CreateWindowWithBounds(this, gfx::Rect(0, 0, 850, 300));
 
   examples::NativeThemeCheckboxExample native_theme_checkbox_example(this);
   tabbed_pane->AddTab(native_theme_checkbox_example.GetExampleTitle(),
@@ -115,10 +118,6 @@ void ExamplesMain::Run() {
   examples::NativeWidgetViewsExample native_widget_views_example(this);
   tabbed_pane->AddTab(native_widget_views_example.GetExampleTitle(),
                       native_widget_views_example.GetExampleView());
-
-  examples::NativeWindowViewsExample native_window_views_example(this);
-  tabbed_pane->AddTab(native_window_views_example.GetExampleTitle(),
-                      native_window_views_example.GetExampleView());
 
   examples::TextfieldExample textfield_example(this);
   tabbed_pane->AddTab(textfield_example.GetExampleTitle(),
@@ -194,7 +193,7 @@ int main(int argc, char** argv) {
   g_type_init();
   gtk_init(&argc, &argv);
 #endif
-  TestViewsDelegate delegate;
+  views::TestViewsDelegate delegate;
 
   CommandLine::Init(argc, argv);
 

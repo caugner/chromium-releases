@@ -8,13 +8,14 @@
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/common/notification_service.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -91,11 +92,8 @@ void ExtensionMenuItem::AddChild(ExtensionMenuItem* item) {
   children_.push_back(item);
 }
 
-const int ExtensionMenuManager::kAllowedSchemes =
-    URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS;
-
 ExtensionMenuManager::ExtensionMenuManager() {
-  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  NotificationService::AllSources());
 }
 
@@ -448,11 +446,11 @@ void ExtensionMenuManager::ExecuteCommand(
       item->extension_id(), event_name, json_args, profile, GURL());
 }
 
-void ExtensionMenuManager::Observe(NotificationType type,
+void ExtensionMenuManager::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
   // Remove menu items for disabled/uninstalled extensions.
-  if (type != NotificationType::EXTENSION_UNLOADED) {
+  if (type != chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     NOTREACHED();
     return;
   }
@@ -466,12 +464,6 @@ void ExtensionMenuManager::Observe(NotificationType type,
 const SkBitmap& ExtensionMenuManager::GetIconForExtension(
     const std::string& extension_id) {
   return icon_manager_.GetIcon(extension_id);
-}
-
-// static
-bool ExtensionMenuManager::HasAllowedScheme(const GURL& url) {
-  URLPattern pattern(kAllowedSchemes);
-  return pattern.SetScheme(url.scheme());
 }
 
 ExtensionMenuItem::Id::Id()

@@ -8,20 +8,32 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "content/browser/browser_thread.h"
 
+namespace {
+
+// Delay for online change notification reporting.
+const int kOnlineNotificationDelayMS = 500;
+
+}
+
 namespace chromeos {
 
 NetworkChangeNotifierChromeos::NetworkChangeNotifierChromeos()
     : has_active_network_(false),
-      connection_state_(chromeos::STATE_UNKNOWN),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      connection_state_(chromeos::STATE_UNKNOWN) {
 
-  chromeos::NetworkLibrary* lib =
+  chromeos::NetworkLibrary* net =
       chromeos::CrosLibrary::Get()->GetNetworkLibrary();
-  lib->AddNetworkManagerObserver(this);
+  net->AddNetworkManagerObserver(this);
 
   chromeos::PowerLibrary* power =
       chromeos::CrosLibrary::Get()->GetPowerLibrary();
   power->AddObserver(this);
+
+  BrowserThread::PostDelayedTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableFunction(
+          &NetworkChangeNotifierChromeos::UpdateInitialState, this),
+      kOnlineNotificationDelayMS);
 }
 
 NetworkChangeNotifierChromeos::~NetworkChangeNotifierChromeos() {
@@ -56,6 +68,18 @@ bool NetworkChangeNotifierChromeos::IsCurrentlyOffline() const {
   return connection_state_ != chromeos::STATE_ONLINE;
 }
 
+void NetworkChangeNotifierChromeos::OnNetworkChanged(
+    chromeos::NetworkLibrary* cros,
+    const chromeos::Network* network) {
+  CHECK(network);
+
+  // Active network changed?
+  if (network->service_path() != service_path_)
+    UpdateNetworkState(cros);
+  else
+    UpdateConnectivityState(network);
+}
+
 void NetworkChangeNotifierChromeos::UpdateNetworkState(
     chromeos::NetworkLibrary* lib) {
   const chromeos::Network* network = lib->active_network();
@@ -75,8 +99,12 @@ void NetworkChangeNotifierChromeos::UpdateNetworkState(
       has_active_network_ = true;
       service_path_ = network->service_path();
       ip_address_ = network->ip_address();
-      lib->AddNetworkObserver(network->service_path(), this);
     }
+    UpdateConnectivityState(network);
+    // If there is an active network, add observer to track its changes.
+    if (network)
+      lib->AddNetworkObserver(network->service_path(), this);
+
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         NewRunnableFunction(
@@ -84,36 +112,48 @@ void NetworkChangeNotifierChromeos::UpdateNetworkState(
   }
 }
 
-void NetworkChangeNotifierChromeos::OnNetworkChanged(
-    chromeos::NetworkLibrary* cros,
-    const chromeos::Network* network) {
-  if (!network) {
-    NOTREACHED();
-    return;
-  }
-  // Active network changed?
-  if (network->service_path() != service_path_) {
-    UpdateNetworkState(cros);
-  }
-
+void NetworkChangeNotifierChromeos::UpdateConnectivityState(
+      const chromeos::Network* network) {
   // We don't care about all transitions of ConnectionState.  OnlineStateChange
   // notification should trigger if
   //   a) we were online and went offline
   //   b) we were offline and went online
   //   c) switched to/from captive portal
-  chromeos::ConnectionState new_connection_state = network->connection_state();
+  chromeos::ConnectionState new_connection_state =
+      network ? network->connection_state() : chromeos::STATE_UNKNOWN;
+
   bool is_online = (new_connection_state == chromeos::STATE_ONLINE);
   bool was_online = (connection_state_ == chromeos::STATE_ONLINE);
   bool is_portal = (new_connection_state == chromeos::STATE_PORTAL);
   bool was_portal = (connection_state_ == chromeos::STATE_PORTAL);
-
-  if (is_online != was_online || is_portal != was_portal) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        method_factory_.NewRunnableMethod(
-           &NetworkChangeNotifierChromeos::NotifyObserversOfOnlineStateChange));
-  }
+  bool is_unknown = (new_connection_state == chromeos::STATE_UNKNOWN);
+  bool was_unknown = (connection_state_ == chromeos::STATE_UNKNOWN);
   connection_state_ = new_connection_state;
+  if (is_online != was_online || is_portal != was_portal ||
+      is_unknown != was_unknown) {
+    if (!IsCurrentlyOffline()) {
+      // Delay reporting of edge when we go online. dns resolution service
+      // does not seem to be immediately available.
+      BrowserThread::PostDelayedTask(
+          BrowserThread::IO, FROM_HERE,
+          NewRunnableFunction(
+             &NetworkChangeNotifierChromeos::NotifyObserversOfOnlineStateChange),
+          kOnlineNotificationDelayMS);
+    } else {
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          NewRunnableFunction(
+             &NetworkChangeNotifierChromeos::NotifyObserversOfOnlineStateChange));
+    }
+  }
+}
+
+// static
+void NetworkChangeNotifierChromeos::UpdateInitialState(
+    NetworkChangeNotifierChromeos* self) {
+  chromeos::NetworkLibrary* net =
+      chromeos::CrosLibrary::Get()->GetNetworkLibrary();
+  self->UpdateNetworkState(net);
 }
 
 }  // namespace net

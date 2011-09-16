@@ -23,6 +23,7 @@
         'nigori_specifics.proto',
         'password_specifics.proto',
         'preference_specifics.proto',
+        'search_engine_specifics.proto',
         'session_specifics.proto',
         'test.proto',
         'theme_specifics.proto',
@@ -76,6 +77,8 @@
         '<(protoc_out_dir)/chrome/browser/sync/protocol/password_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.h',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/search_engine_specifics.pb.cc',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/search_engine_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/session_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/session_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/theme_specifics.pb.cc',
@@ -102,9 +105,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

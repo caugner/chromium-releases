@@ -9,13 +9,13 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#import "chrome/browser/cocoa/keystone_glue.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/platform_util.h"
+#import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/background_tile_view.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -25,7 +25,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 namespace {
 
@@ -136,7 +136,7 @@ static BOOL recentShownUserActionFailedStatus = NO;
 
   NSString* versionModifier = @"";
   NSString* svnRevision = @"";
-  std::string modifier = platform_util::GetVersionStringModifier();
+  std::string modifier = chrome::VersionInfo::GetVersionStringModifier();
   if (!modifier.empty())
     versionModifier = [NSString stringWithFormat:@" %@",
                                 base::SysUTF8ToNSString(modifier)];
@@ -667,7 +667,7 @@ static BOOL recentShownUserActionFailedStatus = NO;
   NSString* kChromiumProject = base::SysUTF8ToNSString(url.spec());
   // The OSS link should go to here
   NSString* kAcknowledgements =
-      [NSString stringWithUTF8String:chrome::kAboutCreditsURL];
+      [NSString stringWithUTF8String:chrome::kChromeUICreditsURL];
 
   // Now fetch the license string and deal with the markers
 
@@ -731,7 +731,7 @@ static BOOL recentShownUserActionFailedStatus = NO;
   // Terms of service is only valid for Google Chrome
 
   // The url within terms should point here:
-  NSString* kTOS = [NSString stringWithUTF8String:chrome::kAboutTermsURL];
+  NSString* kTOS = [NSString stringWithUTF8String:chrome::kChromeUITermsURL];
   // Following Windows. There is one marker in the string for where the terms
   // link goes, but the text of the link comes from a second string resources.
   std::vector<size_t> url_offsets;

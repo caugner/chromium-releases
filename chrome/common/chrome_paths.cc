@@ -10,6 +10,7 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
+#include "base/version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -29,6 +30,20 @@ const FilePath::CharType kInternalFlashPluginFileName[] =
 #else  // OS_LINUX, etc.
     FILE_PATH_LITERAL("libgcflashplayer.so");
 #endif
+
+// File name of the pepper Flash plugin on different platforms.
+const FilePath::CharType kPepperFlashPluginFileName[] =
+#if defined(OS_MACOSX)
+    FILE_PATH_LITERAL("PepperFlashPlayer.plugin");
+#elif defined(OS_WIN)
+    FILE_PATH_LITERAL("pepflashplayer.dll");
+#else  // OS_LINUX, etc.
+    FILE_PATH_LITERAL("libpepflashplayer.so");
+#endif
+
+// The pepper flash plugins are in a directory with this name.
+const FilePath::CharType kPepperFlashBaseDirectory[] =
+    FILE_PATH_LITERAL("PepperFlash");
 
 // File name of the internal PDF plugin on different platforms.
 const FilePath::CharType kInternalPDFPluginFileName[] =
@@ -71,6 +86,30 @@ bool GetInternalPluginsDirectory(FilePath* result) {
 
   // The rest of the world expects plugins in the module directory.
   return PathService::Get(base::DIR_MODULE, result);
+}
+
+// Pepper flash plugins have the version encoded in the path itself
+// so we need to enumerate the directories to find the full path
+bool GetPepperFlashDirectory(FilePath* result) {
+  if (!GetInternalPluginsDirectory(result))
+    return false;
+  *result = result->Append(kPepperFlashBaseDirectory);
+  Version latest("0.0");
+  bool found = false;
+  file_util::FileEnumerator
+      file_enumerator(*result, false, file_util::FileEnumerator::DIRECTORIES);
+  for (FilePath path = file_enumerator.Next(); !path.value().empty();
+       path = file_enumerator.Next()) {
+    Version version(path.BaseName().MaybeAsASCII());
+    if (!version.IsValid())
+      continue;
+    if (version.CompareTo(latest) > 0) {
+      latest = version;
+      *result = path;
+      found = true;
+    }
+  }
+  return found;
 }
 
 bool PathProvider(int key, FilePath* result) {
@@ -220,6 +259,13 @@ bool PathProvider(int key, FilePath* result) {
       if (!file_util::PathExists(cur))
         return false;
       break;
+    case chrome::FILE_PEPPER_FLASH_PLUGIN:
+      if (!GetPepperFlashDirectory(&cur))
+        return false;
+      cur = cur.Append(kPepperFlashPluginFileName);
+      if (!file_util::PathExists(cur))
+        return false;
+      break;
     case chrome::FILE_PDF_PLUGIN:
       if (!GetInternalPluginsDirectory(&cur))
         return false;
@@ -308,6 +354,27 @@ bool PathProvider(int key, FilePath* result) {
       break;
     }
 #endif
+    case chrome::DIR_EXTERNAL_EXTENSIONS:
+#if defined(OS_MACOSX)
+      if (!PathService::Get(base::DIR_EXE, &cur))
+        return false;
+
+      // On Mac, built-in extensions are in Contents/Extensions, a sibling of
+      // the App dir. If there are none, it may not exist.
+      // TODO(skerner): Reading external extensions from a file inside the
+      // app budle causes several problems.  Change this path to be outside
+      // the app bundle.  crbug/67203
+      cur = cur.DirName();
+      cur = cur.Append(FILE_PATH_LITERAL("Extensions"));
+      create_dir = false;
+#else
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
+
+      cur = cur.Append(FILE_PATH_LITERAL("extensions"));
+      create_dir = true;
+#endif
+      break;
     default:
       return false;
   }

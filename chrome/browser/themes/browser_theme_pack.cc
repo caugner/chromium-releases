@@ -4,23 +4,23 @@
 
 #include "chrome/browser/themes/browser_theme_pack.h"
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "content/browser/browser_thread.h"
-#include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/resource/data_pack.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
 
 namespace {

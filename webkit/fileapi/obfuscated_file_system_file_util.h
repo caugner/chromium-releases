@@ -47,8 +47,11 @@ class FileSystemOperationContext;
 class ObfuscatedFileSystemFileUtil : public FileSystemFileUtil,
     public base::RefCountedThreadSafe<ObfuscatedFileSystemFileUtil> {
  public:
-
-  ObfuscatedFileSystemFileUtil(const FilePath& file_system_directory);
+  // |underlying_file_util| is not owned by the instance.  It will need to be
+  // a singleton or to be deleted by someone else.
+  ObfuscatedFileSystemFileUtil(
+      const FilePath& file_system_directory,
+      FileSystemFileUtil* underlying_file_util);
   virtual ~ObfuscatedFileSystemFileUtil();
 
   virtual base::PlatformFileError CreateOrOpen(
@@ -132,9 +135,9 @@ class ObfuscatedFileSystemFileUtil : public FileSystemFileUtil,
   FilePath GetDirectoryForOriginAndType(
       const GURL& origin, FileSystemType type, bool create);
 
-  // Gets the topmost directory specific to this origin.  This will
-  // contain both the filesystem type subdirectories.
-  FilePath GetDirectoryForOrigin(const GURL& origin, bool create);
+  // Deletes the topmost directory specific to this origin and type.  This will
+  // delete its directory database.
+  bool DeleteDirectoryForOriginAndType(const GURL& origin, FileSystemType type);
 
   // This will migrate a filesystem from the old passthrough sandbox into the
   // new obfuscated one.  It won't obfuscate the old filenames [it will maintain
@@ -176,9 +179,21 @@ class ObfuscatedFileSystemFileUtil : public FileSystemFileUtil,
       FileSystemOperationContext* context,
       const FilePath& root_path) OVERRIDE;
 
+  // Deletes a directory database from the database list in the ObfuscatedFSFU
+  // and destroys the database on the disk.
+  bool DestroyDirectoryDatabase(const GURL& origin, FileSystemType type);
+
  private:
   typedef FileSystemDirectoryDatabase::FileId FileId;
   typedef FileSystemDirectoryDatabase::FileInfo FileInfo;
+
+  base::PlatformFileError GetFileInfoInternal(
+      FileSystemDirectoryDatabase* db,
+      FileSystemOperationContext* context,
+      FileId file_id,
+      FileInfo* local_info,
+      base::PlatformFileInfo* file_info,
+      FilePath* platform_file_path);
 
   // Creates a new file, both the underlying backing file and the entry in the
   // database.  file_info is an in-out parameter.  Supply the name and
@@ -212,11 +227,16 @@ class ObfuscatedFileSystemFileUtil : public FileSystemFileUtil,
   // This does the reverse of DataPathToLocalPath.
   FilePath LocalPathToDataPath(
       const GURL& origin, FileSystemType type, const FilePath& local_path);
+  // This returns NULL if |create| flag is false and a filesystem does not
+  // exist for the given |origin_url| and |type|.
+  // For read operations |create| should be false.
   FileSystemDirectoryDatabase* GetDirectoryDatabase(
-      const GURL& origin_url, FileSystemType type);
+      const GURL& origin_url, FileSystemType type, bool create);
+  // Gets the topmost directory specific to this origin.  This will
+  // contain both the filesystem type subdirectories.
+  FilePath GetDirectoryForOrigin(const GURL& origin, bool create);
   void MarkUsed();
   void DropDatabases();
-  bool DestroyDirectoryDatabase(const GURL& origin, FileSystemType type);
   bool InitOriginDatabase(bool create);
 
   typedef std::map<std::string, FileSystemDirectoryDatabase*> DirectoryMap;
@@ -224,6 +244,7 @@ class ObfuscatedFileSystemFileUtil : public FileSystemFileUtil,
   scoped_ptr<FileSystemOriginDatabase> origin_database_;
   FilePath file_system_directory_;
   base::OneShotTimer<ObfuscatedFileSystemFileUtil> timer_;
+  FileSystemFileUtil* underlying_file_util_;
 
   DISALLOW_COPY_AND_ASSIGN(ObfuscatedFileSystemFileUtil);
 };

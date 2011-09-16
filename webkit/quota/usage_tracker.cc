@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/message_loop_proxy.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "net/base/net_util.h"
 #include "webkit/quota/special_storage_policy.h"
 
@@ -301,6 +301,19 @@ void UsageTracker::DidGetClientHostUsage(const std::string& host,
     host_usage_callbacks_.Run(host, host, type, info.usage);
     outstanding_host_usage_.erase(host);
   }
+}
+
+bool UsageTracker::IsWorking() {
+  if (global_usage_.pending_clients > 0)
+    return false;
+  for (std::map<std::string, TrackingInfo>::iterator iter =
+           outstanding_host_usage_.begin();
+       iter != outstanding_host_usage_.end();
+       ++iter) {
+    if (iter->second.pending_clients > 0)
+      return false;
+  }
+  return true;
 }
 
 // ClientUsageTracker ----------------------------------------------------

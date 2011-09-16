@@ -11,16 +11,14 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "views/background.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/layout/grid_layout.h"
 
@@ -57,19 +55,6 @@ views::View* CreateSplitter(const SkColor& color) {
   views::View* splitter = new views::View();
   splitter->set_background(views::Background::CreateSolidBackground(color));
   return splitter;
-}
-
-void TriggerPolicyFetch() {
-  // Notify all the profiles that the system is idle enough now for a policy
-  // fetch. (The policy fetch will happen after some delay, see implementation.)
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  std::vector<Profile*> profiles = profile_manager->GetLoadedProfiles();
-  std::vector<Profile*>::iterator it;
-  for (it = profiles.begin(); it != profiles.end(); ++it) {
-    policy::ProfilePolicyConnectorFactory::GetForProfile(*it)->
-        ScheduleServiceInitialization(
-            kPolicyServiceInitializationDelayMilliseconds);
-  }
 }
 
 }  // namespace
@@ -109,7 +94,7 @@ void UserImageView::Init() {
 
   ok_button_ = new login::WideButton(
       this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_OK)));
-  ok_button_->SetFocusable(true);
+  ok_button_->set_focusable(true);
   ok_button_->SetEnabled(false);
 
   accel_ok_ = views::Accelerator(ui::VKEY_RETURN, false, false, false);
@@ -135,7 +120,11 @@ void UserImageView::Init() {
 
   default_images_view_->SetDefaultImageIndex(image_index);
 
-  TriggerPolicyFetch();
+  // Notify the policy subsystem that the system is idle enough now for a
+  // policy fetch. (The policy fetch will happen after some delay, see
+  // implementation.)
+  g_browser_process->browser_policy_connector()->ScheduleServiceInitialization(
+      kPolicyServiceInitializationDelayMilliseconds);
 }
 
 void UserImageView::InitLayout() {

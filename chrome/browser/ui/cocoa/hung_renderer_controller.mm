@@ -6,7 +6,6 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "app/mac/nsimage_cache.h"
 #include "base/mac/mac_util.h"
 #include "base/process_util.h"
 #include "base/sys_string_conversions.h"
@@ -14,28 +13,28 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/multi_key_equivalent_button.h"
+#import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/logging_chrome.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
 #include "content/common/result_codes.h"
-#include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 namespace {
 // We only support showing one of these at a time per app.  The
 // controller owns itself and is released when its window is closed.
 HungRendererController* g_instance = NULL;
-}  // end namespace
+}  // namespace
 
 @implementation HungRendererController
 
@@ -87,7 +86,7 @@ HungRendererController* g_instance = NULL;
 - (IBAction)kill:(id)sender {
   if (hungContents_)
     base::KillProcess(hungContents_->GetRenderProcessHost()->GetHandle(),
-                      ResultCodes::HUNG, false);
+                      content::RESULT_CODE_HUNG, false);
   // Cannot call performClose:, because the close button is disabled.
   [self close];
 }

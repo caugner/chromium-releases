@@ -14,6 +14,7 @@
 #include "chrome/browser/sync/protocol/nigori_specifics.pb.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
+#include "chrome/browser/sync/protocol/search_engine_specifics.pb.h"
 #include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/protocol/theme_specifics.pb.h"
@@ -50,6 +51,9 @@ void AddDefaultExtensionValue(syncable::ModelType datatype,
       break;
     case NIGORI:
       specifics->MutableExtension(sync_pb::nigori);
+      break;
+    case SEARCH_ENGINES:
+      specifics->MutableExtension(sync_pb::search_engine);
       break;
     case SESSIONS:
       specifics->MutableExtension(sync_pb::session);
@@ -100,6 +104,9 @@ int GetExtensionFieldNumberFromModelType(ModelType model_type) {
       break;
     case NIGORI:
       return sync_pb::kNigoriFieldNumber;
+      break;
+    case SEARCH_ENGINES:
+      return sync_pb::kSearchEngineFieldNumber;
       break;
     case SESSIONS:
       return sync_pb::kSessionFieldNumber;
@@ -178,10 +185,17 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.HasExtension(sync_pb::app))
     return APPS;
 
+  if (specifics.HasExtension(sync_pb::search_engine))
+    return SEARCH_ENGINES;
+
   if (specifics.HasExtension(sync_pb::session))
     return SESSIONS;
 
   return UNSPECIFIED;
+}
+
+bool ShouldMaintainPosition(ModelType model_type) {
+  return model_type == BOOKMARKS;
 }
 
 std::string ModelTypeToString(ModelType model_type) {
@@ -202,6 +216,8 @@ std::string ModelTypeToString(ModelType model_type) {
       return "Extensions";
     case NIGORI:
       return "Encryption keys";
+    case SEARCH_ENGINES:
+      return "Search Engines";
     case SESSIONS:
       return "Sessions";
     case APPS:
@@ -257,6 +273,8 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
     return EXTENSIONS;
   else if (model_type_string == "Encryption keys")
     return NIGORI;
+  else if (model_type_string == "Search Engines")
+    return SEARCH_ENGINES;
   else if (model_type_string == "Sessions")
     return SESSIONS;
   else if (model_type_string == "Apps")
@@ -265,6 +283,19 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
     NOTREACHED() << "No known model type corresponding to "
                  << model_type_string << ".";
   return UNSPECIFIED;
+}
+
+std::string ModelTypeBitSetToString(const ModelTypeBitSet& model_types) {
+  std::string result;
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    if (model_types[i]) {
+      if (!result.empty()) {
+        result += ", ";
+      }
+      result += ModelTypeToString(ModelTypeFromInt(i));
+    }
+  }
+  return result;
 }
 
 bool ModelTypeBitSetFromString(
@@ -328,6 +359,8 @@ std::string ModelTypeToRootTag(ModelType type) {
       return "google_chrome_extensions";
     case NIGORI:
       return "google_chrome_nigori";
+    case SEARCH_ENGINES:
+      return "google_chrome_search_engines";
     case SESSIONS:
       return "google_chrome_sessions";
     case APPS:
@@ -385,6 +418,10 @@ void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time) {
         SYNC_FREQ_HISTOGRAM("Sync.FreqNigori", time);
         return;
     }
+    case SEARCH_ENGINES: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqSearchEngines", time);
+        return;
+    }
     case SESSIONS: {
         SYNC_FREQ_HISTOGRAM("Sync.FreqSessions", time);
         return;
@@ -403,54 +440,58 @@ void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time) {
 // TODO(akalin): Figure out a better way to do these mappings.
 
 namespace {
-const char kBookmarkNotificationType[] = "BOOKMARK";
-const char kPreferenceNotificationType[] = "PREFERENCE";
-const char kPasswordNotificationType[] = "PASSWORD";
-const char kAutofillNotificationType[] = "AUTOFILL";
-const char kThemeNotificationType[] = "THEME";
-const char kTypedUrlNotificationType[] = "TYPED_URL";
-const char kExtensionNotificationType[] = "EXTENSION";
-const char kNigoriNotificationType[] = "NIGORI";
-const char kAppNotificationType[] = "APP";
-const char kSessionNotificationType[] = "SESSION";
-const char kAutofillProfileNotificationType[] = "AUTOFILL_PROFILE";
+const char kBookmarkint[] = "BOOKMARK";
+const char kPreferenceint[] = "PREFERENCE";
+const char kPasswordint[] = "PASSWORD";
+const char kAutofillint[] = "AUTOFILL";
+const char kThemeint[] = "THEME";
+const char kTypedUrlint[] = "TYPED_URL";
+const char kExtensionint[] = "EXTENSION";
+const char kNigoriint[] = "NIGORI";
+const char kAppint[] = "APP";
+const char kSearchEngineint[] = "SEARCH_ENGINE";
+const char kSessionint[] = "SESSION";
+const char kAutofillProfileint[] = "AUTOFILL_PROFILE";
 }  // namespace
 
-bool RealModelTypeToNotificationType(ModelType model_type,
+bool RealModelTypeToint(ModelType model_type,
                                      std::string* notification_type) {
   switch (model_type) {
     case BOOKMARKS:
-      *notification_type = kBookmarkNotificationType;
+      *notification_type = kBookmarkint;
       return true;
     case PREFERENCES:
-      *notification_type = kPreferenceNotificationType;
+      *notification_type = kPreferenceint;
       return true;
     case PASSWORDS:
-      *notification_type = kPasswordNotificationType;
+      *notification_type = kPasswordint;
       return true;
     case AUTOFILL:
-      *notification_type = kAutofillNotificationType;
+      *notification_type = kAutofillint;
       return true;
     case THEMES:
-      *notification_type = kThemeNotificationType;
+      *notification_type = kThemeint;
       return true;
     case TYPED_URLS:
-      *notification_type = kTypedUrlNotificationType;
+      *notification_type = kTypedUrlint;
       return true;
     case EXTENSIONS:
-      *notification_type = kExtensionNotificationType;
+      *notification_type = kExtensionint;
       return true;
     case NIGORI:
-      *notification_type = kNigoriNotificationType;
+      *notification_type = kNigoriint;
       return true;
     case APPS:
-      *notification_type = kAppNotificationType;
+      *notification_type = kAppint;
+      return true;
+    case SEARCH_ENGINES:
+      *notification_type = kSearchEngineint;
       return true;
     case SESSIONS:
-      *notification_type = kSessionNotificationType;
+      *notification_type = kSessionint;
       return true;
     case AUTOFILL_PROFILE:
-      *notification_type = kAutofillProfileNotificationType;
+      *notification_type = kAutofillProfileint;
       return true;
     default:
       break;
@@ -459,39 +500,42 @@ bool RealModelTypeToNotificationType(ModelType model_type,
   return false;
 }
 
-bool NotificationTypeToRealModelType(const std::string& notification_type,
+bool intToRealModelType(const std::string& notification_type,
                                      ModelType* model_type) {
-  if (notification_type == kBookmarkNotificationType) {
+  if (notification_type == kBookmarkint) {
     *model_type = BOOKMARKS;
     return true;
-  } else if (notification_type == kPreferenceNotificationType) {
+  } else if (notification_type == kPreferenceint) {
     *model_type = PREFERENCES;
     return true;
-  } else if (notification_type == kPasswordNotificationType) {
+  } else if (notification_type == kPasswordint) {
     *model_type = PASSWORDS;
     return true;
-  } else if (notification_type == kAutofillNotificationType) {
+  } else if (notification_type == kAutofillint) {
     *model_type = AUTOFILL;
     return true;
-  } else if (notification_type == kThemeNotificationType) {
+  } else if (notification_type == kThemeint) {
     *model_type = THEMES;
     return true;
-  } else if (notification_type == kTypedUrlNotificationType) {
+  } else if (notification_type == kTypedUrlint) {
     *model_type = TYPED_URLS;
     return true;
-  } else if (notification_type == kExtensionNotificationType) {
+  } else if (notification_type == kExtensionint) {
     *model_type = EXTENSIONS;
     return true;
-  } else if (notification_type == kNigoriNotificationType) {
+  } else if (notification_type == kNigoriint) {
     *model_type = NIGORI;
     return true;
-  } else if (notification_type == kAppNotificationType) {
+  } else if (notification_type == kAppint) {
     *model_type = APPS;
     return true;
-  } else if (notification_type == kSessionNotificationType) {
+  } else if (notification_type == kSearchEngineint) {
+    *model_type = SEARCH_ENGINES;
+    return true;
+  } else if (notification_type == kSessionint) {
     *model_type = SESSIONS;
     return true;
-  } else if (notification_type == kAutofillProfileNotificationType) {
+  } else if (notification_type == kAutofillProfileint) {
     *model_type = AUTOFILL_PROFILE;
     return true;
   }

@@ -14,8 +14,6 @@
 
 @implementation TabStripView
 
-@synthesize newTabButton = newTabButton_;
-@synthesize profileMenuButton = profileMenuButton_;
 @synthesize dropArrowShown = dropArrowShown_;
 @synthesize dropArrowPosition = dropArrowPosition_;
 
@@ -209,6 +207,14 @@
 
 - (ViewID)viewID {
   return VIEW_ID_TAB_STRIP;
+}
+
+- (NewTabButton*)getNewTabButton {
+  return newTabButton_;
+}
+
+- (void)setNewTabButton:(NewTabButton*)button {
+  newTabButton_ = button;
 }
 
 @end

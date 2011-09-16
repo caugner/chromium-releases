@@ -14,20 +14,23 @@
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/ui/shell_dialogs.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/webui/web_ui.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
-class DictionaryValue;
 class Extension;
 class ExtensionService;
 class FilePath;
-class ListValue;
 class PrefService;
 class RenderProcessHost;
 class UserScript;
+
+namespace base {
+class DictionaryValue;
+class ListValue;
+}
 
 // Information about a page running in an extension, for example a toolstrip,
 // a background page, or a tab contents.
@@ -40,23 +43,6 @@ struct ExtensionPage {
   int render_process_id;
   int render_view_id;
   bool incognito;
-};
-
-class ExtensionsUIHTMLSource : public ChromeURLDataManager::DataSource {
- public:
-  ExtensionsUIHTMLSource();
-
-  // Called when the network layer has requested a resource underneath
-  // the path we registered.
-  virtual void StartDataRequest(const std::string& path,
-                                bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const;
-
- private:
-  virtual ~ExtensionsUIHTMLSource() {}
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsUIHTMLSource);
 };
 
 // The handler for JavaScript messages related to the "extensions" view.
@@ -74,7 +60,7 @@ class ExtensionsDOMHandler : public WebUIMessageHandler,
 
   // Extension Detail JSON Struct for page. (static for ease of testing).
   // Note: service can be NULL in unit tests.
-  static DictionaryValue* CreateExtensionDetailValue(
+  static base::DictionaryValue* CreateExtensionDetailValue(
       ExtensionService* service,
       const Extension* extension,
       const std::vector<ExtensionPage>& pages,
@@ -93,52 +79,52 @@ class ExtensionsDOMHandler : public WebUIMessageHandler,
 
  private:
   // Callback for "requestExtensionsData" message.
-  void HandleRequestExtensionsData(const ListValue* args);
+  void HandleRequestExtensionsData(const base::ListValue* args);
 
   // Callback for "toggleDeveloperMode" message.
-  void HandleToggleDeveloperMode(const ListValue* args);
+  void HandleToggleDeveloperMode(const base::ListValue* args);
 
   // Callback for "inspect" message.
-  void HandleInspectMessage(const ListValue* args);
+  void HandleInspectMessage(const base::ListValue* args);
 
   // Callback for "reload" message.
-  void HandleReloadMessage(const ListValue* args);
+  void HandleReloadMessage(const base::ListValue* args);
 
   // Callback for "enable" message.
-  void HandleEnableMessage(const ListValue* args);
+  void HandleEnableMessage(const base::ListValue* args);
 
   // Callback for "enableIncognito" message.
-  void HandleEnableIncognitoMessage(const ListValue* args);
+  void HandleEnableIncognitoMessage(const base::ListValue* args);
 
   // Callback for "allowFileAcces" message.
-  void HandleAllowFileAccessMessage(const ListValue* args);
+  void HandleAllowFileAccessMessage(const base::ListValue* args);
 
   // Callback for "uninstall" message.
-  void HandleUninstallMessage(const ListValue* args);
+  void HandleUninstallMessage(const base::ListValue* args);
 
   // Callback for "options" message.
-  void HandleOptionsMessage(const ListValue* args);
+  void HandleOptionsMessage(const base::ListValue* args);
 
   // Callback for "showButton" message.
-  void HandleShowButtonMessage(const ListValue* args);
+  void HandleShowButtonMessage(const base::ListValue* args);
 
   // Callback for "load" message.
-  void HandleLoadMessage(const ListValue* args);
+  void HandleLoadMessage(const base::ListValue* args);
 
   // Callback for "pack" message.
-  void HandlePackMessage(const ListValue* args);
+  void HandlePackMessage(const base::ListValue* args);
 
   // Callback for "autoupdate" message.
-  void HandleAutoUpdateMessage(const ListValue* args);
+  void HandleAutoUpdateMessage(const base::ListValue* args);
 
   // Utility for calling javascript window.alert in the page.
   void ShowAlert(const std::string& message);
 
   // Callback for "selectFilePath" message.
-  void HandleSelectFilePathMessage(const ListValue* args);
+  void HandleSelectFilePathMessage(const base::ListValue* args);
 
   // Utility for callbacks that get an extension ID as the sole argument.
-  const Extension* GetExtension(const ListValue* args);
+  const Extension* GetExtension(const base::ListValue* args);
 
   // Forces a UI update if appropriate after a notification is received.
   void MaybeUpdateAfterNotification();
@@ -154,7 +140,7 @@ class ExtensionsDOMHandler : public WebUIMessageHandler,
   virtual void FileSelectionCanceled(void* params) {}
 
   // NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -204,7 +190,7 @@ class ExtensionsDOMHandler : public WebUIMessageHandler,
   DISALLOW_COPY_AND_ASSIGN(ExtensionsDOMHandler);
 };
 
-class ExtensionsUI : public WebUI {
+class ExtensionsUI : public ChromeWebUI {
  public:
   explicit ExtensionsUI(TabContents* contents);
 

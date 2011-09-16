@@ -13,7 +13,9 @@
 namespace views {
 
 MenuModelAdapter::MenuModelAdapter(ui::MenuModel* menu_model)
-    : menu_model_(menu_model) {
+    : menu_model_(menu_model),
+      triggerable_event_flags_(ui::EF_LEFT_BUTTON_DOWN |
+                               ui::EF_RIGHT_BUTTON_DOWN) {
   DCHECK(menu_model);
 }
 
@@ -30,7 +32,11 @@ void MenuModelAdapter::BuildMenu(MenuItemView* menu) {
       menu->RemoveMenuItemAt(0);
   }
 
-  menu_map_.clear();
+  // Leave entries in the map if the menu is being shown.  This
+  // allows the map to find the menu model of submenus being closed
+  // so ui::MenuModel::MenuClosed() can be called.
+  if (!menu->GetMenuController())
+    menu_map_.clear();
   menu_map_[menu] = menu_model_;
 
   // Repopulate the menu.
@@ -65,6 +71,11 @@ void MenuModelAdapter::ExecuteCommand(int id, int mouse_event_flags) {
   NOTREACHED();
 }
 
+bool MenuModelAdapter::IsTriggerableEvent(MenuItemView* source,
+                                          const MouseEvent& e) {
+  return (triggerable_event_flags_ & e.flags()) != 0;
+}
+
 bool MenuModelAdapter::GetAccelerator(int id,
                                       views::Accelerator* accelerator) {
   ui::MenuModel* model = menu_model_;
@@ -94,7 +105,7 @@ const gfx::Font& MenuModelAdapter::GetLabelFont(int id) const {
     return font ? *font : MenuDelegate::GetLabelFont(id);
   }
 
-  NOTREACHED();
+  // This line may be reached for the empty menu item.
   return MenuDelegate::GetLabelFont(id);
 }
 
@@ -119,6 +130,10 @@ bool MenuModelAdapter::IsItemChecked(int id) const {
 }
 
 void MenuModelAdapter::SelectionChanged(MenuItemView* menu) {
+  // Ignore selection of the root menu.
+  if (menu == menu->GetRootMenuItem())
+    return;
+
   const int id = menu->GetCommand();
   ui::MenuModel* model = menu_model_;
   int index = 0;
@@ -136,6 +151,18 @@ void MenuModelAdapter::WillShowMenu(MenuItemView* menu) {
       menu_map_.find(menu);
   if (map_iterator != menu_map_.end()) {
     map_iterator->second->MenuWillShow();
+    return;
+  }
+
+  NOTREACHED();
+}
+
+void MenuModelAdapter::WillHideMenu(MenuItemView* menu) {
+  // Look up the menu model for this menu.
+  const std::map<MenuItemView*, ui::MenuModel*>::const_iterator map_iterator =
+      menu_map_.find(menu);
+  if (map_iterator != menu_map_.end()) {
+    map_iterator->second->MenuClosed();
     return;
   }
 
@@ -167,4 +194,4 @@ void MenuModelAdapter::BuildMenuImpl(MenuItemView* menu, ui::MenuModel* model) {
   menu->set_has_icons(model->HasIcons());
 }
 
-}  // views
+}  // namespace views

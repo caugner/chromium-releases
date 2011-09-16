@@ -9,15 +9,16 @@
 #import "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/download/save_package.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/cocoa/applescript/error_applescript.h"
-#include "chrome/browser/ui/download/download_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/download/save_package.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/common/view_messages.h"
 #include "googleurl/src/gurl.h"
 
@@ -61,7 +62,7 @@
     tabContents_ = aTabContent;
     scoped_nsobject<NSNumber> numID(
         [[NSNumber alloc]
-            initWithInt:tabContents_->controller().session_id().id()]);
+            initWithInt:tabContents_->restore_tab_helper()->session_id().id()]);
     [self setUniqueID:numID];
   }
   return self;
@@ -75,7 +76,7 @@
   tabContents_ = aTabContent;
   scoped_nsobject<NSNumber> numID(
       [[NSNumber alloc]
-          initWithInt:tabContents_->controller().session_id().id()]);
+          initWithInt:tabContents_->restore_tab_helper()->session_id().id()]);
   [self setUniqueID:numID];
 
   [self setURL:[self tempURL]];
@@ -134,7 +135,7 @@
 }
 
 - (NSNumber*)loading {
-  BOOL loadingValue = tabContents_->tab_contents()->is_loading() ? YES : NO;
+  BOOL loadingValue = tabContents_->tab_contents()->IsLoading() ? YES : NO;
   return [NSNumber numberWithBool:loadingValue];
 }
 
@@ -242,7 +243,7 @@
   // Scripter has not specifed the location at which to save, so we prompt for
   // it.
   if (!fileURL) {
-    tabContents_->download_tab_helper()->OnSavePage();
+    tabContents_->tab_contents()->OnSavePage();
     return;
   }
 
@@ -268,11 +269,15 @@
     }
   }
 
-  tabContents_->download_tab_helper()->SavePage(mainFile,
-                                                directoryPath,
-                                                savePackageType);
+  tabContents_->tab_contents()->SavePage(mainFile,
+                                         directoryPath,
+                                         savePackageType);
 }
 
+- (void)handlesCloseScriptCommand:(NSScriptCommand*)command {
+  TabContents* contents = tabContents_->tab_contents();
+  contents->delegate()->CloseContents(contents);
+}
 
 - (void)handlesViewSourceScriptCommand:(NSScriptCommand*)command {
   NavigationEntry* entry = tabContents_->controller().GetLastCommittedEntry();

@@ -8,7 +8,10 @@
 
 #include "base/task.h"
 #include "views/controls/button/image_button.h"
-#include "views/controls/menu/menu_2.h"
+
+namespace ui {
+class MenuModel;
+}  // namespace ui
 
 namespace views {
 
@@ -22,6 +25,9 @@ namespace views {
 ////////////////////////////////////////////////////////////////////////////////
 class ButtonDropDown : public ImageButton {
  public:
+  // The button's class name.
+  static const char kViewClassName[];
+
   ButtonDropDown(ButtonListener* listener, ui::MenuModel* model);
   virtual ~ButtonDropDown();
 
@@ -29,6 +35,7 @@ class ButtonDropDown : public ImageButton {
   virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
   // Showing the drop down results in a MouseCaptureLost, we need to ignore it.
   virtual void OnMouseCaptureLost() OVERRIDE {}
   virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
@@ -51,7 +58,6 @@ class ButtonDropDown : public ImageButton {
 
   // The model that populates the attached menu.
   ui::MenuModel* model_;
-  scoped_ptr<Menu2> menu_;
 
   // Y position of mouse when left mouse button is pressed
   int y_position_on_lbuttondown_;

@@ -8,16 +8,16 @@
 
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/webui/html_dialog_tab_contents_delegate.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "ui/gfx/size.h"
-#include "views/window/window_delegate.h"
+#include "views/widget/widget_delegate.h"
 
 class Browser;
-namespace views {
-class Window;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -36,7 +36,8 @@ class HtmlDialogView
     : public DOMView,
       public HtmlDialogTabContentsDelegate,
       public HtmlDialogUIDelegate,
-      public views::WindowDelegate {
+      public views::WidgetDelegate,
+      public NotificationObserver {
  public:
   HtmlDialogView(Profile* profile, HtmlDialogUIDelegate* delegate);
   virtual ~HtmlDialogView();
@@ -45,43 +46,76 @@ class HtmlDialogView
   void InitDialog();
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize();
-  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual bool AcceleratorPressed(const views::Accelerator& accelerator)
+      OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child)
+      OVERRIDE;
 
-  // Overridden from views::WindowDelegate:
-  virtual bool CanResize() const;
-  virtual bool IsModal() const;
-  virtual std::wstring GetWindowTitle() const;
-  virtual void WindowClosing();
-  virtual views::View* GetContentsView();
-  virtual views::View* GetInitiallyFocusedView();
-  virtual bool ShouldShowWindowTitle() const;
+  // Overridden from views::WidgetDelegate:
+  virtual bool CanResize() const OVERRIDE;
+  virtual bool IsModal() const OVERRIDE;
+  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual void WindowClosing() OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
+  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
+  virtual bool ShouldShowWindowTitle() const OVERRIDE;
+  virtual views::Widget* GetWidget() OVERRIDE;
+  virtual const views::Widget* GetWidget() const OVERRIDE;
 
   // Overridden from HtmlDialogUIDelegate:
-  virtual bool IsDialogModal() const;
-  virtual std::wstring GetDialogTitle() const;
-  virtual GURL GetDialogContentURL() const;
+  virtual bool IsDialogModal() const OVERRIDE;
+  virtual std::wstring GetDialogTitle() const OVERRIDE;
+  virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const;
-  virtual void GetDialogSize(gfx::Size* size) const;
-  virtual std::string GetDialogArgs() const;
-  virtual void OnWindowClosed();
-  virtual void OnDialogClosed(const std::string& json_retval);
-  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog);
-  virtual bool ShouldShowDialogTitle() const;
-  virtual bool HandleContextMenu(const ContextMenuParams& params);
+      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
+  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
+  virtual std::string GetDialogArgs() const OVERRIDE;
+  virtual void OnWindowClosed() OVERRIDE;
+  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog)
+      OVERRIDE;
+  virtual bool ShouldShowDialogTitle() const OVERRIDE;
+  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
 
   // Overridden from TabContentsDelegate:
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void CloseContents(TabContents* source);
+  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) OVERRIDE;
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event)
+      OVERRIDE;
+  virtual void CloseContents(TabContents* source) OVERRIDE;
+
+  // Overridden from NotificationObserver
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
+
+ protected:
+  // Register accelerators for this dialog.
+  virtual void RegisterDialogAccelerators();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(HtmlDialogBrowserTest, TestStateTransition);
+
+  // A state used to ensure that we show the window only after the
+  // renderer painted the full page.
+  enum DialogState {
+    NONE,
+    INITIALIZED,  // FreezeUpdates property is set to prevent WM from showing
+                  // the window until the property is remoevd.
+    LOADED,       // Renderer loaded the page.
+    PAINTED,      // 1st paint event after the page is loaded.
+                  // FreezeUpdates property is removed to tell WM to shows
+                  // the window.
+  };
+  DialogState state_;
+
   // This view is a delegate to the HTML content since it needs to get notified
   // about when the dialog is closing. For all other actions (besides dialog
   // closing) we delegate to the creator of this view, which we keep track of
   // using this variable.
   HtmlDialogUIDelegate* delegate_;
+
+  NotificationRegistrar notification_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(HtmlDialogView);
 };

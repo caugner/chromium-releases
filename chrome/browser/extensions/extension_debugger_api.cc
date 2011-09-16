@@ -14,8 +14,6 @@
 #include "base/memory/singleton.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/debugger/devtools_client_host.h"
-#include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/extensions/extension_debugger_api_constants.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
@@ -23,7 +21,10 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
+#include "content/browser/debugger/devtools_client_host.h"
+#include "content/browser/debugger/devtools_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/devtools_messages.h"
 #include "content/common/notification_service.h"
 
@@ -48,12 +49,12 @@ class ExtensionDevToolsClientHost : public DevToolsClientHost,
   // DevToolsClientHost interface
   virtual void InspectedTabClosing();
   virtual void SendMessageToClient(const IPC::Message& msg);
-  virtual void TabReplaced(TabContentsWrapper* tab_contents);
+  virtual void TabReplaced(TabContents* tab_contents);
   virtual void FrameNavigating(const std::string& url) {}
 
  private:
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
   void OnDispatchOnInspectorFrontend(const std::string& data);
@@ -116,7 +117,7 @@ ExtensionDevToolsClientHost::ExtensionDevToolsClientHost(
   AttachedClientHosts::GetInstance()->Add(this);
 
   // Detach from debugger when extension unloads.
-  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  Source<Profile>(tab_contents_->profile()));
 
   // Attach to debugger and tell it we are ready.
@@ -125,7 +126,7 @@ ExtensionDevToolsClientHost::ExtensionDevToolsClientHost(
       this);
   DevToolsManager::GetInstance()->ForwardToDevToolsAgent(
       this,
-      DevToolsAgentMsg_FrontendLoaded());
+      DevToolsAgentMsg_FrontendLoaded(MSG_ROUTING_NONE));
 }
 
 ExtensionDevToolsClientHost::~ExtensionDevToolsClientHost() {
@@ -165,8 +166,8 @@ void ExtensionDevToolsClientHost::SendMessageToClient(
 }
 
 void ExtensionDevToolsClientHost::TabReplaced(
-    TabContentsWrapper* tab_contents) {
-  tab_contents_ = tab_contents->tab_contents();
+    TabContents* tab_contents) {
+  tab_contents_ = tab_contents;
 }
 
 void ExtensionDevToolsClientHost::Close() {
@@ -190,14 +191,15 @@ void ExtensionDevToolsClientHost::SendMessageToBackend(
   base::JSONWriter::Write(&protocol_request, false, &json_args);
   DevToolsManager::GetInstance()->ForwardToDevToolsAgent(
       this,
-      DevToolsAgentMsg_DispatchOnInspectorBackend(json_args));
+      DevToolsAgentMsg_DispatchOnInspectorBackend(MSG_ROUTING_NONE,
+                                                  json_args));
 }
 
 void ExtensionDevToolsClientHost::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  DCHECK(type == NotificationType::EXTENSION_UNLOADED);
+  DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
   Close();
 }
 

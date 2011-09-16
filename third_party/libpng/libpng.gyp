@@ -26,7 +26,6 @@
             'CHROME_PNG_WRITE_SUPPORT',
             'PNG_USER_CONFIG',
           ],
-          'msvs_guid': 'C564F145-9172-42C3-BFCB-6014CA97DBCD',
           'sources': [
             'png.c',
             'png.h',
@@ -117,9 +116,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

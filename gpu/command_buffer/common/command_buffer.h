@@ -28,6 +28,7 @@ class CommandBuffer {
           put_offset(0),
           token(-1),
           error(error::kNoError),
+          context_lost_reason(error::kUnknown),
           generation(0) {
     }
 
@@ -49,6 +50,9 @@ class CommandBuffer {
 
     // Error status.
     error::Error error;
+
+    // Lost context detail information.
+    error::ContextLostReason context_lost_reason;
 
     // Generation index of this state. The generation index is incremented every
     // time a new state is retrieved from the command processor, so that
@@ -74,17 +78,18 @@ class CommandBuffer {
   // Returns the current status.
   virtual State GetState() = 0;
 
+  // Returns the last state without synchronizing with the service.
+  virtual State GetLastState();
+
   // The writer calls this to update its put offset. This ensures the reader
-  // sees the latest added commands, and will eventually process them.
+  // sees the latest added commands, and will eventually process them. On the
+  // service side, commands are processed up to the given put_offset before
+  // subsequent Flushes on the same GpuChannel.
   virtual void Flush(int32 put_offset) = 0;
 
   // The writer calls this to update its put offset. This function returns the
-  // reader's most recent get offset. Does not return until after the put offset
-  // change callback has been invoked. Returns -1 if the put offset is invalid.
-  // If last_known_get is different from the reader's current get pointer, this
-  // function will return immediately, otherwise it guarantees that the reader
-  // has processed some commands before returning (assuming the command buffer
-  // isn't empty and there is no error).
+  // reader's most recent get offset. Does not return until all pending commands
+  // have been executed.
   virtual State FlushSync(int32 put_offset, int32 last_known_get) = 0;
 
   // Sets the current get offset. This can be called from any thread.
@@ -119,8 +124,40 @@ class CommandBuffer {
   // Allows the reader to set the current parse error.
   virtual void SetParseError(error::Error) = 0;
 
+  // Allows the reader to set the current context lost reason.
+  // NOTE: if calling this in conjunction with SetParseError,
+  // call this first.
+  //
+  // TODO(kbr): this temporarily has a definition (i.e., is not pure
+  // virtual) to work around a difficult interdependency with the NaCl
+  // build. Make this pure virtual and remove the body once this is
+  // defined in CommandBufferNaCl and NaCl has rolled forward. See
+  // http://crbug.com/89127 .
+  virtual void SetContextLostReason(error::ContextLostReason);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(CommandBuffer);
+};
+
+// Synchronizing other mechanisms (such as IPC) with the CommandBuffer requires
+// inserting (writing) a token into the buffer and knowing what the last token
+// read at that point was.  ReadWriteTokens is a convenience struct for passing
+// these pairs around.  Expected usage is to compare a current token to
+// [last_token_read,last_token_written).
+class ReadWriteTokens {
+ public:
+  ReadWriteTokens(int32 read, int32 written);
+  // Required to support pickling.  Use by anything else will DCHECK in InRange.
+  ReadWriteTokens();
+
+  // Return true iff |value| is in the range described by |tokens|, accounting
+  // for (up to) one wrap-around.
+  bool InRange(int32 token) const;
+
+  // These want to be private (and const) but can't in order to support
+  // pickling.
+  int32 last_token_read;
+  int32 last_token_written;
 };
 
 }  // namespace gpu

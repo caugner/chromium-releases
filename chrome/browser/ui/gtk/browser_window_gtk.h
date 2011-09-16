@@ -14,10 +14,9 @@
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/tab_contents/infobar_container.h"
 #include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/gtk/infobars/infobar_arrow_model.h"
-#include "content/common/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/base/x/x11_util.h"
@@ -46,7 +45,7 @@ class BrowserWindowGtk : public BrowserWindow,
                          public NotificationObserver,
                          public TabStripModelObserver,
                          public ui::ActiveWindowWatcherX::Observer,
-                         public InfoBarArrowModel::Observer {
+                         public InfoBarContainer::Delegate {
  public:
   explicit BrowserWindowGtk(Browser* browser);
   virtual ~BrowserWindowGtk();
@@ -69,7 +68,8 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual StatusBubble* GetStatusBubble();
   virtual void ToolbarSizeChanged(bool is_animating);
   virtual void UpdateTitleBar();
-  virtual void ShelfVisibilityChanged();
+  virtual void BookmarkBarStateChanged(
+      BookmarkBar::AnimateChangeType change_type);
   virtual void UpdateDevTools();
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
@@ -137,7 +137,7 @@ class BrowserWindowGtk : public BrowserWindow,
       const gfx::Rect& bounds);
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -151,8 +151,10 @@ class BrowserWindowGtk : public BrowserWindow,
   // Overridden from ActiveWindowWatcher::Observer.
   virtual void ActiveWindowChanged(GdkWindow* active_window);
 
-  // Overridden from InfoBarArrowModel::Observer.
-  virtual void PaintStateChanged();
+  // Overridden from InfoBarContainer::Delegate:
+  virtual SkColor GetInfoBarSeparatorColor() const;
+  virtual void InfoBarContainerStateChanged(bool is_animating);
+  virtual bool DrawInfoBarArrows(int* x) const;
 
   // Accessor for the tab strip.
   TabStripGtk* tabstrip() const { return tabstrip_.get(); }
@@ -182,10 +184,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // else for the custom frame.
   void ResetCustomFrameCursor();
 
-  // Toggles whether an infobar is showing.
-  // |animate| controls whether we animate to the new state set by |bar|.
-  void SetInfoBarShowing(InfoBar* bar, bool animate);
-
   // Returns the BrowserWindowGtk registered with |window|.
   static BrowserWindowGtk* GetBrowserWindowForNativeWindow(
       gfx::NativeWindow window);
@@ -198,17 +196,14 @@ class BrowserWindowGtk : public BrowserWindow,
 
   GtkWindow* window() const { return window_; }
 
+  GtkWidget* titlebar_widget() const;
+
   BrowserToolbarGtk* GetToolbar() { return toolbar_.get(); }
 
   gfx::Rect bounds() const { return bounds_; }
 
-  // Make changes necessary when the floating state of the bookmark bar changes.
-  // This should only be called by the bookmark bar itself.
-  void BookmarkBarIsFloating(bool is_floating);
-
-  // Returns the tab contents we're currently displaying in the tab contents
-  // container.
-  TabContents* GetDisplayedTabContents();
+  // Returns the tab we're currently displaying in the tab contents container.
+  TabContentsWrapper* GetDisplayedTab();
 
   static void RegisterUserPrefs(PrefService* prefs);
 
@@ -347,10 +342,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // has changed.
   void InvalidateInfoBarBits();
 
-  // Gets the size (width and height) of the infobar arrow. The size depends on
-  // the state of the bookmark bar.
-  gfx::Size GetInfobarArrowSize();
-
   // When the location icon moves, we have to redraw the arrow.
   CHROMEGTK_CALLBACK_1(BrowserWindowGtk, void, OnLocationIconSizeAllocate,
                        GtkAllocation*);
@@ -428,8 +419,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // frame based on the currently-running window manager.
   static bool GetCustomFramePrefDefault();
 
-  NotificationRegistrar registrar_;
-
   // The position and size of the current window.
   gfx::Rect bounds_;
 
@@ -451,9 +440,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // The object that manages the bookmark bar. This will be NULL if the
   // bookmark bar is not supported.
   scoped_ptr<BookmarkBarGtk> bookmark_bar_;
-
-  // Caches the hover state of the bookmark bar.
-  bool bookmark_bar_is_floating_;
 
   // The status bubble manager.  Always non-NULL.
   scoped_ptr<StatusBubbleGtk> status_bubble_;
@@ -523,10 +509,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // autocomplete popup before the results can be read) and the final window
   // position is unimportant.
   bool debounce_timer_disabled_;
-
-  // The model that tracks the paint state of the arrow for the infobar
-  // directly below the toolbar.
-  InfoBarArrowModel infobar_arrow_model_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWindowGtk);
 };

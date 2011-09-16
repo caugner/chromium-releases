@@ -8,7 +8,6 @@
 #include "chrome/browser/chromeos/frame/panel_controller.h"
 #include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 namespace {
 
@@ -89,6 +88,11 @@ void PanelBrowserView::Close() {
     panel_controller_->Close();
 }
 
+void PanelBrowserView::FlashFrame() {
+  if (panel_controller_.get())
+    panel_controller_->SetUrgent(true);
+}
+
 void PanelBrowserView::UpdateTitleBar() {
   ::BrowserView::UpdateTitleBar();
   if (panel_controller_.get())
@@ -113,8 +117,17 @@ bool PanelBrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
   return res;
 }
 
-void PanelBrowserView::OnWindowActivationChanged(bool active) {
-  ::BrowserView::OnWindowActivationChanged(active);
+bool PanelBrowserView::GetSavedMaximizedState(bool* maximized) const {
+  // Panels have no maximized state.
+  return false;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// views::Widget::Observer overrides.
+
+void PanelBrowserView::OnWidgetActivationChanged(views::Widget* widget,
+                                                 bool active) {
+  ::BrowserView::OnWidgetActivationChanged(widget, active);
   if (panel_controller_.get()) {
     if (active)
       panel_controller_->OnFocusIn();

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/sync/glue/autofill_profile_model_associator.h"
 
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/sync/glue/autofill_profile_change_processor.h"
 #include "chrome/browser/sync/glue/do_optimistic_refresh_task.h"
@@ -116,7 +117,7 @@ bool AutofillProfileModelAssociator::TraverseAndAssociateChromeAutofillProfiles(
 bool AutofillProfileModelAssociator::GetSyncIdForTaggedNode(
     const std::string& tag,
     int64* sync_id) {
-  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
+  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
   sync_api::ReadNode sync_node(&trans);
   if (!sync_node.InitByTagLookup(tag.c_str()))
     return false;
@@ -157,7 +158,7 @@ bool AutofillProfileModelAssociator::AssociateModels() {
   {
     // The write transaction lock is held inside this block.
     // We do all the web db operations outside this block.
-    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
 
     sync_api::ReadNode autofill_root(&trans);
     if (!autofill_root.InitByTagLookup(kAutofillProfileTag)) {
@@ -179,18 +180,6 @@ bool AutofillProfileModelAssociator::AssociateModels() {
   if (!SaveChangesToWebData(bundle)) {
     LOG(ERROR) << "Failed to update autofill entries.";
     return false;
-  }
-
-  if (sync_service_->GetAutofillMigrationState() !=
-     syncable::MIGRATED) {
-    syncable::AutofillMigrationDebugInfo debug_info;
-    debug_info.autofill_profile_added_during_migration =
-        number_of_profiles_created_;
-    sync_service_->SetAutofillMigrationDebugInfo(
-        syncable::AutofillMigrationDebugInfo::PROFILES_ADDED,
-        debug_info);
-    sync_service_->SetAutofillMigrationState(
-        syncable::MIGRATED);
   }
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -218,7 +207,7 @@ bool AutofillProfileModelAssociator::MergeField(FormGroup* f,
 bool AutofillProfileModelAssociator::SyncModelHasUserCreatedNodes(
     bool *has_nodes) {
   CHECK_NE(has_nodes, reinterpret_cast<bool*>(NULL));
-  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
+  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
 
   sync_api::ReadNode node(&trans);
 
@@ -506,12 +495,11 @@ AutofillProfileModelAssociator::DataBundle::~DataBundle() {
 
 bool AutofillProfileModelAssociator::CryptoReadyIfNecessary() {
   // We only access the cryptographer while holding a transaction.
-  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
+  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
   syncable::ModelTypeSet encrypted_types;
-  sync_service_->GetEncryptedDataTypes(&encrypted_types);
+  encrypted_types = sync_api::GetEncryptedTypes(&trans);
   return encrypted_types.count(syncable::AUTOFILL_PROFILE) == 0 ||
          sync_service_->IsCryptographerReady(&trans);
 }
 
 }  // namespace browser_sync
-

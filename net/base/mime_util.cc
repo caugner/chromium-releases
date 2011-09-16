@@ -102,7 +102,8 @@ static const MimeInfo primary_mappings[] = {
   { "audio/webm", "webm" },
   { "audio/wav", "wav" },
   { "application/xhtml+xml", "xhtml,xht" },
-  { "application/x-chrome-extension", "crx" }
+  { "application/x-chrome-extension", "crx" },
+  { "multipart/related", "mhtml,mht" }
 };
 
 static const MimeInfo secondary_mappings[] = {
@@ -125,7 +126,8 @@ static const MimeInfo secondary_mappings[] = {
   { "text/xml", "xsl,xbl" },
   { "application/vnd.mozilla.xul+xml", "xul" },
   { "application/x-shockwave-flash", "swf,swl" },
-  { "multipart/related", "mht,mhtml" }
+  { "application/pkcs7-mime", "p7m,p7c,p7z" },
+  { "application/pkcs7-signature", "p7s" }
 };
 
 static const char* FindMimeType(const MimeInfo* mappings,
@@ -225,10 +227,14 @@ static const char* const supported_image_types[] = {
 // A list of media types: http://en.wikipedia.org/wiki/Internet_media_type
 // A comprehensive mime type list: http://plugindoc.mozdev.org/winmime.php
 static const char* const supported_media_types[] = {
+#if defined(ENABLE_MEDIA_TYPE_OGG)
   // Ogg.
   "video/ogg",
   "audio/ogg",
   "application/ogg",
+#endif
+
+  // WebM.
   "video/webm",
   "audio/webm",
   "audio/wav",
@@ -257,7 +263,9 @@ static const char* const supported_media_codecs[] = {
   "avc1",
   "mp4a",
 #endif
+#if defined(ENABLE_MEDIA_CODEC_THEORA)
   "theora",
+#endif
   "vorbis",
   "vp8",
   "1"  // PCM for WAV.

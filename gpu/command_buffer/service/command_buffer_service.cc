@@ -98,9 +98,14 @@ CommandBufferService::State CommandBufferService::GetState() {
   state.put_offset = put_offset_;
   state.token = token_;
   state.error = error_;
+  state.context_lost_reason = context_lost_reason_;
   state.generation = ++generation_;
 
   return state;
+}
+
+CommandBufferService::State CommandBufferService::GetLastState() {
+  return GetState();
 }
 
 CommandBufferService::State CommandBufferService::FlushSync(
@@ -113,7 +118,7 @@ CommandBufferService::State CommandBufferService::FlushSync(
   put_offset_ = put_offset;
 
   if (put_offset_change_callback_.get()) {
-    put_offset_change_callback_->Run(last_known_get == get_offset_);
+    put_offset_change_callback_->Run();
   }
 
   return GetState();
@@ -128,7 +133,7 @@ void CommandBufferService::Flush(int32 put_offset) {
   put_offset_ = put_offset;
 
   if (put_offset_change_callback_.get()) {
-    put_offset_change_callback_->Run(false);
+    put_offset_change_callback_->Run();
   }
 }
 
@@ -254,8 +259,13 @@ void CommandBufferService::SetParseError(error::Error error) {
   }
 }
 
+void CommandBufferService::SetContextLostReason(
+    error::ContextLostReason reason) {
+  context_lost_reason_ = reason;
+}
+
 void CommandBufferService::SetPutOffsetChangeCallback(
-    Callback1<bool>::Type* callback) {
+    Callback0::Type* callback) {
   put_offset_change_callback_.reset(callback);
 }
 

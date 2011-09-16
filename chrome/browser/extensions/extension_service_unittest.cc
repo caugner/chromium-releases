@@ -16,7 +16,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -39,6 +39,7 @@
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -56,7 +57,6 @@
 #include "content/common/json_value_serializer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_options.h"
@@ -112,23 +112,6 @@ static std::vector<std::string> GetErrors() {
 static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   int schemes = URLPattern::SCHEME_ALL;
   extent->AddPattern(URLPattern(schemes, pattern));
-}
-
-static void AssertEqualExtents(URLPatternSet* extent1,
-                               URLPatternSet* extent2) {
-  URLPatternList patterns1 = extent1->patterns();
-  URLPatternList patterns2 = extent2->patterns();
-  std::set<std::string> strings1;
-  EXPECT_EQ(patterns1.size(), patterns2.size());
-
-  for (size_t i = 0; i < patterns1.size(); ++i)
-    strings1.insert(patterns1.at(i).GetAsString());
-
-  std::set<std::string> strings2;
-  for (size_t i = 0; i < patterns2.size(); ++i)
-    strings2.insert(patterns2.at(i).GetAsString());
-
-  EXPECT_EQ(strings1, strings2);
 }
 
 }  // namespace
@@ -354,8 +337,7 @@ class ExtensionTestingProfile : public TestingProfile {
                   IsOffTheRecord()
                   ? FilePath() : GetPath().Append(chrome::kAppCacheDirname),
                   &GetResourceContext(),
-                  make_scoped_refptr(GetExtensionSpecialStoragePolicy()),
-                  false)))
+                  make_scoped_refptr(GetExtensionSpecialStoragePolicy()))))
         NOTREACHED();
     }
     return appcache_service_;
@@ -492,19 +474,19 @@ class ExtensionServiceTest
   : public ExtensionServiceTestBase, public NotificationObserver {
  public:
   ExtensionServiceTest() : installed_(NULL) {
-    registrar_.Add(this, NotificationType::EXTENSION_LOADED,
+    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                    NotificationService::AllSources());
-    registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                    NotificationService::AllSources());
-    registrar_.Add(this, NotificationType::EXTENSION_INSTALLED,
+    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
                    NotificationService::AllSources());
   }
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    switch (type.value) {
-      case NotificationType::EXTENSION_LOADED: {
+    switch (type) {
+      case chrome::NOTIFICATION_EXTENSION_LOADED: {
         const Extension* extension = Details<const Extension>(details).ptr();
         loaded_.push_back(make_scoped_refptr(extension));
         // The tests rely on the errors being in a certain order, which can vary
@@ -513,7 +495,7 @@ class ExtensionServiceTest
         break;
       }
 
-      case NotificationType::EXTENSION_UNLOADED: {
+      case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
         const Extension* e =
             Details<UnloadedExtensionInfo>(details)->extension;
         unloaded_id_ = e->id();
@@ -526,7 +508,7 @@ class ExtensionServiceTest
         loaded_.erase(i);
         break;
       }
-      case NotificationType::EXTENSION_INSTALLED:
+      case chrome::NOTIFICATION_EXTENSION_INSTALLED:
         installed_ = Details<const Extension>(details).ptr();
         break;
 
@@ -569,7 +551,6 @@ class ExtensionServiceTest
                              pem_output_path));
 
     ASSERT_TRUE(file_util::PathExists(crx_path));
-
     InstallCrx(crx_path, should_succeed);
   }
 
@@ -583,10 +564,16 @@ class ExtensionServiceTest
   // method directly.  Instead, use InstallCrx(), which waits for
   // the crx to be installed and does extra error checking.
   void StartCrxInstall(const FilePath& crx_path) {
+    StartCrxInstall(crx_path, false);
+  }
+
+  void StartCrxInstall(const FilePath& crx_path, bool from_webstore) {
     ASSERT_TRUE(file_util::PathExists(crx_path))
         << "Path does not exist: "<< crx_path.value().c_str();
-    // no client (silent install)
-    scoped_refptr<CrxInstaller> installer(service_->MakeCrxInstaller(NULL));
+    scoped_refptr<CrxInstaller> installer(
+        service_->MakeCrxInstaller(NULL));
+    installer->set_allow_silent_install(true);
+    installer->set_is_gallery_install(from_webstore);
     installer->InstallCrx(crx_path);
   }
 
@@ -1000,16 +987,14 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   ValidateIntegerPref(good2, "state", Extension::ENABLED);
   ValidateIntegerPref(good2, "location", Extension::INTERNAL);
 
+  URLPatternSet expected_patterns;
+  AddPattern(&expected_patterns, "file:///*");
+  AddPattern(&expected_patterns, "http://*.google.com/*");
+  AddPattern(&expected_patterns, "https://*.google.com/*");
   const Extension* extension = loaded_[0];
   const UserScriptList& scripts = extension->content_scripts();
   ASSERT_EQ(2u, scripts.size());
-  EXPECT_EQ(3u, scripts[0].url_patterns().size());
-  EXPECT_EQ("file:///*",
-            scripts[0].url_patterns()[0].GetAsString());
-  EXPECT_EQ("http://*.google.com/*",
-            scripts[0].url_patterns()[1].GetAsString());
-  EXPECT_EQ("https://*.google.com/*",
-            scripts[0].url_patterns()[2].GetAsString());
+  EXPECT_EQ(expected_patterns, scripts[0].url_patterns());
   EXPECT_EQ(2u, scripts[0].js_scripts().size());
   ExtensionResource resource00(extension->id(),
                                scripts[0].js_scripts()[0].extension_root(),
@@ -1024,8 +1009,9 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   ASSERT_TRUE(file_util::AbsolutePath(&expected_path));
   EXPECT_TRUE(resource01.ComparePathWithDefault(expected_path));
   EXPECT_TRUE(extension->plugins().empty());
-  EXPECT_EQ(1u, scripts[1].url_patterns().size());
-  EXPECT_EQ("http://*.news.com/*", scripts[1].url_patterns()[0].GetAsString());
+  EXPECT_EQ(1u, scripts[1].url_patterns().patterns().size());
+  EXPECT_EQ("http://*.news.com/*",
+            scripts[1].url_patterns().begin()->GetAsString());
   ExtensionResource resource10(extension->id(),
                                scripts[1].js_scripts()[0].extension_root(),
                                scripts[1].js_scripts()[0].relative_path());
@@ -1033,10 +1019,11 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
       extension->path().AppendASCII("js_files").AppendASCII("script3.js");
   ASSERT_TRUE(file_util::AbsolutePath(&expected_path));
   EXPECT_TRUE(resource10.ComparePathWithDefault(expected_path));
-  const URLPatternList permissions = extension->host_permissions();
-  ASSERT_EQ(2u, permissions.size());
-  EXPECT_EQ("http://*.google.com/*", permissions[0].GetAsString());
-  EXPECT_EQ("https://*.google.com/*", permissions[1].GetAsString());
+
+  expected_patterns.ClearPatterns();
+  AddPattern(&expected_patterns, "http://*.google.com/*");
+  AddPattern(&expected_patterns, "https://*.google.com/*");
+  EXPECT_EQ(expected_patterns, extension->permission_set()->explicit_hosts());
 
   EXPECT_EQ(std::string(good1), loaded_[1]->id());
   EXPECT_EQ(std::string("My extension 2"), loaded_[1]->name());
@@ -1336,8 +1323,9 @@ TEST_F(ExtensionServiceTest, InstallUserScript) {
              .AppendASCII("user_script_basic.user.js");
 
   ASSERT_TRUE(file_util::PathExists(path));
-  // Pass NULL to install silently.
-  scoped_refptr<CrxInstaller> installer(service_->MakeCrxInstaller(NULL));
+  scoped_refptr<CrxInstaller> installer(
+      service_->MakeCrxInstaller(NULL));
+  installer->set_allow_silent_install(true);
   installer->InstallUserScript(
       path,
       GURL("http://www.aaronboodman.com/scripts/user_script_basic.user.js"));
@@ -1371,18 +1359,14 @@ TEST_F(ExtensionServiceTest, GrantedPermissions) {
 
   ExtensionPrefs* prefs = service_->extension_prefs();
 
-  std::set<std::string> expected_api_perms;
-  std::set<std::string> known_api_perms;
-  bool full_access;
+  ExtensionAPIPermissionSet expected_api_perms;
   URLPatternSet expected_host_perms;
-  URLPatternSet known_host_perms;
 
   // Make sure there aren't any granted permissions before the
   // extension is installed.
-  EXPECT_FALSE(prefs->GetGrantedPermissions(
-      permissions_crx, &full_access, &known_api_perms, &known_host_perms));
-  EXPECT_TRUE(known_api_perms.empty());
-  EXPECT_TRUE(known_host_perms.is_empty());
+  scoped_ptr<ExtensionPermissionSet> known_perms(
+      prefs->GetGrantedPermissions(permissions_crx));
+  EXPECT_FALSE(known_perms.get());
 
   PackAndInstallCrx(path, pem_path, true);
 
@@ -1391,23 +1375,20 @@ TEST_F(ExtensionServiceTest, GrantedPermissions) {
   std::string extension_id = service_->extensions()->at(0)->id();
   EXPECT_EQ(permissions_crx, extension_id);
 
-
   // Verify that the valid API permissions have been recognized.
-  expected_api_perms.insert("tabs");
+  expected_api_perms.insert(ExtensionAPIPermission::kTab);
 
   AddPattern(&expected_host_perms, "http://*.google.com/*");
   AddPattern(&expected_host_perms, "https://*.google.com/*");
   AddPattern(&expected_host_perms, "http://*.google.com.hk/*");
   AddPattern(&expected_host_perms, "http://www.example.com/*");
 
-  EXPECT_TRUE(prefs->GetGrantedPermissions(extension_id,
-                                           &full_access,
-                                           &known_api_perms,
-                                           &known_host_perms));
-
-  EXPECT_EQ(expected_api_perms, known_api_perms);
-  EXPECT_FALSE(full_access);
-  AssertEqualExtents(&expected_host_perms, &known_host_perms);
+  known_perms.reset(prefs->GetGrantedPermissions(extension_id));
+  EXPECT_TRUE(known_perms.get());
+  EXPECT_FALSE(known_perms->IsEmpty());
+  EXPECT_EQ(expected_api_perms, known_perms->apis());
+  EXPECT_FALSE(known_perms->HasEffectiveFullAccess());
+  EXPECT_EQ(expected_host_perms, known_perms->effective_hosts());
 }
 
 #if !defined(OS_CHROMEOS)
@@ -1424,24 +1405,22 @@ TEST_F(ExtensionServiceTest, GrantedFullAccessPermissions) {
       .AppendASCII("2");
 
   ASSERT_TRUE(file_util::PathExists(path));
-
   PackAndInstallCrx(path, true);
-
   EXPECT_EQ(0u, GetErrors().size());
   EXPECT_EQ(1u, service_->extensions()->size());
   const Extension* extension = service_->extensions()->at(0);
   std::string extension_id = extension->id();
   ExtensionPrefs* prefs = service_->extension_prefs();
 
-  bool full_access;
-  std::set<std::string> api_permissions;
-  URLPatternSet host_permissions;
-  EXPECT_TRUE(prefs->GetGrantedPermissions(
-      extension_id, &full_access, &api_permissions, &host_permissions));
+  scoped_ptr<ExtensionPermissionSet> permissions(
+      prefs->GetGrantedPermissions(extension_id));
+  EXPECT_FALSE(permissions->IsEmpty());
+  EXPECT_TRUE(permissions->HasEffectiveFullAccess());
+  EXPECT_FALSE(permissions->apis().empty());
+  EXPECT_TRUE(permissions->HasAPIPermission(ExtensionAPIPermission::kPlugin));
 
-  EXPECT_TRUE(full_access);
-  EXPECT_TRUE(api_permissions.empty());
-  EXPECT_TRUE(host_permissions.is_empty());
+  // Full access implies full host access too...
+  EXPECT_TRUE(permissions->HasEffectiveAccessToAllHosts());
 }
 #endif
 
@@ -1466,66 +1445,64 @@ TEST_F(ExtensionServiceTest, GrantedAPIAndHostPermissions) {
 
   ExtensionPrefs* prefs = service_->extension_prefs();
 
-  std::set<std::string> expected_api_permissions;
+  ExtensionAPIPermissionSet expected_api_permissions;
   URLPatternSet expected_host_permissions;
 
-  expected_api_permissions.insert("tabs");
+  expected_api_permissions.insert(ExtensionAPIPermission::kTab);
   AddPattern(&expected_host_permissions, "http://*.google.com/*");
   AddPattern(&expected_host_permissions, "https://*.google.com/*");
   AddPattern(&expected_host_permissions, "http://*.google.com.hk/*");
   AddPattern(&expected_host_permissions, "http://www.example.com/*");
 
-  std::set<std::string> api_permissions;
   std::set<std::string> host_permissions;
 
   // Test that the extension is disabled when an API permission is missing from
   // the extension's granted api permissions preference. (This simulates
   // updating the browser to a version which recognizes a new API permission).
-  SetPrefStringSet(extension_id, "granted_permissions.api", api_permissions);
-
+  SetPref(extension_id, "granted_permissions.api",
+          new ListValue(), "granted_permissions.api");
   service_->ReloadExtensions();
 
   EXPECT_EQ(1u, service_->disabled_extensions()->size());
   extension = service_->disabled_extensions()->at(0);
 
   ASSERT_TRUE(prefs->GetExtensionState(extension_id) == Extension::DISABLED);
+  ASSERT_FALSE(service_->IsExtensionEnabled(extension_id));
   ASSERT_TRUE(prefs->DidExtensionEscalatePermissions(extension_id));
 
   // Now grant and re-enable the extension, making sure the prefs are updated.
   service_->GrantPermissionsAndEnableExtension(extension);
 
   ASSERT_TRUE(prefs->GetExtensionState(extension_id) == Extension::ENABLED);
+  ASSERT_TRUE(service_->IsExtensionEnabled(extension_id));
   ASSERT_FALSE(prefs->DidExtensionEscalatePermissions(extension_id));
 
-  std::set<std::string> current_api_permissions;
-  URLPatternSet current_host_permissions;
-  bool current_full_access;
-
-  ASSERT_TRUE(prefs->GetGrantedPermissions(extension_id,
-                                           &current_full_access,
-                                           &current_api_permissions,
-                                           &current_host_permissions));
-
-  ASSERT_FALSE(current_full_access);
-  ASSERT_EQ(expected_api_permissions, current_api_permissions);
-  AssertEqualExtents(&expected_host_permissions, &current_host_permissions);
+  scoped_ptr<ExtensionPermissionSet> current_perms(
+      prefs->GetGrantedPermissions(extension_id));
+  ASSERT_TRUE(current_perms.get());
+  ASSERT_FALSE(current_perms->IsEmpty());
+  ASSERT_FALSE(current_perms->HasEffectiveFullAccess());
+  ASSERT_EQ(expected_api_permissions, current_perms->apis());
+  ASSERT_EQ(expected_host_permissions, current_perms->effective_hosts());
 
   // Tests that the extension is disabled when a host permission is missing from
   // the extension's granted host permissions preference. (This simulates
   // updating the browser to a version which recognizes additional host
   // permissions).
-  api_permissions.clear();
   host_permissions.clear();
-  current_api_permissions.clear();
-  current_host_permissions.ClearPatterns();
+  current_perms.reset();
 
-  api_permissions.insert("tabs");
   host_permissions.insert("http://*.google.com/*");
   host_permissions.insert("https://*.google.com/*");
   host_permissions.insert("http://*.google.com.hk/*");
 
-  SetPrefStringSet(extension_id, "granted_permissions.api", api_permissions);
-  SetPrefStringSet(extension_id, "granted_permissions.host", host_permissions);
+  ListValue* api_permissions = new ListValue();
+  api_permissions->Append(
+      Value::CreateIntegerValue(ExtensionAPIPermission::kTab));
+  SetPref(extension_id, "granted_permissions.api",
+          api_permissions, "granted_permissions.api");
+  SetPrefStringSet(
+      extension_id, "granted_permissions.scriptable_host", host_permissions);
 
   service_->ReloadExtensions();
 
@@ -1533,46 +1510,21 @@ TEST_F(ExtensionServiceTest, GrantedAPIAndHostPermissions) {
   extension = service_->disabled_extensions()->at(0);
 
   ASSERT_TRUE(prefs->GetExtensionState(extension_id) == Extension::DISABLED);
+  ASSERT_FALSE(service_->IsExtensionEnabled(extension_id));
   ASSERT_TRUE(prefs->DidExtensionEscalatePermissions(extension_id));
 
   // Now grant and re-enable the extension, making sure the prefs are updated.
   service_->GrantPermissionsAndEnableExtension(extension);
 
-  ASSERT_TRUE(prefs->GetExtensionState(extension_id) == Extension::ENABLED);
+  ASSERT_TRUE(service_->IsExtensionEnabled(extension_id));
   ASSERT_FALSE(prefs->DidExtensionEscalatePermissions(extension_id));
 
-  ASSERT_TRUE(prefs->GetGrantedPermissions(extension_id,
-                                           &current_full_access,
-                                           &current_api_permissions,
-                                           &current_host_permissions));
-
-  ASSERT_FALSE(current_full_access);
-  ASSERT_EQ(expected_api_permissions, current_api_permissions);
-  AssertEqualExtents(&expected_host_permissions, &current_host_permissions);
-
-  // Tests that the granted permissions preferences are initialized when
-  // migrating from the old pref schema.
-  current_api_permissions.clear();
-  current_host_permissions.ClearPatterns();
-
-  ClearPref(extension_id, "granted_permissions");
-
-  service_->ReloadExtensions();
-
-  EXPECT_EQ(1u, service_->extensions()->size());
-  extension = service_->extensions()->at(0);
-
-  ASSERT_TRUE(prefs->GetExtensionState(extension_id) == Extension::ENABLED);
-  ASSERT_FALSE(prefs->DidExtensionEscalatePermissions(extension_id));
-
-  ASSERT_TRUE(prefs->GetGrantedPermissions(extension_id,
-                                           &current_full_access,
-                                           &current_api_permissions,
-                                           &current_host_permissions));
-
-  ASSERT_FALSE(current_full_access);
-  ASSERT_EQ(expected_api_permissions, current_api_permissions);
-  AssertEqualExtents(&expected_host_permissions, &current_host_permissions);
+  current_perms.reset(prefs->GetGrantedPermissions(extension_id));
+  ASSERT_TRUE(current_perms.get());
+  ASSERT_FALSE(current_perms->IsEmpty());
+  ASSERT_FALSE(current_perms->HasEffectiveFullAccess());
+  ASSERT_EQ(expected_api_permissions, current_perms->apis());
+  ASSERT_EQ(expected_host_permissions, current_perms->effective_hosts());
 }
 
 // Test Packaging and installing an extension.
@@ -1803,6 +1755,18 @@ TEST_F(ExtensionServiceTest, InstallApps) {
   ValidatePrefKeyCount(pref_count);
 }
 
+// Tests that file access is OFF by default.
+TEST_F(ExtensionServiceTest, DefaultFileAccess) {
+  InitializeEmptyExtensionService();
+  PackAndInstallCrx(data_dir_.AppendASCII("permissions").AppendASCII("files"),
+                    true);
+
+  EXPECT_EQ(0u, GetErrors().size());
+  EXPECT_EQ(1u, service_->extensions()->size());
+  std::string id = service_->extensions()->at(0)->id();
+  EXPECT_FALSE(service_->extension_prefs()->AllowFileAccess(id));
+}
+
 TEST_F(ExtensionServiceTest, UpdateApps) {
   InitializeEmptyExtensionService();
   FilePath extensions_path = data_dir_.AppendASCII("app_update");
@@ -1834,8 +1798,8 @@ TEST_F(ExtensionServiceTest, InstallAppsWithUnlimtedStorage) {
   ASSERT_EQ(1u, service_->extensions()->size());
   const Extension* extension = service_->extensions()->at(0);
   const std::string id1 = extension->id();
-  EXPECT_TRUE(extension->HasApiPermission(
-                  Extension::kUnlimitedStoragePermission));
+  EXPECT_TRUE(extension->HasAPIPermission(
+      ExtensionAPIPermission::kUnlimitedStorage));
   EXPECT_TRUE(extension->web_extent().MatchesURL(
                   extension->GetFullLaunchURL()));
   const GURL origin1(extension->GetFullLaunchURL().GetOrigin());
@@ -1848,8 +1812,8 @@ TEST_F(ExtensionServiceTest, InstallAppsWithUnlimtedStorage) {
   ASSERT_EQ(2u, service_->extensions()->size());
   extension = service_->extensions()->at(1);
   const std::string id2 = extension->id();
-  EXPECT_TRUE(extension->HasApiPermission(
-                  Extension::kUnlimitedStoragePermission));
+  EXPECT_TRUE(extension->HasAPIPermission(
+      ExtensionAPIPermission::kUnlimitedStorage));
   EXPECT_TRUE(extension->web_extent().MatchesURL(
                   extension->GetFullLaunchURL()));
   const GURL origin2(extension->GetFullLaunchURL().GetOrigin());
@@ -1942,6 +1906,45 @@ TEST_F(ExtensionServiceTest, Reinstall) {
   ValidatePrefKeyCount(1);
   ValidateIntegerPref(good_crx, "state", Extension::ENABLED);
   ValidateIntegerPref(good_crx, "location", Extension::INTERNAL);
+}
+
+// Test that we can determine if extensions came from the
+// Chrome web store.
+TEST_F(ExtensionServiceTest, FromWebStore) {
+  InitializeEmptyExtensionService();
+
+  // A simple extension that should install without error.
+  FilePath path = data_dir_.AppendASCII("good.crx");
+  StartCrxInstall(path, false);  // Not from web store.
+  loop_.RunAllPending();
+
+  ASSERT_TRUE(installed_);
+  ASSERT_EQ(1u, loaded_.size());
+  ASSERT_EQ(0u, GetErrors().size());
+  ValidatePrefKeyCount(1);
+  ValidateBooleanPref(good_crx, "from_webstore", false);
+
+  const Extension* extension = service_->extensions()->at(0);
+  ASSERT_FALSE(extension->from_webstore());
+
+  installed_ = NULL;
+  loaded_.clear();
+  ExtensionErrorReporter::GetInstance()->ClearErrors();
+
+  // Test install from web store.
+  StartCrxInstall(path, true);  // From web store.
+  loop_.RunAllPending();
+
+  ASSERT_TRUE(installed_);
+  ASSERT_EQ(1u, loaded_.size());
+  ASSERT_EQ(0u, GetErrors().size());
+  ValidatePrefKeyCount(1);
+  ValidateBooleanPref(good_crx, "from_webstore", true);
+
+  // Reload so extension gets reinitialized with new value.
+  service_->ReloadExtensions();
+  extension = service_->extensions()->at(0);
+  ASSERT_TRUE(extension->from_webstore());
 }
 
 // Test upgrading a signed extension.
@@ -2218,6 +2221,7 @@ TEST_F(ExtensionServiceTest, UpdatePendingTheme) {
 
   EXPECT_EQ(Extension::ENABLED,
             service_->extension_prefs()->GetExtensionState(extension->id()));
+  EXPECT_TRUE(service_->IsExtensionEnabled(theme_crx));
 }
 
 #if defined(OS_CHROMEOS)
@@ -2246,6 +2250,7 @@ TEST_F(ExtensionServiceTest, MAYBE_UpdatePendingExternalCrx) {
 
   EXPECT_EQ(Extension::ENABLED,
             service_->extension_prefs()->GetExtensionState(extension->id()));
+  EXPECT_TRUE(service_->IsExtensionEnabled(extension->id()));
   EXPECT_FALSE(service_->IsIncognitoEnabled(extension->id()));
 }
 
@@ -3229,7 +3234,7 @@ TEST_F(ExtensionServiceTest, LoadAndRelocalizeExtensions) {
 class ExtensionsReadyRecorder : public NotificationObserver {
  public:
   ExtensionsReadyRecorder() : ready_(false) {
-    registrar_.Add(this, NotificationType::EXTENSIONS_READY,
+    registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
                    NotificationService::AllSources());
   }
 
@@ -3237,11 +3242,11 @@ class ExtensionsReadyRecorder : public NotificationObserver {
   bool ready() { return ready_; }
 
  private:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    switch (type.value) {
-      case NotificationType::EXTENSIONS_READY:
+    switch (type) {
+      case chrome::NOTIFICATION_EXTENSIONS_READY:
         ready_ = true;
         break;
       default:

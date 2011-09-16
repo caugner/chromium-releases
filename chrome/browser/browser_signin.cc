@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/constrained_html_ui.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -28,7 +29,6 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -67,10 +67,7 @@ void BrowserSigninResourcesSource::StartDataRequest(const std::string& path,
     response = jstemplate_builder::GetI18nTemplateHtml(html, &dict);
   }
 
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(response.size());
-  std::copy(response.begin(), response.end(), html_bytes->data.begin());
-  SendResponse(request_id, html_bytes);
+  SendResponse(request_id, base::RefCountedString::TakeString(&response));
 }
 
 class BrowserSigninHtml : public HtmlDialogUIDelegate,
@@ -181,7 +178,8 @@ void BrowserSigninHtml::HandleSigninInit(const ListValue* args) {
   // particular value.
   bool is_editable;
   std::string user;
-  json_args.GetBoolean("editable_user", &is_editable);
+  if (!json_args.GetBoolean("editable_user", &is_editable))
+    is_editable = false;
   json_args.GetString("user", &user);
   if (is_editable && user.empty() && !suggested_email_.empty())
     json_args.SetString("user", suggested_email_);
@@ -253,11 +251,11 @@ std::string BrowserSignin::GetSignedInUsername() const {
   return username;
 }
 
-void BrowserSignin::Observe(NotificationType type,
+void BrowserSignin::Observe(int type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::GOOGLE_SIGNIN_SUCCESSFUL: {
+  switch (type) {
+    case chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL: {
       VLOG(1) << "GOOGLE_SIGNIN_SUCCESSFUL";
       if (delegate_)
         delegate_->OnLoginSuccess();
@@ -265,7 +263,7 @@ void BrowserSignin::Observe(NotificationType type,
       OnLoginFinished();
       break;
     }
-    case NotificationType::GOOGLE_SIGNIN_FAILED: {
+    case chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED: {
       VLOG(1) << "GOOGLE_SIGNIN_FAILED";
       // The signin failed, refresh the UI with error information.
       html_dialog_ui_delegate_->ReloadUI();
@@ -308,19 +306,19 @@ BrowserSigninHtml* BrowserSignin::CreateHtmlDialogUI() {
 
 void BrowserSignin::RegisterAuthNotifications() {
   registrar_.Add(this,
-                 NotificationType::GOOGLE_SIGNIN_SUCCESSFUL,
+                 chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
                  Source<Profile>(profile_));
   registrar_.Add(this,
-                 NotificationType::GOOGLE_SIGNIN_FAILED,
+                 chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
                  Source<Profile>(profile_));
 }
 
 void BrowserSignin::UnregisterAuthNotifications() {
   registrar_.Remove(this,
-                    NotificationType::GOOGLE_SIGNIN_SUCCESSFUL,
+                    chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
                     Source<Profile>(profile_));
   registrar_.Remove(this,
-                    NotificationType::GOOGLE_SIGNIN_FAILED,
+                    chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
                     Source<Profile>(profile_));
 }
 

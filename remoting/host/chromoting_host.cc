@@ -4,12 +4,15 @@
 
 #include "remoting/host/chromoting_host.h"
 
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/logging.h"
 #include "build/build_config.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/encoder.h"
 #include "remoting/base/encoder_row_based.h"
 #include "remoting/base/encoder_vp8.h"
-#include "remoting/host/capturer.h"
+#include "remoting/base/logger.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/curtain.h"
 #include "remoting/host/desktop_environment.h"
@@ -18,6 +21,7 @@
 #include "remoting/host/host_key_pair.h"
 #include "remoting/host/screen_recorder.h"
 #include "remoting/host/user_authenticator.h"
+#include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/proto/auth.pb.h"
 #include "remoting/protocol/connection_to_client.h"
 #include "remoting/protocol/client_stub.h"
@@ -34,52 +38,47 @@ namespace remoting {
 // static
 ChromotingHost* ChromotingHost::Create(ChromotingHostContext* context,
                                        MutableHostConfig* config,
-                                       AccessVerifier* access_verifier) {
-  Capturer* capturer = Capturer::Create();
-  EventExecutor* event_executor =
-      EventExecutor::Create(context->ui_message_loop(), capturer);
-  Curtain* curtain = Curtain::Create();
-  return Create(context, config,
-                new DesktopEnvironment(capturer, event_executor, curtain),
-                access_verifier);
-}
-
-// static
-ChromotingHost* ChromotingHost::Create(ChromotingHostContext* context,
-                                       MutableHostConfig* config,
                                        DesktopEnvironment* environment,
-                                       AccessVerifier* access_verifier) {
-  return new ChromotingHost(context, config, environment, access_verifier);
+                                       AccessVerifier* access_verifier,
+                                       Logger* logger,
+                                       bool allow_nat_traversal) {
+  return new ChromotingHost(context, config, environment, access_verifier,
+                            logger, allow_nat_traversal);
 }
 
 ChromotingHost::ChromotingHost(ChromotingHostContext* context,
                                MutableHostConfig* config,
                                DesktopEnvironment* environment,
-                               AccessVerifier* access_verifier)
+                               AccessVerifier* access_verifier,
+                               Logger* logger,
+                               bool allow_nat_traversal)
     : context_(context),
       config_(config),
       desktop_environment_(environment),
       access_verifier_(access_verifier),
+      logger_(logger),
+      allow_nat_traversal_(allow_nat_traversal),
       state_(kInitial),
       protocol_config_(protocol::CandidateSessionConfig::CreateDefault()),
       is_curtained_(false),
-      is_me2mom_(false) {
+      is_it2me_(false) {
   DCHECK(desktop_environment_.get());
+  desktop_environment_->set_host(this);
+  logger_->SetThread(MessageLoop::current());
 }
 
 ChromotingHost::~ChromotingHost() {
 }
 
-void ChromotingHost::Start(Task* shutdown_task) {
-  if (MessageLoop::current() != context_->main_message_loop()) {
-    context_->main_message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &ChromotingHost::Start, shutdown_task));
+void ChromotingHost::Start() {
+  if (MessageLoop::current() != context_->network_message_loop()) {
+    context_->network_message_loop()->PostTask(
+        FROM_HERE, base::Bind(&ChromotingHost::Start, this));
     return;
   }
 
-  DCHECK(!jingle_client_);
-  DCHECK(shutdown_task);
+  logger_->Log(logging::LOG_INFO, "Starting host");
+  DCHECK(!signal_strategy_.get());
   DCHECK(access_verifier_.get());
 
   // Make sure this object is not started.
@@ -90,47 +89,48 @@ void ChromotingHost::Start(Task* shutdown_task) {
     state_ = kStarted;
   }
 
-  // Save the shutdown task.
-  shutdown_task_.reset(shutdown_task);
-
+  // Use an XMPP connection to the Talk network for session signalling.
   std::string xmpp_login;
   std::string xmpp_auth_token;
   std::string xmpp_auth_service;
   if (!config_->GetString(kXmppLoginConfigPath, &xmpp_login) ||
       !config_->GetString(kXmppAuthTokenConfigPath, &xmpp_auth_token) ||
       !config_->GetString(kXmppAuthServiceConfigPath, &xmpp_auth_service)) {
-    LOG(ERROR) << "XMPP credentials are not defined in the config.";
+    logger_->Log(logging::LOG_ERROR,
+                 "XMPP credentials are not defined in the config.");
     return;
   }
 
-  // Connect to the talk network with a JingleClient.
   signal_strategy_.reset(
       new XmppSignalStrategy(context_->jingle_thread(), xmpp_login,
                              xmpp_auth_token,
                              xmpp_auth_service));
-  jingle_client_ = new JingleClient(context_->jingle_thread(),
-                                    signal_strategy_.get(),
-                                    NULL, NULL, NULL, this);
-  jingle_client_->Init();
+  signal_strategy_->Init(this);
 }
 
 // This method is called when we need to destroy the host process.
-void ChromotingHost::Shutdown() {
+void ChromotingHost::Shutdown(Task* shutdown_task) {
   if (MessageLoop::current() != context_->main_message_loop()) {
     context_->main_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &ChromotingHost::Shutdown));
+        base::Bind(&ChromotingHost::Shutdown, this, shutdown_task));
     return;
   }
 
   // No-op if this object is not started yet.
   {
     base::AutoLock auto_lock(lock_);
-    if (state_ != kStarted) {
+    if (state_ == kInitial || state_ == kStopped) {
+      // Nothing to do if we are not started.
       state_ = kStopped;
+      context_->main_message_loop()->PostTask(FROM_HERE, shutdown_task);
       return;
     }
-    state_ = kStopped;
+    if (shutdown_task)
+      shutdown_tasks_.push_back(shutdown_task);
+    if (state_ == kStopping)
+      return;
+    state_ = kStopping;
   }
 
   // Make sure ScreenRecorder doesn't write to the connection.
@@ -138,39 +138,19 @@ void ChromotingHost::Shutdown() {
     recorder_->RemoveAllConnections();
   }
 
+  // Stop all desktop interaction.
+  desktop_environment_->OnLastDisconnect();
+
   // Disconnect the clients.
   for (size_t i = 0; i < clients_.size(); i++) {
     clients_[i]->Disconnect();
   }
   clients_.clear();
 
-  // Notify observers.
-  for (StatusObserverList::iterator it = status_observers_.begin();
-       it != status_observers_.end(); ++it) {
-    (*it)->OnShutdown();
-  }
-
-  // Stop chromotocol session manager.
-  if (session_manager_) {
-    session_manager_->Close(
-        NewRunnableMethod(this, &ChromotingHost::OnServerClosed));
-  }
-
-  // Disconnect from the talk network.
-  if (jingle_client_) {
-    jingle_client_->Close();
-  }
-
-  if (recorder_.get()) {
-    recorder_->Stop(shutdown_task_.release());
-  } else {
-    shutdown_task_->Run();
-    shutdown_task_.reset();
-  }
+  ShutdownNetwork();
 }
 
-void ChromotingHost::AddStatusObserver(
-    const scoped_refptr<HostStatusObserver>& observer) {
+void ChromotingHost::AddStatusObserver(HostStatusObserver* observer) {
   DCHECK_EQ(state_, kInitial);
   status_observers_.push_back(observer);
 }
@@ -179,34 +159,31 @@ void ChromotingHost::AddStatusObserver(
 // protocol::ConnectionToClient::EventHandler implementations
 void ChromotingHost::OnConnectionOpened(ConnectionToClient* connection) {
   DCHECK_EQ(context_->network_message_loop(), MessageLoop::current());
-  VLOG(1) << "Connection to client established.";
-  if (is_me2mom_) {
-    // TODO(wez): Improve our authentication framework.
+  logger_->VLog(1, "Connection to client established.");
+  // TODO(wez): ChromotingHost shouldn't need to know about Me2Mom.
+  if (is_it2me_) {
     context_->main_message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &ChromotingHost::ProcessPreAuthentication,
-                          make_scoped_refptr(connection)));
+        FROM_HERE, base::Bind(&ChromotingHost::ProcessPreAuthentication, this,
+                              make_scoped_refptr(connection)));
   }
 }
 
 void ChromotingHost::OnConnectionClosed(ConnectionToClient* connection) {
   DCHECK_EQ(context_->network_message_loop(), MessageLoop::current());
 
-  VLOG(1) << "Connection to client closed.";
+  logger_->VLog(1, "Connection to client closed.");
   context_->main_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &ChromotingHost::OnClientDisconnected,
-                        make_scoped_refptr(connection)));
+      FROM_HERE, base::Bind(&ChromotingHost::OnClientDisconnected, this,
+                            make_scoped_refptr(connection)));
 }
 
 void ChromotingHost::OnConnectionFailed(ConnectionToClient* connection) {
   DCHECK_EQ(context_->network_message_loop(), MessageLoop::current());
 
-  LOG(ERROR) << "Connection failed unexpectedly.";
+  logger_->Log(logging::LOG_ERROR, "Connection failed unexpectedly.");
   context_->main_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &ChromotingHost::OnClientDisconnected,
-                        make_scoped_refptr(connection)));
+      FROM_HERE, base::Bind(&ChromotingHost::OnClientDisconnected, this,
+                            make_scoped_refptr(connection)));
 }
 
 void ChromotingHost::OnSequenceNumberUpdated(ConnectionToClient* connection,
@@ -214,9 +191,8 @@ void ChromotingHost::OnSequenceNumberUpdated(ConnectionToClient* connection,
   // Update the sequence number in ScreenRecorder.
   if (MessageLoop::current() != context_->main_message_loop()) {
     context_->main_message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &ChromotingHost::OnSequenceNumberUpdated,
-                          make_scoped_refptr(connection), sequence_number));
+        FROM_HERE, base::Bind(&ChromotingHost::OnSequenceNumberUpdated, this,
+                              make_scoped_refptr(connection), sequence_number));
     return;
   }
 
@@ -225,18 +201,17 @@ void ChromotingHost::OnSequenceNumberUpdated(ConnectionToClient* connection,
 }
 
 ////////////////////////////////////////////////////////////////////////////
-// JingleClient::Callback implementations
-void ChromotingHost::OnStateChange(JingleClient* jingle_client,
-                                   JingleClient::State state) {
-  if (state == JingleClient::CONNECTED) {
-    std::string jid = jingle_client->GetFullJid();
+// SignalStrategy::StatusObserver implementations
+void ChromotingHost::OnStateChange(
+    SignalStrategy::StatusObserver::State state) {
+  DCHECK_EQ(MessageLoop::current(), context_->network_message_loop());
 
-    DCHECK_EQ(jingle_client_.get(), jingle_client);
-    VLOG(1) << "Host connected as " << jid;
+  if (state == SignalStrategy::StatusObserver::CONNECTED) {
+    logger_->Log(logging::LOG_INFO, "Host connected as %s", local_jid_.c_str());
 
     // Create and start session manager.
     protocol::JingleSessionManager* server =
-        new protocol::JingleSessionManager(context_->jingle_thread());
+        protocol::JingleSessionManager::CreateNotSandboxed();
     // TODO(ajwong): Make this a command switch when we're more stable.
     server->set_allow_local_ips(true);
 
@@ -245,34 +220,54 @@ void ChromotingHost::OnStateChange(JingleClient* jingle_client,
     CHECK(key_pair.Load(config_))
         << "Failed to load server authentication data";
 
-    server->Init(jid, jingle_client->session_manager(),
-                 NewCallback(this, &ChromotingHost::OnNewClientSession),
-                 key_pair.CopyPrivateKey(), key_pair.GenerateCertificate());
+    server->Init(local_jid_, signal_strategy_.get(), this,
+                 key_pair.CopyPrivateKey(), key_pair.GenerateCertificate(),
+                 allow_nat_traversal_);
 
-    session_manager_ = server;
+    session_manager_.reset(server);
 
     for (StatusObserverList::iterator it = status_observers_.begin();
          it != status_observers_.end(); ++it) {
-      (*it)->OnSignallingConnected(signal_strategy_.get(), jid);
+      (*it)->OnSignallingConnected(signal_strategy_.get(), local_jid_);
     }
-  } else if (state == JingleClient::CLOSED) {
-    VLOG(1) << "Host disconnected from talk network.";
-
+  } else if (state == SignalStrategy::StatusObserver::CLOSED) {
+    logger_->Log(logging::LOG_INFO, "Host disconnected from talk network.");
     for (StatusObserverList::iterator it = status_observers_.begin();
          it != status_observers_.end(); ++it) {
       (*it)->OnSignallingDisconnected();
     }
-    // TODO(sergeyu): We should try reconnecting here instead of terminating
-    // the host.
-    Shutdown();
+    // TODO(sergeyu): Don't shutdown the host and let the upper level
+    // decide what needs to be done when signalling channel is
+    // disconnected.
+    Shutdown(NULL);
   }
 }
 
-void ChromotingHost::OnNewClientSession(
-    protocol::Session* session,
-    protocol::SessionManager::IncomingSessionResponse* response) {
+void ChromotingHost::OnJidChange(const std::string& full_jid) {
+  DCHECK_EQ(MessageLoop::current(), context_->network_message_loop());
+  local_jid_ = full_jid;
+}
+
+void ChromotingHost::OnSessionManagerInitialized() {
+  DCHECK_EQ(MessageLoop::current(), context_->network_message_loop());
+  // Don't need to do anything here, just wait for incoming
+  // connections.
+}
+
+void ChromotingHost::OnIncomingSession(
+      protocol::Session* session,
+      protocol::SessionManager::IncomingSessionResponse* response) {
+  DCHECK_EQ(MessageLoop::current(), context_->network_message_loop());
+
   base::AutoLock auto_lock(lock_);
   if (state_ != kStarted) {
+    *response = protocol::SessionManager::DECLINE;
+    return;
+  }
+
+  // If we are running Me2Mom and already have an authenticated client then
+  // reject the connection immediately.
+  if (is_it2me_ && AuthenticatedClientsCount() > 0) {
     *response = protocol::SessionManager::DECLINE;
     return;
   }
@@ -281,6 +276,12 @@ void ChromotingHost::OnNewClientSession(
   if (!access_verifier_->VerifyPermissions(session->jid(),
                                            session->initiator_token())) {
     *response = protocol::SessionManager::DECLINE;
+
+    // Notify observers.
+    for (StatusObserverList::iterator it = status_observers_.begin();
+         it != status_observers_.end(); ++it) {
+      (*it)->OnAccessDenied();
+    }
     return;
   }
 
@@ -293,8 +294,9 @@ void ChromotingHost::OnNewClientSession(
       session->candidate_config(), true /* force_host_resolution */);
 
   if (!config) {
-    LOG(WARNING) << "Rejecting connection from " << session->jid()
-                 << " because no compatible configuration has been found.";
+    logger_->Log(logging::LOG_WARNING,
+                 "Rejecting connection from %s because no compatible"
+                 " configuration has been found.", session->jid().c_str());
     *response = protocol::SessionManager::INCOMPATIBLE;
     return;
   }
@@ -303,9 +305,13 @@ void ChromotingHost::OnNewClientSession(
   session->set_receiver_token(
       GenerateHostAuthToken(session->initiator_token()));
 
+  // Provide the Access Code as shared secret for SSL channel authentication.
+  session->set_shared_secret(access_code_);
+
   *response = protocol::SessionManager::ACCEPT;
 
-  VLOG(1) << "Client connected: " << session->jid();
+  logger_->Log(logging::LOG_INFO, "Client connected: %s",
+               session->jid().c_str());
 
   // We accept the connection, so create a connection object.
   ConnectionToClient* connection = new ConnectionToClient(
@@ -332,8 +338,32 @@ void ChromotingHost::set_protocol_config(
   protocol_config_.reset(config);
 }
 
-void ChromotingHost::OnServerClosed() {
-  // Don't need to do anything here.
+void ChromotingHost::LocalMouseMoved(const gfx::Point& new_pos) {
+  if (MessageLoop::current() != context_->network_message_loop()) {
+    context_->network_message_loop()->PostTask(
+        FROM_HERE, base::Bind(&ChromotingHost::LocalMouseMoved, this, new_pos));
+    return;
+  }
+  ClientList::iterator client;
+  for (client = clients_.begin(); client != clients_.end(); ++client) {
+    client->get()->LocalMouseMoved(new_pos);
+  }
+}
+
+void ChromotingHost::PauseSession(bool pause) {
+  if (context_->main_message_loop() != MessageLoop::current()) {
+    context_->main_message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this,
+                          &ChromotingHost::PauseSession,
+                          pause));
+    return;
+  }
+  ClientList::iterator client;
+  for (client = clients_.begin(); client != clients_.end(); ++client) {
+    client->get()->set_awaiting_continue_approval(pause);
+  }
+  desktop_environment_->OnPause(!pause);
 }
 
 void ChromotingHost::OnClientDisconnected(ConnectionToClient* connection) {
@@ -364,10 +394,25 @@ void ChromotingHost::OnClientDisconnected(ConnectionToClient* connection) {
   connection->Disconnect();
 
   // Also remove reference to ConnectionToClient from this object.
+  int old_authenticated_clients = AuthenticatedClientsCount();
   clients_.erase(client);
 
-  if (!HasAuthenticatedClients())
+  // Notify the observers of the change, if any.
+  int authenticated_clients = AuthenticatedClientsCount();
+  if (old_authenticated_clients != authenticated_clients) {
+    for (StatusObserverList::iterator it = status_observers_.begin();
+         it != status_observers_.end(); ++it) {
+      (*it)->OnAuthenticatedClientsChanged(authenticated_clients);
+    }
+  }
+
+  // Disable the "curtain" if there are no more active clients.
+  if (AuthenticatedClientsCount() == 0) {
     EnableCurtainMode(false);
+    if (is_it2me_) {
+      desktop_environment_->OnLastDisconnect();
+    }
+  }
 }
 
 // TODO(sergeyu): Move this to SessionManager?
@@ -395,19 +440,21 @@ std::string ChromotingHost::GenerateHostAuthToken(
   return encoded_client_token;
 }
 
-bool ChromotingHost::HasAuthenticatedClients() const {
+int ChromotingHost::AuthenticatedClientsCount() const {
+  int authenticated_clients = 0;
   for (ClientList::const_iterator it = clients_.begin(); it != clients_.end();
        ++it) {
     if (it->get()->authenticated())
-      return true;
+      ++authenticated_clients;
   }
-  return false;
+  return authenticated_clients;
 }
 
 void ChromotingHost::EnableCurtainMode(bool enable) {
   // TODO(jamiewalch): This will need to be more sophisticated when we think
   // about proper crash recovery and daemon mode.
-  if (is_me2mom_ || enable == is_curtained_)
+  // TODO(wez): CurtainMode shouldn't be driven directly by ChromotingHost.
+  if (is_it2me_ || enable == is_curtained_)
     return;
   desktop_environment_->curtain()->EnableCurtainMode(enable);
   is_curtained_ = enable;
@@ -417,10 +464,8 @@ void ChromotingHost::LocalLoginSucceeded(
     scoped_refptr<ConnectionToClient> connection) {
   if (MessageLoop::current() != context_->main_message_loop()) {
     context_->main_message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this,
-                          &ChromotingHost::LocalLoginSucceeded,
-                          connection));
+        FROM_HERE, base::Bind(&ChromotingHost::LocalLoginSucceeded, this,
+                              connection));
     return;
   }
 
@@ -459,15 +504,30 @@ void ChromotingHost::LocalLoginSucceeded(
   // Immediately add the connection and start the session.
   recorder_->AddConnection(connection);
   recorder_->Start();
+  // TODO(jamiewalch): Tidy up actions to be taken on connect/disconnect,
+  // including closing the connection on failure of a critical operation.
   EnableCurtainMode(true);
+  if (is_it2me_) {
+    std::string username = connection->session()->jid();
+    size_t pos = username.find('/');
+    if (pos != std::string::npos)
+      username.replace(pos, std::string::npos, "");
+    desktop_environment_->OnConnect(username);
+  }
+
+  // Notify observers that there is at least one authenticated client.
+  for (StatusObserverList::iterator it = status_observers_.begin();
+       it != status_observers_.end(); ++it) {
+    (*it)->OnAuthenticatedClientsChanged(AuthenticatedClientsCount());
+  }
 }
 
 void ChromotingHost::LocalLoginFailed(
     scoped_refptr<ConnectionToClient> connection) {
   if (MessageLoop::current() != context_->main_message_loop()) {
     context_->main_message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &ChromotingHost::LocalLoginFailed, connection));
+        FROM_HERE, base::Bind(&ChromotingHost::LocalLoginFailed, this,
+                              connection));
     return;
   }
 
@@ -488,6 +548,73 @@ void ChromotingHost::ProcessPreAuthentication(
   }
   CHECK(client != clients_.end());
   client->get()->OnAuthorizationComplete(true);
+}
+
+void ChromotingHost::ShutdownNetwork() {
+  if (MessageLoop::current() != context_->network_message_loop()) {
+    context_->network_message_loop()->PostTask(
+        FROM_HERE, base::Bind(&ChromotingHost::ShutdownNetwork, this));
+    return;
+  }
+
+  // Stop chromotocol session manager.
+  if (session_manager_.get()) {
+    session_manager_->Close();
+    session_manager_.reset();
+  }
+
+  // Stop XMPP connection.
+  if (signal_strategy_.get()) {
+    signal_strategy_->Close();
+    signal_strategy_.reset();
+
+    for (StatusObserverList::iterator it = status_observers_.begin();
+         it != status_observers_.end(); ++it) {
+      (*it)->OnSignallingDisconnected();
+    }
+  }
+
+  ShutdownRecorder();
+}
+
+void ChromotingHost::ShutdownRecorder() {
+  if (MessageLoop::current() != context_->main_message_loop()) {
+    context_->main_message_loop()->PostTask(
+        FROM_HERE, base::Bind(&ChromotingHost::ShutdownRecorder, this));
+    return;
+  }
+
+  if (recorder_.get()) {
+    recorder_->Stop(NewRunnableMethod(this, &ChromotingHost::ShutdownFinish));
+  } else {
+    ShutdownFinish();
+  }
+}
+
+void ChromotingHost::ShutdownFinish() {
+  if (MessageLoop::current() != context_->main_message_loop()) {
+    context_->main_message_loop()->PostTask(
+        FROM_HERE, base::Bind(&ChromotingHost::ShutdownFinish, this));
+    return;
+  }
+
+  {
+    base::AutoLock auto_lock(lock_);
+    state_ = kStopped;
+  }
+
+  // Notify observers.
+  for (StatusObserverList::iterator it = status_observers_.begin();
+       it != status_observers_.end(); ++it) {
+    (*it)->OnShutdown();
+  }
+
+  for (std::vector<Task*>::iterator it = shutdown_tasks_.begin();
+       it != shutdown_tasks_.end(); ++it) {
+    (*it)->Run();
+    delete *it;
+  }
+  shutdown_tasks_.clear();
 }
 
 }  // namespace remoting

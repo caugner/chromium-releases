@@ -7,30 +7,35 @@
 #include <cmath>
 #include <queue>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_split.h"
 #include "base/sync_socket.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "content/common/audio_messages.h"
 #include "content/common/child_process_messages.h"
+#include "content/common/child_process.h"
 #include "content/common/child_thread.h"
 #include "content/common/content_switches.h"
 #include "content/common/file_system/file_system_dispatcher.h"
+#include "content/common/file_system_messages.h"
+#include "content/common/media/audio_messages.h"
 #include "content/common/pepper_file_messages.h"
 #include "content/common/pepper_plugin_registry.h"
 #include "content/common/pepper_messages.h"
+#include "content/common/quota_dispatcher.h"
 #include "content/common/view_messages.h"
-#include "content/renderer/audio_message_filter.h"
 #include "content/renderer/content_renderer_client.h"
 #include "content/renderer/gpu/command_buffer_proxy.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
 #include "content/renderer/gpu/renderer_gl_context.h"
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
+#include "content/renderer/media/audio_message_filter.h"
 #include "content/renderer/p2p/p2p_transport_impl.h"
 #include "content/renderer/pepper_platform_context_3d_impl.h"
 #include "content/renderer/pepper_platform_video_decoder_impl.h"
@@ -159,10 +164,10 @@ class PlatformAudioImpl
       public AudioMessageFilter::Delegate,
       public base::RefCountedThreadSafe<PlatformAudioImpl> {
  public:
-  explicit PlatformAudioImpl(scoped_refptr<AudioMessageFilter> filter)
-      : client_(NULL), filter_(filter), stream_id_(0),
+  PlatformAudioImpl()
+      : client_(NULL), stream_id_(0),
         main_message_loop_(MessageLoop::current()) {
-    DCHECK(filter_);
+    filter_ = RenderThread::current()->audio_message_filter();
   }
 
   virtual ~PlatformAudioImpl() {
@@ -239,7 +244,8 @@ bool PlatformAudioImpl::Initialize(
   params.bits_per_sample = 16;
   params.samples_per_packet = sample_count;
 
-  filter_->message_loop()->PostTask(FROM_HERE,
+  ChildProcess::current()->io_message_loop()->PostTask(
+      FROM_HERE,
       NewRunnableMethod(this, &PlatformAudioImpl::InitializeOnIOThread,
                         params));
   return true;
@@ -247,7 +253,8 @@ bool PlatformAudioImpl::Initialize(
 
 bool PlatformAudioImpl::StartPlayback() {
   if (filter_) {
-    filter_->message_loop()->PostTask(FROM_HERE,
+    ChildProcess::current()->io_message_loop()->PostTask(
+        FROM_HERE,
         NewRunnableMethod(this, &PlatformAudioImpl::StartPlaybackOnIOThread));
     return true;
   }
@@ -256,7 +263,8 @@ bool PlatformAudioImpl::StartPlayback() {
 
 bool PlatformAudioImpl::StopPlayback() {
   if (filter_) {
-    filter_->message_loop()->PostTask(FROM_HERE,
+    ChildProcess::current()->io_message_loop()->PostTask(
+        FROM_HERE,
         NewRunnableMethod(this, &PlatformAudioImpl::StopPlaybackOnIOThread));
     return true;
   }
@@ -267,23 +275,24 @@ void PlatformAudioImpl::ShutDown() {
   // Called on the main thread to stop all audio callbacks. We must only change
   // the client on the main thread, and the delegates from the I/O thread.
   client_ = NULL;
-  filter_->message_loop()->PostTask(FROM_HERE,
+  ChildProcess::current()->io_message_loop()->PostTask(
+      FROM_HERE,
       NewRunnableMethod(this, &PlatformAudioImpl::ShutDownOnIOThread));
 }
 
 void PlatformAudioImpl::InitializeOnIOThread(const AudioParameters& params) {
   stream_id_ = filter_->AddDelegate(this);
-  filter_->Send(new AudioHostMsg_CreateStream(0, stream_id_, params, true));
+  filter_->Send(new AudioHostMsg_CreateStream(stream_id_, params, true));
 }
 
 void PlatformAudioImpl::StartPlaybackOnIOThread() {
   if (stream_id_)
-    filter_->Send(new AudioHostMsg_PlayStream(0, stream_id_));
+    filter_->Send(new AudioHostMsg_PlayStream(stream_id_));
 }
 
 void PlatformAudioImpl::StopPlaybackOnIOThread() {
   if (stream_id_)
-    filter_->Send(new AudioHostMsg_PauseStream(0, stream_id_));
+    filter_->Send(new AudioHostMsg_PauseStream(stream_id_));
 }
 
 void PlatformAudioImpl::ShutDownOnIOThread() {
@@ -291,7 +300,7 @@ void PlatformAudioImpl::ShutDownOnIOThread() {
   if (!stream_id_)
     return;
 
-  filter_->Send(new AudioHostMsg_CloseStream(0, stream_id_));
+  filter_->Send(new AudioHostMsg_CloseStream(stream_id_));
   filter_->RemoveDelegate(stream_id_);
   stream_id_ = 0;
 
@@ -348,6 +357,23 @@ class DispatcherWrapper
 
  private:
   scoped_ptr<pp::proxy::HostDispatcher> dispatcher_;
+};
+
+class QuotaCallbackTranslator : public QuotaDispatcher::Callback {
+ public:
+  typedef webkit::ppapi::PluginDelegate::AvailableSpaceCallback PluginCallback;
+  explicit QuotaCallbackTranslator(PluginCallback* cb) : callback_(cb) {}
+  virtual void DidQueryStorageUsageAndQuota(int64 usage, int64 quota) OVERRIDE {
+    callback_->Run(std::max(static_cast<int64>(0), quota - usage));
+  }
+  virtual void DidGrantStorageQuota(int64 granted_quota) OVERRIDE {
+    NOTREACHED();
+  }
+  virtual void DidFail(quota::QuotaStatusCode error) OVERRIDE {
+    callback_->Run(0);
+  }
+ private:
+  scoped_ptr<PluginCallback> callback_;
 };
 
 }  // namespace
@@ -749,6 +775,7 @@ void PepperPluginDelegateImpl::PluginFocusChanged(bool focused) {
 
 void PepperPluginDelegateImpl::PluginCrashed(
     webkit::ppapi::PluginInstance* instance) {
+  subscribed_to_policy_updates_.erase(instance);
   render_view_->PluginCrashed(instance->module()->path());
 }
 
@@ -763,6 +790,7 @@ void PepperPluginDelegateImpl::InstanceCreated(
 void PepperPluginDelegateImpl::InstanceDeleted(
     webkit::ppapi::PluginInstance* instance) {
   active_instances_.erase(instance);
+  subscribed_to_policy_updates_.erase(instance);
 }
 
 SkBitmap* PepperPluginDelegateImpl::GetSadPluginBitmap() {
@@ -828,8 +856,11 @@ webkit::ppapi::PluginDelegate::PlatformContext3D*
 
 webkit::ppapi::PluginDelegate::PlatformVideoDecoder*
 PepperPluginDelegateImpl::CreateVideoDecoder(
-    media::VideoDecodeAccelerator::Client* client) {
-  return new PlatformVideoDecoderImpl(client);
+    media::VideoDecodeAccelerator::Client* client,
+    int32 command_buffer_route_id,
+    gpu::CommandBufferHelper* cmd_buffer_helper) {
+  return new PlatformVideoDecoderImpl(
+      client, command_buffer_route_id, cmd_buffer_helper);
 }
 
 void PepperPluginDelegateImpl::NumberOfFindResultsChanged(int identifier,
@@ -848,8 +879,7 @@ webkit::ppapi::PluginDelegate::PlatformAudio*
 PepperPluginDelegateImpl::CreateAudio(
     uint32_t sample_rate, uint32_t sample_count,
     webkit::ppapi::PluginDelegate::PlatformAudio::Client* client) {
-  scoped_refptr<PlatformAudioImpl> audio(
-      new PlatformAudioImpl(render_view_->audio_message_filter()));
+  scoped_refptr<PlatformAudioImpl> audio(new PlatformAudioImpl());
   if (audio->Initialize(sample_rate, sample_count, client)) {
     // Balanced by Release invoked in PlatformAudioImpl::ShutDownOnIOThread().
     return audio.release();
@@ -907,7 +937,10 @@ void PepperPluginDelegateImpl::OnAsyncFileOpened(
       messages_waiting_replies_.Lookup(message_id);
   DCHECK(callback);
   messages_waiting_replies_.Remove(message_id);
-  callback->Run(error_code, file);
+  callback->Run(error_code, base::PassPlatformFile(&file));
+  // Make sure we won't leak file handle if the requester has died.
+  if (file != base::kInvalidPlatformFileValue)
+    base::FileUtilProxy::Close(GetFileThreadMessageLoopProxy(), file, NULL);
   delete callback;
 }
 
@@ -988,9 +1021,31 @@ bool PepperPluginDelegateImpl::ReadDirectory(
   return file_system_dispatcher->ReadDirectory(directory_path, dispatcher);
 }
 
-class AsyncOpenFileSystemURLCallbackTranslator :
-    public fileapi::FileSystemCallbackDispatcher {
-public:
+void PepperPluginDelegateImpl::PublishPolicy(const std::string& policy_json) {
+  for (std::set<webkit::ppapi::PluginInstance*>::iterator i =
+           subscribed_to_policy_updates_.begin();
+       i != subscribed_to_policy_updates_.end(); ++i)
+    (*i)->HandlePolicyUpdate(policy_json);
+}
+
+void PepperPluginDelegateImpl::QueryAvailableSpace(
+    const GURL& origin, quota::StorageType type,
+    AvailableSpaceCallback* callback) {
+  ChildThread::current()->quota_dispatcher()->QueryStorageUsageAndQuota(
+      origin, type, new QuotaCallbackTranslator(callback));
+}
+
+void PepperPluginDelegateImpl::WillUpdateFile(const GURL& path) {
+  ChildThread::current()->Send(new FileSystemHostMsg_WillUpdate(path));
+}
+
+void PepperPluginDelegateImpl::DidUpdateFile(const GURL& path, int64_t delta) {
+  ChildThread::current()->Send(new FileSystemHostMsg_DidUpdate(path, delta));
+}
+
+class AsyncOpenFileSystemURLCallbackTranslator
+    : public fileapi::FileSystemCallbackDispatcher {
+ public:
   AsyncOpenFileSystemURLCallbackTranslator(
       webkit::ppapi::PluginDelegate::AsyncOpenFileCallback* callback)
     : callback_(callback) {
@@ -1017,7 +1072,8 @@ public:
   }
 
   virtual void DidFail(base::PlatformFileError error_code) {
-    callback_->Run(error_code, base::kInvalidPlatformFileValue);
+    base::PlatformFile invalid_file = base::kInvalidPlatformFileValue;
+    callback_->Run(error_code, base::PassPlatformFile(&invalid_file));
   }
 
   virtual void DidWrite(int64 bytes, bool complete) {
@@ -1027,7 +1083,12 @@ public:
   virtual void DidOpenFile(
       base::PlatformFile file,
       base::ProcessHandle unused) {
-    callback_->Run(base::PLATFORM_FILE_OK, file);
+    callback_->Run(base::PLATFORM_FILE_OK, base::PassPlatformFile(&file));
+    // Make sure we won't leak file handle if the requester has died.
+    if (file != base::kInvalidPlatformFileValue) {
+      base::FileUtilProxy::Close(
+          RenderThread::current()->GetFileThreadMessageLoopProxy(), file, NULL);
+    }
   }
 
 private:  // TODO(ericu): Delete this?
@@ -1167,7 +1228,7 @@ int32_t PepperPluginDelegateImpl::ShowContextMenu(
     webkit::ppapi::PPB_Flash_Menu_Impl* menu,
     const gfx::Point& position) {
   int32 render_widget_id = render_view_->routing_id();
-  if (instance->IsFullscreen()) {
+  if (instance->IsFullscreen(instance->pp_instance())) {
     webkit::ppapi::FullscreenContainer* container =
         instance->fullscreen_container();
     DCHECK(container);
@@ -1187,7 +1248,7 @@ int32_t PepperPluginDelegateImpl::ShowContextMenu(
   params.custom_items = menu->menu_data();
 
   // Transform the position to be in render view's coordinates.
-  if (instance->IsFullscreen()) {
+  if (instance->IsFullscreen(instance->pp_instance())) {
     WebKit::WebRect rect = render_view_->windowRect();
     params.x -= rect.x;
     params.y -= rect.y;
@@ -1209,12 +1270,14 @@ int32_t PepperPluginDelegateImpl::ShowContextMenu(
 void PepperPluginDelegateImpl::OnContextMenuClosed(
     const webkit_glue::CustomContextMenuContext& custom_context) {
   int request_id = custom_context.request_id;
-  scoped_refptr<webkit::ppapi::PPB_Flash_Menu_Impl> menu =
-      *pending_context_menus_.Lookup(request_id);
-  if (!menu) {
+  scoped_refptr<webkit::ppapi::PPB_Flash_Menu_Impl>* menu_ptr =
+      pending_context_menus_.Lookup(request_id);
+  if (!menu_ptr) {
     NOTREACHED() << "CompleteShowContextMenu() called twice for the same menu.";
     return;
   }
+  scoped_refptr<webkit::ppapi::PPB_Flash_Menu_Impl> menu = *menu_ptr;
+  DCHECK(menu.get());
   pending_context_menus_.Remove(request_id);
 
   if (has_saved_context_menu_action_) {
@@ -1257,6 +1320,15 @@ void PepperPluginDelegateImpl::ZoomLimitsChanged(double minimum_factor,
   double minimum_level = WebView::zoomFactorToZoomLevel(minimum_factor);
   double maximum_level = WebView::zoomFactorToZoomLevel(maximum_factor);
   render_view_->webview()->zoomLimitsChanged(minimum_level, maximum_level);
+}
+
+void PepperPluginDelegateImpl::SubscribeToPolicyUpdates(
+    webkit::ppapi::PluginInstance* instance) {
+  subscribed_to_policy_updates_.insert(instance);
+
+  // TODO(ajwong): Make this only send an update to the current instance,
+  // and not all subscribed plugin instances.
+  render_view_->RequestRemoteAccessClientFirewallTraversal();
 }
 
 std::string PepperPluginDelegateImpl::ResolveProxy(const GURL& url) {
@@ -1333,4 +1405,10 @@ base::SharedMemory* PepperPluginDelegateImpl::CreateAnonymousSharedMemory(
 
 ppapi::Preferences PepperPluginDelegateImpl::GetPreferences() {
   return ppapi::Preferences(render_view_->webkit_preferences());
+}
+
+void PepperPluginDelegateImpl::PublishInitialPolicy(
+    scoped_refptr<webkit::ppapi::PluginInstance> instance,
+    const std::string& policy) {
+  instance->HandlePolicyUpdate(policy);
 }

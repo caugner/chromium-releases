@@ -38,7 +38,8 @@ class SyncBackendHostForProfileSyncTest
   SyncBackendHostForProfileSyncTest(
       Profile* profile,
       bool set_initial_sync_ended_on_init,
-      bool synchronous_init);
+      bool synchronous_init,
+      bool fail_initial_download);
   virtual ~SyncBackendHostForProfileSyncTest();
 
   MOCK_METHOD1(RequestNudge, void(const tracked_objects::Location&));
@@ -47,7 +48,7 @@ class SyncBackendHostForProfileSyncTest
       const DataTypeController::TypeMap& data_type_controllers,
       const syncable::ModelTypeSet& types,
       sync_api::ConfigureReason reason,
-      CancelableTask* ready_task,
+      base::Callback<void(bool)> ready_task,
       bool nigori_enabled);
 
   // Called when a nudge comes in.
@@ -55,7 +56,7 @@ class SyncBackendHostForProfileSyncTest
       const tracked_objects::Location&);
 
   virtual sync_api::HttpPostProviderFactory* MakeHttpBridgeFactory(
-      net::URLRequestContextGetter* getter);
+      const scoped_refptr<net::URLRequestContextGetter>& getter);
 
   virtual void InitCore(const Core::DoInitializeOptions& options);
 
@@ -79,6 +80,7 @@ class SyncBackendHostForProfileSyncTest
 
  private:
   bool synchronous_init_;
+  bool fail_initial_download_;
 };
 
 }  // namespace browser_sync
@@ -97,9 +99,9 @@ class TestProfileSyncService : public ProfileSyncService {
 
   void SetInitialSyncEndedForEnabledTypes();
 
-  virtual void OnBackendInitialized();
+  virtual void OnBackendInitialized(bool success);
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -107,6 +109,8 @@ class TestProfileSyncService : public ProfileSyncService {
   // nudge.
   void dont_set_initial_sync_ended_on_init();
   void set_synchronous_sync_configuration();
+
+  void fail_initial_download();
 
   browser_sync::TestIdFactory* id_factory();
 
@@ -135,6 +139,8 @@ class TestProfileSyncService : public ProfileSyncService {
 
   Task* initial_condition_setup_task_;
   bool set_initial_sync_ended_on_init_;
+
+  bool fail_initial_download_;
 };
 
 

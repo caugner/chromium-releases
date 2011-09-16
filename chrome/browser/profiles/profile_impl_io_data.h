@@ -7,14 +7,12 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 
 namespace net {
-class CookiePolicy;
-class NetworkDelegate;
-class DnsCertProvenanceChecker;
 class HttpTransactionFactory;
 }  // namespace net
 
@@ -39,6 +37,8 @@ class ProfileImplIOData : public ProfileIOData {
               const FilePath& extensions_cookie_path,
               const FilePath& app_path);
 
+    base::Callback<ChromeURLDataManagerBackend*(void)>
+        GetChromeURLDataManagerBackendGetter() const;
     const content::ResourceContext& GetResourceContext() const;
     scoped_refptr<ChromeURLRequestContextGetter>
         GetMainRequestContextGetter() const;
@@ -75,7 +75,7 @@ class ProfileImplIOData : public ProfileIOData {
     mutable scoped_refptr<ChromeURLRequestContextGetter>
         extensions_request_context_getter_;
     mutable ChromeURLRequestContextGetterMap app_request_context_getter_map_;
-    const scoped_refptr<ProfileImplIOData> io_data_;
+    scoped_refptr<ProfileImplIOData> io_data_;
 
     Profile* const profile_;
 
@@ -112,7 +112,7 @@ class ProfileImplIOData : public ProfileIOData {
       const std::string& app_id) const;
   virtual scoped_refptr<ChromeURLRequestContext>
       AcquireMediaRequestContext() const;
-  virtual scoped_refptr<ChromeURLRequestContext>
+  virtual scoped_refptr<RequestContext>
       AcquireIsolatedAppRequestContext(
           scoped_refptr<ChromeURLRequestContext> main_context,
           const std::string& app_id) const;
@@ -124,9 +124,6 @@ class ProfileImplIOData : public ProfileIOData {
 
   mutable scoped_ptr<net::HttpTransactionFactory> main_http_factory_;
   mutable scoped_ptr<net::HttpTransactionFactory> media_http_factory_;
-
-  // One HttpTransactionFactory per isolated app.
-  mutable HttpTransactionFactoryMap app_http_factory_map_;
 
   // Parameters needed for isolated apps.
   FilePath app_path_;

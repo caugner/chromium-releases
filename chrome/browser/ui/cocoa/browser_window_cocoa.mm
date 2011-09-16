@@ -19,6 +19,7 @@
 #include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/bug_report_window_controller.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
@@ -34,6 +35,7 @@
 #import "chrome/browser/ui/cocoa/theme_install_bubble_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/native_web_keyboard_event.h"
@@ -50,9 +52,10 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
     controller_(controller),
     confirm_close_factory_(browser) {
   // This pref applies to all windows, so all must watch for it.
-  registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::SIDEBAR_CHANGED,
+  registrar_.Add(this, chrome::NOTIFICATION_SIDEBAR_CHANGED,
                  NotificationService::AllSources());
 }
 
@@ -76,13 +79,16 @@ void BrowserWindowCocoa::ShowInactive() {
 }
 
 void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
+  gfx::Rect real_bounds = [controller_ enforceMinWindowSize:bounds];
+
   SetFullscreen(false);
-  NSRect cocoa_bounds = NSMakeRect(bounds.x(), 0, bounds.width(),
-                                   bounds.height());
+  NSRect cocoa_bounds = NSMakeRect(real_bounds.x(), 0,
+                                   real_bounds.width(),
+                                   real_bounds.height());
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
   cocoa_bounds.origin.y =
-      [screen frame].size.height - bounds.height() - bounds.y();
+      [screen frame].size.height - real_bounds.height() - real_bounds.y();
 
   [window() setFrame:cocoa_bounds display:YES];
 }
@@ -171,11 +177,9 @@ void BrowserWindowCocoa::UpdateTitleBar() {
                 modes:[NSArray arrayWithObject:NSDefaultRunLoopMode]];
 }
 
-void BrowserWindowCocoa::ShelfVisibilityChanged() {
-  // Mac doesn't yet support showing the bookmark bar at a different size on
-  // the new tab page. When it does, this method should attempt to relayout the
-  // bookmark bar/extension shelf as their preferred height may have changed.
-  // http://crbug.com/43346
+void BrowserWindowCocoa::BookmarkBarStateChanged(
+    BookmarkBar::AnimateChangeType change_type) {
+  // TODO: route changes to state through this.
 }
 
 void BrowserWindowCocoa::UpdateDevTools() {
@@ -223,7 +227,16 @@ bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
 void BrowserWindowCocoa::ConfirmAddSearchProvider(
     const TemplateURL* template_url,
     Profile* profile) {
-  NOTIMPLEMENTED();
+  // The controller will release itself when the window closes.
+  EditSearchEngineCocoaController* editor =
+      [[EditSearchEngineCocoaController alloc] initWithProfile:profile
+                                                      delegate:NULL
+                                                   templateURL:template_url];
+  [NSApp beginSheet:[editor window]
+     modalForWindow:window()
+      modalDelegate:controller_
+     didEndSelector:@selector(sheetDidEnd:returnCode:context:)
+        contextInfo:NULL];
 }
 
 LocationBar* BrowserWindowCocoa::GetLocationBar() const {
@@ -543,6 +556,14 @@ void BrowserWindowCocoa::OpenTabpose() {
   [controller_ openTabpose];
 }
 
+void BrowserWindowCocoa::SetPresentationMode(bool presentation_mode) {
+  [controller_ setPresentationMode:presentation_mode];
+}
+
+bool BrowserWindowCocoa::InPresentationMode() {
+  return [controller_ inPresentationMode];
+}
+
 void BrowserWindowCocoa::PrepareForInstant() {
   // TODO: implement fade as done on windows.
 }
@@ -572,16 +593,16 @@ WindowOpenDisposition BrowserWindowCocoa::GetDispositionForPopupBounds(
   return NEW_POPUP;
 }
 
-void BrowserWindowCocoa::Observe(NotificationType type,
+void BrowserWindowCocoa::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
-  switch (type.value) {
+  switch (type) {
     // Only the key window gets a direct toggle from the menu.
     // Other windows hear about it from the notification.
-    case NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED:
+    case chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED:
       [controller_ updateBookmarkBarVisibilityWithAnimation:YES];
       break;
-    case NotificationType::SIDEBAR_CHANGED:
+    case chrome::NOTIFICATION_SIDEBAR_CHANGED:
       UpdateSidebarForContents(
           Details<SidebarContainer>(details)->tab_contents());
       break;

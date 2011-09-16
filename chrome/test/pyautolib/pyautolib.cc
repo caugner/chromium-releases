@@ -6,6 +6,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/extension_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/pyautolib/pyautolib.h"
@@ -125,7 +126,7 @@ bool PyUITestBase::RunCommand(int browser_command, int window_index) {
 bool PyUITestBase::ActivateTab(int tab_index, int window_index) {
   scoped_refptr<BrowserProxy> browser_proxy =
       automation()->GetBrowserWindow(window_index);
-  return browser_proxy->ActivateTab(tab_index);
+  return browser_proxy->BringToFront() && browser_proxy->ActivateTab(tab_index);
 }
 
 void PyUITestBase::SetDownloadShelfVisible(bool is_visible, int window_index) {

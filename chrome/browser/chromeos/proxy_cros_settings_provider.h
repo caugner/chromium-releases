@@ -20,6 +20,21 @@ class ProxyCrosSettingsProvider : public CrosSettingsProvider {
   virtual bool Get(const std::string& path, Value** out_value) const;
   virtual bool HandlesSetting(const std::string& path);
 
+  // Set the current network whose proxy settings will be displayed and possibly
+  // edited on.
+  void SetCurrentNetwork(const std::string& network);
+
+  // Make the active network the current one whose proxy settings will be
+  // displayed and possibly edited on.
+  void MakeActiveNetworkCurrent();
+
+  // Returns name of current network that has been set via SetCurrentNetwork or
+  // MakeActiveNetworkCurrent.
+  const std::string& GetCurrentNetworkName() const;
+
+  // Returns true if user has selected to use shared proxies.
+  bool IsUsingSharedProxies() const;
+
  private:
   // CrosSettingsProvider implementation.
   virtual void DoSet(const std::string& path, Value* value);

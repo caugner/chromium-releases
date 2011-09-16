@@ -4,6 +4,7 @@
 
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/common/pref_names.h"
@@ -190,8 +191,6 @@ IN_PROC_BROWSER_TEST_F(MigrationErrorsTest, MigrationHellWithoutNigori) {
             GetPrefs(1)->GetBoolean(prefs::kShowHomeButton));
 }
 
-// Fails because the client doesn't know how to not sync NIGORI.
-// TODO(timsteele): Fix http://crbug.com/80333 and re-enable.
 IN_PROC_BROWSER_TEST_F(TwoClientLivePreferencesSyncTest,
                        MigrationHellWithNigori) {
   if (!ServerSupportsErrorTriggering()) {

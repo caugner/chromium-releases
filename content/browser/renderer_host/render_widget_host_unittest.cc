@@ -40,9 +40,9 @@ class RenderWidgetHostProcess : public MockRenderProcessHost {
         update_msg_reply_flags_(0) {
     // DANGER! This is a hack. The RenderWidgetHost checks the channel to see
     // if the process is still alive, but it doesn't actually dereference it.
-    // An IPC::SyncChannel is nontrivial, so we just fake it here. If you end up
+    // An IPC::ChannelProxy is nontrivial, so we just fake it here. If you end up
     // crashing by dereferencing 1, then you'll have to make a real channel.
-    channel_.reset(reinterpret_cast<IPC::SyncChannel*>(0x1));
+    channel_.reset(reinterpret_cast<IPC::ChannelProxy*>(0x1));
   }
   ~RenderWidgetHostProcess() {
     // We don't want to actually delete the channel, since it's not a real
@@ -219,11 +219,11 @@ class MockPaintingObserver : public NotificationObserver {
     size_ = size;
   }
 
-  void Observe(NotificationType type,
+  void Observe(int type,
                const NotificationSource& source,
                const NotificationDetails& details) {
     if (type ==
-        NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK) {
+        content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK) {
       RenderWidgetHost::PaintAtSizeAckDetails* size_ack_details =
           Details<RenderWidgetHost::PaintAtSizeAckDetails>(details).ptr();
       WidgetDidReceivePaintAtSizeAck(
@@ -260,7 +260,7 @@ class RenderWidgetHostTest : public testing::Test {
     process_ = new RenderWidgetHostProcess(profile_.get());
     host_.reset(new MockRenderWidgetHost(process_, 1));
     view_.reset(new TestView(host_.get()));
-    host_->set_view(view_.get());
+    host_->SetView(view_.get());
     host_->Init();
   }
   void TearDown() {
@@ -416,13 +416,13 @@ TEST_F(RenderWidgetHostTest, ResizeThenCrash) {
   // Simulate a renderer crash before the update message.  Ensure all the
   // resize ack logic is cleared.  Must clear the view first so it doesn't get
   // deleted.
-  host_->set_view(NULL);
+  host_->SetView(NULL);
   host_->RendererExited(base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
   EXPECT_FALSE(host_->resize_ack_pending_);
   EXPECT_EQ(gfx::Size(), host_->in_flight_size_);
 
   // Reset the view so we can exit the test cleanly.
-  host_->set_view(view_.get());
+  host_->SetView(view_.get());
 }
 
 // Tests setting custom background
@@ -430,7 +430,7 @@ TEST_F(RenderWidgetHostTest, Background) {
 #if !defined(OS_MACOSX)
   scoped_ptr<RenderWidgetHostView> view(
       RenderWidgetHostView::CreateViewForWidget(host_.get()));
-  host_->set_view(view.get());
+  host_->SetView(view.get());
 
   // Create a checkerboard background to test with.
   gfx::CanvasSkia canvas(4, 4, true);
@@ -574,7 +574,7 @@ TEST_F(RenderWidgetHostTest, PaintAtSize) {
   MockPaintingObserver observer;
   registrar.Add(
       &observer,
-      NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
       Source<RenderWidgetHost>(host_.get()));
 
   host_->OnMsgPaintAtSizeAck(kPaintAtSizeTag, gfx::Size(20, 30));

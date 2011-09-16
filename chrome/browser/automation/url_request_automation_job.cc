@@ -33,6 +33,7 @@ static const char* const kFilteredHeaderStrings[] = {
   "expect",
   "max-forwards",
   "proxy-authorization",
+  "referer",
   "te",
   "upgrade",
   "via"
@@ -80,10 +81,10 @@ bool URLRequestAutomationJob::EnsureProtocolFactoryRegistered() {
 
   if (!is_protocol_factory_registered_) {
     old_http_factory_ =
-        net::URLRequest::RegisterProtocolFactory(
+        net::URLRequest::Deprecated::RegisterProtocolFactory(
             "http", &URLRequestAutomationJob::Factory);
     old_https_factory_ =
-        net::URLRequest::RegisterProtocolFactory(
+        net::URLRequest::Deprecated::RegisterProtocolFactory(
             "https", &URLRequestAutomationJob::Factory);
     is_protocol_factory_registered_ = true;
   }
@@ -99,9 +100,8 @@ net::URLRequestJob* URLRequestAutomationJob::Factory(
 
   // Returning null here just means that the built-in handler will be used.
   if (scheme_is_http || scheme_is_https) {
-    ResourceDispatcherHostRequestInfo* request_info = NULL;
-    if (request->GetUserData(NULL))
-      request_info = ResourceDispatcherHost::InfoForRequest(request);
+    ResourceDispatcherHostRequestInfo* request_info =
+        ResourceDispatcherHost::InfoForRequest(request);
     if (request_info) {
       int child_id = request_info->child_id();
       int route_id = request_info->route_id();

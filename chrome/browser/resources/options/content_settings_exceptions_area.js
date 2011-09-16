@@ -42,6 +42,7 @@ cr.define('options.contentSettings', function() {
       this.isPlaceholder = !this.pattern;
       var patternCell = this.createEditableTextCell(this.pattern);
       patternCell.className = 'exception-pattern';
+      patternCell.classList.add('weakrtl');
       this.contentElement.appendChild(patternCell);
       if (this.pattern)
         this.patternLabel = patternCell.querySelector('.static-text');
@@ -111,6 +112,14 @@ cr.define('options.contentSettings', function() {
       // Editing notifications and geolocation is disabled for now.
       if (this.contentType == 'notifications' ||
           this.contentType == 'location') {
+        this.editable = false;
+      }
+
+      // If the source of the content setting exception is a policy, then the
+      // content settings exception is managed and the user can't edit it.
+      if (this.dataItem.source == 'policy') {
+        this.setAttribute('managedby', this.dataItem.source);
+        this.deletable = false;
         this.editable = false;
       }
 
@@ -311,6 +320,7 @@ cr.define('options.contentSettings', function() {
      * @param {string} newSetting The setting the user chose.
      */
     finishEdit: function(newPattern, newSetting) {
+      this.resetInput();
       chrome.send('setException',
                   [this.contentType, this.mode, newPattern, newSetting]);
     },

@@ -6,17 +6,19 @@
 #define CHROME_BROWSER_RENDERER_HOST_CHROME_RENDER_MESSAGE_FILTER_H_
 #pragma once
 
+#include "base/memory/weak_ptr.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/common/dom_storage_common.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
 struct ExtensionHostMsg_Request_Params;
+class ExtensionInfoMap;
 class FilePath;
 class GURL;
 class HostContentSettingsMap;
-class Profile;
 
 namespace net {
 class URLRequestContextGetter;
@@ -82,6 +84,9 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
   void OnExtensionRemoveListener(const std::string& extension_id,
                                  const std::string& event_name);
   void OnExtensionCloseChannel(int port_id);
+  void OnExtensionRequestForIOThread(
+      int routing_id,
+      const ExtensionHostMsg_Request_Params& params);
 #if defined(USE_TCMALLOC)
   void OnRendererTcmalloc(base::ProcessId pid, const std::string& output);
 #endif
@@ -127,11 +132,14 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
   // accessed on the UI thread!
   Profile* profile_;
   scoped_refptr<net::URLRequestContextGetter> request_context_;
+  scoped_refptr<ExtensionInfoMap> extension_info_map_;
   // Used to look up permissions at database creation time.
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
   BooleanPrefMember allow_outdated_plugins_;
   BooleanPrefMember always_authorize_plugins_;
+
+  base::WeakPtrFactory<ChromeRenderMessageFilter> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderMessageFilter);
 };

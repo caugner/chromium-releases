@@ -25,6 +25,7 @@
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
@@ -38,6 +39,7 @@
 #include "grit/chromium_strings.h"
 #include "net/base/escape.h"
 #include "net/http/http_util.h"
+#include "ui/base/models/menu_model.h"
 
 #include "chrome_tab.h"  // NOLINT
 
@@ -64,10 +66,7 @@ const wchar_t kRundllProfileName[] = L"rundll32";
 
 const wchar_t kAllowUnsafeURLs[] = L"AllowUnsafeURLs";
 const wchar_t kEnableBuggyBhoIntercept[] = L"EnableBuggyBhoIntercept";
-const wchar_t kEnableFirefoxPrivilegeMode[] = L"EnableFirefoxPrivilegeMode";
 
-static const wchar_t kChromeFrameNPAPIKey[] =
-    L"Software\\MozillaPlugins\\@google.com/ChromeFrame,version=1.0";
 static const wchar_t kChromeFramePersistNPAPIReg[] = L"PersistNPAPIReg";
 
 const char kAttachExternalTabPrefix[] = "attach_external_tab";
@@ -217,53 +216,17 @@ HRESULT UtilUnRegisterTypeLib(ITypeLib* typelib,
   return hr;
 }
 
-bool UtilIsNPAPIPluginRegistered() {
-  std::wstring npapi_key_name(kChromeFrameNPAPIKey);
-  RegKey npapi_key(HKEY_LOCAL_MACHINE, npapi_key_name.c_str(), KEY_QUERY_VALUE);
-  return npapi_key.Valid();
-}
-
-bool UtilChangePersistentNPAPIMarker(bool set) {
+bool UtilRemovePersistentNPAPIMarker() {
   BrowserDistribution* cf_dist = BrowserDistribution::GetDistribution();
   std::wstring cf_state_key_path(cf_dist->GetStateKey());
+  RegKey cf_state_key;
 
-  RegKey cf_state_key(HKEY_LOCAL_MACHINE, cf_state_key_path.c_str(),
-                      KEY_READ | KEY_WRITE);
-
-  bool success = false;
-  if (cf_state_key.Valid()) {
-    if (set) {
-      success = (cf_state_key.WriteValue(kChromeFramePersistNPAPIReg, 1) ==
-          ERROR_SUCCESS);
-    } else {
-      // Unfortunately, DeleteValue returns true only if the value
-      // previously existed, so we do a separate existence check to
-      // validate success.
-      cf_state_key.DeleteValue(kChromeFramePersistNPAPIReg);
-      success = !cf_state_key.ValueExists(kChromeFramePersistNPAPIReg);
-    }
-  }
-  return success;
+  LONG result = cf_state_key.Open(HKEY_LOCAL_MACHINE, cf_state_key_path.c_str(),
+                                  KEY_SET_VALUE);
+  if (result == ERROR_SUCCESS)
+    result = cf_state_key.DeleteValue(kChromeFramePersistNPAPIReg);
+  return (result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND);
 }
-
-bool UtilIsPersistentNPAPIMarkerSet() {
-  BrowserDistribution* cf_dist = BrowserDistribution::GetDistribution();
-  std::wstring cf_state_key_path(cf_dist->GetStateKey());
-
-  RegKey cf_state_key(HKEY_LOCAL_MACHINE, cf_state_key_path.c_str(),
-                      KEY_QUERY_VALUE);
-
-  bool success = false;
-  if (cf_state_key.Valid()) {
-    DWORD val = 0;
-    if (cf_state_key.ReadValueDW(kChromeFramePersistNPAPIReg, &val) ==
-        ERROR_SUCCESS) {
-      success = (val != 0);
-    }
-  }
-  return success;
-}
-
 
 HRESULT UtilGetXUACompatContentValue(const std::wstring& html_string,
                                      std::wstring* content_value) {
@@ -371,8 +334,6 @@ bool IsChrome(RendererType renderer_type) {
 
 namespace {
 const char kIEImageName[] = "iexplore.exe";
-const char kFirefoxImageName[] = "firefox.exe";
-const char kOperaImageName[] = "opera.exe";
 }  // namespace
 
 std::wstring GetHostProcessName(bool include_extension) {
@@ -395,10 +356,6 @@ BrowserType GetBrowserType() {
       std::wstring::const_iterator end = exe.end();
       if (LowerCaseEqualsASCII(begin, end, kIEImageName)) {
         browser_type = BROWSER_IE;
-      } else if (LowerCaseEqualsASCII(begin, end, kFirefoxImageName)) {
-        browser_type = BROWSER_FIREFOX;
-      } else if (LowerCaseEqualsASCII(begin, end, kOperaImageName)) {
-        browser_type = BROWSER_OPERA;
       } else {
         browser_type = BROWSER_UNKNOWN;
       }
@@ -587,61 +544,66 @@ namespace {
 
 const int kMaxSubmenuDepth = 10;
 
-// Copies original_menu and returns the copy. The caller is responsible for
-// closing the returned HMENU. This does not currently copy over bitmaps
-// (e.g. hbmpChecked, hbmpUnchecked or hbmpItem), so checkmarks, radio buttons,
-// and custom icons won't work.
+// Builds a Windows menu from the menu model sent from Chrome.  The
+// caller is responsible for closing the returned HMENU.  This does
+// not currently handle bitmaps (e.g. hbmpChecked, hbmpUnchecked or
+// hbmpItem), so checkmarks, radio buttons, and custom icons won't work.
 // It also copies over submenus up to a maximum depth of kMaxSubMenuDepth.
-//
-// TODO(robertshield): Add support for the bitmap fields if need be.
-HMENU UtilCloneContextMenuImpl(HMENU original_menu, int depth) {
-  DCHECK(IsMenu(original_menu));
-
+HMENU BuildContextMenuImpl(const ContextMenuModel* menu_model, int depth) {
   if (depth >= kMaxSubmenuDepth)
     return NULL;
 
-  HMENU new_menu = CreatePopupMenu();
-  int item_count = GetMenuItemCount(original_menu);
-  if (item_count <= 0) {
-    NOTREACHED();
-  } else {
-    for (int i = 0; i < item_count; i++) {
-      MENUITEMINFO item_info = { 0 };
-      item_info.cbSize = sizeof(MENUITEMINFO);
-      item_info.fMask = MIIM_ID | MIIM_STRING | MIIM_FTYPE |
-                        MIIM_STATE | MIIM_DATA | MIIM_SUBMENU |
-                        MIIM_CHECKMARKS | MIIM_BITMAP;
+  HMENU menu = CreatePopupMenu();
+  for (size_t i = 0; i < menu_model->items.size(); i++) {
+    const ContextMenuModel::Item& item = menu_model->items[i];
 
-      // Call GetMenuItemInfo a first time to obtain the buffer size for
-      // the label.
-      if (GetMenuItemInfo(original_menu, i, TRUE, &item_info)) {
-        item_info.cch++;  // Increment this as per MSDN
-        std::vector<wchar_t> buffer(item_info.cch, 0);
-        item_info.dwTypeData = &buffer[0];
-
-        // Call GetMenuItemInfo a second time with dwTypeData set to a buffer
-        // of a correct size to get the label.
-        GetMenuItemInfo(original_menu, i, TRUE, &item_info);
-
-        // Clone any submenus. Within reason.
-        if (item_info.hSubMenu) {
-          HMENU new_submenu = UtilCloneContextMenuImpl(item_info.hSubMenu,
-                                                       depth + 1);
-          item_info.hSubMenu = new_submenu;
-        }
-
-        // Now insert the item into the new menu.
-        InsertMenuItem(new_menu, i, TRUE, &item_info);
-      }
+    MENUITEMINFO item_info = { 0 };
+    item_info.cbSize = sizeof(MENUITEMINFO);
+    switch (item.type) {
+      case ui::MenuModel::TYPE_COMMAND:
+      case ui::MenuModel::TYPE_CHECK:
+        item_info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING;
+        item_info.fType = MFT_STRING;
+        item_info.wID = item.item_id;
+        item_info.dwTypeData = const_cast<LPWSTR>(item.label.c_str());
+        break;
+      case ui::MenuModel::TYPE_RADIO:
+        item_info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING;
+        item_info.fType = MFT_STRING | MFT_RADIOCHECK;
+        item_info.wID = item.item_id;
+        item_info.dwTypeData = const_cast<LPWSTR>(item.label.c_str());
+        break;
+      case ui::MenuModel::TYPE_SEPARATOR:
+        item_info.fMask = MIIM_FTYPE;
+        item_info.fType = MFT_SEPARATOR;
+        break;
+      case ui::MenuModel::TYPE_SUBMENU:
+        item_info.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_SUBMENU;
+        item_info.fType = MFT_STRING;
+        item_info.wID = item.item_id;
+        item_info.dwTypeData = const_cast<LPWSTR>(item.label.c_str());
+        item_info.hSubMenu = BuildContextMenuImpl(item.submenu, depth + 1);
+        break;
+      default:
+        NOTREACHED() << "Unsupported MenuModel::ItemType " << item.type;
+        break;
     }
+
+    item_info.fMask |= MIIM_STATE;
+    item_info.fState =
+        (item.checked ? MFS_CHECKED : MFS_UNCHECKED) |
+        (item.enabled ? MFS_ENABLED : (MFS_DISABLED | MFS_GRAYED));
+
+    InsertMenuItem(menu, i, TRUE, &item_info);
   }
-  return new_menu;
+
+  return menu;
 }
 
 }  // namespace
 
-HMENU UtilCloneContextMenu(HMENU original_menu) {
-  return UtilCloneContextMenuImpl(original_menu, 0);
+HMENU BuildContextMenu(const ContextMenuModel& menu_model) {
+  return BuildContextMenuImpl(&menu_model, 0);
 }
 
 std::string ResolveURL(const std::string& document,
@@ -792,7 +754,8 @@ RendererType RendererTypeForUrl(const std::wstring& url) {
 
 HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
                                  const wchar_t* headers, IBindCtx* bind_ctx,
-                                 const wchar_t* fragment, IStream* post_data) {
+                                 const wchar_t* fragment, IStream* post_data,
+                                 VARIANT* flags) {
   DCHECK(browser);
   DCHECK(moniker);
   DCHECK(bind_ctx);
@@ -805,13 +768,6 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
                                                      hr);
   if (FAILED(hr))
     return hr;
-
-  // Always issue the download request in a new window to ensure that the
-  // currently loaded ChromeFrame document does not inadvarently see an unload
-  // request. This runs javascript unload handlers on the page which renders
-  // the page non functional.
-  VARIANT flags = { VT_I4 };
-  V_I4(&flags) = navOpenInNewWindow | navNoHistory;
 
   // If the data to be downloaded was received in response to a post request
   // then we need to reissue the post request.
@@ -893,14 +849,14 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
 
       if (GetIEVersion() < IE_9) {
         hr = browser_priv2->NavigateWithBindCtx2(
-                uri_obj, &flags, NULL, post_data_variant.AsInput(),
+                uri_obj, flags, NULL, post_data_variant.AsInput(),
                 headers_var.AsInput(), bind_ctx,
                 const_cast<wchar_t*>(fragment));
       } else {
         IWebBrowserPriv2CommonIE9* browser_priv2_ie9 =
             reinterpret_cast<IWebBrowserPriv2CommonIE9*>(browser_priv2.get());
         hr = browser_priv2_ie9->NavigateWithBindCtx2(
-                uri_obj, &flags, NULL, post_data_variant.AsInput(),
+                uri_obj, flags, NULL, post_data_variant.AsInput(),
                 headers_var.AsInput(), bind_ctx,
                 const_cast<wchar_t*>(fragment), 0);
       }
@@ -930,7 +886,7 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
         }
 
         base::win::ScopedVariant var_url(UTF8ToWide(target_url.spec()).c_str());
-        hr = browser_priv->NavigateWithBindCtx(var_url.AsInput(), &flags, NULL,
+        hr = browser_priv->NavigateWithBindCtx(var_url.AsInput(), flags, NULL,
                                                post_data_variant.AsInput(),
                                                headers_var.AsInput(), bind_ctx,
                                                const_cast<wchar_t*>(fragment));

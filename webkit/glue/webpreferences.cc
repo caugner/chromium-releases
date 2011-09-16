@@ -6,6 +6,7 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNetworkStateNotifier.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSettings.h"
@@ -14,6 +15,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
+using WebKit::WebNetworkStateNotifier;
 using WebKit::WebRuntimeFeatures;
 using WebKit::WebSettings;
 using WebKit::WebString;
@@ -56,6 +58,7 @@ WebPreferences::WebPreferences()
       tabs_to_links(true),
       caret_browsing_enabled(false),
       hyperlink_auditing_enabled(true),
+      is_online(true),
       user_style_sheet_enabled(false),
       author_and_user_styles_enabled(true),
       frame_flattening_enabled(false),
@@ -80,7 +83,10 @@ WebPreferences::WebPreferences()
       interactive_form_validation_enabled(true),
       fullscreen_enabled(false),
       allow_displaying_insecure_content(true),
-      allow_running_insecure_content(false) {
+      allow_running_insecure_content(false),
+      should_print_backgrounds(false),
+      enable_scroll_animator(false),
+      hixie76_websocket_protocol_enabled(false) {
 }
 
 WebPreferences::~WebPreferences() {
@@ -229,4 +235,10 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setFullScreenEnabled(fullscreen_enabled);
   settings->setAllowDisplayOfInsecureContent(allow_displaying_insecure_content);
   settings->setAllowRunningOfInsecureContent(allow_running_insecure_content);
+  settings->setShouldPrintBackgrounds(should_print_backgrounds);
+  settings->setEnableScrollAnimator(enable_scroll_animator);
+  settings->setHixie76WebSocketProtocolEnabled(
+      hixie76_websocket_protocol_enabled);
+
+  WebNetworkStateNotifier::setOnLine(is_online);
 }

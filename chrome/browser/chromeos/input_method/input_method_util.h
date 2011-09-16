@@ -6,33 +6,25 @@
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_INPUT_METHOD_UTIL_H_
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "base/string16.h"
-#include "chrome/browser/chromeos/cros/input_method_library.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 
 namespace chromeos {
 namespace input_method {
 
 // The list of language that do not have associated input methods in IBus.
 // For these languages, we associate input methods here.
-const struct ExtraLanguage {
+struct ExtraLanguage {
   const char* language_code;
   const char* input_method_id;
-} kExtraLanguages[] = {
-  { "en-AU", "xkb:us::eng" },  // For Austrailia, use US keyboard layout.
-  { "id", "xkb:us::eng" }, // For Indonesian, use US keyboard layout.
-  // The code "fil" comes from app/l10_util.cc.
-  { "fil", "xkb:us::eng" },  // For Filipino, use US keyboard layout.
-  // For Netherlands, use US international keyboard layout.
-  { "nl", "xkb:us:intl:eng" },
-  // The code "es-419" comes from app/l10_util.cc.
-  // For Spanish in Latin America, use Latin American keyboard layout.
-  { "es-419", "xkb:latam::spa" },
 };
-// TODO(yusukes): Move |kExtraLanguages| to input_method_util.cc.
+extern const ExtraLanguage kExtraLanguages[];
+extern const size_t kExtraLanguagesLength;
 
 // Converts a string sent from IBus IME engines, which is written in English,
 // into Chrome's string ID, then pulls internationalized resource string from
@@ -83,16 +75,6 @@ std::string GetLanguageCodeFromDescriptor(
 // "pinyin"            => "us" (because Pinyin uses US keyboard layout)
 std::string GetKeyboardLayoutName(const std::string& input_method_id);
 
-// Gets the ID for the keyboard overlay from the given input method ID.
-// If the ID is invalid, an empty string will be returned.
-//
-// Examples:
-//
-// "us"                => "en_US"
-// "us(dvorak)"        => "en_US_dvorak"
-// "gb"                => "en_GB"
-std::string GetKeyboardOverlayId(const std::string& input_method_name);
-
 // Converts an input method ID to a language code of the IME. Returns "Eng"
 // when |input_method_id| is unknown.
 // Example: "hangul" => "ko"
@@ -109,7 +91,7 @@ std::string GetInputMethodDisplayNameFromId(const std::string& input_method_id);
 // when |input_method_id| is unknown.
 // Example: "pinyin" => { id: "pinyin", display_name: "Pinyin",
 //                        keyboard_layout: "us", language_code: "zh" }
-const chromeos::InputMethodDescriptor* GetInputMethodDescriptorFromId(
+const InputMethodDescriptor* GetInputMethodDescriptorFromId(
     const std::string& input_method_id);
 
 // Converts a language code to a language display name, using the
@@ -141,10 +123,7 @@ enum InputMethodType {
 // Note that the function might return false or |language_code| is unknown.
 //
 // The retured input method IDs are sorted by populalirty per
-// chromeos/platform/assets/input_methods/whitelist.txt in production.
-// For testing with the stub libcros, the list in
-// GetInputMethodDescriptorsForTesting() in input_method_library.cc will
-// be used.
+// chromeos/platform/assets/input_methods/whitelist.txt.
 bool GetInputMethodIdsFromLanguageCode(
     const std::string& language_code,
     InputMethodType type,
@@ -188,6 +167,11 @@ std::string GetHardwareInputMethodId();
 // keyboard). This function is mostly used for testing, but may be used
 // as the fallback, when there is no other choice.
 InputMethodDescriptor GetFallbackInputMethodDescriptor();
+
+// Gets all input method engines that are supported, including ones not
+// active.  Caller has to delete the returned list. This function never
+// returns NULL.
+InputMethodDescriptors* GetSupportedInputMethods();
 
 // This function should be called when Chrome's application locale is
 // changed, so that the internal maps of this library is reloaded.

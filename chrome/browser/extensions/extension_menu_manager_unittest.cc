@@ -13,6 +13,7 @@
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -330,7 +331,7 @@ TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
   // Notify that the extension was unloaded, and make sure the right item is
   // gone.
   UnloadedExtensionInfo details(extension1, UnloadedExtensionInfo::DISABLE);
-  notifier->Notify(NotificationType::EXTENSION_UNLOADED,
+  notifier->Notify(chrome::NOTIFICATION_EXTENSION_UNLOADED,
                    Source<Profile>(NULL),
                    Details<UnloadedExtensionInfo>(&details));
   ASSERT_EQ(NULL, manager_.MenuItems(extension1->id()));
@@ -345,10 +346,11 @@ class MockExtensionEventRouter : public ExtensionEventRouter {
   explicit MockExtensionEventRouter(Profile* profile) :
       ExtensionEventRouter(profile) {}
 
-  MOCK_METHOD5(DispatchEventImpl, void(const std::string& extension_id,
+  MOCK_METHOD6(DispatchEventImpl, void(const std::string& extension_id,
                                        const std::string& event_name,
                                        const std::string& event_args,
                                        Profile* source_profile,
+                                       const std::string& cross_incognito_args,
                                        const GURL& event_url));
 
  private:
@@ -438,7 +440,7 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
       .WillOnce(Return(mock_event_router.get()));
 
   // Use the magic of googlemock to save a parameter to our mock's
-  // DispatchEventImpl method into event_args.
+  // DispatchEventToExtension method into event_args.
   std::string event_args;
   std::string expected_event_name = "contextMenus";
   EXPECT_CALL(*mock_event_router.get(),
@@ -446,6 +448,7 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
                                 expected_event_name,
                                 _,
                                 &profile,
+                                "",
                                 GURL()))
       .Times(1)
       .WillOnce(SaveArg<2>(&event_args));

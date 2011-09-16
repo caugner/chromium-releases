@@ -8,7 +8,6 @@
 
 #include <set>
 #include "base/basictypes.h"
-#include "base/debug/stack_trace.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -16,35 +15,43 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/profiles/profile.h"
 #include "content/browser/resource_context.h"
 #include "net/base/cookie_monster.h"
 
 class CommandLine;
 class ChromeAppCacheService;
 class ChromeBlobStorageContext;
+class DesktopNotificationService;
 class ExtensionInfoMap;
-namespace fileapi {
-class FileSystemContext;
-}  // namespace fileapi
 class HostContentSettingsMap;
 class HostZoomMap;
 class IOThread;
+class Profile;
+class ProtocolHandlerRegistry;
+
+namespace fileapi {
+class FileSystemContext;
+}  // namespace fileapi
+
 namespace net {
+class CookieStore;
 class DnsCertProvenanceChecker;
+class HttpTransactionFactory;
 class NetLog;
 class ProxyConfigService;
 class ProxyService;
 class SSLConfigService;
 class TransportSecurityState;
 }  // namespace net
+
 namespace prerender {
 class PrerenderManager;
 };  // namespace prerender
-class ProtocolHandlerRegistry;
+
 namespace quota {
 class QuotaManager;
 };  // namespace quota
+
 namespace webkit_database {
 class DatabaseTracker;
 }  // webkit_database
@@ -72,6 +79,10 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
   // net::URLRequest.
   static bool IsHandledURL(const GURL& url);
 
+  // Called by Profile.
+  const content::ResourceContext& GetResourceContext() const;
+  ChromeURLDataManagerBackend* GetChromeURLDataManagerBackend() const;
+
   // These should only be called at most once each. Ownership is reversed when
   // they get called, from ProfileIOData owning ChromeURLRequestContext to vice
   // versa.
@@ -81,12 +92,25 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
   scoped_refptr<ChromeURLRequestContext> GetIsolatedAppRequestContext(
       scoped_refptr<ChromeURLRequestContext> main_context,
       const std::string& app_id) const;
-  const content::ResourceContext& GetResourceContext() const;
 
   // These are useful when the Chrome layer is called from the content layer
   // with a content::ResourceContext, and they want access to Chrome data for
   // that profile.
+  ExtensionInfoMap* GetExtensionInfoMap() const;
   HostContentSettingsMap* GetHostContentSettingsMap() const;
+  DesktopNotificationService* GetNotificationService() const;
+
+  BooleanPrefMember* clear_local_state_on_exit()  const {
+    return &clear_local_state_on_exit_;
+  }
+
+  ChromeURLRequestContext* extensions_request_context() const {
+    return weak_extensions_request_context_.get();
+  }
+
+  BooleanPrefMember* safe_browsing_enabled() const {
+    return &safe_browsing_enabled_;
+  }
 
  protected:
   friend class base::RefCountedThreadSafe<ProfileIOData>;
@@ -97,12 +121,29 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
     virtual ~RequestContext();
 
     // Setter is used to transfer ownership of the ProfileIOData to the context.
-    void set_profile_io_data(const ProfileIOData* profile_io_data) {
+    void set_profile_io_data(ProfileIOData* profile_io_data) {
       profile_io_data_ = profile_io_data;
     }
 
+   protected:
+    ProfileIOData* profile_io_data() { return profile_io_data_; }
+
    private:
-    scoped_refptr<const ProfileIOData> profile_io_data_;
+    scoped_refptr<ProfileIOData> profile_io_data_;
+  };
+
+  class AppRequestContext : public RequestContext {
+   public:
+    explicit AppRequestContext(const std::string& app_id);
+    virtual ~AppRequestContext();
+
+    void SetCookieStore(net::CookieStore* cookie_store);
+    void SetHttpTransactionFactory(net::HttpTransactionFactory* http_factory);
+
+   private:
+    const std::string app_id_;
+    scoped_refptr<net::CookieStore> cookie_store_;
+    scoped_ptr<net::HttpTransactionFactory> http_factory_;
   };
 
   // Created on the UI thread, read on the IO thread during ProfileIOData lazy
@@ -116,7 +157,6 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
     std::string accept_language;
     std::string accept_charset;
     std::string referrer_charset;
-    FilePath user_script_dir_path;
     IOThread* io_thread;
     scoped_refptr<HostContentSettingsMap> host_content_settings_map;
     scoped_refptr<HostZoomMap> host_zoom_map;
@@ -129,14 +169,17 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
     scoped_refptr<fileapi::FileSystemContext> file_system_context;
     scoped_refptr<quota::QuotaManager> quota_manager;
     scoped_refptr<ExtensionInfoMap> extension_info_map;
+    DesktopNotificationService* notification_service;
     base::WeakPtr<prerender::PrerenderManager> prerender_manager;
     scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry;
     // We need to initialize the ProxyConfigService from the UI thread
     // because on linux it relies on initializing things through gconf,
     // and needs to be on the main thread.
     scoped_ptr<net::ProxyConfigService> proxy_config_service;
-    // The profile this struct was populated from.
-    ProfileId profile_id;
+    // The profile this struct was populated from. It's passed as a void* to
+    // ensure it's not accidently used on the IO thread. Before using it  on the
+    // UI thread, call ProfileManager::IsValidProfile to ensure it's alive.
+    void* profile;
   };
 
   explicit ProfileIOData(bool is_incognito);
@@ -182,10 +225,6 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
     return main_request_context_;
   }
 
-  ChromeURLRequestContext* extensions_request_context() const {
-    return extensions_request_context_;
-  }
-
  private:
   class ResourceContext : public content::ResourceContext {
    public:
@@ -197,6 +236,9 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
 
     const ProfileIOData* const io_data_;
   };
+
+  typedef base::hash_map<std::string, ChromeURLRequestContext*>
+      AppRequestContextMap;
 
   // --------------------------------------------
   // Virtual interface for subtypes to implement:
@@ -216,7 +258,7 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
   // context from ProfileIOData to the URLRequestContextGetter.
   virtual scoped_refptr<ChromeURLRequestContext>
       AcquireMediaRequestContext() const = 0;
-  virtual scoped_refptr<ChromeURLRequestContext>
+  virtual scoped_refptr<RequestContext>
       AcquireIsolatedAppRequestContext(
           scoped_refptr<ChromeURLRequestContext> main_context,
           const std::string& app_id) const = 0;
@@ -230,6 +272,8 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
 
   // Member variables which are pointed to by the various context objects.
   mutable BooleanPrefMember enable_referrers_;
+  mutable BooleanPrefMember clear_local_state_on_exit_;
+  mutable BooleanPrefMember safe_browsing_enabled_;
 
   // Pointed to by URLRequestContext.
   mutable scoped_ptr<ChromeURLDataManagerBackend>
@@ -248,8 +292,9 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
   mutable scoped_refptr<HostZoomMap> host_zoom_map_;
 
   // TODO(willchan): Remove from ResourceContext.
-  mutable scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   mutable scoped_refptr<ExtensionInfoMap> extension_info_map_;
+  mutable scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
+  mutable DesktopNotificationService* notification_service_;
   mutable base::WeakPtr<prerender::PrerenderManager> prerender_manager_;
 
   mutable ResourceContext resource_context_;
@@ -258,6 +303,14 @@ class ProfileIOData : public base::RefCountedThreadSafe<ProfileIOData> {
   // called.
   mutable scoped_refptr<RequestContext> main_request_context_;
   mutable scoped_refptr<RequestContext> extensions_request_context_;
+  // One AppRequestContext per isolated app.
+  mutable AppRequestContextMap app_request_context_map_;
+
+  // Weak pointers to the request contexts. Only valid after LazyInitialize.
+  // These are weak so that they don't hold a reference to the RequestContext,
+  // because that holds a reference back to ProfileIOData.
+  mutable base::WeakPtr<ChromeURLRequestContext>
+      weak_extensions_request_context_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileIOData);
 };

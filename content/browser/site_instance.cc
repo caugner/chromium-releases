@@ -17,12 +17,10 @@ static bool IsURLSameAsAnySiteInstance(const GURL& url) {
   if (!url.is_valid())
     return false;
 
-  // We treat javascript: and about:crash as the same site as any URL since they
-  // are actually modifiers on existing pages.
-  if (url.SchemeIs(chrome::kJavaScriptScheme) ||
-      url.spec() == chrome::kAboutCrashURL) {
+  // We treat javascript: as the same site as any URL since it is actually
+  // a modifier on existing pages.
+  if (url.SchemeIs(chrome::kJavaScriptScheme))
     return true;
-  }
 
   return
       content::GetContentClient()->browser()->IsURLSameAsAnySiteInstance(url);
@@ -39,11 +37,16 @@ SiteInstance::SiteInstance(BrowsingInstance* browsing_instance)
       has_site_(false) {
   DCHECK(browsing_instance);
 
-  registrar_.Add(this, NotificationType::RENDERER_PROCESS_TERMINATED,
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  NotificationService::AllSources());
 }
 
 SiteInstance::~SiteInstance() {
+  NotificationService::current()->Notify(
+      content::NOTIFICATION_SITE_INSTANCE_DELETED,
+      Source<SiteInstance>(this),
+      NotificationService::NoDetails());
+
   // Now that no one is referencing us, we can safely remove ourselves from
   // the BrowsingInstance.  Any future visits to a page from this site
   // (within the same BrowsingInstance) can safely create a new SiteInstance.
@@ -234,10 +237,10 @@ RenderProcessHost::Type SiteInstance::GetRendererType() {
   return RendererTypeForURL(site_);
 }
 
-void SiteInstance::Observe(NotificationType type,
+void SiteInstance::Observe(int type,
                            const NotificationSource& source,
                            const NotificationDetails& details) {
-  DCHECK(type == NotificationType::RENDERER_PROCESS_TERMINATED);
+  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
   RenderProcessHost* rph = Source<RenderProcessHost>(source).ptr();
   if (rph == process_)
     process_ = NULL;

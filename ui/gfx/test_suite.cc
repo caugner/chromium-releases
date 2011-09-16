@@ -6,21 +6,22 @@
 
 #include "base/file_path.h"
 #include "base/path_service.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
+#include "build/build_config.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_paths.h"
 #include "ui/gfx/gfx_paths.h"
 
 #if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
+#include "base/mac/foundation_util.h"
 #endif
 
 GfxTestSuite::GfxTestSuite(int argc, char** argv) : TestSuite(argc, argv) {}
 
 void GfxTestSuite::Initialize() {
-  base::mac::ScopedNSAutoreleasePool autorelease_pool;
-
-  TestSuite::Initialize();
+  base::TestSuite::Initialize();
 
   gfx::RegisterPathProvider();
+  ui::RegisterPathProvider();
 
 #if defined(OS_MACOSX)
   // Look in the framework bundle for resources.
@@ -37,12 +38,25 @@ void GfxTestSuite::Initialize() {
 #error Unknown branding
 #endif
   base::mac::SetOverrideAppBundlePath(path);
-#endif  // OS_MACOSX
+#elif defined(OS_POSIX)
+  FilePath pak_dir;
+  PathService::Get(base::DIR_MODULE, &pak_dir);
+  pak_dir = pak_dir.AppendASCII("ui_unittests_strings");
+  PathService::Override(ui::DIR_LOCALES, pak_dir);
+  PathService::Override(ui::FILE_RESOURCES_PAK,
+                        pak_dir.AppendASCII("ui_resources.pak"));
+#endif  // defined(OS_MACOSX)
+
+  // Force unittests to run using en-US so if we test against string
+  // output, it'll pass regardless of the system language.
+  ui::ResourceBundle::InitSharedInstance("en-US");
 }
 
 void GfxTestSuite::Shutdown() {
+  ui::ResourceBundle::CleanupSharedInstance();
+
 #if defined(OS_MACOSX)
   base::mac::SetOverrideAppBundle(NULL);
 #endif
-  TestSuite::Shutdown();
+  base::TestSuite::Shutdown();
 }

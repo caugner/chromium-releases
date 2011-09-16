@@ -25,7 +25,7 @@
 #include "base/observer_list.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/download/download_process_handle.h"
+#include "chrome/browser/download/download_request_handle.h"
 #include "chrome/browser/download/download_state_info.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -131,11 +131,15 @@ class DownloadItem : public NotificationObserver {
   void UpdateObservers();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Returns true if it is OK to open this download.
+  // Returns true if it is OK to open a folder which this file is inside.
+  bool CanShowInFolder();
+
+  // Returns true if it is OK to register the type of this file so that
+  // it opens automatically.
   bool CanOpenDownload();
 
   // Tests if a file type should be opened automatically.
@@ -170,12 +174,15 @@ class DownloadItem : public NotificationObserver {
   // when resuming a download (assuming the server supports byte ranges).
   void Cancel(bool update_history);
 
-  // Called when all data has been saved.  Only has display effects.
-  void OnAllDataSaved(int64 size);
-
   // Called by external code (SavePackage) using the DownloadItem interface
   // to display progress when the DownloadItem should be considered complete.
   void MarkAsComplete();
+
+  // Called when all data has been saved. Only has display effects.
+  void OnAllDataSaved(int64 size);
+
+  // Called when the downloaded file is removed.
+  void OnDownloadedFileRemoved();
 
   // Download operation had an error.
   // |size| is the amount of data received so far, and |os_error| is the error
@@ -205,7 +212,7 @@ class DownloadItem : public NotificationObserver {
   int PercentComplete() const;
 
   // Called when the final path has been determined.
-  void OnPathDetermined(const FilePath& path) { full_path_ = path; }
+  void OnPathDetermined(const FilePath& path);
 
   // Returns true if this download has saved all of its data.
   bool all_data_saved() const { return all_data_saved_; }
@@ -214,9 +221,6 @@ class DownloadItem : public NotificationObserver {
   // result of analyzing the file and figuring out its type, location, etc.
   // May only be called once.
   void SetFileCheckResults(const DownloadStateInfo& state);
-
-  // Updates the target file.
-  void UpdateTarget();
 
   // Update the download's path, the actual file is renamed on the download
   // thread.
@@ -253,7 +257,7 @@ class DownloadItem : public NotificationObserver {
 
   // Accessors
   DownloadState state() const { return state_; }
-  FilePath full_path() const { return full_path_; }
+  const FilePath& full_path() const { return full_path_; }
   void set_path_uniquifier(int uniquifier) {
     state_info_.path_uniquifier = uniquifier;
   }
@@ -262,6 +266,7 @@ class DownloadItem : public NotificationObserver {
   const std::vector<GURL>& url_chain() const { return url_chain_; }
   const GURL& original_url() const { return url_chain_.front(); }
   const GURL& referrer_url() const { return referrer_url_; }
+  std::string suggested_filename() const { return suggested_filename_; }
   std::string content_disposition() const { return content_disposition_; }
   std::string mime_type() const { return mime_type_; }
   std::string original_mime_type() const { return original_mime_type_; }
@@ -278,10 +283,8 @@ class DownloadItem : public NotificationObserver {
   bool is_paused() const { return is_paused_; }
   bool open_when_complete() const { return open_when_complete_; }
   void set_open_when_complete(bool open) { open_when_complete_ = open; }
+  bool file_externally_removed() const { return file_externally_removed_; }
   SafetyState safety_state() const { return safety_state_; }
-  void set_safety_state(SafetyState safety_state) {
-    safety_state_ = safety_state;
-  }
   // Why |safety_state_| is not SAFE.
   DangerType GetDangerType() const;
   bool IsDangerous() const;
@@ -289,21 +292,21 @@ class DownloadItem : public NotificationObserver {
   void MarkUrlDangerous();
 
   bool auto_opened() { return auto_opened_; }
-  FilePath target_name() const { return state_info_.target_name; }
+  const FilePath& target_name() const { return state_info_.target_name; }
   bool save_as() const { return state_info_.prompt_user_for_save_location; }
   bool is_otr() const { return is_otr_; }
   bool is_extension_install() const {
     return state_info_.is_extension_install;
   }
-  FilePath suggested_path() const { return state_info_.suggested_path; }
+  const FilePath& suggested_path() const { return state_info_.suggested_path; }
   bool is_temporary() const { return is_temporary_; }
   void set_opened(bool opened) { opened_ = opened; }
   bool opened() const { return opened_; }
 
   DownloadHistoryInfo GetHistoryInfo() const;
   DownloadStateInfo state_info() const { return state_info_; }
-  const DownloadProcessHandle& process_handle() const {
-    return process_handle_;
+  const DownloadRequestHandle& request_handle() const {
+    return request_handle_;
   }
 
   // Returns the final target file path for the download.
@@ -338,7 +341,9 @@ class DownloadItem : public NotificationObserver {
 #endif
 
  private:
-  void Init(bool start_timer);
+  // Construction common to all constructors. |active| should be true for new
+  // downloads and false for downloads from the history.
+  void Init(bool active);
 
   // Internal helper for maintaining consistent received and total sizes.
   void UpdateSize(int64 size);
@@ -355,12 +360,24 @@ class DownloadItem : public NotificationObserver {
   // items which are CRXes. Use is_extension_install() to check.
   void StartCrxInstall();
 
+  // Call to transition state; all state transitions should go through this.
+  void TransitionTo(DownloadState new_state);
+
+  // Called when safety_state_ should be recomputed from is_dangerous_file
+  // and is_dangerous_url.
+  void UpdateSafetyState();
+
+  // Helper function to recompute |state_info_.target_name| when
+  // it may have changed.  (If it's non-null it should be left alone,
+  // otherwise updated from |full_path_|.)
+  void UpdateTarget();
+
   // State information used by the download manager.
   DownloadStateInfo state_info_;
 
-  // The handle to the process information.  Used for operations outside the
+  // The handle to the request information.  Used for operations outside the
   // download system.
-  DownloadProcessHandle process_handle_;
+  DownloadRequestHandle request_handle_;
 
   // Download ID assigned by DownloadResourceHandler.
   int32 download_id_;
@@ -377,6 +394,10 @@ class DownloadItem : public NotificationObserver {
 
   // The URL of the page that initiated the download.
   GURL referrer_url_;
+
+  // Suggested filename in 'download' attribute of an anchor. Details:
+  // http://www.whatwg.org/specs/web-apps/current-work/#downloading-hyperlinks
+  std::string suggested_filename_;
 
   // Information from the request.
   // Content-disposition field from the header.
@@ -429,6 +450,9 @@ class DownloadItem : public NotificationObserver {
 
   // A flag for indicating if the download should be opened at completion.
   bool open_when_complete_;
+
+  // A flag for indicating if the downloaded file is externally removed.
+  bool file_externally_removed_;
 
   // Indicates if the download is considered potentially safe or dangerous
   // (executable files are typically considered dangerous).

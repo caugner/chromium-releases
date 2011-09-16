@@ -3,31 +3,35 @@
 // found in the LICENSE file.
 
 /**
- * This view displays options for importing/exporting the captured data. Its
- * primarily usefulness is to allow users to copy-paste their data in an easy
- * to read format for bug reports.
+ * This view displays options for importing/exporting the captured data.  This
+ * view is responsible for the interface and file I/O.  The BrowserBridge
+ * handles creation and loading of the data dumps.
  *
- *   - Has a button to generate a text report.
+ *   - Has a button to generate a JSON dump.
+ *
+ *   - Has a button to import a JSON dump.
  *
  *   - Shows how many events have been captured.
  *  @constructor
  */
 function DataView(mainBoxId,
-                  outputTextBoxId,
-                  exportTextButtonId,
+                  downloadIframeId,
+                  saveFileButtonId,
+                  dataViewSaveStatusTextId,
                   securityStrippingCheckboxId,
                   byteLoggingCheckboxId,
                   passivelyCapturedCountId,
                   activelyCapturedCountId,
                   deleteAllId,
                   dumpDataDivId,
-                  loadDataDivId,
+                  loadedDivId,
+                  loadedClientInfoTextId,
+                  loadLogFileDropTargetId,
                   loadLogFileId,
+                  dataViewLoadStatusTextId,
                   capturingTextSpanId,
                   loggingTextSpanId) {
   DivView.call(this, mainBoxId);
-
-  this.textPre_ = document.getElementById(outputTextBoxId);
 
   var securityStrippingCheckbox =
       document.getElementById(securityStrippingCheckboxId);
@@ -38,8 +42,11 @@ function DataView(mainBoxId,
   byteLoggingCheckbox.onclick =
       this.onSetByteLogging_.bind(this, byteLoggingCheckbox);
 
-  var exportTextButton = document.getElementById(exportTextButtonId);
-  exportTextButton.onclick = this.onExportToText_.bind(this);
+  this.downloadIframe_ = document.getElementById(downloadIframeId);
+
+  this.saveFileButton_ = document.getElementById(saveFileButtonId);
+  this.saveFileButton_.onclick = this.onSaveFile_.bind(this);
+  this.saveStatusText_ = document.getElementById(dataViewSaveStatusTextId);
 
   this.activelyCapturedCountBox_ =
       document.getElementById(activelyCapturedCountId);
@@ -49,15 +56,26 @@ function DataView(mainBoxId,
       g_browser.deleteAllEvents.bind(g_browser);
 
   this.dumpDataDiv_ = document.getElementById(dumpDataDivId);
-  this.loadDataDiv_ = document.getElementById(loadDataDivId);
   this.capturingTextSpan_ = document.getElementById(capturingTextSpanId);
   this.loggingTextSpan_ = document.getElementById(loggingTextSpanId);
 
-  document.getElementById(loadLogFileId).onclick =
-      g_browser.loadLogFile.bind(g_browser);
+  this.loadedDiv_ = document.getElementById(loadedDivId);
+  this.loadedClientInfoText_ = document.getElementById(loadedClientInfoTextId);
+
+  this.loadFileElement_ = document.getElementById(loadLogFileId);
+  this.loadFileElement_.onchange = this.logFileChanged.bind(this);
+  this.loadStatusText_ = document.getElementById(dataViewLoadStatusTextId);
+
+  var dropTarget = document.getElementById(loadLogFileDropTargetId);
+  dropTarget.ondragenter = this.onDrag.bind(this);
+  dropTarget.ondragover = this.onDrag.bind(this);
+  dropTarget.ondrop = this.onDrop.bind(this);
 
   this.updateEventCounts_();
-  this.waitingForUpdate_ = false;
+
+  // Track blob for previous log dump so it can be revoked when a new dump is
+  // saved.
+  this.lastBlobURL_ = null;
 
   g_browser.addLogObserver(this);
 }
@@ -87,24 +105,27 @@ DataView.prototype.onAllLogEntriesDeleted = function() {
 };
 
 /**
- * Called when either a log file is loaded or when going back to actively
- * logging events.  In either case, called after clearing the old entries,
- * but before getting any new ones.
+ * Called when a log file is loaded, after clearing the old log entries and
+ * loading the new ones.  Hides parts of the page related to saving data, and
+ * shows those related to loading.  Returns true to indicate the view should
+ * still be visible.
  */
-DataView.prototype.onSetIsViewingLogFile = function(isViewingLogFile) {
-  setNodeDisplay(this.dumpDataDiv_, !isViewingLogFile);
-  setNodeDisplay(this.capturingTextSpan_, !isViewingLogFile);
-  setNodeDisplay(this.loggingTextSpan_, isViewingLogFile);
-  this.setText_('');
+DataView.prototype.onLoadLogFinish = function(data) {
+  setNodeDisplay(this.dumpDataDiv_, false);
+  setNodeDisplay(this.capturingTextSpan_, false);
+  setNodeDisplay(this.loggingTextSpan_, true);
+  setNodeDisplay(this.loadedDiv_, true);
+  this.updateLoadedClientInfo();
+  return true;
 };
 
 /**
  * Updates the counters showing how many events have been captured.
  */
 DataView.prototype.updateEventCounts_ = function() {
-  this.activelyCapturedCountBox_.innerText =
+  this.activelyCapturedCountBox_.textContent =
       g_browser.getNumActivelyCapturedEvents()
-  this.passivelyCapturedCountBox_.innerText =
+  this.passivelyCapturedCountBox_.textContent =
       g_browser.getNumPassivelyCapturedEvents();
 };
 
@@ -129,349 +150,178 @@ DataView.prototype.onSetSecurityStripping_ =
   g_browser.setSecurityStripping(securityStrippingCheckbox.checked);
 };
 
-/**
- * Clears displayed text when security stripping is toggled.
- */
 DataView.prototype.onSecurityStrippingChanged = function() {
-  this.setText_('');
-}
-
-/**
- * If not already waiting for results from all updates, triggers all
- * updates and starts waiting for them to complete.
- */
-DataView.prototype.onExportToText_ = function() {
-  if (this.waitingForUpdate_)
-    return;
-  this.waitingForUpdate = true;
-  this.setText_('Generating...');
-  g_browser.updateAllInfo(this.onUpdateAllCompleted.bind(this));
 };
 
 /**
- * Presents the captured data as formatted text.
+ * Called when something is dragged over the drop target.
+ *
+ * Returns false to cancel default browser behavior when a single file is being
+ * dragged.  When this happens, we may not receive a list of files for security
+ * reasons, which is why we allow the |files| array to be empty.
  */
-DataView.prototype.onUpdateAllCompleted = function(data) {
-  // It's possible for a log file to be loaded while a dump is being generated.
-  // When that happens, don't display the log dump, to avoid any confusion.
-  if (g_browser.isViewingLogFile())
+DataView.prototype.onDrag = function(event) {
+  return event.dataTransfer.types.indexOf('Files') == -1 ||
+         event.dataTransfer.files.length > 1;
+};
+
+/**
+ * Called when something is dropped onto the drop target.  If it's a single
+ * file, tries to load it as a log file.
+ */
+DataView.prototype.onDrop = function(event) {
+  if (event.dataTransfer.types.indexOf('Files') == -1 ||
+      event.dataTransfer.files.length != 1) {
     return;
-  this.waitingForUpdate_ = false;
+  }
+  event.preventDefault();
+
+  // Loading a log file may hide the currently active tab.  Switch to the data
+  // tab to prevent this.
+  document.location.hash = 'data';
+
+  this.loadLogFile(event.dataTransfer.files[0]);
+};
+
+/**
+ * Called when a log file is selected.
+ *
+ * Gets the log file from the input element and tries to read from it.
+ */
+DataView.prototype.logFileChanged = function() {
+  this.loadLogFile(this.loadFileElement_.files[0]);
+};
+
+/**
+ * Attempts to read from the File |logFile|.
+ */
+DataView.prototype.loadLogFile = function(logFile) {
+  if (logFile) {
+    this.setLoadFileStatus('Loading log...', true);
+    var fileReader = new FileReader();
+
+    fileReader.onload = this.onLoadLogFile.bind(this);
+    fileReader.onerror = this.onLoadLogFileError.bind(this);
+
+    fileReader.readAsText(logFile);
+  }
+};
+
+/**
+ * Displays an error message when unable to read the selected log file.
+ * Also clears the file input control, so the same file can be reloaded.
+ */
+DataView.prototype.onLoadLogFileError = function(event) {
+  this.loadFileElement_.value = null;
+  this.setLoadFileStatus(
+      'Error ' +  getKeyWithValue(FileError, event.target.error.code) +
+          '.  Unable to read file.',
+      false);
+};
+
+DataView.prototype.onLoadLogFile = function(event) {
+  var result = loadLogFile(event.target.result);
+  this.setLoadFileStatus(result, false);
+};
+
+/**
+ * Sets the load from file status text, displayed below the load file button,
+ * to |text|.  Also enables or disables the save/load buttons based on the value
+ * of |isLoading|, which must be true if the load process is still ongoing, and
+ * false when the operation has stopped, regardless of success of failure.
+ * Also, when loading is done, replaces the load button so the same file can be
+ * loaded again.
+ */
+DataView.prototype.setLoadFileStatus = function(text, isLoading) {
+  this.enableLoadFileElement_(!isLoading);
+  this.enableSaveFileButton_(!isLoading);
+  this.loadStatusText_.textContent = text;
+  this.saveStatusText_.textContent = '';
+
+  if (!isLoading) {
+    // Clear the button, so the same file can be reloaded.  Recreating the
+    // element seems to be the only way to do this.
+    var loadFileElementId = this.loadFileElement_.id;
+    var loadFileElementOnChange = this.loadFileElement_.onchange;
+    this.loadFileElement_.outerHTML = this.loadFileElement_.outerHTML;
+    this.loadFileElement_ = document.getElementById(loadFileElementId);
+    this.loadFileElement_.onchange = loadFileElementOnChange;
+  }
+};
+
+/**
+ * Sets the save to file status text, displayed below the save to file button,
+ * to |text|.  Also enables or disables the save/load buttons based on the value
+ * of |isSaving|, which must be true if the save process is still ongoing, and
+ * false when the operation has stopped, regardless of success of failure.
+ */
+DataView.prototype.setSaveFileStatus = function(text, isSaving) {
+  this.enableSaveFileButton_(!isSaving);
+  this.enableLoadFileElement_(!isSaving);
+  this.loadStatusText_.textContent = '';
+  this.saveStatusText_.textContent = text;
+};
+
+DataView.prototype.enableSaveFileButton_ = function(enabled) {
+  this.saveFileButton_.disabled = !enabled;
+};
+
+DataView.prototype.enableLoadFileElement_ = function(enabled) {
+  this.loadFileElement_.disabled = !enabled;
+};
+
+/**
+ * If not already busy loading or saving a log dump, triggers asynchronous
+ * generation of log dump and starts waiting for it to complete.
+ */
+DataView.prototype.onSaveFile_ = function() {
+  if (this.saveFileButton_.disabled)
+    return;
+  // Clean up previous blob, if any, to reduce resource usage.
+  if (this.lastBlobURL_) {
+    window.webkitURL.revokeObjectURL(this.lastBlobURL_);
+    this.lastBlobURL_ = null;
+  }
+  this.setSaveFileStatus('Preparing data...', true);
+
+  createLogDumpAsync(this.onLogDumpCreated_.bind(this));
+};
+
+/**
+ * Creates a blob url and starts downloading it.
+ */
+DataView.prototype.onLogDumpCreated_ = function(dumpText) {
+  var blobBuilder = new WebKitBlobBuilder();
+  blobBuilder.append(dumpText, 'native');
+  var textBlob = blobBuilder.getBlob('octet/stream');
+  this.lastBlobURL_ = window.webkitURL.createObjectURL(textBlob);
+  this.downloadIframe_.src = this.lastBlobURL_;
+  this.setSaveFileStatus('Dump successful', false);
+};
+
+/**
+ * Prints some basic information about the environment when the log was made.
+ */
+DataView.prototype.updateLoadedClientInfo = function() {
+  this.loadedClientInfoText_.textContent = '';
+  if (typeof(ClientInfo) != 'object')
+    return;
+
   var text = [];
 
-  // Print some basic information about our environment.
-  text.push('Data exported on: ' + (new Date()).toLocaleString());
-  text.push('');
-  text.push('Number of passively captured events: ' +
-            g_browser.getNumPassivelyCapturedEvents());
-  text.push('Number of actively captured events: ' +
-            g_browser.getNumActivelyCapturedEvents());
-  text.push('');
+  // Dumps made with the command line option don't have a date.
+  if (ClientInfo.date) {
+    text.push('Data exported on: ' + ClientInfo.date);
+    text.push('');
+  }
 
-  text.push('Chrome version: ' + ClientInfo.version +
+  text.push(ClientInfo.name +
+            ' ' + ClientInfo.version +
             ' (' + ClientInfo.official +
             ' ' + ClientInfo.cl +
             ') ' + ClientInfo.version_mod);
-  // Third value in first set of parentheses in user-agent string.
-  var platform = /\(.*?;.*?; (.*?);/.exec(navigator.userAgent);
-  if (platform)
-    text.push('Platform: ' + platform[1]);
+  text.push('OS Type: ' + ClientInfo.os_type);
   text.push('Command line: ' + ClientInfo.command_line);
 
-  text.push('');
-  var default_address_family = data.hostResolverInfo.default_address_family;
-  text.push('Default address family: ' +
-      getKeyWithValue(AddressFamily, default_address_family));
-  if (default_address_family == AddressFamily.ADDRESS_FAMILY_IPV4)
-    text.push('  (IPv6 disabled)');
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Proxy settings (effective)');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  text.push(proxySettingsToString(data.proxySettings.effective));
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Proxy settings (original)');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  text.push(proxySettingsToString(data.proxySettings.original));
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Bad proxies cache');
-  text.push('----------------------------------------------');
-
-  var badProxiesList = data.badProxies;
-  if (badProxiesList.length == 0) {
-    text.push('');
-    text.push('None');
-  } else {
-    for (var i = 0; i < badProxiesList.length; ++i) {
-      var e = badProxiesList[i];
-      text.push('');
-      text.push('(' + (i+1) + ')');
-      text.push('Proxy: ' + e.proxy_uri);
-      text.push('Bad until: ' + this.formatExpirationTime_(e.bad_until));
-    }
-  }
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Host resolver cache');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  var hostResolverCache = data.hostResolverInfo.cache;
-
-  text.push('Capacity: ' + hostResolverCache.capacity);
-  text.push('Time to live for successful resolves (ms): ' +
-            hostResolverCache.ttl_success_ms);
-  text.push('Time to live for failed resolves (ms): ' +
-            hostResolverCache.ttl_failure_ms);
-
-  if (hostResolverCache.entries.length > 0) {
-    for (var i = 0; i < hostResolverCache.entries.length; ++i) {
-      var e = hostResolverCache.entries[i];
-
-      text.push('');
-      text.push('(' + (i+1) + ')');
-      text.push('Hostname: ' + e.hostname);
-      text.push('Address family: ' +
-                getKeyWithValue(AddressFamily, e.address_family));
-
-      if (e.error != undefined) {
-         text.push('Error: ' + e.error);
-      } else {
-        for (var j = 0; j < e.addresses.length; ++j) {
-          text.push('Address ' + (j + 1) + ': ' + e.addresses[j]);
-        }
-      }
-
-      text.push('Valid until: ' + this.formatExpirationTime_(e.expiration));
-      var expirationDate = g_browser.convertTimeTicksToDate(e.expiration);
-      text.push('  (' + expirationDate.toLocaleString() + ')');
-    }
-  } else {
-    text.push('');
-    text.push('None');
-  }
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Events');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  this.appendEventsPrintedAsText_(text);
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Http cache stats');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  var httpCacheStats = data.httpCacheInfo.stats;
-  for (var statName in httpCacheStats)
-    text.push(statName + ': ' + httpCacheStats[statName]);
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Socket pools');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  this.appendSocketPoolsAsText_(text, data.socketPoolInfo);
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' SPDY Status');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  text.push('SPDY Enabled: ' + data.spdyStatus.spdy_enabled);
-  text.push('Use Alternate Protocol: ' +
-      data.spdyStatus.use_alternate_protocols);
-  text.push('Force SPDY Always: ' + data.spdyStatus.force_spdy_always);
-  text.push('Force SPDY Over SSL: ' + data.spdyStatus.force_spdy_over_ssl);
-  text.push('Next Protocols: ' + data.spdyStatus.next_protos);
-
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' SPDY Sessions');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  if (data.spdySessionInfo == null || data.spdySessionInfo.length == 0) {
-    text.push('None');
-  } else {
-    var spdyTablePrinter =
-      SpdyView.createSessionTablePrinter(data.spdySessionInfo);
-    text.push(spdyTablePrinter.toText(2));
-  }
-
-  text.push('');
-  text.push('----------------------------------------------');
-  text.push(' Alternate Protocol Mappings');
-  text.push('----------------------------------------------');
-  text.push('');
-
-  if (data.spdyAlternateProtocolMappings == null ||
-      data.spdyAlternateProtocolMappings.length == 0) {
-    text.push('None');
-  } else {
-    var spdyTablePrinter =
-      SpdyView.createAlternateProtocolMappingsTablePrinter(
-          data.spdyAlternateProtocolMappings);
-    text.push(spdyTablePrinter.toText(2));
-  }
-
-  if (g_browser.isPlatformWindows()) {
-    text.push('');
-    text.push('----------------------------------------------');
-    text.push(' Winsock layered service providers');
-    text.push('----------------------------------------------');
-    text.push('');
-
-    var serviceProviders = data.serviceProviders;
-    var layeredServiceProviders = serviceProviders.service_providers;
-    for (var i = 0; i < layeredServiceProviders.length; ++i) {
-      var provider = layeredServiceProviders[i];
-      text.push('name: ' + provider.name);
-      text.push('version: ' + provider.version);
-      text.push('type: ' +
-                ServiceProvidersView.getLayeredServiceProviderType(provider));
-      text.push('socket_type: ' +
-                ServiceProvidersView.getSocketType(provider));
-      text.push('socket_protocol: ' +
-                ServiceProvidersView.getProtocolType(provider));
-      text.push('path: ' + provider.path);
-      text.push('');
-    }
-
-    text.push('');
-    text.push('----------------------------------------------');
-    text.push(' Winsock namespace providers');
-    text.push('----------------------------------------------');
-    text.push('');
-
-    var namespaceProviders = serviceProviders.namespace_providers;
-    for (var i = 0; i < namespaceProviders.length; ++i) {
-      var provider = namespaceProviders[i];
-      text.push('name: ' + provider.name);
-      text.push('version: ' + provider.version);
-      text.push('type: ' +
-                ServiceProvidersView.getNamespaceProviderType(provider));
-      text.push('active: ' + provider.active);
-      text.push('');
-    }
-  }
-
-  // Open a new window to display this text.
-  this.setText_(text.join('\n'));
-
-  this.selectText_();
-};
-
-DataView.prototype.appendEventsPrintedAsText_ = function(out) {
-  var allEvents = g_browser.getAllCapturedEvents();
-
-  // Group the events into buckets by source ID, and buckets by source type.
-  var sourceIds = [];
-  var sourceIdToEventList = {};
-  var sourceTypeToSourceIdList = {};
-
-  // Lists used for actual output.
-  var eventLists = [];
-
-  for (var i = 0; i < allEvents.length; ++i) {
-    var e = allEvents[i];
-    var eventList = sourceIdToEventList[e.source.id];
-    if (!eventList) {
-      eventList = [];
-      eventLists.push(eventList);
-      if (e.source.type != LogSourceType.NONE)
-        sourceIdToEventList[e.source.id] = eventList;
-
-      // Update sourceIds
-      sourceIds.push(e.source.id);
-
-      // Update the sourceTypeToSourceIdList list.
-      var idList = sourceTypeToSourceIdList[e.source.type];
-      if (!idList) {
-        idList = [];
-        sourceTypeToSourceIdList[e.source.type] = idList;
-      }
-      idList.push(e.source.id);
-    }
-    eventList.push(e);
-  }
-
-
-  // For each source or event without a source (ordered by when the first
-  // output event for that source happened).
-  for (var i = 0; i < eventLists.length; ++i) {
-    var eventList = eventLists[i];
-    var sourceId = eventList[0].source.id;
-    var sourceType = eventList[0].source.type;
-
-    var startDate = g_browser.convertTimeTicksToDate(eventList[0].time);
-
-    out.push('------------------------------------------');
-    out.push(getKeyWithValue(LogSourceType, sourceType) +
-             ' (id=' + sourceId + ')' +
-             '  [start=' + startDate.toLocaleString() + ']');
-    out.push('------------------------------------------');
-
-    out.push(PrintSourceEntriesAsText(eventList));
-  }
-};
-
-DataView.prototype.appendSocketPoolsAsText_ = function(text, socketPoolInfo) {
-  var socketPools = SocketPoolWrapper.createArrayFrom(socketPoolInfo);
-  var tablePrinter = SocketPoolWrapper.createTablePrinter(socketPools);
-  text.push(tablePrinter.toText(2));
-
-  text.push('');
-
-  for (var i = 0; i < socketPools.length; ++i) {
-    if (socketPools[i].origPool.groups == undefined)
-      continue;
-    var groupTablePrinter = socketPools[i].createGroupTablePrinter();
-    text.push(groupTablePrinter.toText(2));
-  }
-};
-
-/**
- * Helper function to set this view's content to |text|.
- */
-DataView.prototype.setText_ = function(text) {
-  this.textPre_.innerHTML = '';
-  addTextNode(this.textPre_, text);
-};
-
-/**
- * Format a time ticks count as a timestamp.
- */
-DataView.prototype.formatExpirationTime_ = function(timeTicks) {
-  var d = g_browser.convertTimeTicksToDate(timeTicks);
-  var isExpired = d.getTime() < (new Date()).getTime();
-  return 't=' + d.getTime() + (isExpired ? ' [EXPIRED]' : '');
-};
-
-/**
- * Select all text from log dump.
- */
-DataView.prototype.selectText_ = function() {
-  var selection = window.getSelection();
-  selection.removeAllRanges();
-
-  var range = document.createRange();
-  range.selectNodeContents(this.textPre_);
-  selection.addRange(range);
+  this.loadedClientInfoText_.textContent = text.join('\n');
 };

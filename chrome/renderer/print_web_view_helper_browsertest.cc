@@ -41,6 +41,7 @@ void CreatePrintSettingsDictionary(DictionaryValue* dict) {
   dict->SetInteger(printing::kSettingDuplexMode, printing::SIMPLEX);
   dict->SetInteger(printing::kSettingCopies, 1);
   dict->SetString(printing::kSettingDeviceName, "dummy");
+  dict->SetInteger(printing::kPreviewRequestID, 12345);
 }
 
 }  // namespace
@@ -101,7 +102,7 @@ class PrintWebViewHelperTest : public PrintWebViewHelperTestBase {
 
   virtual void SetUp() {
     // Append the print preview switch before creating the PrintWebViewHelper.
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kDisablePrintPreview);
 #endif
@@ -301,7 +302,7 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
 
   virtual void SetUp() {
     // Append the print preview switch before creating the PrintWebViewHelper.
-#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_MACOSX)
+#if !defined(GOOGLE_CHROME_BUILD)
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnablePrintPreview);
 #endif
@@ -345,11 +346,20 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
 TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreview) {
   LoadHTML(kHelloWorldHTML);
 
+  PrintWebViewHelper::Get(view_)->OnInitiatePrintPreview();
   // Fill in some dummy values.
   DictionaryValue dict;
   CreatePrintSettingsDictionary(&dict);
   PrintWebViewHelper::Get(view_)->OnPrintPreview(dict);
 
+  // Need to finish simulating print preview.
+  // Generate the page and finalize it.
+  PrintWebViewHelper::Get(view_)->OnContinuePreview(
+      printing::INVALID_PAGE_INDEX);
+  PrintWebViewHelper::Get(view_)->OnContinuePreview(
+      printing::INVALID_PAGE_INDEX);
+
+  EXPECT_EQ(0, render_thread_.print_preview_pages_remaining());
   VerifyPrintPreviewFailed(false);
   VerifyPrintPreviewGenerated(true);
   VerifyPagesPrinted(false);
@@ -360,10 +370,12 @@ TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreview) {
 TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewFail) {
   LoadHTML(kHelloWorldHTML);
 
+  PrintWebViewHelper::Get(view_)->OnInitiatePrintPreview();
   // An empty dictionary should fail.
   DictionaryValue empty_dict;
   PrintWebViewHelper::Get(view_)->OnPrintPreview(empty_dict);
 
+  EXPECT_EQ(0, render_thread_.print_preview_pages_remaining());
   VerifyPrintPreviewFailed(true);
   VerifyPrintPreviewGenerated(false);
   VerifyPagesPrinted(false);

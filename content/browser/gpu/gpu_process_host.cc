@@ -11,7 +11,6 @@
 #include "base/process_util.h"
 #include "base/string_piece.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/gpu/gpu_data_manager.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
@@ -23,13 +22,15 @@
 #include "content/gpu/gpu_process.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_switches.h"
-#include "media/base/media_switches.h"
 #include "ui/gfx/gl/gl_context.h"
+#include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_switches.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_native_view_id_manager.h"
 #endif
+
+bool GpuProcessHost::gpu_enabled_ = true;
 
 namespace {
 
@@ -198,7 +199,7 @@ GpuProcessHost* GpuProcessHost::GetForRenderer(
   return NULL;
 }
 
-// static 
+// static
 void GpuProcessHost::SendOnIO(int renderer_id,
                               content::CauseForGpuLaunch cause,
                               IPC::Message* message) {
@@ -316,7 +317,6 @@ bool GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
   DCHECK(CalledOnValidThread());
   IPC_BEGIN_MESSAGE_MAP(GpuProcessHost, message)
     IPC_MESSAGE_HANDLER(GpuHostMsg_ChannelEstablished, OnChannelEstablished)
-    IPC_MESSAGE_HANDLER(GpuHostMsg_SynchronizeReply, OnSynchronizeReply)
     IPC_MESSAGE_HANDLER(GpuHostMsg_CommandBufferCreated, OnCommandBufferCreated)
     IPC_MESSAGE_HANDLER(GpuHostMsg_DestroyCommandBuffer, OnDestroyCommandBuffer)
     IPC_MESSAGE_HANDLER(GpuHostMsg_GraphicsInfoCollected,
@@ -355,17 +355,6 @@ void GpuProcessHost::EstablishGpuChannel(
     EstablishChannelError(
         wrapped_callback.release(), IPC::ChannelHandle(),
         base::kNullProcessHandle, GPUInfo());
-  }
-}
-
-void GpuProcessHost::Synchronize(SynchronizeCallback* callback) {
-  DCHECK(CalledOnValidThread());
-  linked_ptr<SynchronizeCallback> wrapped_callback(callback);
-
-  if (Send(new GpuMsg_Synchronize())) {
-    synchronize_requests_.push(wrapped_callback);
-  } else {
-    SynchronizeError(wrapped_callback.release());
   }
 }
 
@@ -426,22 +415,13 @@ void GpuProcessHost::OnChannelEstablished(
                           GPUInfo());
     RouteOnUIThread(GpuHostMsg_OnLogMessage(
         logging::LOG_WARNING,
-        "WARNING", 
+        "WARNING",
         "Hardware acceleration is unavailable."));
     return;
   }
 
   callback->Run(
       channel_handle, gpu_process_, GpuDataManager::GetInstance()->gpu_info());
-}
-
-void GpuProcessHost::OnSynchronizeReply() {
-  // Guard against race conditions in abrupt GPU process termination.
-  if (!synchronize_requests_.empty()) {
-    linked_ptr<SynchronizeCallback> callback(synchronize_requests_.front());
-    synchronize_requests_.pop();
-    callback->Run();
-  }
 }
 
 void GpuProcessHost::OnCommandBufferCreated(const int32 route_id) {
@@ -514,17 +494,15 @@ void GpuProcessHost::OnProcessCrashed(int exit_code) {
   SendOutstandingReplies();
   if (++g_gpu_crash_count >= kGpuMaxCrashCount) {
     // The gpu process is too unstable to use. Disable it for current session.
-    RenderViewHostDelegateHelper::set_gpu_enabled(false);
+    gpu_enabled_ = false;
   }
   BrowserChildProcessHost::OnProcessCrashed(exit_code);
 }
 
 bool GpuProcessHost::LaunchGpuProcess() {
-  if (!RenderViewHostDelegateHelper::gpu_enabled() ||
-      g_gpu_crash_count >= kGpuMaxCrashCount)
-  {
+  if (!gpu_enabled_ || g_gpu_crash_count >= kGpuMaxCrashCount) {
     SendOutstandingReplies();
-    RenderViewHostDelegateHelper::set_gpu_enabled(false);
+    gpu_enabled_ = false;
     return false;
   }
 
@@ -548,7 +526,7 @@ bool GpuProcessHost::LaunchGpuProcess() {
     switches::kDisableGpuVsync,
     switches::kDisableGpuWatchdog,
     switches::kDisableLogging,
-    switches::kEnableAcceleratedDecoding,
+    switches::kEnableGPUServiceLogging,
     switches::kEnableLogging,
 #if defined(OS_MACOSX)
     switches::kEnableSandboxLogging,
@@ -593,13 +571,6 @@ void GpuProcessHost::SendOutstandingReplies() {
                           base::kNullProcessHandle,
                           GPUInfo());
   }
-
-  // Now unblock all renderers waiting for synchronization replies.
-  while (!synchronize_requests_.empty()) {
-    linked_ptr<SynchronizeCallback> callback = synchronize_requests_.front();
-    synchronize_requests_.pop();
-    SynchronizeError(callback.release());
-  }
 }
 
 void GpuProcessHost::EstablishChannelError(
@@ -616,9 +587,4 @@ void GpuProcessHost::CreateCommandBufferError(
   scoped_ptr<GpuProcessHost::CreateCommandBufferCallback>
     wrapped_callback(callback);
   callback->Run(route_id);
-}
-
-void GpuProcessHost::SynchronizeError(SynchronizeCallback* callback) {
-  scoped_ptr<SynchronizeCallback> wrapped_callback(callback);
-  wrapped_callback->Run();
 }

@@ -13,9 +13,14 @@ namespace thunk {
 
 class PPB_ImageData_API {
  public:
+  virtual ~PPB_ImageData_API() {}
+
   virtual PP_Bool Describe(PP_ImageDataDesc* desc) = 0;
   virtual void* Map() = 0;
   virtual void Unmap() = 0;
+
+  // Trusted inteface.
+  virtual int32_t GetSharedMemory(int* handle, uint32_t* byte_count) = 0;
 };
 
 }  // namespace thunk

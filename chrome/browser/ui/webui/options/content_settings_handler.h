@@ -29,7 +29,7 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
   virtual void RegisterMessages();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -84,9 +84,6 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
   // Called to decide whether a given pattern is valid, or if it should be
   // rejected. Called while the user is editing an exception pattern.
   void CheckExceptionPatternValidity(const ListValue* args);
-
-  // Sets the global 3rd party cookies pref.
-  void SetAllowThirdPartyCookies(const ListValue* args);
 
   // Utility functions ---------------------------------------------------------
 

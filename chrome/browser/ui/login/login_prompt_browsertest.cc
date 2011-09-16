@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/browser_thread.h"
@@ -73,7 +74,7 @@ class LoginPromptBrowserTestObserver : public NotificationObserver {
         auth_supplied_count_(0),
         auth_cancelled_count_(0) {}
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -100,20 +101,20 @@ class LoginPromptBrowserTestObserver : public NotificationObserver {
 };
 
 void LoginPromptBrowserTestObserver::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  if (type == NotificationType::AUTH_NEEDED) {
+  if (type == chrome::NOTIFICATION_AUTH_NEEDED) {
     LoginNotificationDetails* login_details =
         Details<LoginNotificationDetails>(details).ptr();
     AddHandler(login_details->handler());
     auth_needed_count_++;
-  } else if (type == NotificationType::AUTH_SUPPLIED) {
+  } else if (type == chrome::NOTIFICATION_AUTH_SUPPLIED) {
     AuthSuppliedLoginNotificationDetails* login_details =
         Details<AuthSuppliedLoginNotificationDetails>(details).ptr();
     RemoveHandler(login_details->handler());
     auth_supplied_count_++;
-  } else if (type == NotificationType::AUTH_CANCELLED) {
+  } else if (type == chrome::NOTIFICATION_AUTH_CANCELLED) {
     LoginNotificationDetails* login_details =
         Details<LoginNotificationDetails>(details).ptr();
     RemoveHandler(login_details->handler());
@@ -141,12 +142,12 @@ void LoginPromptBrowserTestObserver::RemoveHandler(LoginHandler* handler) {
 
 void LoginPromptBrowserTestObserver::Register(
     const NotificationSource& source) {
-  registrar_.Add(this, NotificationType::AUTH_NEEDED, source);
-  registrar_.Add(this, NotificationType::AUTH_SUPPLIED, source);
-  registrar_.Add(this, NotificationType::AUTH_CANCELLED, source);
+  registrar_.Add(this, chrome::NOTIFICATION_AUTH_NEEDED, source);
+  registrar_.Add(this, chrome::NOTIFICATION_AUTH_SUPPLIED, source);
+  registrar_.Add(this, chrome::NOTIFICATION_AUTH_CANCELLED, source);
 }
 
-template <NotificationType::Type T>
+template <int T>
 class WindowedNavigationObserver
     : public ui_test_utils::WindowedNotificationObserver {
  public:
@@ -155,16 +156,16 @@ class WindowedNavigationObserver
           T, Source<NavigationController>(controller)) {}
 };
 
-typedef WindowedNavigationObserver<NotificationType::LOAD_STOP>
+typedef WindowedNavigationObserver<content::NOTIFICATION_LOAD_STOP>
     WindowedLoadStopObserver;
 
-typedef WindowedNavigationObserver<NotificationType::AUTH_NEEDED>
+typedef WindowedNavigationObserver<chrome::NOTIFICATION_AUTH_NEEDED>
     WindowedAuthNeededObserver;
 
-typedef WindowedNavigationObserver<NotificationType::AUTH_CANCELLED>
+typedef WindowedNavigationObserver<chrome::NOTIFICATION_AUTH_CANCELLED>
     WindowedAuthCancelledObserver;
 
-typedef WindowedNavigationObserver<NotificationType::AUTH_SUPPLIED>
+typedef WindowedNavigationObserver<chrome::NOTIFICATION_AUTH_SUPPLIED>
     WindowedAuthSuppliedObserver;
 
 const char* kPrefetchAuthPage = "files/login/prefetch.html";
@@ -339,9 +340,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 
 // Testing for recovery from an incorrect password for the case where
 // there are multiple authenticated resources.
-// Marked as flaky.  See http://crbug.com/69266 and http://crbug.com/68860
+// Test enabled but has been historically flaky.  See http://crbug.com/69266
 // TODO(asanka): Remove logging when timeout issues are resolved.
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, DISABLED_IncorrectConfirmation) {
+IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, IncorrectConfirmation) {
   ASSERT_TRUE(test_server()->Start());
   GURL test_page = test_server()->GetURL(kSingleRealmTestPage);
 
@@ -353,8 +354,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, DISABLED_IncorrectConfirmation) {
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(Source<NavigationController>(controller));
-
-  WindowedLoadStopObserver load_stop_waiter(controller);
 
   LOG(INFO) <<
       "Begin test run "
@@ -414,8 +413,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, DISABLED_IncorrectConfirmation) {
   EXPECT_LT(0, observer.auth_needed_count_);
   EXPECT_EQ(0, observer.auth_cancelled_count_);
   EXPECT_EQ(observer.auth_needed_count_, observer.auth_supplied_count_);
-  LOG(INFO) << "Waiting for LOAD_STOP";
-  load_stop_waiter.Wait();
   EXPECT_TRUE(test_server()->Stop());
   LOG(INFO) << "Done with test";
 }

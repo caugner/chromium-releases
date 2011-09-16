@@ -17,6 +17,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_source.h"
 #include "grit/generated_resources.h"
@@ -381,7 +382,7 @@ BookmarkFaviconFetcher::BookmarkFaviconFetcher(
       observer_(observer) {
   favicons_map_.reset(new URLFaviconMap());
   registrar_.Add(this,
-                 NotificationType::PROFILE_DESTROYED,
+                 chrome::NOTIFICATION_PROFILE_DESTROYED,
                  Source<Profile>(profile_));
 }
 
@@ -389,35 +390,32 @@ BookmarkFaviconFetcher::~BookmarkFaviconFetcher() {
 }
 
 void BookmarkFaviconFetcher::ExportBookmarks() {
-  ExtractUrls(profile_->GetBookmarkModel()->GetBookmarkBarNode());
+  ExtractUrls(profile_->GetBookmarkModel()->bookmark_bar_node());
   ExtractUrls(profile_->GetBookmarkModel()->other_node());
   ExtractUrls(profile_->GetBookmarkModel()->synced_node());
-  if (!bookmark_urls_.empty()) {
+  if (!bookmark_urls_.empty())
     FetchNextFavicon();
-  } else {
+  else
     ExecuteWriter();
-  }
 }
 
-void BookmarkFaviconFetcher::Observe(NotificationType type,
+void BookmarkFaviconFetcher::Observe(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
-  if (NotificationType::PROFILE_DESTROYED == type && fetcher != NULL) {
+  if (chrome::NOTIFICATION_PROFILE_DESTROYED == type && fetcher != NULL) {
     MessageLoop::current()->DeleteSoon(FROM_HERE, fetcher);
     fetcher = NULL;
   }
 }
 
 void BookmarkFaviconFetcher::ExtractUrls(const BookmarkNode* node) {
-  if (BookmarkNode::URL == node->type()) {
-    std::string url = node->GetURL().spec();
-    if (!url.empty()) {
+  if (node->is_url()) {
+    std::string url = node->url().spec();
+    if (!url.empty())
       bookmark_urls_.push_back(url);
-    }
   } else {
-    for (int i = 0; i < node->child_count(); ++i) {
+    for (int i = 0; i < node->child_count(); ++i)
       ExtractUrls(node->GetChild(i));
-    }
   }
 }
 

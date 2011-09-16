@@ -64,9 +64,13 @@ class WebGraphicsContext3DCommandBufferImpl
 
   virtual bool isGLES2Compliant();
 
+  virtual bool setParentContext(WebGraphicsContext3D* parent_context);
+
   virtual void reshape(int width, int height);
 
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size);
+  virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size,
+                                   WebGLId framebuffer, int width, int height);
 
   virtual WebGLId getPlatformTextureId();
   virtual void prepareTexture();
@@ -421,20 +425,16 @@ class WebGraphicsContext3DCommandBufferImpl
       WGC3Denum target, WGC3Dsizei samples, WGC3Denum internalformat,
       WGC3Dsizei width, WGC3Dsizei height);
 
-  virtual WebGLId createCompositorTexture(WGC3Dsizei width, WGC3Dsizei height);
-  virtual void deleteCompositorTexture(WebGLId parent_texture);
-  virtual void copyTextureToCompositor(WebGLId texture,
-                                       WebGLId parent_texture);
-
   RendererGLContext* context() { return context_; }
 
   virtual void setContextLostCallback(
       WebGraphicsContext3D::WebGraphicsContextLostCallback* callback);
+  virtual WGC3Denum getGraphicsResetStatusARB();
 
  private:
   // SwapBuffers callback.
   void OnSwapBuffersComplete();
-  virtual void OnContextLost();
+  virtual void OnContextLost(RendererGLContext::ContextLostReason reason);
 
   // The context we use for OpenGL rendering.
   RendererGLContext* context_;
@@ -448,6 +448,7 @@ class WebGraphicsContext3DCommandBufferImpl
   gfx::PluginWindowHandle plugin_handle_;
 #endif
   WebGraphicsContext3D::WebGraphicsContextLostCallback* context_lost_callback_;
+  WGC3Denum context_lost_reason_;
 
   WebKit::WebGraphicsContext3D::Attributes attributes_;
   int cached_width_, cached_height_;

@@ -27,9 +27,7 @@
 #include "ui/gfx/surface/transport_dib.h"
 
 struct FontDescriptor;
-class ExtensionInfoMap;
 class HostContentSettingsMap;
-class NotificationsPrefsCache;
 class Profile;
 class RenderWidgetHelper;
 struct ViewHostMsg_CreateWindow_Params;
@@ -52,6 +50,7 @@ class Rect;
 }
 
 namespace net {
+class CookieList;
 class URLRequestContextGetter;
 }
 
@@ -83,14 +82,15 @@ class RenderMessageFilter : public BrowserMessageFilter {
                                  bool* message_was_ok);
   virtual void OnDestruct() const;
 
+  bool OffTheRecord() const;
+
   int render_process_id() const { return render_process_id_; }
   ResourceDispatcherHost* resource_dispatcher_host() {
     return resource_dispatcher_host_;
   }
-  bool incognito() { return incognito_; }
 
-  // Returns either the extension net::URLRequestContext or regular
-  // net::URLRequestContext depending on whether |url| is an extension URL.
+  // Returns the correct net::URLRequestContext depending on what type of url is
+  // given.
   // Only call on the IO thread.
   net::URLRequestContext* GetRequestContextForURL(const GURL& url);
 
@@ -116,7 +116,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
                     IPC::Message* reply_msg);
   void OnGetRawCookies(const GURL& url,
                        const GURL& first_party_for_cookies,
-                       std::vector<webkit_glue::WebCookie>* cookies);
+                       IPC::Message* reply_msg);
   void OnDeleteCookie(const GURL& url,
                       const std::string& cookieName);
   void OnCookiesEnabled(const GURL& url,
@@ -146,7 +146,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // This hack is Windows-specific.
   // Cache fonts for the renderer. See RenderMessageFilter::OnPreCacheFont
   // implementation for more details.
-  void OnPreCacheFont(LOGFONT font);
+  void OnPreCacheFont(const LOGFONT& font);
 #endif
 
   void OnGetPlugins(bool refresh,
@@ -170,9 +170,12 @@ class RenderMessageFilter : public BrowserMessageFilter {
   void OnGenerateRoutingID(int* route_id);
   void OnDownloadUrl(const IPC::Message& message,
                      const GURL& url,
-                     const GURL& referrer);
+                     const GURL& referrer,
+                     const string16& suggested_name);
   void OnCheckNotificationPermission(const GURL& source_url,
                                      int* permission_level);
+
+  void OnGetHardwareSampleRate(double* sample_rate);
 
   // Used to ask the browser to allocate a block of shared memory for the
   // renderer to send back data in, since shared memory can't be created
@@ -210,6 +213,19 @@ class RenderMessageFilter : public BrowserMessageFilter {
                                  int message_id,
                                  int routing_id);
 
+  // Check the policy for getting cookies. Gets the cookies if allowed.
+  void CheckPolicyForCookies(const GURL& url,
+                             const GURL& first_party_for_cookies,
+                             IPC::Message* reply_msg,
+                             const net::CookieList& cookie_list);
+
+  // Writes the cookies to reply messages, and sends the message.
+  // Callback functions for getting cookies from cookie store.
+  void SendGetCookiesResponse(IPC::Message* reply_msg,
+                              const std::string& cookies);
+  void SendGetRawCookiesResponse(IPC::Message* reply_msg,
+                                 const net::CookieList& cookie_list);
+
   bool CheckBenchmarkingEnabled() const;
   bool CheckPreparsedJsCachingEnabled() const;
 
@@ -223,24 +239,13 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // accessed on the UI thread!
   Profile* profile_;
 
-  // The extension info map. Stored separately from the profile so we can
-  // access it on other threads.
-  ExtensionInfoMap* extension_info_map_;
-
   // Contextual information to be used for requests created here.
   scoped_refptr<net::URLRequestContextGetter> request_context_;
 
   // The ResourceContext which is to be used on the IO thread.
   const content::ResourceContext& resource_context_;
 
-  // A request context that holds a cookie store for chrome-extension URLs.
-  scoped_refptr<net::URLRequestContextGetter> extensions_request_context_;
-
   scoped_refptr<RenderWidgetHelper> render_widget_helper_;
-
-  // A cache of notifications preferences which is used to handle
-  // Desktop Notifications permission messages.
-  scoped_refptr<NotificationsPrefsCache> notification_prefs_;
 
   // Whether this process is used for incognito tabs.
   bool incognito_;

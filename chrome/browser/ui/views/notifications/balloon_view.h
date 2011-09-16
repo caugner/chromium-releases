@@ -45,9 +45,8 @@ class SlideAnimation;
 // A balloon view is the UI component for a desktop notification toasts.
 // It draws a border, and within the border an HTML renderer.
 class BalloonViewImpl : public BalloonView,
-                        public views::View,
                         public views::ViewMenuDelegate,
-                        public views::WidgetDelegate,
+                        public views::WidgetDelegateView,
                         public views::ButtonListener,
                         public NotificationObserver,
                         public ui::AnimationDelegate {
@@ -81,7 +80,7 @@ class BalloonViewImpl : public BalloonView,
       views::Button* sender, const views::Event&) OVERRIDE;
 
   // NotificationObserver interface.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 

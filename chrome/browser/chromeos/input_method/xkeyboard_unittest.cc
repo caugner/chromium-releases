@@ -12,6 +12,7 @@
 #include <X11/Xlib.h>
 
 #include "base/logging.h"
+#include "ui/base/x/x11_util.h"
 
 namespace chromeos {
 namespace input_method {
@@ -50,12 +51,7 @@ bool CheckMap(const ModifierMap& modifier_map,
 
 // Returns true if X display is available.
 bool DisplayAvailable() {
-  Display* display = XOpenDisplay(NULL);
-  if (!display) {
-    return false;
-  }
-  XCloseDisplay(display);
-  return true;
+  return ui::GetXDisplay() ? true : false;
 }
 
 }  // namespace
@@ -161,6 +157,33 @@ TEST(XKeyboardTest, TestCreateFullXkbLayoutNameBasic) {
       "gb(extd)", GetMap(kVoidKey, kVoidKey, kVoidKey)).find(",us"));
   EXPECT_NE(std::string::npos, CreateFullXkbLayoutName(
       "jp", GetMap(kVoidKey, kVoidKey, kVoidKey)).find(",us"));
+}
+
+TEST(XKeyboardTest, TestCreateFullXkbLayoutNameKeepCapsLock) {
+  EXPECT_STREQ("us(colemak)+chromeos(search_disabled_disabled)",
+               CreateFullXkbLayoutName(
+                   "us(colemak)",
+                   // The 1st kVoidKey should be ignored.
+                   GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
+  EXPECT_STREQ("de(neo)+"
+               "chromeos(search_leftcontrol_leftcontrol_keepralt),us",
+               CreateFullXkbLayoutName(
+                   // The 1st kLeftControlKey should be ignored.
+                   "de(neo)", GetMap(kLeftControlKey,
+                                     kLeftControlKey,
+                                     kLeftControlKey)).c_str());
+}
+
+TEST(XKeyboardTest, TestCreateFullXkbLayoutNameKeepAlt) {
+  EXPECT_STREQ("us(intl)+chromeos(disabled_disabled_disabled_keepralt)",
+               CreateFullXkbLayoutName(
+                   "us(intl)", GetMap(kVoidKey, kVoidKey, kVoidKey)).c_str());
+  EXPECT_STREQ("kr(kr104)+"
+               "chromeos(leftcontrol_leftcontrol_leftcontrol_keepralt),us",
+               CreateFullXkbLayoutName(
+                   "kr(kr104)", GetMap(kLeftControlKey,
+                                       kLeftControlKey,
+                                       kLeftControlKey)).c_str());
 }
 
 // Tests if CreateFullXkbLayoutName and ExtractLayoutNameFromFullXkbLayoutName

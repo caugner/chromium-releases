@@ -6,12 +6,15 @@
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_EDITOR_VIEW_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/string16.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
+#include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/models/tree_node_model.h"
+#include "views/context_menu_controller.h"
 #include "views/controls/button/button.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/controls/textfield/textfield_controller.h"
@@ -21,8 +24,7 @@
 namespace views {
 class Label;
 class Menu2;
-class NativeButton;
-class Window;
+class TextButton;
 }
 
 class BookmarkEditorViewTest;
@@ -41,10 +43,9 @@ class Profile;
 // To use BookmarkEditorView invoke the static show method.
 
 class BookmarkEditorView : public BookmarkEditor,
-                           public views::View,
                            public views::ButtonListener,
                            public views::TreeViewController,
-                           public views::DialogDelegate,
+                           public views::DialogDelegateView,
                            public views::TextfieldController,
                            public views::ContextMenuController,
                            public ui::SimpleMenuModel::Delegate,
@@ -118,15 +119,15 @@ class BookmarkEditorView : public BookmarkEditor,
 
   // Creates a Window and adds the BookmarkEditorView to it. When the window is
   // closed the BookmarkEditorView is deleted.
-  void Show(HWND parent_hwnd);
+  void Show(gfx::NativeWindow parent_hwnd);
 
   // Closes the dialog.
   void Close();
 
-  // Shows the context menu.
+  // views::ContextMenuController:
   virtual void ShowContextMenuForView(View* source,
                                       const gfx::Point& p,
-                                      bool is_mouse_gesture);
+                                      bool is_mouse_gesture) OVERRIDE;
 
  private:
   friend class BookmarkEditorViewTest;
@@ -137,7 +138,7 @@ class BookmarkEditorView : public BookmarkEditor,
 
   // BookmarkModel observer methods. Any structural change results in
   // resetting the tree model.
-  virtual void Loaded(BookmarkModel* model) OVERRIDE {}
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {}
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
                                  int old_index,
@@ -218,6 +219,11 @@ class BookmarkEditorView : public BookmarkEditor,
   // internally by NewFolder and broken into a separate method for testing.
   EditorNode* AddNewFolder(EditorNode* parent);
 
+  // If |editor_node| is expanded it's added to |expanded_nodes| and this is
+  // recursively invoked for all the children.
+  void UpdateExpandedNodes(EditorNode* editor_node,
+                           BookmarkExpandedStateTracker::Nodes* expanded_nodes);
+
   // Profile the entry is from.
   Profile* profile_;
 
@@ -228,7 +234,7 @@ class BookmarkEditorView : public BookmarkEditor,
   views::TreeView* tree_view_;
 
   // Used to create a new folder.
-  scoped_ptr<views::NativeButton> new_folder_button_;
+  scoped_ptr<views::TextButton> new_folder_button_;
 
   // The label for the url text field.
   views::Label* url_label_;
@@ -261,6 +267,9 @@ class BookmarkEditorView : public BookmarkEditor,
 
   // Is the tree shown?
   bool show_tree_;
+
+  // List of deleted bookmark folders.
+  std::vector<int64> deletes_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkEditorView);
 };

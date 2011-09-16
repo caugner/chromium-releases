@@ -4,6 +4,8 @@
 
 #include "content/common/content_client.h"
 
+#include "base/string_piece.h"
+
 namespace content {
 
 static ContentClient* g_client;
@@ -16,26 +18,11 @@ ContentClient* GetContentClient() {
   return g_client;
 }
 
-ContentClient::ContentClient() :
-    browser_(NULL), plugin_(NULL), renderer_(NULL) {
+ContentClient::ContentClient()
+    : browser_(NULL), plugin_(NULL), renderer_(NULL), utility_(NULL) {
 }
 
 ContentClient::~ContentClient() {
 }
-
-bool ContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
-  return false;
-}
-
-bool ContentClient::CanHandleWhileSwappedOut(const IPC::Message& msg) {
-  return false;
-}
-
-#if defined(OS_WIN)
-bool ContentClient::SandboxPlugin(CommandLine* command_line,
-                                  sandbox::TargetPolicy* policy) {
-  return false;
-}
-#endif
 
 }  // namespace content

@@ -6,17 +6,17 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/site_instance.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 
 namespace {
 const int kUserStatePollingIntervalSeconds = 1;
@@ -50,7 +50,7 @@ class QueuedNotification {
 NotificationUIManager::NotificationUIManager(PrefService* local_state)
     : balloon_collection_(NULL),
       is_user_active_(true) {
-  registrar_.Add(this, NotificationType::APP_TERMINATING,
+  registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                  NotificationService::AllSources());
   position_pref_.Init(prefs::kDesktopNotificationPosition, local_state, this);
 #if defined(OS_MACOSX)
@@ -67,7 +67,13 @@ NotificationUIManager::~NotificationUIManager() {
 
 // static
 NotificationUIManager* NotificationUIManager::Create(PrefService* local_state) {
-  BalloonCollection* balloons = BalloonCollection::Create();
+  return Create(local_state, BalloonCollection::Create());
+}
+
+// static
+NotificationUIManager* NotificationUIManager::Create(
+    PrefService* local_state,
+    BalloonCollection* balloons) {
   NotificationUIManager* instance = new NotificationUIManager(local_state);
   instance->Initialize(balloons);
   balloons->set_space_change_listener(instance);
@@ -226,12 +232,12 @@ void NotificationUIManager::SetPositionPreference(
   balloon_collection_->SetPositionPreference(preference);
 }
 
-void NotificationUIManager::Observe(NotificationType type,
+void NotificationUIManager::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
-  if (type == NotificationType::APP_TERMINATING) {
+  if (type == content::NOTIFICATION_APP_TERMINATING) {
     CancelAll();
-  } else if (type == NotificationType::PREF_CHANGED) {
+  } else if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     std::string* name = Details<std::string>(details).ptr();
     if (*name == prefs::kDesktopNotificationPosition)
       balloon_collection_->SetPositionPreference(

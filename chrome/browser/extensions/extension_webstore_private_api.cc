@@ -19,7 +19,9 @@
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
@@ -27,7 +29,6 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
@@ -181,25 +182,42 @@ class SafeBeginInstallHelper : public UtilityProcessHost::Client {
     if (icon_data_.empty())
       icon_decode_complete_ = true;
     else
-      utility_host_->StartImageDecodingBase64(icon_data_);
-    utility_host_->StartJSONParsing(manifest_);
+      utility_host_->Send(new UtilityMsg_DecodeImageBase64(icon_data_));
+    utility_host_->Send(new UtilityMsg_ParseJSON(manifest_));
   }
 
   // Implementing pieces of the UtilityProcessHost::Client interface.
-  virtual void OnDecodeImageSucceeded(const SkBitmap& decoded_image) {
+  virtual bool OnMessageReceived(const IPC::Message& message) {
+    bool handled = true;
+    IPC_BEGIN_MESSAGE_MAP(SafeBeginInstallHelper, message)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_DecodeImage_Succeeded,
+                          OnDecodeImageSucceeded)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_DecodeImage_Failed,
+                          OnDecodeImageFailed)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseJSON_Succeeded,
+                          OnJSONParseSucceeded)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseJSON_Failed, OnJSONParseFailed)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_END_MESSAGE_MAP()
+    return handled;
+  }
+
+  void OnDecodeImageSucceeded(const SkBitmap& decoded_image) {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     icon_ = decoded_image;
     icon_decode_complete_ = true;
     ReportResultsIfComplete();
   }
-  virtual void OnDecodeImageFailed() {
+
+  void OnDecodeImageFailed() {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     icon_decode_complete_ = true;
     error_ = std::string(kImageDecodeError);
     parse_error_ = BeginInstallWithManifestFunction::ICON_ERROR;
     ReportResultsIfComplete();
   }
-  virtual void OnJSONParseSucceeded(const ListValue& wrapper) {
+
+  void OnJSONParseSucceeded(const ListValue& wrapper) {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     manifest_parse_complete_ = true;
     Value* value = NULL;
@@ -383,11 +401,12 @@ void BeginInstallWithManifestFunction::OnParseSuccess(
   // Create a dummy extension and show the extension install confirmation
   // dialog.
   std::string init_errors;
-  dummy_extension_ = Extension::Create(
+  dummy_extension_ = Extension::CreateWithId(
       FilePath(),
       Extension::INTERNAL,
       localized_manifest.get() ? *localized_manifest.get() : *parsed_manifest,
       Extension::NO_FLAGS,
+      id_,
       &init_errors);
   if (!dummy_extension_.get()) {
     OnParseFailure(MANIFEST_ERROR, std::string(kInvalidManifestError));
@@ -403,7 +422,7 @@ void BeginInstallWithManifestFunction::OnParseSuccess(
     if (auto_confirm_for_tests == PROCEED)
       this->InstallUIProceed();
     else
-      this->InstallUIAbort();
+      this->InstallUIAbort(true);
     return;
   }
 
@@ -435,14 +454,35 @@ void BeginInstallWithManifestFunction::InstallUIProceed() {
   SetResult(ERROR_NONE);
   SendResponse(true);
 
+  // The Permissions_Install histogram is recorded from the ExtensionService
+  // for all extension installs, so we only need to record the web store
+  // specific histogram here.
+  ExtensionService::RecordPermissionMessagesHistogram(
+      dummy_extension_, "Extensions.Permissions_WebStoreInstall");
+
   // Matches the AddRef in RunImpl().
   Release();
 }
 
-void BeginInstallWithManifestFunction::InstallUIAbort() {
+void BeginInstallWithManifestFunction::InstallUIAbort(bool user_initiated) {
   error_ = std::string(kUserCancelledError);
   SetResult(USER_CANCELLED);
   SendResponse(false);
+
+  // The web store install histograms are a subset of the install histograms.
+  // We need to record both histograms here since CrxInstaller::InstallUIAbort
+  // is never called for web store install cancellations
+  std::string histogram_name = user_initiated ?
+      "Extensions.Permissions_WebStoreInstallCancel" :
+      "Extensions.Permissions_WebStoreInstallAbort";
+  ExtensionService::RecordPermissionMessagesHistogram(
+      dummy_extension_, histogram_name.c_str());
+
+  histogram_name = user_initiated ?
+      "Extensions.Permissions_InstallCancel" :
+      "Extensions.Permissions_InstallAbort";
+  ExtensionService::RecordPermissionMessagesHistogram(
+      dummy_extension_, histogram_name.c_str());
 
   // Matches the AddRef in RunImpl().
   Release();
@@ -551,10 +591,10 @@ bool PromptBrowserLoginFunction::RunImpl() {
   // Start listening for notifications about the token.
   TokenService* token_service = profile->GetTokenService();
   registrar_.Add(this,
-                 NotificationType::TOKEN_AVAILABLE,
+                 chrome::NOTIFICATION_TOKEN_AVAILABLE,
                  Source<TokenService>(token_service));
   registrar_.Add(this,
-                 NotificationType::TOKEN_REQUEST_FAILED,
+                 chrome::NOTIFICATION_TOKEN_REQUEST_FAILED,
                  Source<TokenService>(token_service));
 
   GetBrowserSignin(profile)->RequestSignin(tab,
@@ -606,16 +646,16 @@ void PromptBrowserLoginFunction::OnLoginFailure(
   Release();
 }
 
-void PromptBrowserLoginFunction::Observe(NotificationType type,
+void PromptBrowserLoginFunction::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
   // Make sure this notification is for the service we are interested in.
   std::string service;
-  if (type == NotificationType::TOKEN_AVAILABLE) {
+  if (type == chrome::NOTIFICATION_TOKEN_AVAILABLE) {
     TokenService::TokenAvailableDetails* available =
         Details<TokenService::TokenAvailableDetails>(details).ptr();
     service = available->service();
-  } else if (type == NotificationType::TOKEN_REQUEST_FAILED) {
+  } else if (type == chrome::NOTIFICATION_TOKEN_REQUEST_FAILED) {
     TokenService::TokenRequestFailedDetails* failed =
         Details<TokenService::TokenRequestFailedDetails>(details).ptr();
     service = failed->service();

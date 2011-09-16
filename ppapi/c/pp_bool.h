@@ -1,7 +1,10 @@
-/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
+/* From pp_bool.idl modified Sat Jul 16 16:50:26 2011. */
+
 #ifndef PPAPI_C_PP_BOOL_H_
 #define PPAPI_C_PP_BOOL_H_
 
@@ -9,20 +12,20 @@
 
 /**
  * @file
- * This file defines the PP_Bool enumeration for use in PPAPI C headers.
+ * This file defines the <code>PP_Bool</code> enumeration for use in PPAPI C
+ * headers.
  */
 
+
 /**
- *
  * @addtogroup Enums
  * @{
  */
-
 /**
- * The PP_Bool enum is a boolean value for use in PPAPI C headers.  The
- * standard bool type is not available to pre-C99 compilers, and is not
- * guaranteed to be compatible between C and C++, whereas the PPAPI C
- * headers can be included from C or C++ code.
+ * The <code>PP_Bool</code> enum is a boolean value for use in PPAPI C headers.
+ * The standard bool type is not available to pre-C99 compilers, and is not
+ * guaranteed to be compatible between C and C++, whereas the PPAPI C headers
+ * can be included from C or C++ code.
  */
 typedef enum {
   PP_FALSE = 0,
@@ -47,6 +50,7 @@ inline PP_Bool PP_FromBool(bool b) {
 inline bool PP_ToBool(PP_Bool b) {
   return (b != PP_FALSE);
 }
+
 #endif  // __cplusplus
 
 #endif  /* PPAPI_C_PP_BOOL_H_ */

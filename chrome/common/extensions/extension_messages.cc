@@ -19,7 +19,8 @@ ExtensionMsg_Loaded_Params::ExtensionMsg_Loaded_Params(
     : manifest(other.manifest->DeepCopy()),
       location(other.location),
       path(other.path),
-      id(other.id) {
+      id(other.id),
+      creation_flags(other.creation_flags) {
 }
 
 ExtensionMsg_Loaded_Params::ExtensionMsg_Loaded_Params(
@@ -27,7 +28,8 @@ ExtensionMsg_Loaded_Params::ExtensionMsg_Loaded_Params(
     : manifest(new DictionaryValue()),
       location(extension->location()),
       path(extension->path()),
-      id(extension->id()) {
+      id(extension->id()),
+      creation_flags(extension->creation_flags()) {
   // As we need more bits of extension data in the renderer, add more keys to
   // this list.
   const char* kRendererExtensionKeys[] = {
@@ -55,7 +57,7 @@ scoped_refptr<Extension>
   std::string error;
 
   scoped_refptr<Extension> extension(
-      Extension::Create(path, location, *manifest, Extension::NO_FLAGS,
+      Extension::Create(path, location, *manifest, creation_flags,
                         &error));
   if (!extension.get())
     LOG(ERROR) << "Error deserializing extension: " << error;
@@ -99,8 +101,8 @@ bool ParamTraits<URLPattern>::Read(const Message* m, void** iter,
       !ReadParam(m, iter, &spec))
     return false;
 
-  p->set_valid_schemes(valid_schemes);
-  return URLPattern::PARSE_SUCCESS == p->Parse(spec, URLPattern::PARSE_LENIENT);
+  p->SetValidSchemes(valid_schemes);
+  return URLPattern::PARSE_SUCCESS == p->Parse(spec, URLPattern::IGNORE_PORTS);
 }
 
 void ParamTraits<URLPattern>::Log(const param_type& p, std::string* l) {
@@ -113,14 +115,15 @@ void ParamTraits<URLPatternSet>::Write(Message* m, const param_type& p) {
 
 bool ParamTraits<URLPatternSet>::Read(const Message* m, void** iter,
                                         param_type* p) {
-  URLPatternList patterns;
+  std::set<URLPattern> patterns;
   bool success =
       ReadParam(m, iter, &patterns);
   if (!success)
     return false;
 
-  for (size_t i = 0; i < patterns.size(); ++i)
-    p->AddPattern(patterns[i]);
+  for (std::set<URLPattern>::iterator i = patterns.begin();
+       i != patterns.end(); ++i)
+    p->AddPattern(*i);
   return true;
 }
 
@@ -133,6 +136,7 @@ void ParamTraits<ExtensionMsg_Loaded_Params>::Write(Message* m,
   WriteParam(m, p.location);
   WriteParam(m, p.path);
   WriteParam(m, *(p.manifest));
+  WriteParam(m, p.creation_flags);
 }
 
 bool ParamTraits<ExtensionMsg_Loaded_Params>::Read(const Message* m,
@@ -141,7 +145,8 @@ bool ParamTraits<ExtensionMsg_Loaded_Params>::Read(const Message* m,
   p->manifest.reset(new DictionaryValue());
   return ReadParam(m, iter, &p->location) &&
          ReadParam(m, iter, &p->path) &&
-         ReadParam(m, iter, p->manifest.get());
+         ReadParam(m, iter, p->manifest.get()) &&
+         ReadParam(m, iter, &p->creation_flags);
 }
 
 void ParamTraits<ExtensionMsg_Loaded_Params>::Log(const param_type& p,

@@ -14,8 +14,14 @@
 #include "chrome/renderer/autofill/form_manager.h"
 #include "chrome/renderer/page_click_listener.h"
 #include "content/renderer/render_view_observer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebAutoFillClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
+#include "webkit/glue/form_data.h"
+#include "webkit/glue/form_field.h"
+
+namespace webkit_glue {
+struct FormDataPredictions;
+}
 
 namespace autofill {
 
@@ -31,7 +37,7 @@ class PasswordAutofillManager;
 
 class AutofillAgent : public RenderViewObserver,
                       public PageClickListener,
-                      public WebKit::WebAutoFillClient {
+                      public WebKit::WebAutofillClient {
  public:
   // PasswordAutofillManager is guaranteed to outlive AutofillAgent.
   AutofillAgent(RenderView* render_view,
@@ -42,17 +48,17 @@ class AutofillAgent : public RenderViewObserver,
   // use this signal to re-scan the page for forms.
   void FrameTranslated(WebKit::WebFrame* frame);
 
-  // WebKit::WebAutoFillClient implementation.  Public for tests.
-  virtual void didAcceptAutoFillSuggestion(const WebKit::WebNode& node,
+  // WebKit::WebAutofillClient implementation.  Public for tests.
+  virtual void didAcceptAutofillSuggestion(const WebKit::WebNode& node,
                                            const WebKit::WebString& value,
                                            const WebKit::WebString& label,
                                            int unique_id,
                                            unsigned index);
-  virtual void didSelectAutoFillSuggestion(const WebKit::WebNode& node,
+  virtual void didSelectAutofillSuggestion(const WebKit::WebNode& node,
                                            const WebKit::WebString& value,
                                            const WebKit::WebString& label,
                                            int unique_id);
-  virtual void didClearAutoFillSelection(const WebKit::WebNode& node);
+  virtual void didClearAutofillSelection(const WebKit::WebNode& node);
   virtual void removeAutocompleteSuggestion(const WebKit::WebString& name,
                                             const WebKit::WebString& value);
   virtual void textFieldDidEndEditing(const WebKit::WebInputElement& element);
@@ -87,6 +93,8 @@ class AutofillAgent : public RenderViewObserver,
                              const std::vector<string16>& icons,
                              const std::vector<int>& unique_ids);
   void OnFormDataFilled(int query_id, const webkit_glue::FormData& form);
+  void OnFieldTypePredictionsAvailable(
+      const std::vector<webkit_glue::FormDataPredictions>& forms);
 
   // Called in a posted task by textFieldDidChange() to work-around a WebKit bug
   // http://bugs.webkit.org/show_bug.cgi?id=16976
@@ -120,9 +128,6 @@ class AutofillAgent : public RenderViewObserver,
   void FillAutofillFormData(const WebKit::WebNode& node,
                             int unique_id,
                             AutofillAction action);
-
-  // Scans the given frame for forms and sends them up to the browser.
-  void SendForms(WebKit::WebFrame* frame);
 
   // Fills |form| and |field| with the FormData and FormField corresponding to
   // |node|. Returns true if the data was found; and false otherwise.

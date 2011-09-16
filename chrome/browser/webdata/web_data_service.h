@@ -10,12 +10,12 @@
 #include <string>
 #include <vector>
 
-#include "app/sql/init_status.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "content/browser/browser_thread.h"
+#include "sql/init_status.h"
 
 class AutofillChange;
 class AutofillProfile;
@@ -229,9 +229,7 @@ class WebDataService
     virtual ~GenericRequest() {
     }
 
-    T GetArgument() {
-      return arg_;
-    }
+    const T& arg() const { return arg_; }
 
    private:
     T arg_;
@@ -252,13 +250,9 @@ class WebDataService
 
     virtual ~GenericRequest2() { }
 
-    T GetArgument1() {
-      return arg1_;
-    }
+    const T& arg1() const { return arg1_; }
 
-    U GetArgument2() {
-      return arg2_;
-    }
+    const U& arg2() const { return arg2_; }
 
    private:
     T arg1_;
@@ -299,7 +293,7 @@ class WebDataService
   // done on the background thread.
   //
   // Many of the keyword related methods do not return a handle. This is because
-  // the caller (TemplateURLModel) does not need to know when the request is
+  // the caller (TemplateURLService) does not need to know when the request is
   // done.
   void AddKeyword(const TemplateURL& url);
 
@@ -485,8 +479,8 @@ class WebDataService
 #endif
 
  protected:
-  friend class TemplateURLModelTest;
-  friend class TemplateURLModelTestingProfile;
+  friend class TemplateURLServiceTest;
+  friend class TemplateURLServiceTestingProfile;
   friend class WebDataServiceTest;
   friend class WebDataRequest;
 

@@ -226,9 +226,7 @@ HttpRequestInfo WebSocketHandshakeRequestHandler::GetRequestInfo(
     const GURL& url, std::string* challenge) {
   HttpRequestInfo request_info;
   request_info.url = url;
-  base::StringPiece method = status_line_.data();
-  size_t method_end = base::StringPiece(
-      status_line_.data(), status_line_.size()).find_first_of(" ");
+  size_t method_end = base::StringPiece(status_line_).find_first_of(" ");
   if (method_end != base::StringPiece::npos)
     request_info.method = std::string(status_line_.data(), method_end);
 
@@ -437,8 +435,8 @@ bool WebSocketHandshakeResponseHandler::ParseResponseInfo(
   response_message += "\r\n";
 
   if (protocol_version_ < kMinVersionOfHybiNewHandshake) {
-    MD5Digest digest;
-    MD5Sum(challenge.data(), challenge.size(), &digest);
+    base::MD5Digest digest;
+    base::MD5Sum(challenge.data(), challenge.size(), &digest);
 
     const char* digest_data = reinterpret_cast<char*>(digest.a);
     response_message.append(digest_data, sizeof(digest.a));
@@ -492,8 +490,8 @@ bool WebSocketHandshakeResponseHandler::ParseResponseHeaderBlock(
   response_message += "\r\n";
 
   if (protocol_version_ < kMinVersionOfHybiNewHandshake) {
-    MD5Digest digest;
-    MD5Sum(challenge.data(), challenge.size(), &digest);
+    base::MD5Digest digest;
+    base::MD5Sum(challenge.data(), challenge.size(), &digest);
 
     const char* digest_data = reinterpret_cast<char*>(digest.a);
     response_message.append(digest_data, sizeof(digest.a));

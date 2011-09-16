@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "content/browser/browser_child_process_host.h"
 #include "content/browser/renderer_host/pepper_message_filter.h"
+#include "net/base/network_change_notifier.h"
 
 struct PepperPluginInfo;
 
@@ -24,7 +25,10 @@ namespace net {
 class HostResolver;
 }
 
-class PpapiPluginProcessHost : public BrowserChildProcessHost {
+class PpapiPluginProcessHost
+    : public BrowserChildProcessHost,
+      public net::NetworkChangeNotifier::IPAddressObserver,
+      public net::NetworkChangeNotifier::OnlineStateObserver {
  public:
   class Client {
    public:
@@ -70,6 +74,12 @@ class PpapiPluginProcessHost : public BrowserChildProcessHost {
   virtual void OnChannelError();
 
   void CancelRequests();
+
+  // IPAddressObserver implementation.
+  virtual void OnIPAddressChanged() OVERRIDE;
+
+  // OnlineStateObserver implementation.
+  virtual void OnOnlineStateChanged(bool online) OVERRIDE;
 
   // IPC message handlers.
   void OnRendererPluginChannelCreated(const IPC::ChannelHandle& handle);

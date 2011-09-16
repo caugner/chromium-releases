@@ -168,7 +168,6 @@ class WindowOpenPanelTest : public ExtensionApiTest {
   }
 };
 
-// TODO(jianli): Enable it when Panel::CreateNativePanel is implemented.
-IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, DISABLED_WindowOpenPanel) {
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenPanel) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel")) << message_;
 }

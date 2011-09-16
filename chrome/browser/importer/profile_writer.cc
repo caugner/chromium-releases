@@ -15,7 +15,9 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_service.h"
 
@@ -27,7 +29,7 @@ string16 GenerateUniqueFolderName(BookmarkModel* model,
                                   const string16& folder_name) {
   // Build a set containing the bookmark bar folder names.
   std::set<string16> existing_folder_names;
-  const BookmarkNode* bookmark_bar = model->GetBookmarkBarNode();
+  const BookmarkNode* bookmark_bar = model->bookmark_bar_node();
   for (int i = 0; i < bookmark_bar->child_count(); ++i) {
     const BookmarkNode* node = bookmark_bar->GetChild(i);
     if (node->is_folder())
@@ -60,7 +62,7 @@ void ShowBookmarkBar(Profile* profile) {
     prefs->ScheduleSavePersistentPrefs();
     Source<Profile> source(profile);
     NotificationService::current()->Notify(
-        NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED, source,
+        chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED, source,
         NotificationService::NoDetails());
   }
 }
@@ -79,8 +81,8 @@ bool ProfileWriter::BookmarkModelIsLoaded() const {
   return profile_->GetBookmarkModel()->IsLoaded();
 }
 
-bool ProfileWriter::TemplateURLModelIsLoaded() const {
-  return profile_->GetTemplateURLModel()->loaded();
+bool ProfileWriter::TemplateURLServiceIsLoaded() const {
+  return TemplateURLServiceFactory::GetForProfile(profile_)->loaded();
 }
 
 void ProfileWriter::AddPasswordForm(const webkit_glue::PasswordForm& form) {
@@ -121,8 +123,8 @@ void ProfileWriter::AddBookmarks(const std::vector<BookmarkEntry>& bookmarks,
 
   // If the bookmark bar is currently empty, we should import directly to it.
   // Otherwise, we should import everything to a subfolder.
-  const BookmarkNode* bookmark_bar = model->GetBookmarkBarNode();
-  bool import_to_top_level = bookmark_bar->child_count() == 0;
+  const BookmarkNode* bookmark_bar = model->bookmark_bar_node();
+  bool import_to_top_level = bookmark_bar->empty();
 
   // If the user currently has no bookmarks in the bookmark bar, make sure that
   // at least some of the imported bookmarks end up there.  Otherwise, we'll end
@@ -256,8 +258,8 @@ static std::string BuildHostPathKey(const TemplateURL* t_url,
 }
 
 // Builds a set that contains an entry of the host+path for each TemplateURL in
-// the TemplateURLModel that has a valid search url.
-static void BuildHostPathMap(const TemplateURLModel& model,
+// the TemplateURLService that has a valid search url.
+static void BuildHostPathMap(const TemplateURLService& model,
                              HostPathMap* host_path_map) {
   std::vector<const TemplateURL*> template_urls = model.GetTemplateURLs();
   for (size_t i = 0; i < template_urls.size(); ++i) {
@@ -281,7 +283,8 @@ static void BuildHostPathMap(const TemplateURLModel& model,
 void ProfileWriter::AddKeywords(const std::vector<TemplateURL*>& template_urls,
                                 int default_keyword_index,
                                 bool unique_on_host_and_path) {
-  TemplateURLModel* model = profile_->GetTemplateURLModel();
+  TemplateURLService* model =
+      TemplateURLServiceFactory::GetForProfile(profile_);
   HostPathMap host_path_map;
   if (unique_on_host_and_path)
     BuildHostPathMap(*model, &host_path_map);
@@ -293,7 +296,7 @@ void ProfileWriter::AddKeywords(const std::vector<TemplateURL*>& template_urls,
         default_keyword_index >= 0 &&
         (i - template_urls.begin() == default_keyword_index);
 
-    // TemplateURLModel requires keywords to be unique. If there is already a
+    // TemplateURLService requires keywords to be unique. If there is already a
     // TemplateURL with this keyword, don't import it again.
     const TemplateURL* turl_with_keyword =
         model->GetTemplateURLForKeyword(t_url->keyword());

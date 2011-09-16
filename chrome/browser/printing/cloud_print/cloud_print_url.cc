@@ -6,6 +6,8 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/stringprintf.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
@@ -52,7 +54,7 @@ GURL CloudPrintURL::GetCloudPrintServiceDialogURL() {
   replacements.SetPathStr(path);
   GURL cloud_print_dialog_url = cloud_print_service_url.ReplaceComponents(
       replacements);
-  return cloud_print_dialog_url;
+  return google_util::AppendGoogleLocaleParam(cloud_print_dialog_url);
 }
 
 GURL CloudPrintURL::GetCloudPrintServiceManageURL() {
@@ -63,6 +65,20 @@ GURL CloudPrintURL::GetCloudPrintServiceManageURL() {
   GURL cloud_print_manage_url = cloud_print_service_url.ReplaceComponents(
       replacements);
   return cloud_print_manage_url;
+}
+
+GURL CloudPrintURL::GetCloudPrintServiceEnableURL(
+    const std::string& proxy_id) {
+  GURL cloud_print_service_url = GetCloudPrintServiceURL();
+  std::string path(cloud_print_service_url.path() +
+      "/enable_chrome_connector/enable.html");
+  GURL::Replacements replacements;
+  replacements.SetPathStr(path);
+  std::string query = StringPrintf("proxy=%s", proxy_id.c_str());
+  replacements.SetQueryStr(query);
+  GURL cloud_print_enable_url = cloud_print_service_url.ReplaceComponents(
+      replacements);
+  return cloud_print_enable_url;
 }
 
 GURL CloudPrintURL::GetCloudPrintLearnMoreURL() {

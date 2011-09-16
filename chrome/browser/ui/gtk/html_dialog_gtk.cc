@@ -28,6 +28,26 @@ gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent, Profile* profile,
 
 } // namespace browser
 
+namespace {
+
+void SetDialogStyle() {
+  static bool style_was_set = false;
+
+  if (style_was_set)
+    return;
+  style_was_set = true;
+
+  gtk_rc_parse_string(
+      "style \"chrome-html-dialog\" {\n"
+      "  GtkDialog::action-area-border = 0\n"
+      "  GtkDialog::content-area-border = 0\n"
+      "  GtkDialog::content-area-spacing = 0\n"
+      "}\n"
+      "widget \"*chrome-html-dialog\" style \"chrome-html-dialog\"");
+}
+
+}  // namespace
+
 ////////////////////////////////////////////////////////////////////////////////
 // HtmlDialogGtk, public:
 
@@ -96,17 +116,27 @@ void HtmlDialogGtk::OnDialogClosed(const std::string& json_retval) {
   delete this;
 }
 
+void HtmlDialogGtk::OnCloseContents(TabContents* source,
+                                    bool* out_close_dialog) {
+  if (delegate_)
+    delegate_->OnCloseContents(source, out_close_dialog);
+}
+
+void HtmlDialogGtk::CloseContents(TabContents* source) {
+  DCHECK(dialog_);
+
+  bool close_dialog = false;
+  OnCloseContents(source, &close_dialog);
+  if (close_dialog)
+    OnDialogClosed(std::string());
+}
+
 bool HtmlDialogGtk::ShouldShowDialogTitle() const {
   return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // TabContentsDelegate implementation:
-
-void HtmlDialogGtk::MoveContents(TabContents* source, const gfx::Rect& pos) {
-  // The contained web page wishes to resize itself. We let it do this because
-  // if it's a dialog we know about, we trust it not to be mean to the user.
-}
 
 // A simplified version of BrowserWindowGtk::HandleKeyboardEvent().
 // We don't handle global keyboard shortcuts here, but that's fine since
@@ -146,6 +176,8 @@ gfx::NativeWindow HtmlDialogGtk::InitDialog() {
       flags,
       NULL);
 
+  SetDialogStyle();
+  gtk_widget_set_name(dialog_, "chrome-html-dialog");
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
 
   tab_contents_container_.reset(new TabContentsContainerGtk(NULL));

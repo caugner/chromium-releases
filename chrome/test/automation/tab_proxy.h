@@ -18,33 +18,24 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
-#include "chrome/browser/download/save_package.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 #include "chrome/test/automation/dom_element_proxy.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
+#include "content/browser/download/save_package.h"
 #include "content/common/page_type.h"
 #include "content/common/security_style.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class BrowserProxy;
 class GURL;
-class Value;
 namespace IPC {
 class Message;
 }
 
-enum FindInPageDirection { BACK = 0, FWD = 1 };
-enum FindInPageCase { IGNORE_CASE = 0, CASE_SENSITIVE = 1 };
-// Specifies the font size on a page which is requested by an automation
-// client.
-enum AutomationPageFontSize {
-  SMALLEST_FONT = 8,
-  SMALL_FONT = 12,
-  MEDIUM_FONT = 16,
-  LARGE_FONT = 24,
-  LARGEST_FONT = 36
-};
+namespace base {
+class Value;
+}
 
 class TabProxy : public AutomationResourceProxy,
                  public JavaScriptExecutionController {
@@ -99,7 +90,7 @@ class TabProxy : public AutomationResourceProxy,
                             int* value) WARN_UNUSED_RESULT;
   bool ExecuteAndExtractValue(const std::wstring& frame_xpath,
                               const std::wstring& jscript,
-                              Value** value) WARN_UNUSED_RESULT;
+                              base::Value** value) WARN_UNUSED_RESULT;
 
   // Returns a DOMElementProxyRef to the tab's current DOM document.
   // This proxy is invalidated when the document changes.

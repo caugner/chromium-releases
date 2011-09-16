@@ -162,6 +162,10 @@ html[anim=false] *,
   -webkit-padding-start: 20px;
 }
 
+#notification .link > * {
+  outline: none;
+}
+
 #notification .link-color {
   color: rgb(0, 102, 204);
 }
@@ -182,6 +186,7 @@ html[anim=false] *,
   background-color: hsla(213, 63%, 93%, 0);
   display: block;
   line-height: 20px;
+  max-width: 600px;
   box-sizing: border-box;
   white-space: nowrap;
   overflow: hidden;

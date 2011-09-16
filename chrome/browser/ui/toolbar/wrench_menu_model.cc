@@ -17,20 +17,22 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/upgrade_detector.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -41,10 +43,6 @@
 #if defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#endif
-
-#if defined(OS_MACOSX)
-#include "chrome/browser/ui/browser_window.h"
 #endif
 
 #if defined(OS_WIN)
@@ -200,8 +198,10 @@ BookmarkSubMenuModel::~BookmarkSubMenuModel() {}
 void BookmarkSubMenuModel::Build(Browser* browser) {
   AddCheckItemWithStringId(IDC_SHOW_BOOKMARK_BAR, IDS_SHOW_BOOKMARK_BAR);
   AddItemWithStringId(IDC_SHOW_BOOKMARK_MANAGER, IDS_BOOKMARK_MANAGER);
+#if !defined(OS_CHROMEOS)
   AddItemWithStringId(IDC_IMPORT_SETTINGS, IDS_IMPORT_SETTINGS_TITLE);
-#if defined(OS_MACOSX) || defined(TOOLKIT_VIEWS)
+#endif
+#if defined(OS_MACOSX)
   AddSeparator();
 #else
   // TODO: add submenu for bookmarks themselves, restore separator.
@@ -223,9 +223,9 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
 
   tabstrip_model_->AddObserver(this);
 
-  registrar_.Add(this, NotificationType::ZOOM_LEVEL_CHANGED,
+  registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
                  Source<HostZoomMap>(browser_->profile()->GetHostZoomMap()));
-  registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
+  registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                  NotificationService::AllSources());
 }
 
@@ -318,11 +318,13 @@ bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
 }
 
 bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
-  if (command_id == IDC_SHOW_BOOKMARK_BAR) {
-    return !browser_->profile()->GetPrefs()->IsManagedPreference(
-        prefs::kEnableBookmarkBar);
+  switch (command_id) {
+    case IDC_SHOW_BOOKMARK_BAR:
+      return !browser_->profile()->GetPrefs()->IsManagedPreference(
+          prefs::kEnableBookmarkBar);
+    default:
+      return browser_->command_updater()->IsCommandEnabled(command_id);
   }
-  return browser_->command_updater()->IsCommandEnabled(command_id);
 }
 
 bool WrenchMenuModel::IsCommandIdVisible(int command_id) const {
@@ -374,12 +376,12 @@ void WrenchMenuModel::TabStripModelDeleted() {
   tabstrip_model_ = NULL;
 }
 
-void WrenchMenuModel::Observe(NotificationType type,
+void WrenchMenuModel::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::ZOOM_LEVEL_CHANGED:
-    case NotificationType::NAV_ENTRY_COMMITTED:
+  switch (type) {
+    case content::NOTIFICATION_ZOOM_LEVEL_CHANGED:
+    case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
       UpdateZoomControls();
       break;
     default:
@@ -457,6 +459,16 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
   AddSeparator();
+
+#if !defined(OS_CHROMEOS)
+  if (ProfileManager::IsMultipleProfilesEnabled()) {
+    const string16 short_product_name =
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
+    AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
+        IDS_SHOW_SYNC_SETUP, short_product_name));
+    AddSeparator();
+  }
+#endif
 
 #if defined(OS_CHROMEOS)
   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);

@@ -5,9 +5,13 @@
 #ifndef REMOTING_HOST_CLIENT_SESSION_H_
 #define REMOTING_HOST_CLIENT_SESSION_H_
 
+#include <list>
+#include <set>
+
 #include "remoting/protocol/connection_to_client.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_stub.h"
+#include "ui/gfx/point.h"
 
 namespace remoting {
 
@@ -42,8 +46,6 @@ class ClientSession : public protocol::HostStub,
                 protocol::InputStub* input_stub);
 
   // protocol::HostStub interface.
-  virtual void SuggestResolution(
-      const protocol::SuggestResolutionRequest* msg, Task* done);
   virtual void BeginSessionRequest(
       const protocol::LocalLoginCredentials* credentials, Task* done);
 
@@ -65,9 +67,31 @@ class ClientSession : public protocol::HostStub,
     return authenticated_;
   }
 
+  void set_awaiting_continue_approval(bool awaiting) {
+    awaiting_continue_approval_ = awaiting;
+  }
+
+  // Indicate that local mouse activity has been detected. This causes remote
+  // inputs to be ignored for a short time so that the local user will always
+  // have the upper hand in 'pointer wars'.
+  void LocalMouseMoved(const gfx::Point& new_pos);
+
+  bool ShouldIgnoreRemoteMouseInput(const protocol::MouseEvent* event) const;
+  bool ShouldIgnoreRemoteKeyboardInput(const protocol::KeyEvent* event) const;
+
  private:
   friend class base::RefCountedThreadSafe<ClientSession>;
+  friend class ClientSessionTest_UnpressKeys_Test;
   virtual ~ClientSession();
+
+  // Keep track of keydowns and keyups so that we can clean up the keyboard
+  // state when the user disconnects.
+  void RecordKeyEvent(const protocol::KeyEvent* event);
+
+  // Synthesize KeyUp events for keys that have been pressed but not released.
+  // This should be used when the client has disconnected to clear out any
+  // pending key events.
+  void UnpressKeys();
 
   EventHandler* event_handler_;
 
@@ -82,6 +106,16 @@ class ClientSession : public protocol::HostStub,
 
   // Whether this client is authenticated.
   bool authenticated_;
+
+  // Whether or not inputs from this client are blocked pending approval from
+  // the host user to continue the connection.
+  bool awaiting_continue_approval_;
+
+  // State to control remote input blocking while the local pointer is in use.
+  uint32 remote_mouse_button_state_;
+  std::list<gfx::Point> recent_remote_mouse_positions_;
+  base::Time latest_local_input_time_;
+  std::set<int> pressed_keys_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSession);
 };

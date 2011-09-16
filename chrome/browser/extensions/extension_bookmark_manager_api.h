@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,22 @@
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/extensions/extension_bookmarks_module.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 
 struct BookmarkNodeData;
-class ListValue;
 class Profile;
-class TabContents;
+class TabContentsWrapper;
+
+namespace base {
+class ListValue;
+}
 
 // Class that handles the chrome.experimental.bookmarkManager events.
 class ExtensionBookmarkManagerEventRouter
-    : public RenderViewHostDelegate::BookmarkDrag {
+    : public BookmarkTabHelper::BookmarkDrag {
  public:
   ExtensionBookmarkManagerEventRouter(Profile* profile,
-                                      TabContents* tab_contents);
+                                      TabContentsWrapper* tab);
   virtual ~ExtensionBookmarkManagerEventRouter();
 
   // RenderViewHostDelegate::BookmarkDrag interface
@@ -39,12 +42,12 @@ class ExtensionBookmarkManagerEventRouter
 
  private:
   // Helper to actually dispatch an event to extension listeners.
-  void DispatchEvent(const char* event_name, const ListValue* args);
+  void DispatchEvent(const char* event_name, const base::ListValue* args);
 
   void DispatchDragEvent(const BookmarkNodeData& data, const char* event_name);
 
   Profile* profile_;
-  TabContents* tab_contents_;
+  TabContentsWrapper* tab_;
   BookmarkNodeData bookmark_drag_data_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionBookmarkManagerEventRouter);
@@ -57,8 +60,7 @@ class ClipboardBookmarkManagerFunction : public BookmarksFunction {
 
 class CopyBookmarkManagerFunction : public ClipboardBookmarkManagerFunction {
  public:
-  // Override ClipboardBookmarkManagerFunction.
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.copy");
@@ -66,8 +68,7 @@ class CopyBookmarkManagerFunction : public ClipboardBookmarkManagerFunction {
 
 class CutBookmarkManagerFunction : public ClipboardBookmarkManagerFunction {
  public:
-  // Override ClipboardBookmarkManagerFunction.
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.cut");
@@ -75,48 +76,39 @@ class CutBookmarkManagerFunction : public ClipboardBookmarkManagerFunction {
 
 class PasteBookmarkManagerFunction : public BookmarksFunction {
  public:
-  // Override BookmarksFunction.
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.paste");
 };
 
-class CanPasteBookmarkManagerFunction
-    : public BookmarksFunction {
+class CanPasteBookmarkManagerFunction : public BookmarksFunction {
  public:
-  // Override BookmarksFunction.
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.canPaste");
 };
 
-class SortChildrenBookmarkManagerFunction
-    : public BookmarksFunction {
+class SortChildrenBookmarkManagerFunction : public BookmarksFunction {
  public:
-  // Override BookmarksFunction.
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
-  DECLARE_EXTENSION_FUNCTION_NAME(
-      "experimental.bookmarkManager.sortChildren");
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.sortChildren");
 };
 
 class BookmarkManagerGetStringsFunction : public AsyncExtensionFunction {
  public:
-  // Override AsyncExtensionFunction.
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.getStrings");
 };
 
-class StartDragBookmarkManagerFunction
-    : public BookmarksFunction {
+class StartDragBookmarkManagerFunction : public BookmarksFunction {
  public:
-  // Override BookmarksFunction.
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.startDrag");
@@ -124,20 +116,26 @@ class StartDragBookmarkManagerFunction
 
 class DropBookmarkManagerFunction : public BookmarksFunction {
  public:
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.drop");
 };
 
-
 class GetSubtreeBookmarkManagerFunction : public BookmarksFunction {
  public:
-  // Override BookmarksFunction
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.getSubtree");
+};
+
+class CanEditBookmarkManagerFunction : public BookmarksFunction {
+ public:
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bookmarkManager.canEdit");
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_BOOKMARK_MANAGER_API_H_

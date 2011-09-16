@@ -10,6 +10,8 @@
 
 #include "base/base_api.h"
 
+namespace base {
+
 // MD5 stands for Message Digest algorithm 5.
 // MD5 is a robust hash function, designed for cyptography, but often used
 // for file checksums.  The code is complex and slow, but has few
@@ -33,10 +35,10 @@
 //
 // You can call MD5DigestToBase16() to generate a string of the digest.
 
-// The output of an MD5 operation
-typedef struct MD5Digest_struct {
+// The output of an MD5 operation.
+struct MD5Digest {
   unsigned char a[16];
-} MD5Digest;
+};
 
 // Used for storing intermediate data during an MD5 computation. Callers
 // should not access the data.
@@ -53,10 +55,10 @@ BASE_API void MD5Init(MD5Context* context);
 // For the given buffer of data, updates the given MD5 context with the sum of
 // the data. You can call this any number of times during the computation,
 // except that MD5Init() must have been called first.
-BASE_API void MD5Update(MD5Context* context, const void* buf, size_t len);
+BASE_API void MD5Update(MD5Context* context, const void* data, size_t length);
 
 // Finalizes the MD5 operation and fills the buffer with the digest.
-BASE_API void MD5Final(MD5Digest* digest, MD5Context* pCtx);
+BASE_API void MD5Final(MD5Digest* digest, MD5Context* context);
 
 // Converts a digest into human-readable hexadecimal.
 BASE_API std::string MD5DigestToBase16(const MD5Digest& digest);
@@ -64,5 +66,9 @@ BASE_API std::string MD5DigestToBase16(const MD5Digest& digest);
 // Returns the MD5 (in hexadecimal) of a string.
 BASE_API std::string MD5String(const std::string& str);
 
-#endif  // BASE_MD5_H_
+}  // namespace base
 
+// TODO(tfarina): Fix third_party/hunspell then remove this hack.
+using base::MD5Digest;
+
+#endif  // BASE_MD5_H_

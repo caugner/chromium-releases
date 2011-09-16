@@ -283,7 +283,8 @@ cr.define('gpu', function() {
       for (var i = 0; i < slices.length; ++i) {
         var slice = slices[i];
         var x = slice.start;
-        var w = slice.duration;
+        // Less than 0.001 causes short events to disappear when zoomed in.
+        var w = Math.max(slice.duration, 0.001);
         var colorId;
         colorId = slice.selected ?
             slice.colorId + selectedIdBoost :
@@ -306,11 +307,15 @@ cr.define('gpu', function() {
       for (var i = 0; i < slices.length; ++i) {
         var slice = slices[i];
         if (slice.duration > quickDiscardThresshold) {
-          var labelWidth = quickMeasureText(ctx, slice.title) + 2;
+          var title = slice.title;
+          if (slice.didNotFinish) {
+            title += " (Did Not Finish)";
+          }
+          var labelWidth = quickMeasureText(ctx, title) + 2;
           var labelWidthWorld = pixWidth * labelWidth;
           if (labelWidthWorld < slice.duration) {
             var cX = vp.xWorldToView(slice.start + 0.5 * slice.duration);
-            ctx.fillText(slice.title, cX, 2.5);
+            ctx.fillText(title, cX, 2.5);
           }
         }
       }

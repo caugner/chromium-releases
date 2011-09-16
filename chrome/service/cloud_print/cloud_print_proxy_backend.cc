@@ -10,12 +10,13 @@
 #include "base/file_util.h"
 #include "base/md5.h"
 #include "base/rand_util.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/net/gaia/gaia_oauth_client.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/cloud_print/cloud_print_helpers.h"
 #include "chrome/service/cloud_print/cloud_print_token_store.h"
@@ -412,7 +413,8 @@ void CloudPrintProxyBackend::Core::DoInitializeWithLsid(
   std::string user_agent = "ChromiumBrowser";
   scoped_refptr<ServiceGaiaAuthenticator> gaia_auth_for_print(
       new ServiceGaiaAuthenticator(
-          user_agent, kCloudPrintGaiaServiceId, kGaiaUrl,
+          user_agent, kCloudPrintGaiaServiceId,
+          GaiaUrls::GetInstance()->client_login_url(),
           g_service_process->io_thread()->message_loop_proxy()));
   gaia_auth_for_print->set_message_loop(MessageLoop::current());
   if (gaia_auth_for_print->AuthenticateWithLsid(lsid)) {
@@ -680,7 +682,7 @@ void CloudPrintProxyBackend::Core::OnReceivePrinterCaps(
     // later to check if the capabilities have changed
     CloudPrintHelpers::AddMultipartValueForUpload(
         kPrinterCapsHashValue,
-        MD5String(last_uploaded_printer_info_.printer_capabilities),
+        base::MD5String(last_uploaded_printer_info_.printer_capabilities),
         mime_boundary, std::string(), &post_data);
     GURL post_url = CloudPrintHelpers::GetUrlForPrinterRegistration(
         cloud_print_server_url_);
@@ -843,9 +845,8 @@ CloudPrintProxyBackend::Core::HandlePrinterListResponse(
     return CloudPrintURLFetcher::RETRY_REQUEST;
   }
   ListValue* printer_list = NULL;
-  json_data->GetList(kPrinterListValue, &printer_list);
   // There may be no "printers" value in the JSON
-  if (printer_list) {
+  if (json_data->GetList(kPrinterListValue, &printer_list) && printer_list) {
     for (size_t index = 0; index < printer_list->GetSize(); index++) {
       DictionaryValue* printer_data = NULL;
       if (printer_list->GetDictionary(index, &printer_data)) {
@@ -897,12 +898,11 @@ void CloudPrintProxyBackend::Core::InitJobHandlerForPrinter(
     printer_data->GetString(kPrinterCapsHashValue,
         &printer_info_cloud.caps_hash);
     ListValue* tags_list = NULL;
-    printer_data->GetList(kTagsValue, &tags_list);
-    if (tags_list) {
+    if (printer_data->GetList(kTagsValue, &tags_list) && tags_list) {
       for (size_t index = 0; index < tags_list->GetSize(); index++) {
         std::string tag;
-        tags_list->GetString(index, &tag);
-        if (StartsWithASCII(tag, kTagsHashTagName, false)) {
+        if (tags_list->GetString(index, &tag) &&
+            StartsWithASCII(tag, kTagsHashTagName, false)) {
           std::vector<std::string> tag_parts;
           base::SplitStringDontTrim(tag, '=', &tag_parts);
           DCHECK_EQ(tag_parts.size(), 2U);
@@ -961,10 +961,8 @@ CloudPrintProxyBackend::Core::HandleRegisterPrinterResponse(
   DCHECK(MessageLoop::current() == backend_->core_thread_.message_loop());
   if (succeeded) {
     ListValue* printer_list = NULL;
-    json_data->GetList(kPrinterListValue, &printer_list);
     // There should be a "printers" value in the JSON
-    DCHECK(printer_list);
-    if (printer_list) {
+    if (json_data->GetList(kPrinterListValue, &printer_list)) {
       DictionaryValue* printer_data = NULL;
       if (printer_list->GetDictionary(0, &printer_data))
         InitJobHandlerForPrinter(printer_data);

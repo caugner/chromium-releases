@@ -6,7 +6,6 @@
 
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"  // TODO(viettrungluu): remove
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -26,7 +25,7 @@ class BookmarkBubbleNotificationBridge : public NotificationObserver {
   BookmarkBubbleNotificationBridge(BookmarkBubbleController* controller,
                                    SEL selector);
   virtual ~BookmarkBubbleNotificationBridge() {}
-  void Observe(NotificationType type,
+  void Observe(int type,
                const NotificationSource& source,
                const NotificationDetails& details);
  private:
@@ -40,16 +39,16 @@ BookmarkBubbleNotificationBridge::BookmarkBubbleNotificationBridge(
     : controller_(controller), selector_(selector) {
   // registrar_ will automatically RemoveAll() when destroyed so we
   // don't need to do so explicitly.
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::TAB_CLOSED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
                  NotificationService::AllSources());
 }
 
 // At this time all notifications instigate the same behavior (go
 // away) so we don't bother checking which notification came in.
 void BookmarkBubbleNotificationBridge::Observe(
-  NotificationType type,
+  int type,
   const NotificationSource& source,
   const NotificationDetails& details) {
   [controller_ performSelector:selector_ withObject:controller_];
@@ -116,7 +115,7 @@ void BookmarkBubbleNotificationBridge::Observe(
 // until we find something visible to pulse.
 - (void)startPulsingBookmarkButton:(const BookmarkNode*)node  {
   while (node) {
-    if ((node->parent() == model_->GetBookmarkBarNode()) ||
+    if ((node->parent() == model_->bookmark_bar_node()) ||
         (node == model_->other_node())) {
       pulsingBookmarkNode_ = node;
       NSValue *value = [NSValue valueWithPointer:node];
@@ -276,8 +275,7 @@ void BookmarkBubbleNotificationBridge::Observe(
 
 - (IBAction)remove:(id)sender {
   [self stopPulsingBookmarkButton];
-  // TODO(viettrungluu): get rid of conversion and utf_string_conversions.h.
-  model_->SetURLStarred(node_->GetURL(), node_->GetTitle(), false);
+  model_->SetURLStarred(node_->url(), node_->GetTitle(), false);
   UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Unstar"));
   node_ = NULL;  // no longer valid
   [self ok:sender];

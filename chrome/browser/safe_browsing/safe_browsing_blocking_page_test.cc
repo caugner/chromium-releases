@@ -253,8 +253,7 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
                     SafeBrowsingService::UrlCheckResult checkresult) {
     FakeSafeBrowsingService* service =
         static_cast<FakeSafeBrowsingService*>(
-            g_browser_process->resource_dispatcher_host()->
-            safe_browsing_service());
+            g_browser_process->safe_browsing_service());
 
     ASSERT_TRUE(service);
     service->AddURLResult(url, checkresult);
@@ -316,7 +315,7 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
     TabContents* contents = browser()->GetSelectedTabContents();
     if (!InterstitialPage::GetInterstitialPage(contents))
       ui_test_utils::WaitForNotificationFrom(
-          NotificationType::INTERSTITIAL_ATTACHED,
+          content::NOTIFICATION_INTERSTITIAL_ATTACHED,
           Source<TabContents>(contents));
   }
 
@@ -332,8 +331,7 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
 
     FakeSafeBrowsingService* service =
         static_cast<FakeSafeBrowsingService*>(
-            g_browser_process->resource_dispatcher_host()->
-            safe_browsing_service());
+            g_browser_process->safe_browsing_service());
 
     std::string serialized = service->GetReport();
 
@@ -469,7 +467,8 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingReportError) {
             browser()->GetSelectedTabContents()->GetURL().path());
 }
 
-IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingLearnMore) {
+IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
+                       PhishingLearnMore) {
   GURL url = test_server()->GetURL(kEmptyPage);
   AddURLResult(url, SafeBrowsingService::URL_PHISHING);
 

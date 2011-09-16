@@ -1,4 +1,4 @@
-// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@ WebWidgetHost* WebWidgetHost::Create(NSView* parent_view,
   host->view_ = [[NSView alloc] initWithFrame:content_rect];
   [parent_view addSubview:host->view_];
 
-  // app::win::SetWindowUserData(host->hwnd_, host);
+  // ui::SetWindowUserData(host->hwnd_, host);
 
   host->webwidget_ = WebPopupMenu::create(client);
   host->webwidget_->resize(WebSize(content_rect.size.width,
@@ -155,7 +155,7 @@ WebWidgetHost::WebWidgetHost()
 }
 
 WebWidgetHost::~WebWidgetHost() {
-  // app::win::SetWindowUserData(hwnd_, 0);
+  // ui::SetWindowUserData(hwnd_, 0);
 
   webwidget_->close();
 }
@@ -184,7 +184,11 @@ void WebWidgetHost::Paint() {
       [NSGraphicsContext graphicsContextWithGraphicsPort:bitmap_context
                                                  flipped:YES]];
 
+#ifdef WEBWIDGET_HAS_ANIMATE_CHANGES
+  webwidget_->animate(0.0);
+#else
   webwidget_->animate();
+#endif
 
   // This may result in more invalidation
   webwidget_->layout();

@@ -431,12 +431,6 @@ TEST_F(TransportSecurityStateTest, Preloaded) {
   EXPECT_TRUE(state->IsEnabledForHost(&domain_state,
                                       "chrome.google.com",
                                       true));
-  EXPECT_FALSE(state->IsEnabledForHost(&domain_state,
-                                       "foo.latest.chrome.google.com",
-                                       true));
-  EXPECT_TRUE(state->IsEnabledForHost(&domain_state,
-                                      "latest.chrome.google.com",
-                                      true));
   EXPECT_TRUE(state->IsEnabledForHost(&domain_state,
                                       "checkout.google.com",
                                       true));
@@ -497,6 +491,11 @@ TEST_F(TransportSecurityStateTest, Preloaded) {
   EXPECT_TRUE(state->IsEnabledForHost(&domain_state,
                                       "talkgadget.google.com",
                                       true));
+  EXPECT_TRUE(state->IsEnabledForHost(&domain_state,
+                                      "hostedtalkgadget.google.com",
+                                      true));
+  EXPECT_TRUE(state->IsEnabledForHost(&domain_state, "talk.google.com", true));
+  EXPECT_TRUE(state->IsEnabledForHost(&domain_state, "plus.google.com", true));
 
   EXPECT_TRUE(state->IsEnabledForHost(&domain_state, "entropia.de", true));
   EXPECT_TRUE(state->IsEnabledForHost(&domain_state, "www.entropia.de", true));
@@ -615,6 +614,13 @@ TEST_F(TransportSecurityStateTest, Preloaded) {
   EXPECT_FALSE(state->IsEnabledForHost(&domain_state,
                                        "foo.squareup.com",
                                        false));
+
+  EXPECT_TRUE(state->IsEnabledForHost(&domain_state,
+                                      "cert.se",
+                                      false));
+  EXPECT_TRUE(state->IsEnabledForHost(&domain_state,
+                                      "foo.cert.se",
+                                       false));
 }
 
 TEST_F(TransportSecurityStateTest, LongNames) {
@@ -706,6 +712,11 @@ TEST_F(TransportSecurityStateTest, BuiltinCertPins) {
   EXPECT_TRUE(state->HasPinsForHost(&domain_state,
                                     "talkgadget.google.com",
                                     true));
+  EXPECT_TRUE(state->HasPinsForHost(&domain_state,
+                                    "hostedtalkgadget.google.com",
+                                    true));
+  EXPECT_TRUE(state->HasPinsForHost(&domain_state, "talk.google.com", true));
+  EXPECT_TRUE(state->HasPinsForHost(&domain_state, "plus.google.com", true));
   EXPECT_TRUE(state->HasPinsForHost(&domain_state, "ssl.gstatic.com", true));
   EXPECT_FALSE(state->HasPinsForHost(&domain_state, "www.gstatic.com", true));
   EXPECT_TRUE(state->HasPinsForHost(&domain_state,

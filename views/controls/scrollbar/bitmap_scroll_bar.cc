@@ -13,7 +13,7 @@
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "grit/app_strings.h"
+#include "grit/ui_strings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -21,7 +21,6 @@
 #include "views/controls/menu/menu.h"
 #include "views/controls/scroll_view.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 #undef min
 #undef max
@@ -300,10 +299,10 @@ BitmapScrollBar::BitmapScrollBar(bool horizontal, bool show_scroll_buttons)
   AddChildView(next_button_);
   AddChildView(thumb_);
 
-  SetContextMenuController(this);
-  prev_button_->SetContextMenuController(this);
-  next_button_->SetContextMenuController(this);
-  thumb_->SetContextMenuController(this);
+  set_context_menu_controller(this);
+  prev_button_->set_context_menu_controller(this);
+  next_button_->set_context_menu_controller(this);
+  thumb_->set_context_menu_controller(this);
 }
 
 gfx::Rect BitmapScrollBar::GetTrackBounds() const {

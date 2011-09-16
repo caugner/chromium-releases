@@ -7,11 +7,12 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "chrome/browser/debugger/debugger_remote_service.h"
-#include "chrome/browser/debugger/devtools_client_host.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "content/browser/debugger/devtools_client_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/devtools_messages.h"
 
@@ -34,7 +35,7 @@ void DevToolsClientHostImpl::InspectedTabClosing() {
 }
 
 // The remote debugger has detached.
-void DevToolsClientHostImpl::Close() {
+void DevToolsClientHostImpl::CloseImpl() {
   NotifyCloseListener();
   delete this;
 }
@@ -48,9 +49,14 @@ void DevToolsClientHostImpl::SendMessageToClient(
   IPC_END_MESSAGE_MAP()
 }
 
-void DevToolsClientHostImpl::TabReplaced(TabContentsWrapper* new_tab) {
+void DevToolsClientHostImpl::TabReplaced(TabContents* new_tab) {
   map_->erase(id_);
-  id_ = new_tab->controller().session_id().id();
+  TabContentsWrapper* new_tab_wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(new_tab);
+  DCHECK(new_tab_wrapper);
+  if (!new_tab_wrapper)
+    return;
+  id_ = new_tab_wrapper->restore_tab_helper()->session_id().id();
   (*map_)[id_] = this;
 }
 
@@ -70,19 +76,17 @@ InspectableTabProxy::InspectableTabProxy() {}
 
 InspectableTabProxy::~InspectableTabProxy() {}
 
-const InspectableTabProxy::ControllersMap&
-    InspectableTabProxy::controllers_map() {
-  controllers_map_.clear();
+const InspectableTabProxy::TabMap& InspectableTabProxy::tab_map() {
+  tab_map_.clear();
   for (BrowserList::const_iterator it = BrowserList::begin(),
        end = BrowserList::end(); it != end; ++it) {
     TabStripModel* model = (*it)->tabstrip_model();
     for (int i = 0, size = model->count(); i < size; ++i) {
-      NavigationController& controller =
-          model->GetTabContentsAt(i)->controller();
-      controllers_map_[controller.session_id().id()] = &controller;
+      TabContentsWrapper* tab = model->GetTabContentsAt(i);
+      tab_map_[tab->restore_tab_helper()->session_id().id()] = tab;
     }
   }
-  return controllers_map_;
+  return tab_map_;
 }
 
 DevToolsClientHostImpl* InspectableTabProxy::ClientHostForTabId(

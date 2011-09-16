@@ -264,29 +264,12 @@
           },
           'link_settings': {
             'ldflags': [
-              '<!@(<(pkg-config) --libs-only-L --libs-only-other x11)',
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other x11 xi)',
             ],
             'libraries': [
-              '<!@(<(pkg-config) --libs-only-l x11)',
+              '<!@(<(pkg-config) --libs-only-l x11 xi)',
             ],
           },
-      }],
-      # When XInput2 is available (i.e. inputproto version is 2.0), the
-      # pkg-config command will succeed, so the output will be empty.
-      ['"<!@(<(pkg-config) --atleast-version=2.0 inputproto || echo $?)"==""', {
-        'direct_dependent_settings': {
-          'defines': [
-            'HAVE_XINPUT2',
-          ],
-        },
-        'link_settings': {
-          'ldflags': [
-            '<!@(<(pkg-config) --libs-only-L --libs-only-other xi)',
-          ],
-          'libraries': [
-            '<!@(<(pkg-config) --libs-only-l xi)',
-          ],
-        }
       }],
       ],
     },
@@ -314,7 +297,7 @@
       'target_name': 'libgcrypt',
       'type': 'settings',
       'conditions': [
-        ['_toolset=="target"', {
+        ['_toolset=="target" and use_cups==1', {
           'direct_dependent_settings': {
             'cflags': [
               '<!@(libgcrypt-config --cflags)',
@@ -340,7 +323,7 @@
       }]]
     },
     {
-      'target_name': 'gnome-keyring',
+      'target_name': 'gnome_keyring',
       'type': 'settings',
       'conditions': [
         ['use_gnome_keyring==1', {
@@ -379,6 +362,57 @@
       ],
     },
     {
+      # The unit tests use a few convenience functions from the GNOME
+      # Keyring library directly. We ignore linux_link_gnome_keyring and
+      # link directly in this version of the target to allow this.
+      # *** Do not use this target in the main binary! ***
+      'target_name': 'gnome_keyring_direct',
+      'type': 'settings',
+      'conditions': [
+        ['use_gnome_keyring==1', {
+          'direct_dependent_settings': {
+            'cflags': [
+              '<!@(<(pkg-config) --cflags gnome-keyring-1)',
+            ],
+            'defines': [
+              'USE_GNOME_KEYRING',
+            ],
+            'conditions': [
+              ['linux_link_gnome_keyring==0', {
+                'defines': ['DLOPEN_GNOME_KEYRING'],
+              }],
+            ],
+          },
+          'link_settings': {
+            'ldflags': [
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other gnome-keyring-1)',
+            ],
+            'libraries': [
+              '<!@(<(pkg-config) --libs-only-l gnome-keyring-1)',
+            ],
+          },
+        }],
+      ],
+    },
+    {
+      'target_name': 'dbus',
+      'type': 'settings',
+      'direct_dependent_settings': {
+        'cflags': [
+          '<!@(<(pkg-config) --cflags dbus-1)',
+        ],
+      },
+      'link_settings': {
+        'ldflags': [
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other dbus-1)',
+        ],
+        'libraries': [
+          '<!@(<(pkg-config) --libs-only-l dbus-1)',
+        ],
+      },
+    },
+    {
+      # TODO(satorux): Remove this once dbus-glib clients are gone.
       'target_name': 'dbus-glib',
       'type': 'settings',
       'direct_dependent_settings': {
@@ -431,9 +465,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

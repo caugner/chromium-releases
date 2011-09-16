@@ -22,20 +22,17 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/logging_chrome.h"
 #include "content/browser/appcache/appcache_dispatcher_host.h"
 #include "content/browser/browser_child_process_host.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/content_browser_client.h"
 #include "content/browser/device_orientation/message_filter.h"
+#include "content/browser/download/mhtml_generation_manager.h"
 #include "content/browser/file_system/file_system_dispatcher_host.h"
 #include "content/browser/geolocation/geolocation_dispatcher_host.h"
 #include "content/browser/gpu/gpu_data_manager.h"
@@ -44,14 +41,15 @@
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/browser/mime_registry_message_filter.h"
 #include "content/browser/plugin_service.h"
-#include "content/browser/renderer_host/audio_input_renderer_host.h"
-#include "content/browser/renderer_host/audio_renderer_host.h"
 #include "content/browser/renderer_host/blob_message_filter.h"
 #include "content/browser/renderer_host/clipboard_message_filter.h"
 #include "content/browser/renderer_host/database_message_filter.h"
-#include "content/browser/resolve_proxy_msg_helper.h"
 #include "content/browser/renderer_host/file_utilities_message_filter.h"
 #include "content/browser/renderer_host/gpu_message_filter.h"
+#include "content/browser/renderer_host/media/audio_input_renderer_host.h"
+#include "content/browser/renderer_host/media/audio_renderer_host.h"
+#include "content/browser/renderer_host/media/media_stream_dispatcher_host.h"
+#include "content/browser/renderer_host/media/video_capture_host.h"
 #include "content/browser/renderer_host/p2p/socket_dispatcher_host.h"
 #include "content/browser/renderer_host/pepper_file_message_filter.h"
 #include "content/browser/renderer_host/pepper_message_filter.h"
@@ -63,12 +61,14 @@
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
 #include "content/browser/renderer_host/socket_stream_dispatcher_host.h"
+#include "content/browser/resolve_proxy_msg_helper.h"
 #include "content/browser/speech/speech_input_dispatcher_host.h"
 #include "content/browser/trace_message_filter.h"
 #include "content/browser/user_metrics.h"
 #include "content/browser/worker_host/worker_message_filter.h"
 #include "content/common/child_process_info.h"
 #include "content/common/child_process_messages.h"
+#include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/notification_service.h"
 #include "content/common/process_watcher.h"
@@ -278,14 +278,9 @@ bool BrowserRenderProcessHost::Init(bool is_accessibility_enabled) {
   // Setup the IPC channel.
   const std::string channel_id =
       ChildProcessInfo::GenerateRandomChannelID(this);
-  channel_.reset(new IPC::SyncChannel(
+  channel_.reset(new IPC::ChannelProxy(
       channel_id, IPC::Channel::MODE_SERVER, this,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO), true,
-      g_browser_process->shutdown_event()));
-  // As a preventive mesure, we DCHECK if someone sends a synchronous message
-  // with no time-out, which in the context of the browser process we should not
-  // be doing.
-  channel_->set_sync_messages_with_no_timeout_allowed(false);
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
 
   // Call the embedder first so that their IPC filters have priority.
   content::GetContentClient()->browser()->BrowserRenderProcessHostCreated(this);
@@ -357,11 +352,12 @@ void BrowserRenderProcessHost::CreateMessageFilters() {
       id(), ChildProcessInfo::RENDER_PROCESS,
       &profile()->GetResourceContext(),
       new RendererURLRequestContextSelector(profile(), id()),
-      g_browser_process->resource_dispatcher_host());
+      content::GetContentClient()->browser()->GetResourceDispatcherHost());
 
   channel_->AddFilter(resource_message_filter);
   channel_->AddFilter(new AudioInputRendererHost());
-  channel_->AddFilter(new AudioRendererHost());
+  channel_->AddFilter(new AudioRendererHost(&profile()->GetResourceContext()));
+  channel_->AddFilter(new VideoCaptureHost());
   channel_->AddFilter(
       new AppCacheDispatcherHost(&profile()->GetResourceContext(), id()));
   channel_->AddFilter(new ClipboardMessageFilter());
@@ -372,7 +368,8 @@ void BrowserRenderProcessHost::CreateMessageFilters() {
   channel_->AddFilter(
       GeolocationDispatcherHost::New(
           id(), profile()->GetGeolocationPermissionContext()));
-  channel_->AddFilter(new GpuMessageFilter(id()));
+  channel_->AddFilter(new GpuMessageFilter(id(), widget_helper_.get()));
+  channel_->AddFilter(new media_stream::MediaStreamDispatcherHost(id()));
   channel_->AddFilter(new PepperFileMessageFilter(id(), profile()));
   channel_->AddFilter(
       new PepperMessageFilter(&profile()->GetResourceContext()));
@@ -397,13 +394,13 @@ void BrowserRenderProcessHost::CreateMessageFilters() {
       new WorkerMessageFilter(
           id(),
           &profile()->GetResourceContext(),
-          g_browser_process->resource_dispatcher_host(),
+          content::GetContentClient()->browser()->GetResourceDispatcherHost(),
           NewCallbackWithReturnValue(
               widget_helper_.get(), &RenderWidgetHelper::GetNextRoutingID)));
 
 #if defined(ENABLE_P2P_APIS)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableP2PApi))
-    channel_->AddFilter(new P2PSocketDispatcherHost());
+  channel_->AddFilter(new P2PSocketDispatcherHost(
+      &profile()->GetResourceContext()));
 #endif
 
   channel_->AddFilter(new TraceMessageFilter());
@@ -445,7 +442,8 @@ void BrowserRenderProcessHost::ReceivedBadMessage() {
     CHECK(false);
   }
   NOTREACHED();
-  base::KillProcess(GetHandle(), ResultCodes::KILLED_BAD_MESSAGE, false);
+  base::KillProcess(GetHandle(), content::RESULT_CODE_KILLED_BAD_MESSAGE,
+                    false);
 }
 
 void BrowserRenderProcessHost::WidgetRestored() {
@@ -481,9 +479,6 @@ void BrowserRenderProcessHost::AppendRendererCommandLine(
   command_line->AppendSwitchASCII(switches::kProcessType,
       is_extension_process_ ? switches::kExtensionProcess :
                               switches::kRendererProcess);
-
-  if (logging::DialogsAreSuppressed())
-    command_line->AppendSwitch(switches::kNoErrorDialogs);
 
   if (accessibility_enabled_)
     command_line->AppendSwitch(switches::kEnableAccessibility);
@@ -522,14 +517,9 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
   // Propagate the following switches to the renderer command line (along
   // with any associated values) if present in the browser command line.
   static const char* const kSwitchNames[] = {
-    switches::kAllowHTTPBackgroundPage,
-    switches::kAllowScriptingGallery,
-    switches::kAppsCheckoutURL,
-    switches::kAppsGalleryURL,
     // We propagate the Chrome Frame command line here as well in case the
     // renderer is not run in the sandbox.
     switches::kChromeFrame,
-    switches::kDebugPrint,
     switches::kDisable3DAPIs,
     switches::kDisableAcceleratedCompositing,
     switches::kDisableApplicationCache,
@@ -543,54 +533,33 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableGeolocation,
     switches::kDisableGLMultisampling,
     switches::kDisableGLSLTranslator,
+    switches::kDisableGpuVsync,
     switches::kDisableIndexedDatabase,
     switches::kDisableJavaScriptI18NAPI,
     switches::kDisableLocalStorage,
     switches::kDisableLogging,
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
-    // Enabled by default in Google Chrome builds, except on CrOS.
-    switches::kDisablePrintPreview,
-#else
-    // Disabled by default in Chromium builds and on CrOS.
-    switches::kEnablePrintPreview,
-#endif
     switches::kDisableSeccompSandbox,
     switches::kDisableSessionStorage,
     switches::kDisableSharedWorkers,
     switches::kDisableSpeechInput,
+    switches::kDisableWebAudio,
     switches::kDisableWebSockets,
-    switches::kDomAutomationController,
-    switches::kDumpHistogramsOnExit,
-    switches::kEnableAcceleratedDecoding,
     switches::kEnableAdaptive,
     switches::kEnableBenchmarking,
-    switches::kEnableClickToPlay,
-    switches::kEnableCrxlessWebApps,
     switches::kEnableDCHECK,
-    switches::kEnableExperimentalExtensionApis,
-    switches::kEnableInBrowserThumbnailing,
-    switches::kEnableIPCFuzzing,
+    switches::kEnableGPUServiceLogging,
+    switches::kEnableGPUClientLogging,
     switches::kEnableLogging,
-    switches::kEnableNaCl,
-    switches::kEnableOpenMax,
-#if defined(ENABLE_P2P_APIS)
-    switches::kEnableP2PApi,
-#endif
+    switches::kEnableMediaStream,
     switches::kEnablePepperTesting,
-    switches::kEnableRemoting,
-    switches::kEnableResourceContentSettings,
 #if defined(OS_MACOSX)
     // Allow this to be set when invoking the browser and relayed along.
     switches::kEnableSandboxLogging,
 #endif
-    switches::kEnableSearchProviderApiV2,
     switches::kEnableSeccompSandbox,
     switches::kEnableStatsTable,
     switches::kEnableVideoFullscreen,
     switches::kEnableVideoLogging,
-    switches::kEnableWatchdog,
-    switches::kEnableWebAudio,
-    switches::kExperimentalSpellcheckerFeatures,
     switches::kFullMemoryCrashReport,
 #if !defined (GOOGLE_CHROME_BUILD)
     // These are unsupported and not fully tested modes, so don't enable them
@@ -600,20 +569,12 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kInProcessWebGL,
     switches::kJavaScriptFlags,
     switches::kLoggingLevel,
-    switches::kMemoryProfiling,
-    switches::kMessageLoopHistogrammer,
+    switches::kLowLatencyAudio,
     switches::kNoJsRandomness,
     switches::kNoReferrers,
     switches::kNoSandbox,
     switches::kPlaybackMode,
-    switches::kPpapiFlashArgs,
-    switches::kPpapiFlashInProcess,
-    switches::kPpapiFlashPath,
-    switches::kPpapiFlashVersion,
     switches::kPpapiOutOfProcess,
-    switches::kProfilingAtStart,
-    switches::kProfilingFile,
-    switches::kProfilingFlush,
     switches::kRecordMode,
     switches::kRegisterPepperPlugins,
     switches::kRemoteShellPort,
@@ -624,7 +585,6 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kRendererCrashTest,
     switches::kRendererStartupDialog,
     switches::kShowPaintRects,
-    switches::kSilentDumpOnDCHECK,
     switches::kSimpleDataSource,
     switches::kTestSandbox,
     // This flag needs to be propagated to the renderer process for
@@ -662,6 +622,9 @@ bool BrowserRenderProcessHost::FastShutdownIfPossible() {
   if (run_renderer_in_process())
     return false;  // Single process mode can't do fast shutdown.
 
+  if (!content::GetContentClient()->browser()->IsFastShutdownPossible())
+    return false;
+
   if (!child_process_launcher_.get() ||
       child_process_launcher_->IsStarting() ||
       !GetHandle())
@@ -675,36 +638,9 @@ bool BrowserRenderProcessHost::FastShutdownIfPossible() {
   if (!sudden_termination_allowed())
     return false;
 
-  // Check for any external tab containers, since they may still be running even
-  // though this window closed.
-  listeners_iterator iter(ListenersIterator());
-  while (!iter.IsAtEnd()) {
-    // NOTE: This is a bit dangerous.  We know that for now, listeners are
-    // always RenderWidgetHosts.  But in theory, they don't have to be.
-    const RenderWidgetHost* widget =
-        static_cast<const RenderWidgetHost*>(iter.GetCurrentValue());
-    DCHECK(widget);
-    if (widget && widget->IsRenderView()) {
-      const RenderViewHost* rvh = static_cast<const RenderViewHost*>(widget);
-      if (rvh->delegate()->IsExternalTabContainer())
-        return false;
-    }
-
-    iter.Advance();
-  }
-
   child_process_launcher_.reset();
   fast_shutdown_started_ = true;
   return true;
-}
-
-bool BrowserRenderProcessHost::SendWithTimeout(IPC::Message* msg,
-                                               int timeout_ms) {
-  if (!channel_.get()) {
-    delete msg;
-    return false;
-  }
-  return channel_->SendWithTimeout(msg, timeout_ms);
 }
 
 // This is a platform specific function for mapping a transport DIB given its id
@@ -768,6 +704,12 @@ void BrowserRenderProcessHost::ClearTransportDIBCache() {
   cached_dibs_.clear();
 }
 
+void BrowserRenderProcessHost::SetCompositingSurface(
+    int render_widget_id,
+    gfx::PluginWindowHandle compositing_surface) {
+  widget_helper_->SetCompositingSurface(render_widget_id, compositing_surface);
+}
+
 bool BrowserRenderProcessHost::Send(IPC::Message* msg) {
   if (!channel_.get()) {
     if (!is_initialized_) {
@@ -805,6 +747,7 @@ bool BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
       IPC_MESSAGE_HANDLER(ViewHostMsg_UserMetricsRecordAction,
                           OnUserMetricsRecordAction)
       IPC_MESSAGE_HANDLER(ViewHostMsg_RevealFolderInOS, OnRevealFolderInOS)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_SavedPageAsMHTML, OnSavedPageAsMHTML)
       IPC_MESSAGE_UNHANDLED_ERROR()
     IPC_END_MESSAGE_MAP_EX()
 
@@ -874,7 +817,7 @@ void BrowserRenderProcessHost::OnChannelError() {
 
   RendererClosedDetails details(status, exit_code, is_extension_process_);
   NotificationService::current()->Notify(
-      NotificationType::RENDERER_PROCESS_CLOSED,
+      content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
       Source<RenderProcessHost>(this),
       Details<RendererClosedDetails>(&details));
 
@@ -904,7 +847,7 @@ void BrowserRenderProcessHost::OnShutdownRequest() {
   // Notify any tabs that might have swapped out renderers from this process.
   // They should not attempt to swap them back in.
   NotificationService::current()->Notify(
-      NotificationType::RENDERER_PROCESS_CLOSING,
+      content::NOTIFICATION_RENDERER_PROCESS_CLOSING,
       Source<RenderProcessHost>(this), NotificationService::NoDetails());
 
   Send(new ChildProcessMsg_Shutdown());
@@ -958,7 +901,7 @@ void BrowserRenderProcessHost::OnProcessLaunched() {
   // was after, we can end up executing JavaScript before the initialization
   // happens.
   NotificationService::current()->Notify(
-      NotificationType::RENDERER_PROCESS_CREATED,
+      content::NOTIFICATION_RENDERER_PROCESS_CREATED,
       Source<RenderProcessHost>(this), NotificationService::NoDetails());
 
   while (!queued_messages_.empty()) {
@@ -976,4 +919,9 @@ void BrowserRenderProcessHost::OnRevealFolderInOS(const FilePath& path) {
   // Only honor the request if appropriate persmissions are granted.
   if (ChildProcessSecurityPolicy::GetInstance()->CanReadFile(id(), path))
     content::GetContentClient()->browser()->RevealFolderInOS(path);
+}
+
+void BrowserRenderProcessHost::OnSavedPageAsMHTML(int job_id, bool success) {
+  content::GetContentClient()->browser()->GetMHTMLGenerationManager()->
+      MHTMLGenerated(job_id, success);
 }

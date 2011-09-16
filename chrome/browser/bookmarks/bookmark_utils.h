@@ -193,6 +193,12 @@ void GetURLAndTitleToBookmark(TabContents* tab_contents,
                               GURL* url,
                               string16* title);
 
+// Fills in the URL and title for a bookmark from the current tab of the
+// specified profile.
+void GetURLAndTitleToBookmarkFromCurrentTab(Profile* profile,
+                                            GURL* url,
+                                            string16* title);
+
 // Returns, by reference in |urls|, the url and title pairs for each open
 // tab in browser.
 void GetURLsForOpenTabs(Browser* browser,
@@ -210,6 +216,14 @@ const BookmarkNode* GetParentForNewNodes(
 // Returns true if the specified node is of type URL, or has a descendant
 // of type URL.
 bool NodeHasURLs(const BookmarkNode* node);
+
+// Ask the user before deleting a non-empty bookmark folder.
+bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
+                               gfx::NativeWindow window);
+
+// Delete the list of nodes.
+void DeleteBookmarkFolders(BookmarkModel* model,
+                           const std::vector<int64>& ids);
 
 // Number of bookmarks we'll open before prompting the user to see if they
 // really want to open all.

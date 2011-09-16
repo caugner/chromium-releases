@@ -9,12 +9,13 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/autofill/autofill_field.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/form_data.h"
+
 
 enum RequestMethod {
   GET,
@@ -31,6 +32,11 @@ class AutofillMetrics;
 
 namespace buzz {
 class XmlElement;
+}
+
+namespace webkit_glue {
+struct FormData;
+struct FormDataPredictions;
 }
 
 // FormStructure stores a single HTML form together with the values entered
@@ -62,8 +68,13 @@ class FormStructure {
   // same as the one passed to EncodeQueryRequest when constructing the query.
   static void ParseQueryResponse(const std::string& response_xml,
                                  const std::vector<FormStructure*>& forms,
-                                 UploadRequired* upload_required,
                                  const AutofillMetrics& metric_logger);
+
+  // Fills |forms| with the details from the given |form_structures| and their
+  // fields' predicted types.
+  static void GetFieldTypePredictions(
+      const std::vector<FormStructure*>& form_structures,
+      std::vector<webkit_glue::FormDataPredictions>* forms);
 
   // The unique signature for this form, composed of the target url domain,
   // the form name, and the form field names in a 64-bit hash.
@@ -112,6 +123,8 @@ class FormStructure {
 
   const GURL& source_url() const { return source_url_; }
 
+  UploadRequired upload_required() const { return upload_required_; }
+
   virtual std::string server_experiment_id() const;
 
   bool operator==(const webkit_glue::FormData& form) const;
@@ -123,6 +136,7 @@ class FormStructure {
 
  private:
   friend class FormStructureTest;
+  FRIEND_TEST_ALL_PREFIXES(AutofillDownloadTest, QueryAndUploadTest);
   // 64-bit hash of the string - used in FormSignature and unit-tests.
   static std::string Hash64Bit(const std::string& str);
 
@@ -155,6 +169,10 @@ class FormStructure {
   // The string starts with "&" and the names are also separated by the "&"
   // character. E.g.: "&form_input1_name&form_input2_name&...&form_inputN_name"
   std::string form_signature_field_names_;
+
+  // Whether the server expects us to always upload, never upload, or default
+  // to the stored upload rates.
+  UploadRequired upload_required_;
 
   // The server experiment corresponding to the server types returned for this
   // form.

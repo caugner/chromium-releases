@@ -34,12 +34,12 @@ FormField* AddressField::Parse(AutofillScanner* scanner, bool is_ecml) {
 
   // Allow address fields to appear in any order.
   while (!scanner->IsEnd()) {
-    if (ParseCompany(scanner, is_ecml, address_field.get()) ||
-        ParseAddressLines(scanner, is_ecml, address_field.get()) ||
+    if (ParseAddressLines(scanner, is_ecml, address_field.get()) ||
         ParseCity(scanner, is_ecml, address_field.get()) ||
         ParseState(scanner, is_ecml, address_field.get()) ||
         ParseZipCode(scanner, is_ecml, address_field.get()) ||
-        ParseCountry(scanner, is_ecml, address_field.get())) {
+        ParseCountry(scanner, is_ecml, address_field.get()) ||
+        ParseCompany(scanner, is_ecml, address_field.get())) {
       continue;
     } else if (ParseField(scanner, attention_ignored, NULL) ||
                ParseField(scanner, region_ignored, NULL)) {
@@ -79,17 +79,40 @@ FormField* AddressField::Parse(AutofillScanner* scanner, bool is_ecml) {
 }
 
 AddressType AddressField::FindType() const {
-  // This is not a full address, so don't even bother trying to figure
-  // out its type.
-  if (address1_ == NULL)
-    return kGenericAddress;
-
   // First look at the field name, which itself will sometimes contain
   // "bill" or "ship".  We could check for the ECML type prefixes
   // here, but there's no need to since ECML's prefixes Ecom_BillTo
   // and Ecom_ShipTo contain "bill" and "ship" anyway.
-  string16 name = StringToLowerASCII(address1_->name);
-  return AddressTypeFromText(name);
+  if (company_) {
+    string16 name = StringToLowerASCII(company_->name);
+    return AddressTypeFromText(name);
+  }
+  if (address1_) {
+    string16 name = StringToLowerASCII(address1_->name);
+    return AddressTypeFromText(name);
+  }
+  if (address2_) {
+    string16 name = StringToLowerASCII(address2_->name);
+    return AddressTypeFromText(name);
+  }
+  if (city_) {
+    string16 name = StringToLowerASCII(city_->name);
+    return AddressTypeFromText(name);
+  }
+  if (zip_) {
+    string16 name = StringToLowerASCII(zip_->name);
+    return AddressTypeFromText(name);
+  }
+  if (state_) {
+    string16 name = StringToLowerASCII(state_->name);
+    return AddressTypeFromText(name);
+  }
+  if (country_) {
+    string16 name = StringToLowerASCII(country_->name);
+    return AddressTypeFromText(name);
+  }
+
+  return kGenericAddress;
 }
 
 AddressField::AddressField()
@@ -226,8 +249,7 @@ bool AddressField::ParseAddressLines(AutofillScanner* scanner,
       ParseField(scanner, pattern, NULL);
     } else {
       pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_LINE_3_RE);
-      if (!ParseEmptyLabel(scanner, NULL))
-        ParseField(scanner, pattern, NULL);
+      ParseField(scanner, pattern, NULL);
     }
   }
 

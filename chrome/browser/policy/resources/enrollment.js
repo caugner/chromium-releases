@@ -31,18 +31,37 @@ cr.define('enterpriseEnrollment', function() {
         }
       }
     }
+
+    if (screen === 'confirmation-screen') {
+      // Focus on the submit button when showing the confirmation-screen.
+      $('close').focus();
+    }
   }
 
   function showInitialScreen() {
-    var args = JSON.parse(chrome.dialogArguments);
-    showScreen(args.initialScreen);
+    showScreen('login-screen');
+    document.addEventListener('keydown', onKeydown);
+    $('gaialogin').contentWindow.addEventListener('keydown', onKeydown);
+  }
+
+  function onKeydown(e) {
+    // Handle ESC key.
+    if (e.keyIdentifier === 'U+001B') {
+      e.stopPropagation();
+      chrome.send("DialogClose", [""]);
+    }
+  }
+
+  function onLoad() {
+    chrome.send('enrollmentScreenReady', []);
   }
 
   return {
     showScreen: showScreen,
-    showInitialScreen: showInitialScreen
+    showInitialScreen: showInitialScreen,
+    onLoad: onLoad
   };
 });
 
 document.addEventListener('DOMContentLoaded',
-                          enterpriseEnrollment.showInitialScreen);
+                          enterpriseEnrollment.onLoad);

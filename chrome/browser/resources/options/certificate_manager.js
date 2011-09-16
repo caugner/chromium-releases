@@ -100,7 +100,10 @@ cr.define('options', function() {
           localStrings.getString(id + 'DeleteImpact'),
           localStrings.getString('ok'),
           localStrings.getString('cancel'),
-          function() { chrome.send('deleteCertificate', [data.id]); });
+          function() {
+            tree.selectedItem = null;
+            chrome.send('deleteCertificate', [data.id]);
+          });
     }
   }
 
@@ -202,6 +205,7 @@ cr.define('options', function() {
     handleVisibleChange_: function(e) {
       if (!this.initalized_ && this.visible) {
         this.initalized_ = true;
+        OptionsPage.showTab($('personal-certs-nav-tab'));
         chrome.send('populateCertificateManager');
       }
 

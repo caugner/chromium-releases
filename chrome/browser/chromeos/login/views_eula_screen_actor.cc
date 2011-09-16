@@ -12,6 +12,8 @@ ViewsEulaScreenActor::ViewsEulaScreenActor(ViewScreenDelegate* delegate)
 }
 
 ViewsEulaScreenActor::~ViewsEulaScreenActor() {
+  if (screen_)
+    screen_->OnActorDestroyed(this);
 }
 
 EulaView* ViewsEulaScreenActor::AllocateView() {
@@ -30,12 +32,12 @@ void ViewsEulaScreenActor::Hide() {
   ViewScreen<EulaView>::Hide();
 }
 
-bool ViewsEulaScreenActor::IsUsageStatsChecked() const {
-  return view() && view()->IsUsageStatsChecked();
-}
-
 void ViewsEulaScreenActor::SetDelegate(Delegate* delegate) {
   screen_ = delegate;
+}
+
+void ViewsEulaScreenActor::OnPasswordFetched(const std::string& tpm_password) {
+  view()->ShowTpmPassword(tpm_password);
 }
 
 }  // namespace chromeos

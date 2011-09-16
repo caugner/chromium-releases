@@ -2,9 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/common/extensions/extension.h"
+
+#if defined(TOOLKIT_GTK)
+#include <gtk/gtk.h>
+#endif
+
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
@@ -21,6 +28,17 @@
 #include "chrome/common/extensions/url_pattern.h"
 #include "content/common/json_value_serializer.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/l10n/l10n_util.h"
+
+
+namespace {
+
+static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
+  int schemes = URLPattern::SCHEME_ALL;
+  extent->AddPattern(URLPattern(schemes, pattern));
+}
+
+}
 
 namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
@@ -105,8 +123,8 @@ class ExtensionManifestTest : public testing::Test {
                                                 const std::string& name) {
     std::string error;
     scoped_refptr<Extension> extension = LoadExtension(manifest, &error);
-    EXPECT_TRUE(extension) << "Unexpected success for " << name;
-    EXPECT_EQ("", error) << "Unexpected no error for " << name;
+    EXPECT_TRUE(extension) << "Unexpected failure for " << name;
+    EXPECT_EQ("", error) << "Unexpected error for " << name;
     return extension;
   }
 
@@ -143,16 +161,161 @@ class ExtensionManifestTest : public testing::Test {
     VerifyExpectedError(extension.get(), name, error, expected_error);
   }
 
+  struct Testcase {
+    std::string manifest;
+    std::string expected_error;
+  };
+
+  void RunTestcases(const Testcase* testcases, size_t num_testcases) {
+    for (size_t i = 0; i < num_testcases; ++i) {
+      LoadAndExpectError(testcases[i].manifest, testcases[i].expected_error);
+    }
+  }
+
   bool enable_apps_;
 };
 
+TEST_F(ExtensionManifestTest, InitFromValueInvalid) {
+  Testcase testcases[] = {
+    {"init_invalid_version_missing.json", errors::kInvalidVersion},
+    {"init_invalid_version_invalid.json", errors::kInvalidVersion},
+    {"init_invalid_name_missing.json", errors::kInvalidName},
+    {"init_invalid_name_invalid.json", errors::kInvalidName},
+    {"init_invalid_description_invalid.json", errors::kInvalidDescription},
+    {"init_invalid_icons_invalid.json", errors::kInvalidIcons},
+    {"init_invalid_icons_path_invalid.json", errors::kInvalidIconPath},
+    {"init_invalid_script_invalid.json", errors::kInvalidContentScriptsList},
+    {"init_invalid_script_item_invalid.json", errors::kInvalidContentScript},
+    {"init_invalid_script_matches_missing.json", errors::kInvalidMatches},
+    {"init_invalid_script_matches_invalid.json", errors::kInvalidMatches},
+    {"init_invalid_script_matches_empty.json", errors::kInvalidMatchCount},
+    {"init_invalid_script_match_item_invalid.json", errors::kInvalidMatch},
+    {"init_invalid_script_match_item_invalid_2.json", errors::kInvalidMatch},
+    {"init_invalid_script_files_missing.json", errors::kMissingFile},
+    {"init_invalid_files_js_invalid.json", errors::kInvalidJsList},
+    {"init_invalid_files_empty.json", errors::kMissingFile},
+    {"init_invalid_files_js_empty_css_missing.json", errors::kMissingFile},
+    {"init_invalid_files_js_item_invalid.json", errors::kInvalidJs},
+    {"init_invalid_files_css_invalid.json", errors::kInvalidCssList},
+    {"init_invalid_files_css_item_invalid.json", errors::kInvalidCss},
+    {"init_invalid_permissions_invalid.json", errors::kInvalidPermissions},
+    {"init_invalid_permissions_item_invalid.json", errors::kInvalidPermission},
+    {"init_invalid_page_actions_multi.json",
+        errors::kInvalidPageActionsListSize},
+    {"init_invalid_options_url_invalid.json", errors::kInvalidOptionsPage},
+    {"init_invalid_locale_invalid.json", errors::kInvalidDefaultLocale},
+    {"init_invalid_locale_empty.json", errors::kInvalidDefaultLocale},
+    {"init_invalid_min_chrome_invalid.json",
+        errors::kInvalidMinimumChromeVersion},
+    {"init_invalid_chrome_version_too_low.json", errors::kChromeVersionTooLow}
+  };
+
+  RunTestcases(testcases, arraysize(testcases));
+}
+
+TEST_F(ExtensionManifestTest, InitFromValueValid) {
+  scoped_refptr<Extension> extension(LoadAndExpectSuccess(
+      "init_valid_minimal.json"));
+
+  FilePath path;
+  PathService::Get(chrome::DIR_TEST_DATA, &path);
+  path = path.AppendASCII("extensions");
+
+  EXPECT_TRUE(Extension::IdIsValid(extension->id()));
+  EXPECT_EQ("1.0.0.0", extension->VersionString());
+  EXPECT_EQ("my extension", extension->name());
+  EXPECT_EQ(extension->id(), extension->url().host());
+  EXPECT_EQ(extension->path(), path);
+  EXPECT_EQ(path, extension->path());
+
+  // Test permissions scheme.
+  // We allow unknown API permissions, so this will be valid until we better
+  // distinguish between API and host permissions.
+  extension = LoadAndExpectSuccess("init_valid_permissions.json");
+
+  // Test with an options page.
+  extension = LoadAndExpectSuccess("init_valid_options.json");
+  EXPECT_EQ("chrome-extension", extension->options_url().scheme());
+  EXPECT_EQ("/options.html", extension->options_url().path());
+
+  // Test that an empty list of page actions does not stop a browser action
+  // from being loaded.
+  extension = LoadAndExpectSuccess("init_valid_empty_page_actions.json");
+
+  // Test with a minimum_chrome_version.
+  extension = LoadAndExpectSuccess("init_valid_minimum_chrome.json");
+
+  // Verify empty permission settings are considered valid.
+  LoadAndExpectSuccess("init_valid_permissions_empty.json");
+
+  // We allow unknown API permissions, so this will be valid until we better
+  // distinguish between API and host permissions.
+  LoadAndExpectSuccess("init_valid_permissions_unknown.json");
+}
+
+TEST_F(ExtensionManifestTest, InitFromValueValidNameInRTL) {
+#if defined(TOOLKIT_GTK)
+  GtkTextDirection gtk_dir = gtk_widget_get_default_direction();
+  gtk_widget_set_default_direction(GTK_TEXT_DIR_RTL);
+#else
+  std::string locale = l10n_util::GetApplicationLocale("");
+  base::i18n::SetICUDefaultLocale("he");
+#endif
+
+  // No strong RTL characters in name.
+  scoped_refptr<Extension> extension(LoadAndExpectSuccess(
+      "init_valid_name_no_rtl.json"));
+
+  string16 localized_name(ASCIIToUTF16("Dictionary (by Google)"));
+  base::i18n::AdjustStringForLocaleDirection(&localized_name);
+  EXPECT_EQ(localized_name, UTF8ToUTF16(extension->name()));
+
+  // Strong RTL characters in name.
+  extension = LoadAndExpectSuccess("init_valid_name_strong_rtl.json");
+
+  localized_name = WideToUTF16(L"Dictionary (\x05D1\x05D2"L" Google)");
+  base::i18n::AdjustStringForLocaleDirection(&localized_name);
+  EXPECT_EQ(localized_name, UTF8ToUTF16(extension->name()));
+
+  // Reset locale.
+#if defined(TOOLKIT_GTK)
+  gtk_widget_set_default_direction(gtk_dir);
+#else
+  base::i18n::SetICUDefaultLocale(locale);
+#endif
+}
+
+TEST_F(ExtensionManifestTest, UpdateUrls) {
+  // Test several valid update urls
+  LoadStrictAndExpectSuccess("update_url_valid_1.json");
+  LoadStrictAndExpectSuccess("update_url_valid_2.json");
+  LoadStrictAndExpectSuccess("update_url_valid_3.json");
+  LoadStrictAndExpectSuccess("update_url_valid_4.json");
+
+  // Test some invalid update urls
+  LoadAndExpectErrorStrict("update_url_invalid_1.json",
+      errors::kInvalidUpdateURL);
+  LoadAndExpectErrorStrict("update_url_invalid_2.json",
+      errors::kInvalidUpdateURL);
+  LoadAndExpectErrorStrict("update_url_invalid_3.json",
+      errors::kInvalidUpdateURL);
+}
+
+// Tests that the old permission name "unlimited_storage" still works for
+// backwards compatibility (we renamed it to "unlimitedStorage").
+TEST_F(ExtensionManifestTest, OldUnlimitedStoragePermission) {
+  scoped_refptr<Extension> extension = LoadStrictAndExpectSuccess(
+      "old_unlimited_storage.json");
+  EXPECT_TRUE(extension->HasAPIPermission(
+      ExtensionAPIPermission::kUnlimitedStorage));
+}
+
 TEST_F(ExtensionManifestTest, ValidApp) {
   scoped_refptr<Extension> extension(LoadAndExpectSuccess("valid_app.json"));
-  ASSERT_EQ(2u, extension->web_extent().patterns().size());
-  EXPECT_EQ("http://www.google.com/mail/*",
-            extension->web_extent().patterns()[0].GetAsString());
-  EXPECT_EQ("http://www.google.com/foobar/*",
-            extension->web_extent().patterns()[1].GetAsString());
+  URLPatternSet expected_patterns;
+  AddPattern(&expected_patterns, "http://www.google.com/mail/*");
+  AddPattern(&expected_patterns, "http://www.google.com/foobar/*");
+  EXPECT_EQ(expected_patterns, extension->web_extent());
   EXPECT_EQ(extension_misc::LAUNCH_TAB, extension->launch_container());
   EXPECT_EQ("http://www.google.com/mail/", extension->launch_web_url());
 }
@@ -211,7 +374,7 @@ TEST_F(ExtensionManifestTest, AppWebUrls) {
       LoadAndExpectSuccess("web_urls_default.json"));
   ASSERT_EQ(1u, extension->web_extent().patterns().size());
   EXPECT_EQ("*://www.google.com/*",
-            extension->web_extent().patterns()[0].GetAsString());
+            extension->web_extent().patterns().begin()->GetAsString());
 }
 
 TEST_F(ExtensionManifestTest, AppLaunchContainer) {
@@ -253,6 +416,8 @@ TEST_F(ExtensionManifestTest, AppLaunchContainer) {
 TEST_F(ExtensionManifestTest, AppLaunchURL) {
   LoadAndExpectError("launch_path_and_url.json",
                      errors::kLaunchPathAndURLAreExclusive);
+  LoadAndExpectError("launch_path_and_extent.json",
+                     errors::kLaunchPathAndExtentAreExclusive);
   LoadAndExpectError("launch_path_invalid_type.json",
                      errors::kInvalidLaunchLocalPath);
   LoadAndExpectError("launch_path_invalid_value.json",
@@ -462,21 +627,33 @@ TEST_F(ExtensionManifestTest, AllowUnrecognizedPermissions) {
   scoped_ptr<DictionaryValue> manifest(
       LoadManifestFile("valid_app.json", &error));
   ASSERT_TRUE(manifest.get());
+  CommandLine old_command_line = *CommandLine::ForCurrentProcess();
 
   ListValue *permissions = new ListValue();
   manifest->Set(keys::kPermissions, permissions);
-  for (size_t i = 0; i < Extension::kNumPermissions; i++) {
-    const char* name = Extension::kPermissions[i].name;
+  ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+  ExtensionAPIPermissionSet api_perms = info->GetAll();
+  for (ExtensionAPIPermissionSet::iterator i = api_perms.begin();
+       i != api_perms.end(); ++i) {
+    ExtensionAPIPermission* permission = info->GetByID(*i);
+    const char* name = permission->name();
     StringValue* p = new StringValue(name);
     permissions->Clear();
     permissions->Append(p);
     std::string message_name = base::StringPrintf("permission-%s", name);
+
+    if (*i == ExtensionAPIPermission::kExperimental) {
+      // Experimental permission is allowed, but requires this switch.
+      CommandLine::ForCurrentProcess()->AppendSwitch(
+          switches::kEnableExperimentalExtensionApis);
+    }
 
     // Extensions are allowed to contain unrecognized API permissions,
     // so there shouldn't be any errors.
     scoped_refptr<Extension> extension;
     extension = LoadAndExpectSuccess(manifest.get(), message_name);
   }
+  *CommandLine::ForCurrentProcess() = old_command_line;
 }
 
 TEST_F(ExtensionManifestTest, NormalizeIconPaths) {
@@ -526,7 +703,7 @@ TEST_F(ExtensionManifestTest, DefaultPathForExtent) {
       LoadAndExpectSuccess("default_path_for_extent.json"));
 
   ASSERT_EQ(1u, extension->web_extent().patterns().size());
-  EXPECT_EQ("/*", extension->web_extent().patterns()[0].path());
+  EXPECT_EQ("/*", extension->web_extent().patterns().begin()->path());
   EXPECT_TRUE(extension->web_extent().MatchesURL(
       GURL("http://www.google.com/monkey")));
 }
@@ -540,29 +717,34 @@ TEST_F(ExtensionManifestTest, DefaultLocale) {
   EXPECT_EQ("de-AT", extension->default_locale());
 }
 
-TEST_F(ExtensionManifestTest, TtsProvider) {
-  LoadAndExpectError("tts_provider_invalid_1.json",
+TEST_F(ExtensionManifestTest, TtsEngine) {
+  LoadAndExpectError("tts_engine_invalid_1.json",
                      extension_manifest_errors::kInvalidTts);
-  LoadAndExpectError("tts_provider_invalid_2.json",
+  LoadAndExpectError("tts_engine_invalid_2.json",
                      extension_manifest_errors::kInvalidTtsVoices);
-  LoadAndExpectError("tts_provider_invalid_3.json",
+  LoadAndExpectError("tts_engine_invalid_3.json",
                      extension_manifest_errors::kInvalidTtsVoices);
-  LoadAndExpectError("tts_provider_invalid_4.json",
+  LoadAndExpectError("tts_engine_invalid_4.json",
                      extension_manifest_errors::kInvalidTtsVoicesVoiceName);
-  LoadAndExpectError("tts_provider_invalid_5.json",
-                     extension_manifest_errors::kInvalidTtsVoicesLocale);
-  LoadAndExpectError("tts_provider_invalid_6.json",
-                     extension_manifest_errors::kInvalidTtsVoicesLocale);
-  LoadAndExpectError("tts_provider_invalid_7.json",
+  LoadAndExpectError("tts_engine_invalid_5.json",
+                     extension_manifest_errors::kInvalidTtsVoicesLang);
+  LoadAndExpectError("tts_engine_invalid_6.json",
+                     extension_manifest_errors::kInvalidTtsVoicesLang);
+  LoadAndExpectError("tts_engine_invalid_7.json",
                      extension_manifest_errors::kInvalidTtsVoicesGender);
+  LoadAndExpectError("tts_engine_invalid_8.json",
+                     extension_manifest_errors::kInvalidTtsVoicesEventTypes);
+  LoadAndExpectError("tts_engine_invalid_9.json",
+                     extension_manifest_errors::kInvalidTtsVoicesEventTypes);
 
   scoped_refptr<Extension> extension(
-      LoadAndExpectSuccess("tts_provider_valid.json"));
+      LoadAndExpectSuccess("tts_engine_valid.json"));
 
   ASSERT_EQ(1u, extension->tts_voices().size());
   EXPECT_EQ("name", extension->tts_voices()[0].voice_name);
-  EXPECT_EQ("en-US", extension->tts_voices()[0].locale);
+  EXPECT_EQ("en-US", extension->tts_voices()[0].lang);
   EXPECT_EQ("female", extension->tts_voices()[0].gender);
+  EXPECT_EQ(3U, extension->tts_voices()[0].event_types.size());
 }
 
 TEST_F(ExtensionManifestTest, ForbidPortsInPermissions) {
@@ -577,14 +759,13 @@ TEST_F(ExtensionManifestTest, ForbidPortsInPermissions) {
 }
 
 TEST_F(ExtensionManifestTest, IsolatedApps) {
-  // Requires --enable-experimental-app-manifests
-  scoped_refptr<Extension> extension(
-      LoadAndExpectSuccess("isolated_app_valid.json"));
-  EXPECT_FALSE(extension->is_storage_isolated());
+  // Requires --enable-experimental-extension-apis
+  LoadAndExpectError("isolated_app_valid.json",
+                     errors::kExperimentalFlagRequired);
 
   CommandLine old_command_line = *CommandLine::ForCurrentProcess();
   CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalAppManifests);
+      switches::kEnableExperimentalExtensionApis);
   scoped_refptr<Extension> extension2(
       LoadAndExpectSuccess("isolated_app_valid.json"));
   EXPECT_TRUE(extension2->is_storage_isolated());
@@ -620,8 +801,28 @@ TEST_F(ExtensionManifestTest, FileBrowserHandlers) {
       extension->file_browser_handlers()->at(0).get();
   EXPECT_EQ(action->title(), "Default title");
   EXPECT_EQ(action->icon_path(), "icon.png");
-  const URLPatternList& patterns = action->file_url_patterns();
-  ASSERT_EQ(patterns.size(), 1U);
+  const URLPatternSet& patterns = action->file_url_patterns();
+  ASSERT_EQ(patterns.patterns().size(), 1U);
   ASSERT_TRUE(action->MatchesURL(
       GURL("filesystem:chrome-extension://foo/local/test.txt")));
+}
+
+TEST_F(ExtensionManifestTest, FileManagerURLOverride) {
+  // A component extention can override chrome://files/ URL.
+  std::string error;
+  scoped_refptr<Extension> extension;
+  extension = LoadExtensionWithLocation(
+      "filebrowser_url_override.json",
+      Extension::COMPONENT,
+      true,  // Strict error checking
+      &error);
+#if defined(FILE_MANAGER_EXTENSION)
+  EXPECT_EQ("", error);
+#else
+  EXPECT_EQ(errors::kInvalidChromeURLOverrides, error);
+#endif
+
+  // Extensions of other types can't ovverride chrome://files/ URL.
+  LoadAndExpectError("filebrowser_url_override.json",
+      errors::kInvalidChromeURLOverrides);
 }

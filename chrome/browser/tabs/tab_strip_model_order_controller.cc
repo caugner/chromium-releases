@@ -38,7 +38,7 @@ int TabStripModelOrderController::DetermineInsertionIndex(
       return tabstrip_->active_index() + delta;
     }
     NavigationController* opener =
-        &tabstrip_->GetSelectedTabContents()->controller();
+        &tabstrip_->GetActiveTabContents()->controller();
     // Get the index of the next item opened by this tab, and insert after
     // it...
     int index;
@@ -111,9 +111,6 @@ void TabStripModelOrderController::ActiveTabChanged(
     TabContentsWrapper* new_contents,
     int index,
     bool user_gesture) {
-  if (old_contents == new_contents)
-    return;
-
   NavigationController* old_opener = NULL;
   if (old_contents) {
     int index = tabstrip_->GetIndexOfTabContents(old_contents);
@@ -128,9 +125,12 @@ void TabStripModelOrderController::ActiveTabChanged(
   }
   NavigationController* new_opener =
       tabstrip_->GetOpenerOfTabContentsAt(index);
+
   if (user_gesture && new_opener != old_opener &&
-      new_opener != &old_contents->controller() &&
-      old_opener != &new_contents->controller()) {
+      ((old_contents == NULL && new_opener == NULL) ||
+          new_opener != &old_contents->controller()) &&
+      ((new_contents == NULL && old_opener == NULL) ||
+          old_opener != &new_contents->controller())) {
     tabstrip_->ForgetAllOpeners();
   }
 }

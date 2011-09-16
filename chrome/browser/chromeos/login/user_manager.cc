@@ -10,6 +10,7 @@
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -20,7 +21,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/input_method_library.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
@@ -29,11 +30,11 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
 
@@ -45,12 +46,26 @@ namespace {
 const char kLoggedInUsers[] = "LoggedInUsers";
 // A dictionary that maps usernames to file paths to their images.
 const char kUserImages[] = "UserImages";
+// A dictionary that maps usernames to OAuth token presence flag.
+const char kUserOAuthTokenStatus[] = "OAuthTokenStatus";
 
 // Incognito user is represented by an empty string (since some code already
 // depends on that and it's hard to figure out what).
 const char kGuestUser[] = "";
 
 base::LazyInstance<UserManager> g_user_manager(base::LINKER_INITIALIZED);
+
+// Stores path to the image in local state. Runs on UI thread.
+void SaveOAuthTokenStatusToLocalState(const std::string& username,
+    UserManager::OAuthTokenStatus oauth_token_status) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  PrefService* local_state = g_browser_process->local_state();
+  DictionaryPrefUpdate oauth_status_update(local_state, kUserOAuthTokenStatus);
+  oauth_status_update->SetWithoutPathExpansion(username,
+      new FundamentalValue(static_cast<int>(oauth_token_status)));
+  DVLOG(1) << "Saving user OAuth token status in Local State.";
+  local_state->SavePersistentPrefs();
+}
 
 // Stores path to the image in local state. Runs on UI thread.
 void SavePathToLocalState(const std::string& username,
@@ -103,9 +118,10 @@ void UpdateOwnership(bool is_owner) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   g_user_manager.Get().set_current_user_is_owner(is_owner);
-  NotificationService::current()->Notify(NotificationType::OWNERSHIP_CHECKED,
-                                         NotificationService::AllSources(),
-                                         NotificationService::NoDetails());
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_OWNERSHIP_CHECKED,
+      NotificationService::AllSources(),
+      NotificationService::NoDetails());
   if (is_owner) {
     // Also update cached value.
     UserCrosSettingsProvider::UpdateCachedOwner(
@@ -140,6 +156,8 @@ class RemoveAttempt : public CryptohomeLibrary::Delegate {
         method_factory_(this) {
     RemoveUser();
   }
+
+  virtual ~RemoveAttempt() {}
 
   void RemoveUser() {
     // Owner is not allowed to be removed from the device.
@@ -197,12 +215,19 @@ class RemoveAttempt : public CryptohomeLibrary::Delegate {
 
 }  // namespace
 
-UserManager::User::User() {
+UserManager::User::User() : oauth_token_status_(OAUTH_TOKEN_STATUS_UNKNOWN),
+                            is_displayname_unique_(false) {
   image_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
       kDefaultImageResources[0]);
 }
 
 UserManager::User::~User() {}
+
+void UserManager::User::SetImage(const SkBitmap& image,
+                                 int default_image_index) {
+  image_ = image;
+  default_image_index_ = default_image_index;
+}
 
 std::string UserManager::User::GetDisplayName() const {
   size_t i = email_.find('@');
@@ -213,17 +238,7 @@ std::string UserManager::User::GetDisplayName() const {
 }
 
 bool UserManager::User::NeedsNameTooltip() const {
-  const std::vector<User>& users = UserManager::Get()->GetUsers();
-  const std::string& display_name = GetDisplayName();
-  const std::string& user_email = email();
-
-  for (std::vector<User>::const_iterator it = users.begin();
-       it != users.end();
-       ++it) {
-    if (display_name == it->GetDisplayName() && user_email != it->email())
-      return true;
-  }
-  return false;
+  return !is_displayname_unique_;
 }
 
 std::string UserManager::User::GetNameTooltip() const {
@@ -253,6 +268,8 @@ void UserManager::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterListPref(kLoggedInUsers, PrefService::UNSYNCABLE_PREF);
   local_state->RegisterDictionaryPref(kUserImages,
                                       PrefService::UNSYNCABLE_PREF);
+  local_state->RegisterDictionaryPref(kUserOAuthTokenStatus,
+                                      PrefService::UNSYNCABLE_PREF);
 }
 
 std::vector<UserManager::User> UserManager::GetUsers() const {
@@ -263,8 +280,12 @@ std::vector<UserManager::User> UserManager::GetUsers() const {
   PrefService* local_state = g_browser_process->local_state();
   const ListValue* prefs_users = local_state->GetList(kLoggedInUsers);
   const DictionaryValue* prefs_images = local_state->GetDictionary(kUserImages);
+  const DictionaryValue* prefs_oauth_status =
+      local_state->GetDictionary(kUserOAuthTokenStatus);
 
   if (prefs_users) {
+    std::map<std::string, size_t> display_name_count;
+
     for (ListValue::const_iterator it = prefs_users->begin();
          it != prefs_users->end();
          ++it) {
@@ -272,31 +293,59 @@ std::vector<UserManager::User> UserManager::GetUsers() const {
       if ((*it)->GetAsString(&email)) {
         User user;
         user.set_email(email);
-        UserImages::const_iterator image_it = user_images_.find(email);
+
+        // Get OAuth token status.
+        if (CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kSkipOAuthLogin)) {
+          // Use OAUTH_TOKEN_STATUS_VALID flag if kSkipOAuthLogin is present.
+          user.set_oauth_token_status(OAUTH_TOKEN_STATUS_VALID);
+        } else {
+          int oauth_token_status = OAUTH_TOKEN_STATUS_UNKNOWN;
+          if (prefs_oauth_status &&
+              prefs_oauth_status->GetIntegerWithoutPathExpansion(email,
+                  &oauth_token_status)) {
+            user.set_oauth_token_status(
+                static_cast<OAuthTokenStatus>(oauth_token_status));
+          }
+        }
+
         std::string image_path;
-        if (image_it == user_images_.end()) {
-          if (prefs_images &&
-              prefs_images->GetStringWithoutPathExpansion(email, &image_path)) {
-            int default_image_id = kDefaultImagesCount;
-            if (IsDefaultImagePath(image_path, &default_image_id)) {
-              DCHECK(default_image_id < kDefaultImagesCount);
-              int resource_id = kDefaultImageResources[default_image_id];
-              user.set_image(
-                  *ResourceBundle::GetSharedInstance().GetBitmapNamed(
-                      resource_id));
-              user_images_[email] = user.image();
-            } else {
+        // Get account image path.
+        if (prefs_images &&
+            prefs_images->GetStringWithoutPathExpansion(email, &image_path)) {
+          int default_image_id = kDefaultImagesCount;
+          if (IsDefaultImagePath(image_path, &default_image_id)) {
+            DCHECK(default_image_id >= 0);
+            DCHECK(default_image_id < kDefaultImagesCount);
+            int resource_id = kDefaultImageResources[default_image_id];
+            user.SetImage(
+                *ResourceBundle::GetSharedInstance().GetBitmapNamed(
+                    resource_id),
+                default_image_id);
+          } else {
+            UserImages::const_iterator image_it = user_images_.find(email);
+            if (image_it == user_images_.end()) {
               // Insert the default image so we don't send another request if
               // GetUsers is called twice.
               user_images_[email] = user.image();
               image_loader_->Start(email, image_path, false);
+            } else {
+              user.SetImage(image_it->second, -1);
             }
           }
-        } else {
-          user.set_image(image_it->second);
         }
+
+        // Makes table to determine whether displayname is unique.
+        const std::string& display_name = user.GetDisplayName();
+        ++display_name_count[display_name];
+
         users.push_back(user);
       }
+    }
+
+    for (UserVector::iterator it = users.begin(); it != users.end(); ++it) {
+      const std::string& display_name = it->GetDisplayName();
+      it->is_displayname_unique_ = display_name_count[display_name] <= 1;
     }
   }
   return users;
@@ -347,8 +396,16 @@ void UserManager::UserLoggedIn(const std::string& email) {
   }
   prefs->SavePersistentPrefs();
   NotifyOnLogin();
-  if (current_user_is_new_)
+  if (current_user_is_new_) {
     SetDefaultUserImage(email);
+  } else {
+    int metric = kDefaultImagesCount;
+    if (logged_in_user_.default_image_index() != -1)
+      metric = logged_in_user_.default_image_index();
+    UMA_HISTOGRAM_ENUMERATION("UserImage.LoggedIn",
+                              metric,
+                              kDefaultImagesCount + 1);
+  }
 }
 
 void UserManager::RemoveUser(const std::string& email,
@@ -396,6 +453,11 @@ void UserManager::RemoveUserFromList(const std::string& email) {
   std::string image_path_string;
   prefs_images_update->GetStringWithoutPathExpansion(email, &image_path_string);
   prefs_images_update->RemoveWithoutPathExpansion(email, NULL);
+
+  DictionaryPrefUpdate prefs_oauth_update(prefs, kUserOAuthTokenStatus);
+  int oauth_status;
+  prefs_oauth_update->GetIntegerWithoutPathExpansion(email, &oauth_status);
+  prefs_oauth_update->RemoveWithoutPathExpansion(email, NULL);
 
   prefs->SavePersistentPrefs();
 
@@ -449,6 +511,12 @@ void UserManager::SaveUserImage(const std::string& username,
       FROM_HERE,
       NewRunnableFunction(&SaveImageToFile,
                           image, image_path, username));
+}
+
+void UserManager::SaveUserOAuthStatus(const std::string& username,
+                                      OAuthTokenStatus oauth_token_status) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  SaveOAuthTokenStatusToLocalState(username, oauth_token_status);
 }
 
 void UserManager::SaveUserImagePath(const std::string& username,
@@ -527,13 +595,13 @@ void UserManager::OnImageLoaded(const std::string& username,
   user_images_[username] = image;
   User user;
   user.set_email(username);
-  user.set_image(image);
+  user.SetImage(image, -1);
   if (logged_in_user_.email() == username)
-    logged_in_user_.set_image(image);
+    logged_in_user_.SetImage(image, -1);
   if (should_save_image)
     SaveUserImage(username, image);
   NotificationService::current()->Notify(
-      NotificationType::LOGIN_USER_IMAGE_CHANGED,
+      chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
       Source<UserManager>(this),
       Details<const User>(&user));
 }
@@ -548,7 +616,7 @@ UserManager::UserManager()
       current_user_is_owner_(false),
       current_user_is_new_(false),
       user_is_logged_in_(false) {
-  registrar_.Add(this, NotificationType::OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED,
+  registrar_.Add(this, chrome::NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED,
       NotificationService::AllSources());
 }
 
@@ -567,13 +635,18 @@ class RealTPMTokenInfoDelegate : public crypto::TPMTokenInfoDelegate {
  public:
   RealTPMTokenInfoDelegate();
   virtual ~RealTPMTokenInfoDelegate();
-  virtual bool IsTokenReady() const;
+  virtual bool IsTokenAvailable() const OVERRIDE;
+  virtual bool IsTokenReady() const OVERRIDE;
   virtual void GetTokenInfo(std::string* token_name,
-                            std::string* user_pin) const;
+                            std::string* user_pin) const OVERRIDE;
 };
 
 RealTPMTokenInfoDelegate::RealTPMTokenInfoDelegate() {}
 RealTPMTokenInfoDelegate::~RealTPMTokenInfoDelegate() {}
+
+bool RealTPMTokenInfoDelegate::IsTokenAvailable() const {
+  return CrosLibrary::Get()->GetCryptohomeLibrary()->TpmIsEnabled();
+}
 
 bool RealTPMTokenInfoDelegate::IsTokenReady() const {
   return CrosLibrary::Get()->GetCryptohomeLibrary()->Pkcs11IsTpmTokenReady();
@@ -593,14 +666,14 @@ void RealTPMTokenInfoDelegate::GetTokenInfo(std::string* token_name,
 
 void UserManager::NotifyOnLogin() {
   NotificationService::current()->Notify(
-      NotificationType::LOGIN_USER_CHANGED,
+      chrome::NOTIFICATION_LOGIN_USER_CHANGED,
       Source<UserManager>(this),
       Details<const User>(&logged_in_user_));
 
-  chromeos::CrosLibrary::Get()->GetInputMethodLibrary()->
+  chromeos::input_method::InputMethodManager::GetInstance()->
       SetDeferImeStartup(false);
   // Shut down the IME so that it will reload the user's settings.
-  chromeos::CrosLibrary::Get()->GetInputMethodLibrary()->
+  chromeos::input_method::InputMethodManager::GetInstance()->
       StopInputMethodDaemon();
   // Let the window manager know that we're logged in now.
   WmIpc::instance()->SetLoggedInProperty(true);
@@ -620,10 +693,10 @@ void UserManager::NotifyOnLogin() {
       NewRunnableFunction(&CheckOwnership));
 }
 
-void UserManager::Observe(NotificationType type,
+void UserManager::Observe(int type,
                           const NotificationSource& source,
                           const NotificationDetails& details) {
-  if (type == NotificationType::OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED) {
+  if (type == chrome::NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED) {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         NewRunnableFunction(&CheckOwnership));
   }

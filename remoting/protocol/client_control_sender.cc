@@ -24,19 +24,16 @@ ClientControlSender::ClientControlSender(net::Socket* socket)
 ClientControlSender::~ClientControlSender() {
 }
 
-void ClientControlSender::NotifyResolution(
-    const NotifyResolutionRequest* msg, Task* done) {
-  protocol::ControlMessage message;
-  message.mutable_notify_resolution()->CopyFrom(*msg);
-  buffered_writer_->Write(SerializeAndFrameMessage(message), done);
-}
-
 void ClientControlSender::BeginSessionResponse(const LocalLoginStatus* msg,
                                                Task* done) {
   protocol::ControlMessage message;
   message.mutable_begin_session_response()->mutable_login_status()->CopyFrom(
       *msg);
   buffered_writer_->Write(SerializeAndFrameMessage(message), done);
+}
+
+void ClientControlSender::Close() {
+  buffered_writer_->Close();
 }
 
 }  // namespace protocol

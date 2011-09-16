@@ -27,7 +27,7 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 namespace {
 
@@ -177,7 +177,8 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
       alertIcon = rb.GetNativeImageNamed(IDR_SAFEBROWSING_WARNING);
       dangerousWarning = l10n_util::GetNSStringWithFixup(
           IDS_PROMPT_UNSAFE_DOWNLOAD_URL);
-      confirmButtonTitle = l10n_util::GetNSStringWithFixup(IDS_SAVE_DOWNLOAD);
+      confirmButtonTitle = l10n_util::GetNSStringWithFixup(
+          IDS_CONFIRM_DOWNLOAD);
     } else {
       // It's a dangerous file type (e.g.: an executable).
       DCHECK_EQ(downloadModel->download()->GetDangerType(),
@@ -218,7 +219,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
          dangerousWarning = l10n_util::GetNSStringFWithFixup(
              IDS_PROMPT_DANGEROUS_DOWNLOAD, UTF8ToUTF16(new_filename));
          confirmButtonTitle =
-             l10n_util::GetNSStringWithFixup(IDS_SAVE_DOWNLOAD);
+             l10n_util::GetNSStringWithFixup(IDS_CONFIRM_DOWNLOAD);
       }
     }
     DCHECK(alertIcon);

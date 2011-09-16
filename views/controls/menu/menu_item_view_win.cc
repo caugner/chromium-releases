@@ -7,7 +7,7 @@
 #include <uxtheme.h>
 #include <Vssym32.h>
 
-#include "grit/app_strings.h"
+#include "grit/ui_strings.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/native_theme_win.h"
 #include "views/controls/menu/menu_config.h"
@@ -18,11 +18,13 @@ using gfx::NativeTheme;
 namespace views {
 
 gfx::Size MenuItemView::CalculatePreferredSize() {
+  gfx::Size child_size = GetChildPreferredSize();
   const gfx::Font& font = GetFont();
   return gfx::Size(
       font.GetStringWidth(title_) + label_start_ + item_right_margin_ +
-          GetChildPreferredWidth(),
-      font.GetHeight() + GetBottomMargin() + GetTopMargin());
+          child_size.width(),
+      std::max(child_size.height(), font.GetHeight()) + GetBottomMargin() +
+          GetTopMargin());
 }
 
 void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {

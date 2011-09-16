@@ -144,7 +144,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // RenderWidget is being destroyed or the render process crashed. You should
   // never cache this pointer since it can become NULL if the renderer crashes,
   // instead you should always ask for it using the accessor.
-  void set_view(RenderWidgetHostView* view) { view_ = view; }
+  void SetView(RenderWidgetHostView* view);
   RenderWidgetHostView* view() const { return view_; }
 
   RenderProcessHost* process() const { return process_; }
@@ -261,9 +261,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   virtual void OnMouseActivate();
   void ForwardWheelEvent(const WebKit::WebMouseWheelEvent& wheel_event);
   virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
-#if defined(TOUCH_UI)
   virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
-#endif
 
 
   // Update the text direction of the focused input element and notify it to a
@@ -372,7 +370,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Notification that the user has made some kind of input that could
   // perform an action. See OnUserGesture for more details.
   void StartUserGesture();
-  
+
  protected:
   // Internal implementation of the public Forward*Event() methods.
   void ForwardInputEvent(const WebKit::WebInputEvent& input_event,
@@ -446,6 +444,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgRenderViewGone(int status, int error_code);
   void OnMsgClose();
   void OnMsgRequestMove(const gfx::Rect& pos);
+  void OnMsgSetTooltipText(const std::wstring& tooltip_text,
+                           WebKit::WebTextDirection text_direction_hint);
   void OnMsgPaintAtSizeAck(int tag, const gfx::Size& size);
   void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
   void OnMsgInputEventAck(const IPC::Message& message);
@@ -588,6 +588,19 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // mechanism as for mouse moves (just dropping old events when multiple ones
   // would be queued) results in very slow scrolling.
   WheelEventQueue coalesced_mouse_wheel_events_;
+
+  // True if a touch move event was sent to the renderer view and we are waiting
+  // for a corresponding ACK message.
+  bool touch_move_pending_;
+
+  // If a touch move event comes in while we are waiting for an ACK for a
+  // previously sent touch move event, it will be stored here. A touch event
+  // stores the location of the moved point, instead of the amount that it
+  // moved. So it is not necessary to coalesce the move events (as is done for
+  // mouse wheel events). Storing the most recent event for dispatch is
+  // sufficient.
+  WebKit::WebTouchEvent queued_touch_event_;
+  bool touch_event_is_queued_;
 
   // The time when an input event was sent to the RenderWidget.
   base::TimeTicks input_event_start_time_;

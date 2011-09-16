@@ -5,13 +5,18 @@
 #include "views/test/test_views_delegate.h"
 
 #include "base/logging.h"
+#include "ui/base/clipboard/clipboard.h"
 
-TestViewsDelegate::TestViewsDelegate() {
-  DCHECK(!views::ViewsDelegate::views_delegate);
-  views::ViewsDelegate::views_delegate = this;
+namespace views {
+
+TestViewsDelegate::TestViewsDelegate()
+    : default_parent_view_(NULL) {
+  DCHECK(!ViewsDelegate::views_delegate);
+  ViewsDelegate::views_delegate = this;
 }
+
 TestViewsDelegate::~TestViewsDelegate() {
-  views::ViewsDelegate::views_delegate = NULL;
+  ViewsDelegate::views_delegate = NULL;
 }
 
 ui::Clipboard* TestViewsDelegate::GetClipboard() const {
@@ -22,15 +27,16 @@ ui::Clipboard* TestViewsDelegate::GetClipboard() const {
   return clipboard_.get();
 }
 
+View* TestViewsDelegate::GetDefaultParentView() {
+  return default_parent_view_;
+}
 
-bool TestViewsDelegate::GetSavedWindowBounds(views::Window* window,
-                                             const std::wstring& window_name,
+bool TestViewsDelegate::GetSavedWindowBounds(const std::wstring& window_name,
                                              gfx::Rect* bounds) const {
   return false;
 }
 
-bool TestViewsDelegate::GetSavedMaximizedState(views::Window* window,
-                                               const std::wstring& window_name,
+bool TestViewsDelegate::GetSavedMaximizedState(const std::wstring& window_name,
                                                bool* maximized) const {
   return false;
 }
@@ -38,3 +44,5 @@ bool TestViewsDelegate::GetSavedMaximizedState(views::Window* window,
 int TestViewsDelegate::GetDispositionForEvent(int event_flags) {
   return 0;
 }
+
+}  // namespace views

@@ -17,7 +17,7 @@
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/system_access.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/chromeos/version_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
@@ -173,15 +173,9 @@ void RegisterPageUIHTMLSource::StartDataRequest(const std::string& path,
     return;
   }
 
-  static const base::StringPiece register_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
+  scoped_refptr<RefCountedMemory> html_bytes(
+      ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
           IDR_HOST_REGISTRATION_PAGE_HTML));
-
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(register_html.size());
-  std::copy(register_html.begin(),
-            register_html.end(),
-            html_bytes->data.begin());
 
   SendResponse(request_id, html_bytes);
 #else
@@ -274,14 +268,16 @@ void RegisterPageHandler::SendUserInfo() {
 #if defined(OS_CHROMEOS)
   DictionaryValue value;
 
-  chromeos::SystemAccess * sys_lib =
-      chromeos::SystemAccess::GetInstance();
+  chromeos::system::StatisticsProvider * provider =
+      chromeos::system::StatisticsProvider::GetInstance();
 
   // Required info.
   std::string system_hwqual;
   std::string serial_number;
-  if (!sys_lib->GetMachineStatistic(kMachineInfoSystemHwqual, &system_hwqual) ||
-      !sys_lib->GetMachineStatistic(kMachineInfoSerialNumber, &serial_number)) {
+  if (!provider->GetMachineStatistic(kMachineInfoSystemHwqual,
+                                     &system_hwqual) ||
+      !provider->GetMachineStatistic(kMachineInfoSerialNumber,
+                                     &serial_number)) {
     SkipRegistration("Failed to get required machine info.");
     return;
   }
@@ -307,7 +303,7 @@ void RegisterPageHandler::SendUserInfo() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-RegisterPageUI::RegisterPageUI(TabContents* contents) : WebUI(contents){
+RegisterPageUI::RegisterPageUI(TabContents* contents) : ChromeWebUI(contents) {
   RegisterPageHandler* handler = new RegisterPageHandler();
   AddMessageHandler((handler)->Attach(this));
   handler->Init();

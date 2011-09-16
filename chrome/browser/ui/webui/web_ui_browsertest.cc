@@ -6,20 +6,29 @@
 #include <string>
 #include <vector>
 
+#include "base/lazy_instance.h"
 #include "base/path_service.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/test_tab_strip_model_observer.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
+#include "testing/gtest/include/gtest/gtest-spi.h"
 #include "ui/base/resource/resource_bundle.h"
 
-static const FilePath::CharType* kWebUILibraryJS =
-    FILE_PATH_LITERAL("test_api.js");
-static const FilePath::CharType* kWebUITestFolder = FILE_PATH_LITERAL("webui");
-static std::vector<std::string> error_messages_;
+namespace {
+
+const FilePath::CharType kMockJS[] = FILE_PATH_LITERAL("mock4js.js");
+const FilePath::CharType kWebUILibraryJS[] = FILE_PATH_LITERAL("test_api.js");
+const FilePath::CharType kWebUITestFolder[] = FILE_PATH_LITERAL("webui");
+base::LazyInstance<std::vector<std::string> > error_messages_(
+    base::LINKER_INITIALIZED);
 
 // Intercepts all log messages.
 bool LogHandler(int severity,
@@ -27,16 +36,19 @@ bool LogHandler(int severity,
                 int line,
                 size_t message_start,
                 const std::string& str) {
-  if (severity == logging::LOG_ERROR) {
-    error_messages_.push_back(str);
-    return true;
-  } else {
-    // For debugging messages while developing tests.
-    return false;
-  }
+  if (severity == logging::LOG_ERROR)
+    error_messages_.Get().push_back(str);
+
+  return false;
 }
 
+} // namespace
+
 WebUIBrowserTest::~WebUIBrowserTest() {}
+
+void WebUIBrowserTest::AddLibrary(const FilePath& library_path) {
+  user_libraries_.push_back(library_path);
+}
 
 bool WebUIBrowserTest::RunJavascriptFunction(const std::string& function_name) {
   return RunJavascriptFunction(function_name, ConstValueVector());
@@ -62,6 +74,14 @@ bool WebUIBrowserTest::RunJavascriptFunction(
     const std::string& function_name,
     const ConstValueVector& function_arguments) {
   return RunJavascriptUsingHandler(function_name, function_arguments, false);
+}
+
+bool WebUIBrowserTest::RunJavascriptTestF(const std::string& test_fixture,
+                                          const std::string& test_name) {
+  ConstValueVector args;
+  args.push_back(Value::CreateStringValue(test_fixture));
+  args.push_back(Value::CreateStringValue(test_name));
+  return RunJavascriptTest("RUN_TEST_F", args);
 }
 
 bool WebUIBrowserTest::RunJavascriptTest(const std::string& test_name) {
@@ -90,8 +110,52 @@ bool WebUIBrowserTest::RunJavascriptTest(
   return RunJavascriptUsingHandler(test_name, test_arguments, true);
 }
 
+void WebUIBrowserTest::PreLoadJavascriptLibraries(
+    const std::string& preload_test_fixture,
+    const std::string& preload_test_name) {
+  ASSERT_FALSE(libraries_preloaded_);
+  ConstValueVector args;
+  args.push_back(Value::CreateStringValue(preload_test_fixture));
+  args.push_back(Value::CreateStringValue(preload_test_name));
+  RunJavascriptFunction("preloadJavascriptLibraries", args);
+  libraries_preloaded_ = true;
+}
+
+void WebUIBrowserTest::BrowsePreload(const GURL& browse_to,
+                                     const std::string& preload_test_fixture,
+                                     const std::string& preload_test_name) {
+  // Remember for callback OnJsInjectionReady().
+  preload_test_fixture_ = preload_test_fixture;
+  preload_test_name_ = preload_test_name;
+
+  TestNavigationObserver navigation_observer(
+      &browser()->GetSelectedTabContentsWrapper()->controller(), this, 1);
+  browser::NavigateParams params(
+      browser(), GURL(browse_to), PageTransition::TYPED);
+  params.disposition = CURRENT_TAB;
+  browser::Navigate(&params);
+  navigation_observer.WaitForObservation();
+}
+
+void WebUIBrowserTest::BrowsePrintPreload(
+    const GURL& browse_to,
+    const std::string& preload_test_fixture,
+    const std::string& preload_test_name) {
+  // Remember for callback OnJsInjectionReady().
+  preload_test_fixture_ = preload_test_fixture;
+  preload_test_name_ = preload_test_name;
+
+  ui_test_utils::NavigateToURL(browser(), browse_to);
+
+  TestTabStripModelObserver tabstrip_observer(
+      browser()->tabstrip_model(), this);
+  browser()->Print();
+  tabstrip_observer.WaitForObservation();
+}
+
 WebUIBrowserTest::WebUIBrowserTest()
-    : test_handler_(new WebUITestHandler()) {}
+    : test_handler_(new WebUITestHandler()),
+      libraries_preloaded_(false) {}
 
 void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_));
@@ -102,6 +166,13 @@ void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
   ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
 
+  FilePath mockPath;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &mockPath));
+  mockPath = mockPath.AppendASCII("chrome");
+  mockPath = mockPath.AppendASCII("third_party");
+  mockPath = mockPath.AppendASCII("mock4js");
+  mockPath = mockPath.Append(kMockJS);
+  AddLibrary(mockPath);
   AddLibrary(FilePath(kWebUILibraryJS));
 }
 
@@ -109,14 +180,27 @@ WebUIMessageHandler* WebUIBrowserTest::GetMockMessageHandler() {
   return NULL;
 }
 
+GURL WebUIBrowserTest::WebUITestDataPathToURL(
+    const FilePath::StringType& path) {
+  FilePath dir_test_data;
+  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &dir_test_data));
+  FilePath test_path(dir_test_data.AppendASCII("webui"));
+  test_path = test_path.Append(path);
+  EXPECT_TRUE(file_util::PathExists(test_path));
+  return net::FilePathToFileURL(test_path);
+}
+
+void WebUIBrowserTest::OnJsInjectionReady() {
+  PreLoadJavascriptLibraries(preload_test_fixture_, preload_test_name_);
+}
+
 void WebUIBrowserTest::BuildJavascriptLibraries(std::string* content) {
   ASSERT_TRUE(content != NULL);
-  std::string library_content, src_content;
-
   std::vector<FilePath>::iterator user_libraries_iterator;
-  for (user_libraries_iterator = user_libraries.begin();
-       user_libraries_iterator != user_libraries.end();
+  for (user_libraries_iterator = user_libraries_.begin();
+       user_libraries_iterator != user_libraries_.end();
        ++user_libraries_iterator) {
+    std::string library_content;
     if (user_libraries_iterator->IsAbsolute()) {
       ASSERT_TRUE(file_util::ReadFileToString(*user_libraries_iterator,
                                               &library_content));
@@ -152,7 +236,8 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
     const ConstValueVector& function_arguments,
     bool is_test) {
   std::string content;
-  BuildJavascriptLibraries(&content);
+  if (!libraries_preloaded_)
+    BuildJavascriptLibraries(&content);
 
   if (!function_name.empty()) {
     string16 called_function;
@@ -169,10 +254,10 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
   bool result = test_handler_->RunJavascript(content, is_test);
   logging::SetLogMessageHandler(NULL);
 
-  if (error_messages_.size() > 0) {
+  if (error_messages_.Get().size() > 0) {
     LOG(ERROR) << "Encountered javascript console error(s)";
     result = false;
-    error_messages_.clear();
+    error_messages_.Get().clear();
   }
   return result;
 }
@@ -188,18 +273,38 @@ void WebUIBrowserTest::SetupHandlers() {
     GetMockMessageHandler()->Attach(web_ui_instance);
 }
 
-void WebUIBrowserTest::AddLibrary(const FilePath& library_path) {
-  user_libraries.push_back(library_path);
-}
+// According to the interface for EXPECT_FATAL_FAILURE
+// (http://code.google.com/p/googletest/wiki/AdvancedGuide#Catching_Failures)
+// the statement must be statically available. Therefore, we make a static
+// global s_test_ which should point to |this| for the duration of the test run
+// and be cleared afterward.
+class WebUIBrowserExpectFailTest : public WebUIBrowserTest {
+ public:
+  WebUIBrowserExpectFailTest() {
+    EXPECT_FALSE(s_test_);
+    s_test_ = this;
+  }
 
-IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, TestSamplePass) {
+ protected:
+  virtual ~WebUIBrowserExpectFailTest() {
+    EXPECT_TRUE(s_test_);
+    s_test_ = NULL;
+  }
+
+  static void RunJavascriptTestNoReturn(const std::string& testname) {
+    EXPECT_TRUE(s_test_);
+    s_test_->RunJavascriptTest(testname);
+  }
+
+ private:
+  static WebUIBrowserTest* s_test_;
+};
+
+WebUIBrowserTest* WebUIBrowserExpectFailTest::s_test_ = NULL;
+
+IN_PROC_BROWSER_TEST_F(WebUIBrowserExpectFailTest, TestFailsFast) {
   AddLibrary(FilePath(FILE_PATH_LITERAL("sample_downloads.js")));
-
-  // Navigate to UI.
-  // TODO(dtseng): make accessor for subclasses to return?
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
-
-  ASSERT_TRUE(RunJavascriptTest("testAssertFalse"));
-  ASSERT_TRUE(RunJavascriptTest("testInitialFocus"));
-  ASSERT_FALSE(RunJavascriptTest("testConsoleError"));
+  EXPECT_FATAL_FAILURE(RunJavascriptTestNoReturn("FAILS_BogusFunctionName"),
+                       "WebUITestHandler::Observe");
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -129,10 +129,11 @@ def FindDumpRenderTree():
     search_locations.append(home_dir + "/bin/DumpRenderTree/"
                             "DumpRenderTree.exe")
 
-  if (sys.platform in ('linux', 'linux2')):
+  if (sys.platform.startswith('linux')):
     search_locations.append(src_dir + "/sconsbuild/Release/DumpRenderTree")
     search_locations.append(src_dir + "/out/Release/DumpRenderTree")
     search_locations.append(src_dir + "/sconsbuild/Debug/DumpRenderTree")
+    search_locations.append(src_dir + "/ninja/DumpRenderTree")
     search_locations.append(src_dir + "/out/Debug/DumpRenderTree")
     search_locations.append(os.getenv("HOME") + "/bin/DumpRenderTree/"
                             "DumpRenderTree")

@@ -8,7 +8,6 @@
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
-#include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_set.h"
@@ -21,6 +20,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webkit_glue.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 using WebKit::WebURLError;
 
 namespace {
@@ -31,6 +34,8 @@ static const char kWeakDHKeyLearnMoreUrl[] =
     "http://sites.google.com/a/chromium.org/dev/err_ssl_weak_server_ephemeral_dh_key";
 static const char kESETLearnMoreUrl[] =
     "http://kb.eset.com/esetkb/index?page=content&id=SOLN2588";
+static const char kKasperskyLearnMoreUrl[] =
+    "http://support.kaspersky.com/kav2012/settings/options?print=true&qid=208284701";
 
 enum NAV_SUGGESTIONS {
   SUGGEST_NONE     = 0,
@@ -209,6 +214,13 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
    IDS_ERRORPAGES_HEADING_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
    IDS_ERRORPAGES_SUMMARY_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
+   SUGGEST_LEARNMORE,
+  },
+  {net::ERR_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_SUMMARY_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION,
    IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_LEARNMORE,
   },
@@ -442,14 +454,12 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
         IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM;
 #if defined(OS_WIN)
     // Different versions of Windows have different instructions.
-    int32 major_version, minor_version, bugfix_version;
-    base::SysInfo::OperatingSystemVersionNumbers(
-        &major_version, &minor_version, &bugfix_version);
-    if (major_version < 6) {
+    base::win::Version windows_version = base::win::GetVersion();
+    if (windows_version < base::win::VERSION_VISTA) {
       // XP, XP64, and Server 2003.
       platform_string_id =
           IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM_XP;
-    } else if (major_version == 6 && minor_version == 0) {
+    } else if (windows_version == base::win::VERSION_VISTA) {
       // Vista
       platform_string_id =
           IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM_VISTA;
@@ -546,6 +556,9 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
         break;
       case net::ERR_ESET_ANTI_VIRUS_SSL_INTERCEPTION:
         learn_more_url = GURL(kESETLearnMoreUrl);
+        break;
+      case net::ERR_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION:
+        learn_more_url = GURL(kKasperskyLearnMoreUrl);
         break;
       default:
         break;

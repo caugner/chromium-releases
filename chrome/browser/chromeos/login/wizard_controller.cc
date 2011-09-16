@@ -38,8 +38,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/accelerator.h"
 
@@ -164,14 +164,14 @@ void WizardController::CancelOOBEUpdate() {
 chromeos::NetworkScreen* WizardController::GetNetworkScreen() {
   if (!network_screen_.get())
     network_screen_.reset(new chromeos::NetworkScreen(
-        this, oobe_display_->CreateNetworkScreenActor()));
+        this, oobe_display_->GetNetworkScreenActor()));
   return network_screen_.get();
 }
 
 chromeos::UpdateScreen* WizardController::GetUpdateScreen() {
   if (!update_screen_.get()) {
     update_screen_.reset(new chromeos::UpdateScreen(
-        this, oobe_display_->CreateUpdateScreenActor()));
+        this, oobe_display_->GetUpdateScreenActor()));
     update_screen_->SetRebootCheckDelay(kWaitForRebootTimeSec);
   }
   return update_screen_.get();
@@ -181,14 +181,14 @@ chromeos::UserImageScreen* WizardController::GetUserImageScreen() {
   if (!user_image_screen_.get())
     user_image_screen_.reset(
         new chromeos::UserImageScreen(
-            oobe_display_->CreateUserImageScreenActor()));
+            this, oobe_display_->GetUserImageScreenActor()));
   return user_image_screen_.get();
 }
 
 chromeos::EulaScreen* WizardController::GetEulaScreen() {
   if (!eula_screen_.get())
     eula_screen_.reset(new chromeos::EulaScreen(
-        this, oobe_display_->CreateEulaScreenActor()));
+        this, oobe_display_->GetEulaScreenActor()));
   return eula_screen_.get();
 }
 
@@ -196,25 +196,27 @@ chromeos::RegistrationScreen* WizardController::GetRegistrationScreen() {
   if (!registration_screen_.get())
     registration_screen_.reset(
         new chromeos::RegistrationScreen(
-            oobe_display_->CreateRegistrationScreenActor()));
+            oobe_display_->GetRegistrationScreenActor()));
   return registration_screen_.get();
 }
 
 chromeos::HTMLPageScreen* WizardController::GetHTMLPageScreen() {
   if (!html_page_screen_.get()) {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+    const CommandLine::StringVector& args = cmd_line->GetArgs();
+
     std::string url;
     // It's strange but args may contains empty strings.
-    for (size_t i = 0; i < command_line->args().size(); i++) {
-      if (!command_line->args()[i].empty()) {
+    for (size_t i = 0; i < args.size(); i++) {
+      if (!args[i].empty()) {
         DCHECK(url.empty()) << "More than one URL in command line";
-        url = command_line->args()[i];
+        url = args[i];
       }
     }
-    DCHECK(!url.empty()) << "No URL in commane line";
+    DCHECK(!url.empty()) << "No URL in command line";
     html_page_screen_.reset(
         new chromeos::HTMLPageScreen(
-            oobe_display_->CreateHTMLPageScreenActor(), url));
+            oobe_display_->GetHTMLPageScreenActor(), url));
   }
   return html_page_screen_.get();
 }
@@ -224,7 +226,7 @@ chromeos::EnterpriseEnrollmentScreen*
   if (!enterprise_enrollment_screen_.get()) {
     enterprise_enrollment_screen_.reset(
         new chromeos::EnterpriseEnrollmentScreen(
-            oobe_display_->CreateEnterpriseEnrollmentScreenActor()));
+            this, oobe_display_->GetEnterpriseEnrollmentScreenActor()));
   }
   return enterprise_enrollment_screen_.get();
 }
@@ -240,7 +242,7 @@ void WizardController::ShowLoginScreen() {
   host_->SetOobeProgress(chromeos::BackgroundView::SIGNIN);
   host_->StartSignInScreen();
   smooth_show_timer_.Stop();
-  oobe_display_.reset(NULL);
+  oobe_display_ = NULL;
 }
 
 void WizardController::ShowUpdateScreen() {
@@ -451,7 +453,7 @@ void WizardController::SetCurrentScreen(WizardScreen* new_current) {
 void WizardController::ShowCurrentScreen() {
   // ShowCurrentScreen may get called by smooth_show_timer_ even after
   // flow has been switched to sign in screen (ExistingUserController).
-  if (!oobe_display_.get())
+  if (!oobe_display_)
     return;
 
   smooth_show_timer_.Stop();

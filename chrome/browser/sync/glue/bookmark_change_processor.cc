@@ -1,6 +1,7 @@
 // Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
 
 #include <stack>
@@ -8,8 +9,9 @@
 
 #include "base/string16.h"
 #include "base/string_util.h"
-
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -53,7 +55,7 @@ void BookmarkChangeProcessor::UpdateSyncNodeProperties(
   dst->SetIsFolder(src->is_folder());
   dst->SetTitle(UTF16ToWideHack(src->GetTitle()));
   if (!src->is_folder())
-    dst->SetURL(src->GetURL());
+    dst->SetURL(src->url());
   SetSyncNodeFavicon(src, model, dst);
 }
 
@@ -92,7 +94,7 @@ void BookmarkChangeProcessor::RemoveOneSyncNode(
 
 void BookmarkChangeProcessor::RemoveSyncNodeHierarchy(
     const BookmarkNode* topmost) {
-  sync_api::WriteTransaction trans(share_handle());
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
 
   // Later logic assumes that |topmost| has been unlinked.
   DCHECK(topmost->is_root());
@@ -128,7 +130,8 @@ void BookmarkChangeProcessor::RemoveSyncNodeHierarchy(
   DCHECK(index_stack.empty());  // Nothing should be left on the stack.
 }
 
-void BookmarkChangeProcessor::Loaded(BookmarkModel* model) {
+void BookmarkChangeProcessor::Loaded(BookmarkModel* model,
+                                     bool ids_reassigned) {
   NOTREACHED();
 }
 
@@ -145,7 +148,7 @@ void BookmarkChangeProcessor::BookmarkNodeAdded(BookmarkModel* model,
   DCHECK(share_handle());
 
   // Acquire a scoped write lock via a transaction.
-  sync_api::WriteTransaction trans(share_handle());
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
 
   CreateSyncNode(parent, model, index, &trans, model_associator_,
                  error_handler());
@@ -197,7 +200,7 @@ void BookmarkChangeProcessor::BookmarkNodeChanged(BookmarkModel* model,
   }
 
   // Acquire a scoped write lock via a transaction.
-  sync_api::WriteTransaction trans(share_handle());
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
 
   // Lookup the sync node that's associated with |node|.
   sync_api::WriteNode sync_node(&trans);
@@ -231,7 +234,7 @@ void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
   }
 
   // Acquire a scoped write lock via a transaction.
-  sync_api::WriteTransaction trans(share_handle());
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
 
   // Lookup the sync node that's associated with |child|.
   sync_api::WriteNode sync_node(&trans);
@@ -258,7 +261,7 @@ void BookmarkChangeProcessor::BookmarkNodeChildrenReordered(
     BookmarkModel* model, const BookmarkNode* node) {
 
   // Acquire a scoped write lock via a transaction.
-  sync_api::WriteTransaction trans(share_handle());
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
 
   // The given node's children got reordered. We need to reorder all the
   // children of the corresponding sync node.
@@ -396,7 +399,7 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
       if (!dst) // Can't do anything if we can't find the chrome node.
         continue;
       const BookmarkNode* parent = dst->parent();
-      if (dst->child_count()) {
+      if (!dst->empty()) {
         if (!foster_parent) {
           foster_parent = model->AddFolder(model->other_node(),
                                            model->other_node()->child_count(),
@@ -531,15 +534,15 @@ void BookmarkChangeProcessor::ApplyBookmarkFavicon(
   // destination URL, which is not correct, but since the favicon URL
   // is used as a key in the history's thumbnail DB, this gives us a value
   // which does not collide with others.
-  GURL fake_icon_url = bookmark_node->GetURL();
+  GURL fake_icon_url = bookmark_node->url();
 
   HistoryService* history =
       profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
   FaviconService* favicon_service =
       profile->GetFaviconService(Profile::EXPLICIT_ACCESS);
 
-  history->AddPageNoVisitForBookmark(bookmark_node->GetURL());
-  favicon_service->SetFavicon(bookmark_node->GetURL(),
+  history->AddPageNoVisitForBookmark(bookmark_node->url());
+  favicon_service->SetFavicon(bookmark_node->url(),
                               fake_icon_url,
                               icon_bytes_vector,
                               history::FAVICON);

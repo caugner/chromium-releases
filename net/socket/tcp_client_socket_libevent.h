@@ -15,14 +15,13 @@
 #include "net/base/net_log.h"
 #include "net/socket/stream_socket.h"
 
-struct event;  // From libevent
-
 namespace net {
 
 class BoundNetLog;
 
 // A client socket that uses TCP as the transport layer.
-class TCPClientSocketLibevent : public StreamSocket, base::NonThreadSafe {
+class NET_TEST TCPClientSocketLibevent : public StreamSocket,
+                                         public base::NonThreadSafe {
  public:
   // The IP address(es) and port number to connect to.  The TCP socket will try
   // each IP address in the list until it succeeds in establishing a
@@ -55,6 +54,8 @@ class TCPClientSocketLibevent : public StreamSocket, base::NonThreadSafe {
   virtual void SetOmniboxSpeculation();
   virtual bool WasEverUsed() const;
   virtual bool UsingTCPFastOpen() const;
+  virtual int64 NumBytesRead() const;
+  virtual base::TimeDelta GetConnectTimeMicros() const;
 
   // Socket methods:
   // Multiple outstanding requests are not supported.
@@ -196,6 +197,10 @@ class TCPClientSocketLibevent : public StreamSocket, base::NonThreadSafe {
 
   // True when TCP FastOpen is in use and we have done the connect.
   bool tcp_fastopen_connected_;
+
+  base::TimeTicks connect_start_time_;
+  base::TimeDelta connect_time_micros_;
+  int64 num_bytes_read_;
 
   DISALLOW_COPY_AND_ASSIGN(TCPClientSocketLibevent);
 };

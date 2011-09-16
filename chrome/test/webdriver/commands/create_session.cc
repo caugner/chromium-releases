@@ -7,12 +7,18 @@
 #include <sstream>
 #include <string>
 
+#include "base/base64.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/logging.h"
+#include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/zip.h"
 #include "chrome/test/webdriver/commands/response.h"
 #include "chrome/test/webdriver/session.h"
 #include "chrome/test/webdriver/session_manager.h"
@@ -68,15 +74,65 @@ void CreateSession::ExecutePost(Response* const response) {
         kBadRequest, "Custom switches must be a list"));
     return;
   }
+  Value* verbose_value;
+  if (capabilities->GetWithoutPathExpansion("chrome.verbose", &verbose_value)) {
+    bool verbose;
+    if (verbose_value->GetAsBoolean(&verbose) && verbose) {
+      // Since logging is shared among sessions, if any session requests verbose
+      // logging, verbose logging will be enabled for all sessions. It is not
+      // possible to turn it off.
+      logging::SetMinLogLevel(logging::LOG_INFO);
+    } else {
+      response->SetError(new Error(
+          kBadRequest, "verbose must be a boolean true or false"));
+      return;
+    }
+  }
 
   FilePath browser_exe;
   FilePath::StringType path;
   if (capabilities->GetStringWithoutPathExpansion("chrome.binary", &path))
     browser_exe = FilePath(path);
 
+  ScopedTempDir temp_dir;
+  FilePath temp_user_data_dir;
+
+  std::string base64_profile;
+  if (capabilities->GetStringWithoutPathExpansion("chrome.profile",
+                                                  &base64_profile)) {
+    if (!temp_dir.CreateUniqueTempDir()) {
+      response->SetError(new Error(
+          kUnknownError, "Could not create temporary directory."));
+      return;
+    }
+
+    std::string data;
+    if (!base::Base64Decode(base64_profile, &data)) {
+      response->SetError(new Error(
+          kBadRequest, "Invalid base64 encoded user profile"));
+      return;
+    }
+
+    FilePath temp_profile_zip = temp_dir.path().AppendASCII("profile.zip");
+    if (!file_util::WriteFile(temp_profile_zip, data.c_str(), data.length())) {
+      response->SetError(new Error(
+          kUnknownError, "Could not write temporary profile zip file."));
+      return;
+    }
+
+    temp_user_data_dir = temp_dir.path().AppendASCII("user_data_dir");
+    if (!Unzip(temp_profile_zip, temp_user_data_dir)) {
+      response->SetError(new Error(
+          kBadRequest, "Could not unarchive provided user profile"));
+      return;
+    }
+  }
+
   // Session manages its own liftime, so do not call delete.
   Session* session = new Session();
-  Error* error = session->Init(browser_exe, command_line_options);
+  Error* error = session->Init(browser_exe,
+                               temp_user_data_dir,
+                               command_line_options);
   if (error) {
     response->SetError(error);
     return;
@@ -96,10 +152,13 @@ void CreateSession::ExecutePost(Response* const response) {
     session->set_screenshot_on_error(screenshot_on_error);
   }
 
-  VLOG(1) << "Created session " << session->id();
+  LOG(INFO) << "Created session " << session->id();
+  // Redirect to a relative URI. Although prohibited by the HTTP standard,
+  // this is what the IEDriver does. Finding the actual IP address is
+  // difficult, and returning the hostname causes perf problems with the python
+  // bindings on Windows.
   std::ostringstream stream;
-  SessionManager* session_manager = SessionManager::GetInstance();
-  stream << "http://" << session_manager->GetAddress() << "/session/"
+  stream << SessionManager::GetInstance()->url_base() << "/session/"
          << session->id();
   response->SetStatus(kSeeOther);
   response->SetValue(Value::CreateStringValue(stream.str()));

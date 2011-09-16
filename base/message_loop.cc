@@ -11,9 +11,9 @@
 #include "base/debug/alias.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_pump_default.h"
 #include "base/metrics/histogram.h"
-#include "base/scoped_ptr.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/thread_local.h"
 #include "base/time.h"
@@ -25,14 +25,16 @@
 #if defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
 #endif
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
-#include "base/message_pump_glib.h"
-#endif
 #if defined(TOUCH_UI)
-#include "base/message_pump_glib_x.h"
-#endif
+#include "base/message_pump_x.h"
+#else
+#include "base/message_pump_gtk.h"
+#endif  // defined(TOUCH_UI)
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -176,7 +178,7 @@ MessageLoop::MessageLoop(Type type)
 #define MESSAGE_PUMP_UI base::MessagePumpMac::Create()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #elif defined(TOUCH_UI)
-#define MESSAGE_PUMP_UI new base::MessagePumpGlibX()
+#define MESSAGE_PUMP_UI new base::MessagePumpX()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #elif defined(OS_NACL)
 // Currently NaCl doesn't have a UI or an IO MessageLoop.
@@ -184,7 +186,7 @@ MessageLoop::MessageLoop(Type type)
 #define MESSAGE_PUMP_UI NULL
 #define MESSAGE_PUMP_IO NULL
 #elif defined(OS_POSIX)  // POSIX but not MACOSX.
-#define MESSAGE_PUMP_UI new base::MessagePumpForUI()
+#define MESSAGE_PUMP_UI new base::MessagePumpGtk()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #else
 #error Not implemented
@@ -778,14 +780,12 @@ MessageLoop::PendingTask::PendingTask(
       nestable(nestable),
       birth_program_counter(posted_from.program_counter()) {
 #if defined(TRACK_ALL_TASK_OBJECTS)
+  post_births = NULL;
   if (tracked_objects::ThreadData::IsActive()) {
     tracked_objects::ThreadData* current_thread_data =
         tracked_objects::ThreadData::current();
     if (current_thread_data) {
       post_births = current_thread_data->TallyABirth(posted_from);
-    } else {
-      // Shutdown started, and this thread wasn't registered.
-      post_births = NULL;
     }
   }
 #endif  // defined(TRACK_ALL_TASK_OBJECTS)
@@ -818,12 +818,6 @@ void MessageLoopForUI::DidProcessMessage(const MSG& message) {
   pump_win()->DidProcessMessage(message);
 }
 #endif  // defined(OS_WIN)
-
-#if defined(USE_X11)
-Display* MessageLoopForUI::GetDisplay() {
-  return gdk_x11_get_default_xdisplay();
-}
-#endif  // defined(USE_X11)
 
 #if !defined(OS_MACOSX) && !defined(OS_NACL)
 void MessageLoopForUI::AddObserver(Observer* observer) {

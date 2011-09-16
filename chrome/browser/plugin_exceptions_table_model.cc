@@ -7,6 +7,7 @@
 #include "base/auto_reset.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -19,8 +20,12 @@ PluginExceptionsTableModel::PluginExceptionsTableModel(
       otr_map_(otr_content_settings_map),
       updates_disabled_(false),
       observer_(NULL) {
-  registrar_.Add(this, NotificationType::CONTENT_SETTINGS_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
+                 Source<HostContentSettingsMap>(map_));
+  if (otr_map_) {
+    registrar_.Add(this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
+                   Source<HostContentSettingsMap>(otr_map_));
+  }
 }
 
 PluginExceptionsTableModel::~PluginExceptionsTableModel() {
@@ -41,6 +46,7 @@ void PluginExceptionsTableModel::RemoveRows(const Rows& rows) {
     SettingsEntry entry = settings_[*it];
     HostContentSettingsMap* map = entry.is_otr ? otr_map_ : map_;
     map->SetContentSetting(entry.pattern,
+                           ContentSettingsPattern::Wildcard(),
                            CONTENT_SETTINGS_TYPE_PLUGINS,
                            resources_[entry.plugin_id],
                            CONTENT_SETTING_DEFAULT);
@@ -117,7 +123,7 @@ int PluginExceptionsTableModel::GetGroupID(int row) {
   return settings_[row].plugin_id;
 }
 
-void PluginExceptionsTableModel::Observe(NotificationType type,
+void PluginExceptionsTableModel::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
   if (!updates_disabled_)
@@ -157,9 +163,9 @@ void PluginExceptionsTableModel::LoadSettings() {
              settings.begin();
          setting_it != settings.end(); ++setting_it) {
       SettingsEntry entry = {
-        setting_it->first,
+        setting_it->a,
         group_id,
-        setting_it->second,
+        setting_it->c,
         false
       };
       settings_.push_back(entry);
@@ -168,9 +174,9 @@ void PluginExceptionsTableModel::LoadSettings() {
              otr_settings.begin();
          setting_it != otr_settings.end(); ++setting_it) {
       SettingsEntry entry = {
-        setting_it->first,
+        setting_it->a,
         group_id,
-        setting_it->second,
+        setting_it->c,
         true
       };
       settings_.push_back(entry);

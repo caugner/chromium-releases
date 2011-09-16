@@ -19,20 +19,29 @@
 
 namespace {
 
-// Helper class used to wait for the favicon of a particular bookmark node in
-// a particular bookmark model to load.
-class FaviconLoadObserver : public BookmarkModelObserver {
+// Helper class used to wait for changes to take effect on the favicon of a
+// particular bookmark node in a particular bookmark model.
+class FaviconChangeObserver : public BookmarkModelObserver {
  public:
-  FaviconLoadObserver(BookmarkModel* model, const BookmarkNode* node)
+  FaviconChangeObserver(BookmarkModel* model, const BookmarkNode* node)
       : model_(model),
-        node_(node) {
+        node_(node),
+        wait_for_load_(false) {
     model->AddObserver(this);
   }
-  virtual ~FaviconLoadObserver() {
+  virtual ~FaviconChangeObserver() {
     model_->RemoveObserver(this);
   }
-  void WaitForFaviconLoad() { ui_test_utils::RunMessageLoop(); }
-  virtual void Loaded(BookmarkModel* model) OVERRIDE {}
+  void WaitForGetFavicon() {
+    wait_for_load_ = true;
+    ui_test_utils::RunMessageLoop();
+    ASSERT_TRUE(node_->is_favicon_loaded());
+  }
+  void WaitForSetFavicon() {
+    wait_for_load_ = false;
+    ui_test_utils::RunMessageLoop();
+  }
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {}
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
                                  int old_index,
@@ -56,14 +65,17 @@ class FaviconLoadObserver : public BookmarkModelObserver {
   virtual void BookmarkNodeFaviconChanged(
       BookmarkModel* model,
       const BookmarkNode* node) OVERRIDE {
-    if (model == model_ && node == node_)
-      MessageLoopForUI::current()->Quit();
+    if (model == model_ && node == node_) {
+      if (!wait_for_load_ || (wait_for_load_ && node->is_favicon_loaded()))
+        MessageLoopForUI::current()->Quit();
+    }
   }
 
  private:
   BookmarkModel* model_;
   const BookmarkNode* node_;
-  DISALLOW_COPY_AND_ASSIGN(FaviconLoadObserver);
+  bool wait_for_load_;
+  DISALLOW_COPY_AND_ASSIGN(FaviconChangeObserver);
 };
 
 }  // namespace
@@ -87,9 +99,8 @@ bool BookmarkModelVerifier::NodesMatch(const BookmarkNode* node_a,
                << node_b->GetTitle();
     return false;
   }
-  if (node_a->GetURL() != node_b->GetURL()) {
-    LOG(ERROR) << "URL mismatch: " << node_a->GetURL() << " vs. "
-               << node_b->GetURL();
+  if (node_a->url() != node_b->url()) {
+    LOG(ERROR) << "URL mismatch: " << node_a->url() << " vs. " << node_b->url();
     return false;
   }
   if (node_a->parent()->GetIndexOf(node_a) !=
@@ -115,8 +126,7 @@ bool BookmarkModelVerifier::ModelsMatch(BookmarkModel* model_a,
     }
     const BookmarkNode* node_b = iterator_b.Next();
     ret_val = ret_val && NodesMatch(node_a, node_b);
-    if (node_a->type() != BookmarkNode::URL ||
-        node_b->type() != BookmarkNode::URL)
+    if (node_a->is_folder() || node_b->is_folder())
       continue;
     ret_val = ret_val && FaviconsMatch(model_a, model_b, node_a, node_b);
   }
@@ -166,10 +176,10 @@ bool BookmarkModelVerifier::ContainsDuplicateBookmarks(
   ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
   while (iterator.has_next()) {
     const BookmarkNode* node = iterator.Next();
-    if (node->type() != BookmarkNode::URL)
+    if (node->is_folder())
       continue;
     std::vector<const BookmarkNode*> nodes;
-    model->GetNodesByURL(node->GetURL(), &nodes);
+    model->GetNodesByURL(node->url(), &nodes);
     EXPECT_TRUE(nodes.size() >= 1);
     for (std::vector<const BookmarkNode*>::const_iterator it = nodes.begin();
          it != nodes.end(); ++it) {
@@ -283,19 +293,19 @@ void BookmarkModelVerifier::SetFavicon(
     BookmarkModel* model,
     const BookmarkNode* node,
     const std::vector<unsigned char>& icon_bytes_vector) {
-  urls_with_favicons_.insert(node->GetURL());
+  urls_with_favicons_.insert(node->url());
   if (use_verifier_model_) {
     const BookmarkNode* v_node = NULL;
     FindNodeInVerifier(model, node, &v_node);
-    FaviconLoadObserver v_observer(verifier_model_, v_node);
+    FaviconChangeObserver v_observer(verifier_model_, v_node);
     browser_sync::BookmarkChangeProcessor::ApplyBookmarkFavicon(
         v_node, verifier_model_->profile(), icon_bytes_vector);
-    v_observer.WaitForFaviconLoad();
+    v_observer.WaitForSetFavicon();
   }
-  FaviconLoadObserver observer(model, node);
+  FaviconChangeObserver observer(model, node);
   browser_sync::BookmarkChangeProcessor::ApplyBookmarkFavicon(
       node, model->profile(), icon_bytes_vector);
-  observer.WaitForFaviconLoad();
+  observer.WaitForSetFavicon();
 }
 
 const SkBitmap& BookmarkModelVerifier::GetFavicon(
@@ -303,15 +313,15 @@ const SkBitmap& BookmarkModelVerifier::GetFavicon(
     const BookmarkNode* node) const {
   // If a favicon wasn't explicitly set for a particular URL, simply return its
   // blank favicon.
-  if (urls_with_favicons_.find(node->GetURL()) == urls_with_favicons_.end()) {
+  if (urls_with_favicons_.find(node->url()) == urls_with_favicons_.end()) {
     return node->favicon();
   }
   // If a favicon was explicitly set, we may need to wait for it to be loaded
   // via BookmarkModel::GetFavIcon(), which is an asynchronous operation.
   if (!node->is_favicon_loaded()) {
-    FaviconLoadObserver observer(model, node);
+    FaviconChangeObserver observer(model, node);
     model->GetFavicon(node);
-    observer.WaitForFaviconLoad();
+    observer.WaitForGetFavicon();
   }
   EXPECT_TRUE(node->is_favicon_loaded());
   return node->favicon();

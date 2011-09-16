@@ -8,14 +8,12 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/renderer/gpu/command_buffer_proxy.h"
 #include "content/renderer/gpu/gpu_surface_proxy.h"
-#include "content/renderer/gpu/gpu_video_service_host.h"
 #include "content/renderer/gpu/transport_texture_service.h"
 #include "content/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
 
 GpuChannelHost::GpuChannelHost()
     : state_(kUnconnected),
-      gpu_video_service_host_(new GpuVideoServiceHost()),
       transport_texture_service_(new TransportTextureService()) {
 }
 
@@ -56,17 +54,10 @@ void GpuChannelHost::SetStateLost() {
 bool GpuChannelHost::OnMessageReceived(const IPC::Message& message) {
   DCHECK(message.routing_id() != MSG_ROUTING_CONTROL);
 
-  // The object to which the message is addressed might have been destroyed.
-  // This is expected, for example an asynchronous SwapBuffers notification
-  // to a command buffer proxy that has since been destroyed. This function
-  // fails silently in that case.
   return router_.RouteMessage(message);
 }
 
 void GpuChannelHost::OnChannelConnected(int32 peer_pid) {
-  // When the channel is connected we create a GpuVideoServiceHost and add it
-  // as a message filter.
-  channel_->AddFilter(gpu_video_service_host_.get());
   channel_->AddFilter(transport_texture_service_.get());
 }
 
@@ -105,7 +96,6 @@ bool GpuChannelHost::Send(IPC::Message* message) {
 }
 
 CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
-    gfx::PluginWindowHandle compositing_surface,
     int render_view_id,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
@@ -122,7 +112,7 @@ CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
   int32 route_id;
   if (!RenderThread::current()->Send(
       new GpuHostMsg_CreateViewCommandBuffer(
-          compositing_surface, render_view_id, init_params, &route_id))) {
+          render_view_id, init_params, &route_id))) {
     return NULL;
   }
 
@@ -138,12 +128,21 @@ CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
 #endif
 }
 
+GpuVideoDecodeAcceleratorHost* GpuChannelHost::CreateVideoDecoder(
+    int command_buffer_route_id,
+    const std::vector<uint32>& configs,
+    gpu::CommandBufferHelper* cmd_buffer_helper,
+    media::VideoDecodeAccelerator::Client* client) {
+  ProxyMap::iterator it = proxies_.find(command_buffer_route_id);
+  DCHECK(it != proxies_.end());
+  CommandBufferProxy* proxy = it->second;
+  return proxy->CreateVideoDecoder(configs, cmd_buffer_helper, client);
+}
+
 CommandBufferProxy* GpuChannelHost::CreateOffscreenCommandBuffer(
-    CommandBufferProxy* parent,
     const gfx::Size& size,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
-    uint32 parent_texture_id,
     const GURL& active_url) {
 #if defined(ENABLE_GPU)
   // An error occurred. Need to get the host again to reinitialize it.
@@ -154,12 +153,9 @@ CommandBufferProxy* GpuChannelHost::CreateOffscreenCommandBuffer(
   init_params.allowed_extensions = allowed_extensions;
   init_params.attribs = attribs;
   init_params.active_url = active_url;
-  int32 parent_route_id = parent ? parent->route_id() : 0;
   int32 route_id;
-  if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(parent_route_id,
-                                                           size,
+  if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(size,
                                                            init_params,
-                                                           parent_texture_id,
                                                            &route_id))) {
     return NULL;
   }

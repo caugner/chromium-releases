@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "ppapi/c/dev/ppb_scrollbar_dev.h"
+#include "ppapi/thunk/ppb_scrollbar_api.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScrollbarClient.h"
 #include "ui/gfx/rect.h"
@@ -19,38 +19,43 @@ namespace ppapi {
 class PluginInstance;
 
 class PPB_Scrollbar_Impl : public PPB_Widget_Impl,
+                           public ::ppapi::thunk::PPB_Scrollbar_API,
                            public WebKit::WebScrollbarClient {
  public:
   PPB_Scrollbar_Impl(PluginInstance* instance, bool vertical);
   virtual ~PPB_Scrollbar_Impl();
 
-  // Returns a pointer to the interface implementing PPB_Scrollbar that is
-  // exposed to the plugin.
-  static const PPB_Scrollbar_Dev* GetInterface();
+  // ResourceObjectBase override.
+  virtual PPB_Scrollbar_API* AsPPB_Scrollbar_API() OVERRIDE;
 
-  // Resource overrides.
-  virtual PPB_Scrollbar_Impl* AsPPB_Scrollbar_Impl();
+  // Returns a pointer to the interface implementing PPB_Scrollbar_0_3 that is
+  // exposed to the plugin. New code should use the thunk system for the new
+  // version of this API.
+  static const PPB_Scrollbar_0_3_Dev* Get0_3Interface();
 
-  // PPB_Scrollbar implementation.
-  uint32_t GetValue();
-  void SetValue(uint32_t value);
-  void SetDocumentSize(uint32_t size);
-  void SetTickMarks(const PP_Rect* tick_marks, uint32_t count);
-  void ScrollBy(PP_ScrollBy_Dev unit, int32_t multiplier);
-
-  // PPB_Widget implementation.
-  virtual bool Paint(const PP_Rect* rect, PPB_ImageData_Impl* image);
-  virtual bool HandleEvent(const PP_InputEvent* event);
-  virtual void SetLocationInternal(const PP_Rect* location);
+  // PPB_Scrollbar_API implementation.
+  virtual uint32_t GetThickness() OVERRIDE;
+  virtual uint32_t GetValue() OVERRIDE;
+  virtual void SetValue(uint32_t value) OVERRIDE;
+  virtual void SetDocumentSize(uint32_t size) OVERRIDE;
+  virtual void SetTickMarks(const PP_Rect* tick_marks, uint32_t count) OVERRIDE;
+  virtual void ScrollBy(PP_ScrollBy_Dev unit, int32_t multiplier) OVERRIDE;
 
  private:
+  // PPB_Widget private implementation.
+  virtual PP_Bool PaintInternal(const gfx::Rect& rect,
+                                PPB_ImageData_Impl* image) OVERRIDE;
+  virtual PP_Bool HandleEventInternal(
+      const ::ppapi::InputEventData& data) OVERRIDE;
+  virtual void SetLocationInternal(const PP_Rect* location) OVERRIDE;
+
   // WebKit::WebScrollbarClient implementation.
-  virtual void valueChanged(WebKit::WebScrollbar* scrollbar);
+  virtual void valueChanged(WebKit::WebScrollbar* scrollbar) OVERRIDE;
   virtual void invalidateScrollbarRect(WebKit::WebScrollbar* scrollbar,
-                                       const WebKit::WebRect& rect);
+                                       const WebKit::WebRect& rect) OVERRIDE;
   virtual void getTickmarks(
       WebKit::WebScrollbar* scrollbar,
-      WebKit::WebVector<WebKit::WebRect>* tick_marks) const;
+      WebKit::WebVector<WebKit::WebRect>* tick_marks) const OVERRIDE;
 
   void NotifyInvalidate();
 

@@ -50,15 +50,6 @@ static CGContextRef CGContextForData(void* data, int width, int height) {
 
 }  // namespace
 
-SkDevice* BitmapPlatformDeviceFactory::newDevice(SkCanvas* ignored,
-                                                 SkBitmap::Config config,
-                                                 int width, int height,
-                                                 bool isOpaque,
-                                                 bool isForLayer) {
-  SkASSERT(config == SkBitmap::kARGB_8888_Config);
-  return BitmapPlatformDevice::Create(NULL, width, height, isOpaque);
-}
-
 BitmapPlatformDevice::BitmapPlatformDeviceData::BitmapPlatformDeviceData(
     CGContextRef bitmap)
     : bitmap_context_(bitmap),
@@ -193,26 +184,8 @@ BitmapPlatformDevice::BitmapPlatformDevice(
       data_(data) {
 }
 
-// The copy constructor just adds another reference to the underlying data.
-// We use a const cast since the default Skia definitions don't define the
-// proper constedness that we expect (accessBitmap should really be const).
-BitmapPlatformDevice::BitmapPlatformDevice(
-    const BitmapPlatformDevice& other)
-    : PlatformDevice(
-          const_cast<BitmapPlatformDevice&>(other).accessBitmap(true)),
-      data_(other.data_) {
-  data_->ref();
-}
-
 BitmapPlatformDevice::~BitmapPlatformDevice() {
   data_->unref();
-}
-
-BitmapPlatformDevice& BitmapPlatformDevice::operator=(
-    const BitmapPlatformDevice& other) {
-  data_ = other.data_;
-  data_->ref();
-  return *this;
 }
 
 CGContextRef BitmapPlatformDevice::GetBitmapContext() {
@@ -261,8 +234,11 @@ void BitmapPlatformDevice::onAccessBitmap(SkBitmap*) {
   // Not needed in CoreGraphics
 }
 
-SkDeviceFactory* BitmapPlatformDevice::onNewDeviceFactory() {
-  return SkNEW(BitmapPlatformDeviceFactory);
+SkDevice* BitmapPlatformDevice::onCreateCompatibleDevice(
+    SkBitmap::Config config, int width, int height, bool isOpaque,
+    Usage /*usage*/) {
+  SkASSERT(config == SkBitmap::kARGB_8888_Config);
+  return BitmapPlatformDevice::Create(NULL, width, height, isOpaque);
 }
 
 }  // namespace skia

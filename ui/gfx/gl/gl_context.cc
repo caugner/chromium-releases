@@ -13,10 +13,15 @@
 
 namespace gfx {
 
-GLContext::GLContext() {
+GLContext::GLContext(GLShareGroup* share_group) : share_group_(share_group) {
+  if (!share_group_.get())
+    share_group_ = new GLShareGroup;
+
+  share_group_->AddContext(this);
 }
 
 GLContext::~GLContext() {
+  share_group_->RemoveContext(this);
 }
 
 std::string GLContext::GetExtensions() {
@@ -35,6 +40,10 @@ bool GLContext::HasExtension(const char* name) {
   return extensions.find(delimited_name) != std::string::npos;
 }
 
+GLShareGroup* GLContext::share_group() {
+  return share_group_.get();
+}
+
 bool GLContext::LosesAllContextsOnContextLost()
 {
   switch (GetGLImplementation()) {
@@ -50,6 +59,10 @@ bool GLContext::LosesAllContextsOnContextLost()
       NOTREACHED();
       return true;
   }
+}
+
+bool GLContext::WasAllocatedUsingARBRobustness() {
+  return false;
 }
 
 }  // namespace gfx

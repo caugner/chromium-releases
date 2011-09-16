@@ -11,13 +11,13 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field_cell.h"
-#import "chrome/browser/ui/cocoa/find_pasteboard.h"
 #import "chrome/browser/ui/cocoa/focus_tracker.h"
 #import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#import "content/browser/find_pasteboard.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
@@ -91,6 +91,7 @@ const float kRightEdgeOffset = 25;
 
 - (void)awakeFromNib {
   [findBarView_ setFrame:[self hiddenFindBarFrame]];
+  defaultWidth_ = NSWidth([findBarView_ frame]);
 
   // Stopping the search requires a findbar controller, which isn't valid yet
   // during setup. Furthermore, there is no active search yet anyway.
@@ -134,7 +135,7 @@ const float kRightEdgeOffset = 25;
 - (void)positionFindBarViewAtMaxY:(CGFloat)maxY maxWidth:(CGFloat)maxWidth {
   NSView* containerView = [self view];
   CGFloat containerHeight = NSHeight([containerView frame]);
-  CGFloat containerWidth = NSWidth([containerView frame]);
+  CGFloat containerWidth = std::min(maxWidth, defaultWidth_);
 
   // Adjust where we'll actually place the find bar.
   maxY += [containerView cr_lineWidth];
@@ -391,6 +392,9 @@ const float kRightEdgeOffset = 25;
   return view_rect.origin();
 }
 
+- (int)findBarWidth {
+  return NSWidth([[self view] frame]);
+}
 @end
 
 @implementation FindBarCocoaController (PrivateMethods)

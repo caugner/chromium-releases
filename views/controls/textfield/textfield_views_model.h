@@ -10,13 +10,18 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/composition_text.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/render_text.h"
 
 namespace gfx {
+class Canvas;
 class Font;
+class RenderText;
+struct StyleRange;
 }  // namespace gfx
 
 namespace ui {
@@ -28,6 +33,20 @@ namespace views {
 namespace internal {
 // Internal Edit class that keeps track of edits for undo/redo.
 class Edit;
+
+// C++ doesn't allow forward decl enum, so let's define here.
+enum MergeType {
+  // The edit should not be merged with next edit. It still may
+  // be merged with an edit with MERGE_WITH_PREVIOUS.
+  DO_NOT_MERGE,
+  // The edit can be merged with next edit when possible.
+  MERGEABLE,
+  // Does the edit have to be merged with previous edit?
+  // This forces the merge even if the previous edit is marked
+  // as DO_NOT_MERGE.
+  MERGE_WITH_PREVIOUS,
+};
+
 }  // namespace internal
 
 // A model that represents a text content for TextfieldViews.
@@ -49,41 +68,22 @@ class TextfieldViewsModel {
   explicit TextfieldViewsModel(Delegate* delegate);
   virtual ~TextfieldViewsModel();
 
-  // Text fragment info. Used to draw selected text.
-  // We may replace this with TextAttribute class
-  // in the future to support multi-color text
-  // for omnibox.
-  struct TextFragment {
-    TextFragment(size_t s, size_t e, bool sel, bool u)
-        : start(s), end(e), selected(sel), underline(u) {
-    }
-    // The start and end position of text fragment.
-    size_t start, end;
-    // True if the text is selected.
-    bool selected;
-    // True if the text has underline.
-    // TODO(suzhe): support underline color and thick style.
-    bool underline;
-  };
-  typedef std::vector<TextFragment> TextFragments;
-
-  // Gets the text element info.
-  void GetFragments(TextFragments* elements) const;
-
   void set_is_password(bool is_password) {
     is_password_ = is_password;
   }
-  const string16& text() const { return text_; }
 
   // Edit related methods.
 
-  // Sest the text. Returns true if the text has been modified.  The
+  const string16& GetText() const;
+  // Sets the text. Returns true if the text has been modified.  The
   // current composition text will be confirmed first.  Setting
   // the same text will not add edit history because it's not user
   // visible change nor user-initiated change. This allow a client
   // code to set the same text multiple times without worrying about
   // messing edit history.
   bool SetText(const string16& text);
+
+  gfx::RenderText* render_text() { return render_text_.get(); }
 
   // Inserts given |text| at the current cursor position.
   // The current composition text will be cleared.
@@ -126,46 +126,23 @@ class TextfieldViewsModel {
   // Cursor related methods.
 
   // Returns the current cursor position.
-  size_t cursor_pos() const { return cursor_pos_; }
+  size_t GetCursorPosition() const;
 
-  // Moves the cursor left by one position (as if, the user has pressed the left
-  // arrow key). If |select| is true, it updates the selection accordingly.
+  // Moves the cursor, see RenderText for additional details.
   // The current composition text will be confirmed.
-  void MoveCursorLeft(bool select);
-
-  // Moves the cursor right by one position (as if, the user has pressed the
-  // right arrow key). If |select| is true, it updates the selection
-  // accordingly.
-  // The current composition text will be confirmed.
-  void MoveCursorRight(bool select);
-
-  // Moves the cursor left by one word (word boundry is defined by space).
-  // If |select| is true, it updates the selection accordingly.
-  // The current composition text will be confirmed.
-  void MoveCursorToPreviousWord(bool select);
-
-  // Moves the cursor right by one word (word boundry is defined by space).
-  // If |select| is true, it updates the selection accordingly.
-  // The current composition text will be confirmed.
-  void MoveCursorToNextWord(bool select);
-
-  // Moves the cursor to start of the textfield contents.
-  // If |select| is true, it updates the selection accordingly.
-  // The current composition text will be confirmed.
-  void MoveCursorToHome(bool select);
-
-  // Moves the cursor to end of the textfield contents.
-  // If |select| is true, it updates the selection accordingly.
-  // The current composition text will be confirmed.
-  void MoveCursorToEnd(bool select);
+  void MoveCursorLeft(gfx::BreakType break_type, bool select);
+  void MoveCursorRight(gfx::BreakType break_type, bool select);
 
   // Moves the cursor to the specified |position|.
   // If |select| is true, it updates the selection accordingly.
   // The current composition text will be confirmed.
   bool MoveCursorTo(size_t position, bool select);
 
-  // Returns the bounds of character at the current cursor.
-  gfx::Rect GetCursorBounds(const gfx::Font& font) const;
+  // Helper function to call MoveCursorTo on the TextfieldViewsModel.
+  bool MoveCursorTo(const gfx::Point& point, bool select);
+
+  // Returns the bounds of selected text.
+  std::vector<gfx::Rect> GetSelectionBounds() const;
 
   // Selection related method
 
@@ -206,9 +183,7 @@ class TextfieldViewsModel {
 
   // Returns visible text. If the field is password, it returns the
   // sequence of "*".
-  string16 GetVisibleText() const {
-    return GetVisibleText(0U, text_.length());
-  }
+  string16 GetVisibleText() const;
 
   // Cuts the currently selected text and puts it to clipboard. Returns true
   // if text has changed after cutting.
@@ -252,7 +227,7 @@ class TextfieldViewsModel {
   void ConfirmCompositionText();
 
   // Removes current composition text.
-  void ClearCompositionText();
+  void CancelCompositionText();
 
   // Retrieves the range of current composition text.
   void GetCompositionTextRange(ui::Range* range) const;
@@ -276,13 +251,6 @@ class TextfieldViewsModel {
   // Returns the visible text given |start| and |end|.
   string16 GetVisibleText(size_t start, size_t end) const;
 
-  // Utility for SelectWord(). Checks whether position pos is at word boundary.
-  bool IsPositionAtWordSelectionBoundary(size_t pos);
-
-  // Returns the normalized cursor position that does not exceed the
-  // text length.
-  size_t GetSafePosition(size_t position) const;
-
   // Insert the given |text|. |mergeable| indicates if this insert
   // operation can be merged to previous edit in the edit history.
   void InsertTextInternal(const string16& text, bool mergeable);
@@ -300,10 +268,13 @@ class TextfieldViewsModel {
 
   // Executes and records edit operations.
   void ExecuteAndRecordDelete(size_t from, size_t to, bool mergeable);
-  void ExecuteAndRecordReplace(const string16& text, bool mergeable);
-  void ExecuteAndRecordReplaceAt(const string16& text,
-                                 size_t at,
-                                 bool mergeable);
+  void ExecuteAndRecordReplaceSelection(internal::MergeType merge_type,
+                                        const string16& text);
+  void ExecuteAndRecordReplace(internal::MergeType merge_type,
+                               size_t old_cursor_pos,
+                               size_t new_cursor_pos,
+                               const string16& text,
+                               size_t new_text_start);
   void ExecuteAndRecordInsert(const string16& text, bool mergeable);
 
   // Adds or merge |edit| into edit history. Return true if the edit
@@ -321,25 +292,14 @@ class TextfieldViewsModel {
                   size_t new_text_insert_at,
                   size_t new_cursor_pos);
 
+  void ClearComposition();
+
   // Pointer to a TextfieldViewsModel::Delegate instance, should be provided by
   // the View object.
   Delegate* delegate_;
 
-  // The text in utf16 format.
-  string16 text_;
-
-  // Current cursor position.
-  size_t cursor_pos_;
-
-  // Selection range.
-  size_t selection_start_;
-
-  // Composition text range.
-  size_t composition_start_;
-  size_t composition_end_;
-
-  // Underline information of the composition text.
-  ui::CompositionUnderlines composition_underlines_;
+  // The stylized text, cursor, selection, and the visual layout model.
+  scoped_ptr<gfx::RenderText> render_text_;
 
   // True if the text is the password.
   bool is_password_;

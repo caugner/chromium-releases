@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/options/chromeos/change_picture_options_handler.h"
 
 #include "base/callback.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
@@ -19,7 +20,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace chromeos {
 
@@ -72,19 +73,20 @@ void ChangePictureOptionsHandler::RegisterMessages() {
   DCHECK(web_ui_);
   web_ui_->RegisterMessageCallback(
       "chooseFile",
-      NewCallback(this, &ChangePictureOptionsHandler::ChooseFile));
+      NewCallback(this, &ChangePictureOptionsHandler::HandleChooseFile));
   web_ui_->RegisterMessageCallback(
       "takePhoto",
-      NewCallback(this, &ChangePictureOptionsHandler::TakePhoto));
+      NewCallback(this, &ChangePictureOptionsHandler::HandleTakePhoto));
   web_ui_->RegisterMessageCallback(
       "getAvailableImages",
-      NewCallback(this, &ChangePictureOptionsHandler::GetAvailableImages));
+      NewCallback(this,
+                  &ChangePictureOptionsHandler::HandleGetAvailableImages));
   web_ui_->RegisterMessageCallback(
       "selectImage",
-      NewCallback(this, &ChangePictureOptionsHandler::SelectImage));
+      NewCallback(this, &ChangePictureOptionsHandler::HandleSelectImage));
 }
 
-void ChangePictureOptionsHandler::ChooseFile(const ListValue* args) {
+void ChangePictureOptionsHandler::HandleChooseFile(const ListValue* args) {
   DCHECK(args && args->empty());
   if (!select_file_dialog_.get())
     select_file_dialog_ = SelectFileDialog::Create(this);
@@ -111,17 +113,18 @@ void ChangePictureOptionsHandler::ChooseFile(const ListValue* args) {
       NULL);
 }
 
-void ChangePictureOptionsHandler::TakePhoto(const ListValue* args) {
+void ChangePictureOptionsHandler::HandleTakePhoto(const ListValue* args) {
   DCHECK(args && args->empty());
-  views::Window* window = browser::CreateViewsWindow(
+  views::Widget* window = browser::CreateViewsWindow(
       GetBrowserWindow(),
       gfx::Rect(),
-      new TakePhotoDialog());
+      new TakePhotoDialog(this));
   window->SetAlwaysOnTop(true);
   window->Show();
 }
 
-void ChangePictureOptionsHandler::GetAvailableImages(const ListValue* args) {
+void ChangePictureOptionsHandler::HandleGetAvailableImages(
+    const ListValue* args) {
   DCHECK(args && args->empty());
   ListValue image_urls;
   for (int i = 0; i < kDefaultImagesCount; ++i) {
@@ -131,7 +134,7 @@ void ChangePictureOptionsHandler::GetAvailableImages(const ListValue* args) {
                                   image_urls);
 }
 
-void ChangePictureOptionsHandler::SelectImage(const ListValue* args) {
+void ChangePictureOptionsHandler::HandleSelectImage(const ListValue* args) {
   std::string image_url;
   if (!args ||
       args->GetSize() != 1 ||
@@ -150,12 +153,32 @@ void ChangePictureOptionsHandler::SelectImage(const ListValue* args) {
   user_manager->SaveUserImagePath(
       user_manager->logged_in_user().email(),
       GetDefaultImagePath(user_image_index));
+  UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
+                            user_image_index,
+                            kDefaultImagesCount + 2);
 }
 
 void ChangePictureOptionsHandler::FileSelected(const FilePath& path,
                                                int index,
                                                void* params) {
   UserManager::Get()->LoadLoggedInUserImage(path);
+  UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
+                            kDefaultImagesCount + 1,
+                            kDefaultImagesCount + 2);
+}
+
+void ChangePictureOptionsHandler::OnPhotoAccepted(const SkBitmap& photo) {
+  UserManager* user_manager = UserManager::Get();
+  DCHECK(user_manager);
+
+  const UserManager::User& user = user_manager->logged_in_user();
+  DCHECK(!user.email().empty());
+
+  user_manager->SetLoggedInUserImage(photo);
+  user_manager->SaveUserImage(user.email(), photo);
+  UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
+                            kDefaultImagesCount,
+                            kDefaultImagesCount + 2);
 }
 
 gfx::NativeWindow ChangePictureOptionsHandler::GetBrowserWindow() const {

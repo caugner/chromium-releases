@@ -21,15 +21,15 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/controls/table/group_table_view.h"
 #include "views/layout/grid_layout.h"
 #include "views/layout/layout_constants.h"
+#include "views/widget/widget.h"
 #include "views/window/client_view.h"
 #include "views/window/dialog_delegate.h"
-#include "views/window/window.h"
 
 class HungRendererDialogView;
 
@@ -123,9 +123,9 @@ void HungPagesTableModel::GetGroupRangeForItem(int item,
 ///////////////////////////////////////////////////////////////////////////////
 // HungRendererDialogView
 
-class HungRendererDialogView : public views::View,
-                               public views::DialogDelegate,
-                               public views::ButtonListener {
+class HungRendererDialogView : public views::DialogDelegateView,
+                               public views::ButtonListener,
+                               public TabContentsObserver {
  public:
   HungRendererDialogView();
   ~HungRendererDialogView();
@@ -152,6 +152,10 @@ class HungRendererDialogView : public views::View,
                                     views::View* parent,
                                     views::View* child);
 
+  // TabContentsObserver overrides:
+  virtual void RenderViewGone() OVERRIDE;
+  virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
+
  private:
   // Initialize the controls in this dialog.
   void Init();
@@ -171,7 +175,7 @@ class HungRendererDialogView : public views::View,
   // The button we insert into the ClientView to kill the errant process. This
   // is parented to a container view that uses a grid layout to align it
   // properly.
-  views::NativeButton* kill_button_;
+  views::TextButton* kill_button_;
   class ButtonContainer : public views::View {
    public:
     ButtonContainer() {}
@@ -228,8 +232,9 @@ HungRendererDialogView::~HungRendererDialogView() {
 }
 
 void HungRendererDialogView::ShowForTabContents(TabContents* contents) {
-  DCHECK(contents && window());
+  DCHECK(contents && GetWidget());
   contents_ = contents;
+  Observe(contents);
 
   // Don't show the warning unless the foreground window is the frame, or this
   // window (but still invisible). If the user has another window or
@@ -237,20 +242,20 @@ void HungRendererDialogView::ShowForTabContents(TabContents* contents) {
   HWND frame_hwnd = GetAncestor(contents->GetNativeView(), GA_ROOT);
   HWND foreground_window = GetForegroundWindow();
   if (foreground_window != frame_hwnd &&
-      foreground_window != window()->GetNativeWindow()) {
+      foreground_window != GetWidget()->GetNativeWindow()) {
     return;
   }
 
-  if (!window()->IsActive()) {
+  if (!GetWidget()->IsActive()) {
     volatile TabContents* passed_c = contents;
     volatile TabContents* this_contents = contents_;
 
     gfx::Rect bounds = GetDisplayBounds(contents);
     views::Widget* insert_after =
         views::Widget::GetWidgetForNativeView(frame_hwnd);
-    window()->SetBoundsConstrained(bounds, insert_after);
+    GetWidget()->SetBoundsConstrained(bounds, insert_after);
     if (insert_after)
-      window()->MoveAboveWidget(insert_after);
+      GetWidget()->MoveAboveWidget(insert_after);
 
     // We only do this if the window isn't active (i.e. hasn't been shown yet,
     // or is currently shown but deactivated for another TabContents). This is
@@ -259,7 +264,7 @@ void HungRendererDialogView::ShowForTabContents(TabContents* contents) {
     // the list of hung pages for a potentially unrelated renderer while this
     // one is showing.
     hung_pages_table_model_->InitForTabContents(contents);
-    window()->Show();
+    GetWidget()->Show();
   }
 }
 
@@ -267,9 +272,10 @@ void HungRendererDialogView::EndForTabContents(TabContents* contents) {
   DCHECK(contents);
   if (contents_ && contents_->GetRenderProcessHost() ==
       contents->GetRenderProcessHost()) {
-    window()->Close();
+    GetWidget()->Close();
     // Since we're closing, we no longer need this TabContents.
     contents_ = NULL;
+    Observe(NULL);
   }
 }
 
@@ -333,7 +339,7 @@ void HungRendererDialogView::ButtonPressed(
     if (contents_ && contents_->GetRenderProcessHost()) {
       // Kill the process.
       TerminateProcess(contents_->GetRenderProcessHost()->GetHandle(),
-                       ResultCodes::HUNG);
+                       content::RESULT_CODE_HUNG);
     }
   }
 }
@@ -346,6 +352,18 @@ void HungRendererDialogView::ViewHierarchyChanged(bool is_add,
                                                   views::View* child) {
   if (!initialized_ && is_add && child == this && GetWidget())
     Init();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// HungRendererDialogView, TabContentsObserver overrides:
+
+void HungRendererDialogView::RenderViewGone() {
+  // Hide any visible hung renderer warning for this tab contents' process.
+  EndForTabContents(contents_);
+}
+
+void HungRendererDialogView::TabContentsDestroyed(TabContents* tab) {
+  EndForTabContents(tab);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -400,7 +418,7 @@ void HungRendererDialogView::Init() {
 }
 
 void HungRendererDialogView::CreateKillButtonView() {
-  kill_button_ = new views::NativeButton(this, UTF16ToWide(
+  kill_button_ = new views::NativeTextButton(this, UTF16ToWide(
       l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_END)));
 
   kill_button_container_ = new ButtonContainer;
@@ -428,7 +446,7 @@ gfx::Rect HungRendererDialogView::GetDisplayBounds(
   RECT contents_bounds_rect;
   GetWindowRect(contents_hwnd, &contents_bounds_rect);
   gfx::Rect contents_bounds(contents_bounds_rect);
-  gfx::Rect window_bounds = window()->GetBounds();
+  gfx::Rect window_bounds = GetWidget()->GetWindowScreenBounds();
 
   int window_x = contents_bounds.x() +
       (contents_bounds.width() - window_bounds.width()) / 2;
@@ -449,7 +467,7 @@ void HungRendererDialogView::InitClass() {
 
 static HungRendererDialogView* CreateHungRendererDialogView() {
   HungRendererDialogView* cv = new HungRendererDialogView;
-  views::Window::CreateChromeWindow(NULL, gfx::Rect(), cv);
+  views::Widget::CreateWindow(cv);
   return cv;
 }
 

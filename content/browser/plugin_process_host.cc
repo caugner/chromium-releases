@@ -19,15 +19,13 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/logging_chrome.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/content_browser_client.h"
 #include "content/browser/resolve_proxy_msg_helper.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
+#include "content/common/content_switches.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/resource_messages.h"
 #include "ipc/ipc_switches.h"
@@ -46,6 +44,8 @@
 #endif
 
 #if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 
 namespace {
@@ -59,6 +59,9 @@ void ReparentPluginWindowHelper(HWND window, HWND parent) {
 
   ::SetWindowLongPtr(window, GWL_STYLE, window_style);
   ::SetParent(window, parent);
+  // Allow the Flash plugin to forward some messages back to Chrome.
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
+    ::SetPropW(parent, webkit::npapi::kNativeWindowClassFilterProp, HANDLE(-1));
 }
 
 }  // namespace
@@ -80,8 +83,11 @@ void PluginProcessHost::AddWindow(HWND window) {
 }
 
 void PluginProcessHost::OnReparentPluginWindow(HWND window, HWND parent) {
-  // Reparent only to our process.
+  // Reparent only from the plugin process to our process.
   DWORD process_id = 0;
+  ::GetWindowThreadProcessId(window, &process_id);
+  if (process_id != ::GetProcessId(GetChildProcessHandle()))
+    return;
   ::GetWindowThreadProcessId(parent, &process_id);
   if (process_id != ::GetCurrentProcessId())
     return;
@@ -178,9 +184,6 @@ bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
   cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kPluginProcess);
   cmd_line->AppendSwitchPath(switches::kPluginPath, info.path);
 
-  if (logging::DialogsAreSuppressed())
-    cmd_line->AppendSwitch(switches::kNoErrorDialogs);
-
   // Propagate the following switches to the plugin command line (along with
   // any associated values) if present in the browser command line
   static const char* const kSwitchNames[] = {
@@ -191,18 +194,12 @@ bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
     switches::kEnableStatsTable,
     switches::kFullMemoryCrashReport,
     switches::kLoggingLevel,
-#if defined(OS_CHROMEOS)
-    switches::kLoginProfile,
-#endif
     switches::kLogPluginMessages,
-    switches::kMemoryProfiling,
     switches::kNoSandbox,
     switches::kPluginStartupDialog,
-    switches::kSilentDumpOnDCHECK,
     switches::kTestSandbox,
     switches::kUseGL,
     switches::kUserAgent,
-    switches::kUserDataDir,
     switches::kV,
   };
 
@@ -346,8 +343,9 @@ void PluginProcessHost::RequestPluginChannel(Client* client) {
   // a deadlock can occur if the plugin creation request from the renderer is
   // a result of a sync message by the plugin process.
   PluginProcessMsg_CreateChannel* msg =
-      new PluginProcessMsg_CreateChannel(client->ID(),
-                                         client->OffTheRecord());
+      new PluginProcessMsg_CreateChannel(
+          client->ID(),
+          client->OffTheRecord());
   msg->set_unblock(true);
   if (Send(msg)) {
     sent_requests_.push(client);

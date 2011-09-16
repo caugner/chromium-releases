@@ -53,12 +53,15 @@ class PrintPreviewTabController
   TabContents* GetInitiatorTab(TabContents* preview_tab);
 
   // Notification observer implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
   // Returns true if |tab| is a print preview tab.
   static bool IsPrintPreviewTab(TabContents* tab);
+
+  // Erase the initiator tab info associated with |preview_tab|.
+  void EraseInitiatorTabInfo(TabContents* preview_tab);
 
  private:
   friend class base::RefCounted<PrintPreviewTabController>;

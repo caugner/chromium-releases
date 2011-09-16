@@ -5,6 +5,7 @@
 #include "views/desktop/desktop_views_delegate.h"
 
 #include "base/logging.h"
+#include "views/desktop/desktop_window_view.h"
 
 namespace views {
 namespace desktop {
@@ -27,21 +28,24 @@ ui::Clipboard* DesktopViewsDelegate::GetClipboard() const {
   return NULL;
 }
 
-void DesktopViewsDelegate::SaveWindowPlacement(views::Window* window,
-                                   const std::wstring& window_name,
-                                   const gfx::Rect& bounds,
-                                   bool maximized) {
+View* DesktopViewsDelegate::GetDefaultParentView() {
+  return DesktopWindowView::desktop_window_view;
 }
 
-bool DesktopViewsDelegate::GetSavedWindowBounds(views::Window* window,
-                                                const std::wstring& window_name,
+void DesktopViewsDelegate::SaveWindowPlacement(const Widget* widget,
+                                               const std::wstring& window_name,
+                                               const gfx::Rect& bounds,
+                                               bool maximized) {
+}
+
+bool DesktopViewsDelegate::GetSavedWindowBounds(const std::wstring& window_name,
                                                 gfx::Rect* bounds) const {
   return false;
 }
 
-bool DesktopViewsDelegate::GetSavedMaximizedState(views::Window* window,
-                                      const std::wstring& window_name,
-                                      bool* maximized) const {
+bool DesktopViewsDelegate::GetSavedMaximizedState(
+    const std::wstring& window_name,
+    bool* maximized) const {
   return false;
 }
 

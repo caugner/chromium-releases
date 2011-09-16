@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/constrained_html_ui.h"
 #include "chrome/browser/ui/webui/cookies_tree_model_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -120,14 +121,10 @@ void CollectedCookiesSource::StartDataRequest(const std::string& path,
   static const base::StringPiece html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_COLLECTED_COOKIES_HTML));
-  const std::string response = jstemplate_builder::GetI18nTemplateHtml(
+  std::string response = jstemplate_builder::GetI18nTemplateHtml(
       html, &localized_strings);
 
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(response.size());
-  std::copy(response.begin(), response.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
+  SendResponse(request_id, base::RefCountedString::TakeString(&response));
 }
 
 }  // namespace
@@ -151,7 +148,7 @@ CollectedCookiesUIDelegate::CollectedCookiesUIDelegate(
   HostContentSettingsMap* host_content_settings_map =
       tab_contents_->profile()->GetHostContentSettingsMap();
 
-  registrar_.Add(this, NotificationType::COLLECTED_COOKIES_SHOWN,
+  registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
                  Source<TabSpecificContentSettings>(content_settings));
 
   allowed_cookies_tree_model_.reset(
@@ -237,10 +234,10 @@ void CollectedCookiesUIDelegate::AddContentException(
   }
 }
 
-void CollectedCookiesUIDelegate::Observe(NotificationType type,
+void CollectedCookiesUIDelegate::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  DCHECK_EQ(type.value, NotificationType::COLLECTED_COOKIES_SHOWN);
+  DCHECK_EQ(type, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
   CloseDialog();
 }
 

@@ -18,6 +18,7 @@
 #include "chrome/app/breakpad_win.h"
 #include "chrome/app/client_util.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/channel_info.h"
@@ -25,7 +26,6 @@
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/util_constants.h"
-#include "content/common/result_codes.h"
 
 namespace {
 // The entry point signature of chrome.dll.
@@ -105,17 +105,21 @@ HMODULE LoadChromeWithDirectory(std::wstring* dir) {
   dir->append(installer::kChromeDll);
 #endif
 
+#ifndef WIN_DISABLE_PREREAD
 #ifdef NDEBUG
   // Experimental pre-reading optimization
-  // The idea is to pre read significant portion of chrome.dll in advance
+  // The idea is to pre-read a significant portion of chrome.dll in advance
   // so that subsequent hard page faults are avoided.
+  //
+  // Pre-read may be disabled at compile time by defining WIN_DISABLE_PREREAD,
+  // but by default it is enabled in release builds. The ability to disable it
+  // is useful for evaluating competing optimization techniques.
   if (!cmd_line.HasSwitch(switches::kProcessType)) {
     // The kernel brings in 8 pages for the code section at a time and 4 pages
     // for other sections. We can skip over these pages to avoid a soft page
     // fault which may not occur during code execution. However skipping 4K at
     // a time still has better performance over 32K and 16K according to data.
-    // TODO(ananta)
-    // Investigate this and tune.
+    // TODO(ananta): Investigate this and tune.
     const size_t kStepSize = 4 * 1024;
 
     DWORD pre_read_size = 0;
@@ -137,6 +141,7 @@ HMODULE LoadChromeWithDirectory(std::wstring* dir) {
     }
   }
 #endif  // NDEBUG
+#endif  // WIN_DISABLE_PREREAD
 
   return ::LoadLibraryExW(dir->c_str(), NULL,
                           LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -238,7 +243,7 @@ int MainDllLoader::Launch(HINSTANCE instance,
   std::wstring file;
   dll_ = Load(&version, &file);
   if (!dll_)
-    return ResultCodes::MISSING_DATA;
+    return chrome::RESULT_CODE_MISSING_DATA;
 
   scoped_ptr<base::Environment> env(base::Environment::Create());
   env->SetVar(chrome::kChromeVersionEnvVar, WideToUTF8(version));
@@ -249,7 +254,7 @@ int MainDllLoader::Launch(HINSTANCE instance,
   DLL_MAIN entry_point =
       reinterpret_cast<DLL_MAIN>(::GetProcAddress(dll_, "ChromeMain"));
   if (!entry_point)
-    return ResultCodes::BAD_PROCESS_TYPE;
+    return chrome::RESULT_CODE_BAD_PROCESS_TYPE;
 
   int rc = entry_point(instance, sbox_info, ::GetCommandLineW());
   return OnBeforeExit(rc, file);
@@ -287,7 +292,7 @@ class ChromeDllLoader : public MainDllLoader {
     // NORMAL_EXIT_CANCEL is used for experiments when the user cancels
     // so we need to reset the did_run signal so omaha does not count
     // this run as active usage.
-    if (ResultCodes::NORMAL_EXIT_CANCEL == return_code) {
+    if (chrome::RESULT_CODE_NORMAL_EXIT_CANCEL == return_code) {
       ClearDidRun(dll_path);
     }
     return return_code;

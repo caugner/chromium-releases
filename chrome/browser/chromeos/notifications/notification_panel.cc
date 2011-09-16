@@ -10,6 +10,7 @@
 
 #include "chrome/browser/chromeos/notifications/balloon_collection_impl.h"
 #include "chrome/browser/chromeos/notifications/balloon_view.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
 #include "grit/generated_resources.h"
@@ -113,6 +114,11 @@ class ViewportWidget : public views::Widget {
   }
 
   void OnMouseExited(const views::MouseEvent& event) {
+    // Filter gtk's fake mouse leave events that are issued when
+    // window activation changes.
+    if (event.location().x() == 0 && event.location().y() == 0)
+      return;
+
     // Leave notify can happen if the mouse moves into the child gdk window.
     // Make sure the mouse is outside of the panel.
     gfx::Rect bounds = GetWindowScreenBounds();
@@ -148,7 +154,7 @@ class BalloonSubContainer : public views::View {
     // Layout bottom up
     int height = 0;
     for (int i = child_count() - 1; i >= 0; --i) {
-      views::View* child = GetChildViewAt(i);
+      views::View* child = child_at(i);
       child->SetBounds(0, height, child->width(), child->height());
       height += child->height() + margin_;
     }
@@ -160,7 +166,7 @@ class BalloonSubContainer : public views::View {
     int height = 0;
     int max_width = 0;
     for (int i = child_count() - 1; i >= 0; --i) {
-      views::View* child = GetChildViewAt(i);
+      views::View* child = child_at(i);
       height += child->height() + margin_;
       max_width = std::max(max_width, child->width());
     }
@@ -175,8 +181,7 @@ class BalloonSubContainer : public views::View {
   gfx::Rect GetNewBounds() {
     gfx::Rect rect;
     for (int i = child_count() - 1; i >= 0; --i) {
-      BalloonViewImpl* view =
-          static_cast<BalloonViewImpl*>(GetChildViewAt(i));
+      BalloonViewImpl* view = static_cast<BalloonViewImpl*>(child_at(i));
       if (!view->stale()) {
         if (rect.IsEmpty()) {
           rect = view->bounds();
@@ -192,8 +197,7 @@ class BalloonSubContainer : public views::View {
   int GetNewCount() {
     int count = 0;
     for (int i = child_count() - 1; i >= 0; --i) {
-      BalloonViewImpl* view =
-          static_cast<BalloonViewImpl*>(GetChildViewAt(i));
+      BalloonViewImpl* view = static_cast<BalloonViewImpl*>(child_at(i));
       if (!view->stale())
         count++;
     }
@@ -203,24 +207,21 @@ class BalloonSubContainer : public views::View {
   // Make all notifications stale.
   void MakeAllStale() {
     for (int i = child_count() - 1; i >= 0; --i) {
-      BalloonViewImpl* view =
-          static_cast<BalloonViewImpl*>(GetChildViewAt(i));
+      BalloonViewImpl* view = static_cast<BalloonViewImpl*>(child_at(i));
       view->set_stale();
     }
   }
 
   void DismissAll() {
     for (int i = child_count() - 1; i >= 0; --i) {
-      BalloonViewImpl* view =
-          static_cast<BalloonViewImpl*>(GetChildViewAt(i));
+      BalloonViewImpl* view = static_cast<BalloonViewImpl*>(child_at(i));
       view->Close(true);
     }
   }
 
   BalloonViewImpl* FindBalloonView(const Notification& notification) {
     for (int i = child_count() - 1; i >= 0; --i) {
-      BalloonViewImpl* view =
-          static_cast<BalloonViewImpl*>(GetChildViewAt(i));
+      BalloonViewImpl* view = static_cast<BalloonViewImpl*>(child_at(i));
       if (view->IsFor(notification)) {
         return view;
       }
@@ -232,7 +233,7 @@ class BalloonSubContainer : public views::View {
     gfx::Point copy(point);
     ConvertPointFromWidget(this, &copy);
     for (int i = child_count() - 1; i >= 0; --i) {
-      views::View* view = GetChildViewAt(i);
+      views::View* view = child_at(i);
       if (view->bounds().Contains(copy))
         return static_cast<BalloonViewImpl*>(view);
     }
@@ -426,7 +427,7 @@ void NotificationPanel::Show() {
     panel_widget_ = new views::Widget;
     // TODO(oshima): Using window because Popup widget behaves weird
     // when resizing. This needs to be investigated.
-    Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
+    Widget::InitParams params(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     // Enable double buffering because the panel has both pure views
     // control and native controls (scroll bar).
     params.double_buffer = true;
@@ -461,7 +462,7 @@ void NotificationPanel::Show() {
     panel_controller_->Init(false /* don't focus when opened */,
                             gfx::Rect(0, 0, kBalloonMinWidth, 1), 0,
                             WM_IPC_PANEL_USER_RESIZE_VERTICALLY);
-    registrar_.Add(this, NotificationType::PANEL_STATE_CHANGED,
+    registrar_.Add(this, chrome::NOTIFICATION_PANEL_STATE_CHANGED,
                    Source<PanelController>(panel_controller_.get()));
   }
   panel_widget_->Show();
@@ -611,10 +612,10 @@ void NotificationPanel::ActivatePanel() {
 ////////////////////////////////////////////////////////////////////////////////
 // NotificationObserver overrides.
 
-void NotificationPanel::Observe(NotificationType type,
+void NotificationPanel::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  DCHECK(type == NotificationType::PANEL_STATE_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_PANEL_STATE_CHANGED);
   PanelController::State* state =
       reinterpret_cast<PanelController::State*>(details.map_key());
   switch (*state) {
@@ -651,6 +652,10 @@ void NotificationPanel::OnMouseLeave() {
 void NotificationPanel::OnMouseMotion(const gfx::Point& point) {
   SetActiveView(balloon_container_->FindBalloonView(point));
   SET_STATE(KEEP_SIZE);
+  // We need to set the focus to scroll view to get mouse wheel
+  // working. Setting focus when mouse moves on the panel
+  // because focus may be taken by other view.
+  scroll_view_->RequestFocus();
 }
 
 NotificationPanelTester* NotificationPanel::GetTester() {
@@ -670,6 +675,7 @@ void NotificationPanel::Init() {
       views::Background::CreateSolidBackground(ResourceBundle::frame_color));
 
   scroll_view_.reset(new views::ScrollView());
+  scroll_view_->set_focusable(true);
   scroll_view_->set_parent_owned(false);
   scroll_view_->set_background(
       views::Background::CreateSolidBackground(SK_ColorWHITE));
@@ -677,7 +683,7 @@ void NotificationPanel::Init() {
 
 void NotificationPanel::UnregisterNotification() {
   if (panel_controller_.get())
-    registrar_.Remove(this, NotificationType::PANEL_STATE_CHANGED,
+    registrar_.Remove(this, chrome::NOTIFICATION_PANEL_STATE_CHANGED,
                       Source<PanelController>(panel_controller_.get()));
 }
 

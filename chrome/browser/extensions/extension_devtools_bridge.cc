@@ -9,13 +9,13 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/extensions/extension_devtools_events.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "content/browser/debugger/devtools_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/devtools_messages.h"
 
@@ -38,6 +38,7 @@ static std::string FormatDevToolsMessage(int id, const std::string& method) {
   DictionaryValue message;
   message.SetInteger("id", id);
   message.SetString("method", method);
+  message.Set("params", new DictionaryValue);
 
   std::string json;
   base::JSONWriter::Write(&message, false, &json);
@@ -68,18 +69,20 @@ bool ExtensionDevToolsBridge::RegisterAsDevToolsClientHost() {
     // 1. Report front-end is loaded.
     devtools_manager->ForwardToDevToolsAgent(
         this,
-        DevToolsAgentMsg_FrontendLoaded());
+        DevToolsAgentMsg_FrontendLoaded(MSG_ROUTING_NONE));
 
     // 2. Start timeline profiler.
     devtools_manager->ForwardToDevToolsAgent(
         this,
         DevToolsAgentMsg_DispatchOnInspectorBackend(
+            MSG_ROUTING_NONE,
             FormatDevToolsMessage(2, "Timeline.start")));
 
     // 3. Enable network resource tracking.
     devtools_manager->ForwardToDevToolsAgent(
         this,
         DevToolsAgentMsg_DispatchOnInspectorBackend(
+            MSG_ROUTING_NONE,
             FormatDevToolsMessage(3, "Network.enable")));
 
     return true;
@@ -116,8 +119,7 @@ void ExtensionDevToolsBridge::SendMessageToClient(const IPC::Message& msg) {
   IPC_END_MESSAGE_MAP()
 }
 
-void ExtensionDevToolsBridge::TabReplaced(TabContentsWrapper* new_tab) {
-  DCHECK_EQ(profile_, new_tab->profile());
+void ExtensionDevToolsBridge::TabReplaced(TabContents* new_tab) {
   // We don't update the tab id as it needs to remain the same so that we can
   // properly unregister.
 }

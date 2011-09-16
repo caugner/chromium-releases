@@ -430,14 +430,10 @@ void MobileSetupUIHTMLSource::StartDataRequest(const std::string& path,
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_MOBILE_SETUP_PAGE_HTML));
 
-  const std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
-      html, &strings);
+  std::string full_html = jstemplate_builder::GetI18nTemplateHtml(html,
+                                                                  &strings);
 
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
+  SendResponse(request_id, base::RefCountedString::TakeString(&full_html));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -753,7 +749,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     case PLAN_ACTIVATION_START: {
       switch (network->activation_state()) {
         case chromeos::ACTIVATION_STATE_ACTIVATED: {
-          if (network->failed_or_disconnected()) {
+          if (network->disconnected()) {
             new_state = PLAN_ACTIVATION_RECONNECTING;
           } else if (network->connected()) {
             if (network->restricted_pool()) {
@@ -765,7 +761,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
           break;
         }
         default: {
-          if (network->failed_or_disconnected() ||
+          if (network->disconnected() ||
               network->state() == chromeos::STATE_ACTIVATION_FAILURE) {
             new_state = (network->activation_state() ==
                          chromeos::ACTIVATION_STATE_PARTIALLY_ACTIVATED) ?
@@ -783,7 +779,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     case PLAN_ACTIVATION_START_OTASP: {
       switch (network->activation_state()) {
         case chromeos::ACTIVATION_STATE_PARTIALLY_ACTIVATED: {
-          if (network->failed_or_disconnected()) {
+          if (network->disconnected()) {
             new_state = PLAN_ACTIVATION_OTASP;
           } else if (network->connected()) {
             DisconnectFromNetwork(network);
@@ -811,7 +807,7 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     case PLAN_ACTIVATION_TRYING_OTASP: {
       switch (network->activation_state()) {
         case chromeos::ACTIVATION_STATE_ACTIVATED:
-          if (network->failed_or_disconnected()) {
+          if (network->disconnected()) {
             new_state = GetNextReconnectState(state_);
           } else if (network->connected()) {
             if (network->restricted_pool()) {
@@ -1323,7 +1319,7 @@ void MobileSetupHandler::LoadCellularConfig() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-MobileSetupUI::MobileSetupUI(TabContents* contents) : WebUI(contents) {
+MobileSetupUI::MobileSetupUI(TabContents* contents) : ChromeWebUI(contents) {
   chromeos::CellularNetwork* network = GetCellularNetwork();
   std::string service_path = network ? network->service_path() : std::string();
   MobileSetupHandler* handler = new MobileSetupHandler(service_path);

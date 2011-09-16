@@ -354,6 +354,35 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserver {
     DISALLOW_COPY_AND_ASSIGN(ExponentialBackoffThrottlingTracker);
   };
 
+  // Tracks the log entries for the last seen SOURCE_DNS_TRANSACTION.
+  class DnsTransactionTracker : public SourceTracker {
+   public:
+    static const size_t kMaxNumSources;
+    static const size_t kMaxGraveyardSize;
+
+    DnsTransactionTracker();
+
+   private:
+    virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
+                              SourceInfo* out_info);
+
+    DISALLOW_COPY_AND_ASSIGN(DnsTransactionTracker);
+  };
+
+  // Tracks the log entries for the last seen SOURCE_ASYNC_HOST_RESOLVER_REQUEST
+  class AsyncHostResolverRequestTracker : public SourceTracker {
+   public:
+    static const size_t kMaxNumSources;
+    static const size_t kMaxGraveyardSize;
+
+    AsyncHostResolverRequestTracker();
+
+   private:
+    virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
+                              SourceInfo* out_info);
+
+    DISALLOW_COPY_AND_ASSIGN(AsyncHostResolverRequestTracker);
+  };
 
   PassiveLogCollector();
   virtual ~PassiveLogCollector();
@@ -395,6 +424,8 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserver {
   MemCacheEntryTracker mem_cache_entry_tracker_;
   HttpStreamJobTracker http_stream_job_tracker_;
   ExponentialBackoffThrottlingTracker exponential_backoff_throttling_tracker_;
+  DnsTransactionTracker dns_transaction_tracker_;
+  AsyncHostResolverRequestTracker async_host_resolver_request_tracker_;
 
   // This array maps each NetLog::SourceType to one of the tracker instances
   // defined above. Use of this array avoid duplicating the list of trackers

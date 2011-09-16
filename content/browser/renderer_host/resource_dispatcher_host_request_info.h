@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 class CrossSiteResourceHandler;
 class LoginHandler;
 class ResourceDispatcherHost;
+class ResourceDispatcherHostLoginDelegate;
 class ResourceHandler;
 class SSLClientAuthHandler;
 
@@ -41,6 +42,8 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
       int route_id,
       int origin_pid,
       int request_id,
+      bool is_main_frame,
+      int64 frame_id,
       ResourceType::Type resource_type,
       uint64 upload_size,
       bool is_download,
@@ -62,9 +65,11 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
     cross_site_handler_ = h;
   }
 
-  // Pointer to the login handler, or NULL if there is none for this request.
-  LoginHandler* login_handler() const { return login_handler_.get(); }
-  void set_login_handler(LoginHandler* lh);
+  // Pointer to the login delegate, or NULL if there is none for this request.
+  ResourceDispatcherHostLoginDelegate* login_delegate() const {
+    return login_delegate_.get();
+  }
+  void set_login_delegate(ResourceDispatcherHostLoginDelegate* ld);
 
   // Pointer to the SSL auth, or NULL if there is none for this request.
   SSLClientAuthHandler* ssl_client_auth_handler() const {
@@ -92,6 +97,12 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
 
   // Unique identifier for this resource request.
   int request_id() const { return request_id_; }
+
+  // True if |frame_id_| represents a main frame in the RenderView.
+  bool is_main_frame() const { return is_main_frame_; }
+
+  // Frame ID that sent this resource request. -1 if unknown / invalid.
+  int64 frame_id() const { return frame_id_; }
 
   // Number of messages we've sent to the renderer that we haven't gotten an
   // ACK for. This allows us to avoid having too many messages in flight.
@@ -196,13 +207,15 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
 
   scoped_refptr<ResourceHandler> resource_handler_;
   CrossSiteResourceHandler* cross_site_handler_;  // Non-owning, may be NULL.
-  scoped_refptr<LoginHandler> login_handler_;
+  scoped_refptr<ResourceDispatcherHostLoginDelegate> login_delegate_;
   scoped_refptr<SSLClientAuthHandler> ssl_client_auth_handler_;
   ChildProcessInfo::ProcessType process_type_;
   int child_id_;
   int route_id_;
   int origin_pid_;
   int request_id_;
+  bool is_main_frame_;
+  int64 frame_id_;
   int pending_data_count_;
   bool is_download_;
   bool allow_download_;

@@ -8,7 +8,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
@@ -185,12 +185,12 @@ SystemSettingsProvider::SystemSettingsProvider() {
     timezones_.push_back(icu::TimeZone::createTimeZone(
         icu::UnicodeString(kTimeZones[i], -1, US_INV)));
   }
-  SystemAccess::GetInstance()->AddObserver(this);
+  system::TimezoneSettings::GetInstance()->AddObserver(this);
 
 }
 
 SystemSettingsProvider::~SystemSettingsProvider() {
-  SystemAccess::GetInstance()->RemoveObserver(this);
+  system::TimezoneSettings::GetInstance()->RemoveObserver(this);
   STLDeleteElements(&timezones_);
 }
 
@@ -207,7 +207,7 @@ void SystemSettingsProvider::DoSet(const std::string& path, Value* in_value) {
     const icu::TimeZone* timezone = GetTimezone(value);
     if (!timezone)
       return;
-    SystemAccess::GetInstance()->SetTimezone(*timezone);
+    system::TimezoneSettings::GetInstance()->SetTimezone(*timezone);
   }
 }
 
@@ -215,14 +215,14 @@ bool SystemSettingsProvider::Get(const std::string& path,
                                  Value** out_value) const {
   if (path == kSystemTimezone) {
     *out_value = Value::CreateStringValue(GetKnownTimezoneID(
-        SystemAccess::GetInstance()->GetTimezone()));
+        system::TimezoneSettings::GetInstance()->GetTimezone()));
     return true;
   }
   return false;
 }
 
 bool SystemSettingsProvider::HandlesSetting(const std::string& path) {
-  return ::StartsWithASCII(path, std::string("cros.system."), true);
+  return path == kSystemTimezone;
 }
 
 void SystemSettingsProvider::TimezoneChanged(const icu::TimeZone& timezone) {

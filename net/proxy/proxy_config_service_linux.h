@@ -11,11 +11,13 @@
 
 #include "base/base_api.h"
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/observer_list.h"
+#include "net/base/net_api.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_server.h"
@@ -24,7 +26,7 @@ namespace net {
 
 // Implementation of ProxyConfigService that retrieves the system proxy
 // settings from environment variables, gconf, gsettings, or kioslaverc (KDE).
-class BASE_API ProxyConfigServiceLinux : public ProxyConfigService {
+class NET_TEST ProxyConfigServiceLinux : public ProxyConfigService {
  public:
 
   // Forward declaration of Delegate.
@@ -286,10 +288,10 @@ class BASE_API ProxyConfigServiceLinux : public ProxyConfigService {
 
   // ProxyConfigService methods:
   // Called from IO thread.
-  virtual void AddObserver(Observer* observer);
-  virtual void RemoveObserver(Observer* observer);
+  virtual void AddObserver(Observer* observer) OVERRIDE;
+  virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual ProxyConfigService::ConfigAvailability GetLatestProxyConfig(
-      ProxyConfig* config);
+      ProxyConfig* config) OVERRIDE;
 
  private:
   scoped_refptr<Delegate> delegate_;

@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "ipc/ipc_message.h"
 
 class GURL;
 class Extension;
@@ -22,11 +23,13 @@ class RenderProcessHost;
 
 class ExtensionEventRouter : public NotificationObserver {
  public:
-  // Returns true if the given extension can see events and data from another
-  // sub-profile (incognito to original profile, or vice versa).
-  static bool CanCrossIncognito(Profile* profile,
-                                const std::string& extension_id);
-  static bool CanCrossIncognito(Profile* profile, const Extension* extension);
+  // Sends an event via ipc_sender to the given extension. Can be called on
+  // any thread.
+  static void DispatchEvent(IPC::Message::Sender* ipc_sender,
+                            const std::string& extension_id,
+                            const std::string& event_name,
+                            const std::string& event_args,
+                            const GURL& event_url);
 
   explicit ExtensionEventRouter(Profile* profile);
   virtual ~ExtensionEventRouter();
@@ -56,28 +59,49 @@ class ExtensionEventRouter : public NotificationObserver {
   // |event_url| is not empty, the event is only sent to extension with host
   // permissions for this url.
   void DispatchEventToRenderers(
-      const std::string& event_name, const std::string& event_args,
-      Profile* restrict_to_profile, const GURL& event_url);
+      const std::string& event_name,
+      const std::string& event_args,
+      Profile* restrict_to_profile,
+      const GURL& event_url);
 
   // Same as above, except only send the event to the given extension.
   void DispatchEventToExtension(
       const std::string& extension_id,
-      const std::string& event_name, const std::string& event_args,
-      Profile* restrict_to_profile, const GURL& event_url);
+      const std::string& event_name,
+      const std::string& event_args,
+      Profile* restrict_to_profile,
+      const GURL& event_url);
+
+  // Send different versions of an event to extensions in different profiles.
+  // This is used in the case of sending one event to extensions that have
+  // incognito access, and another event to extensions that don't (here),
+  // in order to avoid sending 2 events to "spanning" extensions.
+  // If |cross_incognito_profile| is non-NULL and different from
+  // restrict_to_profile, send the event with cross_incognito_args to the
+  // extensions in that profile that can't cross incognito.
+  void DispatchEventsToRenderersAcrossIncognito(
+      const std::string& event_name,
+      const std::string& event_args,
+      Profile* restrict_to_profile,
+      const std::string& cross_incognito_args,
+      const GURL& event_url);
 
  protected:
   // Shared by DispatchEvent*. If |extension_id| is empty, the event is
   // broadcast.
   virtual void DispatchEventImpl(
       const std::string& extension_id,
-      const std::string& event_name, const std::string& event_args,
-      Profile* restrict_to_profile, const GURL& event_url);
+      const std::string& event_name,
+      const std::string& event_args,
+      Profile* restrict_to_profile,
+      const std::string& cross_incognito_args,
+      const GURL& event_url);
 
  private:
   // An extension listening to an event.
   struct EventListener;
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

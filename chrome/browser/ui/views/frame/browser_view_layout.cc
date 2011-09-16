@@ -9,7 +9,6 @@
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
-#include "chrome/browser/ui/views/download/download_shelf_view.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/contents_container.h"
@@ -21,7 +20,10 @@
 #include "ui/gfx/scrollbar_size.h"
 #include "ui/gfx/size.h"
 #include "views/controls/single_split_view.h"
-#include "views/window/window.h"
+
+#if !defined(OS_CHROMEOS)
+#include "chrome/browser/ui/views/download/download_shelf_view.h"
+#endif
 
 #if !defined(OS_WIN)
 #include "views/window/hit_test.h"
@@ -124,11 +126,8 @@ gfx::Rect BrowserViewLayout::GetFindBarBoundingBox() const {
 
   // First determine the bounding box of the content area in Widget
   // coordinates.
-  gfx::Rect bounding_box(contents_container_->bounds());
-
-  gfx::Point topleft;
-  views::View::ConvertPointToWidget(contents_container_, &topleft);
-  bounding_box.set_origin(topleft);
+  gfx::Rect bounding_box = contents_container_->ConvertRectToWidget(
+      contents_container_->GetLocalBounds());
 
   // Adjust the position and size of the bounding box by the find bar offset
   // calculated during the last Layout.
@@ -249,7 +248,7 @@ void BrowserViewLayout::Installed(views::View* host) {
 void BrowserViewLayout::Uninstalled(views::View* host) {}
 
 void BrowserViewLayout::ViewAdded(views::View* host, views::View* view) {
-  switch (view->GetID()) {
+  switch (view->id()) {
     case VIEW_ID_CONTENTS_SPLIT: {
       contents_split_ = static_cast<views::SingleSplitView*>(view);
       // We're installed as the LayoutManager before BrowserView creates the
@@ -262,7 +261,11 @@ void BrowserViewLayout::ViewAdded(views::View* host, views::View* view) {
       infobar_container_ = view;
       break;
     case VIEW_ID_DOWNLOAD_SHELF:
+#if !defined(OS_CHROMEOS)
       download_shelf_ = static_cast<DownloadShelfView*>(view);
+#else
+      NOTREACHED();
+#endif
       break;
     case VIEW_ID_BOOKMARK_BAR:
       active_bookmark_bar_ = static_cast<BookmarkBarView*>(view);
@@ -286,7 +289,7 @@ void BrowserViewLayout::ViewAdded(views::View* host, views::View* view) {
 }
 
 void BrowserViewLayout::ViewRemoved(views::View* host, views::View* view) {
-  switch (view->GetID()) {
+  switch (view->id()) {
     case VIEW_ID_BOOKMARK_BAR:
       active_bookmark_bar_ = NULL;
       break;
@@ -407,7 +410,7 @@ int BrowserViewLayout::LayoutTabStripRegion() {
 int BrowserViewLayout::LayoutToolbar(int top) {
   int browser_view_width = vertical_layout_rect_.width();
   bool toolbar_visible = browser_view_->IsToolbarVisible();
-  toolbar_->location_bar()->SetFocusable(toolbar_visible);
+  toolbar_->location_bar()->set_focusable(toolbar_visible);
   int y = top;
   if (!browser_view_->UseVerticalTabs()) {
     y -= ((toolbar_visible || browser_view_->UseCompactNavigationBar()) &&
@@ -543,7 +546,7 @@ void BrowserViewLayout::LayoutTabContents(int top, int bottom) {
 
   views::SingleSplitView* sidebar_split = browser_view_->sidebar_split_;
   if (sidebar_split) {
-    DCHECK(sidebar_split == contents_split_->GetChildViewAt(0));
+    DCHECK(sidebar_split == contents_split_->child_at(0));
     sidebar_split->CalculateChildrenBounds(
         sidebar_split_bounds, &contents_bounds, &sidebar_bounds);
   } else {
@@ -596,14 +599,14 @@ int BrowserViewLayout::GetTopMarginForActiveContent() {
     return 0;
   }
 
-  if (contents_split_->GetChildViewAt(1) &&
-      contents_split_->GetChildViewAt(1)->IsVisible())
+  if (contents_split_->child_at(1) &&
+      contents_split_->child_at(1)->IsVisible())
     return 0;
 
   if (SidebarManager::IsSidebarAllowed()) {
-    views::View* sidebar_split = contents_split_->GetChildViewAt(0);
-    if (sidebar_split->GetChildViewAt(1) &&
-        sidebar_split->GetChildViewAt(1)->IsVisible())
+    views::View* sidebar_split = contents_split_->child_at(0);
+    if (sidebar_split->child_count() >= 2 &&
+        sidebar_split->child_at(1)->IsVisible())
       return 0;
   }
 
@@ -613,8 +616,10 @@ int BrowserViewLayout::GetTopMarginForActiveContent() {
 }
 
 int BrowserViewLayout::LayoutDownloadShelf(int bottom) {
+#if !defined(OS_CHROMEOS)
   // Re-layout the shelf either if it is visible or if it's close animation
-  // is currently running.
+  // is currently running.  ChromiumOS uses ActiveDownloadsUI instead of
+  // DownloadShelf.
   if (browser_view_->IsDownloadShelfVisible() ||
       (download_shelf_ && download_shelf_->IsClosing())) {
     bool visible = browser()->SupportsWindowFeature(
@@ -627,6 +632,7 @@ int BrowserViewLayout::LayoutDownloadShelf(int bottom) {
     download_shelf_->Layout();
     bottom -= height;
   }
+#endif
   return bottom;
 }
 

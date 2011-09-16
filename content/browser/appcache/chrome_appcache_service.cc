@@ -14,33 +14,18 @@
 
 static bool has_initialized_thread_ids;
 
-namespace {
-
-// Used to defer deleting of local storage until the destructor has finished.
-void DeleteLocalStateOnIOThread(FilePath cache_path) {
-  // Post the actual deletion to the DB thread to ensure it happens after the
-  // database file has been closed.
-  BrowserThread::PostTask(
-      BrowserThread::DB, FROM_HERE,
-      NewRunnableFunction<bool(*)(const FilePath&, bool), FilePath, bool>(
-          &file_util::Delete, cache_path, true));
-}
-
-}  // namespace
-
 // ----------------------------------------------------------------------------
 
 ChromeAppCacheService::ChromeAppCacheService(
     quota::QuotaManagerProxy* quota_manager_proxy)
     : AppCacheService(quota_manager_proxy),
-      resource_context_(NULL), clear_local_state_on_exit_(false) {
+      resource_context_(NULL) {
 }
 
 void ChromeAppCacheService::InitializeOnIOThread(
     const FilePath& cache_path,
     const content::ResourceContext* resource_context,
-    scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy,
-    bool clear_local_state_on_exit) {
+    scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (!has_initialized_thread_ids) {
@@ -51,8 +36,8 @@ void ChromeAppCacheService::InitializeOnIOThread(
   cache_path_ = cache_path;
   resource_context_ = resource_context;
   registrar_.Add(
-      this, NotificationType::PURGE_MEMORY, NotificationService::AllSources());
-  SetClearLocalStateOnExit(clear_local_state_on_exit);
+      this, content::NOTIFICATION_PURGE_MEMORY,
+      NotificationService::AllSources());
 
   // Init our base class.
   Initialize(cache_path_,
@@ -62,26 +47,6 @@ void ChromeAppCacheService::InitializeOnIOThread(
 }
 
 ChromeAppCacheService::~ChromeAppCacheService() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (clear_local_state_on_exit_ && !cache_path_.empty()) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(DeleteLocalStateOnIOThread, cache_path_));
-  }
-}
-
-void ChromeAppCacheService::SetClearLocalStateOnExit(bool clear_local_state) {
-  // TODO(michaeln): How is 'protected' status granted to apps in this case?
-  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this,
-                          &ChromeAppCacheService::SetClearLocalStateOnExit,
-                          clear_local_state));
-    return;
-  }
-  clear_local_state_on_exit_ = clear_local_state;
 }
 
 bool ChromeAppCacheService::CanLoadAppCache(const GURL& manifest_url) {
@@ -98,11 +63,11 @@ int ChromeAppCacheService::CanCreateAppCache(
       manifest_url, *resource_context_) ? net::OK : net::ERR_ACCESS_DENIED;
 }
 
-void ChromeAppCacheService::Observe(NotificationType type,
+void ChromeAppCacheService::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(type == NotificationType::PURGE_MEMORY);
+  DCHECK(type == content::NOTIFICATION_PURGE_MEMORY);
   PurgeMemory();
 }
 

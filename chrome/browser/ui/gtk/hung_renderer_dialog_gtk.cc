@@ -24,7 +24,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 namespace {
 
@@ -32,6 +32,7 @@ namespace {
 class HungRendererDialogGtk {
  public:
   HungRendererDialogGtk();
+  virtual ~HungRendererDialogGtk() {}
   void ShowForTabContents(TabContents* hung_contents);
   void EndForTabContents(TabContents* hung_contents);
 
@@ -193,7 +194,7 @@ void HungRendererDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
       // Kill the process.
       if (contents_ && contents_->GetRenderProcessHost()) {
         base::KillProcess(contents_->GetRenderProcessHost()->GetHandle(),
-                          ResultCodes::HUNG, false);
+                          content::RESULT_CODE_HUNG, false);
       }
       break;
 

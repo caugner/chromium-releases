@@ -12,9 +12,12 @@
 #include "chrome/browser/chromeos/network_state_notifier.h"
 #include "chrome/browser/tab_contents/chrome_interstitial_page.h"
 
-class DictionaryValue;
 class Extension;
 class TabContents;
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace chromeos {
 
@@ -61,7 +64,7 @@ class OfflineLoadPage : public ChromeInterstitialPage {
   virtual void DontProceed();
 
   // Overrides ChromeInterstitialPage's Observe.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -69,9 +72,9 @@ class OfflineLoadPage : public ChromeInterstitialPage {
   // normal site.
   void GetAppOfflineStrings(const Extension* app,
                             const string16& faield_url,
-                            DictionaryValue* strings) const;
+                            base::DictionaryValue* strings) const;
   void GetNormalOfflineStrings(const string16& faield_url,
-                               DictionaryValue* strings) const;
+                               base::DictionaryValue* strings) const;
 
   // True if there is a mobile network is available but
   // has not been activated.

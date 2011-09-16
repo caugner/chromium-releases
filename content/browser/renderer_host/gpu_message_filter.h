@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_RENDERER_HOST_GPU_MESSAGE_FILTER_H_
 #pragma once
 
+#include "base/memory/ref_counted.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "ui/gfx/native_widget_types.h"
@@ -14,6 +15,7 @@ class GpuProcessHost;
 class GpuProcessHostUIShim;
 struct GPUCreateCommandBufferConfig;
 struct GPUInfo;
+class RenderWidgetHelper;
 
 namespace IPC {
 struct ChannelHandle;
@@ -25,7 +27,8 @@ struct ChannelHandle;
 class GpuMessageFilter : public BrowserMessageFilter,
                          public base::SupportsWeakPtr<GpuMessageFilter> {
  public:
-  explicit GpuMessageFilter(int render_process_id);
+  GpuMessageFilter(int render_process_id,
+                   RenderWidgetHelper* render_widget_helper);
 
   // BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -38,16 +41,17 @@ class GpuMessageFilter : public BrowserMessageFilter,
   virtual ~GpuMessageFilter();
 
   // Message handlers called on the browser IO thread:
-  void OnEstablishGpuChannel(content::CauseForGpuLaunch);
-  void OnSynchronizeGpu(IPC::Message* reply);
+  void OnEstablishGpuChannel(content::CauseForGpuLaunch,
+                             IPC::Message* reply);
   void OnCreateViewCommandBuffer(
-      gfx::PluginWindowHandle compositing_surface,
       int32 render_view_id,
       const GPUCreateCommandBufferConfig& init_params,
       IPC::Message* reply);
 
   int gpu_host_id_;
   int render_process_id_;
+
+  scoped_refptr<RenderWidgetHelper> render_widget_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMessageFilter);
 };

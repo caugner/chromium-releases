@@ -9,22 +9,17 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
-#include "app/win/scoped_co_mem.h"
-#include "app/win/shell.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
-#include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/google_update_settings.h"
-#include "chrome/installer/util/install_util.h"
+#include "chrome/common/scoped_co_mem.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/message_box_win.h"
+#include "ui/base/win/shell.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace platform_util {
@@ -70,14 +65,14 @@ void ShowItemInFolder(const FilePath& full_path) {
   if (FAILED(hr))
     return;
 
-  app::win::ScopedCoMem<ITEMIDLIST> dir_item;
+  chrome::common::ScopedCoMem<ITEMIDLIST> dir_item;
   hr = desktop->ParseDisplayName(NULL, NULL,
                                  const_cast<wchar_t *>(dir.value().c_str()),
                                  NULL, &dir_item, NULL);
   if (FAILED(hr))
     return;
 
-  app::win::ScopedCoMem<ITEMIDLIST> file_item;
+  chrome::common::ScopedCoMem<ITEMIDLIST> file_item;
   hr = desktop->ParseDisplayName(NULL, NULL,
       const_cast<wchar_t *>(full_path.value().c_str()),
       NULL, &file_item, NULL);
@@ -114,7 +109,7 @@ void ShowItemInFolder(const FilePath& full_path) {
 }
 
 void OpenItem(const FilePath& full_path) {
-  app::win::OpenItemViaShell(full_path);
+  ui::win::OpenItemViaShell(full_path);
 }
 
 void OpenExternal(const GURL& url) {
@@ -194,56 +189,6 @@ bool SimpleYesNoBox(gfx::NativeWindow parent,
                     const string16& message) {
   return ui::MessageBox(parent, message.c_str(), title.c_str(),
       MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND) == IDYES;
-}
-
-std::string GetVersionStringModifier() {
-#if defined(GOOGLE_CHROME_BUILD)
-  FilePath module;
-  string16 channel;
-  if (PathService::Get(base::FILE_MODULE, &module)) {
-    bool is_system_install =
-        !InstallUtil::IsPerUserInstall(module.value().c_str());
-
-    GoogleUpdateSettings::GetChromeChannelAndModifiers(is_system_install,
-                                                       &channel);
-  }
-  return UTF16ToASCII(channel);
-#else
-  return std::string();
-#endif
-}
-
-Channel GetChannel() {
-#if defined(GOOGLE_CHROME_BUILD)
-  std::wstring channel(L"unknown");
-
-  FilePath module;
-  if (PathService::Get(base::FILE_MODULE, &module)) {
-    bool is_system_install =
-        !InstallUtil::IsPerUserInstall(module.value().c_str());
-    channel = GoogleUpdateSettings::GetChromeChannel(is_system_install);
-  }
-
-  if (channel.empty()) {
-    return CHANNEL_STABLE;
-  } else if (channel == L"beta") {
-    return CHANNEL_BETA;
-  } else if (channel == L"dev") {
-    return CHANNEL_DEV;
-  } else if (channel == L"canary") {
-    return CHANNEL_CANARY;
-  }
-#endif
-
-  return CHANNEL_UNKNOWN;
-}
-
-bool CanSetAsDefaultBrowser() {
-  return BrowserDistribution::GetDistribution()->CanSetAsDefault();
-}
-
-bool CanSetAsDefaultProtocolClient(const std::string& protocol) {
-  return CanSetAsDefaultBrowser();
 }
 
 }  // namespace platform_util

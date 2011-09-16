@@ -30,7 +30,7 @@
 #include "webkit/glue/ftp_directory_listing_response_delegate.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/glue/resource_loader_bridge.h"
-#include "webkit/glue/site_isolation_metrics.h"
+#include "webkit/glue/request_extra_data.h"
 #include "webkit/glue/webkit_glue.h"
 
 using base::Time;
@@ -330,9 +330,6 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   scoped_ptr<FtpDirectoryListingResponseDelegate> ftp_listing_delegate_;
   scoped_ptr<MultipartResponseDelegate> multipart_delegate_;
   scoped_ptr<ResourceLoaderBridge> completed_bridge_;
-
-  // TODO(japhet): Storing this is a temporary hack for site isolation logging.
-  WebURL response_url_;
 };
 
 WebURLLoaderImpl::Context::Context(WebURLLoaderImpl* loader)
@@ -442,6 +439,14 @@ void WebURLLoaderImpl::Context::Start(
   request_info.routing_id = request.requestorID();
   request_info.download_to_file = request.downloadToFile();
   request_info.has_user_gesture = request.hasUserGesture();
+  request_info.frame_id = -1;
+  request_info.is_main_frame = false;
+  if (request.extraData()) {
+    RequestExtraData* extra_data =
+        static_cast<RequestExtraData*>(request.extraData());
+    request_info.frame_id = extra_data->frame_identifier();
+    request_info.is_main_frame = extra_data->is_main_frame();
+  }
   bridge_.reset(ResourceLoaderBridge::Create(request_info));
 
   if (!request.httpBody().isNull()) {
@@ -589,8 +594,6 @@ void WebURLLoaderImpl::Context::OnReceivedResponse(
     ftp_listing_delegate_.reset(
         new FtpDirectoryListingResponseDelegate(client_, loader_, response));
   }
-
-  response_url_ = response.url();
 }
 
 void WebURLLoaderImpl::Context::OnDownloadedData(int len) {
@@ -603,9 +606,6 @@ void WebURLLoaderImpl::Context::OnReceivedData(const char* data,
                                                int encoded_data_length) {
   if (!client_)
     return;
-
-  // Temporary logging, see site_isolation_metrics.h/cc.
-  SiteIsolationMetrics::SniffCrossOriginHTML(response_url_, data, data_length);
 
   if (ftp_listing_delegate_.get()) {
     // The FTP listing delegate will make the appropriate calls to
@@ -654,6 +654,8 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
         error_code = status.os_error();
       }
       WebURLError error;
+      if (error_code == net::ERR_ABORTED)
+        error.isCancellation = true;
       error.domain = WebString::fromUTF8(net::kErrorDomain);
       error.reason = error_code;
       error.unreachableURL = request_.url();
@@ -662,9 +664,6 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
       client_->didFinishLoading(loader_, completion_time.ToDoubleT());
     }
   }
-
-  // Temporary logging, see site_isolation_metrics.h/cc
-  SiteIsolationMetrics::RemoveCompletedResponse(response_url_);
 
   // We are done with the bridge now, and so we need to release the reference
   // to ourselves that we took on behalf of the bridge.  This may cause our

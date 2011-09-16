@@ -16,7 +16,10 @@ ResourceContext::ResourceContext()
       appcache_service_(NULL),
       database_tracker_(NULL),
       file_system_context_(NULL),
-      blob_storage_context_(NULL) {
+      blob_storage_context_(NULL),
+      quota_manager_(NULL),
+      host_zoom_map_(NULL),
+      media_observer_(NULL) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -131,16 +134,15 @@ void ResourceContext::set_host_zoom_map(HostZoomMap* host_zoom_map) {
   host_zoom_map_ = host_zoom_map;
 }
 
-const ExtensionInfoMap* ResourceContext::extension_info_map() const {
+MediaObserver* ResourceContext::media_observer() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   EnsureInitialized();
-  return extension_info_map_;
+  return media_observer_;
 }
 
-void ResourceContext::set_extension_info_map(
-    ExtensionInfoMap* extension_info_map) {
+void ResourceContext::set_media_observer(MediaObserver* media_observer) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  extension_info_map_ = extension_info_map;
+  media_observer_ = media_observer;
 }
 
 const base::WeakPtr<prerender::PrerenderManager>&

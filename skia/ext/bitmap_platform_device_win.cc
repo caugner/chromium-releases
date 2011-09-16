@@ -15,15 +15,6 @@
 
 namespace skia {
 
-SkDevice* BitmapPlatformDeviceFactory::newDevice(SkCanvas* ignored,
-                                                 SkBitmap::Config config,
-                                                 int width, int height,
-                                                 bool isOpaque,
-                                                 bool isForLayer) {
-  SkASSERT(config == SkBitmap::kARGB_8888_Config);
-  return BitmapPlatformDevice::create(width, height, isOpaque, NULL);
-}
-
 BitmapPlatformDevice::BitmapPlatformDeviceData::BitmapPlatformDeviceData(
     HBITMAP hbitmap)
     : bitmap_context_(hbitmap),
@@ -180,28 +171,9 @@ BitmapPlatformDevice::BitmapPlatformDevice(
   SkDEBUGCODE(begin_paint_count_ = 0);
 }
 
-// The copy constructor just adds another reference to the underlying data.
-// We use a const cast since the default Skia definitions don't define the
-// proper constedness that we expect (accessBitmap should really be const).
-BitmapPlatformDevice::BitmapPlatformDevice(
-    const BitmapPlatformDevice& other)
-    : PlatformDevice(
-          const_cast<BitmapPlatformDevice&>(other).accessBitmap(true)),
-      data_(other.data_) {
-  data_->ref();
-  SkDEBUGCODE(begin_paint_count_ = 0);
-}
-
 BitmapPlatformDevice::~BitmapPlatformDevice() {
   SkASSERT(begin_paint_count_ == 0);
   data_->unref();
-}
-
-BitmapPlatformDevice& BitmapPlatformDevice::operator=(
-    const BitmapPlatformDevice& other) {
-  data_ = other.data_;
-  data_->ref();
-  return *this;
 }
 
 HDC BitmapPlatformDevice::BeginPlatformPaint() {
@@ -282,8 +254,11 @@ void BitmapPlatformDevice::onAccessBitmap(SkBitmap* bitmap) {
     GdiFlush();
 }
 
-SkDeviceFactory* BitmapPlatformDevice::onNewDeviceFactory() {
-  return SkNEW(BitmapPlatformDeviceFactory);
+SkDevice* BitmapPlatformDevice::onCreateCompatibleDevice(
+    SkBitmap::Config config, int width, int height, bool isOpaque,
+    Usage /*usage*/) {
+  SkASSERT(config == SkBitmap::kARGB_8888_Config);
+  return BitmapPlatformDevice::create(width, height, isOpaque, NULL);
 }
 
 }  // namespace skia

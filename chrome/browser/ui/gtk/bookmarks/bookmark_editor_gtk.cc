@@ -5,11 +5,13 @@
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_editor_gtk.h"
 
 #include <gtk/gtk.h>
+#include <set>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
@@ -43,6 +45,52 @@ const GdkColor kErrorColor = GDK_COLOR_RGB(0xFF, 0xBC, 0xBC);
 static const int kTreeWidth = 300;
 static const int kTreeHeight = 150;
 
+typedef std::set<int64> ExpandedNodeIDs;
+
+// Used by ExpandNodes.
+struct ExpandNodesData {
+  const ExpandedNodeIDs* ids;
+  GtkWidget* tree_view;
+};
+
+// Expands all the nodes in |pointer_data| (which is a ExpandNodesData). This is
+// intended for use by gtk_tree_model_foreach to expand a particular set of
+// nodes.
+gboolean ExpandNodes(GtkTreeModel* model,
+                     GtkTreePath* path,
+                     GtkTreeIter* iter,
+                     gpointer pointer_data) {
+  ExpandNodesData* data = reinterpret_cast<ExpandNodesData*>(pointer_data);
+  int64 node_id = bookmark_utils::GetIdFromTreeIter(model, iter);
+  if (data->ids->find(node_id) != data->ids->end())
+    gtk_tree_view_expand_to_path(GTK_TREE_VIEW(data->tree_view), path);
+  return FALSE;  // Indicates we want to continue iterating.
+}
+
+// Used by SaveExpandedNodes.
+struct SaveExpandedNodesData {
+  // Filled in by SaveExpandedNodes.
+  BookmarkExpandedStateTracker::Nodes nodes;
+  BookmarkModel* bookmark_model;
+};
+
+// Adds the node at |path| to |pointer_data| (which is a SaveExpandedNodesData).
+// This is intended for use with gtk_tree_view_map_expanded_rows to save all
+// the expanded paths.
+void SaveExpandedNodes(GtkTreeView* tree_view,
+                       GtkTreePath* path,
+                       gpointer pointer_data) {
+  SaveExpandedNodesData* data =
+      reinterpret_cast<SaveExpandedNodesData*>(pointer_data);
+  GtkTreeIter iter;
+  gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
+  const BookmarkNode* node = data->bookmark_model->GetNodeByID(
+      bookmark_utils::GetIdFromTreeIter(gtk_tree_view_get_model(tree_view),
+                                        &iter));
+  if (node)
+    data->nodes.insert(node);
+}
+
 }  // namespace
 
 class BookmarkEditorGtk::ContextMenuController
@@ -53,6 +101,7 @@ class BookmarkEditorGtk::ContextMenuController
         running_menu_for_root_(false) {
     menu_model_.reset(new ui::SimpleMenuModel(this));
     menu_model_->AddItemWithStringId(COMMAND_EDIT, IDS_EDIT);
+    menu_model_->AddItemWithStringId(COMMAND_DELETE, IDS_DELETE);
     menu_model_->AddItemWithStringId(
         COMMAND_NEW_FOLDER,
         IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
@@ -86,14 +135,24 @@ class BookmarkEditorGtk::ContextMenuController
 
  private:
   enum ContextMenuCommand {
+    COMMAND_DELETE,
     COMMAND_EDIT,
     COMMAND_NEW_FOLDER
   };
 
   // Overridden from ui::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdEnabled(int command_id) const {
-    return !(command_id == COMMAND_EDIT && running_menu_for_root_) &&
-        (editor_ != NULL);
+    if (editor_ == NULL)
+      return false;
+
+    switch (command_id) {
+      case COMMAND_DELETE:
+      case COMMAND_EDIT:
+        return !running_menu_for_root_;
+      case COMMAND_NEW_FOLDER:
+        return true;
+    }
+    return false;
   }
 
   virtual bool IsCommandIdChecked(int command_id) const {
@@ -110,6 +169,29 @@ class BookmarkEditorGtk::ContextMenuController
       return;
 
     switch (command_id) {
+      case COMMAND_DELETE: {
+        GtkTreeIter iter;
+        GtkTreeModel* model = NULL;
+        if (!gtk_tree_selection_get_selected(editor_->tree_selection_,
+                                             &model,
+                                             &iter)) {
+          break;
+        }
+        const BookmarkNode* selected_node = GetNodeAt(model, &iter);
+        if (selected_node) {
+          DCHECK(selected_node->is_folder());
+          // Deleting an existing bookmark folder. Confirm if it has other
+          // bookmarks.
+          if (!selected_node->empty()) {
+            if (!bookmark_utils::ConfirmDeleteBookmarkNode(selected_node,
+                  GTK_WINDOW(editor_->dialog_)))
+              break;
+          }
+          editor_->deletes_.push_back(selected_node->id());
+        }
+        gtk_tree_store_remove(editor_->tree_store_, &iter);
+        break;
+      }
       case COMMAND_EDIT: {
         GtkTreeIter iter;
         if (!gtk_tree_selection_get_selected(editor_->tree_selection_,
@@ -139,20 +221,12 @@ class BookmarkEditorGtk::ContextMenuController
     }
   }
 
-  int64 GetRowIdAt(GtkTreeModel* model, GtkTreeIter* iter) {
-    GValue value = { 0, };
-    gtk_tree_model_get_value(model, iter, bookmark_utils::ITEM_ID, &value);
-    int64 id = g_value_get_int64(&value);
-    g_value_unset(&value);
-    return id;
-  }
-
-  const BookmarkNode* GetNodeAt(GtkTreeModel* model, GtkTreeIter* iter) {
-    int64 id = GetRowIdAt(model, iter);
+  const BookmarkNode* GetNodeAt(GtkTreeModel* model, GtkTreeIter* iter) const {
+    int64 id = bookmark_utils::GetIdFromTreeIter(model, iter);
     return (id > 0) ? editor_->bb_model_->GetNodeByID(id) : NULL;
   }
 
-  const BookmarkNode* GetSelectedNode() {
+  const BookmarkNode* GetSelectedNode() const {
     GtkTreeModel* model;
     GtkTreeIter iter;
     if (!gtk_tree_selection_get_selected(editor_->tree_selection_,
@@ -276,10 +350,17 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
 
   name_entry_ = gtk_entry_new();
   std::string title;
+  GURL url;
   if (details_.type == EditDetails::EXISTING_NODE) {
     title = UTF16ToUTF8(details_.existing_node->GetTitle());
+    url = details_.existing_node->url();
   } else if (details_.type == EditDetails::NEW_FOLDER) {
     title = l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME);
+  } else if (details_.type == EditDetails::NEW_URL) {
+    string16 title16;
+    bookmark_utils::GetURLAndTitleToBookmarkFromCurrentTab(profile_,
+        &url, &title16);
+    title = UTF16ToUTF8(title16);
   }
   gtk_entry_set_text(GTK_ENTRY(name_entry_), title.c_str());
   g_signal_connect(name_entry_, "changed",
@@ -289,10 +370,7 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   GtkWidget* table;
   if (details_.type != EditDetails::NEW_FOLDER) {
     url_entry_ = gtk_entry_new();
-    std::string url_spec;
-    if (details_.type == EditDetails::EXISTING_NODE)
-      url_spec = details_.existing_node->GetURL().spec();
-    gtk_entry_set_text(GTK_ENTRY(url_entry_), url_spec.c_str());
+    gtk_entry_set_text(GTK_ENTRY(url_entry_), url.spec().c_str());
     g_signal_connect(url_entry_, "changed",
                      G_CALLBACK(OnEntryChangedThunk), this);
     gtk_entry_set_activates_default(GTK_ENTRY(url_entry_), TRUE);
@@ -328,6 +406,19 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
     tree_selection_ = gtk_tree_view_get_selection(GTK_TREE_VIEW(tree_view_));
     g_signal_connect(tree_view_, "button-press-event",
                      G_CALLBACK(OnTreeViewButtonPressEventThunk), this);
+
+    BookmarkExpandedStateTracker::Nodes expanded_nodes =
+        bb_model_->expanded_state_tracker()->GetExpandedNodes();
+    if (!expanded_nodes.empty()) {
+      ExpandedNodeIDs ids;
+      for (BookmarkExpandedStateTracker::Nodes::iterator i =
+           expanded_nodes.begin(); i != expanded_nodes.end(); ++i) {
+        ids.insert((*i)->id());
+      }
+      ExpandNodesData data = { &ids, tree_view_ };
+      gtk_tree_model_foreach(GTK_TREE_MODEL(tree_store_), &ExpandNodes,
+                             reinterpret_cast<gpointer>(&data));
+    }
 
     GtkTreePath* path = NULL;
     if (selected_id) {
@@ -458,6 +549,8 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
   string16 new_title(GetInputTitle());
 
   if (!show_tree_ || !selected_parent) {
+    // TODO: this is wrong. Just because there is no selection doesn't mean new
+    // folders weren't added.
     bookmark_utils::ApplyEditsWithNoFolderChange(
         bb_model_, parent_, details_, new_title, new_url);
     return;
@@ -468,6 +561,13 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
       bookmark_utils::CommitTreeStoreDifferencesBetween(
       bb_model_, tree_store_, selected_parent);
 
+  SaveExpandedNodesData data;
+  data.bookmark_model = bb_model_;
+  gtk_tree_view_map_expanded_rows(GTK_TREE_VIEW(tree_view_),
+                                  &SaveExpandedNodes,
+                                  reinterpret_cast<gpointer>(&data));
+  bb_model_->expanded_state_tracker()->SetExpandedNodes(data.nodes);
+
   if (!new_parent) {
     // Bookmarks must be parented.
     NOTREACHED();
@@ -476,6 +576,10 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
 
   bookmark_utils::ApplyEditsWithPossibleFolderChange(
       bb_model_, new_parent, details_, new_title, new_url);
+
+  // Remove the folders that were removed. This has to be done after all the
+  // other changes have been committed.
+  bookmark_utils::DeleteBookmarkFolders(bb_model_, deletes_);
 }
 
 void BookmarkEditorGtk::AddNewFolder(GtkTreeIter* parent, GtkTreeIter* child) {

@@ -8,12 +8,12 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/background_contents_service.h"
-#include "chrome/browser/background_contents_service_factory.h"
+#include "chrome/browser/background/background_contents_service.h"
+#include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
@@ -31,15 +31,16 @@
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/result_codes.h"
-#include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/text/bytes_formatting.h"
 #include "unicode/coll.h"
 
 #if defined(OS_MACOSX)
-#include "chrome/browser/mach_broker_mac.h"
+#include "content/browser/mach_broker_mac.h"
 #endif
 
 namespace {
@@ -63,8 +64,8 @@ int ValueCompare(T value1, T value2) {
 
 string16 FormatStatsSize(const WebKit::WebCache::ResourceTypeStat& stat) {
   return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_CACHE_SIZE_CELL_TEXT,
-      FormatBytes(stat.size, DATA_UNITS_KIBIBYTE, false),
-      FormatBytes(stat.liveSize, DATA_UNITS_KIBIBYTE, false));
+      ui::FormatBytesWithUnits(stat.size, ui::DATA_UNITS_KIBIBYTE, false),
+      ui::FormatBytesWithUnits(stat.liveSize, ui::DATA_UNITS_KIBIBYTE, false));
 }
 
 }  // namespace
@@ -86,8 +87,11 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       new TaskManagerChildProcessResourceProvider(task_manager));
   AddResourceProvider(
       new TaskManagerExtensionProcessResourceProvider(task_manager));
-  AddResourceProvider(
-      new TaskManagerNotificationResourceProvider(task_manager));
+
+  TaskManager::ResourceProvider* provider =
+      TaskManagerNotificationResourceProvider::Create(task_manager);
+  if (provider)
+    AddResourceProvider(provider);
 }
 
 TaskManagerModel::~TaskManagerModel() {
@@ -99,6 +103,10 @@ TaskManagerModel::~TaskManagerModel() {
 
 int TaskManagerModel::ResourceCount() const {
   return resources_.size();
+}
+
+int TaskManagerModel::GroupCount() const {
+  return group_map_.size();
 }
 
 void TaskManagerModel::AddObserver(TaskManagerModelObserver* observer) {
@@ -125,8 +133,7 @@ string16 TaskManagerModel::GetResourceNetworkUsage(int index) const {
     return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT);
   if (net_usage == 0)
     return ASCIIToUTF16("0");
-  string16 net_byte = FormatSpeed(net_usage, GetByteDisplayUnits(net_usage),
-                                  true);
+  string16 net_byte = ui::FormatSpeed(net_usage);
   // Force number string to have LTR directionality.
   return base::i18n::GetDisplayStringInLTRDirectionality(net_byte);
 }
@@ -234,12 +241,12 @@ string16 TaskManagerModel::GetResourceV8MemoryAllocatedSize(
   if (!resources_[index]->ReportsV8MemoryStats())
     return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT);
   return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_CACHE_SIZE_CELL_TEXT,
-      FormatBytes(resources_[index]->GetV8MemoryAllocated(),
-                  DATA_UNITS_KIBIBYTE,
-                  false),
-      FormatBytes(resources_[index]->GetV8MemoryUsed(),
-                  DATA_UNITS_KIBIBYTE,
-                  false));
+      ui::FormatBytesWithUnits(resources_[index]->GetV8MemoryAllocated(),
+                               ui::DATA_UNITS_KIBIBYTE,
+                               false),
+      ui::FormatBytesWithUnits(resources_[index]->GetV8MemoryUsed(),
+                               ui::DATA_UNITS_KIBIBYTE,
+                               false));
 }
 
 bool TaskManagerModel::IsResourceFirstInGroup(int index) const {
@@ -249,6 +256,15 @@ bool TaskManagerModel::IsResourceFirstInGroup(int index) const {
   DCHECK(iter != group_map_.end());
   const ResourceList* group = iter->second;
   return ((*group)[0] == resource);
+}
+
+bool TaskManagerModel::IsResourceLastInGroup(int index) const {
+  CHECK_LT(index, ResourceCount());
+  TaskManager::Resource* resource = resources_[index];
+  GroupMap::const_iterator iter = group_map_.find(resource->GetProcess());
+  DCHECK(iter != group_map_.end());
+  const ResourceList* group = iter->second;
+  return (group->back() == resource);
 }
 
 bool TaskManagerModel::IsBackgroundResource(int index) const {
@@ -286,6 +302,38 @@ std::pair<int, int> TaskManagerModel::GetGroupRangeForResource(int index)
     NOTREACHED();
     return std::make_pair(-1, -1);
   }
+}
+
+int TaskManagerModel::GetGroupIndexForResource(int index) const {
+  int group_index = -1;
+  for (int i = 0; i <= index; ++i) {
+    if (IsResourceFirstInGroup(i))
+        group_index++;
+  }
+
+  DCHECK(group_index != -1);
+  return group_index;
+}
+
+int TaskManagerModel::GetResourceIndexForGroup(int group_index,
+                                               int index_in_group) const {
+  int group_count = -1;
+  int count_in_group = -1;
+  for (int i = 0; i < ResourceCount(); ++i) {
+    if (IsResourceFirstInGroup(i))
+      group_count++;
+
+    if (group_count == group_index) {
+      count_in_group++;
+      if (count_in_group == index_in_group)
+        return i;
+    } else if (group_count > group_index) {
+      break;
+    }
+  }
+
+  NOTREACHED();
+  return -1;
 }
 
 int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
@@ -464,6 +512,34 @@ bool TaskManagerModel::GetPhysicalMemory(int index, size_t* result) const {
   return true;
 }
 
+bool TaskManagerModel::GetWebCoreCacheStats(
+    int index, WebKit::WebCache::ResourceTypeStats* result) const {
+  if (!resources_[index]->ReportsCacheStats())
+    return false;
+
+  *result = resources_[index]->GetWebCoreCacheStats();
+  return true;
+}
+
+bool TaskManagerModel::GetFPS(int index, float* result) const {
+  *result = 0;
+  if (!resources_[index]->ReportsFPS())
+    return false;
+
+  *result = resources_[index]->GetFPS();
+  return true;
+}
+
+bool TaskManagerModel::GetSqliteMemoryUsedBytes(
+    int index, size_t* result) const {
+  *result = 0;
+  if (!resources_[index]->ReportsSqliteMemoryUsed())
+    return false;
+
+  *result = resources_[index]->SqliteMemoryUsedBytes();
+  return true;
+}
+
 bool TaskManagerModel::GetV8Memory(int index, size_t* result) const {
   *result = 0;
   if (!resources_[index]->ReportsV8MemoryStats())
@@ -486,9 +562,9 @@ string16 TaskManagerModel::GetMemCellText(int64 number) const {
   base::i18n::AdjustStringForLocaleDirection(&str);
   return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_MEM_CELL_TEXT, str);
 #else
-  // System expectation is to show "100 KB", "200 MB", etc.
+  // System expectation is to show "100 kB", "200 MB", etc.
   // TODO(thakis): Switch to metric units (as opposed to powers of two).
-  return FormatBytes(number, GetByteDisplayUnits(number), /*show_units=*/true);
+  return ui::FormatBytes(number);
 #endif
 }
 
@@ -909,7 +985,7 @@ void TaskManager::KillProcess(int index) {
   base::ProcessHandle process = model_->GetResourceProcessHandle(index);
   DCHECK(process);
   if (process != base::GetCurrentProcessHandle())
-    base::KillProcess(process, ResultCodes::KILLED, false);
+    base::KillProcess(process, content::RESULT_CODE_KILLED, false);
 }
 
 void TaskManager::ActivateProcess(int index) {
@@ -918,8 +994,10 @@ void TaskManager::ActivateProcess(int index) {
   // the Browser process or a plugin), GetTabContents will return NULL.
   TabContentsWrapper* chosen_tab_contents =
       model_->GetResourceTabContents(index);
-  if (chosen_tab_contents)
-    chosen_tab_contents->tab_contents()->Activate();
+  if (chosen_tab_contents) {
+    static_cast<RenderViewHostDelegate*>(chosen_tab_contents->tab_contents())->
+        Activate();
+  }
 }
 
 void TaskManager::AddResource(Resource* resource) {
@@ -951,16 +1029,16 @@ void TaskManager::OpenAboutMemory() {
     if (!g_browser_process || !g_browser_process->profile_manager())
       return;
     Profile* profile =
-        g_browser_process->profile_manager()->GetDefaultProfile();
+        g_browser_process->profile_manager()->GetLastUsedProfile();
     if (!profile)
       return;
     browser = Browser::Create(profile);
-    browser->OpenURL(GURL(chrome::kAboutMemoryURL), GURL(), NEW_FOREGROUND_TAB,
-                     PageTransition::LINK);
+    browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
+                     NEW_FOREGROUND_TAB, PageTransition::LINK);
     browser->window()->Show();
   } else {
-    browser->OpenURL(GURL(chrome::kAboutMemoryURL), GURL(), NEW_FOREGROUND_TAB,
-                     PageTransition::LINK);
+    browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
+                     NEW_FOREGROUND_TAB, PageTransition::LINK);
 
     // In case the browser window is minimzed, show it. If |browser| is a
     // non-tabbed window, the call to OpenURL above will have opened a

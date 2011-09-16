@@ -11,7 +11,7 @@
 
 #include "base/environment.h"
 #include "base/nix/xdg_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -20,17 +20,18 @@
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/chrome_gtk_frame.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
+#include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/hover_controller_gtk.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
-#include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -40,7 +41,7 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/skia_utils_gtk.h"
@@ -333,7 +334,7 @@ bool GtkThemeService::HasCustomImage(int id) const {
 }
 
 void GtkThemeService::InitThemesFor(NotificationObserver* observer) {
-  observer->Observe(NotificationType::BROWSER_THEME_CHANGED,
+  observer->Observe(chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                     Source<ThemeService>(this),
                     NotificationService::NoDetails());
 }
@@ -365,10 +366,10 @@ bool GtkThemeService::UsingNativeTheme() const {
   return use_gtk_;
 }
 
-void GtkThemeService::Observe(NotificationType type,
+void GtkThemeService::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  if ((type == NotificationType::PREF_CHANGED) &&
+  if ((type == chrome::NOTIFICATION_PREF_CHANGED) &&
       (*Details<std::string>(details).ptr() == prefs::kUsesSystemTheme)) {
 #if !defined(OS_CHROMEOS)
     use_gtk_ = profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
@@ -386,6 +387,31 @@ GtkWidget* GtkThemeService::BuildChromeButton() {
   signals_->Connect(button, "destroy", G_CALLBACK(OnDestroyChromeButtonThunk),
                     this);
   return button;
+}
+
+GtkWidget* GtkThemeService::BuildChromeLinkButton(const std::string& text) {
+  GtkWidget* link_button = gtk_chrome_link_button_new(text.c_str());
+  gtk_chrome_link_button_set_use_gtk_theme(
+      GTK_CHROME_LINK_BUTTON(link_button),
+      use_gtk_);
+  link_buttons_.push_back(link_button);
+
+  signals_->Connect(link_button, "destroy",
+                    G_CALLBACK(OnDestroyChromeLinkButtonThunk), this);
+
+  return link_button;
+}
+
+GtkWidget* GtkThemeService::BuildLabel(const std::string& text,
+                                       GdkColor color) {
+  GtkWidget* label = gtk_label_new(text.empty() ? NULL : text.c_str());
+  if (!use_gtk_)
+    gtk_widget_modify_fg(label, GTK_STATE_NORMAL, &color);
+  labels_.insert(std::make_pair(label, color));
+
+  signals_->Connect(label, "destroy", G_CALLBACK(OnDestroyLabelThunk), this);
+
+  return label;
 }
 
 GtkWidget* GtkThemeService::CreateToolbarSeparator() {
@@ -651,6 +677,18 @@ void GtkThemeService::NotifyThemeChanged() {
        it != chrome_buttons_.end(); ++it) {
     gtk_chrome_button_set_use_gtk_rendering(
         GTK_CHROME_BUTTON(*it), use_gtk_);
+  }
+
+  for (std::vector<GtkWidget*>::iterator it = link_buttons_.begin();
+       it != link_buttons_.end(); ++it) {
+    gtk_chrome_link_button_set_use_gtk_theme(
+        GTK_CHROME_LINK_BUTTON(*it), use_gtk_);
+  }
+
+  for (std::map<GtkWidget*, GdkColor>::iterator it = labels_.begin();
+       it != labels_.end(); ++it) {
+    const GdkColor* color = use_gtk_ ? NULL : &it->second;
+    gtk_util::SetLabelColor(it->first, color);
   }
 
   Browser* browser = BrowserList::GetLastActive();
@@ -1107,6 +1145,19 @@ void GtkThemeService::OnDestroyChromeButton(GtkWidget* button) {
       find(chrome_buttons_.begin(), chrome_buttons_.end(), button);
   if (it != chrome_buttons_.end())
     chrome_buttons_.erase(it);
+}
+
+void GtkThemeService::OnDestroyChromeLinkButton(GtkWidget* button) {
+  std::vector<GtkWidget*>::iterator it =
+      find(link_buttons_.begin(), link_buttons_.end(), button);
+  if (it != link_buttons_.end())
+    link_buttons_.erase(it);
+}
+
+void GtkThemeService::OnDestroyLabel(GtkWidget* button) {
+  std::map<GtkWidget*, GdkColor>::iterator it = labels_.find(button);
+  if (it != labels_.end())
+    labels_.erase(it);
 }
 
 gboolean GtkThemeService::OnSeparatorExpose(GtkWidget* widget,

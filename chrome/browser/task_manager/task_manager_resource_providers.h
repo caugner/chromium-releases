@@ -103,6 +103,9 @@ class TaskManagerTabContentsResource : public TaskManagerRendererResource {
  private:
   bool IsPrerendering() const;
 
+  // Returns true if contains content rendered by an extension.
+  bool HostsExtension() const;
+
   static SkBitmap* prerender_icon_;
   TabContentsWrapper* tab_contents_;
 
@@ -122,7 +125,7 @@ class TaskManagerTabContentsResourceProvider
   virtual void StopUpdating();
 
   // NotificationObserver method:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -191,7 +194,7 @@ class TaskManagerBackgroundContentsResourceProvider
   virtual void StopUpdating();
 
   // NotificationObserver method:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -268,7 +271,7 @@ class TaskManagerChildProcessResourceProvider
   virtual void StopUpdating();
 
   // NotificationObserver method:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -357,7 +360,7 @@ class TaskManagerExtensionProcessResourceProvider
   virtual void StopUpdating();
 
   // NotificationObserver method:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -416,7 +419,8 @@ class TaskManagerNotificationResourceProvider
     : public TaskManager::ResourceProvider,
       public NotificationObserver {
  public:
-  explicit TaskManagerNotificationResourceProvider(TaskManager* task_manager);
+  static TaskManagerNotificationResourceProvider* Create(
+      TaskManager* task_manager);
 
   // TaskManager::ResourceProvider interface
   virtual TaskManager::Resource* GetResource(int origin_pid,
@@ -426,11 +430,12 @@ class TaskManagerNotificationResourceProvider
   virtual void StopUpdating();
 
   // NotificationObserver interface
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
  private:
+  explicit TaskManagerNotificationResourceProvider(TaskManager* task_manager);
   virtual ~TaskManagerNotificationResourceProvider();
 
   void AddToTaskManager(BalloonHost* balloon_host);

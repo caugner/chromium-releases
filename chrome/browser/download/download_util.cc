@@ -32,11 +32,9 @@
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_types.h"
-#include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/time_format.h"
 #include "content/browser/browser_thread.h"
@@ -54,8 +52,9 @@
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/text/bytes_formatting.h"
 #include "ui/gfx/canvas_skia.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -199,6 +198,14 @@ void GenerateFileNameInternal(const GURL& url,
   GenerateSafeFileName(mime_type, generated_name);
 }
 
+// All possible error codes from the network module. Note that the error codes
+// are all positive (since histograms expect positive sample values).
+const int kAllNetErrorCodes[] = {
+#define NET_ERROR(label, value) -(value),
+#include "net/base/net_error_list.h"
+#undef NET_ERROR
+};
+
 }  // namespace
 
 // Download temporary file creation --------------------------------------------
@@ -281,16 +288,13 @@ void GenerateExtension(const FilePath& file_name,
   generated_extension->swap(extension);
 }
 
-void GenerateFileNameFromRequest(const GURL& url,
-                                 const std::string& content_disposition,
-                                 const std::string& referrer_charset,
-                                 const std::string& mime_type,
+void GenerateFileNameFromRequest(const DownloadItem& download_item,
                                  FilePath* generated_name) {
-  GenerateFileNameInternal(url,
-                           content_disposition,
-                           referrer_charset,
-                           std::string(),
-                           mime_type,
+  GenerateFileNameInternal(download_item.GetURL(),
+                           download_item.content_disposition(),
+                           download_item.referrer_charset(),
+                           download_item.suggested_filename(),
+                           download_item.mime_type(),
                            generated_name);
 }
 
@@ -333,46 +337,59 @@ void GenerateSafeFileName(const std::string& mime_type, FilePath* file_name) {
 #endif
 }
 
-scoped_refptr<CrxInstaller> OpenChromeExtension(
-    Profile* profile,
-    const DownloadItem& download_item) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(download_item.is_extension_install());
-
-  ExtensionService* service = profile->GetExtensionService();
-  CHECK(service);
-  NotificationService* nservice = NotificationService::current();
-  GURL nonconst_download_url = download_item.GetURL();
-  nservice->Notify(NotificationType::EXTENSION_READY_FOR_INSTALL,
-                   Source<DownloadManager>(profile->GetDownloadManager()),
-                   Details<GURL>(&nonconst_download_url));
-
-  scoped_refptr<CrxInstaller> installer(
-      service->MakeCrxInstaller(new ExtensionInstallUI(profile)));
-  installer->set_delete_source(true);
-
-  if (UserScript::IsURLUserScript(download_item.GetURL(),
-                                  download_item.mime_type())) {
-    installer->InstallUserScript(download_item.full_path(),
-                                 download_item.GetURL());
-  } else {
-    bool is_gallery_download = service->IsDownloadFromGallery(
-        download_item.GetURL(), download_item.referrer_url());
-    installer->set_original_mime_type(download_item.original_mime_type());
-    installer->set_apps_require_extension_mime_type(true);
-    installer->set_original_url(download_item.GetURL());
-    installer->set_is_gallery_install(is_gallery_download);
-    installer->set_allow_silent_install(is_gallery_download);
-    installer->set_install_cause(extension_misc::INSTALL_CAUSE_USER_DOWNLOAD);
-    installer->InstallCrx(download_item.full_path());
-  }
-
-  return installer;
-}
-
 void RecordDownloadCount(DownloadCountTypes type) {
   UMA_HISTOGRAM_ENUMERATION(
       "Download.Counts", type, DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
+}
+
+void RecordDownloadCompleted(const base::TimeTicks& start) {
+  download_util::RecordDownloadCount(download_util::COMPLETED_COUNT);
+  UMA_HISTOGRAM_LONG_TIMES("Download.Time", (base::TimeTicks::Now() - start));
+}
+
+void RecordDownloadInterrupted(int error, int64 received, int64 total) {
+  download_util::RecordDownloadCount(download_util::INTERRUPTED_COUNT);
+  UMA_HISTOGRAM_CUSTOM_ENUMERATION(
+      "Download.InterruptedError",
+      -error,
+      base::CustomHistogram::ArrayToCustomRanges(
+          kAllNetErrorCodes, arraysize(kAllNetErrorCodes)));
+
+  // The maximum should be 2^kBuckets, to have the logarithmic bucket
+  // boundaries fall on powers of 2.
+  static const int kBuckets = 30;
+  static const int64 kMaxKb = 1 << kBuckets;  // One Terabyte, in Kilobytes.
+  int64 delta_bytes = total - received;
+  bool unknown_size = total <= 0;
+  int64 received_kb = received / 1024;
+  int64 total_kb = total / 1024;
+  UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedReceivedSizeK",
+                              received_kb,
+                              1,
+                              kMaxKb,
+                              kBuckets);
+  if (!unknown_size) {
+    UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedTotalSizeK",
+                                total_kb,
+                                1,
+                                kMaxKb,
+                                kBuckets);
+    if (delta_bytes >= 0) {
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedOverrunBytes",
+                                  delta_bytes,
+                                  1,
+                                  kMaxKb,
+                                  kBuckets);
+    } else {
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedUnderrunBytes",
+                                  -delta_bytes,
+                                  1,
+                                  kMaxKb,
+                                  kBuckets);
+    }
+  }
+
+  UMA_HISTOGRAM_BOOLEAN("Download.InterruptedUnknownSize", unknown_size);
 }
 
 // Download progress painting --------------------------------------------------
@@ -617,7 +634,7 @@ void DragDownload(const DownloadItem* download,
     return;
 
   views::NativeWidgetGtk* widget = static_cast<views::NativeWidgetGtk*>(
-      views::NativeWidget::GetNativeWidgetForNativeView(root));
+      views::Widget::GetWidgetForNativeView(root)->native_widget());
   if (!widget)
     return;
 
@@ -643,8 +660,12 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   file_value->SetString("date_string",
       base::TimeFormatShortDate(download->start_time()));
   file_value->SetInteger("id", id);
-  file_value->Set("file_path",
-                  base::CreateFilePathValue(download->GetTargetFilePath()));
+
+  FilePath download_path(download->GetTargetFilePath());
+  file_value->Set("file_path", base::CreateFilePathValue(download_path));
+  file_value->SetString("file_url",
+                        net::FilePathToFileURL(download_path).spec());
+
   // Keep file names as LTR.
   string16 file_name = download->GetFileNameToReportUser().LossyDisplayName();
   file_name = base::i18n::GetDisplayStringInLTRDirectionality(file_name);
@@ -652,6 +673,8 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   file_value->SetString("url", download->GetURL().spec());
   file_value->SetBoolean("otr", download->is_otr());
   file_value->SetInteger("total", static_cast<int>(download->total_bytes()));
+  file_value->SetBoolean("file_externally_removed",
+                         download->file_externally_removed());
 
   if (download->IsInProgress()) {
     if (download->safety_state() == DownloadItem::DANGEROUS) {
@@ -688,11 +711,10 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   } else if (download->IsCancelled()) {
     file_value->SetString("state", "CANCELLED");
   } else if (download->IsComplete()) {
-    if (download->safety_state() == DownloadItem::DANGEROUS) {
+    if (download->safety_state() == DownloadItem::DANGEROUS)
       file_value->SetString("state", "DANGEROUS");
-    } else {
+    else
       file_value->SetString("state", "COMPLETE");
-    }
   } else if (download->state() == DownloadItem::REMOVING) {
     file_value->SetString("state", "REMOVING");
   } else {
@@ -705,8 +727,7 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
 string16 GetProgressStatusText(DownloadItem* download) {
   int64 total = download->total_bytes();
   int64 size = download->received_bytes();
-  DataUnits amount_units = GetByteDisplayUnits(size);
-  string16 received_size = FormatBytes(size, amount_units, true);
+  string16 received_size = ui::FormatBytes(size);
   string16 amount = received_size;
 
   // Adjust both strings for the locale direction since we don't yet know which
@@ -714,8 +735,7 @@ string16 GetProgressStatusText(DownloadItem* download) {
   base::i18n::AdjustStringForLocaleDirection(&amount);
 
   if (total) {
-    amount_units = GetByteDisplayUnits(total);
-    string16 total_text = FormatBytes(total, amount_units, true);
+    string16 total_text = ui::FormatBytes(total);
     base::i18n::AdjustStringForLocaleDirection(&total_text);
 
     base::i18n::AdjustStringForLocaleDirection(&received_size);
@@ -726,8 +746,7 @@ string16 GetProgressStatusText(DownloadItem* download) {
     amount.assign(received_size);
   }
   int64 current_speed = download->CurrentSpeed();
-  amount_units = GetByteDisplayUnits(current_speed);
-  string16 speed_text = FormatSpeed(current_speed, amount_units, true);
+  string16 speed_text = ui::FormatSpeed(current_speed);
   base::i18n::AdjustStringForLocaleDirection(&speed_text);
 
   base::TimeDelta remaining;
@@ -836,26 +855,6 @@ void DownloadUrl(
                      *context);
 }
 
-static void CancelDownloadRequestOnIOThread(
-    ResourceDispatcherHost* rdh, DownloadProcessHandle process_handle) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  // |rdh| may be NULL in unit tests.
-  if (!rdh)
-    return;
-
-  rdh->CancelRequest(process_handle.child_id(),
-                     process_handle.request_id(),
-                     false);
-}
-
-void CancelDownloadRequest(ResourceDispatcherHost* rdh,
-                           DownloadProcessHandle process_handle) {
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(&download_util::CancelDownloadRequestOnIOThread,
-                          rdh, process_handle));
-}
-
 void NotifyDownloadInitiated(int render_process_id, int render_view_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RenderViewHost* rvh = RenderViewHost::FromID(render_process_id,
@@ -863,9 +862,9 @@ void NotifyDownloadInitiated(int render_process_id, int render_view_id) {
   if (!rvh)
     return;
 
-  NotificationService::current()->Notify(NotificationType::DOWNLOAD_INITIATED,
-                                         Source<RenderViewHost>(rvh),
-                                         NotificationService::NoDetails());
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_DOWNLOAD_INITIATED, Source<RenderViewHost>(rvh),
+      NotificationService::NoDetails());
 }
 
 int GetUniquePathNumberWithCrDownload(const FilePath& path) {

@@ -40,9 +40,11 @@ class PhoneField : public FormField {
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseTwoLinePhoneEcmlBillTo);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ThreePartPhoneNumber);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ThreePartPhoneNumberPrefixSuffix);
+  FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ThreePartPhoneNumberPrefixSuffix2);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseOneLineFax);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseTwoLineFax);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ThreePartFaxNumberPrefixSuffix);
+  FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, CountryAndCityAndPhoneNumber);
 
   PhoneField();
 

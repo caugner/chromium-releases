@@ -26,6 +26,8 @@ const char library_name[] = "libppapi_tests.so";
 
 }  // namespace
 
+// In-process plugin test runner.  See OutOfProcessPPAPITest below for the
+// out-of-process version.
 class PPAPITest : public UITest {
  public:
   PPAPITest() {
@@ -53,11 +55,6 @@ class PPAPITest : public UITest {
     // TODO(dumi): remove this switch once we have a quota management
     // system in place.
     launch_arguments_.AppendSwitch(switches::kUnlimitedQuotaForFiles);
-
-#if defined(ENABLE_P2P_APIS)
-    // Enable P2P API.
-    launch_arguments_.AppendSwitch(switches::kEnableP2PApi);
-#endif // ENABLE_P2P_APIS
   }
 
   void RunTest(const std::string& test_case) {
@@ -116,73 +113,157 @@ class PPAPITest : public UITest {
   }
 };
 
-TEST_F(PPAPITest, Broker) {
-  RunTest("Broker");
-}
+// Variant of PPAPITest that runs plugins out-of-process to test proxy
+// codepaths.
+class OutOfProcessPPAPITest : public PPAPITest {
+ public:
+  OutOfProcessPPAPITest() {
+    // Run PPAPI out-of-process to exercise proxy implementations.
+    launch_arguments_.AppendSwitch(switches::kPpapiOutOfProcess);
+  }
+};
 
-TEST_F(PPAPITest, CursorControl) {
-  RunTest("CursorControl");
-}
+// Use these macros to run the tests for a specific interface.
+// Most interfaces should be tested with both macros.
+#define TEST_PPAPI_IN_PROCESS(test_name) \
+    TEST_F(PPAPITest, test_name) { \
+      RunTest(#test_name); \
+    }
+#define TEST_PPAPI_OUT_OF_PROCESS(test_name) \
+    TEST_F(OutOfProcessPPAPITest, test_name) { \
+      RunTest(#test_name); \
+    }
 
-TEST_F(PPAPITest, FAILS_Instance) {
-  RunTest("Instance");
-}
+// Similar macros that test over HTTP.
+#define TEST_PPAPI_IN_PROCESS_VIA_HTTP(test_name) \
+    TEST_F(PPAPITest, test_name) { \
+      RunTestViaHTTP(#test_name); \
+    }
+#define TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(test_name) \
+    TEST_F(OutOfProcessPPAPITest, test_name) { \
+      RunTestViaHTTP(#test_name); \
+    }
 
-TEST_F(PPAPITest, Graphics2D) {
-  RunTest("Graphics2D");
-}
 
-TEST_F(PPAPITest, ImageData) {
-  RunTest("ImageData");
-}
+//
+// Interface tests.
+//
 
-TEST_F(PPAPITest, Buffer) {
-  RunTest("Buffer");
-}
+TEST_PPAPI_IN_PROCESS(Broker)
+TEST_PPAPI_OUT_OF_PROCESS(Broker)
 
-TEST_F(PPAPITest, URLLoader) {
+TEST_PPAPI_IN_PROCESS(Core)
+TEST_PPAPI_OUT_OF_PROCESS(Core)
+
+TEST_PPAPI_IN_PROCESS(CursorControl)
+TEST_PPAPI_OUT_OF_PROCESS(CursorControl)
+
+TEST_PPAPI_IN_PROCESS(Instance)
+TEST_PPAPI_OUT_OF_PROCESS(Instance)
+
+TEST_PPAPI_IN_PROCESS(Graphics2D)
+// Disabled because it times out: http://crbug.com/89961
+//TEST_PPAPI_OUT_OF_PROCESS(Graphics2D)
+
+TEST_PPAPI_IN_PROCESS(ImageData)
+TEST_PPAPI_OUT_OF_PROCESS(ImageData)
+
+TEST_PPAPI_IN_PROCESS(Buffer)
+TEST_PPAPI_OUT_OF_PROCESS(Buffer)
+
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader)
+// http://crbug.com/89961
+TEST_F(OutOfProcessPPAPITest, FAILS_URLLoader) {
   RunTestViaHTTP("URLLoader");
 }
 
-TEST_F(PPAPITest,PaintAggregator) {
-  RunTestViaHTTP("PaintAggregator");
-}
+TEST_PPAPI_IN_PROCESS(PaintAggregator)
+TEST_PPAPI_OUT_OF_PROCESS(PaintAggregator)
 
-TEST_F(PPAPITest, Scrollbar) {
+TEST_PPAPI_IN_PROCESS(Scrollbar)
+// http://crbug.com/89961
+TEST_F(OutOfProcessPPAPITest, FAILS_Scrollbar) {
   RunTest("Scrollbar");
 }
 
-TEST_F(PPAPITest, URLUtil) {
-  RunTest("URLUtil");
+TEST_PPAPI_IN_PROCESS(URLUtil)
+TEST_PPAPI_OUT_OF_PROCESS(URLUtil)
+
+TEST_PPAPI_IN_PROCESS(CharSet)
+TEST_PPAPI_OUT_OF_PROCESS(CharSet)
+
+TEST_PPAPI_IN_PROCESS(Var)
+// http://crbug.com/89961
+TEST_F(OutOfProcessPPAPITest, FAILS_Var) {
+  RunTest("Var");
 }
 
-TEST_F(PPAPITest, CharSet) {
-  RunTest("CharSet");
-}
+TEST_PPAPI_IN_PROCESS(VarDeprecated)
+// Disabled because it times out: http://crbug.com/89961
+//TEST_PPAPI_OUT_OF_PROCESS(VarDeprecated)
 
-TEST_F(PPAPITest, VarDeprecated) {
-  RunTest("VarDeprecated");
-}
+TEST_PPAPI_IN_PROCESS(PostMessage)
+// Disabled because it times out: http://crbug.com/89961
+//TEST_PPAPI_OUT_OF_PROCESS(PostMessage)
 
-TEST_F(PPAPITest, PostMessage) {
-  RunTest("PostMessage");
-}
+TEST_PPAPI_IN_PROCESS(Memory)
+TEST_PPAPI_OUT_OF_PROCESS(Memory)
 
-// http://crbug.com/83443
+TEST_PPAPI_IN_PROCESS(QueryPolicy)
+//TEST_PPAPI_OUT_OF_PROCESS(QueryPolicy)
+
+// http://crbug.com/90039 and http://crbug.com/83443 (Mac)
 TEST_F(PPAPITest, FAILS_FileIO) {
   RunTestViaHTTP("FileIO");
 }
-
-TEST_F(PPAPITest, FileRef) {
-  RunTestViaHTTP("FileRef");
+TEST_F(OutOfProcessPPAPITest, FAILS_FileIO) {
+  RunTestViaHTTP("FileIO");
 }
 
-TEST_F(PPAPITest, DirectoryReader) {
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileRef)
+// Disabled because it times out: http://crbug.com/89961
+//TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileRef)
+
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileSystem)
+// http://crbug.com/90040
+TEST_F(OutOfProcessPPAPITest, FLAKY_FileSystem) {
+  RunTestViaHTTP("FileSystem");
+}
+
+#if defined(OS_POSIX)
+#define MAYBE_DirectoryReader FLAKY_DirectoryReader
+#else
+#define MAYBE_DirectoryReader DirectoryReader
+#endif
+
+// Flaky on Mac + Linux, maybe http://codereview.chromium.org/7094008
+TEST_F(PPAPITest, MAYBE_DirectoryReader) {
+  RunTestViaHTTP("DirectoryReader");
+}
+// http://crbug.com/89961
+TEST_F(OutOfProcessPPAPITest, FAILS_DirectoryReader) {
   RunTestViaHTTP("DirectoryReader");
 }
 
 #if defined(ENABLE_P2P_APIS)
-TEST_F(PPAPITest, Transport) {
+// Flaky. http://crbug.com/84295
+TEST_F(PPAPITest, FLAKY_Transport) {
   RunTest("Transport");
 }
+// http://crbug.com/89961
+TEST_F(OutOfProcessPPAPITest, FAILS_Transport) {
+  RunTestViaHTTP("Transport");
+}
 #endif // ENABLE_P2P_APIS
+
+TEST_PPAPI_IN_PROCESS(UMA)
+// There is no proxy.
+TEST_F(OutOfProcessPPAPITest, FAILS_UMA) {
+  RunTest("UMA");
+}
+
+TEST_PPAPI_IN_PROCESS(VideoDecoder)
+// There is no proxy yet (vrk is adding it).
+TEST_F(OutOfProcessPPAPITest, FAILS_VideoDecoder) {
+  RunTest("VideoDecoder");
+}

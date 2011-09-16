@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -258,12 +259,13 @@ class ContentSettingSingleRadioGroup
       mostRestrictiveSetting =
           content_type() == CONTENT_SETTINGS_TYPE_COOKIES ?
               map->GetCookieContentSetting(url, url, true) :
-              map->GetContentSetting(url, content_type(), std::string());
+              map->GetContentSetting(url, url, content_type(), std::string());
     } else {
       mostRestrictiveSetting = CONTENT_SETTING_ALLOW;
       for (std::set<std::string>::const_iterator it = resources.begin();
            it != resources.end(); ++it) {
         ContentSetting setting = map->GetContentSetting(url,
+                                                        url,
                                                         content_type(),
                                                         *it);
         if (setting == CONTENT_SETTING_BLOCK) {
@@ -287,9 +289,14 @@ class ContentSettingSingleRadioGroup
 
   void AddException(ContentSetting setting,
                     const std::string& resource_identifier) {
-    profile()->GetHostContentSettingsMap()->AddExceptionForURL(
-        bubble_content().radio_group.url, content_type(), resource_identifier,
-        setting);
+    if (profile()) {
+      profile()->GetHostContentSettingsMap()->AddExceptionForURL(
+          bubble_content().radio_group.url,
+          bubble_content().radio_group.url,
+          content_type(),
+          resource_identifier,
+          setting);
+    }
   }
 
   virtual void OnRadioClicked(int radio_index) {
@@ -321,7 +328,7 @@ class ContentSettingCookiesBubbleModel : public ContentSettingSingleRadioGroup {
     if (!tab_contents())
       return;
     NotificationService::current()->Notify(
-        NotificationType::COLLECTED_COOKIES_SHOWN,
+        chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
         Source<TabSpecificContentSettings>(tab_contents()->content_settings()),
         NotificationService::NoDetails());
     browser()->ShowCollectedCookiesDialog(tab_contents()->tab_contents());
@@ -500,8 +507,10 @@ ContentSettingBubbleModel::ContentSettingBubbleModel(
     : tab_contents_(tab_contents),
       profile_(profile),
       content_type_(content_type) {
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  Source<TabContents>(tab_contents->tab_contents()));
+  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
+                 Source<Profile>(profile_));
 }
 
 ContentSettingBubbleModel::~ContentSettingBubbleModel() {
@@ -527,10 +536,19 @@ void ContentSettingBubbleModel::AddBlockedResource(
   bubble_content_.resource_identifiers.insert(resource_identifier);
 }
 
-void ContentSettingBubbleModel::Observe(NotificationType type,
+void ContentSettingBubbleModel::Observe(int type,
                                         const NotificationSource& source,
                                         const NotificationDetails& details) {
-  DCHECK(type == NotificationType::TAB_CONTENTS_DESTROYED);
-  DCHECK(source == Source<TabContents>(tab_contents_->tab_contents()));
-  tab_contents_ = NULL;
+  switch (type) {
+    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
+      DCHECK(source == Source<TabContents>(tab_contents_->tab_contents()));
+      tab_contents_ = NULL;
+      break;
+    case chrome::NOTIFICATION_PROFILE_DESTROYED:
+      DCHECK(source == Source<Profile>(profile_));
+      profile_ = NULL;
+      break;
+    default:
+      NOTREACHED();
+  }
 }

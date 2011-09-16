@@ -13,6 +13,7 @@
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/socket_stream/socket_stream_job.h"
+#include "net/spdy/spdy_websocket_stream.h"
 
 class GURL;
 
@@ -31,7 +32,8 @@ class WebSocketHandshakeResponseHandler;
 // TODO(ukai): refactor websocket.cc to use this.
 class NET_API WebSocketJob
     : public SocketStreamJob,
-      public SocketStream::Delegate {
+      public SocketStream::Delegate,
+      public SpdyWebSocketStream::Delegate {
  public:
   // This is state of WebSocket, not SocketStream.
   enum State {
@@ -62,17 +64,22 @@ class NET_API WebSocketJob
   // SocketStream::Delegate methods.
   virtual int OnStartOpenConnection(
       SocketStream* socket, CompletionCallback* callback);
-  virtual void OnConnected(
-      SocketStream* socket, int max_pending_send_allowed);
-  virtual void OnSentData(
-      SocketStream* socket, int amount_sent);
-  virtual void OnReceivedData(
-      SocketStream* socket, const char* data, int len);
+  virtual void OnConnected(SocketStream* socket, int max_pending_send_allowed);
+  virtual void OnSentData(SocketStream* socket, int amount_sent);
+  virtual void OnReceivedData(SocketStream* socket, const char* data, int len);
   virtual void OnClose(SocketStream* socket);
   virtual void OnAuthRequired(
       SocketStream* socket, AuthChallengeInfo* auth_info);
-  virtual void OnError(
-      const SocketStream* socket, int error);
+  virtual void OnError(const SocketStream* socket, int error);
+
+  // SpdyWebSocketStream::Delegate methods.
+  virtual void OnCreatedSpdyStream(int status);
+  virtual void OnSentSpdyHeaders(int status);
+  virtual int OnReceivedSpdyResponseHeader(
+      const spdy::SpdyHeaderBlock& headers, int status);
+  virtual void OnSentSpdyData(int amount_sent);
+  virtual void OnReceivedSpdyData(const char* data, int length);
+  virtual void OnCloseSpdyStream();
 
  private:
   friend class WebSocketThrottle;
@@ -91,11 +98,15 @@ class NET_API WebSocketJob
   GURL GetURLForCookies() const;
 
   const AddressList& address_list() const;
+  int TrySpdyStream();
   void SetWaiting();
   bool IsWaiting() const;
   void Wakeup();
-  void DoCallback();
+  void RetryPendingIO();
+  void CompleteIO(int result);
 
+  bool SendDataInternal(const char* data, int length);
+  void CloseInternal();
   void SendPending();
 
   static bool websocket_over_spdy_enabled_;
@@ -109,6 +120,7 @@ class NET_API WebSocketJob
   scoped_ptr<WebSocketHandshakeRequestHandler> handshake_request_;
   scoped_ptr<WebSocketHandshakeResponseHandler> handshake_response_;
 
+  bool started_to_send_handshake_request_;
   size_t handshake_request_sent_;
 
   std::vector<std::string> response_cookies_;
@@ -117,6 +129,11 @@ class NET_API WebSocketJob
   scoped_ptr<WebSocketFrameHandler> send_frame_handler_;
   scoped_refptr<DrainableIOBuffer> current_buffer_;
   scoped_ptr<WebSocketFrameHandler> receive_frame_handler_;
+
+  scoped_ptr<SpdyWebSocketStream> spdy_websocket_stream_;
+  std::string challenge_;
+
+  ScopedRunnableMethodFactory<WebSocketJob> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebSocketJob);
 };

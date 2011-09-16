@@ -11,7 +11,7 @@
 
 #include "build/build_config.h"
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
 #include "webkit/glue/password_form.h"
 
@@ -74,7 +74,7 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // PasswordStoreConsumer implementation.
   virtual void OnPasswordStoreRequestDone(
       CancelableRequestProvider::Handle handle,
-      const std::vector<webkit_glue::PasswordForm*>& result);
+      const std::vector<webkit_glue::PasswordForm*>& result) OVERRIDE;
 
   // A user opted to 'never remember' passwords for this form.
   // Blacklist it so that from now on when it is seen we ignore it.

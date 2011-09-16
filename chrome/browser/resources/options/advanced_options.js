@@ -76,7 +76,6 @@ var OptionsPage = options.OptionsPage;
       } else {
         $('certificatesManageButton').onclick = function(event) {
           OptionsPage.navigateToPage('certificates');
-          OptionsPage.showTab($('personal-certs-nav-tab'));
           chrome.send('coreOptionsUserMetricsAction',
                       ['Options_ManageSSLCertificates']);
         };
@@ -92,12 +91,6 @@ var OptionsPage = options.OptionsPage;
         $('promptForDownload').onclick = function(event) {
           chrome.send('promptForDownloadAction',
               [String($('promptForDownload').checked)]);
-        };
-      } else {
-        $('proxiesConfigureButton').onclick = function(event) {
-          OptionsPage.navigateToPage('proxy');
-          chrome.send('coreOptionsUserMetricsAction',
-              ['Options_ShowProxySettings']);
         };
       }
 
@@ -219,8 +212,10 @@ var OptionsPage = options.OptionsPage;
 
   // Set the enabled state for the proxy settings button.
   AdvancedOptions.SetupProxySettingsSection = function(disabled, label) {
-    $('proxiesConfigureButton').disabled = disabled;
-    $('proxiesLabel').textContent = label;
+    if (!cr.isChromeOS) {
+      $('proxiesConfigureButton').disabled = disabled;
+      $('proxiesLabel').textContent = label;
+    }
   };
 
   // Set the checked state for the sslCheckRevocation checkbox.

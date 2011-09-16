@@ -7,6 +7,9 @@
 <html>
   <head>
     <script>
+      // Resources from shared locations are loaded dynamically, so we can
+      // get them from file:// when running as a normal web page, and from
+      // chrome://resources/ when compiled directly into chrome.
       var css =
       ['list.css',
        'table.css',
@@ -18,7 +21,6 @@
        'i18n_template.js',
 
        'cr.js',
-       'cr/locale.js',
        'cr/ui.js',
        'cr/event_target.js',
        'cr/ui/array_data_model.js',
@@ -70,9 +72,19 @@
     </script>
 
     <link rel="stylesheet" href="css/file_manager.css"></link>
+    <link rel="stylesheet" href="css/dialogs.css"></link>
+
+    <link rel="stylesheet" href="js/image_editor/image_editor.css"></link>
+    <script src="js/image_editor/image_util.js"></script>
+    <script src="js/image_editor/image_buffer.js"></script>
+    <script src="js/image_editor/image_editor.js"></script>
+    <script src="js/image_editor/image_transform.js"></script>
+    <script src="js/image_editor/image_adjust.js"></script>
 
     <script src="js/util.js"></script>
+    <script src="js/file_copy_manager.js"></script>
     <script src="js/file_manager.js"></script>
+    <script src="js/dialogs.js"></script>
     <script src="js/main.js"></script>
 
     <!-- We have to set some default title, or chrome will use the page
@@ -82,14 +94,21 @@
       -->
     <title>&#x2707;</title>
   </head>
-  <body i18n-values=".style.fontFamily:BODY_FONT_FAMILY;
-                     .style.fontSize:BODY_FONT_SIZE">
+  <body i18n-values=".style.fontFamily:WEB_FONT_FAMILY;
+                     .style.fontSize:WEB_FONT_SIZE">
     <commands>
+      <command id="cut"></command>
+      <command id="copy"></command>
+      <command id="paste"></command>
       <command id="rename"></command>
       <command id="delete"></command>
     </commands>
 
     <menu class=file-context-menu>
+      <menuitem i18n-content=CUT_BUTTON_LABEL command='#cut'></menuitem>
+      <menuitem i18n-content=COPY_BUTTON_LABEL command='#copy'></menuitem>
+      <menuitem i18n-content=PASTE_BUTTON_LABEL command='#paste'></menuitem>
+      <hr>
       <menuitem i18n-content=RENAME_BUTTON_LABEL command='#rename'></menuitem>
       <menuitem i18n-content=DELETE_BUTTON_LABEL command='#delete'></menuitem>
     </menu>
@@ -98,20 +117,26 @@
          >[TITLE]</div>
     <div class=dialog-header>
       <div class=breadcrumbs></div>
-      <!-- TODO(rginda): Add icons instead of unicode glyphs -->
-      <button class=detail-view
+      <button class=detail-view tabindex=4
               ><img src='images/icon-detail-view.png'></button
-      ><button class=thumbnail-view
+      ><button class=thumbnail-view tabindex=5
               ><img src='images/icon-thumb-view.png'></button>
       <button i18n-content=NEW_FOLDER_BUTTON_LABEL class='new-folder'
+              tabindex=6
               visibleif='this.dialogType_ == "saveas-file" ||
                          this.dialogType_ == "full-page"'
               ></button>
     </div>
     <div class=dialog-body>
-      <div class=list-container>
-        <grid class=thumbnail-grid></grid>
-        <div class=detail-table></div>
+      <div class=left-column>
+        <div class=list-container>
+          <div class=detail-table tabindex=0></div>
+          <grid class=thumbnail-grid tabindex=0></grid>
+        </div>
+        <div class=downloads-warning>
+          <img src=images/warning_icon_square_26x26.png>
+          <div></div>
+        </div>
       </div>
       <div class=preview-container>
         <div class=table-header style='width:100%'>
@@ -122,8 +147,25 @@
         </div>
         <div class=preview-filename></div>
         <center><img class=preview-img></center>
+        <div class=preview-metadata></div>
         <div class=vertical-spacer></div>
         <div class=task-buttons></div>
+        <div class=clipboard-status>
+          <div class=clipboard-buttons>
+            <button class='clipboard-copy' command='#copy'
+                    onclick='fileManager.copySelectionToClipboard()'
+                    visibleif='this.dialogType_ == "full-page"'
+               ><img src='images/button-icon-copy.png'
+                ><span i18n-content=COPY_BUTTON_LABEL></span
+            ></button>
+            <button class='clipboard-paste' command='#paste'
+                    onclick='fileManager.pasteFromClipboard()'
+                    visibleif='this.dialogType_ == "full-page"'
+               ><img src='images/button-icon-paste.png'
+                ><span i18n-content=PASTE_BUTTON_LABEL></span
+            ></button>
+          </div>
+        </div>
         <div class=preview-summary></div>
       </div>
     </div>
@@ -132,10 +174,12 @@
            visibleif='this.dialogType_ == "saveas-file"'
            >[FILENAME]</div>
       <input type=text class=filename-input spellcheck=false
+             tabindex=1
              visibleif='this.dialogType_ == "saveas-file"'>
       <div class=horizontal-spacer></div>
-      <button class=ok disabled>[OK]</button>
-      <button class=cancel i18n-content=CANCEL_LABEL>[CANCEL]</button>
+      <button class=ok disabled tabindex=2>[OK]</button>
+      <button class=cancel tabindex=3 i18n-content=CANCEL_LABEL
+              >[CANCEL]</button>
     </div>
 
     <script>init();</script>

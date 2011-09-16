@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INFOBAR_DELEGATE_H_
 #pragma once
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -15,7 +15,6 @@ class Browser;
 class Extension;
 class ExtensionHost;
 class GURL;
-class TabContentsWrapper;
 
 // The InfobarDelegate for creating and managing state for the ExtensionInfobar
 // plus monitor when the extension goes away.
@@ -54,7 +53,7 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   virtual ExtensionInfoBarDelegate* AsExtensionInfoBarDelegate() OVERRIDE;
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
@@ -68,7 +67,6 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   DelegateObserver* observer_;
 
   const Extension* extension_;
-  TabContents* tab_contents_;
   NotificationRegistrar registrar_;
 
   // Whether we are currently animating to close. This is used to ignore

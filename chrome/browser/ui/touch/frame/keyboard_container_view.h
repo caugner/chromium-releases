@@ -8,7 +8,6 @@
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "views/view.h"
 
@@ -43,6 +42,10 @@ class KeyboardContainerView : public views::View,
   virtual gfx::NativeView GetNativeViewOfHost();
   virtual TabContents* GetAssociatedTabContents() const;
 
+  // Shows |keyboard_url|. The URL should look something like
+  // http://id_of_the_vk_extension/index.html#layout_name_to_show
+  void LoadURL(const GURL& keyboard_url);
+
  protected:
   // Overridden from views::View
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
@@ -55,7 +58,6 @@ class KeyboardContainerView : public views::View,
 
   DOMView* dom_view_;
   ExtensionFunctionDispatcher extension_function_dispatcher_;
-  TabContentsObserver::Registrar tab_contents_registrar_;
   Browser* browser_;
 
   DISALLOW_COPY_AND_ASSIGN(KeyboardContainerView);

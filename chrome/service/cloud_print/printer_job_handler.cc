@@ -194,7 +194,8 @@ void PrinterJobHandler::OnReceivePrinterCaps(
   CloudPrintHelpers::CreateMimeBoundaryForUpload(&mime_boundary);
 
   if (succeeded) {
-    std::string caps_hash = MD5String(caps_and_defaults.printer_capabilities);
+    std::string caps_hash =
+        base::MD5String(caps_and_defaults.printer_capabilities);
     if (caps_hash != printer_info_cloud_.caps_hash) {
       // Hashes don't match, we need to upload new capabilities (the defaults
       // go for free along with the capabilities)
@@ -414,8 +415,7 @@ PrinterJobHandler::HandleJobMetadataResponse(
   bool job_available = false;
   if (succeeded) {
     ListValue* job_list = NULL;
-    json_data->GetList(kJobListValue, &job_list);
-    if (job_list) {
+    if (json_data->GetList(kJobListValue, &job_list) && job_list) {
       // Even though it is a job list, for now we are only interested in the
       // first job
       DictionaryValue* job_data = NULL;

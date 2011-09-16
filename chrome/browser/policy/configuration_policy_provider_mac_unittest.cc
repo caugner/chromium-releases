@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "base/mac/scoped_cftyperef.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/configuration_policy_provider_mac.h"
@@ -345,6 +345,9 @@ INSTANTIATE_TEST_CASE_P(
             key::kDisabledSchemes),
         PolicyTestParams::ForStringPolicy(
             kPolicyDiskCacheDir,
-            key::kDiskCacheDir)));
+            key::kDiskCacheDir),
+        PolicyTestParams::ForIntegerPolicy(
+            kPolicyMaxConnectionsPerProxy,
+            key::kMaxConnectionsPerProxy)));
 
 }  // namespace policy

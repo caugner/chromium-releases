@@ -104,7 +104,7 @@ PP_Var CopyPPVar(const PP_Var& var) {
     scoped_refptr<StringVar> string(StringVar::FromPPVar(var));
     if (!string)
       return PP_MakeUndefined();
-    return StringVar::StringToPPVar(string->module(), string->value());
+    return StringVar::StringToPPVar(string->pp_module(), string->value());
   } else {
     return var;
   }
@@ -235,6 +235,9 @@ bool MessageChannelEnumerate(NPObject *np_obj, NPIdentifier **value,
     bool success = WebBindings::enumerate(NULL, passthrough, value, count);
     if (success) {
       // Add postMessage to the list and return it.
+      if (std::numeric_limits<size_t>::max() / sizeof(NPIdentifier) <=
+          (*count + 1))
+        return false;
       NPIdentifier* new_array = static_cast<NPIdentifier*>(
           std::malloc(sizeof(NPIdentifier) * (*count + 1)));
       std::memcpy(new_array, *value, sizeof(NPIdentifier)*(*count));
@@ -271,7 +274,9 @@ NPClass message_channel_class = {
 }  // namespace
 
 // MessageChannel --------------------------------------------------------------
-MessageChannel::MessageChannelNPObject::MessageChannelNPObject() {}
+MessageChannel::MessageChannelNPObject::MessageChannelNPObject()
+    : message_channel(NULL) {
+}
 
 MessageChannel::MessageChannelNPObject::~MessageChannelNPObject() {}
 

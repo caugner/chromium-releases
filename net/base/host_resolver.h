@@ -14,6 +14,7 @@
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_api.h"
+#include "net/base/net_util.h"
 #include "net/base/request_priority.h"
 
 namespace net {
@@ -189,56 +190,11 @@ class NET_API HostResolver {
   // additional functionality on the about:net-internals page.
   virtual HostResolverImpl* GetAsHostResolverImpl();
 
-  // Does additional cleanup prior to destruction.
-  virtual void Shutdown() {}
-
  protected:
   HostResolver();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HostResolver);
-};
-
-// This class represents the task of resolving a hostname (or IP address
-// literal) to an AddressList object.  It wraps HostResolver to resolve only a
-// single hostname at a time and cancels this request when going out of scope.
-class NET_API SingleRequestHostResolver {
- public:
-  // |resolver| must remain valid for the lifetime of |this|.
-  explicit SingleRequestHostResolver(HostResolver* resolver);
-
-  // If a completion callback is pending when the resolver is destroyed, the
-  // host resolution is cancelled, and the completion callback will not be
-  // called.
-  ~SingleRequestHostResolver();
-
-  // Resolves the given hostname (or IP address literal), filling out the
-  // |addresses| object upon success. See HostResolver::Resolve() for details.
-  int Resolve(const HostResolver::RequestInfo& info,
-              AddressList* addresses,
-              CompletionCallback* callback,
-              const BoundNetLog& net_log);
-
-  // Cancels the in-progress request, if any. This prevents the callback
-  // from being invoked. Resolve() can be called again after cancelling.
-  void Cancel();
-
- private:
-  // Callback for when the request to |resolver_| completes, so we dispatch
-  // to the user's callback.
-  void OnResolveCompletion(int result);
-
-  // The actual host resolver that will handle the request.
-  HostResolver* const resolver_;
-
-  // The current request (if any).
-  HostResolver::RequestHandle cur_request_;
-  CompletionCallback* cur_request_callback_;
-
-  // Completion callback for when request to |resolver_| completes.
-  CompletionCallbackImpl<SingleRequestHostResolver> callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(SingleRequestHostResolver);
 };
 
 // Creates a HostResolver implementation that queries the underlying system.
@@ -254,6 +210,11 @@ NET_API HostResolver* CreateSystemHostResolver(size_t max_concurrent_resolves,
                                                size_t max_retry_attempts,
                                                NetLog* net_log);
 
+// Creates a HostResolver implementation that sends actual DNS queries to
+// the specified DNS server and parses response and returns results.
+NET_API HostResolver* CreateAsyncHostResolver(size_t max_concurrent_resolves,
+                                              const IPAddressNumber& dns_ip,
+                                              NetLog* net_log);
 }  // namespace net
 
 #endif  // NET_BASE_HOST_RESOLVER_H_

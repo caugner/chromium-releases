@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file is auto-generated. DO NOT EDIT!
+// This file is auto-generated from
+// gpu/command_buffer/build_gles2_cmd_buffer.py
+// DO NOT EDIT!
 
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_VALIDATION_AUTOGEN_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_VALIDATION_AUTOGEN_H_
@@ -36,6 +38,7 @@ ValueValidator<GLenum> read_pixel_format;
 ValueValidator<GLenum> render_buffer_format;
 ValueValidator<GLenum> render_buffer_parameter;
 ValueValidator<GLenum> render_buffer_target;
+ValueValidator<GLenum> shader_binary_format;
 ValueValidator<GLenum> shader_parameter;
 ValueValidator<GLenum> shader_precision;
 ValueValidator<GLenum> shader_type;

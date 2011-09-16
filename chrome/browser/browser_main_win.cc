@@ -16,7 +16,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
-#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
@@ -26,15 +25,14 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/uninstall_view.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "content/common/main_function_params.h"
-#include "content/common/result_codes.h"
 #include "crypto/nss_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -44,7 +42,7 @@
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/message_box_win.h"
 #include "views/focus/accelerator_handler.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -62,38 +60,6 @@ void InitializeWindowProcExceptions() {
   exception_filter = base::win::SetWinProcExceptionFilter(exception_filter);
   DCHECK(!exception_filter);
 }
-
-// BrowserUsageUpdater --------------------------------------------------------
-// This class' job is to update the registry 'dr' value every 24 hours
-// that way google update can accurately track browser usage without
-// undercounting users that do not close chrome for long periods of time.
-class BrowserUsageUpdater : public Task {
- public:
-  virtual ~BrowserUsageUpdater() {}
-
-  virtual void Run() OVERRIDE {
-    if (UpdateUsageRegKey())
-      Track();
-  }
-
-  static void Track() {
-    BrowserThread::PostDelayedTask(
-        BrowserThread::FILE,
-        FROM_HERE, new BrowserUsageUpdater,
-        base::TimeDelta::FromHours(24).InMillisecondsRoundedUp());
-  }
-
- private:
-  bool UpdateUsageRegKey() {
-    FilePath module_dir;
-    if (!PathService::Get(base::DIR_MODULE, &module_dir))
-      return false;
-    bool system_level =
-        !InstallUtil::IsPerUserInstall(module_dir.value().c_str());
-    return GoogleUpdateSettings::UpdateDidRunState(true, system_level);
-  }
-};
-
 }  // namespace
 
 void DidEndMainMessageLoop() {
@@ -133,9 +99,8 @@ void RecordBrowserStartupTime() {
 }
 
 int AskForUninstallConfirmation() {
-  int ret = ResultCodes::NORMAL_EXIT;
-  views::Window::CreateChromeWindow(NULL, gfx::Rect(),
-                                    new UninstallView(ret))->Show();
+  int ret = content::RESULT_CODE_NORMAL_EXIT;
+  views::Widget::CreateWindow(new UninstallView(ret))->Show();
   views::AcceleratorHandler accelerator_handler;
   MessageLoopForUI::current()->Run(&accelerator_handler);
   return ret;
@@ -155,15 +120,15 @@ int DoUninstallTasks(bool chrome_still_running) {
   // check once again after user acknowledges Uninstall dialog.
   if (chrome_still_running) {
     ShowCloseBrowserFirstMessageBox();
-    return ResultCodes::UNINSTALL_CHROME_ALIVE;
+    return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
   }
   int ret = AskForUninstallConfirmation();
   if (browser_util::IsBrowserAlreadyRunning()) {
     ShowCloseBrowserFirstMessageBox();
-    return ResultCodes::UNINSTALL_CHROME_ALIVE;
+    return chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE;
   }
 
-  if (ret != ResultCodes::UNINSTALL_USER_CANCEL) {
+  if (ret != chrome::RESULT_CODE_UNINSTALL_USER_CANCEL) {
     // The following actions are just best effort.
     VLOG(1) << "Executing uninstall actions";
     if (!FirstRun::RemoveSentinel())
@@ -217,31 +182,34 @@ void PrepareRestartOnCrashEnviroment(const CommandLine& parsed_command_line) {
   env->SetVar(env_vars::kRestartInfo, UTF16ToUTF8(dlg_strings));
 }
 
-bool RegisterApplicationRestart(const CommandLine& parsed_command_line) {
+void RegisterApplicationRestart(const CommandLine& parsed_command_line) {
   DCHECK(base::win::GetVersion() >= base::win::VERSION_VISTA);
   base::ScopedNativeLibrary library(FilePath(L"kernel32.dll"));
   // Get the function pointer for RegisterApplicationRestart.
   RegisterApplicationRestartProc register_application_restart =
       static_cast<RegisterApplicationRestartProc>(
           library.GetFunctionPointer("RegisterApplicationRestart"));
-  if (!register_application_restart)
-    return false;
-
+  if (!register_application_restart) {
+    LOG(WARNING) << "Cannot find RegisterApplicationRestart in kernel32.dll";
+    return;
+  }
   // The Windows Restart Manager expects a string of command line flags only,
   // without the program.
   CommandLine command_line(CommandLine::NO_PROGRAM);
   command_line.AppendArguments(parsed_command_line, false);
-  // Ensure restore last session is set.
   if (!command_line.HasSwitch(switches::kRestoreLastSession))
     command_line.AppendSwitch(switches::kRestoreLastSession);
+  if (command_line.GetCommandLineString().length() > RESTART_MAX_CMD_LINE) {
+    LOG(WARNING) << "Command line too long for RegisterApplicationRestart";
+    return;
+  }
 
   // Restart Chrome if the computer is restarted as the result of an update.
   // This could be extended to handle crashes, hangs, and patches.
   HRESULT hr = register_application_restart(
-      command_line.command_line_string().c_str(),
+      command_line.GetCommandLineString().c_str(),
       RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_PATCH);
   DCHECK(SUCCEEDED(hr)) << "RegisterApplicationRestart failed.";
-  return SUCCEEDED(hr);
 }
 
 // This method handles the --hide-icons and --show-icons command line options
@@ -257,7 +225,7 @@ int HandleIconsCommands(const CommandLine& parsed_command_line) {
     } else if (version >= base::win::VERSION_XP) {
       cp_applet.assign(L"Add/Remove Programs");  // Windows XP.
     } else {
-      return ResultCodes::UNSUPPORTED_PARAM;  // Not supported
+      return chrome::RESULT_CODE_UNSUPPORTED_PARAM;  // Not supported
     }
 
     const string16 msg =
@@ -266,10 +234,12 @@ int HandleIconsCommands(const CommandLine& parsed_command_line) {
     const UINT flags = MB_OKCANCEL | MB_ICONWARNING | MB_TOPMOST;
     if (IDOK == ui::MessageBox(NULL, msg, caption, flags))
       ShellExecute(NULL, NULL, L"appwiz.cpl", NULL, NULL, SW_SHOWNORMAL);
-    return ResultCodes::NORMAL_EXIT;  // Exit as we are not launching browser.
+
+    // Exit as we are not launching the browser.
+    return content::RESULT_CODE_NORMAL_EXIT;
   }
   // We don't hide icons so we shouldn't do anything special to show them
-  return ResultCodes::UNSUPPORTED_PARAM;
+  return chrome::RESULT_CODE_UNSUPPORTED_PARAM;
 }
 
 // Check if there is any machine level Chrome installed on the current
@@ -298,7 +268,7 @@ bool CheckMachineLevelInstall() {
         uninstall_cmd.AppendSwitch(installer::switches::kForceUninstall);
         uninstall_cmd.AppendSwitch(
             installer::switches::kDoNotRemoveSharedItems);
-        base::LaunchApp(uninstall_cmd, false, false, NULL);
+        base::LaunchProcess(uninstall_cmd, base::LaunchOptions(), NULL);
       }
       return true;
     }
@@ -331,13 +301,6 @@ class BrowserMainPartsWin : public BrowserMainParts {
       // Make sure that we know how to handle exceptions from the message loop.
       InitializeWindowProcExceptions();
     }
-  }
-
-  virtual void PostMainMessageLoopStart() OVERRIDE {
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        NewRunnableFunction(&BrowserUsageUpdater::Track),
-        base::TimeDelta::FromSeconds(30).InMillisecondsRoundedUp());
   }
 
  private:

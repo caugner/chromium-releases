@@ -33,6 +33,13 @@ class RemoveUserDelegate;
 class UserManager : public UserImageLoader::Delegate,
                     public NotificationObserver {
  public:
+  // User OAuth token status according to the last check.
+  typedef enum {
+    OAUTH_TOKEN_STATUS_UNKNOWN = 0,
+    OAUTH_TOKEN_STATUS_INVALID = 1,
+    OAUTH_TOKEN_STATUS_VALID   = 2,
+  } OAuthTokenStatus;
+
   // A class representing information about a previously logged in user.
   class User {
    public:
@@ -54,12 +61,30 @@ class UserManager : public UserImageLoader::Delegate,
     bool NeedsNameTooltip() const;
 
     // The image for this user.
-    void set_image(const SkBitmap& image) { image_ = image; }
+    void SetImage(const SkBitmap& image,
+                  int default_image_index);
     const SkBitmap& image() const { return image_; }
+    int default_image_index() const { return default_image_index_; }
+
+    // OAuth token status for this user.
+    OAuthTokenStatus oauth_token_status() const { return oauth_token_status_; }
+    void set_oauth_token_status(OAuthTokenStatus status) {
+      oauth_token_status_ = status;
+    }
 
    private:
+    friend class UserManager;
+
     std::string email_;
     SkBitmap image_;
+    OAuthTokenStatus oauth_token_status_;
+
+    // Cached flag of whether any users has same display name.
+    bool is_displayname_unique_;
+
+    // Index of the default image the user has set. -1 if it's some other
+    // image.
+    int default_image_index_;
   };
 
   // Gets a shared instance of a UserManager. Not thread-safe...should
@@ -107,6 +132,10 @@ class UserManager : public UserImageLoader::Delegate,
   void SaveUserImage(const std::string& username,
                      const SkBitmap& image);
 
+  // Saves user's oauth token status in local state preferences.
+  void SaveUserOAuthStatus(const std::string& username,
+                           OAuthTokenStatus oauth_token_status);
+
   // Saves user image path for the user. Can be used to set default images.
   void SaveUserImagePath(const std::string& username,
                          const std::string& image_path);
@@ -121,7 +150,7 @@ class UserManager : public UserImageLoader::Delegate,
                              bool save_image);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

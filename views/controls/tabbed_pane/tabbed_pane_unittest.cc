@@ -5,8 +5,8 @@
 #include "base/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
-#include "views/window/window.h"
-#include "views/window/window_delegate.h"
+#include "views/widget/widget.h"
+#include "views/widget/widget_delegate.h"
 
 namespace views {
 
@@ -26,7 +26,8 @@ class FixedSizeView : public View {
   DISALLOW_COPY_AND_ASSIGN(FixedSizeView);
 };
 
-class TabbedPaneTest : public testing::Test, WindowDelegate {
+class TabbedPaneTest : public testing::Test,
+                       public WidgetDelegate {
  public:
   TabbedPaneTest() {}
 
@@ -37,23 +38,29 @@ class TabbedPaneTest : public testing::Test, WindowDelegate {
   }
 
  private:
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     tabbed_pane_ = new TabbedPane();
-    window_ = Window::CreateChromeWindow(NULL, gfx::Rect(0, 0, 100, 100), this);
+    window_ = Widget::CreateWindowWithBounds(this, gfx::Rect(0, 0, 100, 100));
     window_->Show();
   }
 
-  virtual void TearDown() {
+  virtual void TearDown() OVERRIDE {
     window_->Close();
     message_loop_.RunAllPending();
   }
 
-  virtual views::View* GetContentsView() {
+  virtual views::View* GetContentsView() OVERRIDE {
     return tabbed_pane_;
+  }
+  virtual views::Widget* GetWidget() OVERRIDE {
+    return tabbed_pane_->GetWidget();
+  }
+  virtual const views::Widget* GetWidget() const OVERRIDE {
+    return tabbed_pane_->GetWidget();
   }
 
   MessageLoopForUI message_loop_;
-  Window* window_;
+  Widget* window_;
 
   DISALLOW_COPY_AND_ASSIGN(TabbedPaneTest);
 };

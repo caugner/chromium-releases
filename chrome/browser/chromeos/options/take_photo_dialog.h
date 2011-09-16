@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_OPTIONS_TAKE_PHOTO_DIALOG_H_
 #pragma once
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/camera_controller.h"
 #include "chrome/browser/chromeos/login/take_photo_view.h"
 #include "content/common/notification_observer.h"
@@ -15,19 +15,26 @@
 
 namespace views {
 class View;
-class Window;
 }
 
 namespace chromeos {
 
 // A dialog box for taking new user picture.
-class TakePhotoDialog : public views::View,
-                        public views::DialogDelegate,
+class TakePhotoDialog : public views::DialogDelegateView,
                         public TakePhotoView::Delegate,
                         public CameraController::Delegate,
                         public NotificationObserver {
  public:
-  TakePhotoDialog();
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Called when user accepts the photo.
+    virtual void OnPhotoAccepted(const SkBitmap& photo) = 0;
+  };
+
+  explicit TakePhotoDialog(Delegate* delegate);
+  virtual ~TakePhotoDialog();
 
   // views::DialogDelegate overrides.
   virtual bool IsDialogButtonEnabled(
@@ -51,7 +58,7 @@ class TakePhotoDialog : public views::View,
   virtual void OnCaptureFailure();
 
   // NotificationObserver implementation:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -70,6 +77,8 @@ class TakePhotoDialog : public views::View,
   CameraController camera_controller_;
 
   NotificationRegistrar registrar_;
+
+  Delegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(TakePhotoDialog);
 };

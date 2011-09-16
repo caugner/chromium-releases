@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -28,7 +29,6 @@
 #include "content/common/notification_details.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -77,10 +77,10 @@ class DevmodeObserver : public NotificationObserver {
   }
   virtual ~DevmodeObserver() {}
 
-  void Observe(NotificationType type,
+  void Observe(int type,
                const NotificationSource& source,
                const NotificationDetails& details) {
-    if (type == NotificationType::PREF_CHANGED)
+    if (type == chrome::NOTIFICATION_PREF_CHANGED)
       [menu_ updateInspectorItem];
     else
       NOTREACHED();
@@ -98,17 +98,17 @@ class ProfileObserverBridge : public NotificationObserver {
                         const Profile* profile)
       : owner_(owner),
         profile_(profile) {
-    registrar_.Add(this, NotificationType::PROFILE_DESTROYED,
+    registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                    Source<Profile>(profile));
   }
 
   ~ProfileObserverBridge() {}
 
   // Overridden from NotificationObserver
-  void Observe(NotificationType type,
+  void Observe(int type,
                const NotificationSource& source,
                const NotificationDetails& details) {
-    if (type == NotificationType::PROFILE_DESTROYED &&
+    if (type == chrome::NOTIFICATION_PROFILE_DESTROYED &&
         source == Source<Profile>(profile_)) {
       [owner_ invalidateProfile];
     }
@@ -183,16 +183,6 @@ int CurrentTabId() {
         // The tag should correspond to the enum above.
         // NOTE: The enum and the order of the menu items MUST be in sync.
         [itemObj setTag:[self indexOfItem:itemObj]];
-
-        // Disable the 'Options' item if there are no options to set.
-        if ([itemObj tag] == kExtensionContextOptions &&
-            extension_->options_url().spec().length() <= 0) {
-          // Setting the target to nil will disable the item. For some reason
-          // setEnabled:NO does not work.
-          [itemObj setTarget:nil];
-        } else {
-          [itemObj setTarget:self];
-        }
 
         // Only browser actions can have their button hidden. Page actions
         // should never show the "Hide" menu item.
@@ -317,8 +307,12 @@ int CurrentTabId() {
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)menuItem {
-  if([menuItem isEqualTo:inspectorItem_.get()]) {
+  if ([menuItem tag] == kExtensionContextInspect) {
+    // Disable 'Inspect popup' if there is no popup.
     return action_ && action_->HasPopup(CurrentTabId());
+  } else if ([menuItem tag] == kExtensionContextOptions) {
+    // Disable 'Options' if there are no options to set.
+    return extension_->options_url().spec().length() > 0;
   }
   return YES;
 }

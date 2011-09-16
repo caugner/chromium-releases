@@ -26,8 +26,8 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -356,12 +356,20 @@ void TaskManagerGtk::OnModelChanged() {
 
 void TaskManagerGtk::OnItemsChanged(int start, int length) {
   GtkTreeIter iter;
-  gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(process_list_), &iter,
-                                NULL, start);
+  if (!gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(process_list_), &iter,
+                                     NULL, start)) {
+    NOTREACHED() << "Can't get child " << start <<
+        " from GTK_TREE_MODEL(process_list_)";
+  }
 
   for (int i = start; i < start + length; i++) {
     SetRowDataFromModel(i, &iter);
-    gtk_tree_model_iter_next(GTK_TREE_MODEL(process_list_), &iter);
+    if (i != start + length - 1) {
+      if (!gtk_tree_model_iter_next(GTK_TREE_MODEL(process_list_), &iter)) {
+        NOTREACHED() << "Can't get next GtkTreeIter object from process_list_ \
+            iterator at position " << i;
+      }
+    }
   }
 }
 

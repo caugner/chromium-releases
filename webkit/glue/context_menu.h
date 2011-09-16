@@ -66,8 +66,15 @@ struct ContextMenuParams {
   // on.
   GURL page_url;
 
+  // This is the absolute keyword search URL including the %s search tag when
+  // the "Add as search engine..." option is clicked (left empty if not used).
+  GURL keyword_url;
+
   // This is the URL of the subframe that the context menu was invoked on.
   GURL frame_url;
+
+  // This is the ID of the subframe that the context menu was invoked on.
+  int64 frame_id;
 
   // This is the history item state of the subframe that the context menu was
   // invoked on.

@@ -10,7 +10,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
 #include "views/controls/message_box_view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // RestartMessageBox, public:
@@ -47,6 +47,14 @@ views::View* RestartMessageBox::GetContentsView() {
   return message_box_view_;
 }
 
+views::Widget* RestartMessageBox::GetWidget() {
+  return message_box_view_->GetWidget();
+}
+
+const views::Widget* RestartMessageBox::GetWidget() const {
+  return message_box_view_->GetWidget();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // RestartMessageBox, private:
 
@@ -60,7 +68,7 @@ RestartMessageBox::RestartMessageBox(gfx::NativeWindow parent_window) {
           l10n_util::GetStringUTF16(IDS_OPTIONS_RELAUNCH_REQUIRED)).c_str(),
       std::wstring(),
       kDialogWidth);
-  views::Window::CreateChromeWindow(parent_window, gfx::Rect(), this)->Show();
+  views::Widget::CreateWindowWithParent(this, parent_window)->Show();
 }
 
 RestartMessageBox::~RestartMessageBox() {

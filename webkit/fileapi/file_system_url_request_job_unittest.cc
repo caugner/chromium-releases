@@ -75,6 +75,8 @@ class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
   }
 };
 
+}  // namespace
+
 class FileSystemURLRequestJobTest : public testing::Test {
  protected:
   FileSystemURLRequestJobTest()
@@ -105,19 +107,12 @@ class FileSystemURLRequestJobTest : public testing::Test {
             &FileSystemURLRequestJobTest::OnGetRootPath));
     MessageLoop::current()->RunAllPending();
 
-    net::URLRequest::RegisterProtocolFactory("filesystem",
-                                             &FileSystemURLRequestJobFactory);
+    net::URLRequest::Deprecated::RegisterProtocolFactory(
+        "filesystem", &FileSystemURLRequestJobFactory);
   }
 
   virtual void TearDown() {
-    // NOTE: order matters, request must die before delegate
-    request_.reset(NULL);
-    delegate_.reset(NULL);
-
-    // This shouldn't be necessary, but it shuts HeapChecker up.
-    file_system_context_ = NULL;
-
-    net::URLRequest::RegisterProtocolFactory("filesystem", NULL);
+    net::URLRequest::Deprecated::RegisterProtocolFactory("filesystem", NULL);
   }
 
   void OnGetRootPath(bool success, const FilePath& root_path,
@@ -216,20 +211,26 @@ class FileSystemURLRequestJobTest : public testing::Test {
     return temp;
   }
 
+  // Put the message loop at the top, so that it's the last thing deleted.
+  MessageLoop message_loop_;
+
   ScopedTempDir temp_dir_;
   FilePath origin_root_path_;
-  scoped_ptr<net::URLRequest> request_;
-  scoped_ptr<TestDelegate> delegate_;
   scoped_refptr<TestSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
-  MessageLoop message_loop_;
   base::ScopedCallbackFactory<FileSystemURLRequestJobTest> callback_factory_;
+
+  // NOTE: order matters, request must die before delegate
+  scoped_ptr<TestDelegate> delegate_;
+  scoped_ptr<net::URLRequest> request_;
 
   static net::URLRequestJob* job_;
 };
 
 // static
 net::URLRequestJob* FileSystemURLRequestJobTest::job_ = NULL;
+
+namespace {
 
 TEST_F(FileSystemURLRequestJobTest, FileTest) {
   WriteFile("file1.dat", kTestFileData, arraysize(kTestFileData) - 1);

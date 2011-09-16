@@ -34,6 +34,8 @@ void LanguageOptionsHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
   LanguageOptionsHandlerCommon::GetLocalizedValues(localized_strings);
 
+  RegisterTitle(localized_strings, "languagePage",
+                IDS_OPTIONS_SETTINGS_LANGUAGES_DIALOG_TITLE);
   localized_strings->SetString("restart_button",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON));
@@ -108,9 +110,5 @@ void LanguageOptionsHandler::SetApplicationLocale(
 
 void LanguageOptionsHandler::RestartCallback(const ListValue* args) {
   UserMetrics::RecordAction(UserMetricsAction("LanguageOptions_Restart"));
-
-  // Set the flag to restore state after the restart.
-  PrefService* pref_service = g_browser_process->local_state();
-  pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, true);
-  BrowserList::CloseAllBrowsersAndExit();
+  BrowserList::AttemptRestart();
 }

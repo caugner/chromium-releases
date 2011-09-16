@@ -15,6 +15,7 @@
 
 class Profile;
 class RenderProcessHost;
+class SpellCheckHostMetrics;
 class SpellCheckHostObserver;
 
 namespace net {
@@ -52,15 +53,8 @@ class SpellCheckHost
   static scoped_refptr<SpellCheckHost> Create(
       SpellCheckHostObserver* observer,
       const std::string& language,
-      net::URLRequestContextGetter* request_context_getter);
-
-  // Collects the number of words in the custom dictionary, which is
-  // to be uploaded via UMA
-  static void RecordCustomWordCountStats(size_t count);
-
-  // Collects status of spellchecking enabling state, which is
-  // to be uploaded via UMA
-  static void RecordEnabledStats(bool enabled);
+      net::URLRequestContextGetter* request_context_getter,
+      SpellCheckHostMetrics* metrics);
 
   // Clears an observer which is set on creation.
   // Used to prevent calling back to a deleted object.
@@ -84,13 +78,9 @@ class SpellCheckHost
 
   virtual bool IsUsingPlatformChecker() const = 0;
 
-  // Collects status of spellchecking enabling state, which is
-  // to be uploaded via UMA
-  virtual void RecordCheckedWordStats(bool misspell) = 0;
-
-  // Collects a histogram for misspelled word replacement
-  // to be uploaded via UMA
-  virtual void RecordReplacedWordStats(int delta) = 0;
+  // Returns a metrics counter associated with this object,
+  // or null when metrics recording is disabled.
+  virtual SpellCheckHostMetrics* GetMetrics() const = 0;
 
   // This function computes a vector of strings which are to be displayed in
   // the context menu over a text area for changing spell check languages. It

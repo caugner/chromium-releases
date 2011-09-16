@@ -7,19 +7,26 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/task.h"
+#include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/controls/textfield/textfield_controller.h"
 #include "views/layout/grid_layout.h"
 #include "views/layout/layout_constants.h"
+#include "views/widget/widget.h"
 #include "views/window/dialog_delegate.h"
-#include "views/window/window.h"
 
-// Width to make the text field, in pixels.
-static const int kTextfieldWidth = 200;
+namespace {
 
-class ContentView;
+// Width of the text field, in pixels.
+const int kTextfieldWidth = 200;
+
+}  // namespace
+
+namespace views {
+class Widget;
+}
 
 // The Windows implementation of the cross platform input dialog interface.
 class WinInputWindowDialog : public InputWindowDialog {
@@ -42,7 +49,7 @@ class WinInputWindowDialog : public InputWindowDialog {
 
  private:
   // Our chrome views window.
-  views::Window* window_;
+  views::Widget* window_;
 
   // Strings to feed to the on screen window.
   std::wstring window_title_;
@@ -55,8 +62,7 @@ class WinInputWindowDialog : public InputWindowDialog {
 
 // ContentView, as the name implies, is the content view for the InputWindow.
 // It registers accelerators that accept/cancel the input.
-class ContentView : public views::View,
-                    public views::DialogDelegate,
+class ContentView : public views::DialogDelegateView,
                     public views::TextfieldController {
  public:
   explicit ContentView(WinInputWindowDialog* delegate)
@@ -65,7 +71,7 @@ class ContentView : public views::View,
     DCHECK(delegate_);
   }
 
-  // views::DialogDelegate:
+  // views::DialogDelegateView:
   virtual bool IsDialogButtonEnabled(
       MessageBoxFlags::DialogButton button) const;
   virtual bool Accept();
@@ -207,8 +213,8 @@ WinInputWindowDialog::WinInputWindowDialog(HWND parent,
       label_(label),
       contents_(contents),
       delegate_(delegate) {
-  window_ = views::Window::CreateChromeWindow(parent, gfx::Rect(),
-                                              new ContentView(this));
+  window_ = views::Widget::CreateWindowWithParent(new ContentView(this),
+                                                  parent);
   window_->client_view()->AsDialogClientView()->UpdateDialogButtons();
 }
 
@@ -225,13 +231,13 @@ void WinInputWindowDialog::Close() {
 
 // static
 InputWindowDialog* InputWindowDialog::Create(HWND parent,
-                                             const std::wstring& window_title,
-                                             const std::wstring& label,
-                                             const std::wstring& contents,
+                                             const string16& window_title,
+                                             const string16& label,
+                                             const string16& contents,
                                              Delegate* delegate) {
   return new WinInputWindowDialog(parent,
-                                  window_title,
-                                  label,
-                                  contents,
+                                  UTF16ToWide(window_title),
+                                  UTF16ToWide(label),
+                                  UTF16ToWide(contents),
                                   delegate);
 }

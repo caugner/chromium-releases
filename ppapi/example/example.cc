@@ -17,12 +17,13 @@
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/c/pp_input_event.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/cpp/completion_callback.h"
+#include "ppapi/cpp/dev/memory_dev.h"
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
+#include "ppapi/cpp/input_event.h"
 #include "ppapi/cpp/private/instance_private.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/private/var_private.h"
@@ -107,7 +108,7 @@ class MyFetcher {
     client_ = client;
 
     pp::CompletionCallback callback =
-        callback_factory_.NewCallback(&MyFetcher::DidOpen);
+        callback_factory_.NewOptionalCallback(&MyFetcher::DidOpen);
     int rv = loader_.Open(request, callback);
     if (rv != PP_OK_COMPLETIONPENDING)
       callback.Run(rv);
@@ -124,7 +125,7 @@ class MyFetcher {
  private:
   void ReadMore() {
     pp::CompletionCallback callback =
-        callback_factory_.NewCallback(&MyFetcher::DidRead);
+        callback_factory_.NewOptionalCallback(&MyFetcher::DidRead);
     int rv = loader_.ReadResponseBody(buf_, sizeof(buf_), callback);
     if (rv != PP_OK_COMPLETIONPENDING)
       callback.Run(rv);
@@ -169,7 +170,9 @@ class MyInstance : public pp::InstancePrivate, public MyFetcherClient {
         height_(0),
         animation_counter_(0),
         print_settings_valid_(false),
-        showing_custom_cursor_(false) {}
+        showing_custom_cursor_(false) {
+    RequestInputEvents(PP_INPUTEVENT_CLASS_MOUSE);
+  }
 
   virtual ~MyInstance() {
     if (fetcher_) {
@@ -196,8 +199,8 @@ class MyInstance : public pp::InstancePrivate, public MyFetcherClient {
     return true;
   }
 
-  virtual bool HandleInputEvent(const PP_InputEvent& event) {
-    switch (event.type) {
+  virtual bool HandleInputEvent(const pp::InputEvent& event) {
+    switch (event.GetType()) {
       case PP_INPUTEVENT_TYPE_MOUSEDOWN:
         SayHello();
         ToggleCursor();
@@ -325,12 +328,13 @@ int gettimeofday(struct timeval *tv, struct timezone*) {
   }
 
   // Print interfaces.
+  // TODO(mball,dmichael) Replace this with the PPP_PRINTING_DEV_USE_0_4 version
   virtual PP_PrintOutputFormat_Dev* QuerySupportedPrintOutputFormats(
       uint32_t* format_count) {
+    pp::Memory_Dev memory;
     PP_PrintOutputFormat_Dev* format =
-        reinterpret_cast<PP_PrintOutputFormat_Dev*>(
-            pp::Module::Get()->core()->MemAlloc(
-                sizeof(PP_PrintOutputFormat_Dev)));
+        static_cast<PP_PrintOutputFormat_Dev*>(
+            memory.MemAlloc(sizeof(PP_PrintOutputFormat_Dev)));
     *format = PP_PRINTOUTPUTFORMAT_RASTER;
     *format_count = 1;
     return format;
@@ -405,8 +409,8 @@ int gettimeofday(struct timeval *tv, struct timezone*) {
     for (size_t i = 0; i < props.size(); ++i)
       Log(PP_LOGLEVEL_LOG, props[i]);
 
-    pp::Var location = window.GetProperty("location");
-    pp::Var href = location.GetProperty("href");
+    pp::VarPrivate location = window.GetProperty("location");
+    pp::VarPrivate href = location.GetProperty("href");
 
     if (!fetcher_) {
       fetcher_ = new MyFetcher();

@@ -9,11 +9,15 @@
 #include "media/base/filter_host.h"
 #include "net/base/data_url.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_request_headers.h"
 #include "net/url_request/url_request_status.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "webkit/glue/media/web_data_source_factory.h"
 #include "webkit/glue/webkit_glue.h"
+
+using WebKit::WebString;
 
 namespace webkit_glue {
 
@@ -87,7 +91,7 @@ void SimpleDataSource::Initialize(
     initialize_callback_.reset(callback);
 
     // Validate the URL.
-    SetURL(GURL(url));
+    url_ = GURL(url);
     if (!url_.is_valid() || !IsProtocolSupportedForMedia(url_)) {
       DoneInitialization_Locked(false);
       return;
@@ -108,10 +112,6 @@ void SimpleDataSource::CancelInitialize() {
   // Post a task to the render thread to cancel loading the resource.
   render_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &SimpleDataSource::CancelTask));
-}
-
-const media::MediaFormat& SimpleDataSource::media_format() {
-  return media_format_;
 }
 
 void SimpleDataSource::Read(int64 position,
@@ -262,12 +262,6 @@ void SimpleDataSource::Abort() {
   frame_ = NULL;
 }
 
-void SimpleDataSource::SetURL(const GURL& url) {
-  url_ = url;
-  media_format_.Clear();
-  media_format_.SetAsString(media::MediaFormat::kURL, url.spec());
-}
-
 void SimpleDataSource::StartTask() {
   DCHECK(MessageLoop::current() == render_loop_);
   // Reference to prevent destruction while inside the |initialize_callback_|
@@ -299,6 +293,11 @@ void SimpleDataSource::StartTask() {
       request.setTargetType(WebKit::WebURLRequest::TargetIsMedia);
 
       frame_->setReferrerForRequest(request, WebKit::WebURL());
+
+      // Disable compression, compression for audio/video doesn't make sense...
+      request.setHTTPHeaderField(
+          WebString::fromUTF8(net::HttpRequestHeaders::kAcceptEncoding),
+          WebString::fromUTF8("identity;q=1, *;q=0"));
 
       // This flag is for unittests as we don't want to reset |url_loader|
       if (!keep_test_loader_)

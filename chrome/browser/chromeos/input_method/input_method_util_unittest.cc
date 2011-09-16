@@ -15,6 +15,15 @@
 namespace chromeos {
 namespace input_method {
 
+namespace {
+InputMethodDescriptor GetDesc(const std::string& id,
+                              const std::string& raw_layout,
+                              const std::string& language_code) {
+  return InputMethodDescriptor::CreateInputMethodDescriptor(
+      id, raw_layout, language_code);
+}
+}  // namespace
+
 class InputMethodUtilTest : public testing::Test {
  public:
   static void SetUpTestCase() {
@@ -31,12 +40,11 @@ class InputMethodUtilTest : public testing::Test {
 
 TEST_F(InputMethodUtilTest, GetStringUTF8) {
   EXPECT_EQ("Pinyin input method",
-            GetStringUTF8("Pinyin", ""));
+            GetStringUTF8("pinyin", ""));
+#if !defined(GOOGLE_CHROME_BUILD)
   EXPECT_EQ("Japanese input method (for US Dvorak keyboard)",
-            GetStringUTF8("Mozc (US Dvorak keyboard layout)", ""));
-  EXPECT_EQ("Google Japanese Input (for US Dvorak keyboard)",
-            GetStringUTF8("Google Japanese Input (US Dvorak keyboard layout)",
-                          ""));
+            GetStringUTF8("mozc-dv", ""));
+#endif
 }
 
 TEST_F(InputMethodUtilTest, StringIsSupported) {
@@ -81,20 +89,19 @@ TEST_F(InputMethodUtilTest, IsKeyboardLayout) {
 
 TEST_F(InputMethodUtilTest, GetLanguageCodeFromDescriptor) {
   EXPECT_EQ("ja", GetLanguageCodeFromDescriptor(
-      InputMethodDescriptor("mozc", "Mozc", "us", "us", "ja")));
+      GetDesc("mozc", "us", "ja")));
   EXPECT_EQ("zh-TW", GetLanguageCodeFromDescriptor(
-      InputMethodDescriptor("mozc-chewing", "Chewing", "us", "us", "zh")));
+      GetDesc("mozc-chewing", "us", "zh")));
   EXPECT_EQ("zh-TW", GetLanguageCodeFromDescriptor(
-      InputMethodDescriptor("m17n:zh:cangjie", "Cangjie", "us", "us", "zh")));
+      GetDesc("m17n:zh:cangjie", "us", "zh")));
   EXPECT_EQ("zh-TW", GetLanguageCodeFromDescriptor(
-      InputMethodDescriptor("m17n:zh:quick", "Quick", "us", "us", "zh")));
+      GetDesc("m17n:zh:quick", "us", "zh")));
   EXPECT_EQ("zh-CN", GetLanguageCodeFromDescriptor(
-      InputMethodDescriptor("pinyin", "Pinyin", "us", "us", "zh")));
+      GetDesc("pinyin", "us", "zh")));
   EXPECT_EQ("en-US", GetLanguageCodeFromDescriptor(
-      InputMethodDescriptor("xkb:us::eng", "USA", "us", "us", "eng")));
+      GetDesc("xkb:us::eng", "us", "eng")));
   EXPECT_EQ("en-UK", GetLanguageCodeFromDescriptor(
-      InputMethodDescriptor("xkb:uk::eng", "United Kingdom",
-                            "us", "us", "eng")));
+      GetDesc("xkb:uk::eng", "us", "eng")));
 }
 
 TEST_F(InputMethodUtilTest, GetKeyboardLayoutName) {
@@ -104,6 +111,7 @@ TEST_F(InputMethodUtilTest, GetKeyboardLayoutName) {
   // Supported cases (samples).
   EXPECT_EQ("jp", GetKeyboardLayoutName("mozc-jp"));
   EXPECT_EQ("us", GetKeyboardLayoutName("pinyin"));
+  EXPECT_EQ("us(dvorak)", GetKeyboardLayoutName("pinyin-dv"));
   EXPECT_EQ("us", GetKeyboardLayoutName("m17n:ar:kbd"));
   EXPECT_EQ("es", GetKeyboardLayoutName("xkb:es::spa"));
   EXPECT_EQ("es(cat)", GetKeyboardLayoutName("xkb:es:cat:cat"));
@@ -132,13 +140,11 @@ TEST_F(InputMethodUtilTest, GetInputMethodDescriptorFromId) {
   const InputMethodDescriptor* descriptor =
       GetInputMethodDescriptorFromId("pinyin");
   ASSERT_TRUE(NULL != descriptor);  // ASSERT_NE doesn't compile.
-  EXPECT_EQ("pinyin", descriptor->id);
-  EXPECT_EQ("Pinyin", descriptor->display_name);
-  EXPECT_EQ("us", descriptor->keyboard_layout);
-  // This is not zh-CN as the language code in InputMethodDescriptor is
-  // not normalized to our format. The normalization is done in
-  // GetLanguageCodeFromDescriptor().
-  EXPECT_EQ("zh", descriptor->language_code);
+  EXPECT_EQ("pinyin", descriptor->id());
+  EXPECT_EQ("us", descriptor->keyboard_layout());
+  // This used to be "zh" but now we have "zh-CN" in ibus_input_methods.h,
+  // hence this should be zh-CN now.
+  EXPECT_EQ("zh-CN", descriptor->language_code());
 }
 
 TEST_F(InputMethodUtilTest, GetLanguageNativeDisplayNameFromCode) {

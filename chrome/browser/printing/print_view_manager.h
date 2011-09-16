@@ -22,6 +22,7 @@ namespace printing {
 class JobEventDetails;
 class PrintJob;
 class PrintJobWorkerOwner;
+class PrintViewManagerObserver;
 
 // Manages the print commands in relation to a TabContents. TabContents
 // delegates a few printing related commands to this instance.
@@ -41,18 +42,30 @@ class PrintViewManager : public NotificationObserver,
   // this function. Returns false if printing is impossible at the moment.
   bool PrintNow();
 
+  // Same as PrintNow(), but for the case where a user prints with the system
+  // dialog from print preview.
+  bool PrintForSystemDialogNow();
+
   // Initiate print preview of the current document by first notifying the
   // renderer. Since this happens asynchronous, the print preview tab creation
   // will not be completed on the return of this function. Returns false if
   // print preview is impossible at the moment.
   bool PrintPreviewNow();
 
+  // Handles cancelled preview printing request.
+  void PreviewPrintingRequestCancelled();
+
+  // Sets |observer| as the current PrintViewManagerObserver. Pass in NULL to
+  // remove the current observer. |observer| may always be NULL, but |observer_|
+  // must be NULL if |observer| is non-NULL.
+  void set_observer(PrintViewManagerObserver* observer);
+
   // PrintedPagesSource implementation.
   virtual string16 RenderSourceName();
   virtual GURL RenderSourceUrl();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -68,6 +81,8 @@ class PrintViewManager : public NotificationObserver,
  private:
   // IPC Message handlers.
   void OnDidGetPrintedPagesCount(int cookie, int number_pages);
+  void OnDidGetDocumentCookie(int cookie);
+  void OnDidShowPrintDialog();
   void OnDidPrintPage(const PrintHostMsg_DidPrintPage_Params& params);
   void OnPrintingFailed(int cookie);
 
@@ -75,7 +90,7 @@ class PrintViewManager : public NotificationObserver,
   void OnNotifyPrintJobEvent(const JobEventDetails& event_details);
 
   // Requests the RenderView to render all the missing pages for the print job.
-  // Noop if no print job is pending. Returns true if at least one page has been
+  // No-op if no print job is pending. Returns true if at least one page has been
   // requested to the renderer.
   bool RenderAllMissingPagesNow();
 
@@ -99,12 +114,12 @@ class PrintViewManager : public NotificationObserver,
   // Notify that the printing is done.
   void PrintingDone(bool success);
 
-  // Terminates the print job. Noop if no print job has been created. If
+  // Terminates the print job. No-op if no print job has been created. If
   // |cancel| is true, cancel it instead of waiting for the job to finish. Will
   // call ReleasePrintJob().
   void TerminatePrintJob(bool cancel);
 
-  // Releases print_job_. Correctly deregisters from notifications. Noop if
+  // Releases print_job_. Correctly deregisters from notifications. No-op if
   // no print job has been created.
   void ReleasePrintJob();
 
@@ -118,6 +133,9 @@ class PrintViewManager : public NotificationObserver,
   // control flow, print_job_ is initialized whenever possible. No-op is
   // print_job_ is initialized.
   bool OpportunisticallyCreatePrintJob(int cookie);
+
+  // Helper method for Print*Now().
+  bool PrintNowInternal(IPC::Message* message);
 
   // TabContentsWrapper we're associated with.
   TabContentsWrapper* tab_;
@@ -146,6 +164,13 @@ class PrintViewManager : public NotificationObserver,
   // Title override.
   bool is_title_overridden_;
   string16 overridden_title_;
+
+  // Weak pointer to an observer that is notified when the print dialog is
+  // shown.
+  PrintViewManagerObserver* observer_;
+
+  // The document cookie of the current PrinterQuery.
+  int cookie_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintViewManager);
 };

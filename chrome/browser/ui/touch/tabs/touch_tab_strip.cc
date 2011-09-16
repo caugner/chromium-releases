@@ -12,8 +12,8 @@
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 #include "ui/gfx/canvas_skia.h"
 #include "views/metrics.h"
+#include "views/widget/widget.h"
 #include "views/window/non_client_view.h"
-#include "views/window/window.h"
 
 static const int kTouchTabStripHeight = 64;
 static const int kTouchTabWidth = 64;
@@ -86,7 +86,9 @@ void TouchTabStrip::RemoveTabAt(int model_index) {
   StartRemoveTabAnimation(model_index);
 }
 
-void TouchTabStrip::SelectTabAt(int old_model_index, int new_model_index) {
+void TouchTabStrip::SetSelection(
+    const TabStripSelectionModel& old_selection,
+    const TabStripSelectionModel& new_selection) {
   SchedulePaint();
 }
 
@@ -271,11 +273,16 @@ TouchTab* TouchTabStrip::GetTabAtTabDataIndex(int tab_data_index) const {
   return static_cast<TouchTab*>(base_tab_at_tab_index(tab_data_index));
 }
 
+// Retrieves the Tab at the specified *model* index.
+TouchTab* TouchTabStrip::GetTouchTabAtModelIndex(int model_index) const {
+  return static_cast<TouchTab*>(GetBaseTabAtModelIndex(model_index));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // TouchTabStrip, private:
 
 void TouchTabStrip::Init() {
-  SetID(VIEW_ID_TAB_STRIP);
+  set_id(VIEW_ID_TAB_STRIP);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -304,7 +311,7 @@ void TouchTabStrip::PaintChildren(gfx::Canvas* canvas) {
     }
   }
 
-  if (GetWindow()->ShouldUseNativeFrame()) {
+  if (GetWidget()->ShouldUseNativeFrame()) {
     // Make sure unselected tabs are somewhat transparent.
     SkPaint paint;
     paint.setColor(SkColorSetARGB(200, 255, 255, 255));
@@ -324,14 +331,14 @@ void TouchTabStrip::PaintChildren(gfx::Canvas* canvas) {
     dragging_tab->Paint(canvas);
 }
 
-views::View::TouchStatus TouchTabStrip::OnTouchEvent(
+ui::TouchStatus TouchTabStrip::OnTouchEvent(
     const views::TouchEvent& event) {
   if (event.type() != ui::ET_TOUCH_PRESSED)
-    return TOUCH_STATUS_UNKNOWN;
+    return ui::TOUCH_STATUS_UNKNOWN;
 
   views::View* view = GetEventHandlerForPoint(event.location());
-  if (view && view != this && view->GetID() != VIEW_ID_TAB)
-    return TOUCH_STATUS_UNKNOWN;
+  if (view && view != this && view->id() != VIEW_ID_TAB)
+    return ui::TOUCH_STATUS_UNKNOWN;
 
   base::TimeDelta delta = event.time_stamp() - last_tap_time_;
 
@@ -346,12 +353,12 @@ views::View::TouchStatus TouchTabStrip::OnTouchEvent(
 
     last_tap_time_ = base::Time::FromInternalValue(0);
     last_tapped_view_ = NULL;
-    return TOUCH_STATUS_END;
+    return ui::TOUCH_STATUS_END;
   }
 
   last_tap_time_ = event.time_stamp();
   last_tapped_view_ = view;
-  return TOUCH_STATUS_UNKNOWN;
+  return ui::TOUCH_STATUS_UNKNOWN;
 }
 
 void TouchTabStrip::ViewHierarchyChanged(bool is_add,

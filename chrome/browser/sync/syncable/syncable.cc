@@ -34,21 +34,25 @@
 #include "base/perftimer.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/time.h"
+#include "base/tracked.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/protocol/proto_value_conversions.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
 #include "chrome/browser/sync/syncable/directory_backing_store.h"
-#include "chrome/browser/sync/syncable/directory_change_listener.h"
+#include "chrome/browser/sync/syncable/directory_change_delegate.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/syncable_changes_version.h"
 #include "chrome/browser/sync/syncable/syncable_columns.h"
 #include "chrome/browser/sync/syncable/syncable_enum_conversions.h"
+#include "chrome/browser/sync/syncable/transaction_observer.h"
+#include "chrome/browser/sync/util/logging.h"
 #include "chrome/common/deprecated/event_sys-inl.h"
 #include "net/base/escape.h"
 
@@ -87,17 +91,29 @@ std::string WriterTagToString(WriterTag writer_tag) {
   return "";
 }
 
-ListValue* OriginalEntriesToValue(const OriginalEntries& original_entries) {
+#undef ENUM_CASE
+
+namespace {
+
+DictionaryValue* EntryKernelMutationToValue(
+    const EntryKernelMutation& mutation) {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->Set("original", mutation.original.ToValue());
+  dict->Set("mutated", mutation.mutated.ToValue());
+  return dict;
+}
+
+}  // namespace
+
+ListValue* EntryKernelMutationSetToValue(
+    const EntryKernelMutationSet& mutations) {
   ListValue* list = new ListValue();
-  for (OriginalEntries::const_iterator it = original_entries.begin();
-       it != original_entries.end();
-       ++it) {
-    list->Append(it->ToValue());
+  for (EntryKernelMutationSet::const_iterator it = mutations.begin();
+       it != mutations.end(); ++it) {
+    list->Append(EntryKernelMutationToValue(*it));
   }
   return list;
 }
-
-#undef ENUM_CASE
 
 int64 Now() {
 #if defined(OS_WIN)
@@ -207,6 +223,36 @@ EntryKernel::EntryKernel() : dirty_(false) {
 
 EntryKernel::~EntryKernel() {}
 
+bool EntryKernel::ContainsString(const std::string& lowercase_query) const {
+  // TODO(lipalani) - figure out what to do if the node is encrypted.
+  const sync_pb::EntitySpecifics& specifics = ref(SPECIFICS);
+  std::string temp;
+  // The protobuf serialized string contains the original strings. So
+  // we will just serialize it and search it.
+  specifics.SerializeToString(&temp);
+
+  // Now convert to lower case.
+  StringToLowerASCII(&temp);
+
+  if (temp.find(lowercase_query) != std::string::npos)
+    return true;
+
+  // Now go through all the string fields to see if the value is there.
+  for (int i = STRING_FIELDS_BEGIN; i < STRING_FIELDS_END; ++i) {
+    if (StringToLowerASCII(ref(static_cast<StringField>(i))).find(
+            lowercase_query) != std::string::npos)
+      return true;
+  }
+
+  for (int i = ID_FIELDS_BEGIN; i < ID_FIELDS_END; ++i) {
+    const Id& id = ref(static_cast<IdField>(i));
+    if (id.ContainsStringCaseInsensitive(lowercase_query)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 
 // Utility function to loop through a set of enum values and add the
@@ -297,9 +343,10 @@ DictionaryValue* EntryKernel::ToValue() const {
 ///////////////////////////////////////////////////////////////////////////
 // Directory
 
-void Directory::init_kernel(const std::string& name) {
+void Directory::InitKernel(const std::string& name,
+                           DirectoryChangeDelegate* delegate) {
   DCHECK(kernel_ == NULL);
-  kernel_ = new Kernel(FilePath(), name, KernelLoadInfo());
+  kernel_ = new Kernel(FilePath(), name, KernelLoadInfo(), delegate);
 }
 
 Directory::PersistedKernelInfo::PersistedKernelInfo()
@@ -307,9 +354,6 @@ Directory::PersistedKernelInfo::PersistedKernelInfo()
   for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
     reset_download_progress(ModelTypeFromInt(i));
   }
-  autofill_migration_state = NOT_DETERMINED;
-  memset(&autofill_migration_debug_info, 0,
-         sizeof(autofill_migration_debug_info));
 }
 
 Directory::PersistedKernelInfo::~PersistedKernelInfo() {}
@@ -330,7 +374,8 @@ Directory::SaveChangesSnapshot::~SaveChangesSnapshot() {}
 
 Directory::Kernel::Kernel(const FilePath& db_path,
                           const string& name,
-                          const KernelLoadInfo& info)
+                          const KernelLoadInfo& info,
+                          DirectoryChangeDelegate* delegate)
     : db_path(db_path),
       refcount(1),
       name(name),
@@ -346,7 +391,10 @@ Directory::Kernel::Kernel(const FilePath& db_path,
       info_status(Directory::KERNEL_SHARE_INFO_VALID),
       persisted_info(info.kernel_info),
       cache_guid(info.cache_guid),
-      next_metahandle(info.max_metahandle + 1) {
+      next_metahandle(info.max_metahandle + 1),
+      delegate(delegate),
+      observers(new ObserverListThreadSafe<TransactionObserver>()) {
+  DCHECK(delegate);
 }
 
 void Directory::Kernel::AddRef() {
@@ -356,33 +404,6 @@ void Directory::Kernel::AddRef() {
 void Directory::Kernel::Release() {
   if (!base::subtle::NoBarrier_AtomicIncrement(&refcount, -1))
     delete this;
-}
-
-void Directory::Kernel::AddChangeListener(
-    DirectoryChangeListener* listener) {
-  base::AutoLock lock(change_listeners_lock_);
-  change_listeners_.AddObserver(listener);
-}
-
-void Directory::Kernel::RemoveChangeListener(
-    DirectoryChangeListener* listener) {
-  base::AutoLock lock(change_listeners_lock_);
-  change_listeners_.RemoveObserver(listener);
-}
-
-// Note: it is possible that a listener will remove itself after we
-// have made a copy, but before the copy is consumed. This could
-// theoretically result in accessing a garbage pointer, but can only
-// occur when an about:sync window is closed in the middle of a
-// notification.  See crbug.com/85481.
-void Directory::Kernel::CopyChangeListeners(
-    ObserverList<DirectoryChangeListener>* change_listeners) {
-  DCHECK_EQ(0U, change_listeners->size());
-  base::AutoLock lock(change_listeners_lock_);
-  ObserverListBase<DirectoryChangeListener>::Iterator it(change_listeners_);
-  DirectoryChangeListener* obs;
-  while ((obs = it.GetNext()) != NULL)
-    change_listeners->AddObserver(obs);
 }
 
 Directory::Kernel::~Kernel() {
@@ -406,8 +427,9 @@ Directory::~Directory() {
   Close();
 }
 
-DirOpenResult Directory::Open(const FilePath& file_path, const string& name) {
-  const DirOpenResult result = OpenImpl(file_path, name);
+DirOpenResult Directory::Open(const FilePath& file_path, const string& name,
+                              DirectoryChangeDelegate* delegate) {
+  const DirOpenResult result = OpenImpl(file_path, name, delegate);
   if (OPENED != result)
     Close();
   return result;
@@ -435,7 +457,8 @@ DirectoryBackingStore* Directory::CreateBackingStore(
 }
 
 DirOpenResult Directory::OpenImpl(const FilePath& file_path,
-                                  const string& name) {
+                                  const string& name,
+                                  DirectoryChangeDelegate* delegate) {
   DCHECK_EQ(static_cast<DirectoryBackingStore*>(NULL), store_);
   FilePath db_path(file_path);
   file_util::AbsolutePath(&db_path);
@@ -449,7 +472,7 @@ DirOpenResult Directory::OpenImpl(const FilePath& file_path,
   if (OPENED != result)
     return result;
 
-  kernel_ = new Kernel(db_path, name, info);
+  kernel_ = new Kernel(db_path, name, info, delegate);
   kernel_->metahandles_index->swap(metas_bucket);
   InitializeIndices();
   return OPENED;
@@ -533,21 +556,28 @@ EntryKernel* Directory::GetEntryByHandle(int64 metahandle,
   return NULL;
 }
 
-void Directory::GetChildHandles(BaseTransaction* trans, const Id& parent_id,
-                                Directory::ChildHandles* result) {
+void Directory::GetChildHandlesById(
+    BaseTransaction* trans, const Id& parent_id,
+    Directory::ChildHandles* result) {
   CHECK(this == trans->directory());
   result->clear();
-  {
-    ScopedKernelLock lock(this);
 
-    typedef ParentIdChildIndex::iterator iterator;
-    for (iterator i = GetParentChildIndexLowerBound(lock, parent_id),
-                end = GetParentChildIndexUpperBound(lock, parent_id);
-         i != end; ++i) {
-      DCHECK_EQ(parent_id, (*i)->ref(PARENT_ID));
-      result->push_back((*i)->ref(META_HANDLE));
-    }
-  }
+  ScopedKernelLock lock(this);
+  AppendChildHandles(lock, parent_id, result);
+}
+
+void Directory::GetChildHandlesByHandle(
+    BaseTransaction* trans, int64 handle,
+    Directory::ChildHandles* result) {
+  CHECK(this == trans->directory());
+  result->clear();
+
+  ScopedKernelLock lock(this);
+  EntryKernel* kernel = GetEntryByHandle(handle, &lock);
+  if (!kernel)
+    return;
+
+  AppendChildHandles(lock, kernel->ref(ID), result);
 }
 
 EntryKernel* Directory::GetRootEntry() {
@@ -638,7 +668,7 @@ bool Directory::SafeToPurgeFromMemory(const EntryKernel* const entry) const {
 }
 
 void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
-  ReadTransaction trans(this, __FILE__, __LINE__);
+  ReadTransaction trans(FROM_HERE, this);
   ScopedKernelLock lock(this);
   // Deep copy dirty entries from kernel_->metahandles_index into snapshot and
   // clear dirty flags.
@@ -696,11 +726,11 @@ bool Directory::SaveChanges() {
 
 void Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
   // Need a write transaction as we are about to permanently purge entries.
-  WriteTransaction trans(this, VACUUM_AFTER_SAVE, __FILE__, __LINE__);
+  WriteTransaction trans(FROM_HERE, VACUUM_AFTER_SAVE, this);
   ScopedKernelLock lock(this);
   kernel_->flushed_metahandles.Push(0);  // Begin flush marker
   // Now drop everything we can out of memory.
-  for (OriginalEntries::const_iterator i = snapshot.dirty_metas.begin();
+  for (EntryKernelSet::const_iterator i = snapshot.dirty_metas.begin();
        i != snapshot.dirty_metas.end(); ++i) {
     kernel_->needle.put(META_HANDLE, i->ref(META_HANDLE));
     MetahandlesIndex::iterator found =
@@ -737,7 +767,7 @@ void Directory::PurgeEntriesWithTypeIn(const std::set<ModelType>& types) {
     return;
 
   {
-    WriteTransaction trans(this, PURGE_ENTRIES, __FILE__, __LINE__);
+    WriteTransaction trans(FROM_HERE, PURGE_ENTRIES, this);
     {
       ScopedKernelLock lock(this);
       MetahandlesIndex::iterator it = kernel_->metahandles_index->begin();
@@ -792,7 +822,7 @@ void Directory::HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot) {
   // cause lost data, if no other changes are made to the in-memory entries
   // that would cause the dirty bit to get set again. Setting the bit ensures
   // that SaveChanges will at least try again later.
-  for (OriginalEntries::const_iterator i = snapshot.dirty_metas.begin();
+  for (EntryKernelSet::const_iterator i = snapshot.dirty_metas.begin();
        i != snapshot.dirty_metas.end(); ++i) {
     kernel_->needle.put(META_HANDLE, i->ref(META_HANDLE));
     MetahandlesIndex::iterator found =
@@ -840,73 +870,12 @@ bool Directory::initial_sync_ended_for_type(ModelType type) const {
   return kernel_->persisted_info.initial_sync_ended[type];
 }
 
-AutofillMigrationState Directory::get_autofill_migration_state() const {
-  ScopedKernelLock lock(this);
-  return kernel_->persisted_info.autofill_migration_state;
-}
-
-AutofillMigrationDebugInfo
-    Directory::get_autofill_migration_debug_info() const {
-  ScopedKernelLock lock(this);
-  return kernel_->persisted_info.autofill_migration_debug_info;
-}
-
 template <class T> void Directory::TestAndSet(
     T* kernel_data, const T* data_to_set) {
   if (*kernel_data != *data_to_set) {
     *kernel_data = *data_to_set;
     kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
   }
-}
-
-void Directory::set_autofill_migration_state_debug_info(
-    AutofillMigrationDebugInfo::PropertyToSet property_to_set,
-    const AutofillMigrationDebugInfo& info) {
-
-  ScopedKernelLock lock(this);
-  switch (property_to_set) {
-    case AutofillMigrationDebugInfo::MIGRATION_TIME: {
-      syncable::AutofillMigrationDebugInfo&
-        debug_info = kernel_->persisted_info.autofill_migration_debug_info;
-      TestAndSet<int64>(
-          &debug_info.autofill_migration_time,
-          &info.autofill_migration_time);
-      break;
-    }
-    case AutofillMigrationDebugInfo::ENTRIES_ADDED: {
-      AutofillMigrationDebugInfo& debug_info =
-        kernel_->persisted_info.autofill_migration_debug_info;
-      TestAndSet<int>(
-          &debug_info.autofill_entries_added_during_migration,
-          &info.autofill_entries_added_during_migration);
-      break;
-    }
-    case AutofillMigrationDebugInfo::PROFILES_ADDED: {
-      AutofillMigrationDebugInfo& debug_info =
-        kernel_->persisted_info.autofill_migration_debug_info;
-      TestAndSet<int>(
-          &debug_info.autofill_profile_added_during_migration,
-          &info.autofill_profile_added_during_migration);
-      break;
-    }
-    default:
-      NOTREACHED();
-  }
-}
-
-void Directory::set_autofill_migration_state(AutofillMigrationState state) {
-  ScopedKernelLock lock(this);
-  if (state == kernel_->persisted_info.autofill_migration_state) {
-    return;
-  }
-  kernel_->persisted_info.autofill_migration_state = state;
-  if (state == MIGRATED) {
-    syncable::AutofillMigrationDebugInfo& debug_info =
-        kernel_->persisted_info.autofill_migration_debug_info;
-    debug_info.autofill_migration_time =
-        base::Time::Now().ToInternalValue();
-  }
-  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
 void Directory::set_initial_sync_ended_for_type(ModelType type, bool x) {
@@ -943,10 +912,9 @@ void Directory::set_store_birthday(const string& store_birthday) {
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
-std::string Directory::GetAndClearNotificationState() {
+std::string Directory::GetNotificationState() const {
   ScopedKernelLock lock(this);
   std::string notification_state = kernel_->persisted_info.notification_state;
-  SetNotificationStateUnsafe(std::string());
   return notification_state;
 }
 
@@ -970,6 +938,15 @@ void Directory::GetAllMetaHandles(BaseTransaction* trans,
        ++i) {
     result->insert((*i)->ref(META_HANDLE));
   }
+}
+
+void Directory::GetAllEntryKernels(BaseTransaction* trans,
+                                   std::vector<const EntryKernel*>* result) {
+  result->clear();
+  ScopedKernelLock lock(this);
+  result->insert(result->end(),
+                 kernel_->metahandles_index->begin(),
+                 kernel_->metahandles_index->end());
 }
 
 void Directory::GetUnsyncedMetaHandles(BaseTransaction* trans,
@@ -1018,16 +995,14 @@ class SomeIdsFilter : public IdFilter {
 };
 
 void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
-                                    const OriginalEntries* originals) {
+                                    const EntryKernelMutationSet& mutations) {
   MetahandleSet handles;
   SomeIdsFilter filter;
-  filter.ids_.reserve(originals->size());
-  for (OriginalEntries::const_iterator i = originals->begin(),
-         end = originals->end(); i != end; ++i) {
-    Entry e(trans, GET_BY_HANDLE, i->ref(META_HANDLE));
-    CHECK(e.good());
-    filter.ids_.push_back(e.Get(ID));
-    handles.insert(i->ref(META_HANDLE));
+  filter.ids_.reserve(mutations.size());
+  for (EntryKernelMutationSet::const_iterator i = mutations.begin(),
+         end = mutations.end(); i != end; ++i) {
+    filter.ids_.push_back(i->mutated.ref(ID));
+    handles.insert(i->original.ref(META_HANDLE));
   }
   std::sort(filter.ids_.begin(), filter.ids_.end());
   CheckTreeInvariants(trans, handles, filter);
@@ -1144,12 +1119,12 @@ void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
   }
 }
 
-void Directory::AddChangeListener(DirectoryChangeListener* listener) {
-  kernel_->AddChangeListener(listener);
+void Directory::AddTransactionObserver(TransactionObserver* observer) {
+  kernel_->observers->AddObserver(observer);
 }
 
-void Directory::RemoveChangeListener(DirectoryChangeListener* listener) {
-  kernel_->RemoveChangeListener(listener);
+void Directory::RemoveTransactionObserver(TransactionObserver* observer) {
+  kernel_->observers->RemoveObserver(observer);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1169,166 +1144,149 @@ void BaseTransaction::Lock() {
 
   time_acquired_ = base::TimeTicks::Now();
   const base::TimeDelta elapsed = time_acquired_ - start_time;
-  if (LOG_IS_ON(INFO) &&
-      (1 <= logging::GetVlogLevelHelper(
-          source_file_, ::strlen(source_file_))) &&
-      (elapsed.InMilliseconds() > 200)) {
-    logging::LogMessage(source_file_, line_, logging::LOG_INFO).stream()
+  VLOG_LOC(from_here_, 2)
       << name_ << " transaction waited "
       << elapsed.InSecondsF() << " seconds.";
-  }
 }
 
-BaseTransaction::BaseTransaction(Directory* directory, const char* name,
-    const char* source_file, int line, WriterTag writer)
-  : directory_(directory), dirkernel_(directory->kernel_), name_(name),
-    source_file_(source_file), line_(line), writer_(writer) {
+void BaseTransaction::Unlock() {
+  dirkernel_->transaction_mutex.Release();
+  const base::TimeDelta elapsed = base::TimeTicks::Now() - time_acquired_;
+  VLOG_LOC(from_here_, 2)
+        << name_ << " transaction completed in " << elapsed.InSecondsF()
+        << " seconds.";
+}
+
+BaseTransaction::BaseTransaction(const tracked_objects::Location& from_here,
+                                 const char* name,
+                                 WriterTag writer,
+                                 Directory* directory)
+    : from_here_(from_here), name_(name), writer_(writer),
+      directory_(directory), dirkernel_(directory->kernel_) {
+  dirkernel_->observers->Notify(
+      &TransactionObserver::OnTransactionStart, from_here_, writer_);
+}
+
+BaseTransaction::~BaseTransaction() {
+  dirkernel_->observers->Notify(
+      &TransactionObserver::OnTransactionEnd, from_here_, writer_);
+}
+
+ReadTransaction::ReadTransaction(const tracked_objects::Location& location,
+                                 Directory* directory)
+    : BaseTransaction(location, "Read", INVALID, directory) {
   Lock();
 }
 
-BaseTransaction::BaseTransaction(Directory* directory)
-    : directory_(directory),
-      dirkernel_(NULL),
-      name_(NULL),
-      source_file_(NULL),
-      line_(0),
-      writer_(INVALID) {
-}
-
-BaseTransaction::~BaseTransaction() {}
-
-void BaseTransaction::UnlockAndLog(OriginalEntries* entries) {
-  // Work while trasnaction mutex is held
-  ModelTypeBitSet models_with_changes;
-  if (!NotifyTransactionChangingAndEnding(entries, &models_with_changes))
-    return;
-
-  // Work after mutex is relased.
-  NotifyTransactionComplete(models_with_changes);
-}
-
-bool BaseTransaction::NotifyTransactionChangingAndEnding(
-    OriginalEntries* entries,
-    ModelTypeBitSet* models_with_changes) {
-  dirkernel_->transaction_mutex.AssertAcquired();
-
-  scoped_ptr<OriginalEntries> originals(entries);
-  const base::TimeDelta elapsed = base::TimeTicks::Now() - time_acquired_;
-  if (LOG_IS_ON(INFO) &&
-      (1 <= logging::GetVlogLevelHelper(
-          source_file_, ::strlen(source_file_))) &&
-      (elapsed.InMilliseconds() > 50)) {
-    logging::LogMessage(source_file_, line_, logging::LOG_INFO).stream()
-        << name_ << " transaction completed in " << elapsed.InSecondsF()
-        << " seconds.";
-  }
-
-  ObserverList<DirectoryChangeListener> change_listeners;
-  dirkernel_->CopyChangeListeners(&change_listeners);
-
-  if (NULL == originals.get() || originals->empty() ||
-      (change_listeners.size() == 0)) {
-    dirkernel_->transaction_mutex.Release();
-    return false;
-  }
-
-  if (writer_ == syncable::SYNCAPI) {
-    FOR_EACH_OBSERVER(DirectoryChangeListener,
-                      change_listeners,
-                      HandleCalculateChangesChangeEventFromSyncApi(
-                          *originals.get(),
-                          writer_,
-                          this));
-  } else {
-    FOR_EACH_OBSERVER(DirectoryChangeListener,
-                      change_listeners,
-                      HandleCalculateChangesChangeEventFromSyncer(
-                          *originals.get(),
-                          writer_,
-                          this));
-  }
-
-  // Set |*models_with_changes| to the union of the return values of
-  // the HandleTransactionEndingChangeEvent call to each
-  // DirectoryChangeListener.
-  {
-    ObserverList<DirectoryChangeListener>::Iterator it(change_listeners);
-    DirectoryChangeListener* obs = NULL;
-    while ((obs = it.GetNext()) != NULL) {
-      *models_with_changes |= obs->HandleTransactionEndingChangeEvent(this);
-    }
-  };
-
-  // Release the transaction. Note, once the transaction is released this thread
-  // can be interrupted by another that was waiting for the transaction,
-  // resulting in this code possibly being interrupted with another thread
-  // performing following the same code path. From this point foward, only
-  // local state can be touched.
-  dirkernel_->transaction_mutex.Release();
-  return true;
-}
-
-void BaseTransaction::NotifyTransactionComplete(
-    ModelTypeBitSet models_with_changes) {
-  ObserverList<DirectoryChangeListener> change_listeners;
-  dirkernel_->CopyChangeListeners(&change_listeners);
-  FOR_EACH_OBSERVER(DirectoryChangeListener,
-                    change_listeners,
-                    HandleTransactionCompleteChangeEvent(
-                        models_with_changes));
-}
-
-ReadTransaction::ReadTransaction(Directory* directory, const char* file,
-                                 int line)
-  : BaseTransaction(directory, "Read", file, line, INVALID) {
-}
-
-ReadTransaction::ReadTransaction(const ScopedDirLookup& scoped_dir,
-                                 const char* file, int line)
-  : BaseTransaction(scoped_dir.operator -> (), "Read", file, line, INVALID) {
+ReadTransaction::ReadTransaction(const tracked_objects::Location& location,
+                                 const ScopedDirLookup& scoped_dir)
+    : BaseTransaction(location, "Read", INVALID, scoped_dir.operator->()) {
+  Lock();
 }
 
 ReadTransaction::~ReadTransaction() {
-  UnlockAndLog(NULL);
+  Unlock();
 }
 
-WriteTransaction::WriteTransaction(Directory* directory, WriterTag writer,
-                                   const char* file, int line)
-  : BaseTransaction(directory, "Write", file, line, writer),
-    originals_(new OriginalEntries) {
+WriteTransaction::WriteTransaction(const tracked_objects::Location& location,
+                                   WriterTag writer, Directory* directory)
+    : BaseTransaction(location, "Write", writer, directory) {
+  Lock();
 }
 
-WriteTransaction::WriteTransaction(const ScopedDirLookup& scoped_dir,
-                                   WriterTag writer, const char* file, int line)
-  : BaseTransaction(scoped_dir.operator -> (), "Write", file, line, writer),
-    originals_(new OriginalEntries) {
+WriteTransaction::WriteTransaction(const tracked_objects::Location& location,
+                                   WriterTag writer,
+                                   const ScopedDirLookup& scoped_dir)
+    : BaseTransaction(location, "Write", writer, scoped_dir.operator->()) {
+  Lock();
 }
 
-WriteTransaction::WriteTransaction(Directory *directory)
-    : BaseTransaction(directory),
-      originals_(new OriginalEntries) {
-}
-
-void WriteTransaction::SaveOriginal(EntryKernel* entry) {
-  if (NULL == entry)
+void WriteTransaction::SaveOriginal(const EntryKernel* entry) {
+  if (!entry) {
     return;
-  OriginalEntries::iterator i = originals_->lower_bound(*entry);
-  if (i == originals_->end() ||
-      i->ref(META_HANDLE) != entry->ref(META_HANDLE)) {
-    originals_->insert(i, *entry);
+  }
+  // Insert only if it's not already there.
+  EntryKernelSet::iterator it = originals_.lower_bound(*entry);
+  if (it == originals_.end() ||
+      it->ref(META_HANDLE) != entry->ref(META_HANDLE)) {
+    originals_.insert(it, *entry);
   }
 }
 
+EntryKernelMutationSet WriteTransaction::RecordMutations() {
+  dirkernel_->transaction_mutex.AssertAcquired();
+  EntryKernelMutationSet mutations;
+  for (syncable::EntryKernelSet::iterator it = originals_.begin();
+       it != originals_.end(); ++it) {
+    int64 id = it->ref(syncable::META_HANDLE);
+    EntryKernel* kernel = directory()->GetEntryByHandle(id);
+    if (!kernel) {
+      NOTREACHED();
+      continue;
+    }
+    EntryKernelMutation mutation;
+    mutation.original = *it;
+    mutation.mutated = *kernel;
+    mutations.insert(mutation);
+  }
+  return mutations;
+}
+
+void WriteTransaction::UnlockAndNotify(
+    const EntryKernelMutationSet& mutations) {
+  // Work while transaction mutex is held.
+  ModelTypeBitSet models_with_changes;
+  bool has_mutations = !mutations.empty();
+  if (has_mutations) {
+    models_with_changes = NotifyTransactionChangingAndEnding(mutations);
+  }
+  Unlock();
+
+  // Work after mutex is relased.
+  if (has_mutations) {
+    NotifyTransactionComplete(models_with_changes);
+  }
+}
+
+ModelTypeBitSet WriteTransaction::NotifyTransactionChangingAndEnding(
+    const EntryKernelMutationSet& mutations) {
+  dirkernel_->transaction_mutex.AssertAcquired();
+  DCHECK(!mutations.empty());
+
+  DirectoryChangeDelegate* const delegate = dirkernel_->delegate;
+  if (writer_ == syncable::SYNCAPI) {
+    delegate->HandleCalculateChangesChangeEventFromSyncApi(mutations, this);
+  } else {
+    delegate->HandleCalculateChangesChangeEventFromSyncer(mutations, this);
+  }
+
+  ModelTypeBitSet models_with_changes =
+      delegate->HandleTransactionEndingChangeEvent(this);
+
+  dirkernel_->observers->Notify(
+      &TransactionObserver::OnTransactionMutate,
+      from_here_, writer_, mutations, models_with_changes);
+  return models_with_changes;
+}
+
+void WriteTransaction::NotifyTransactionComplete(
+    ModelTypeBitSet models_with_changes) {
+  dirkernel_->delegate->HandleTransactionCompleteChangeEvent(
+      models_with_changes);
+}
+
 WriteTransaction::~WriteTransaction() {
+  EntryKernelMutationSet mutations = RecordMutations();
+
   if (OFF != kInvariantCheckLevel) {
     const bool full_scan = (FULL_DB_VERIFICATION == kInvariantCheckLevel);
     if (full_scan)
       directory()->CheckTreeInvariants(this, full_scan);
     else
-      directory()->CheckTreeInvariants(this, originals_);
+      directory()->CheckTreeInvariants(this, mutations);
   }
 
-  UnlockAndLog(originals_);
+  UnlockAndNotify(mutations);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1371,8 +1329,6 @@ DictionaryValue* Entry::ToValue() const {
                     ModelTypeToValue(GetServerModelTypeHelper()));
     entry_info->Set("modelType",
                     ModelTypeToValue(GetModelType()));
-    entry_info->SetBoolean("shouldMaintainPosition",
-                           ShouldMaintainPosition());
     entry_info->SetBoolean("existsOnClientBecauseNameIsNonEmpty",
                            ExistsOnClientBecauseNameIsNonEmpty());
     entry_info->SetBoolean("isRoot", IsRoot());
@@ -1981,6 +1937,19 @@ Directory::GetParentChildIndexUpperBound(const ScopedKernelLock& lock,
   // bound of |++parent_id|'s range.
   return GetParentChildIndexLowerBound(lock,
       parent_id.GetLexicographicSuccessor());
+}
+
+void Directory::AppendChildHandles(const ScopedKernelLock& lock,
+                                   const Id& parent_id,
+                                   Directory::ChildHandles* result) {
+  typedef ParentIdChildIndex::iterator iterator;
+  CHECK(result);
+  for (iterator i = GetParentChildIndexLowerBound(lock, parent_id),
+           end = GetParentChildIndexUpperBound(lock, parent_id);
+       i != end; ++i) {
+    DCHECK_EQ(parent_id, (*i)->ref(PARENT_ID));
+    result->push_back((*i)->ref(META_HANDLE));
+  }
 }
 
 }  // namespace syncable

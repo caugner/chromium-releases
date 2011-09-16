@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,11 @@
 #include "googleurl/src/gurl.h"
 #include "grit/default_plugin_resources.h"
 #include "grit/webkit_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "unicode/locid.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/default_plugin_shared.h"
@@ -47,7 +49,7 @@ bool PluginInstallerImpl::Initialize(void* module_handle, NPP instance,
   instance_ = instance;
   mime_type_ = mime_type;
 
-  command_ = [l10n_util::FixUpWindowsStyleLabel(webkit_glue::GetLocalizedString(
+  command_ = [l10n_util::FixUpWindowsStyleLabel(l10n_util::GetStringUTF16(
       IDS_DEFAULT_PLUGIN_NO_PLUGIN_AVAILABLE_MSG)) retain];
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -138,7 +140,7 @@ void PluginInstallerImpl::DownloadCancelled() {
 }
 
 int16 PluginInstallerImpl::OnDrawRect(CGContextRef context, CGRect dirty_rect) {
-  [NSGraphicsContext saveGraphicsState];
+  gfx::ScopedNSGraphicsContextSaveGState scoped_state;
   NSGraphicsContext* ns_context = [NSGraphicsContext
       graphicsContextWithGraphicsPort:context flipped:YES];
   [NSGraphicsContext setCurrentContext:ns_context];
@@ -182,7 +184,6 @@ int16 PluginInstallerImpl::OnDrawRect(CGContextRef context, CGRect dirty_rect) {
   label_point = NSMakePoint(roundf(label_point.x), roundf(label_point.y));
   [command_ drawAtPoint:label_point withAttributes:attributes];
 
-  [NSGraphicsContext restoreGraphicsState];
   return 1;
 }
 

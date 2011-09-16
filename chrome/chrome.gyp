@@ -26,7 +26,7 @@
       'debugger',
       'profile_import',
       'renderer',
-      'syncapi',
+      'syncapi_core',
       'utility',
       'service',
       '../content/content.gyp:content_gpu',
@@ -39,6 +39,8 @@
       'common_nacl_win64',
       'common_constants_win64',
       'installer_util_nacl_win64',
+      '../base/base.gyp:base_static_win64',
+      '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
     ],
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
@@ -142,7 +144,6 @@
       # generated headers.
       'target_name': 'chrome_resources',
       'type': 'none',
-      'msvs_guid': 'B95AB527-F7DB-41E9-AD91-EB51EE0F56BE',
       'actions': [
         # Data resources.
         {
@@ -182,7 +183,6 @@
       # of the static libraries currently have circular dependencies among
       # generated headers.
       'target_name': 'chrome_strings',
-      'msvs_guid': 'D9DDAF60-663F-49CC-90DC-3D08CC3D1B28',
       'type': 'none',
       'conditions': [
         ['OS=="win"', {
@@ -232,7 +232,6 @@
     {
       'target_name': 'theme_resources',
       'type': 'none',
-      'msvs_guid' : 'A158FB0A-25E4-6523-6B5A-4BB294B73D31',
       'actions': [
         {
           'action_name': 'theme_resources',
@@ -318,6 +317,13 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
         {
+          'action_name': 'quota_internals_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/quota_internals_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
           'action_name': 'shared_resources',
           'variables': {
             'grit_grd_file': 'browser/resources/shared_resources.grd',
@@ -328,6 +334,13 @@
           'action_name': 'sync_internals_resources',
           'variables': {
             'grit_grd_file': 'browser/resources/sync_internals_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'workers_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/workers_resources.grd',
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
@@ -363,7 +376,7 @@
           # the real inputs/outputs at GYP time isn't possible.
           'variables': {
             'grit_cmd': ['python', '../tools/grit/grit.py'],
-            'frontend_folder': 'browser/debugger/frontend',
+            'frontend_folder': '../content/browser/debugger/frontend',
             'grit_grd_file':
                '<(frontend_folder)/devtools_frontend_resources.grd',
           },
@@ -390,7 +403,6 @@
     {
       'target_name': 'default_extensions',
       'type': 'none',
-      'msvs_guid': 'DA9BAB64-91DC-419B-AFDE-6FF8C569E83A',
       'conditions': [
         ['OS=="win"', {
           'copies': [
@@ -415,15 +427,16 @@
       ],
     },
     {
+      # TODO(joi): Move debugger-related build rules to content/
       'target_name': 'debugger',
       'type': 'static_library',
-      'msvs_guid': '57823D8C-A317-4713-9125-2C91FDFD12D6',
       'dependencies': [
         'chrome_extra_resources',
         'chrome_resources',
         'chrome_strings',
         '../base/base.gyp:base',
         '../net/net.gyp:http_server',
+        '../net/net.gyp:net',
         'theme_resources',
         'theme_resources_standard',
         '../skia/skia.gyp:skia',
@@ -438,16 +451,8 @@
         'browser/debugger/browser_list_tabcontents_provider.h',
         'browser/debugger/debugger_remote_service.cc',
         'browser/debugger/debugger_remote_service.h',
-        'browser/debugger/devtools_client_host.cc',
-        'browser/debugger/devtools_client_host.h',
         'browser/debugger/devtools_file_util.cc',
         'browser/debugger/devtools_file_util.h',
-        'browser/debugger/devtools_http_protocol_handler.cc',
-        'browser/debugger/devtools_http_protocol_handler.h',
-        'browser/debugger/devtools_manager.cc',
-        'browser/debugger/devtools_manager.h',
-        'browser/debugger/devtools_netlog_observer.cc',
-        'browser/debugger/devtools_netlog_observer.h',
         'browser/debugger/devtools_protocol_handler.cc',
         'browser/debugger/devtools_protocol_handler.h',
         'browser/debugger/devtools_remote.h',
@@ -457,8 +462,6 @@
         'browser/debugger/devtools_remote_message.h',
         'browser/debugger/devtools_remote_service.cc',
         'browser/debugger/devtools_remote_service.h',
-        'browser/debugger/devtools_handler.cc',
-        'browser/debugger/devtools_handler.h',
         'browser/debugger/devtools_toggle_action.h',
         'browser/debugger/devtools_window.cc',
         'browser/debugger/devtools_window.h',
@@ -466,6 +469,20 @@
         'browser/debugger/extension_ports_remote_service.h',
         'browser/debugger/inspectable_tab_proxy.cc',
         'browser/debugger/inspectable_tab_proxy.h',
+        '../content/browser/debugger/devtools_client_host.cc',
+        '../content/browser/debugger/devtools_client_host.h',
+        '../content/browser/debugger/devtools_handler.cc',
+        '../content/browser/debugger/devtools_handler.h',
+        '../content/browser/debugger/devtools_http_protocol_handler.cc',
+        '../content/browser/debugger/devtools_http_protocol_handler.h',
+        '../content/browser/debugger/devtools_manager.cc',
+        '../content/browser/debugger/devtools_manager.h',
+        '../content/browser/debugger/devtools_netlog_observer.cc',
+        '../content/browser/debugger/devtools_netlog_observer.h',
+        '../content/browser/debugger/worker_devtools_manager_io.cc',
+        '../content/browser/debugger/worker_devtools_manager_io.h',
+        '../content/browser/debugger/worker_devtools_message_filter.cc',
+        '../content/browser/debugger/worker_devtools_message_filter.h',
       ],
       'conditions': [
         ['toolkit_uses_gtk == 1', {
@@ -478,15 +495,14 @@
     {
       'target_name': 'utility',
       'type': 'static_library',
-      'msvs_guid': '4D2B38E6-65FF-4F97-B88A-E441DF54EBF7',
       'dependencies': [
         '../base/base.gyp:base',
+        '../content/content.gyp:content_utility',
         '../skia/skia.gyp:skia',
       ],
       'sources': [
-        'utility/utility_main.cc',
-        'utility/utility_thread.cc',
-        'utility/utility_thread.h',
+        'utility/chrome_content_utility_client.cc',
+        'utility/chrome_content_utility_client.h',
       ],
       'include_dirs': [
         '..',
@@ -514,7 +530,7 @@
     {
       # Provides a syncapi dynamic library target from checked-in binaries,
       # or from compiling a stub implementation.
-      'target_name': 'syncapi',
+      'target_name': 'syncapi_core',
       'type': 'static_library',
       'sources': [
         'browser/sync/engine/http_post_provider_factory.h',
@@ -534,6 +550,7 @@
         '../base/base.gyp:base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../jingle/jingle.gyp:notifier',
+        '../net/net.gyp:net',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/sqlite/sqlite.gyp:sqlite',
         'app/policy/cloud_policy_codegen.gyp:policy',
@@ -550,6 +567,38 @@
       # This target exports a hard dependency because syncapi.h includes
       # generated proto header files from sync_proto_cpp.
       'hard_dependency': 1,
+    },
+    {
+      # Provides the API that Chrome services use to talk to sync.
+      'target_name': 'syncapi_service',
+      'type': 'static_library',
+      'sources': [
+        'browser/sync/api/syncable_service.cc',
+        'browser/sync/api/syncable_service.h',
+        'browser/sync/api/sync_data.h',
+        'browser/sync/api/sync_data.cc',
+        'browser/sync/api/sync_change.h',
+        'browser/sync/api/sync_change.cc',
+        'browser/sync/api/sync_change_processor.h',
+        'browser/sync/api/sync_change_processor.cc',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        '../base/base.gyp:base',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'sync',
+      ],
+      'export_dependent_settings': [
+        '../base/base.gyp:base',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'sync',
+      ],
+      # Even though this target depends on sync_proto_cpp, it doesn't
+      # need to export a hard dependency since we explicitly avoid
+      # including the generated proto header files from this target's
+      # header files.
     },
     {
       'target_name': 'sync',
@@ -585,6 +634,7 @@
         'browser/sync/engine/net/syncapi_server_connection_manager.h',
         'browser/sync/engine/net/url_translator.cc',
         'browser/sync/engine/net/url_translator.h',
+        'browser/sync/engine/nudge_source.cc',
         'browser/sync/engine/nudge_source.h',
         'browser/sync/engine/polling_constants.cc',
         'browser/sync/engine/polling_constants.h',
@@ -606,8 +656,8 @@
         'browser/sync/engine/syncer_end_command.h',
         'browser/sync/engine/syncer_proto_util.cc',
         'browser/sync/engine/syncer_proto_util.h',
-        'browser/sync/engine/syncer_thread.cc',
-        'browser/sync/engine/syncer_thread.h',
+        'browser/sync/engine/sync_scheduler.cc',
+        'browser/sync/engine/sync_scheduler.h',
         'browser/sync/engine/syncer_types.cc',
         'browser/sync/engine/syncer_types.h',
         'browser/sync/engine/syncer_util.cc',
@@ -620,8 +670,8 @@
         'browser/sync/js_arg_list.cc',
         'browser/sync/js_arg_list.h',
         'browser/sync/js_backend.h',
-        'browser/sync/js_directory_change_listener.cc',
-        'browser/sync/js_directory_change_listener.h',
+        'browser/sync/js_transaction_observer.cc',
+        'browser/sync/js_transaction_observer.h',
         'browser/sync/js_event_details.cc',
         'browser/sync/js_event_details.h',
         'browser/sync/js_event_handler.h',
@@ -647,12 +697,11 @@
         'browser/sync/sessions/sync_session_context.cc',
         'browser/sync/sessions/sync_session_context.h',
         'browser/sync/shared_value.h',
-        'browser/sync/syncable/autofill_migration.h',
         'browser/sync/syncable/blob.h',
         'browser/sync/syncable/dir_open_result.h',
         'browser/sync/syncable/directory_backing_store.cc',
         'browser/sync/syncable/directory_backing_store.h',
-        'browser/sync/syncable/directory_change_listener.h',
+        'browser/sync/syncable/directory_change_delegate.h',
         'browser/sync/syncable/directory_event.h',
         'browser/sync/syncable/directory_manager.cc',
         'browser/sync/syncable/directory_manager.h',
@@ -671,11 +720,14 @@
         'browser/sync/syncable/syncable_id.h',
         'browser/sync/syncable/syncable_enum_conversions.cc',
         'browser/sync/syncable/syncable_enum_conversions.h',
+        'browser/sync/syncable/transaction_observer.h',
         'browser/sync/util/cryptographer.cc',
         'browser/sync/util/cryptographer.h',
         'browser/sync/util/dbgq.h',
         'browser/sync/util/extensions_activity_monitor.cc',
         'browser/sync/util/extensions_activity_monitor.h',
+        'browser/sync/util/logging.cc',
+        'browser/sync/util/logging.h',
         'browser/sync/util/nigori.cc',
         'browser/sync/util/nigori.h',
         'browser/sync/util/user_settings.cc',
@@ -769,6 +821,7 @@
       'dependencies': [
         'sync',
         '../jingle/jingle.gyp:notifier',
+        '../net/net.gyp:net',
         '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation',
       ],
       # This target exports a hard dependency because it depends on
@@ -782,13 +835,13 @@
     {
       'target_name': 'service',
       'type': 'static_library',
-      'msvs_guid': '2DA87614-55C5-4E56-A17E-0CD099786197',
       'dependencies': [
         'chrome_strings',
         'common',
         'common_net',
         '../base/base.gyp:base',
         '../jingle/jingle.gyp:notifier',
+        '../net/net.gyp:net',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
         '../third_party/libjingle/libjingle.gyp:libjingle',
@@ -921,6 +974,14 @@
             'CHROMIUM_SHORT_NAME': '<(branding)',
             'CHROMIUM_STRIP_SAVE_FILE': 'app/app.saves',
             'INFOPLIST_FILE': 'app/helper-Info.plist',
+            # Stop the helper executable from being position-independent
+            # since that turns on ASLR, which breaks NaCl.  ASLR breaks
+            # NaCl's ability to reliably allocate 1GB of address space for
+            # untrusted code to run in.
+            # See http://code.google.com/p/nativeclient/issues/detail?id=2043
+            # TODO(mseaborn): Create a separate helper executable for NaCl
+            # so that the renderer process can still use ASLR.
+	    'OTHER_LDFLAGS!': ['-Wl,-pie'],
           },
           'copies': [
             {
@@ -1009,6 +1070,11 @@
               'variables': {
                 # A real .dSYM is needed for dump_syms to operate on.
                 'mac_real_dsym': 1,
+              },
+              'xcode_settings': {
+                # With mac_real_dsym set, strip_from_xcode won't be used.
+                # Specify CHROMIUM_STRIP_SAVE_FILE directly to Xcode.
+                'STRIPFLAGS': '-s $(CHROMIUM_STRIP_SAVE_FILE)',
               },
             }],
           ],
@@ -1131,7 +1197,7 @@
           'dependencies': [
             'chrome_strings',
             '../base/base.gyp:base',
-            '../app/app.gyp:app_base',
+            '../ui/ui.gyp:ui',
           ],
           'include_dirs': [
             '<(grit_out_dir)',
@@ -1146,7 +1212,6 @@
         {
           'target_name': 'convert_dict',
           'type': 'executable',
-          'msvs_guid': '42ECD5EC-722F-41DE-B6B8-83764C8016DF',
           'dependencies': [
             '../base/base.gyp:base',
             '../base/base.gyp:base_i18n',
@@ -1161,7 +1226,6 @@
           'target_name': 'convert_dict_lib',
           'product_name': 'convert_dict',
           'type': 'static_library',
-          'msvs_guid': '1F669F6B-3F4A-4308-E496-EE480BDF0B89',
           'include_dirs': [
             '..',
           ],
@@ -1180,7 +1244,6 @@
         {
           'target_name': 'flush_cache',
           'type': 'executable',
-          'msvs_guid': '4539AFB3-B8DC-47F3-A491-6DAC8FD26657',
           'dependencies': [
             '../base/base.gyp:base',
             '../base/base.gyp:test_support_base',
@@ -1212,8 +1275,10 @@
                   '<(grit_out_dir)/devtools_resources.pak',
                   '<(grit_out_dir)/options_resources.pak',
                   '<(grit_out_dir)/net_internals_resources.pak',
+                  '<(grit_out_dir)/quota_internals_resources.pak',
                   '<(grit_out_dir)/shared_resources.pak',
                   '<(grit_out_dir)/sync_internals_resources.pak',
+                  '<(grit_out_dir)/workers_resources.pak',
                 ],
               },
               'inputs': [
@@ -1327,6 +1392,7 @@
             '../printing/printing.gyp:*',
             '../sdch/sdch.gyp:*',
             '../skia/skia.gyp:*',
+            '../sql/sql.gyp:*',
             '../testing/gmock.gyp:*',
             '../testing/gtest.gyp:*',
             '../third_party/bsdiff/bsdiff.gyp:*',
@@ -1367,24 +1433,31 @@
           ],
         },
         {
-          'target_name': 'chrome_dll_version',
+          'target_name': 'chrome_version_resources',
           'type': 'none',
-          #'msvs_guid': '414D4D24-5D65-498B-A33F-3A29AD3CDEDC',
           'dependencies': [
             '../build/util/build_util.gyp:lastchange',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version',
+              '<(SHARED_INTERMEDIATE_DIR)/chrome_version',
             ],
           },
-          'actions': [
+          'sources': [
+            'app/chrome_exe.ver',
+            'app/chrome_dll.ver',
+            'app/nacl64_exe.ver',
+            'app/nacl64_dll.ver',
+            'app/other.ver',
+          ],
+          'rules': [
             {
-              'action_name': 'version',
+              'rule_name': 'version',
+              'extension': 'ver',
               'variables': {
                 'lastchange_path':
                   '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
-                'template_input_path': 'app/chrome_dll_version.rc.version',
+                'template_input_path': 'app/chrome_version.rc.version',
               },
               'conditions': [
                 [ 'branding == "Chrome"', {
@@ -1404,11 +1477,12 @@
                 '<(lastchange_path)',
               ],
               'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/chrome_version/<(RULE_INPUT_ROOT)_version.rc',
               ],
               'action': [
                 'python',
                 '<(version_py_path)',
+                '-f', '<(RULE_INPUT_PATH)',
                 '-f', '<(version_path)',
                 '-f', '<(branding_path)',
                 '-f', '<(lastchange_path)',
@@ -1469,7 +1543,6 @@
         {
           'target_name': 'automation',
           'type': 'static_library',
-          'msvs_guid': '1556EF78-C7E6-43C8-951F-F6B43AC0DD12',
           'dependencies': [
             'theme_resources',
             'theme_resources_standard',
@@ -1481,8 +1554,6 @@
             '..',
           ],
           'sources': [
-             'test/automation/autocomplete_edit_proxy.cc',
-             'test/automation/autocomplete_edit_proxy.h',
              'test/automation/automation_handle_tracker.cc',
              'test/automation/automation_handle_tracker.h',
              'test/automation/automation_json_requests.cc',
@@ -1506,7 +1577,6 @@
         {
           'target_name': 'crash_service',
           'type': 'executable',
-          'msvs_guid': '89C1C190-A5D1-4EC4-BD6A-67FF2195C7CC',
           'dependencies': [
             'app/policy/cloud_policy_codegen.gyp:policy',
             'common_constants',
@@ -1555,9 +1625,9 @@
                 '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
                 '<(grit_out_dir)/renderer_resources.pak',
                 '<(grit_out_dir)/theme_resources.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.pak',
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.pak',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
               ],
@@ -1635,9 +1705,3 @@
     }],  # os_posix == 1 and OS != "mac"
   ],  # 'conditions'
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

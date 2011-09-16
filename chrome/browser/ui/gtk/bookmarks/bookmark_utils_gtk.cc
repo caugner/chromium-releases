@@ -245,7 +245,7 @@ std::string BuildTooltipFor(const BookmarkNode* node) {
   if (node->is_folder())
     return std::string();
 
-  return gtk_util::BuildTooltipTitleFor(node->GetTitle(), node->GetURL());
+  return gtk_util::BuildTooltipTitleFor(node->GetTitle(), node->url());
 }
 
 std::string BuildMenuLabelFor(const BookmarkNode* node) {
@@ -256,7 +256,7 @@ std::string BuildMenuLabelFor(const BookmarkNode* node) {
 
   if (elided_name.empty()) {
     elided_name = UTF16ToUTF8(l10n_util::TruncateString(
-        UTF8ToUTF16(node->GetURL().possibly_invalid_spec()),
+        UTF8ToUTF16(node->url().possibly_invalid_spec()),
         kMaxCharsOnAMenuLabel));
   }
 
@@ -290,6 +290,7 @@ int GetCodeMask(bool folder) {
   int rv = ui::CHROME_BOOKMARK_ITEM;
   if (!folder) {
     rv |= ui::TEXT_URI_LIST |
+          ui::TEXT_HTML |
           ui::TEXT_PLAIN |
           ui::NETSCAPE_URL;
   }
@@ -324,7 +325,7 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
     }
     case ui::NETSCAPE_URL: {
       // _NETSCAPE_URL format is URL + \n + title.
-      std::string utf8_text = nodes[0]->GetURL().spec() + "\n" +
+      std::string utf8_text = nodes[0]->url().spec() + "\n" +
           UTF16ToUTF8(nodes[0]->GetTitle());
       gtk_selection_data_set(selection_data,
                              selection_data->target,
@@ -340,7 +341,7 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
         // If the node is a folder, this will be empty. TODO(estade): figure out
         // if there are any ramifications to passing an empty URI. After a
         // little testing, it seems fine.
-        const GURL& url = nodes[i]->GetURL();
+        const GURL& url = nodes[i]->url();
         // This const cast should be safe as gtk_selection_data_set_uris()
         // makes copies.
         uris[i] = const_cast<gchar*>(url.spec().c_str());
@@ -351,9 +352,21 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
       free(uris);
       break;
     }
+    case ui::TEXT_HTML: {
+      std::string utf8_title = UTF16ToUTF8(nodes[0]->GetTitle());
+      std::string utf8_html = StringPrintf("<a href=\"%s\">%s</a>",
+                                           nodes[0]->url().spec().c_str(),
+                                           utf8_title.c_str());
+      gtk_selection_data_set(selection_data,
+                             GetAtomForTarget(ui::TEXT_HTML),
+                             kBitsInAByte,
+                             reinterpret_cast<const guchar*>(utf8_html.data()),
+                             utf8_html.size());
+      break;
+    }
     case ui::TEXT_PLAIN: {
       gtk_selection_data_set_text(selection_data,
-                                  nodes[0]->GetURL().spec().c_str(), -1);
+                                  nodes[0]->url().spec().c_str(), -1);
       break;
     }
     default: {

@@ -16,10 +16,15 @@ namespace internal {
 const char NativeWidgetView::kViewClassName[] = "views/NativeWidgetView";
 
 NativeWidgetView::NativeWidgetView(NativeWidgetViews* native_widget)
-    : native_widget_(native_widget) {
+    : native_widget_(native_widget),
+      sent_create_(false),
+      delete_native_widget_(true) {
 }
 
 NativeWidgetView::~NativeWidgetView() {
+  native_widget_->set_delete_native_view(false);
+  if (delete_native_widget_)
+    delete native_widget_;
 }
 
 Widget* NativeWidgetView::GetAssociatedWidget() {
@@ -29,18 +34,33 @@ Widget* NativeWidgetView::GetAssociatedWidget() {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetView, View overrides:
 
-void NativeWidgetView::ViewHierarchyChanged(bool is_add, View* parent,
+void NativeWidgetView::SchedulePaintInternal(const gfx::Rect& r) {
+  View::SchedulePaintInternal(r);
+}
+
+void NativeWidgetView::MarkLayerDirty() {
+  View::MarkLayerDirty();
+}
+
+void NativeWidgetView::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
+                                                          View** ancestor) {
+  View::CalculateOffsetToAncestorWithLayer(offset, ancestor);
+}
+
+void NativeWidgetView::ViewHierarchyChanged(bool is_add,
+                                            View* parent,
                                             View* child) {
-  if (is_add && child == this)
+  if (is_add && child == this && !sent_create_) {
+    sent_create_ = true;
     delegate()->OnNativeWidgetCreated();
+  }
 }
 
 void NativeWidgetView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-  delegate()->OnSizeChanged(size());
+  delegate()->OnNativeWidgetSizeChanged(size());
 }
 
 void NativeWidgetView::OnPaint(gfx::Canvas* canvas) {
-  canvas->FillRectInt(SK_ColorRED, 0, 0, width(), height());
   delegate()->OnNativeWidgetPaint(canvas);
 }
 
@@ -78,14 +98,9 @@ void NativeWidgetView::OnMouseExited(const MouseEvent& event) {
   delegate()->OnMouseEvent(event);
 }
 
-#if defined(TOUCH_UI)
-View::TouchStatus NativeWidgetView::OnTouchEvent(const TouchEvent& event) {
-  NOTIMPLEMENTED();
-  // TODO(beng): TouchEvents don't go through the Widget right now... so we
-  //             can't just pass them to the delegate...
-  return TOUCH_STATUS_UNKNOWN;
+ui::TouchStatus NativeWidgetView::OnTouchEvent(const TouchEvent& event) {
+  return delegate()->OnTouchEvent(event);
 }
-#endif
 
 bool NativeWidgetView::OnKeyPressed(const KeyEvent& event) {
   return delegate()->OnKeyEvent(event);
@@ -98,6 +113,11 @@ bool NativeWidgetView::OnKeyReleased(const KeyEvent& event) {
 bool NativeWidgetView::OnMouseWheel(const MouseWheelEvent& event) {
   MouseWheelEvent e(event, this);
   return delegate()->OnMouseEvent(event);
+}
+
+void NativeWidgetView::VisibilityChanged(View* starting_from,
+                                         bool visible) {
+  delegate()->OnNativeWidgetVisibilityChanged(visible);
 }
 
 void NativeWidgetView::OnFocus() {
@@ -114,7 +134,48 @@ std::string NativeWidgetView::GetClassName() const {
   return kViewClassName;
 }
 
+void NativeWidgetView::MoveLayerToParent(ui::Layer* parent_layer,
+                                         const gfx::Point& point) {
+  View::MoveLayerToParent(parent_layer, point);
+  if (!layer() || parent_layer == layer()) {
+    gfx::Point new_offset(point);
+    if (layer() != parent_layer)
+      new_offset.Offset(x(), y());
+    GetAssociatedWidget()->GetRootView()->MoveLayerToParent(
+        parent_layer, new_offset);
+  }
+}
+
+void NativeWidgetView::DestroyLayerRecurse() {
+  GetAssociatedWidget()->GetRootView()->DestroyLayerRecurse();
+  View::DestroyLayerRecurse();
+}
+
+void NativeWidgetView::UpdateLayerBounds(const gfx::Point& offset) {
+  View::UpdateLayerBounds(offset);
+  if (!layer()) {
+    gfx::Point new_offset(offset.x() + x(), offset.y() + y());
+    GetAssociatedWidget()->GetRootView()->UpdateLayerBounds(new_offset);
+  }
+}
+
+void NativeWidgetView::PaintToLayer(const gfx::Rect& dirty_rect) {
+  View::PaintToLayer(dirty_rect);
+
+  View* root = GetAssociatedWidget()->GetRootView();
+  gfx::Rect root_dirty_rect = dirty_rect;
+  root->GetTransform().TransformRectReverse(&root_dirty_rect);
+  root_dirty_rect =
+      gfx::Rect(gfx::Point(), root->size()).Intersect(root_dirty_rect);
+
+  if (!root_dirty_rect.IsEmpty())
+    root->PaintToLayer(root_dirty_rect);
+}
+
+void NativeWidgetView::PaintComposite() {
+  View::PaintComposite();
+  GetAssociatedWidget()->GetRootView()->PaintComposite();
+}
 
 }  // namespace internal
 }  // namespace views
-

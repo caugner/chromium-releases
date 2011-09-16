@@ -23,12 +23,15 @@
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
@@ -78,7 +81,7 @@ AutocompleteEditModel::AutocompleteEditModel(
       control_key_state_(UP),
       is_keyword_hint_(false),
       profile_(profile),
-      update_instant_(true),
+      in_revert_(false),
       allow_exact_keyword_match_(false),
       instant_complete_behavior_(INSTANT_COMPLETE_DELAYED) {
 }
@@ -212,22 +215,33 @@ void AutocompleteEditModel::OnChanged() {
   string16 suggested_text;
   TabContentsWrapper* tab = controller_->GetTabContentsWrapper();
   bool might_support_instant = false;
-  if (update_instant_ && instant && tab) {
-    if (user_input_in_progress() && popup_->IsOpen()) {
-      AutocompleteMatch current_match = CurrentMatch();
-      if (current_match.destination_url == PermanentURL()) {
-        // The destination is the same as the current url. This typically
-        // happens if the user presses the down error in the omnibox, in which
-        // case we don't want to load a preview.
-        instant->DestroyPreviewContentsAndLeaveActive();
+  if (!in_revert_ && tab) {
+    if (instant) {
+      if (user_input_in_progress() && popup_->IsOpen()) {
+        AutocompleteMatch current_match = CurrentMatch();
+        if (current_match.destination_url == PermanentURL()) {
+          // The destination is the same as the current url. This typically
+          // happens if the user presses the down error in the omnibox, in which
+          // case we don't want to load a preview.
+          instant->DestroyPreviewContentsAndLeaveActive();
+        } else {
+          instant->Update(tab, current_match, view_->GetText(),
+                          UseVerbatimInstant(), &suggested_text);
+        }
       } else {
-        instant->Update(tab, CurrentMatch(), view_->GetText(),
-                        UseVerbatimInstant(), &suggested_text);
+        instant->DestroyPreviewContents();
       }
-    } else {
-      instant->DestroyPreviewContents();
+      might_support_instant = instant->MightSupportInstant();
+    } else if (user_input_in_progress() && popup_->IsOpen()) {
+      // Start Prerender of this page instead.
+      CHECK(tab->tab_contents());
+      prerender::PrerenderManager* prerender_manager =
+          tab->tab_contents()->profile()->GetPrerenderManager();
+      if (prerender_manager) {
+        prerender_manager->AddPrerenderFromOmnibox(
+            CurrentMatch().destination_url);
+      }
     }
-    might_support_instant = instant->MightSupportInstant();
   }
 
   if (!might_support_instant) {
@@ -398,7 +412,7 @@ void AutocompleteEditModel::StartAutocomplete(
 }
 
 void AutocompleteEditModel::StopAutocomplete() {
-  if (popup_->IsOpen() && update_instant_) {
+  if (popup_->IsOpen() && !in_revert_) {
     InstantController* instant = controller_->GetInstant();
     if (instant && !instant->commit_on_mouse_up())
       instant->DestroyPreviewContents();
@@ -456,20 +470,14 @@ void AutocompleteEditModel::AcceptInput(WindowOpenDisposition disposition,
     match.transition = PageTransition::LINK;
   }
 
-  if (match.type == AutocompleteMatch::SEARCH_WHAT_YOU_TYPED ||
-      match.type == AutocompleteMatch::SEARCH_HISTORY ||
-      match.type == AutocompleteMatch::SEARCH_SUGGEST) {
-    const TemplateURL* default_provider =
-        profile_->GetTemplateURLModel()->GetDefaultSearchProvider();
-    if (default_provider && default_provider->url() &&
-        default_provider->url()->HasGoogleBaseURLs()) {
-      GoogleURLTracker::GoogleURLSearchCommitted();
+  if (match.template_url && match.template_url->url() &&
+      match.template_url->url()->HasGoogleBaseURLs()) {
+    GoogleURLTracker::GoogleURLSearchCommitted();
 #if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
-      // TODO(pastarmovj): Remove these metrics once we have proven that (close
-      // to) none searches that should have RLZ are sent out without one.
-      default_provider->url()->CollectRLZMetrics();
+    // TODO(pastarmovj): Remove these metrics once we have proven that (close
+    // to) none searches that should have RLZ are sent out without one.
+    match.template_url->url()->CollectRLZMetrics();
 #endif
-    }
   }
 
   view_->OpenMatch(match, disposition, alternate_nav_url,
@@ -493,14 +501,15 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
     else if (!has_temporary_text_)
       log.inline_autocompleted_length = inline_autocomplete_text_.length();
     NotificationService::current()->Notify(
-        NotificationType::OMNIBOX_OPENED_URL, Source<Profile>(profile_),
+        chrome::NOTIFICATION_OMNIBOX_OPENED_URL, Source<Profile>(profile_),
         Details<AutocompleteLog>(&log));
   }
 
-  TemplateURLModel* template_url_model = profile_->GetTemplateURLModel();
-  if (template_url_model && !keyword.empty()) {
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(profile_);
+  if (template_url_service && !keyword.empty()) {
     const TemplateURL* const template_url =
-        template_url_model->GetTemplateURLForKeyword(keyword);
+        template_url_service->GetTemplateURLForKeyword(keyword);
 
     // Special case for extension keywords. Don't increment usage count for
     // these.
@@ -523,7 +532,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
 
     if (template_url) {
       UserMetrics::RecordAction(UserMetricsAction("AcceptedKeyword"));
-      template_url_model->IncrementUsageCount(template_url);
+      template_url_service->IncrementUsageCount(template_url);
     }
 
     // NOTE: We purposefully don't increment the usage count of the default
@@ -531,7 +540,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
   }
 
   if (disposition != NEW_BACKGROUND_TAB) {
-    update_instant_ = false;
+    in_revert_ = true;
     view_->RevertAll();  // Revert the box to its unedited state
   }
 
@@ -545,7 +554,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
   InstantController* instant = controller_->GetInstant();
   if (instant && !popup_->IsOpen())
     instant->DestroyPreviewContents();
-  update_instant_ = true;
+  in_revert_ = false;
 }
 
 bool AutocompleteEditModel::AcceptKeyword() {
@@ -582,7 +591,7 @@ const AutocompleteResult& AutocompleteEditModel::result() const {
 void AutocompleteEditModel::OnSetFocus(bool control_down) {
   has_focus_ = true;
   control_key_state_ = control_down ? DOWN_WITHOUT_CHANGE : UP;
-  NotificationService::current()->Notify(NotificationType::OMNIBOX_FOCUSED,
+  NotificationService::current()->Notify(chrome::NOTIFICATION_OMNIBOX_FOCUSED,
                                          Source<AutocompleteEditModel>(this),
                                          NotificationService::NoDetails());
   InstantController* instant = controller_->GetInstant();

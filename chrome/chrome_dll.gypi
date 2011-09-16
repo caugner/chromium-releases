@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -75,11 +75,10 @@
           'conditions': [
             ['OS=="win"', {
               'product_name': 'chrome',
-              'msvs_guid': 'C0A7EE2C-2A6D-45BE-BA78-6D006FDF52D9',
               'dependencies': [
                 # On Windows, link the dependencies (libraries) that make
                 # up actual Chromium functionality into this .dll.
-                'chrome_dll_version',
+                'chrome_version_resources',
                 'chrome_resources',
                 'installer_util_strings',
                 '../content/content.gyp:content_worker',
@@ -96,12 +95,14 @@
                 'app/chrome_dll_resource.h',
                 'app/chrome_main.cc',
                 'app/chrome_main_win.cc',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
+
+                '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
 
                 '../webkit/glue/resources/aliasb.cur',
                 '../webkit/glue/resources/cell.cur',
                 '../webkit/glue/resources/col_resize.cur',
                 '../webkit/glue/resources/copy.cur',
+                '../webkit/glue/resources/none.cur',
                 '../webkit/glue/resources/row_resize.cur',
                 '../webkit/glue/resources/vertical_text.cur',
                 '../webkit/glue/resources/zoom_in.cur',
@@ -112,7 +113,6 @@
                 # their various targets (net.gyp:net_resources, etc.),
                 # but that causes errors in other targets when
                 # resulting .res files get referenced multiple times.
-                '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/autofill_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
@@ -121,6 +121,7 @@
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources_standard.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
 
@@ -219,6 +220,7 @@
                 'app/nibs/ContentBlockedGeolocation.xib',
                 'app/nibs/DownloadItem.xib',
                 'app/nibs/DownloadShelf.xib',
+                'app/nibs/EditSearchEngine.xib',
                 'app/nibs/ExtensionInstalledBubble.xib',
                 'app/nibs/ExtensionInstallPrompt.xib',
                 'app/nibs/ExtensionInstallPromptNoWarnings.xib',
@@ -266,7 +268,7 @@
                 'app/theme/popup_window_animation.pdf',
                 'app/theme/star.pdf',
                 'app/theme/star_lit.pdf',
-                'browser/ui/cocoa/install.sh',
+                'browser/mac/install.sh',
               ],
               'mac_bundle_resources!': [
                 'app/framework-Info.plist',
@@ -319,8 +321,8 @@
                       '<(grit_out_dir)/renderer_resources.pak',
                       '<(grit_out_dir)/theme_resources.pak',
                       '<(grit_out_dir)/theme_resources_standard.pak',
-                      '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
+                      '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
                     ],
@@ -388,6 +390,45 @@
                   ],
                 },
                 {
+                  # This is an exact copy of the above phase, except for two
+                  # changes:
+                  # 1. process_outputs_as_mac_bundle_resources is omitted.
+                  # 2. We pass 'pseudo_locales' instead of 'locales' wherever
+                  #    'locales' is used.
+                  # The result is a build phase that builds all pseudo locales
+                  # but doesn't copy them to the final dll/framework.
+                  'action_name': 'repack_pseudo_locales',
+                  'variables': {
+                    'conditions': [
+                      ['branding=="Chrome"', {
+                        'branding_flag': ['-b', 'google_chrome',],
+                      }, {  # else: branding!="Chrome"
+                        'branding_flag': ['-b', 'chromium',],
+                      }],
+                    ],
+                  },
+                  'inputs': [
+                    'tools/build/repack_locales.py',
+                    # NOTE: Ideally the common command args would be shared
+                    # amongst inputs/outputs/action, but the args include shell
+                    # variables which need to be passed intact, and command
+                    # expansion wants to expand the shell variables. Adding the
+                    # explicit quoting here was the only way it seemed to work.
+                    '>!@(<(repack_locales_cmd) -i <(branding_flag) -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(pseudo_locales))',
+                  ],
+                  'outputs': [
+                    '<(INTERMEDIATE_DIR)/<(pseudo_locales).pak'
+                  ],
+                  'action': [
+                    '<@(repack_locales_cmd)',
+                    '<@(branding_flag)',
+                    '-g', '<(grit_out_dir)',
+                    '-s', '<(SHARED_INTERMEDIATE_DIR)',
+                    '-x', '<(INTERMEDIATE_DIR)',
+                    '<@(pseudo_locales)',
+                  ],
+                },
+                {
                   'action_name': 'repack_resources',
                   'variables': {
                     'pak_inputs': [
@@ -398,6 +439,7 @@
                       '<(grit_out_dir)/options_resources.pak',
                       '<(grit_out_dir)/shared_resources.pak',
                       '<(grit_out_dir)/sync_internals_resources.pak',
+                      '<(grit_out_dir)/workers_resources.pak',
                     ],
                   },
                   'inputs': [
@@ -494,6 +536,23 @@
                       '<(INTERMEDIATE_DIR)/repack/resources.pak'
                   ],
                 },
+                {
+                  'destination': '<(PRODUCT_DIR)/pseudo_locales',
+                  'files': [
+                      '<(INTERMEDIATE_DIR)/<(pseudo_locales).pak'
+                  ],
+                },
+                {
+                  'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/resources',
+                  'files': [],
+                  'conditions': [
+                    ['debug_devtools!=0', {
+                      'files': [
+                         '<(PRODUCT_DIR)/resources/inspector',
+                      ],
+                    }],
+                  ],
+                },
               ],
               'conditions': [
                 ['mac_breakpad==1', {
@@ -527,8 +586,8 @@
                 }],  # mac_breakpad
                 ['mac_keystone==1', {
                   'mac_bundle_resources': [
-                    'browser/ui/cocoa/keystone_promote_preflight.sh',
-                    'browser/ui/cocoa/keystone_promote_postflight.sh',
+                    'browser/mac/keystone_promote_preflight.sh',
+                    'browser/mac/keystone_promote_postflight.sh',
                   ],
                   'postbuilds': [
                     {
@@ -567,7 +626,6 @@
           'target_name': 'chrome_dll_nacl_win64',
           'type': 'shared_library',
           'product_name': 'nacl64',
-          'msvs_guid': 'F5B2D851-1279-4CE1-9386-AB7C6433551B',
           'variables': {
             'chrome_dll_target': 1,
           },
@@ -576,8 +634,9 @@
           ],
           'dependencies': [
             '<@(nacl_win64_dependencies)',
-            'chrome_dll_version',
+            'chrome_version_resources',
             'nacl_win64',
+            '../base/base.gyp:base_i18n_nacl_win64',
           ],
           'defines': [
             '<@(nacl_win64_defines)',
@@ -592,16 +651,17 @@
             'browser/policy/policy_path_parser_win.cc',
             'browser/renderer_host/render_process_host_dummy.cc',
             'common/googleurl_dummy.cc',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome_dll_version/chrome_dll_version.rc',
+
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/nacl64_dll_version.rc',
 
             # TODO:  It would be nice to have these pulled in
             # automatically from direct_dependent_settings in
             # their various targets (net.gyp:net_resources, etc.),
             # but that causes errors in other targets when
             # resulting .res files get referenced multiple times.
-            '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome/autofill_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
 
             # TODO(sgk):  left-over from pre-gyp build, figure out
             # if we still need them and/or how to update to gyp.

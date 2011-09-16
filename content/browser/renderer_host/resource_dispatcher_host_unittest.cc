@@ -78,6 +78,8 @@ static ResourceHostMsg_Request CreateResourceRequest(
   request.request_context = 0;
   request.appcache_host_id = appcache::kNoHostId;
   request.download_to_file = false;
+  request.is_main_frame = true;
+  request.frame_id = 0;
   return request;
 }
 
@@ -151,9 +153,9 @@ class ForwardingFilter : public ResourceMessageFilter {
     : ResourceMessageFilter(
         ChildProcessInfo::GenerateChildProcessUniqueId(),
         ChildProcessInfo::RENDER_PROCESS,
-        &content::MockResourceContext::GetInstance(),
+        content::MockResourceContext::GetInstance(),
         new MockURLRequestContextSelector(
-            content::MockResourceContext::GetInstance().request_context()),
+            content::MockResourceContext::GetInstance()->request_context()),
         NULL),
       dest_(dest) {
     OnChannelConnected(base::GetCurrentProcId());
@@ -273,7 +275,7 @@ class ResourceDispatcherHostTest : public testing::Test,
     DCHECK(!test_fixture_);
     test_fixture_ = this;
     ChildProcessSecurityPolicy::GetInstance()->Add(0);
-    net::URLRequest::RegisterProtocolFactory(
+    net::URLRequest::Deprecated::RegisterProtocolFactory(
         "test",
         &ResourceDispatcherHostTest::Factory);
     EnsureTestSchemeIsAllowed();
@@ -281,9 +283,10 @@ class ResourceDispatcherHostTest : public testing::Test,
   }
 
   virtual void TearDown() {
-    net::URLRequest::RegisterProtocolFactory("test", NULL);
+    net::URLRequest::Deprecated::RegisterProtocolFactory("test", NULL);
     if (!scheme_.empty())
-      net::URLRequest::RegisterProtocolFactory(scheme_, old_factory_);
+      net::URLRequest::Deprecated::RegisterProtocolFactory(
+          scheme_, old_factory_);
 
     EXPECT_TRUE(URLRequestTestDelayedStartJob::DelayedStartQueueEmpty());
     URLRequestTestDelayedStartJob::ClearQueue();
@@ -346,7 +349,7 @@ class ResourceDispatcherHostTest : public testing::Test,
     DCHECK(scheme_.empty());
     DCHECK(!old_factory_);
     scheme_ = scheme;
-    old_factory_ = net::URLRequest::RegisterProtocolFactory(
+    old_factory_ = net::URLRequest::Deprecated::RegisterProtocolFactory(
         scheme_, &ResourceDispatcherHostTest::Factory);
   }
 
@@ -1164,6 +1167,46 @@ TEST_F(ResourceDispatcherHostTest, IgnoreCancelForDownloads) {
 
   while (net::URLRequestTestJob::ProcessOnePendingMessage()) {}
   EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(0));
+}
+
+TEST_F(ResourceDispatcherHostTest, CancelRequestsForContext) {
+  EXPECT_EQ(0, host_.pending_requests());
+
+  int render_view_id = 0;
+  int request_id = 1;
+
+  std::string response("HTTP\n"
+                       "Content-disposition: attachment; filename=foo\n\n");
+  std::string raw_headers(net::HttpUtil::AssembleRawHeaders(response.data(),
+                                                            response.size()));
+  std::string response_data("01234567890123456789\x01foobar");
+
+  SetResponse(raw_headers, response_data);
+  SetResourceType(ResourceType::MAIN_FRAME);
+  HandleScheme("http");
+
+  MakeTestRequest(render_view_id, request_id, GURL("http://example.com/blah"));
+  // Return some data so that the request is identified as a download
+  // and the proper resource handlers are created.
+  EXPECT_TRUE(net::URLRequestTestJob::ProcessOnePendingMessage());
+
+  // And now simulate a cancellation coming from the renderer.
+  ResourceHostMsg_CancelRequest msg(filter_->child_id(), request_id);
+  bool msg_was_ok;
+  host_.OnMessageReceived(msg, filter_.get(), &msg_was_ok);
+
+  // Since the request had already started processing as a download,
+  // the cancellation above should have been ignored and the request
+  // should still be alive.
+  EXPECT_EQ(1, host_.pending_requests());
+
+  // Cancelling by other methods shouldn't work either.
+  host_.CancelRequestsForProcess(render_view_id);
+  EXPECT_EQ(1, host_.pending_requests());
+
+  // Cancelling by context should work.
+  host_.CancelRequestsForContext(&filter_->resource_context());
+  EXPECT_EQ(0, host_.pending_requests());
 }
 
 class DummyResourceHandler : public ResourceHandler {

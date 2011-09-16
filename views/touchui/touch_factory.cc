@@ -14,6 +14,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "ui/base/x/x11_util.h"
 
 namespace {
@@ -21,11 +22,11 @@ namespace {
 // The X cursor is hidden if it is idle for kCursorIdleSeconds seconds.
 int kCursorIdleSeconds = 5;
 
-// Given the TouchParam, return the correspoding valuator index using
+// Given the TouchParam, return the correspoding XIValuatorClassInfo using
 // the X device information through Atom name matching.
-char FindTPValuator(Display* display,
-                    XIDeviceInfo* info,
-                    views::TouchFactory::TouchParam touch_param) {
+XIValuatorClassInfo* FindTPValuator(Display* display,
+                                    XIDeviceInfo* info,
+                                    views::TouchFactory::TouchParam tp) {
   // Lookup table for mapping TouchParam to Atom string used in X.
   // A full set of Atom strings can be found at xserver-properties.h.
   // For Slot ID, See this chromeos revision: http://git.chromium.org/gitweb/?
@@ -38,6 +39,7 @@ char FindTPValuator(Display* display,
     { views::TouchFactory::TP_TOUCH_MAJOR, "Abs MT Touch Major" },
     { views::TouchFactory::TP_TOUCH_MINOR, "Abs MT Touch Minor" },
     { views::TouchFactory::TP_ORIENTATION, "Abs MT Orientation" },
+    { views::TouchFactory::TP_PRESSURE,    "Abs MT Pressure" },
     { views::TouchFactory::TP_SLOT_ID,     "Abs MT Slot ID" },
     { views::TouchFactory::TP_TRACKING_ID, "Abs MT Tracking ID" },
     { views::TouchFactory::TP_LAST_ENTRY, NULL },
@@ -46,14 +48,14 @@ char FindTPValuator(Display* display,
   const char* atom_tp = NULL;
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTouchParamAtom); i++) {
-    if (touch_param == kTouchParamAtom[i].tp) {
+    if (tp == kTouchParamAtom[i].tp) {
       atom_tp = kTouchParamAtom[i].atom;
       break;
     }
   }
 
   if (!atom_tp)
-    return -1;
+    return NULL;
 
   for (int i = 0; i < info->num_classes; i++) {
     if (info->classes[i]->type != XIValuatorClass)
@@ -63,10 +65,10 @@ char FindTPValuator(Display* display,
 
     const char* atom = XGetAtomName(display, v->label);
     if (atom && strcmp(atom, atom_tp) == 0)
-      return v->number;
+      return v;
   }
 
-  return -1;
+  return NULL;
 }
 
 // Setup XInput2 select for the GtkWidget.
@@ -127,6 +129,11 @@ TouchFactory::TouchFactory()
       pointer_device_lookup_(),
       touch_device_list_(),
       slots_used_() {
+#if defined(TOUCH_UI)
+  if (!base::MessagePumpForUI::HasXInput2())
+    return;
+#endif
+
   char nodata[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
   XColor black;
   black.red = black.green = black.blue = 0;
@@ -160,6 +167,11 @@ TouchFactory::TouchFactory()
 }
 
 TouchFactory::~TouchFactory() {
+#if defined(TOUCH_UI)
+  if (!base::MessagePumpForUI::HasXInput2())
+    return;
+#endif
+
   SetCursorVisible(true, false);
   Display* display = ui::GetXDisplay();
   XFreeCursor(display, invisible_cursor_);
@@ -227,7 +239,7 @@ bool TouchFactory::ShouldProcessXI2Event(XEvent* xev) {
     return true;
 
   XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(cookie->data);
-  return pointer_device_lookup_[xiev->sourceid];
+  return pointer_device_lookup_[xiev->deviceid];
 }
 
 void TouchFactory::SetupXI2ForXWindow(Window window) {
@@ -285,8 +297,11 @@ void TouchFactory::SetSlotUsed(int slot, bool used) {
 }
 
 bool TouchFactory::GrabTouchDevices(Display* display, ::Window window) {
-  if (touch_device_list_.empty())
+#if defined(TOUCH_UI)
+  if (!base::MessagePumpForUI::HasXInput2() ||
+      touch_device_list_.empty())
     return true;
+#endif
 
   unsigned char mask[XIMaskLen(XI_LASTEVENT)];
   bool success = true;
@@ -312,6 +327,11 @@ bool TouchFactory::GrabTouchDevices(Display* display, ::Window window) {
 }
 
 bool TouchFactory::UngrabTouchDevices(Display* display) {
+#if defined(TOUCH_UI)
+  if (!base::MessagePumpForUI::HasXInput2())
+    return true;
+#endif
+
   bool success = true;
   for (std::vector<int>::const_iterator iter =
        touch_device_list_.begin();
@@ -323,6 +343,11 @@ bool TouchFactory::UngrabTouchDevices(Display* display) {
 }
 
 void TouchFactory::SetCursorVisible(bool show, bool start_timer) {
+#if defined(TOUCH_UI)
+  if (!base::MessagePumpForUI::HasXInput2())
+    return;
+#endif
+
   // The cursor is going to be shown. Reset the timer for hiding it.
   if (show && start_timer) {
     cursor_timer_.Stop();
@@ -349,6 +374,8 @@ void TouchFactory::SetCursorVisible(bool show, bool start_timer) {
 
 void TouchFactory::SetupValuator() {
   memset(valuator_lookup_, -1, sizeof(valuator_lookup_));
+  memset(touch_param_min_, 0, sizeof(touch_param_min_));
+  memset(touch_param_max_, 0, sizeof(touch_param_max_));
 
   Display* display = ui::GetXDisplay();
   int ndevice;
@@ -360,9 +387,14 @@ void TouchFactory::SetupValuator() {
     if (!IsTouchDevice(info->deviceid))
       continue;
 
-    for (int i = 0; i < TP_LAST_ENTRY; i++) {
-      TouchParam tp = static_cast<TouchParam>(i);
-      valuator_lookup_[info->deviceid][i] = FindTPValuator(display, info, tp);
+    for (int j = 0; j < TP_LAST_ENTRY; j++) {
+      TouchParam tp = static_cast<TouchParam>(j);
+      XIValuatorClassInfo* valuator = FindTPValuator(display, info, tp);
+      if (valuator) {
+        valuator_lookup_[info->deviceid][j] = valuator->number;
+        touch_param_min_[info->deviceid][j] = valuator->min;
+        touch_param_max_[info->deviceid][j] = valuator->max;
+      }
     }
   }
 
@@ -382,6 +414,31 @@ bool TouchFactory::ExtractTouchParam(const XEvent& xev,
     return true;
   }
 
+  return false;
+}
+
+bool TouchFactory::NormalizeTouchParam(unsigned int deviceid,
+                                       TouchParam tp,
+                                       float* value) {
+  float max_value;
+  float min_value;
+  if (GetTouchParamRange(deviceid, tp, &min_value, &max_value)) {
+    *value = (*value - min_value) / (max_value - min_value);
+    DCHECK(*value >= 0.0 && *value <= 1.0);
+    return true;
+  }
+  return false;
+}
+
+bool TouchFactory::GetTouchParamRange(unsigned int deviceid,
+                                      TouchParam tp,
+                                      float* min,
+                                      float* max) {
+  if (valuator_lookup_[deviceid][tp] >= 0) {
+    *min = touch_param_min_[deviceid][tp];
+    *max = touch_param_max_[deviceid][tp];
+    return true;
+  }
   return false;
 }
 

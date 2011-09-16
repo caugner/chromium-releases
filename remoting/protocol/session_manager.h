@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// The purprose of SessionManager is to facilitate creation of chromotocol
+// The purpose of SessionManager is to facilitate creation of chromotocol
 // sessions. Both host and client use it to establish chromotocol
 // sessions. JingleChromotocolServer implements this inteface using
 // libjingle.
 //
 // OUTGOING SESSIONS
 // Connect() must be used to create new session to a remote host. The
-// returned sessionion is initially in INITIALIZING state. Later state is
-// changed to CONNECTED if the session is accepted by the host or CLOSED
-// if the session is rejected.
+// returned session is initially in INITIALIZING state. Later state is
+// changed to CONNECTED if the session is accepted by the host or
+// CLOSED if the session is rejected.
 //
 // INCOMING SESSIONS
 // The IncomingSessionCallback is called when a client attempts to connect.
@@ -19,12 +19,11 @@
 // rejected.
 //
 // SESSION OWNERSHIP AND SHUTDOWN
-// SessionManager owns all Chromotocol Session it creates. The server
-// must not be closed while sessions created by the server are still in use.
-// When shutting down the Close() method for the sessionion and the server
-// objects must be called in the following order: Session,
-// SessionManager, JingleClient. The same order must be followed in the case
-// of rejected and failed sessions.
+// SessionManager owns all Sessions it creates. The manager must not
+// be closed or destroyed before all sessions created by that
+// SessionManager are destroyed. Caller owns Sessions created by a
+// SessionManager (except rejected sessions). Sessions must outlive
+// SessionManager, and SignalStrategy must outlive SessionManager.
 //
 // PROTOCOL VERSION NEGOTIATION
 // When client connects to a host it sends a session-initiate stanza with list
@@ -50,60 +49,98 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/threading/non_thread_safe.h"
 #include "remoting/protocol/session.h"
 
 class Task;
 
+namespace crypto {
+class RSAPrivateKey;
+}  // namespace base
+
 namespace remoting {
+
+class SignalStrategy;
+
 namespace protocol {
 
 // Generic interface for Chromoting session manager.
-class SessionManager : public base::RefCountedThreadSafe<SessionManager> {
+//
+// TODO(sergeyu): Split this into two separate interfaces: one for the
+// client side and one for the host side.
+class SessionManager : public base::NonThreadSafe {
  public:
+  SessionManager() { }
+  virtual ~SessionManager() { }
+
   enum IncomingSessionResponse {
     ACCEPT,
     INCOMPATIBLE,
     DECLINE,
   };
 
-  // IncomingSessionCallback is called when a new session is received. If
-  // the callback decides to accept the session it should set the second
-  // argument to ACCEPT. Otherwise it should set it to DECLINE, or
-  // INCOMPATIBLE. INCOMPATIBLE indicates that the session has incompatible
-  // configuration, and cannot be accepted.
-  // If the callback accepts session then it must also set configuration
-  // for the new session using Session::set_config().
-  typedef Callback2<Session*, IncomingSessionResponse*>::Type
-      IncomingSessionCallback;
+  class Listener {
+   public:
+    Listener() { }
+    ~Listener() { }
 
-  // Tries to create a session to the host |jid|.
+    // Called when the session manager has finished
+    // initialization. May be called from Init() or after Init()
+    // returns. Outgoing connections can be created after this method
+    // is called.
+    virtual void OnSessionManagerInitialized() = 0;
+
+    // Called when a new session is received. If the host decides to
+    // accept the session it should set the |response| to
+    // ACCEPT. Otherwise it should set it to DECLINE, or
+    // INCOMPATIBLE. INCOMPATIBLE indicates that the session has
+    // incompatible configuration, and cannot be accepted. If the
+    // callback accepts the |session| then it must also set
+    // configuration for the |session| using Session::set_config().
+    // The callback must take ownership of the |session| if it ACCEPTs it.
+    virtual void OnIncomingSession(Session* session,
+                                   IncomingSessionResponse* response) = 0;
+  };
+
+  // Initializes the session client. Caller retains ownership of the
+  // |signal_strategy| and |listener|. |allow_nat_traversal| must be
+  // set to true to enable NAT traversal. STUN/Relay servers are not
+  // used when NAT traversal is disabled, so P2P connection will work
+  // only when both peers are on the same network. If this object is
+  // used in server mode, then |private_key| and |certificate| are
+  // used to establish a secured communication with the client. It
+  // will also take ownership of these objects. On the client side
+  // pass in NULL for |private_key| and empty string for
+  // |certificate|.
+  virtual void Init(const std::string& local_jid,
+                    SignalStrategy* signal_strategy,
+                    Listener* listener,
+                    crypto::RSAPrivateKey* private_key,
+                    const std::string& certificate,
+                    bool allow_nat_traversal) = 0;
+
+  // Tries to create a session to the host |jid|. Must be called only
+  // after initialization has finished successfully, i.e. after
+  // Listener::OnInitialized() has been called.
   //
   // |host_jid| is the full jid of the host to connect to.
-  // |host_public_key| is used to encrypt the client authentication token.
+  // |host_public_key| is used to for authentication.
   // |client_oauth_token| is a short-lived OAuth token identify the client.
   // |config| contains the session configurations that the client supports.
   // |state_change_callback| is called when the connection state changes.
   //
-  // This function may be called from any thread. The |state_change_callback|
-  // is invoked on the network thread.
-  //
   // Ownership of the |config| is passed to the new session.
-  virtual scoped_refptr<Session> Connect(
+  virtual Session* Connect(
       const std::string& host_jid,
+      const std::string& host_public_key,
       const std::string& client_token,
       CandidateSessionConfig* config,
       Session::StateChangeCallback* state_change_callback) = 0;
 
-  // Close session manager and all current sessions. |close_task| is executed
-  // after the session client is actually closed. No callbacks are called after
-  // |closed_task| is executed.
-  virtual void Close(Task* closed_task) = 0;
-
- protected:
-  friend class base::RefCountedThreadSafe<SessionManager>;
-
-  SessionManager() { }
-  virtual ~SessionManager() { }
+  // Close session manager. Can be called only after all corresponding
+  // sessions are destroyed. No callbacks are called after this method
+  // returns.
+  virtual void Close() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionManager);

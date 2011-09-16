@@ -24,6 +24,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
 
 using WebKit::WebAccessibilityCache;
 using WebKit::WebAccessibilityRole;
@@ -318,17 +319,17 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
   location = src.boundingBoxRect();
 
   if (src.actionVerb().length())
-    attributes[ATTR_ACTION] = src.actionVerb();
+    string_attributes[ATTR_ACTION] = src.actionVerb();
   if (src.accessibilityDescription().length())
-    attributes[ATTR_DESCRIPTION] = src.accessibilityDescription();
+    string_attributes[ATTR_DESCRIPTION] = src.accessibilityDescription();
   if (src.helpText().length())
-    attributes[ATTR_HELP] = src.helpText();
+    string_attributes[ATTR_HELP] = src.helpText();
   if (src.keyboardShortcut().length())
-    attributes[ATTR_SHORTCUT] = src.keyboardShortcut();
+    string_attributes[ATTR_SHORTCUT] = src.keyboardShortcut();
   if (src.hasComputedStyle())
-    attributes[ATTR_DISPLAY] = src.computedStyleDisplay();
+    string_attributes[ATTR_DISPLAY] = src.computedStyleDisplay();
   if (!src.url().isEmpty())
-    attributes[ATTR_URL] = src.url().spec().utf16();
+    string_attributes[ATTR_URL] = src.url().spec().utf16();
 
   WebKit::WebNode node = src.node();
   bool is_iframe = false;
@@ -340,7 +341,8 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
     // TODO(ctguil): The tagName in WebKit is lower cased but
     // HTMLElement::nodeName calls localNameUpper. Consider adding
     // a WebElement method that returns the original lower cased tagName.
-    attributes[ATTR_HTML_TAG] = StringToLowerASCII(string16(element.tagName()));
+    string_attributes[ATTR_HTML_TAG] =
+        StringToLowerASCII(string16(element.tagName()));
     for (unsigned i = 0; i < element.attributes().length(); i++) {
       html_attributes.push_back(
           std::pair<string16, string16>(
@@ -351,13 +353,18 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
     if (element.isFormControlElement()) {
       WebKit::WebFormControlElement form_element =
           element.to<WebKit::WebFormControlElement>();
-      if (form_element.formControlType() == ASCIIToUTF16("text")) {
-        WebKit::WebInputElement input_element =
-            form_element.to<WebKit::WebInputElement>();
-        attributes[ATTR_TEXT_SEL_START] = base::IntToString16(
-            input_element.selectionStart());
-        attributes[ATTR_TEXT_SEL_END] = base::IntToString16(
-            input_element.selectionEnd());
+      if (form_element.formControlType() == ASCIIToUTF16("text") ||
+          form_element.formControlType() == ASCIIToUTF16("textarea")) {
+        // Jaws gets confused by children of text fields, so we ignore them.
+        include_children = false;
+
+        int_attributes[ATTR_TEXT_SEL_START] = src.selectionStart();
+        int_attributes[ATTR_TEXT_SEL_END] = src.selectionEnd();
+        WebKit::WebVector<int> src_line_breaks;
+        src.lineBreaks(src_line_breaks);
+        line_breaks.reserve(src_line_breaks.size());
+        for (size_t i = 0; i < src_line_breaks.size(); i++)
+          line_breaks.push_back(src_line_breaks[i]);
       }
     }
   }
@@ -367,20 +374,46 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
     const WebKit::WebDocument& document = src.document();
     if (name.empty())
       name = document.title();
-    attributes[ATTR_DOC_TITLE] = document.title();
-    attributes[ATTR_DOC_URL] = document.frame()->url().spec().utf16();
+    string_attributes[ATTR_DOC_TITLE] = document.title();
+    string_attributes[ATTR_DOC_URL] = document.url().spec().utf16();
     if (document.isXHTMLDocument())
-      attributes[ATTR_DOC_MIMETYPE] = WebKit::WebString("text/xhtml");
+      string_attributes[ATTR_DOC_MIMETYPE] = WebKit::WebString("text/xhtml");
     else
-      attributes[ATTR_DOC_MIMETYPE] = WebKit::WebString("text/html");
+      string_attributes[ATTR_DOC_MIMETYPE] = WebKit::WebString("text/html");
 
     const WebKit::WebDocumentType& doctype = document.doctype();
     if (!doctype.isNull())
-      attributes[ATTR_DOC_DOCTYPE] = doctype.name();
+      string_attributes[ATTR_DOC_DOCTYPE] = doctype.name();
 
     const gfx::Size& scroll_offset = document.frame()->scrollOffset();
-    attributes[ATTR_DOC_SCROLLX] = base::IntToString16(scroll_offset.width());
-    attributes[ATTR_DOC_SCROLLY] = base::IntToString16(scroll_offset.height());
+    int_attributes[ATTR_DOC_SCROLLX] = scroll_offset.width();
+    int_attributes[ATTR_DOC_SCROLLY] = scroll_offset.height();
+  }
+
+  if (role == WebAccessibility::ROLE_TABLE) {
+    int column_count = src.columnCount();
+    int row_count = src.rowCount();
+    if (column_count > 0 && row_count > 0) {
+      int_attributes[ATTR_TABLE_COLUMN_COUNT] = column_count;
+      int_attributes[ATTR_TABLE_ROW_COUNT] = row_count;
+      for (int i = 0; i < column_count * row_count; i++) {
+        WebAccessibilityObject cell = src.cellForColumnAndRow(
+            i % column_count, i / column_count);
+        int cell_id = -1;
+        if (!cell.isNull())
+          cell_id = cache->addOrGetId(cell);
+        cell_ids.push_back(cell_id);
+      }
+    }
+  }
+
+  if (role == WebAccessibility::ROLE_CELL ||
+      role == WebAccessibility::ROLE_ROW_HEADER ||
+      role == WebAccessibility::ROLE_COLUMN_HEADER) {
+    int_attributes[ATTR_TABLE_CELL_COLUMN_INDEX] = src.cellColumnIndex();
+    int_attributes[ATTR_TABLE_CELL_COLUMN_SPAN] = src.cellColumnSpan();
+    int_attributes[ATTR_TABLE_CELL_ROW_INDEX] = src.cellRowIndex();
+    int_attributes[ATTR_TABLE_CELL_ROW_SPAN] = src.cellRowSpan();
   }
 
   // Add the source object to the cache and store its id.

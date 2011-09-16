@@ -134,7 +134,7 @@ class ThumbnailGenerator : public NotificationObserver,
       const gfx::Size& size);
 
   // NotificationObserver interface.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -152,8 +152,6 @@ class ThumbnailGenerator : public NotificationObserver,
   typedef std::map<int,
                    linked_ptr<AsyncRequestInfo> > ThumbnailCallbackMap;
   ThumbnailCallbackMap callback_map_;
-
-  TabContentsObserver::Registrar tab_contents_observer_registrar_;
 
   bool load_interrupted_;
 

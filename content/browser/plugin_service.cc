@@ -14,16 +14,15 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/content_browser_client.h"
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/resource_context.h"
+#include "content/common/content_notification_types.h"
+#include "content/common/content_switches.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "content/common/pepper_plugin_registry.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
@@ -103,17 +102,9 @@ PluginService::PluginService()
 #elif defined(OS_MACOSX)
   // We need to know when the browser comes forward so we can bring modal plugin
   // windows forward too.
-  registrar_.Add(this, NotificationType::APP_ACTIVATED,
+  registrar_.Add(this, content::NOTIFICATION_APP_ACTIVATED,
                  NotificationService::AllSources());
 #elif defined(OS_POSIX)
-  // Also find plugins in a user-specific plugins dir,
-  // e.g. ~/.config/chromium/Plugins.
-  FilePath user_data_dir;
-  if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
-    webkit::npapi::PluginList::Singleton()->AddExtraPluginDir(
-        user_data_dir.Append("Plugins"));
-  }
-
 // The FilePathWatcher produces too many false positives on MacOS (access time
 // updates?) which will lead to enforcing updates of the plugins way too often.
 // On ChromeOS the user can't install plugins anyway and on Windows all
@@ -143,10 +134,10 @@ PluginService::PluginService()
     file_watchers_.push_back(watcher);
   }
 #endif
-  registrar_.Add(this, NotificationType::PLUGIN_ENABLE_STATUS_CHANGED,
+  registrar_.Add(this, content::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
                  NotificationService::AllSources());
   registrar_.Add(this,
-                 NotificationType::RENDERER_PROCESS_CLOSED,
+                 content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                  NotificationService::AllSources());
 }
 
@@ -399,24 +390,24 @@ void PluginService::OnWaitableEventSignaled(
 #endif  // defined(OS_WIN)
 }
 
-void PluginService::Observe(NotificationType type,
+void PluginService::Observe(int type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  switch (type.value) {
+  switch (type) {
 #if defined(OS_MACOSX)
-    case NotificationType::APP_ACTIVATED: {
+    case content::NOTIFICATION_APP_ACTIVATED: {
       BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                               NewRunnableFunction(&NotifyPluginsOfActivation));
       break;
     }
 #endif
 
-    case NotificationType::PLUGIN_ENABLE_STATUS_CHANGED: {
+    case content::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED: {
       webkit::npapi::PluginList::Singleton()->RefreshPlugins();
       PurgePluginListCache(false);
       break;
     }
-    case NotificationType::RENDERER_PROCESS_CLOSED: {
+    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
       int render_process_id = Source<RenderProcessHost>(source).ptr()->id();
 
       base::AutoLock auto_lock(overridden_plugins_lock_);

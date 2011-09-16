@@ -9,7 +9,7 @@
 #include "chrome/browser/ui/views/tabs/dragged_tab_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "views/widget/root_view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 #if defined(OS_WIN)
 // GET_X_LPARAM, et al.
@@ -136,7 +136,7 @@ void BaseTabStrip::AddTabAt(int model_index, const TabRendererData& data) {
 
   // Don't animate the first tab, it looks weird, and don't animate anything
   // if the containing window isn't visible yet.
-  if (tab_count() > 1 && GetWindow() && GetWindow()->IsVisible())
+  if (tab_count() > 1 && GetWidget() && GetWidget()->IsVisible())
     StartInsertTabAnimation(model_index);
   else
     DoLayout();
@@ -160,7 +160,7 @@ void BaseTabStrip::SetTabData(int model_index, const TabRendererData& data) {
   tab->SetData(data);
 
   if (mini_state_changed) {
-    if (GetWindow() && GetWindow()->IsVisible())
+    if (GetWidget() && GetWidget()->IsVisible())
       StartMiniTabAnimation();
     else
       DoLayout();
@@ -559,11 +559,10 @@ BaseTab* BaseTabStrip::GetTabAtLocal(const gfx::Point& local_point) {
     return NULL;  // No tab contains the point.
 
   // Walk up the view hierarchy until we find a tab, or the TabStrip.
-  while (view && view != this && view->GetID() != VIEW_ID_TAB)
+  while (view && view != this && view->id() != VIEW_ID_TAB)
     view = view->parent();
 
-  return view && view->GetID() == VIEW_ID_TAB ?
-      static_cast<BaseTab*>(view) : NULL;
+  return view && view->id() == VIEW_ID_TAB ? static_cast<BaseTab*>(view) : NULL;
 }
 
 void BaseTabStrip::StoppedDraggingTab(BaseTab* tab, bool* is_first_tab) {

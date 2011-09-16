@@ -73,13 +73,6 @@ bool MockRenderProcessHost::FastShutdownIfPossible() {
   return true;
 }
 
-bool MockRenderProcessHost::SendWithTimeout(IPC::Message* msg, int timeout_ms) {
-  // Save the message in the sink. Just ignore timeout_ms.
-  sink_.OnMessageReceived(*msg);
-  delete msg;
-  return true;
-}
-
 base::ProcessHandle MockRenderProcessHost::GetHandle() {
   return base::kNullProcessHandle;
 }
@@ -108,6 +101,11 @@ TransportDIB* MockRenderProcessHost::GetTransportDIB(TransportDIB::Id dib_id) {
 #endif
 
   return transport_dib_;
+}
+
+void MockRenderProcessHost::SetCompositingSurface(
+    int render_widget_id,
+    gfx::PluginWindowHandle compositing_surface) {
 }
 
 bool MockRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {

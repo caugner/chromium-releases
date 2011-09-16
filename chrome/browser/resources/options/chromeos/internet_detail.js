@@ -63,7 +63,7 @@ cr.define('options.internet', function() {
           cr.doc.querySelectorAll('#detailsInternetPage .vpn-details'),
           !this.vpn);
 
-      // Cell plan related
+      // Cell plan related.
       $('planList').hidden = this.cellplanloading;
       updateHidden(
           cr.doc.querySelectorAll('#detailsInternetPage .no-plan-info'),
@@ -80,10 +80,20 @@ cr.define('options.internet', function() {
       updateHidden(
           cr.doc.querySelectorAll('#detailsInternetPage .cdma-only'),
           !this.cellular || this.gsm);
+      updateHidden(
+          cr.doc.querySelectorAll('#detailsInternetPage .apn-list-view'),
+          !this.cellular || !this.gsm);
+      updateHidden(
+          cr.doc.querySelectorAll('#detailsInternetPage .apn-details-view'),
+          true);
 
+      // Password and shared.
       updateHidden(
           cr.doc.querySelectorAll('#detailsInternetPage .password-details'),
           !this.wireless || !this.password);
+      updateHidden(
+          cr.doc.querySelectorAll('#detailsInternetPage .shared-network'),
+          !this.shared);
     }
   };
 
@@ -100,6 +110,14 @@ cr.define('options.internet', function() {
    * @type {boolean}
    */
   cr.defineProperty(DetailsInternetPage, 'wireless',
+      cr.PropertyKind.JS,
+      DetailsInternetPage.prototype.updateControls_);
+
+  /**
+   * Whether the underlying network shared wifi. Only used for display purpose.
+   * @type {boolean}
+   */
+  cr.defineProperty(DetailsInternetPage, 'shared',
       cr.PropertyKind.JS,
       DetailsInternetPage.prototype.updateControls_);
 

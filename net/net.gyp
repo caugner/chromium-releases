@@ -9,7 +9,7 @@
   'targets': [
     {
       'target_name': 'net',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
@@ -60,6 +60,8 @@
         'base/cookie_options.h',
         'base/cookie_store.cc',
         'base/cookie_store.h',
+        'base/crl_filter.cc',
+        'base/crl_filter.h',
         'base/crypto_module.h',
         'base/crypto_module_nss.cc',
         'base/crypto_module_openssl.cc',
@@ -145,6 +147,7 @@
         'base/net_util_win.cc',
         'base/network_change_notifier.cc',
         'base/network_change_notifier.h',
+        'base/network_change_notifier_factory.h',
         'base/network_change_notifier_linux.cc',
         'base/network_change_notifier_linux.h',
         'base/network_change_notifier_mac.cc',
@@ -161,6 +164,9 @@
         'base/nss_memio.h',
         'base/openssl_memory_private_key_store.cc',
         'base/openssl_private_key_store.h',
+        'base/origin_bound_cert_service.cc',
+        'base/origin_bound_cert_service.h',
+        'base/origin_bound_cert_store.h',
         'base/pem_tokenizer.cc',
         'base/pem_tokenizer.h',
         'base/platform_mime_util.h',
@@ -168,6 +174,7 @@
         'base/platform_mime_util_linux.cc',
         'base/platform_mime_util_mac.cc',
         'base/platform_mime_util_win.cc',
+        'base/rand_callback.h',
         'base/registry_controlled_domain.cc',
         'base/registry_controlled_domain.h',
         'base/scoped_cert_chain_context.h',
@@ -175,6 +182,8 @@
         'base/sdch_filter.h',
         'base/sdch_manager.cc',
         'base/sdch_manager.h',
+        'base/single_request_host_resolver.cc',
+        'base/single_request_host_resolver.h',
         'base/ssl_cert_request_info.cc',
         'base/ssl_cert_request_info.h',
         'base/ssl_cipher_suite_names.cc',
@@ -190,6 +199,8 @@
         'base/ssl_info.h',
         'base/static_cookie_policy.cc',
         'base/static_cookie_policy.h',
+        'base/test_data_stream.cc',
+        'base/test_data_stream.h',
         'base/test_root_certs.cc',
         'base/test_root_certs.h',
         'base/test_root_certs_mac.cc',
@@ -217,8 +228,8 @@
         'base/x509_cert_types.cc',
         'base/x509_cert_types.h',
         'base/x509_cert_types_mac.cc',
-        'base/x509_openssl_util.cc',
-        'base/x509_openssl_util.h',
+        'base/x509_util_openssl.cc',
+        'base/x509_util_openssl.h',
         'disk_cache/addr.cc',
         'disk_cache/addr.h',
         'disk_cache/backend_impl.cc',
@@ -276,6 +287,14 @@
         'disk_cache/storage_block.h',
         'disk_cache/trace.cc',
         'disk_cache/trace.h',
+        'dns/async_host_resolver.cc',
+        'dns/async_host_resolver.h',
+        'dns/dns_query.cc',
+        'dns/dns_query.h',
+        'dns/dns_response.cc',
+        'dns/dns_response.h',
+        'dns/dns_transaction.cc',
+        'dns/dns_transaction.h',
         'ftp/ftp_auth_cache.cc',
         'ftp/ftp_auth_cache.h',
         'ftp/ftp_ctrl_response_buffer.cc',
@@ -465,6 +484,7 @@
         'proxy/proxy_server.h',
         'proxy/proxy_service.cc',
         'proxy/proxy_service.h',
+        'proxy/sync_host_resolver.h',
         'proxy/sync_host_resolver_bridge.cc',
         'proxy/sync_host_resolver_bridge.h',
         'socket/client_socket_factory.cc',
@@ -526,6 +546,8 @@
         'socket/tcp_server_socket_win.h',
         'socket/transport_client_socket_pool.cc',
         'socket/transport_client_socket_pool.h',
+        'socket/web_socket_server_socket.cc',
+        'socket/web_socket_server_socket.h',
         'socket_stream/socket_stream.cc',
         'socket_stream/socket_stream.h',
         'socket_stream/socket_stream_job.cc',
@@ -556,6 +578,8 @@
         'spdy/spdy_settings_storage.h',
         'spdy/spdy_stream.cc',
         'spdy/spdy_stream.h',
+        'spdy/spdy_websocket_stream.cc',
+        'spdy/spdy_websocket_stream.h',
         'third_party/mozilla_security_manager/nsKeygenHandler.cpp',
         'third_party/mozilla_security_manager/nsKeygenHandler.h',
         'third_party/mozilla_security_manager/nsNSSCertificateDB.cpp',
@@ -627,14 +651,8 @@
         'url_request/url_request_throttler_manager.h',
         'url_request/view_cache_helper.cc',
         'url_request/view_cache_helper.h',
-        'websockets/websocket.cc',
-        'websockets/websocket.h',
         'websockets/websocket_frame_handler.cc',
         'websockets/websocket_frame_handler.h',
-        'websockets/websocket_handshake.cc',
-        'websockets/websocket_handshake.h',
-        'websockets/websocket_handshake_draft75.cc',
-        'websockets/websocket_handshake_draft75.h',
         'websockets/websocket_handshake_handler.cc',
         'websockets/websocket_handshake_handler.h',
         'websockets/websocket_job.cc',
@@ -643,6 +661,9 @@
         'websockets/websocket_net_log_params.h',
         'websockets/websocket_throttle.cc',
         'websockets/websocket_throttle.h',
+      ],
+      'defines': [
+        'NET_IMPLEMENTATION',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
@@ -718,8 +739,8 @@
               'base/openssl_private_key_store.h',
               'base/test_root_certs_openssl.cc',
               'base/x509_certificate_openssl.cc',
-              'base/x509_openssl_util.cc',
-              'base/x509_openssl_util.h',
+              'base/x509_util_openssl.cc',
+              'base/x509_util_openssl.h',
               'socket/ssl_client_socket_openssl.cc',
               'socket/ssl_client_socket_openssl.h',
               'socket/ssl_server_socket_openssl.cc',
@@ -743,6 +764,13 @@
                 'dependencies': [
                   '../build/linux/system.gyp:ssl',
                 ],
+              }],
+              ['OS=="solaris"', {
+                'link_settings': {
+                  'ldflags': [
+                    '-R/usr/lib/mps',
+                  ],
+                },
               }],
             ],
           },
@@ -777,15 +805,12 @@
               'udp/udp_socket_libevent.h',
             ],
             'dependencies': [
+              '../third_party/nss/nss.gyp:nspr',
               '../third_party/nss/nss.gyp:nss',
               'third_party/nss/ssl.gyp:ssl',
               'tld_cleanup',
             ],
-          },
-          {  # else: OS != "win"
-            'dependencies': [
-              '../third_party/libevent/libevent.gyp:libevent',
-            ],
+          }, { # else: OS != "win"
             'sources!': [
               'base/winsock_init.cc',
               'base/winsock_init.h',
@@ -798,6 +823,7 @@
         ],
         [ 'OS == "mac"', {
             'dependencies': [
+              '../third_party/nss/nss.gyp:nspr',
               '../third_party/nss/nss.gyp:nss',
               'third_party/nss/ssl.gyp:ssl',
             ],
@@ -808,6 +834,19 @@
                 '$(SDKROOT)/usr/lib/libresolv.dylib',
               ]
             },
+          },
+        ],
+        [ 'OS == "android"', {
+            'defines': [
+              # Android can shut down our app at any time, so we persist session cookies.
+              'ENABLE_PERSISTENT_SESSION_COOKIES'
+            ],
+          }, {  # else OS! = "android"
+            'defines': [
+              # These are the features Android doesn't support.
+              'ENABLE_MEDIA_CODEC_THEORA',
+              'ENABLE_MEDIA_TYPE_OGG',
+            ],
           },
         ],
       ],
@@ -827,13 +866,13 @@
         '../testing/gtest.gyp:gtest',
         '../third_party/zlib/zlib.gyp:zlib',
       ],
-      'msvs_guid': 'E99DA267-BE90-4F45-88A1-6919DB2C7567',
       'sources': [
         'base/address_list_unittest.cc',
         'base/backoff_entry_unittest.cc',
         'base/cert_database_nss_unittest.cc',
         'base/cert_verifier_unittest.cc',
         'base/cookie_monster_unittest.cc',
+        'base/crl_filter_unittest.cc',
         'base/data_url_unittest.cc',
         'base/directory_lister_unittest.cc',
         'base/dnssec_unittest.cc',
@@ -862,6 +901,7 @@
         'base/registry_controlled_domain_unittest.cc',
         'base/run_all_unittests.cc',
         'base/sdch_filter_unittest.cc',
+        'base/single_request_host_resolver_unittest.cc',
         'base/ssl_cipher_suite_names_unittest.cc',
         'base/ssl_client_auth_cache_unittest.cc',
         'base/ssl_config_service_unittest.cc',
@@ -883,6 +923,10 @@
         'disk_cache/entry_unittest.cc',
         'disk_cache/mapped_file_unittest.cc',
         'disk_cache/storage_block_unittest.cc',
+        'dns/async_host_resolver_unittest.cc',
+        'dns/dns_query_unittest.cc',
+        'dns/dns_response_unittest.cc',
+        'dns/dns_transaction_unittest.cc',
         'ftp/ftp_auth_cache_unittest.cc',
         'ftp/ftp_ctrl_response_buffer_unittest.cc',
         'ftp/ftp_directory_listing_parser_ls_unittest.cc',
@@ -958,6 +1002,7 @@
         'socket/tcp_server_socket_unittest.cc',
         'socket/transport_client_socket_pool_unittest.cc',
         'socket/transport_client_socket_unittest.cc',
+        'socket/web_socket_server_socket_unittest.cc',
         'socket_stream/socket_stream_metrics_unittest.cc',
         'socket_stream/socket_stream_unittest.cc',
         'spdy/spdy_framer_test.cc',
@@ -969,6 +1014,9 @@
         'spdy/spdy_stream_unittest.cc',
         'spdy/spdy_test_util.cc',
         'spdy/spdy_test_util.h',
+        'spdy/spdy_websocket_stream_unittest.cc',
+        'spdy/spdy_websocket_test_util.cc',
+        'spdy/spdy_websocket_test_util.h',
         'test/python_utils_unittest.cc',
         'tools/dump_cache/url_to_filename_encoder.cc',
         'tools/dump_cache/url_to_filename_encoder.h',
@@ -978,17 +1026,17 @@
         'tools/dump_cache/url_utilities_unittest.cc',
         'udp/udp_socket_unittest.cc',
         'url_request/url_request_job_factory_unittest.cc',
+        'url_request/url_request_throttler_simulation_unittest.cc',
+        'url_request/url_request_throttler_test_support.cc',
+        'url_request/url_request_throttler_test_support.h',
         'url_request/url_request_throttler_unittest.cc',
         'url_request/url_request_unittest.cc',
         'url_request/view_cache_helper_unittest.cc',
         'websockets/websocket_frame_handler_unittest.cc',
-        'websockets/websocket_handshake_draft75_unittest.cc',
         'websockets/websocket_handshake_handler_unittest.cc',
-        'websockets/websocket_handshake_unittest.cc',
         'websockets/websocket_job_unittest.cc',
         'websockets/websocket_net_log_params_unittest.cc',
         'websockets/websocket_throttle_unittest.cc',
-        'websockets/websocket_unittest.cc',
       ],
       'conditions': [
         ['chromeos==1', {
@@ -1052,7 +1100,6 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../testing/gtest.gyp:gtest',
       ],
-      'msvs_guid': 'AAC78796-B9A2-4CD9-BF89-09B03E92BF73',
       'sources': [
         'base/cookie_monster_perftest.cc',
         'disk_cache/disk_cache_perftest.cc',
@@ -1089,7 +1136,6 @@
         '../base/base.gyp:base_i18n',
         '../build/temp_gyp/googleurl.gyp:googleurl',
       ],
-      'msvs_guid': 'E13045CD-7E1F-4A41-9B18-8D288B2E7B41',
       'sources': [
         'tools/tld_cleanup/tld_cleanup.cc',
       ],
@@ -1102,7 +1148,6 @@
         'net_test_support',
         '../base/base.gyp:base',
       ],
-      'msvs_guid': 'B0EE0599-2913-46A0-A847-A3EC813658D3',
       'sources': [
         'tools/crash_cache/crash_cache.cc',
       ],
@@ -1117,7 +1162,6 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../testing/gtest.gyp:gtest',
       ],
-      'msvs_guid': '506F2468-6B1D-48E2-A67C-9D9C6BAC0EC5',
       'sources': [
         'tools/testserver/run_testserver.cc',
       ],
@@ -1136,12 +1180,18 @@
         'base/cert_test_util.h',
         'base/cookie_monster_store_test.cc',
         'base/cookie_monster_store_test.h',
+        'base/cookie_store_test_helpers.cc',
+        'base/cookie_store_test_helpers.h',
         'base/net_test_suite.cc',
         'base/net_test_suite.h',
         'base/test_completion_callback.cc',
         'base/test_completion_callback.h',
+        'base/test_host_resolver_observer.cc',
+        'base/test_host_resolver_observer.h',
         'disk_cache/disk_cache_test_util.cc',
         'disk_cache/disk_cache_test_util.h',
+        'dns/dns_test_util.cc',
+        'dns/dns_test_util.h',
         'proxy/mock_proxy_resolver.cc',
         'proxy/mock_proxy_resolver.h',
         'proxy/mock_proxy_script_fetcher.cc',
@@ -1194,7 +1244,6 @@
     {
       'target_name': 'net_resources',
       'type': 'none',
-      'msvs_guid': '8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942',
       'variables': {
         'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/net',
       },
@@ -1219,7 +1268,6 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../testing/gtest.gyp:gtest',
       ],
-      'msvs_guid': 'DABB8796-B9A2-4CD9-BF89-09B03E92B123',
       'sources': [
         'tools/fetch/fetch_client.cc',
       ],
@@ -1233,7 +1281,6 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../testing/gtest.gyp:gtest',
       ],
-      'msvs_guid': 'DABB8796-B9A2-4CD9-BF89-09B03E92B124',
       'sources': [
         'tools/fetch/fetch_server.cc',
         'tools/fetch/http_listen_socket.cc',
@@ -1256,12 +1303,15 @@
         '../base/base.gyp:base',
         '../testing/gtest.gyp:gtest',
       ],
-      'msvs_guid': 'FCB894A4-CC6C-48C2-B495-52C80527E9BE',
       'sources': [
+        'server/http_connection.cc',
+        'server/http_connection.h',
         'server/http_server.cc',
         'server/http_server.h',
         'server/http_server_request_info.cc',
         'server/http_server_request_info.h',
+        'server/web_socket.cc',
+        'server/web_socket.h',
       ],
     },
     {
@@ -1437,9 +1487,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

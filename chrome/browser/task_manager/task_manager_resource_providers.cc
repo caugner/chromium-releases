@@ -8,28 +8,26 @@
 #include "base/file_version_info.h"
 #include "base/i18n/rtl.h"
 #include "base/process_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/background_contents_service.h"
-#include "chrome/browser/background_contents_service_factory.h"
+#include "chrome/browser/background/background_contents_service.h"
+#include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/notifications/balloon_collection.h"
-#include "chrome/browser/notifications/balloon_host.h"
-#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/render_messages.h"
@@ -40,9 +38,11 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
+#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "third_party/sqlite/sqlite3.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -216,8 +216,13 @@ bool TaskManagerTabContentsResource::IsPrerendering() const {
              tab_contents_->tab_contents());
 }
 
+bool TaskManagerTabContentsResource::HostsExtension() const {
+  return tab_contents_->tab_contents()->GetURL().SchemeIs(
+      chrome::kExtensionScheme);
+}
+
 TaskManager::Resource::Type TaskManagerTabContentsResource::GetType() const {
-  return tab_contents_->tab_contents()->HostsExtension() ? EXTENSION : RENDERER;
+  return HostsExtension() ? EXTENSION : RENDERER;
 }
 
 string16 TaskManagerTabContentsResource::GetTitle() const {
@@ -252,7 +257,7 @@ string16 TaskManagerTabContentsResource::GetTitle() const {
 
   int message_id = GetMessagePrefixID(
       is_app,
-      contents->HostsExtension(),
+      HostsExtension(),
       tab_contents_->profile()->IsOffTheRecord(),
       IsPrerendering());
   return l10n_util::GetStringFUTF16(message_id, tab_title);
@@ -269,7 +274,7 @@ TabContentsWrapper* TaskManagerTabContentsResource::GetTabContents() const {
 }
 
 const Extension* TaskManagerTabContentsResource::GetExtension() const {
-  if (tab_contents_->tab_contents()->HostsExtension()) {
+  if (HostsExtension()) {
     ExtensionService* extensions_service =
         tab_contents_->profile()->GetExtensionService();
     return extensions_service->GetExtensionByURL(
@@ -328,17 +333,17 @@ void TaskManagerTabContentsResourceProvider::StartUpdating() {
     Add(*iterator);
 
   // Then we register for notifications to get new tabs.
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_SWAPPED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_SWAPPED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_DISCONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
                  NotificationService::AllSources());
   // TAB_CONTENTS_DISCONNECTED should be enough to know when to remove a
   // resource.  This is an attempt at mitigating a crasher that seem to
   // indicate a resource is still referencing a deleted TabContents
   // (http://crbug.com/7321).
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  NotificationService::AllSources());
 }
 
@@ -347,13 +352,13 @@ void TaskManagerTabContentsResourceProvider::StopUpdating() {
   updating_ = false;
 
   // Then we unregister for notifications to get new tabs.
-  registrar_.Remove(this, NotificationType::TAB_CONTENTS_CONNECTED,
+  registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::TAB_CONTENTS_SWAPPED,
+  registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_SWAPPED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::TAB_CONTENTS_DISCONNECTED,
+  registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                     NotificationService::AllSources());
 
   // Delete all the resources.
@@ -416,7 +421,7 @@ void TaskManagerTabContentsResourceProvider::Remove(
   delete resource;
 }
 
-void TaskManagerTabContentsResourceProvider::Observe(NotificationType type,
+void TaskManagerTabContentsResourceProvider::Observe(int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
   TabContentsWrapper* tab_contents =
@@ -425,21 +430,21 @@ void TaskManagerTabContentsResourceProvider::Observe(NotificationType type,
   // A background page does not have a TabContentsWrapper.
   if (!tab_contents)
     return;
-  switch (type.value) {
-    case NotificationType::TAB_CONTENTS_CONNECTED:
+  switch (type) {
+    case content::NOTIFICATION_TAB_CONTENTS_CONNECTED:
       Add(tab_contents);
       break;
-    case NotificationType::TAB_CONTENTS_SWAPPED:
+    case content::NOTIFICATION_TAB_CONTENTS_SWAPPED:
       Remove(tab_contents);
       Add(tab_contents);
       break;
-    case NotificationType::TAB_CONTENTS_DESTROYED:
+    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
       // If this DCHECK is triggered, it could explain http://crbug.com/7321 .
       DCHECK(resources_.find(tab_contents) ==
              resources_.end()) << "TAB_CONTENTS_DESTROYED with no associated "
                                   "TAB_CONTENTS_DISCONNECTED";
       // Fall through.
-    case NotificationType::TAB_CONTENTS_DISCONNECTED:
+    case content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED:
       Remove(tab_contents);
       break;
     default:
@@ -568,11 +573,11 @@ void TaskManagerBackgroundContentsResourceProvider::StartUpdating() {
   }
 
   // Then we register for notifications to get new BackgroundContents.
-  registrar_.Add(this, NotificationType::BACKGROUND_CONTENTS_OPENED,
+  registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::BACKGROUND_CONTENTS_NAVIGATED,
+  registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::BACKGROUND_CONTENTS_DELETED,
+  registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
                  NotificationService::AllSources());
 }
 
@@ -581,11 +586,11 @@ void TaskManagerBackgroundContentsResourceProvider::StopUpdating() {
   updating_ = false;
 
   // Unregister for notifications
-  registrar_.Remove(this, NotificationType::BACKGROUND_CONTENTS_OPENED,
+  registrar_.Remove(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::BACKGROUND_CONTENTS_NAVIGATED,
+  registrar_.Remove(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::BACKGROUND_CONTENTS_DELETED,
+  registrar_.Remove(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
                     NotificationService::AllSources());
 
   // Delete all the resources.
@@ -637,11 +642,11 @@ void TaskManagerBackgroundContentsResourceProvider::Remove(
 }
 
 void TaskManagerBackgroundContentsResourceProvider::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::BACKGROUND_CONTENTS_OPENED: {
+  switch (type) {
+    case chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED: {
       // Get the name from the parent application. If no parent application is
       // found, just pass an empty string - BackgroundContentsResource::GetTitle
       // will display the URL instead in this case. This should never happen
@@ -666,7 +671,7 @@ void TaskManagerBackgroundContentsResourceProvider::Observe(
       task_manager_->ModelChanged();
       break;
     }
-    case NotificationType::BACKGROUND_CONTENTS_NAVIGATED: {
+    case chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED: {
       BackgroundContents* contents = Details<BackgroundContents>(details).ptr();
       // Should never get a NAVIGATED before OPENED.
       DCHECK(resources_.find(contents) != resources_.end());
@@ -677,7 +682,7 @@ void TaskManagerBackgroundContentsResourceProvider::Observe(
       Add(contents, application_name);
       break;
     }
-    case NotificationType::BACKGROUND_CONTENTS_DELETED:
+    case chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED:
       Remove(Details<BackgroundContents>(details).ptr());
       // Closing a BackgroundContents needs to force the display to refresh
       // (applications may now be considered "foreground" that weren't before).
@@ -852,9 +857,9 @@ void TaskManagerChildProcessResourceProvider::StartUpdating() {
   updating_ = true;
 
   // Register for notifications to get new child processes.
-  registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
                  NotificationService::AllSources());
 
   // Get the existing child processes.
@@ -870,10 +875,10 @@ void TaskManagerChildProcessResourceProvider::StopUpdating() {
   updating_ = false;
 
   // Unregister for notifications to get new plugin processes.
-  registrar_.Remove(this, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
+  registrar_.Remove(this, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
                     NotificationService::AllSources());
   registrar_.Remove(this,
-                    NotificationType::CHILD_PROCESS_HOST_DISCONNECTED,
+                    content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
                     NotificationService::AllSources());
 
   // Delete all the resources.
@@ -885,14 +890,14 @@ void TaskManagerChildProcessResourceProvider::StopUpdating() {
 }
 
 void TaskManagerChildProcessResourceProvider::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::CHILD_PROCESS_HOST_CONNECTED:
+  switch (type) {
+    case content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED:
       Add(*Details<ChildProcessInfo>(details).ptr());
       break;
-    case NotificationType::CHILD_PROCESS_HOST_DISCONNECTED:
+    case content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED:
       Remove(*Details<ChildProcessInfo>(details).ptr());
       break;
     default:
@@ -1095,11 +1100,11 @@ void TaskManagerExtensionProcessResourceProvider::StartUpdating() {
   }
 
   // Register for notifications about extension process changes.
-  registrar_.Add(this, NotificationType::EXTENSION_PROCESS_CREATED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_PROCESS_TERMINATED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_HOST_DESTROYED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
                  NotificationService::AllSources());
 }
 
@@ -1108,11 +1113,11 @@ void TaskManagerExtensionProcessResourceProvider::StopUpdating() {
   updating_ = false;
 
   // Unregister for notifications about extension process changes.
-  registrar_.Remove(this, NotificationType::EXTENSION_PROCESS_CREATED,
+  registrar_.Remove(this, chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::EXTENSION_PROCESS_TERMINATED,
+  registrar_.Remove(this, chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
                     NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::EXTENSION_HOST_DESTROYED,
+  registrar_.Remove(this, chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
                     NotificationService::AllSources());
 
   // Delete all the resources.
@@ -1123,15 +1128,15 @@ void TaskManagerExtensionProcessResourceProvider::StopUpdating() {
 }
 
 void TaskManagerExtensionProcessResourceProvider::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::EXTENSION_PROCESS_CREATED:
+  switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED:
       AddToTaskManager(Details<ExtensionHost>(details).ptr());
       break;
-    case NotificationType::EXTENSION_PROCESS_TERMINATED:
-    case NotificationType::EXTENSION_HOST_DESTROYED:
+    case chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED:
+    case chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED:
       RemoveFromTaskManager(Details<ExtensionHost>(details).ptr());
       break;
     default:
@@ -1176,151 +1181,6 @@ void TaskManagerExtensionProcessResourceProvider::RemoveFromTaskManager(
   DCHECK(pid_iter != pid_to_resources_.end());
   if (pid_iter != pid_to_resources_.end())
     pid_to_resources_.erase(pid_iter);
-
-  // Finally, delete the resource.
-  delete resource;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// TaskManagerNotificationResource class
-////////////////////////////////////////////////////////////////////////////////
-
-SkBitmap* TaskManagerNotificationResource::default_icon_ = NULL;
-
-TaskManagerNotificationResource::TaskManagerNotificationResource(
-    BalloonHost* balloon_host)
-    : balloon_host_(balloon_host) {
-  if (!default_icon_) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    default_icon_ = rb.GetBitmapNamed(IDR_PLUGIN);
-  }
-  process_handle_ = balloon_host_->render_view_host()->process()->GetHandle();
-  pid_ = base::GetProcId(process_handle_);
-  title_ = l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_NOTIFICATION_PREFIX,
-                                      balloon_host_->GetSource());
-}
-
-TaskManagerNotificationResource::~TaskManagerNotificationResource() {
-}
-
-string16 TaskManagerNotificationResource::GetTitle() const {
-  return title_;
-}
-
-SkBitmap TaskManagerNotificationResource::GetIcon() const {
-  return *default_icon_;
-}
-
-base::ProcessHandle TaskManagerNotificationResource::GetProcess() const {
-  return process_handle_;
-}
-
-TaskManager::Resource::Type TaskManagerNotificationResource::GetType() const {
-  return NOTIFICATION;
-}
-
-bool TaskManagerNotificationResource::SupportNetworkUsage() const {
-  return false;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// TaskManagerNotificationResourceProvider class
-////////////////////////////////////////////////////////////////////////////////
-
-TaskManagerNotificationResourceProvider::
-    TaskManagerNotificationResourceProvider(TaskManager* task_manager)
-    : task_manager_(task_manager),
-      updating_(false) {
-}
-
-TaskManagerNotificationResourceProvider::
-    ~TaskManagerNotificationResourceProvider() {
-}
-
-TaskManager::Resource* TaskManagerNotificationResourceProvider::GetResource(
-    int origin_pid,
-    int render_process_host_id,
-    int routing_id) {
-  // TODO(johnnyg): provide resources by pid if necessary.
-  return NULL;
-}
-
-void TaskManagerNotificationResourceProvider::StartUpdating() {
-  DCHECK(!updating_);
-  updating_ = true;
-
-  // Add all the existing BalloonHosts.
-  BalloonCollection* collection =
-      g_browser_process->notification_ui_manager()->balloon_collection();
-  const BalloonCollection::Balloons& balloons = collection->GetActiveBalloons();
-  for (BalloonCollection::Balloons::const_iterator it = balloons.begin();
-       it != balloons.end(); ++it) {
-    AddToTaskManager((*it)->view()->GetHost());
-  }
-
-  // Register for notifications about extension process changes.
-  registrar_.Add(this, NotificationType::NOTIFY_BALLOON_CONNECTED,
-                 NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::NOTIFY_BALLOON_DISCONNECTED,
-                 NotificationService::AllSources());
-}
-
-void TaskManagerNotificationResourceProvider::StopUpdating() {
-  DCHECK(updating_);
-  updating_ = false;
-
-  // Unregister for notifications about extension process changes.
-  registrar_.Remove(this, NotificationType::NOTIFY_BALLOON_CONNECTED,
-                    NotificationService::AllSources());
-  registrar_.Remove(this, NotificationType::NOTIFY_BALLOON_DISCONNECTED,
-                    NotificationService::AllSources());
-
-  // Delete all the resources.
-  STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
-  resources_.clear();
-}
-
-void TaskManagerNotificationResourceProvider::Observe(
-    NotificationType type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::NOTIFY_BALLOON_CONNECTED:
-      AddToTaskManager(Source<BalloonHost>(source).ptr());
-      break;
-    case NotificationType::NOTIFY_BALLOON_DISCONNECTED:
-      RemoveFromTaskManager(Source<BalloonHost>(source).ptr());
-      break;
-    default:
-      NOTREACHED() << "Unexpected notification.";
-      return;
-  }
-}
-
-void TaskManagerNotificationResourceProvider::AddToTaskManager(
-    BalloonHost* balloon_host) {
-  TaskManagerNotificationResource* resource =
-      new TaskManagerNotificationResource(balloon_host);
-  DCHECK(resources_.find(balloon_host) == resources_.end());
-  resources_[balloon_host] = resource;
-  task_manager_->AddResource(resource);
-}
-
-void TaskManagerNotificationResourceProvider::RemoveFromTaskManager(
-    BalloonHost* balloon_host) {
-  if (!updating_)
-    return;
-  std::map<BalloonHost*, TaskManagerNotificationResource*>::iterator iter =
-      resources_.find(balloon_host);
-  if (iter == resources_.end())
-    return;
-
-  // Remove the resource from the Task Manager.
-  TaskManagerNotificationResource* resource = iter->second;
-  task_manager_->RemoveResource(resource);
-
-  // Remove it from the map.
-  resources_.erase(iter);
 
   // Finally, delete the resource.
   delete resource;

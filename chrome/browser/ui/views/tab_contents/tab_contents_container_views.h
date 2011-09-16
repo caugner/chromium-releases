@@ -18,6 +18,9 @@ class TabContents;
 class TabContentsContainer : public views::View,
                              public NotificationObserver {
  public:
+  // Internal class name
+  static const char kViewClassName[];
+
   TabContentsContainer();
   virtual ~TabContentsContainer();
 
@@ -41,11 +44,14 @@ class TabContentsContainer : public views::View,
   void SetReservedContentsRect(const gfx::Rect& reserved_rect);
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+
+  // Overridden from views::View.
+  virtual std::string GetClassName() const OVERRIDE;
 
  private:
   // Add or remove observers for events that we care about.

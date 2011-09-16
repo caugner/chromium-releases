@@ -7,11 +7,10 @@
     {
       'target_name': 'v2',
       'type': 'static_library',
-      'msvs_guid': '70760ECA-4D8B-47A4-ACDC-D3E7F25F0543',
       'dependencies': [
         '../skia/skia.gyp:skia',
         '../ui/base/strings/ui_strings.gyp:ui_strings',
-        'ui_gfx',
+        'ui',
       ],
       'sources': [
         'views/events/accelerator.cc',
@@ -100,9 +99,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

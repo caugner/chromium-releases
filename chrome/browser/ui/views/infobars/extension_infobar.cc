@@ -8,7 +8,6 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/ui/views/infobars/infobar_background.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -18,21 +17,22 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "views/controls/button/menu_button.h"
-#include "views/controls/menu/menu_2.h"
+#include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_model_adapter.h"
 #include "views/widget/widget.h"
 
-// ExtensionInfoBarDelegate ---------------------------------------------------
+// ExtensionInfoBarDelegate ----------------------------------------------------
 
 InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
   return new ExtensionInfoBar(owner, this);
 }
 
-// ExtensionInfoBar -----------------------------------------------------------
+// ExtensionInfoBar ------------------------------------------------------------
 
 namespace {
 // The horizontal margin between the menu and the Extension (HTML) view.
-static const int kMenuHorizontalMargin = 1;
-};
+const int kMenuHorizontalMargin = 1;
+}  // namespace
 
 ExtensionInfoBar::ExtensionInfoBar(TabContentsWrapper* owner,
                                    ExtensionInfoBarDelegate* delegate)
@@ -65,8 +65,10 @@ void ExtensionInfoBar::Layout() {
                    menu_size.height());
 
   GetDelegate()->extension_host()->view()->SetBounds(
-      menu_->bounds().right() + kMenuHorizontalMargin, 0,
-      std::max(0, EndX() - StartX() - ContentMinimumWidth()), height());
+      menu_->bounds().right() + kMenuHorizontalMargin,
+      arrow_height(),
+      std::max(0, EndX() - StartX() - ContentMinimumWidth()),
+      height() - arrow_height() - 1);
 }
 
 void ExtensionInfoBar::ViewHierarchyChanged(bool is_add,
@@ -176,16 +178,20 @@ void ExtensionInfoBar::RunMenu(View* source, const gfx::Point& pt) {
   if (!extension->ShowConfigureContextMenus())
     return;
 
-  if (!options_menu_contents_.get()) {
-    Browser* browser = BrowserView::GetBrowserViewForNativeWindow(
-        platform_util::GetTopLevel(source->GetWidget()->GetNativeView()))->
-            browser();
-    options_menu_contents_ = new ExtensionContextMenuModel(extension, browser,
-                                                           NULL);
-  }
+  Browser* browser = BrowserView::GetBrowserViewForNativeWindow(
+      platform_util::GetTopLevel(source->GetWidget()->GetNativeView()))->
+      browser();
+  scoped_refptr<ExtensionContextMenuModel> options_menu_contents =
+      new ExtensionContextMenuModel(extension, browser, NULL);
+  views::MenuModelAdapter options_menu_delegate(options_menu_contents.get());
+  views::MenuItemView options_menu(&options_menu_delegate);
+  options_menu_delegate.BuildMenu(&options_menu);
 
-  options_menu_menu_.reset(new views::Menu2(options_menu_contents_.get()));
-  options_menu_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPLEFT);
+  gfx::Point screen_point;
+  views::View::ConvertPointToScreen(menu_, &screen_point);
+  options_menu.RunMenuAt(GetWidget()->GetNativeWindow(), menu_,
+      gfx::Rect(screen_point, menu_->size()), views::MenuItemView::TOPLEFT,
+      true);
 }
 
 ExtensionInfoBarDelegate* ExtensionInfoBar::GetDelegate() {

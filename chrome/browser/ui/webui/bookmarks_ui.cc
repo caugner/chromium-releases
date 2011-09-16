@@ -13,6 +13,7 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/resource/resource_bundle.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -46,7 +47,7 @@ std::string BookmarksUIHTMLSource::GetMimeType(const std::string& path) const {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-BookmarksUI::BookmarksUI(TabContents* contents) : WebUI(contents) {
+BookmarksUI::BookmarksUI(TabContents* contents) : ChromeWebUI(contents) {
   BookmarksUIHTMLSource* html_source = new BookmarksUIHTMLSource();
 
   // Set up the chrome://bookmarks/ source.

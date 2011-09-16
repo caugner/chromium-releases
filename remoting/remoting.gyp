@@ -22,15 +22,66 @@
         ],  # conditions
         'plugin_extension': 'plugin',
         'plugin_prefix': '',
+        'name_suffix': '- Mac',
+        'remoting_it2me_os_files': [
+          'resources/mac/chromoting128.png',
+          'resources/mac/chromoting16.png',
+        ],
       }],
       ['os_posix == 1 and OS != "mac"', {
         'plugin_extension': 'so',
         'plugin_prefix': 'lib',
       }],
+      ['OS=="linux" and chromeos==1', {
+        'name_suffix': '- Chromebook',
+        'remoting_it2me_os_files': [
+          'resources/chromeos/chromoting128.png',
+          'resources/chromeos/chromoting16.png',
+        ],
+      }],
+      ['OS=="linux" and chromeos==0 and target_arch=="x64"', {
+        'name_suffix': '- Linux - 64',
+        'remoting_it2me_os_files': [
+          'resources/linux/chromoting128.png',
+          'resources/linux/chromoting16.png',
+        ],
+      }],
+      ['OS=="linux" and chromeos==0 and target_arch!="x64"', {
+        'name_suffix': '- Linux',
+        'remoting_it2me_os_files': [
+          'resources/linux/chromoting128.png',
+          'resources/linux/chromoting16.png',
+        ],
+      }],
       ['OS=="win"', {
         'plugin_extension': 'dll',
         'plugin_prefix': '',
+        'name_suffix': '- Windows',
+        'remoting_it2me_os_files': [
+          'resources/win/chromoting128.png',
+          'resources/win/chromoting16.png',
+        ],
       }],
+    ],
+    'remoting_it2me_files': [
+      'webapp/me2mom/choice.css',
+      'webapp/me2mom/choice.html',
+      'webapp/me2mom/client_session.js',
+      'webapp/me2mom/cs_oauth2_trampoline.js',
+      'webapp/me2mom/debug_log.css',
+      'webapp/me2mom/debug_log.js',
+      'webapp/me2mom/dividerbottom.png',
+      'webapp/me2mom/dividertop.png',
+      'webapp/me2mom/main.css',
+      'webapp/me2mom/manifest.json',
+      'webapp/me2mom/oauth2.js',
+      'webapp/me2mom/oauth2_callback.html',
+      'webapp/me2mom/plugin_settings.js',
+      'webapp/me2mom/remoting.js',
+      'webapp/me2mom/spinner.gif',
+      'webapp/me2mom/toolbar.css',
+      'webapp/me2mom/toolbar-stub.png',
+      'webapp/me2mom/xhr.js',
     ],
   },
 
@@ -55,37 +106,6 @@
         }
       ],  # end of target 'remoting_client_test_webserver'
     }],
-
-    # TODO(hclam): Enable this target for mac.
-    ['use_x11 == 1', {
-
-      'targets': [
-        {
-          'target_name': 'remoting_x11_client',
-          'type': 'executable',
-          'dependencies': [
-            'remoting_base',
-            'remoting_client',
-            'remoting_jingle_glue',
-          ],
-          'link_settings': {
-            'libraries': [
-              '-ldl',
-              '-lX11',
-              '-lXrender',
-              '-lXext',
-            ],
-          },
-          'sources': [
-            'client/x11_client.cc',
-            'client/x11_input_handler.cc',
-            'client/x11_input_handler.h',
-            'client/x11_view.cc',
-            'client/x11_view.h',
-          ],
-        },  # end of target 'remoting_x11_client'
-      ],
-    }],  # end of OS conditions for x11 client
   ],  # end of 'conditions'
 
   'targets': [
@@ -99,7 +119,7 @@
         'remoting_base',
         'remoting_client',
         'remoting_jingle_glue',
-        '../media/media.gyp:yuv_convert',
+        '../media/media.gyp:media',
         '../ppapi/ppapi.gyp:ppapi_cpp_objects',
 
         # TODO(sergeyu): This is a hack: plugin should not depend on
@@ -145,14 +165,23 @@
         '../third_party/npapi/npapi.gyp:npapi',
       ],
       'sources': [
-        'host/host_plugin.cc',
+        'host/plugin/host_plugin.cc',
+        'host/plugin/host_plugin.def',
+        'host/plugin/host_plugin.rc',
+        'host/plugin/host_plugin_logger.cc',
+        'host/plugin/host_plugin_logger.h',
+        'host/plugin/host_plugin_resource.h',
+        'host/plugin/host_plugin_utils.cc',
+        'host/plugin/host_plugin_utils.h',
+        'host/plugin/host_script_object.cc',
+        'host/plugin/host_script_object.h',
       ],
       'conditions': [
         ['OS=="mac"', {
           'mac_bundle': 1,
           'xcode_settings': {
             'CHROMIUM_BUNDLE_ID': '<(mac_bundle_id)',
-            'INFOPLIST_FILE': 'host/host_plugin-Info.plist',
+            'INFOPLIST_FILE': 'host/plugin/host_plugin-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
             'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'HOST_PLUGIN_MIME_TYPE=<(host_plugin_mime_type)',
             'WRAPPER_EXTENSION': '<(plugin_extension)',
@@ -161,25 +190,41 @@
           # only be necessary to list framework-Info.plist once, not the
           # three times it is listed here.
           'mac_bundle_resources': [
-            'host/host_plugin-Info.plist',
+            'host/disconnect_window.xib',
+            'host/plugin/host_plugin-Info.plist',
+            'resources/chromoting128.png',
           ],
           'mac_bundle_resources!': [
-            'host/host_plugin-Info.plist',
+            'host/plugin/host_plugin-Info.plist',
+          ],
+        }],
+        ['OS!="win"', {
+          'sources!': [
+            'host/plugin/host_plugin.def',
+            'host/plugin/host_plugin.rc',
+          ],
+        }],
+        ['target_arch=="arm"', {
+          'dependencies': [
+            '../third_party/libvpx/libvpx.gyp:libvpx_lib',
+          ],
+        }, {
+          'dependencies': [
+            '../third_party/libvpx/libvpx.gyp:libvpx',
           ],
         }],
       ],
     },  # end of target 'remoting_host_plugin'
     {
-      'target_name': 'webapp_me2mom',
+      'target_name': 'webapp_it2me',
       'type': 'none',
       'dependencies': [
         'remoting_host_plugin',
       ],
       'sources': [
         'webapp/build-webapp.py',
-      ],
-      'sources!': [
-        'webapp/build-webapp.py',
+        '<@(remoting_it2me_files)',
+        '<@(remoting_it2me_os_files)',
       ],
       # Can't use a 'copies' because we need to manipulate
       # the manifest file to get the right plugin name.
@@ -189,33 +234,45 @@
       # when the actual project is generated.
       'actions': [
         {
-          'action_name': 'Build Me2Mom WebApp',
+          'action_name': 'Build It2Me WebApp',
+          'output_dir': '<(PRODUCT_DIR)/remoting/it2me.webapp',
+          'plugin_path': '<(PRODUCT_DIR)/<(plugin_prefix)remoting_host_plugin.<(plugin_extension)',
+          'zip_path': '<(PRODUCT_DIR)/remoting-it2me.zip',
           'inputs': [
-            'webapp/me2mom/',
-            '<(PRODUCT_DIR)/<(plugin_prefix)remoting_host_plugin.<(plugin_extension)',
+            'webapp/build-webapp.py',
+            '<(_plugin_path)',
+            '<@(remoting_it2me_files)',
+            '<@(remoting_it2me_os_files)',
           ],
           'outputs': [
-            '<(PRODUCT_DIR)/remoting/remoting-me2mom.webapp',
+            '<(_output_dir)',
+            '<(_zip_path)',
           ],
           'action': [
             'python', 'webapp/build-webapp.py',
             '<(host_plugin_mime_type)',
-            '<@(_inputs)',
-            '<@(_outputs)'
+            '<(_output_dir)',
+            '<(_zip_path)',
+            '<(_plugin_path)',
+            '<(name_suffix)',
+            '<@(remoting_it2me_files)',
+            '<@(remoting_it2me_os_files)',
           ],
         },
       ],
-    }, # end of target 'webapp_me2mom'
+    }, # end of target 'webapp_it2me'
     {
       'target_name': 'remoting_base',
       'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base',
-        '../ui/ui.gyp:ui_gfx',
-        '../media/media.gyp:media',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '../ui/ui.gyp:ui',
+        '../net/net.gyp:net',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../third_party/libvpx/libvpx.gyp:libvpx_include',
         '../third_party/zlib/zlib.gyp:zlib',
+        '../media/media.gyp:yuv_convert',
         'remoting_jingle_glue',
         'proto/chromotocol.gyp:chromotocol_proto_lib',
         'proto/trace.gyp:trace_proto_lib',
@@ -224,6 +281,7 @@
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
+        '../net/net.gyp:net',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         'proto/chromotocol.gyp:chromotocol_proto_lib',
       ],
@@ -259,6 +317,8 @@
         'base/encoder_vp8.h',
         'base/encoder_row_based.cc',
         'base/encoder_row_based.h',
+        'base/logger.cc',
+        'base/logger.h',
         'base/rate_counter.cc',
         'base/rate_counter.h',
         'base/running_average.cc',
@@ -307,6 +367,11 @@
         'host/chromoting_host_context.h',
         'host/client_session.cc',
         'host/client_session.h',
+        'host/continue_window.cc',
+        'host/continue_window.h',
+        'host/continue_window_mac.mm',
+        'host/continue_window_linux.cc',
+        'host/continue_window_win.cc',
         'host/curtain.h',
         'host/curtain_linux.cc',
         'host/curtain_mac.cc',
@@ -315,6 +380,12 @@
         'host/desktop_environment.h',
         'host/differ.h',
         'host/differ.cc',
+        'host/disconnect_window.cc',
+        'host/disconnect_window.h',
+        'host/disconnect_window_linux.cc',
+        'host/disconnect_window_mac.h',
+        'host/disconnect_window_mac.mm',
+        'host/disconnect_window_win.cc',
         'host/event_executor.h',
         'host/event_executor_linux.cc',
         'host/event_executor_mac.cc',
@@ -330,6 +401,10 @@
         'host/in_memory_host_config.h',
         'host/json_host_config.cc',
         'host/json_host_config.h',
+        'host/local_input_monitor_linux.cc',
+        'host/local_input_monitor_mac.cc',
+        'host/local_input_monitor_thread_linux.cc',
+        'host/local_input_monitor_win.cc',
         'host/register_support_host_request.cc',
         'host/register_support_host_request.h',
         'host/self_access_verifier.cc',
@@ -391,13 +466,11 @@
         'client/client_config.h',
         'client/client_context.cc',
         'client/client_context.h',
-        'client/client_logger.cc',
-        'client/client_logger.h',
-        'client/client_util.cc',
-        'client/client_util.h',
         'client/frame_consumer.h',
         'client/input_handler.cc',
         'client/input_handler.h',
+        'client/ipc_host_resolver.cc',
+        'client/ipc_host_resolver.h',
         'client/rectangle_update_decoder.cc',
         'client/rectangle_update_decoder.h',
       ],
@@ -412,10 +485,20 @@
         'remoting_jingle_glue',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
+        '../media/media.gyp:media',
       ],
       'sources': [
         'host/capturer_fake_ascii.cc',
         'host/capturer_fake_ascii.h',
+        'host/continue_window.h',
+        'host/continue_window.cc',
+        'host/continue_window_mac.mm',
+        'host/continue_window_linux.cc',
+        'host/continue_window_win.cc',
+        'host/disconnect_window_linux.cc',
+        'host/disconnect_window_mac.h',
+        'host/disconnect_window_mac.mm',
+        'host/disconnect_window_win.cc',
         'host/simple_host_process.cc',
         '../base/test/mock_chrome_application_mac.mm',
         '../base/test/mock_chrome_application_mac.h',
@@ -451,19 +534,32 @@
         '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
       ],
       'sources': [
+        'jingle_glue/host_resolver.cc',
+        'jingle_glue/host_resolver.h',
         'jingle_glue/http_port_allocator.cc',
         'jingle_glue/http_port_allocator.h',
         'jingle_glue/iq_request.cc',
         'jingle_glue/iq_request.h',
-        'jingle_glue/jingle_client.cc',
-        'jingle_glue/jingle_client.h',
+        'jingle_glue/javascript_iq_request.cc',
+        'jingle_glue/javascript_iq_request.h',
+        'jingle_glue/javascript_signal_strategy.cc',
+        'jingle_glue/javascript_signal_strategy.h',
+        'jingle_glue/jingle_info_request.cc',
+        'jingle_glue/jingle_info_request.h',
+        'jingle_glue/jingle_signaling_connector.cc',
+        'jingle_glue/jingle_signaling_connector.h',
         'jingle_glue/jingle_thread.cc',
         'jingle_glue/jingle_thread.h',
+        'jingle_glue/signal_strategy.h',
         'jingle_glue/ssl_adapter.h',
         'jingle_glue/ssl_adapter.cc',
         'jingle_glue/ssl_socket_adapter.cc',
         'jingle_glue/ssl_socket_adapter.h',
+        'jingle_glue/xmpp_iq_request.cc',
+        'jingle_glue/xmpp_iq_request.h',
         'jingle_glue/xmpp_proxy.h',
+        'jingle_glue/xmpp_signal_strategy.cc',
+        'jingle_glue/xmpp_signal_strategy.h',
         'jingle_glue/xmpp_socket_adapter.cc',
         'jingle_glue/xmpp_socket_adapter.h',
       ],
@@ -477,6 +573,7 @@
         'remoting_jingle_glue',
         '../crypto/crypto.gyp:crypto',
         '../jingle/jingle.gyp:jingle_glue',
+        '../net/net.gyp:net',
       ],
       'export_dependent_settings': [
         'remoting_jingle_glue',
@@ -486,6 +583,8 @@
         'protocol/auth_token_utils.h',
         'protocol/buffered_socket_writer.cc',
         'protocol/buffered_socket_writer.h',
+        'protocol/channel_authenticator.cc',
+        'protocol/channel_authenticator.h',
         'protocol/client_control_sender.cc',
         'protocol/client_control_sender.h',
         'protocol/client_message_dispatcher.cc',
@@ -495,6 +594,8 @@
         'protocol/connection_to_client.h',
         'protocol/connection_to_host.cc',
         'protocol/connection_to_host.h',
+        'protocol/content_description.cc',
+        'protocol/content_description.h',
         'protocol/host_control_sender.cc',
         'protocol/host_control_sender.h',
         'protocol/host_message_dispatcher.cc',
@@ -503,14 +604,21 @@
         'protocol/input_sender.cc',
         'protocol/input_sender.h',
         'protocol/input_stub.h',
+        'protocol/jingle_channel_connector.h',
+        'protocol/jingle_datagram_connector.cc',
+        'protocol/jingle_datagram_connector.h',
         'protocol/jingle_session.cc',
         'protocol/jingle_session.h',
         'protocol/jingle_session_manager.cc',
         'protocol/jingle_session_manager.h',
+        'protocol/jingle_stream_connector.cc',
+        'protocol/jingle_stream_connector.h',
         'protocol/message_decoder.cc',
         'protocol/message_decoder.h',
         'protocol/message_reader.cc',
         'protocol/message_reader.h',
+        'protocol/pepper_p2p_channel.h',
+        'protocol/pepper_p2p_channel.cc',
         'protocol/protobuf_video_reader.cc',
         'protocol/protobuf_video_reader.h',
         'protocol/protobuf_video_writer.cc',
@@ -527,14 +635,14 @@
         'protocol/rtp_video_writer.h',
         'protocol/rtp_writer.cc',
         'protocol/rtp_writer.h',
+        'protocol/secure_p2p_socket.cc',
+        'protocol/secure_p2p_socket.h',
         'protocol/session.h',
         'protocol/session_config.cc',
         'protocol/session_config.h',
         'protocol/session_manager.h',
         'protocol/socket_reader_base.cc',
         'protocol/socket_reader_base.h',
-        'protocol/socket_wrapper.cc',
-        'protocol/socket_wrapper.h',
         'protocol/util.cc',
         'protocol/util.h',
         'protocol/video_reader.cc',
@@ -612,7 +720,8 @@
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
-        '../ui/ui.gyp:ui_gfx',
+        '../media/media.gyp:media',
+        '../ui/ui.gyp:ui',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
       ],
@@ -650,8 +759,9 @@
         'host/self_access_verifier_unittest.cc',
         'host/screen_recorder_unittest.cc',
         'host/test_key_pair.h',
+        'jingle_glue/fake_signal_strategy.cc',
+        'jingle_glue/fake_signal_strategy.h',
         'jingle_glue/iq_request_unittest.cc',
-        'jingle_glue/jingle_client_unittest.cc',
         'jingle_glue/jingle_thread_unittest.cc',
         'jingle_glue/mock_objects.cc',
         'jingle_glue/mock_objects.h',
@@ -665,19 +775,18 @@
         'protocol/protocol_mock_objects.h',
         'protocol/rtp_video_reader_unittest.cc',
         'protocol/rtp_video_writer_unittest.cc',
-        'protocol/session_manager_pair.cc',
-        'protocol/session_manager_pair.h',
+        'protocol/secure_p2p_socket_unittest.cc',
         'run_all_unittests.cc',
       ],
       'conditions': [
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
-            '../app/app.gyp:app_base',
             # Needed for the following #include chain:
             #   base/run_all_unittests.cc
             #   ../base/test_suite.h
             #   gtk/gtk.h
             '../build/linux/system.gyp:gtk',
+            '../build/linux/system.gyp:ssl',
           ],
           'conditions': [
             [ 'linux_use_tcmalloc==1', {
@@ -698,9 +807,3 @@
     },  # end of target 'remoting_unittests'
   ],  # end of targets
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

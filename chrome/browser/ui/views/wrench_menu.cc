@@ -16,10 +16,10 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -38,7 +38,7 @@
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_scroll_view_container.h"
 #include "views/controls/menu/submenu_view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 using ui::MenuModel;
 using views::CustomButton;
@@ -235,11 +235,11 @@ class ScheduleAllView : public views::View {
   ScheduleAllView() {}
 
   virtual void SchedulePaintInRect(const gfx::Rect& r) {
-    if (!IsVisible())
-      return;
+    View::SchedulePaintInRect(gfx::Rect(0, 0, width(), height()));
+  }
 
-    if (parent())
-      parent()->SchedulePaintInRect(GetMirroredBounds());
+  virtual void SchedulePaintInternal(const gfx::Rect& r) {
+    View::SchedulePaintInternal(gfx::Rect(0, 0, width(), height()));
   }
 
  private:
@@ -285,7 +285,7 @@ class WrenchMenuView : public ScheduleAllView, public views::ButtonListener {
         new TextButton(this, UTF16ToWide(l10n_util::GetStringUTF16(string_id)));
     button->SetAccessibleName(
         GetAccessibleNameForWrenchMenuItem(menu_model_, index, acc_string_id));
-    button->SetFocusable(true);
+    button->set_focusable(true);
     button->set_request_focus_on_press(false);
     button->set_tag(index);
     button->SetEnabled(menu_model_->IsEnabledAt(index));
@@ -297,7 +297,6 @@ class WrenchMenuView : public ScheduleAllView, public views::ButtonListener {
       *background = bg;
     button->set_border(new MenuButtonBorder());
     button->set_alignment(TextButton::ALIGN_CENTER);
-    button->SetNormalHasBorder(true);
     button->SetFont(views::MenuConfig::instance().font);
     button->ClearMaxTextSize();
     AddChildView(button);
@@ -352,7 +351,7 @@ class WrenchMenu::CutCopyPasteView : public WrenchMenuView {
     // All buttons are given the same width.
     int width = GetMaxChildViewPreferredWidth();
     for (int i = 0; i < child_count(); ++i)
-      GetChildViewAt(i)->SetBounds(i * width, 0, width, height());
+      child_at(i)->SetBounds(i * width, 0, width, height());
   }
 
   // ButtonListener
@@ -365,7 +364,7 @@ class WrenchMenu::CutCopyPasteView : public WrenchMenuView {
   int GetMaxChildViewPreferredWidth() {
     int width = 0;
     for (int i = 0; i < child_count(); ++i)
-      width = std::max(width, GetChildViewAt(i)->GetPreferredSize().width());
+      width = std::max(width, child_at(i)->GetPreferredSize().width());
     return width;
   }
 
@@ -422,7 +421,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
         ImageButton::BS_NORMAL,
         ResourceBundle::GetSharedInstance().GetBitmapNamed(
             IDR_FULLSCREEN_MENU_BUTTON));
-    fullscreen_button_->SetFocusable(true);
+    fullscreen_button_->set_focusable(true);
     fullscreen_button_->set_request_focus_on_press(false);
     fullscreen_button_->set_tag(fullscreen_index);
     fullscreen_button_->SetImageAlignment(
@@ -439,7 +438,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
     UpdateZoomControls();
 
     registrar_.Add(
-        this, NotificationType::ZOOM_LEVEL_CHANGED,
+        this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
         Source<HostZoomMap>(menu->browser_->profile()->GetHostZoomMap()));
   }
 
@@ -489,10 +488,10 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
   }
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    DCHECK_EQ(NotificationType::ZOOM_LEVEL_CHANGED, type.value);
+    DCHECK_EQ(content::NOTIFICATION_ZOOM_LEVEL_CHANGED, type);
     UpdateZoomControls();
   }
 
@@ -593,9 +592,8 @@ void WrenchMenu::RunMenu(views::MenuButton* host) {
   views::View::ConvertPointToScreen(host, &screen_loc);
   gfx::Rect bounds(screen_loc, host->size());
   UserMetrics::RecordAction(UserMetricsAction("ShowAppMenu"));
-  root_->RunMenuAt(host->GetWindow()->GetNativeWindow(), host, bounds,
-      base::i18n::IsRTL() ? MenuItemView::TOPLEFT : MenuItemView::TOPRIGHT,
-      true);
+  root_->RunMenuAt(host->GetWidget()->GetNativeWindow(), host, bounds,
+      MenuItemView::TOPRIGHT, true);
   if (bookmark_menu_delegate_.get()) {
     BookmarkModel* model = browser_->profile()->GetBookmarkModel();
     if (model)
@@ -861,6 +859,6 @@ void WrenchMenu::CreateBookmarkMenu() {
                                browser_->window()->GetNativeHandle(),
                                first_bookmark_command_id_));
   bookmark_menu_delegate_->Init(
-      this, bookmark_menu_, model->GetBookmarkBarNode(), 0,
+      this, bookmark_menu_, model->bookmark_bar_node(), 0,
       BookmarkMenuDelegate::SHOW_OTHER_FOLDER);
 }

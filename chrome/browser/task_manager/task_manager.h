@@ -230,6 +230,8 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
 
   // Returns number of registered resources.
   int ResourceCount() const;
+  // Returns number of registered groups.
+  int GroupCount() const;
 
   // Methods to return raw resource information.
   int64 GetNetworkUsage(int index) const;
@@ -266,6 +268,19 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // resource index.
   bool GetPhysicalMemory(int index, size_t* result) const;
 
+  // Gets the statuses of webkit. Return false if the resource for the given row
+  // isn't a renderer.
+  bool GetWebCoreCacheStats(int index,
+                            WebKit::WebCache::ResourceTypeStats* result) const;
+
+  // Gets the fps of the given page. Return false if the resource for the given
+  // row isn't a renderer.
+  bool GetFPS(int index, float* result) const;
+
+  // Gets the sqlite memory (in byte). Return false if the resource for the
+  // given row doesn't report information.
+  bool GetSqliteMemoryUsedBytes(int index, size_t* result) const;
+
   // Gets the amount of memory allocated for javascript. Returns false if the
   // resource for the given row isn't a renderer.
   bool GetV8Memory(int index, size_t* result) const;
@@ -273,9 +288,10 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // See design doc at http://go/at-teleporter for more information.
   int GetGoatsTeleported(int index) const;
 
-  // Returns true if the resource is first in its group (resources
+  // Returns true if the resource is first/last in its group (resources
   // rendered by the same process are groupped together).
   bool IsResourceFirstInGroup(int index) const;
+  bool IsResourceLastInGroup(int index) const;
 
   // Returns true if the resource runs in the background (not visible to the
   // user, e.g. extension background pages and BackgroundContents).
@@ -286,6 +302,13 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
 
   // Returns a pair (start, length) of the group range of resource.
   std::pair<int, int> GetGroupRangeForResource(int index) const;
+
+  // Returns an index of groups to which the resource belongs.
+  int GetGroupIndexForResource(int index) const;
+
+  // Returns an index of resource which belongs to the |group_index|th group
+  // and which is the |index_in_group|th resource in group.
+  int GetResourceIndexForGroup(int group_index, int index_in_group) const;
 
   // Compares values in column |col_id| and rows |row1|, |row2|.
   // Returns -1 if value in |row1| is less than value in |row2|,

@@ -40,10 +40,7 @@ class ChromeAppCacheService
   void InitializeOnIOThread(
       const FilePath& cache_path,  // may be empty to use in-memory structures
       const content::ResourceContext* resource_context,
-      scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy,
-      bool clear_local_state_on_exit);
-
-  void SetClearLocalStateOnExit(bool clear_local_state);
+      scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy);
 
  private:
   friend class BrowserThread;
@@ -57,13 +54,12 @@ class ChromeAppCacheService
                                 net::CompletionCallback* callback);
 
   // NotificationObserver override
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
   const content::ResourceContext* resource_context_;
   NotificationRegistrar registrar_;
-  bool clear_local_state_on_exit_;
   FilePath cache_path_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeAppCacheService);

@@ -28,7 +28,6 @@
         'chromium_code': 1,
       },
       'dependencies': [
-        '<(DEPTH)/app/app.gyp:app_base',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:base_i18n',
         '<(DEPTH)/gpu/gpu.gyp:gles2_c_lib',
@@ -39,6 +38,7 @@
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:inspector_resources',
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+        '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
         '<(DEPTH)/webkit/support/webkit_support.gyp:appcache',
         '<(DEPTH)/webkit/support/webkit_support.gyp:blob',
         '<(DEPTH)/webkit/support/webkit_support.gyp:database',
@@ -49,7 +49,6 @@
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support_common',
       ],
-      'msvs_guid': '77C32787-1B96-CB84-B905-7F170629F0AC',
       'sources': [
         'mac/test_shell_webview.h',
         'mac/test_shell_webview.mm',
@@ -201,7 +200,6 @@
         'chromium_code': 1,
       },
       'mac_bundle': 1,
-      'msvs_guid': 'FA39524D-3067-4141-888D-28A86C66F2B9',
       'dependencies': [
         'test_shell_common',
         '<(DEPTH)/net/net.gyp:net_test_support',
@@ -333,26 +331,34 @@
       ],
     },
     {
+      'target_name': 'test_shell_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '<(DEPTH)/webkit/support/webkit_support.gyp:glue'
+      ],
+      'sources': [
+        '../../plugins/npapi/mock_plugin_list.cc',
+        '../../plugins/npapi/mock_plugin_list.h',
+      ]
+    },
+    {
       'target_name': 'test_shell_tests',
       'type': 'executable',
       'variables': {
         'chromium_code': 1,
       },
-      'msvs_guid': 'E6766F81-1FCD-4CD7-BC16-E36964A14867',
-      #TODO(dmichael): Remove this #define once all plugins are ported from
-      #                PPP_Instance and PPB_Instance scripting functions.
-      'defines': [
-        'PPAPI_INSTANCE_REMOVE_SCRIPTING',
-      ],
       'dependencies': [
         'test_shell_common',
+        'test_shell_test_support',
         '<(DEPTH)/base/base.gyp:test_support_base',
         '<(DEPTH)/media/media.gyp:media_test_support',
+        '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/third_party/leveldb/leveldb.gyp:leveldb',
+        '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
       ],
       'sources': [
         '../../../skia/ext/convolver_unittest.cc',
@@ -364,12 +370,15 @@
         '../../appcache/appcache_database_unittest.cc',
         '../../appcache/appcache_group_unittest.cc',
         '../../appcache/appcache_host_unittest.cc',
+        '../../appcache/appcache_quota_client_unittest.cc',
         '../../appcache/appcache_request_handler_unittest.cc',
         '../../appcache/appcache_response_unittest.cc',
+        '../../appcache/appcache_service_unittest.cc',
         '../../appcache/appcache_storage_unittest.cc',
         '../../appcache/appcache_storage_impl_unittest.cc',
         '../../appcache/appcache_update_job_unittest.cc',
         '../../appcache/appcache_url_request_job_unittest.cc',
+        '../../appcache/mock_appcache_service.cc',
         '../../appcache/mock_appcache_service.h',
         '../../appcache/mock_appcache_storage.cc',
         '../../appcache/mock_appcache_storage.h',
@@ -390,6 +399,7 @@
         '../../fileapi/file_system_origin_database_unittest.cc',
         '../../fileapi/file_system_path_manager_unittest.cc',
         '../../fileapi/file_system_quota_client_unittest.cc',
+        '../../fileapi/file_system_quota_unittest.cc',
         '../../fileapi/file_system_usage_cache_unittest.cc',
         '../../fileapi/file_system_util_unittest.cc',
         '../../fileapi/local_file_system_file_util_unittest.cc',
@@ -430,16 +440,20 @@
         '../../plugins/ppapi/callbacks_unittest.cc',
         '../../plugins/ppapi/mock_plugin_delegate.cc',
         '../../plugins/ppapi/mock_plugin_delegate.h',
-        '../../plugins/ppapi/mock_resource.cc',
         '../../plugins/ppapi/mock_resource.h',
         '../../plugins/ppapi/ppapi_unittest.cc',
         '../../plugins/ppapi/ppapi_unittest.h',
+        '../../plugins/ppapi/quota_file_io_unittest.cc',
         '../../plugins/ppapi/resource_tracker_unittest.cc',
+        '../../plugins/ppapi/time_conversion_unittest.cc',
         '../../plugins/ppapi/url_request_info_unittest.cc',
         '../../quota/mock_special_storage_policy.cc',
         '../../quota/mock_special_storage_policy.h',
         '../../quota/mock_storage_client.cc',
         '../../quota/mock_storage_client.h',
+        '../../quota/mock_quota_manager.cc',
+        '../../quota/mock_quota_manager.h',
+        '../../quota/mock_quota_manager_unittest.cc',
         '../../quota/quota_database_unittest.cc',
         '../../quota/quota_manager_unittest.cc',
         '../../quota/quota_temporary_storage_evictor_unittest.cc',
@@ -557,7 +571,6 @@
             'chromium_code': 1,
           },
           'mac_bundle': 1,
-          'msvs_guid': '0D04AEC1-6B68-492C-BCCF-808DFD69ABC6',
           'dependencies': [
             '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
             'npapi_test_common',
@@ -758,9 +771,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

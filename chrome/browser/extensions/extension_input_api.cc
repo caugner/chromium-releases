@@ -12,8 +12,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "views/events/event.h"
 #include "views/ime/input_method.h"
+#include "views/views_delegate.h"
 #include "views/widget/widget.h"
 
 #if defined(TOUCH_UI)
@@ -21,9 +23,9 @@
 #endif
 
 #if defined(OS_CHROMEOS) && defined(TOUCH_UI)
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/input_method_library.h"
-#include "chrome/browser/chromeos/login/dom_login_display.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#include "chrome/browser/chromeos/input_method/ibus_controller.h"
+#include "chrome/browser/chromeos/login/webui_login_display.h"
 #endif
 
 namespace {
@@ -45,9 +47,7 @@ const char kUnknownOrUnsupportedKeyIdentiferError[] = "Unknown or unsupported "
 const char kUnsupportedModifier[] = "Unsupported modifier.";
 const char kNoValidRecipientError[] = "No valid recipient for event.";
 const char kKeyEventUnprocessedError[] = "Event was not handled.";
-#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
-const char kCrosLibraryNotLoadedError[] = "Cros shared library not loaded.";
-#endif
+const char kInvalidHeight[] = "Invalid height.";
 
 ui::EventType GetTypeFromString(const std::string& type) {
   if (type == kKeyDown) {
@@ -65,8 +65,15 @@ void InputFunction::Run() {
 }
 
 views::Widget* SendKeyboardEventInputFunction::GetTopLevelWidget() {
+  if (views::ViewsDelegate::views_delegate) {
+    views::View* view = views::ViewsDelegate::views_delegate->
+                        GetDefaultParentView();
+    if (view)
+      return view->GetWidget();
+  }
+
 #if defined(OS_CHROMEOS) && defined(TOUCH_UI)
-  views::Widget* login_window = chromeos::DOMLoginDisplay::GetLoginWindow();
+  views::Widget* login_window = chromeos::WebUILoginDisplay::GetLoginWindow();
   if (login_window)
     return login_window;
 #endif
@@ -139,9 +146,28 @@ bool SendKeyboardEventInputFunction::RunImpl() {
 #if defined(TOUCH_UI)
 bool HideKeyboardFunction::RunImpl() {
   NotificationService::current()->Notify(
-      NotificationType::HIDE_KEYBOARD_INVOKED,
+      chrome::NOTIFICATION_HIDE_KEYBOARD_INVOKED,
       Source<HideKeyboardFunction>(this),
       NotificationService::NoDetails());
+  return true;
+}
+
+bool SetKeyboardHeightFunction::RunImpl() {
+  int height = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &height));
+
+  if (height < 0) {
+    error_ = kInvalidHeight;
+    return false;
+  }
+
+  // TODO(penghuang) Check the height is not greater than height of browser view
+  // and set the height of virtual keyboard directly instead of using
+  // notification.
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_SET_KEYBOARD_HEIGHT_INVOKED,
+      Source<SetKeyboardHeightFunction>(this),
+      Details<int>(&height));
   return true;
 }
 #endif
@@ -149,17 +175,11 @@ bool HideKeyboardFunction::RunImpl() {
 #if defined(OS_CHROMEOS) && defined(TOUCH_UI)
 // TODO(yusukes): This part should be moved to extension_input_api_chromeos.cc.
 bool SendHandwritingStrokeFunction::RunImpl() {
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (!cros_library->EnsureLoaded()) {
-    error_ = kCrosLibraryNotLoadedError;
-    return false;
-  }
-
   // TODO(yusukes): Add a parameter for an input context ID.
   ListValue* value = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetList(0, &value));
 
-  chromeos::HandwritingStroke stroke;
+  chromeos::input_method::HandwritingStroke stroke;
   for (size_t i = 0; i < value->GetSize(); ++i) {
     DictionaryValue* dict;
     double x = 0.0;
@@ -169,24 +189,20 @@ bool SendHandwritingStrokeFunction::RunImpl() {
     EXTENSION_FUNCTION_VALIDATE(dict->GetDouble("y", &y));
     stroke.push_back(std::make_pair(x, y));
   }
-  cros_library->GetInputMethodLibrary()->SendHandwritingStroke(stroke);
+  chromeos::input_method::InputMethodManager::GetInstance()->
+      SendHandwritingStroke(stroke);
   return true;
 }
 
 bool CancelHandwritingStrokesFunction::RunImpl() {
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (!cros_library->EnsureLoaded()) {
-    error_ = kCrosLibraryNotLoadedError;
-    return false;
-  }
-
   // TODO(yusukes): Add a parameter for an input context ID.
   int stroke_count = 0;  // zero means 'clear all strokes'.
   if (HasOptionalArgument(0)) {
     EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &stroke_count));
     EXTENSION_FUNCTION_VALIDATE(stroke_count >= 0);
   }
-  cros_library->GetInputMethodLibrary()->CancelHandwritingStrokes(stroke_count);
+  chromeos::input_method::InputMethodManager::GetInstance()->
+      CancelHandwritingStrokes(stroke_count);
   return true;
 }
 #endif

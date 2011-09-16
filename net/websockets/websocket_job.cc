@@ -13,12 +13,18 @@
 #include "net/base/net_log.h"
 #include "net/base/cookie_store.h"
 #include "net/base/io_buffer.h"
+#include "net/http/http_network_session.h"
+#include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
+#include "net/spdy/spdy_session.h"
+#include "net/spdy/spdy_session_pool.h"
 #include "net/url_request/url_request_context.h"
 #include "net/websockets/websocket_frame_handler.h"
 #include "net/websockets/websocket_handshake_handler.h"
 #include "net/websockets/websocket_net_log_params.h"
 #include "net/websockets/websocket_throttle.h"
+
+static const int kMaxPendingSendAllowed = 32768;  // 32 kilobytes.
 
 namespace {
 
@@ -72,10 +78,12 @@ WebSocketJob::WebSocketJob(SocketStream::Delegate* delegate)
       callback_(NULL),
       handshake_request_(new WebSocketHandshakeRequestHandler),
       handshake_response_(new WebSocketHandshakeResponseHandler),
+      started_to_send_handshake_request_(false),
       handshake_request_sent_(0),
       response_cookies_save_index_(0),
       send_frame_handler_(new WebSocketFrameHandler),
-      receive_frame_handler_(new WebSocketFrameHandler) {
+      receive_frame_handler_(new WebSocketFrameHandler),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 }
 
 WebSocketJob::~WebSocketJob() {
@@ -109,7 +117,8 @@ bool WebSocketJob::SendData(const char* data, int len) {
         // pending bytes less than max_pending_send_allowed, so when sending
         // larger message than max_pending_send_allowed should not be buffered.
         // If we don't call OnSentData, WebCore::SocketStreamHandle would stop
-        // sending more data when pending data reaches max_pending_send_allowed.
+        // sending more data when pending data reaches
+        // max_pending_send_allowed.
         // TODO(ukai): Fix this to support compression for larger message.
         int err = 0;
         if (!send_frame_handler_->GetCurrentBuffer() &&
@@ -118,7 +127,7 @@ bool WebSocketJob::SendData(const char* data, int len) {
           current_buffer_ = new DrainableIOBuffer(
               send_frame_handler_->GetCurrentBuffer(),
               send_frame_handler_->GetCurrentBufferSize());
-          return socket_->SendData(
+          return SendDataInternal(
               current_buffer_->data(), current_buffer_->BytesRemaining());
         }
         return err >= 0;
@@ -132,13 +141,16 @@ bool WebSocketJob::SendData(const char* data, int len) {
 }
 
 void WebSocketJob::Close() {
+  if (state_ == CLOSED)
+    return;
+
   state_ = CLOSING;
   if (current_buffer_) {
     // Will close in SendPending.
     return;
   }
   state_ = CLOSED;
-  socket_->Close();
+  CloseInternal();
 }
 
 void WebSocketJob::RestartWithAuth(
@@ -172,11 +184,18 @@ int WebSocketJob::OnStartOpenConnection(
   state_ = CONNECTING;
   addresses_ = socket->address_list();
   WebSocketThrottle::GetInstance()->PutInQueue(this);
-  if (!waiting_)
-    return OK;
-  callback_ = callback;
-  AddRef();  // Balanced when callback_ becomes NULL.
-  return ERR_IO_PENDING;
+  if (delegate_) {
+    int result = delegate_->OnStartOpenConnection(socket, callback);
+    DCHECK_EQ(OK, result);
+  }
+  if (waiting_) {
+    // PutInQueue() may set |waiting_| true for throttling. In this case,
+    // Wakeup() will be called later.
+    callback_ = callback;
+    AddRef();  // Balanced when callback_ becomes NULL.
+    return ERR_IO_PENDING;
+  }
+  return TrySpdyStream();
 }
 
 void WebSocketJob::OnConnected(
@@ -210,9 +229,12 @@ void WebSocketJob::OnSentData(SocketStream* socket, int amount_sent) {
     DCHECK_GT(amount_sent, 0);
     current_buffer_ = NULL;
     send_frame_handler_->ReleaseCurrentBuffer();
+    if (method_factory_.empty()) {
+      MessageLoopForIO::current()->PostTask(
+          FROM_HERE,
+          method_factory_.NewRunnableMethod(&WebSocketJob::SendPending));
+    }
     delegate_->OnSentData(socket, amount_sent);
-    MessageLoopForIO::current()->PostTask(
-        FROM_HERE, NewRunnableMethod(this, &WebSocketJob::SendPending));
   }
 }
 
@@ -267,12 +289,79 @@ void WebSocketJob::OnAuthRequired(
 }
 
 void WebSocketJob::OnError(const SocketStream* socket, int error) {
-  if (delegate_)
+  if (delegate_ && error != ERR_PROTOCOL_SWITCHED)
     delegate_->OnError(socket, error);
+}
+
+void WebSocketJob::OnCreatedSpdyStream(int result) {
+  DCHECK(spdy_websocket_stream_.get());
+  DCHECK(socket_.get());
+  DCHECK_NE(ERR_IO_PENDING, result);
+
+  if (state_ == CLOSED) {
+    result = ERR_ABORTED;
+  } else if (result == OK) {
+    state_ = CONNECTING;
+    result = ERR_PROTOCOL_SWITCHED;
+  } else {
+    spdy_websocket_stream_.reset();
+  }
+
+  CompleteIO(result);
+}
+
+void WebSocketJob::OnSentSpdyHeaders(int result) {
+  DCHECK_NE(INITIALIZED, state_);
+  if (state_ != CONNECTING)
+    return;
+  if (delegate_)
+    delegate_->OnSentData(socket_, handshake_request_->original_length());
+  handshake_request_.reset();
+}
+
+int WebSocketJob::OnReceivedSpdyResponseHeader(
+    const spdy::SpdyHeaderBlock& headers, int status) {
+  DCHECK_NE(INITIALIZED, state_);
+  if (state_ != CONNECTING)
+    return status;
+  if (status != OK)
+    return status;
+  // TODO(toyoshim): Fallback to non-spdy connection?
+  handshake_response_->ParseResponseHeaderBlock(headers, challenge_);
+
+  SaveCookiesAndNotifyHeaderComplete();
+  return OK;
+}
+
+void WebSocketJob::OnSentSpdyData(int amount_sent) {
+  DCHECK_NE(INITIALIZED, state_);
+  DCHECK_NE(CONNECTING, state_);
+  if (state_ == CLOSED)
+    return;
+  if (!spdy_websocket_stream_.get())
+    return;
+  OnSentData(socket_, amount_sent);
+}
+
+void WebSocketJob::OnReceivedSpdyData(const char* data, int length) {
+  DCHECK_NE(INITIALIZED, state_);
+  DCHECK_NE(CONNECTING, state_);
+  if (state_ == CLOSED)
+    return;
+  if (!spdy_websocket_stream_.get())
+    return;
+  OnReceivedData(socket_, data, length);
+}
+
+void WebSocketJob::OnCloseSpdyStream() {
+  spdy_websocket_stream_.reset();
+  OnClose(socket_);
 }
 
 bool WebSocketJob::SendHandshakeRequest(const char* data, int len) {
   DCHECK_EQ(state_, CONNECTING);
+  if (started_to_send_handshake_request_)
+    return false;
   if (!handshake_request_->ParseRequest(data, len))
     return false;
 
@@ -281,6 +370,7 @@ bool WebSocketJob::SendHandshakeRequest(const char* data, int len) {
       handshake_request_->protocol_version());
   AddCookieHeaderAndSend();
   // Just buffered in |handshake_request_|.
+  started_to_send_handshake_request_ = true;
   return true;
 }
 
@@ -305,14 +395,22 @@ void WebSocketJob::AddCookieHeaderAndSend() {
       }
     }
 
-    const std::string& handshake_request = handshake_request_->GetRawRequest();
-    handshake_request_sent_ = 0;
-    socket_->net_log()->AddEvent(
-        NetLog::TYPE_WEB_SOCKET_SEND_REQUEST_HEADERS,
-        make_scoped_refptr(
-            new NetLogWebSocketHandshakeParameter(handshake_request)));
-    socket_->SendData(handshake_request.data(),
-                      handshake_request.size());
+    if (spdy_websocket_stream_.get()) {
+      linked_ptr<spdy::SpdyHeaderBlock> headers(new spdy::SpdyHeaderBlock);
+      handshake_request_->GetRequestHeaderBlock(
+          socket_->url(), headers.get(), &challenge_);
+      spdy_websocket_stream_->SendRequest(headers);
+    } else {
+      const std::string& handshake_request =
+          handshake_request_->GetRawRequest();
+      handshake_request_sent_ = 0;
+      socket_->net_log()->AddEvent(
+          NetLog::TYPE_WEB_SOCKET_SEND_REQUEST_HEADERS,
+          make_scoped_refptr(
+              new NetLogWebSocketHandshakeParameter(handshake_request)));
+      socket_->SendData(handshake_request.data(),
+                        handshake_request.size());
+    }
   }
 }
 
@@ -436,6 +534,54 @@ const AddressList& WebSocketJob::address_list() const {
   return addresses_;
 }
 
+int WebSocketJob::TrySpdyStream() {
+  if (!socket_.get())
+    return ERR_FAILED;
+
+  if (!websocket_over_spdy_enabled_)
+    return OK;
+
+  // Check if we have a SPDY session available.
+  HttpTransactionFactory* factory =
+      socket_->context()->http_transaction_factory();
+  if (!factory)
+    return OK;
+  scoped_refptr<HttpNetworkSession> session = factory->GetSession();
+  if (!session.get())
+    return OK;
+  SpdySessionPool* spdy_pool = session->spdy_session_pool();
+  const HostPortProxyPair pair(HostPortPair::FromURL(socket_->url()),
+                               socket_->proxy_server());
+  if (!spdy_pool->HasSession(pair))
+    return OK;
+
+  // Forbid wss downgrade to SPDY without SSL.
+  // TODO(toyoshim): Does it realize the same policy with HTTP?
+  scoped_refptr<SpdySession> spdy_session =
+      spdy_pool->Get(pair, *socket_->net_log());
+  SSLInfo ssl_info;
+  bool was_npn_negotiated;
+  bool use_ssl = spdy_session->GetSSLInfo(&ssl_info, &was_npn_negotiated);
+  if (socket_->is_secure() && !use_ssl)
+    return OK;
+
+  // Create SpdyWebSocketStream.
+  spdy_websocket_stream_.reset(new SpdyWebSocketStream(spdy_session, this));
+
+  int result = spdy_websocket_stream_->InitializeStream(
+      socket_->url(), MEDIUM, *socket_->net_log());
+  if (result == OK) {
+    OnConnected(socket_, kMaxPendingSendAllowed);
+    return ERR_PROTOCOL_SWITCHED;
+  }
+  if (result != ERR_IO_PENDING) {
+    spdy_websocket_stream_.reset();
+    return OK;
+  }
+
+  return ERR_IO_PENDING;
+}
+
 void WebSocketJob::SetWaiting() {
   waiting_ = true;
 }
@@ -451,18 +597,41 @@ void WebSocketJob::Wakeup() {
   DCHECK(callback_);
   MessageLoopForIO::current()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this,
-                        &WebSocketJob::DoCallback));
+      method_factory_.NewRunnableMethod(&WebSocketJob::RetryPendingIO));
 }
 
-void WebSocketJob::DoCallback() {
+void WebSocketJob::RetryPendingIO() {
+  int result = TrySpdyStream();
+
+  // In the case of ERR_IO_PENDING, CompleteIO() will be called from
+  // OnCreatedSpdyStream().
+  if (result != ERR_IO_PENDING)
+    CompleteIO(result);
+}
+
+void WebSocketJob::CompleteIO(int result) {
   // |callback_| may be NULL if OnClose() or DetachDelegate() was called.
   if (callback_) {
     net::CompletionCallback* callback = callback_;
     callback_ = NULL;
-    callback->Run(net::OK);
+    callback->Run(result);
     Release();  // Balanced with OnStartOpenConnection().
   }
+}
+
+bool WebSocketJob::SendDataInternal(const char* data, int length) {
+  if (spdy_websocket_stream_.get())
+    return ERR_IO_PENDING == spdy_websocket_stream_->SendData(data, length);
+  if (socket_.get())
+    return socket_->SendData(data, length);
+  return false;
+}
+
+void WebSocketJob::CloseInternal() {
+  if (spdy_websocket_stream_.get())
+    spdy_websocket_stream_->Close();
+  if (socket_.get())
+    socket_->Close();
 }
 
 void WebSocketJob::SendPending() {
@@ -473,13 +642,13 @@ void WebSocketJob::SendPending() {
   if (send_frame_handler_->UpdateCurrentBuffer(false) <= 0) {
     // No more data to send.
     if (state_ == CLOSING)
-      socket_->Close();
+      CloseInternal();
     return;
   }
   current_buffer_ = new DrainableIOBuffer(
       send_frame_handler_->GetCurrentBuffer(),
       send_frame_handler_->GetCurrentBufferSize());
-  socket_->SendData(current_buffer_->data(), current_buffer_->BytesRemaining());
+  SendDataInternal(current_buffer_->data(), current_buffer_->BytesRemaining());
 }
 
 }  // namespace net

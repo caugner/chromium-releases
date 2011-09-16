@@ -40,11 +40,10 @@ class NetworkDelegate : public base::NonThreadSafe {
   int NotifyBeforeURLRequest(URLRequest* request,
                              CompletionCallback* callback,
                              GURL* new_url);
-  int NotifyBeforeSendHeaders(uint64 request_id,
+  int NotifyBeforeSendHeaders(URLRequest* request,
                               CompletionCallback* callback,
                               HttpRequestHeaders* headers);
-  void NotifyRequestSent(uint64 request_id,
-                         const HostPortPair& socket_address,
+  void NotifySendHeaders(URLRequest* request,
                          const HttpRequestHeaders& headers);
   void NotifyBeforeRedirect(URLRequest* request,
                             const GURL& new_location);
@@ -52,7 +51,6 @@ class NetworkDelegate : public base::NonThreadSafe {
   void NotifyRawBytesRead(const URLRequest& request, int bytes_read);
   void NotifyCompleted(URLRequest* request);
   void NotifyURLRequestDestroyed(URLRequest* request);
-  void NotifyHttpTransactionDestroyed(uint64 request_id);
   void NotifyPACScriptError(int line_number, const string16& error);
 
  private:
@@ -73,14 +71,12 @@ class NetworkDelegate : public base::NonThreadSafe {
   // read/write |headers| before they get sent out. |callback| and |headers| are
   // valid only until OnHttpTransactionDestroyed is called for this request.
   // Returns a net status code.
-  virtual int OnBeforeSendHeaders(uint64 request_id,
+  virtual int OnBeforeSendHeaders(URLRequest* request,
                                   CompletionCallback* callback,
                                   HttpRequestHeaders* headers) = 0;
 
-  // Called right after the HTTP headers have been sent and notifies where
-  // the request has actually been sent to.
-  virtual void OnRequestSent(uint64 request_id,
-                             const HostPortPair& socket_address,
+  // Called right before the HTTP request(s) are being sent to the network.
+  virtual void OnSendHeaders(URLRequest* request,
                              const HttpRequestHeaders& headers) = 0;
 
   // Called right after a redirect response code was received.
@@ -100,10 +96,6 @@ class NetworkDelegate : public base::NonThreadSafe {
   // being deleted, so it's not safe to call any methods that may result in
   // a virtual method call.
   virtual void OnURLRequestDestroyed(URLRequest* request) = 0;
-
-  // Called when the HttpTransaction for the request with the given ID is
-  // destroyed.
-  virtual void OnHttpTransactionDestroyed(uint64 request_id) = 0;
 
   // Corresponds to ProxyResolverJSBindings::OnError.
   virtual void OnPACScriptError(int line_number, const string16& error) = 0;

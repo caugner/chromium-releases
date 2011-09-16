@@ -14,12 +14,36 @@ MockCurtain::MockCurtain() {}
 
 MockCurtain::~MockCurtain() {}
 
+Curtain* Curtain::Create() {
+  return new MockCurtain();
+}
+
 MockEventExecutor::MockEventExecutor() {}
 
 MockEventExecutor::~MockEventExecutor() {}
 
-Curtain* Curtain::Create() {
-  return new MockCurtain();
+MockDisconnectWindow::MockDisconnectWindow() {}
+
+MockDisconnectWindow::~MockDisconnectWindow() {}
+
+DisconnectWindow* DisconnectWindow::Create() {
+  return new MockDisconnectWindow();
+}
+
+MockContinueWindow::MockContinueWindow() {}
+
+MockContinueWindow::~MockContinueWindow() {}
+
+ContinueWindow* ContinueWindow::Create() {
+  return new MockContinueWindow();
+}
+
+MockLocalInputMonitor::MockLocalInputMonitor() {}
+
+MockLocalInputMonitor::~MockLocalInputMonitor() {}
+
+LocalInputMonitor* LocalInputMonitor::Create() {
+  return new MockLocalInputMonitor();
 }
 
 MockChromotingHostContext::MockChromotingHostContext() {}

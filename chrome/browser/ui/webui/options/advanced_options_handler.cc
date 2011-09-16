@@ -21,17 +21,16 @@
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/service/service_process_control.h"
-#include "chrome/browser/service/service_process_control_manager.h"
 #include "chrome/browser/ui/options/options_util.h"
-#include "chrome/browser/ui/webui/options/options_managed_banner_handler.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -84,8 +83,10 @@ void AdvancedOptionsHandler::GetLocalizedValues(
       IDS_OPTIONS_CERTIFICATES_MANAGE_BUTTON },
     { "proxiesLabel",
       IDS_OPTIONS_PROXIES_LABEL },
+#if !defined(OS_CHROMEOS)
     { "proxiesConfigureButton",
       IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON },
+#endif
     { "safeBrowsingEnableProtection",
       IDS_OPTIONS_SAFEBROWSING_ENABLEPROTECTION },
     { "sslGroupDescription",
@@ -148,6 +149,12 @@ void AdvancedOptionsHandler::GetLocalizedValues(
       IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE },
     { "disableWebServices",
       IDS_OPTIONS_DISABLE_WEB_SERVICES },
+#if defined(OS_CHROMEOS)
+    { "cloudPrintChromeosOptionLabel",
+      IDS_CLOUD_PRINT_CHROMEOS_OPTION_LABEL },
+    { "cloudPrintChromeosOptionButton",
+      IDS_CLOUD_PRINT_CHROMEOS_OPTION_BUTTON },
+#endif
     { "cloudPrintOptionsStaticLabel",
       IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE },
     { "cloudPrintProxyEnabledManageButton",
@@ -179,6 +186,12 @@ void AdvancedOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("privacyLearnMoreURL",
       google_util::AppendGoogleLocaleParam(
           GURL(chrome::kPrivacyLearnMoreURL)).spec());
+
+#if defined(OS_CHROMEOS)
+  localized_strings->SetString("cloudPrintLearnMoreURL",
+      google_util::AppendGoogleLocaleParam(
+          GURL(chrome::kCloudPrintLearnMoreURL)).spec());
+#endif
 }
 
 void AdvancedOptionsHandler::Initialize() {
@@ -203,10 +216,6 @@ void AdvancedOptionsHandler::Initialize() {
   SetupBackgroundModeSettings();
 #endif
 
-  banner_handler_.reset(
-      new OptionsManagedBannerHandler(web_ui_,
-                                      ASCIIToUTF16("AdvancedOptions"),
-                                      OPTIONS_PAGE_ADVANCED));
 }
 
 WebUIMessageHandler* AdvancedOptionsHandler::Attach(WebUI* web_ui) {
@@ -307,10 +316,10 @@ void AdvancedOptionsHandler::RegisterMessages() {
 #endif
 }
 
-void AdvancedOptionsHandler::Observe(NotificationType type,
+void AdvancedOptionsHandler::Observe(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
-  if (type == NotificationType::PREF_CHANGED) {
+  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     std::string* pref_name = Details<std::string>(details).ptr();
     if ((*pref_name == prefs::kDownloadDefaultDirectory) ||
         (*pref_name == prefs::kPromptForDownload) ||
@@ -473,10 +482,11 @@ void AdvancedOptionsHandler::ShowCloudPrintManagePage(const ListValue* args) {
 #if !defined(OS_CHROMEOS)
 void AdvancedOptionsHandler::ShowCloudPrintSetupDialog(const ListValue* args) {
   UserMetricsRecordAction(UserMetricsAction("Options_EnableCloudPrintProxy"));
-  cloud_print_setup_handler_.reset(new CloudPrintSetupHandler(this));
-  CloudPrintSetupFlow::OpenDialog(
-      web_ui_->GetProfile(), cloud_print_setup_handler_->AsWeakPtr(),
-      web_ui_->tab_contents()->GetMessageBoxRootWindow());
+  // Open the connector enable page in the current tab.
+  web_ui_->tab_contents()->OpenURL(
+      CloudPrintURL(web_ui_->GetProfile()).GetCloudPrintServiceEnableURL(
+          web_ui_->GetProfile()->GetCloudPrintProxyService()->proxy_id()),
+      GURL(), CURRENT_TAB, PageTransition::LINK);
 }
 
 void AdvancedOptionsHandler::HandleDisableCloudPrintProxy(

@@ -19,7 +19,7 @@
 #include "ui/base/message_box_flags.h"
 #include "ui/base/text/text_elider.h"
 #include "views/controls/message_box_view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -112,6 +112,14 @@ views::View* ExternalProtocolDialog::GetContentsView() {
   return message_box_view_;
 }
 
+views::Widget* ExternalProtocolDialog::GetWidget() {
+  return message_box_view_->GetWidget();
+}
+
+const views::Widget* ExternalProtocolDialog::GetWidget() const {
+  return message_box_view_->GetWidget();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // ExternalProtocolDialog, private:
 
@@ -157,7 +165,7 @@ ExternalProtocolDialog::ExternalProtocolDialog(TabContents* tab_contents,
     root_hwnd = NULL;
   }
 
-  views::Window::CreateChromeWindow(root_hwnd, gfx::Rect(), this)->Show();
+  views::Widget::CreateWindowWithParent(this, root_hwnd)->Show();
 }
 
 // static

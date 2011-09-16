@@ -6,15 +6,17 @@
 #define VIEWS_WIDGET_WIDGET_H_
 #pragma once
 
-#include <vector>
+#include <stack>
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "views/focus/focus_manager.h"
 #include "views/widget/native_widget_delegate.h"
+#include "views/window/client_view.h"
+#include "views/window/non_client_view.h"
 
 #if defined(OS_WIN)
 // Windows headers define macros for these function names which screw with us.
@@ -23,6 +25,9 @@
 #endif
 #if defined(IsMinimized)
 #undef IsMinimized
+#endif
+#if defined(CreateWindow)
+#undef CreateWindow
 #endif
 #endif
 
@@ -38,6 +43,7 @@ class Accelerator;
 class Compositor;
 class OSExchangeData;
 class ThemeProvider;
+enum TouchStatus;
 }
 using ui::ThemeProvider;
 
@@ -46,11 +52,13 @@ namespace views {
 class DefaultThemeProvider;
 class InputMethod;
 class NativeWidget;
+class NonClientFrameView;
+class ScopedEvent;
 class TooltipManager;
 class View;
 class WidgetDelegate;
-class Window;
 namespace internal {
+class NativeWidgetPrivate;
 class RootView;
 }
 
@@ -82,13 +90,33 @@ class RootView;
 class Widget : public internal::NativeWidgetDelegate,
                public FocusTraversable {
  public:
+  // Observers can listen to various events on the Widgets.
+  class Observer {
+   public:
+    virtual void OnWidgetClosing(Widget* widget) {}
+    virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) {}
+    virtual void OnWidgetActivationChanged(Widget* widget, bool active) {}
+  };
+
+  typedef std::set<Widget*> Widgets;
+
+  enum FrameType {
+    FRAME_TYPE_DEFAULT,         // Use whatever the default would be.
+    FRAME_TYPE_FORCE_CUSTOM,    // Force the custom frame.
+    FRAME_TYPE_FORCE_NATIVE     // Force the native frame.
+  };
+
   struct InitParams {
     enum Type {
-      TYPE_WINDOW,      // A Window, like a frame window.
+      TYPE_WINDOW,      // A decorated Window, like a frame window.
+                        // Widgets of TYPE_WINDOW will have a NonClientView.
+      TYPE_WINDOW_FRAMELESS,
+                        // An undecorated Window.
       TYPE_CONTROL,     // A control, like a button.
       TYPE_POPUP,       // An undecorated Window, with transient properties.
-      TYPE_MENU         // An undecorated Window, with transient properties
+      TYPE_MENU,        // An undecorated Window, with transient properties
                         // specialized to menus.
+      TYPE_TOOLTIP,
     };
     enum Ownership {
       // Default. Creator is not responsible for managing the lifetime of the
@@ -104,6 +132,8 @@ class Widget : public internal::NativeWidgetDelegate,
     explicit InitParams(Type type);
 
     Type type;
+    // If NULL, a default implementation will be constructed.
+    WidgetDelegate* delegate;
     bool child;
     bool transient;
     bool transparent;
@@ -113,6 +143,8 @@ class Widget : public internal::NativeWidgetDelegate,
     Ownership ownership;
     bool mirror_origin_in_rtl;
     bool has_dropshadow;
+    // Whether the widget should be maximized.
+    bool maximize;
     // Should the widget be double buffered? Default is false.
     bool double_buffer;
     gfx::NativeView parent;
@@ -128,6 +160,16 @@ class Widget : public internal::NativeWidgetDelegate,
 
   Widget();
   virtual ~Widget();
+
+  // Creates a decorated window Widget with the specified properties.
+  static Widget* CreateWindow(WidgetDelegate* delegate);
+  static Widget* CreateWindowWithParent(WidgetDelegate* delegate,
+                                        gfx::NativeWindow parent);
+  static Widget* CreateWindowWithBounds(WidgetDelegate* delegate,
+                                        const gfx::Rect& bounds);
+  static Widget* CreateWindowWithParentAndBounds(WidgetDelegate* delegate,
+                                                 gfx::NativeWindow parent,
+                                                 const gfx::Rect& bounds);
 
   // Enumerates all windows pertaining to us and notifies their
   // view hierarchies that the locale has changed.
@@ -150,14 +192,41 @@ class Widget : public internal::NativeWidgetDelegate,
   static void SetPureViews(bool pure);
   static bool IsPureViews();
 
-  // Passes through to NativeWidget::GetWidgetForNativeView().
+  // Retrieves the Widget implementation associated with the given
+  // NativeView or Window, or NULL if the supplied handle has no associated
+  // Widget.
   static Widget* GetWidgetForNativeView(gfx::NativeView native_view);
+  static Widget* GetWidgetForNativeWindow(gfx::NativeWindow native_window);
+
+  // Retrieves the highest Widget in a native view hierarchy starting at
+  // |native_view|, which may or may not be a Widget itself.
+  static Widget* GetTopLevelWidgetForNativeView(gfx::NativeView native_view);
+
+  // Returns all Widgets in |native_view|'s hierarchy, including itself if
+  // it is one.
+  static void GetAllChildWidgets(gfx::NativeView native_view,
+                                 Widgets* children);
+
+  // Re-parent a NativeView and notify all Widgets in |native_view|'s hierarchy
+  // of the change.
+  static void ReparentNativeView(gfx::NativeView native_view,
+                                 gfx::NativeView new_parent);
+
+  // Returns the preferred size of the contents view of this window based on
+  // its localized size data. The width in cols is held in a localized string
+  // resource identified by |col_resource_id|, the height in the same fashion.
+  // TODO(beng): This should eventually live somewhere else, probably closer to
+  //             ClientView.
+  static int GetLocalizedContentsWidth(int col_resource_id);
+  static int GetLocalizedContentsHeight(int row_resource_id);
+  static gfx::Size GetLocalizedContentsSize(int col_resource_id,
+                                            int row_resource_id);
+
+  // Enable/Disable debug paint.
+  static void SetDebugPaintEnabled(bool enabled);
+  static bool IsDebugPaintEnabled();
 
   void Init(const InitParams& params);
-
-  // Unconverted methods -------------------------------------------------------
-
-  // TODO(beng): reorder, they've been converted now.
 
   // Returns the gfx::NativeView associated with this Widget.
   gfx::NativeView GetNativeView() const;
@@ -167,14 +236,14 @@ class Widget : public internal::NativeWidgetDelegate,
   // TYPE_WINDOW.
   gfx::NativeWindow GetNativeWindow() const;
 
+  // Add/remove observer.
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
+  bool HasObserver(Observer* observer);
+
   // Returns the accelerator given a command id. Returns false if there is
   // no accelerator associated with a given id, which is a common condition.
   virtual bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator);
-
-  // Returns the Window containing this Widget, or NULL if not contained in a
-  // window.
-  Window* GetContainingWindow();
-  const Window* GetContainingWindow() const;
 
   // Forwarded from the RootView so that the widget can do any cleanup.
   void ViewHierarchyChanged(bool is_add, View* parent, View* child);
@@ -183,12 +252,6 @@ class Widget : public internal::NativeWidgetDelegate,
   void NotifyNativeViewHierarchyChanged(bool attached,
                                         gfx::NativeView native_view);
 
-  // Converted methods ---------------------------------------------------------
-
-  // TODO(beng):
-  // Widget subclasses are implementing these methods by implementing
-  // NativeWidget. Remove this comment once complete.
-
   // Returns the topmost Widget in a hierarchy. Will return NULL if called
   // before the underlying Native Widget has been initialized.
   Widget* GetTopLevelWidget();
@@ -196,21 +259,22 @@ class Widget : public internal::NativeWidgetDelegate,
 
   // Gets/Sets the WidgetDelegate.
   WidgetDelegate* widget_delegate() const { return widget_delegate_; }
-  void set_widget_delegate(WidgetDelegate* widget_delegate) {
-    widget_delegate_ = widget_delegate;
-  }
 
   // Sets the specified view as the contents of this Widget. There can only
   // be one contents view child of this Widget's RootView. This view is sized to
   // fit the entire size of the RootView. The RootView takes ownership of this
   // View, unless it is set as not being parent-owned.
   void SetContentsView(View* view);
+  View* GetContentsView();
 
   // Returns the bounds of the Widget in screen coordinates.
   gfx::Rect GetWindowScreenBounds() const;
 
   // Returns the bounds of the Widget's client area in screen coordinates.
   gfx::Rect GetClientAreaScreenBounds() const;
+
+  // Retrieves the restored bounds for the window.
+  gfx::Rect GetRestoredBounds() const;
 
   // Sizes and/or places the widget to the specified bounds, size or position.
   void SetBounds(const gfx::Rect& bounds);
@@ -226,6 +290,7 @@ class Widget : public internal::NativeWidgetDelegate,
   // Places the widget in front of the specified widget in z-order.
   void MoveAboveWidget(Widget* widget);
   void MoveAbove(gfx::NativeView native_view);
+  void MoveToTop();
 
   // Sets a shape on the widget. This takes ownership of shape.
   void SetShape(gfx::NativeRegion shape);
@@ -239,9 +304,16 @@ class Widget : public internal::NativeWidgetDelegate,
   // any code that expects it to be valid beyond this call.
   void CloseNow();
 
+  // Toggles the enable state for the Close button (and the Close menu item in
+  // the system menu).
+  void EnableClose(bool enable);
+
   // Shows or hides the widget, without changing activation state.
   virtual void Show();
   void Hide();
+
+  // Like Show(), but does not activate the window.
+  void ShowInactive();
 
   // Activates the widget, assuming it already exists and is visible.
   void Activate();
@@ -252,6 +324,12 @@ class Widget : public internal::NativeWidgetDelegate,
 
   // Returns whether the Widget is the currently active window.
   virtual bool IsActive() const;
+
+  // Prevents the window from being rendered as deactivated the next time it is.
+  // This state is reset automatically as soon as the window becomes activated
+  // again. There is no ability to control the state through this API as this
+  // leads to sync problems.
+  void DisableInactiveRendering();
 
   // Sets the widget to be on top of all other widgets in the windowing system.
   void SetAlwaysOnTop(bool on_top);
@@ -265,15 +343,24 @@ class Widget : public internal::NativeWidgetDelegate,
   virtual bool IsMaximized() const;
   bool IsMinimized() const;
 
+  // Accessors for fullscreen state.
+  void SetFullscreen(bool fullscreen);
+  bool IsFullscreen() const;
+
   // Sets the opacity of the widget. This may allow widgets behind the widget
   // in the Z-order to become visible, depending on the capabilities of the
   // underlying windowing system. Note that the caller must then schedule a
   // repaint to allow this change to take effect.
   void SetOpacity(unsigned char opacity);
 
+  // Sets whether or not the window should show its frame as a "transient drag
+  // frame" - slightly transparent and without the standard window controls.
+  void SetUseDragFrame(bool use_drag_frame);
+
   // Returns the View at the root of the View hierarchy contained by this
   // Widget.
   View* GetRootView();
+  const View* GetRootView() const;
 
   // A secondary widget is one that is automatically closed (via Close()) when
   // all non-secondary widgets are closed.
@@ -303,11 +390,6 @@ class Widget : public internal::NativeWidgetDelegate,
   // Note that all widgets in a widget hierarchy share the same input method.
   InputMethod* GetInputMethod();
 
-  // Returns true if the native view |native_view| is contained in the
-  // views::View hierarchy rooted at this widget.
-  // TODO(beng): const.
-  bool ContainsNativeView(gfx::NativeView native_view);
-
   // Starts a drag operation for the specified view. This blocks until the drag
   // operation completes. |view| can be NULL.
   // If the view is non-NULL it can be accessed during the drag by calling
@@ -333,6 +415,18 @@ class Widget : public internal::NativeWidgetDelegate,
   // to cause the close button to highlight.
   void ResetLastMouseMoveFlag();
 
+  // Sets/Gets a native window property on the underlying native window object.
+  // Returns NULL if the property does not exist. Setting the property value to
+  // NULL removes the property.
+  void SetNativeWindowProperty(const char* name, void* value);
+  void* GetNativeWindowProperty(const char* name) const;
+
+  // Tell the window to update its title from the delegate.
+  void UpdateWindowTitle();
+
+  // Tell the window to update its icon from the delegate.
+  void UpdateWindowIcon();
+
   // Retrieves the focus traversable for this widget.
   FocusTraversable* GetFocusTraversable();
 
@@ -347,8 +441,66 @@ class Widget : public internal::NativeWidgetDelegate,
   void SetFocusTraversableParent(FocusTraversable* parent);
   void SetFocusTraversableParentView(View* parent_view);
 
-  const ui::Compositor* compositor() const { return compositor_.get(); }
-  ui::Compositor* compositor() { return compositor_.get(); }
+  // Clear native focus set to the Widget's NativeWidget.
+  void ClearNativeFocus();
+
+  // Sets the focus to |native_view|.
+  void FocusNativeView(gfx::NativeView native_view);
+
+  // Updates the frame after an event caused it to be changed.
+  virtual void UpdateFrameAfterFrameChange();
+
+  void set_frame_type(FrameType frame_type) { frame_type_ = frame_type; }
+  FrameType frame_type() const { return frame_type_; }
+
+  // Creates an appropriate NonClientFrameView for this widget. The
+  // WidgetDelegate is given the first opportunity to create one, followed by
+  // the NativeWidget implementation. If both return NULL, a default one is
+  // created.
+  virtual NonClientFrameView* CreateNonClientFrameView();
+
+  // Whether we should be using a native frame.
+  bool ShouldUseNativeFrame() const;
+
+  // Forces the frame into the alternate frame type (custom or native) depending
+  // on its current state.
+  void DebugToggleFrameType();
+
+  // Tell the window that something caused the frame type to change.
+  void FrameTypeChanged();
+
+  NonClientView* non_client_view() {
+    return const_cast<NonClientView*>(
+        const_cast<const Widget*>(this)->non_client_view());
+  }
+  const NonClientView* non_client_view() const {
+    return non_client_view_;
+  }
+
+  ClientView* client_view() {
+    return const_cast<ClientView*>(
+        const_cast<const Widget*>(this)->client_view());
+  }
+  const ClientView* client_view() const {
+    // non_client_view_ may be NULL, especially during creation.
+    return non_client_view_ ? non_client_view_->client_view() : NULL;
+  }
+
+#if defined(UNIT_TEST)
+  static void set_compositor_factory(ui::Compositor*(*factory)()) {
+    compositor_factory_ = factory;
+  }
+#endif
+  static ui::Compositor* (*compositor_factory())() {
+    return compositor_factory_;
+  }
+
+  const ui::Compositor* GetCompositor() const;
+  ui::Compositor* GetCompositor();
+
+  // Invokes method of same name on the NativeWidget.
+  void MarkLayerDirty();
+  void CalculateOffsetToAncestorWithLayer(gfx::Point* offset, View** ancestor);
 
   // Notifies assistive technology that an accessibility event has
   // occurred on |view|, such as when the view is focused or when its
@@ -361,21 +513,67 @@ class Widget : public internal::NativeWidgetDelegate,
       ui::AccessibilityTypes::Event event_type,
       bool send_native_event);
 
-  const NativeWidget* native_widget() const { return native_widget_; }
-  NativeWidget* native_widget() { return native_widget_; }
+  const NativeWidget* native_widget() const;
+  NativeWidget* native_widget();
+
+  internal::NativeWidgetPrivate* native_widget_private() {
+    return native_widget_;
+  }
+  const internal::NativeWidgetPrivate* native_widget_private() const {
+    return native_widget_;
+  }
+
+  // Returns the current event being processed. If there are multiple events
+  // being processed at the same time (e.g. one event triggers another event),
+  // then the most recent event is returned. Returns NULL if no event is being
+  // processed.
+  const Event* GetCurrentEvent();
+
+  // Invoked when the tooltip text changes for the specified views.
+  void TooltipTextChanged(View* view);
+
+  // Sets-up the focus manager with the view that should have focus when the
+  // window is shown the first time.  Returns true if the initial focus has been
+  // set or the widget should not set the initial focus, or false if the caller
+  // should set the initial focus (if any).
+  bool SetInitialFocus();
+
+  void set_focus_on_creation(bool focus_on_creation) {
+    focus_on_creation_ = focus_on_creation;
+  }
+
+  // Returns a View* that any child Widgets backed by NativeWidgetViews
+  // are added to.  The default implementation returns the contents view
+  // if it exists and the root view otherwise.
+  virtual View* GetChildViewParent();
 
   // Overridden from NativeWidgetDelegate:
+  virtual bool IsModal() const OVERRIDE;
+  virtual bool IsDialogBox() const OVERRIDE;
+  virtual bool CanActivate() const OVERRIDE;
+  virtual bool IsInactiveRenderingDisabled() const OVERRIDE;
+  virtual void EnableInactiveRendering() OVERRIDE;
+  virtual void OnNativeWidgetActivationChanged(bool active) OVERRIDE;
   virtual void OnNativeFocus(gfx::NativeView focused_view) OVERRIDE;
   virtual void OnNativeBlur(gfx::NativeView focused_view) OVERRIDE;
+  virtual void OnNativeWidgetVisibilityChanged(bool visible) OVERRIDE;
   virtual void OnNativeWidgetCreated() OVERRIDE;
-  virtual void OnSizeChanged(const gfx::Size& new_size) OVERRIDE;
+  virtual void OnNativeWidgetDestroying() OVERRIDE;
+  virtual void OnNativeWidgetDestroyed() OVERRIDE;
+  virtual gfx::Size GetMinimumSize() OVERRIDE;
+  virtual void OnNativeWidgetSizeChanged(const gfx::Size& new_size) OVERRIDE;
+  virtual void OnNativeWidgetBeginUserBoundsChange() OVERRIDE;
+  virtual void OnNativeWidgetEndUserBoundsChange() OVERRIDE;
   virtual bool HasFocusManager() const OVERRIDE;
   virtual bool OnNativeWidgetPaintAccelerated(
       const gfx::Rect& dirty_region) OVERRIDE;
   virtual void OnNativeWidgetPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual int GetNonClientComponent(const gfx::Point& point) OVERRIDE;
   virtual bool OnKeyEvent(const KeyEvent& event) OVERRIDE;
   virtual bool OnMouseEvent(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
+  virtual bool ExecuteCommand(int command_id) OVERRIDE;
   virtual Widget* AsWidget() OVERRIDE;
   virtual const Widget* AsWidget() const OVERRIDE;
 
@@ -415,13 +613,25 @@ class Widget : public internal::NativeWidgetDelegate,
   gfx::Point last_mouse_event_position_;
 
  private:
-  // Try to create a compositor if one hasn't been created yet.
-  void EnsureCompositor();
+  friend class ScopedEvent;
 
   // Returns whether capture should be released on mouse release.
   virtual bool ShouldReleaseCaptureOnMouseReleased() const;
 
-  NativeWidget* native_widget_;
+  // Persists the window's restored position and maximized state using the
+  // window delegate.
+  void SaveWindowPosition();
+
+  // Sizes and positions the window just after it is created.
+  void SetInitialBounds(const gfx::Rect& bounds);
+
+  // Returns the bounds and maximized state from the delegate. Returns true if
+  // the delegate wants to use a specified bounds.
+  bool GetSavedBounds(gfx::Rect* bounds, bool* maximize);
+
+  internal::NativeWidgetPrivate* native_widget_;
+
+  ObserverList<Observer> observers_;
 
   // Non-owned pointer to the Widget's delegate.  May be NULL if no delegate is
   // being used.
@@ -431,6 +641,12 @@ class Widget : public internal::NativeWidgetDelegate,
   // WARNING: see warning in tooltip_manager_ for ordering dependencies with
   // this and tooltip_manager_.
   scoped_ptr<internal::RootView> root_view_;
+
+  // The View that provides the non-client area of the window (title bar,
+  // window controls, sizing borders etc). To use an implementation other than
+  // the default, this class must be sub-classed and this value set to the
+  // desired implementation before calling |InitWindow()|.
+  NonClientView* non_client_view_;
 
   // The focus manager keeping track of focus for this Widget and any of its
   // children.  NULL for non top-level widgets.
@@ -445,14 +661,44 @@ class Widget : public internal::NativeWidgetDelegate,
   // started from.
   View* dragged_view_;
 
-  // The compositor for accelerated drawing.
-  scoped_refptr<ui::Compositor> compositor_;
+  // The event stack.
+  std::stack<ScopedEvent*> event_stack_;
 
   // See class documentation for Widget above for a note about ownership.
   InitParams::Ownership ownership_;
 
   // See set_is_secondary_widget().
   bool is_secondary_widget_;
+
+  // The current frame type in use by this window. Defaults to
+  // FRAME_TYPE_DEFAULT.
+  FrameType frame_type_;
+
+  // True when the window should be rendered as active, regardless of whether
+  // or not it actually is.
+  bool disable_inactive_rendering_;
+
+  // Set to true if the widget is in the process of closing.
+  bool widget_closed_;
+
+  // The saved maximized state for this window. See note in SetInitialBounds
+  // that explains why we save this.
+  bool saved_maximized_state_;
+
+  // The restored bounds used for the initial show. This is only used if
+  // |saved_maximized_state_| is true.
+  gfx::Rect initial_restored_bounds_;
+
+  // The smallest size the window can be.
+  gfx::Size minimum_size_;
+
+  // Focus is automatically set to the view provided by the delegate
+  // when the widget is shown. Set this value to false to override
+  // initial focus for the widget.
+  bool focus_on_creation_;
+
+  // Factory used to create Compositors. Settable by tests.
+  static ui::Compositor*(*compositor_factory_)();
 
   DISALLOW_COPY_AND_ASSIGN(Widget);
 };

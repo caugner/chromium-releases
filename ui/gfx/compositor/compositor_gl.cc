@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/gfx/compositor/compositor.h"
-
-#include <GL/gl.h>
+#include "ui/gfx/compositor/compositor_gl.h"
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/singleton.h"
+#include "base/threading/thread_restrictions.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkScalar.h"
@@ -19,79 +19,270 @@
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface.h"
-#include "ui/gfx/gl/gl_surface_glx.h"
 
-namespace ui {
-
-#if defined COMPOSITOR_2
-namespace glHidden {
-
-class CompositorGL;
-
-class TextureGL : public Texture {
+// Wraps a simple GL program for drawing textures to the screen.
+// Need the declaration before the subclasses in the anonymous namespace below.
+class ui::TextureProgramGL {
  public:
-  TextureGL(CompositorGL* compositor);
-  virtual ~TextureGL();
+  TextureProgramGL();
+  virtual ~TextureProgramGL() {}
 
-  virtual void SetBitmap(const SkBitmap& bitmap,
-                         const gfx::Point& origin,
-                         const gfx::Size& overall_size) OVERRIDE;
+  // Returns false if it was unable to initialize properly.
+  //
+  // Host GL context must be current when this is called.
+  virtual bool Initialize() = 0;
 
-  // Draws the texture.
-  virtual void Draw(const ui::Transform& transform) OVERRIDE;
+  // Make the program active in the current GL context.
+  void Use() const { glUseProgram(program_); }
+
+  // Location of vertex position attribute in vertex shader.
+  GLuint a_pos_loc() const { return a_pos_loc_; }
+
+  // Location of texture co-ordinate attribute in vertex shader.
+  GLuint a_tex_loc() const { return a_tex_loc_; }
+
+  // Location of transformation matrix uniform in vertex shader.
+  GLuint u_mat_loc() const { return u_mat_loc_; }
+
+  // Location of texture unit uniform that we texture map from
+  // in the fragment shader.
+  GLuint u_tex_loc() const { return u_tex_loc_; }
+
+ protected:
+  // Only the fragment shaders differ. This handles the initialization
+  // of all the other fields.
+  bool InitializeCommon();
+
+  GLuint frag_shader_;
 
  private:
-  unsigned int texture_id_;
-  gfx::Size size_;
-  CompositorGL* compositor_;
-  DISALLOW_COPY_AND_ASSIGN(TextureGL);
-};
-
-class CompositorGL : public Compositor {
- public:
-  explicit CompositorGL(gfx::AcceleratedWidget widget);
-  virtual ~CompositorGL();
-
-  void MakeCurrent();
-  gfx::Size GetSize();
-
-  GLuint program();
-  GLuint a_pos_loc();
-  GLuint a_tex_loc();
-  GLuint u_tex_loc();
-  GLuint u_mat_loc();
-
- private:
-  // Overridden from Compositor.
-  virtual Texture* CreateTexture() OVERRIDE;
-  virtual void NotifyStart() OVERRIDE;
-  virtual void NotifyEnd() OVERRIDE;
-
-  // Specific to CompositorGL.
-  bool InitShaders();
-
-  // The GL context used for compositing.
-  scoped_refptr<gfx::GLSurface> gl_surface_;
-  scoped_refptr<gfx::GLContext> gl_context_;
-  gfx::Size size_;
-
-  // Shader program, attributes and uniforms.
-  // TODO(wjmaclean): Make these static so they ca be shared in a single
-  // context.
   GLuint program_;
+  GLuint vertex_shader_;
+
   GLuint a_pos_loc_;
   GLuint a_tex_loc_;
   GLuint u_tex_loc_;
   GLuint u_mat_loc_;
-
-  // Keep track of whether compositing has started or not.
-  bool started_;
-
-  DISALLOW_COPY_AND_ASSIGN(CompositorGL);
 };
+
+namespace {
+
+class TextureProgramNoSwizzleGL : public ui::TextureProgramGL {
+ public:
+  TextureProgramNoSwizzleGL() {}
+  virtual bool Initialize();
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TextureProgramNoSwizzleGL);
+};
+
+class TextureProgramSwizzleGL : public ui::TextureProgramGL {
+ public:
+  TextureProgramSwizzleGL() {}
+  virtual bool Initialize();
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TextureProgramSwizzleGL);
+};
+
+// We share between compositor contexts so that we don't have to compile
+// shaders if they have already been compiled in another context.
+class SharedResources {
+ public:
+  static SharedResources* GetInstance();
+
+  // Creates a context with shaders active.
+  scoped_refptr<gfx::GLContext> CreateContext(gfx::GLSurface* surface);
+  void ContextDestroyed();
+
+  ui::TextureProgramGL* program_no_swizzle() {
+    return program_no_swizzle_.get();
+  }
+
+  ui::TextureProgramGL* program_swizzle() { return program_swizzle_.get(); }
+
+ private:
+  friend struct DefaultSingletonTraits<SharedResources>;
+
+  SharedResources();
+  virtual ~SharedResources();
+
+  scoped_refptr<gfx::GLShareGroup> share_group_;
+  scoped_ptr<ui::TextureProgramGL> program_swizzle_;
+  scoped_ptr<ui::TextureProgramGL> program_no_swizzle_;
+
+  DISALLOW_COPY_AND_ASSIGN(SharedResources);
+};
+
+GLuint CompileShader(GLenum type, const GLchar* source) {
+  GLuint shader = glCreateShader(type);
+  if (!shader)
+    return 0;
+
+  glShaderSource(shader, 1, &source, 0);
+  glCompileShader(shader);
+
+  GLint compiled;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+  if (!compiled) {
+    GLint info_len = 0;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
+
+    if (info_len > 0) {
+      scoped_array<char> info_log(new char[info_len]);
+      glGetShaderInfoLog(shader, info_len, NULL, info_log.get());
+      LOG(ERROR) << "Compile error: " <<  info_log.get();
+      return 0;
+    }
+  }
+  return shader;
+}
+
+bool TextureProgramNoSwizzleGL::Initialize() {
+  const GLchar* frag_shader_source =
+      "#ifdef GL_ES\n"
+      "precision mediump float;\n"
+      "#endif\n"
+      "uniform sampler2D u_tex;"
+      "varying vec2 v_texCoord;"
+      "void main()"
+      "{"
+      "  gl_FragColor = texture2D(u_tex, v_texCoord);"
+      "}";
+
+  frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  if (!frag_shader_)
+    return false;
+
+  return InitializeCommon();
+}
+
+bool TextureProgramSwizzleGL::Initialize() {
+  const GLchar* frag_shader_source =
+      "#ifdef GL_ES\n"
+      "precision mediump float;\n"
+      "#endif\n"
+      "uniform sampler2D u_tex;"
+      "varying vec2 v_texCoord;"
+      "void main()"
+      "{"
+      "  gl_FragColor = texture2D(u_tex, v_texCoord).zyxw;"
+      "}";
+
+  frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  if (!frag_shader_)
+    return false;
+
+  return InitializeCommon();
+}
+
+SharedResources::SharedResources() {
+}
+
+SharedResources::~SharedResources() {
+}
+
+// static
+SharedResources* SharedResources::GetInstance() {
+  return Singleton<SharedResources>::get();
+}
+
+scoped_refptr<gfx::GLContext> SharedResources::CreateContext(
+    gfx::GLSurface* surface) {
+  if (share_group_.get()) {
+    return gfx::GLContext::CreateGLContext(share_group_.get(), surface);
+  } else {
+    scoped_refptr<gfx::GLContext> context(
+        gfx::GLContext::CreateGLContext(NULL, surface));
+    context->MakeCurrent(surface);
+
+    if (!program_no_swizzle_.get()) {
+      scoped_ptr<ui::TextureProgramGL> temp_program(
+          new TextureProgramNoSwizzleGL());
+      if (!temp_program->Initialize()) {
+        LOG(ERROR) << "Unable to initialize shaders (context = "
+                   << static_cast<void*>(context.get()) << ")";
+        return NULL;
+      }
+      program_no_swizzle_.swap(temp_program);
+    }
+
+    if (!program_swizzle_.get()) {
+      scoped_ptr<ui::TextureProgramGL> temp_program(
+          new TextureProgramSwizzleGL());
+      if (!temp_program->Initialize()) {
+        LOG(ERROR) << "Unable to initialize shaders (context = "
+                   << static_cast<void*>(context.get()) << ")";
+        return NULL;
+      }
+      program_swizzle_.swap(temp_program);
+    }
+
+    share_group_ = context->share_group();
+    return context;
+  }
+}
+
+void SharedResources::ContextDestroyed() {
+  if (share_group_.get() && share_group_->GetHandle() == NULL) {
+    share_group_ = NULL;
+    program_no_swizzle_.reset();
+    program_swizzle_.reset();
+  }
+}
+
+}  // namespace
+
+namespace ui {
+
+TextureProgramGL::TextureProgramGL()
+    : program_(0),
+      a_pos_loc_(0),
+      a_tex_loc_(0),
+      u_tex_loc_(0),
+      u_mat_loc_(0) {
+}
+
+bool TextureProgramGL::InitializeCommon() {
+  const GLchar* vertex_shader_source =
+    "attribute vec4 a_position;"
+    "attribute vec2 a_texCoord;"
+    "uniform mat4 u_matViewProjection;"
+    "varying vec2 v_texCoord;"
+    "void main()"
+    "{"
+    "  gl_Position = u_matViewProjection * a_position;"
+    "  v_texCoord = a_texCoord;"
+    "}";
+
+  vertex_shader_ = CompileShader(GL_VERTEX_SHADER, vertex_shader_source);
+  if (!vertex_shader_)
+    return false;
+
+  program_ = glCreateProgram();
+  glAttachShader(program_, vertex_shader_);
+  glAttachShader(program_, frag_shader_);
+  glLinkProgram(program_);
+
+  if (glGetError() != GL_NO_ERROR)
+    return false;
+
+  // Store locations of program inputs.
+  a_pos_loc_ = glGetAttribLocation(program_, "a_position");
+  a_tex_loc_ = glGetAttribLocation(program_, "a_texCoord");
+  u_tex_loc_ = glGetUniformLocation(program_, "u_tex");
+  u_mat_loc_ = glGetUniformLocation(program_, "u_matViewProjection");
+
+  return true;
+}
 
 TextureGL::TextureGL(CompositorGL* compositor) : texture_id_(0),
                                                  compositor_(compositor) {
+}
+
+TextureGL::TextureGL(CompositorGL* compositor,
+                     const gfx::Size& size)
+    : texture_id_(0),
+      size_(size),
+      compositor_(compositor) {
 }
 
 TextureGL::~TextureGL() {
@@ -107,7 +298,7 @@ void TextureGL::SetBitmap(const SkBitmap& bitmap,
   // Verify bitmap pixels are contiguous.
   DCHECK_EQ(bitmap.rowBytes(),
             SkBitmap::ComputeRowBytes(bitmap.config(), bitmap.width()));
-  SkAutoLockPixels lock (bitmap);
+  SkAutoLockPixels lock(bitmap);
   void* pixels = bitmap.getPixels();
 
   if (!texture_id_) {
@@ -137,86 +328,74 @@ void TextureGL::SetBitmap(const SkBitmap& bitmap,
   }
 }
 
-void TextureGL::Draw(const ui::Transform& transform) {
+void TextureGL::Draw(const ui::TextureDrawParams& params) {
+  DCHECK(compositor_->program_swizzle());
+  DrawInternal(*compositor_->program_swizzle(), params);
+}
+
+void TextureGL::DrawInternal(const ui::TextureProgramGL& program,
+                             const ui::TextureDrawParams& params) {
+  if (params.blend)
+    glEnable(GL_BLEND);
+  else
+    glDisable(GL_BLEND);
+
+  program.Use();
+
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(program.u_tex_loc(), 0);
+  glBindTexture(GL_TEXTURE_2D, texture_id_);
+
   gfx::Size window_size = compositor_->GetSize();
 
   ui::Transform t;
-  t.ConcatTranslate(1,1);
+  t.ConcatTranslate(1, 1);
   t.ConcatScale(size_.width()/2.0f, size_.height()/2.0f);
   t.ConcatTranslate(0, -size_.height());
   t.ConcatScale(1, -1);
 
-  t.ConcatTransform(transform); // Add view transform.
+  t.ConcatTransform(params.transform);  // Add view transform.
 
   t.ConcatTranslate(0, -window_size.height());
   t.ConcatScale(1, -1);
   t.ConcatTranslate(-window_size.width()/2.0f, -window_size.height()/2.0f);
   t.ConcatScale(2.0f/window_size.width(), 2.0f/window_size.height());
 
-  DCHECK(compositor_->program());
-  glUseProgram(compositor_->program());
-
-  glActiveTexture(GL_TEXTURE0);
-  glUniform1i(compositor_->u_tex_loc(), 0);
-  glBindTexture(GL_TEXTURE_2D, texture_id_);
-
   GLfloat m[16];
-  const SkMatrix& matrix = t.matrix();
+  t.matrix().asColMajorf(m);
 
-  // Convert 3x3 view transform matrix (row major) into 4x4 GL matrix (column
-  // major). Assume 2-D rotations/translations restricted to XY plane.
+  static const GLfloat vertices[] = { -1., -1., +0., +0., +1.,
+                                      +1., -1., +0., +1., +1.,
+                                      +1., +1., +0., +1., +0.,
+                                      -1., +1., +0., +0., +0. };
 
-  m[ 0] = matrix[0];
-  m[ 1] = matrix[3];
-  m[ 2] = 0;
-  m[ 3] = matrix[6];
-
-  m[ 4] = matrix[1];
-  m[ 5] = matrix[4];
-  m[ 6] = 0;
-  m[ 7] = matrix[7];
-
-  m[ 8] = 0;
-  m[ 9] = 0;
-  m[10] = 1;
-  m[11] = 0;
-
-  m[12] = matrix[2];
-  m[13] = matrix[5];
-  m[14] = 0;
-  m[15] = matrix[8];
-
-  const GLfloat vertices[] = { -1., -1., +0., +0., +1.,
-                               +1., -1., +0., +1., +1.,
-                               +1., +1., +0., +1., +0.,
-                               -1., +1., +0., +0., +0. };
-
-  glVertexAttribPointer(compositor_->a_pos_loc(), 3, GL_FLOAT,
+  glVertexAttribPointer(program.a_pos_loc(), 3, GL_FLOAT,
                         GL_FALSE, 5 * sizeof(GLfloat), vertices);
-  glVertexAttribPointer(compositor_->a_tex_loc(), 2, GL_FLOAT,
+  glVertexAttribPointer(program.a_tex_loc(), 2, GL_FLOAT,
                         GL_FALSE, 5 * sizeof(GLfloat), &vertices[3]);
-  glEnableVertexAttribArray(compositor_->a_pos_loc());
-  glEnableVertexAttribArray(compositor_->a_tex_loc());
+  glEnableVertexAttribArray(program.a_pos_loc());
+  glEnableVertexAttribArray(program.a_tex_loc());
 
-  glUniformMatrix4fv(compositor_->u_mat_loc(), 1, GL_FALSE, m);
+  glUniformMatrix4fv(program.u_mat_loc(), 1, GL_FALSE, m);
 
   glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 }
 
-CompositorGL::CompositorGL(gfx::AcceleratedWidget widget)
-    : started_(false) {
-  gl_surface_ = gfx::GLSurface::CreateViewGLSurface(widget);
-  gl_context_ = gfx::GLContext::CreateGLContext(NULL, gl_surface_.get());
+CompositorGL::CompositorGL(gfx::AcceleratedWidget widget,
+                           const gfx::Size& size)
+    : size_(size),
+      started_(false) {
+  gl_surface_ = gfx::GLSurface::CreateViewGLSurface(false, widget);
+  gl_context_ = SharedResources::GetInstance()->
+      CreateContext(gl_surface_.get());
   gl_context_->MakeCurrent(gl_surface_.get());
-  if (!InitShaders())
-    LOG(ERROR) << "Unable to initialize shaders (context = "
-               << static_cast<void*>(gl_context_.get()) << ")" ;
   glColorMask(true, true, true, true);
-  glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 CompositorGL::~CompositorGL() {
+  gl_context_ = NULL;
+  SharedResources::GetInstance()->ContextDestroyed();
 }
 
 void CompositorGL::MakeCurrent() {
@@ -224,27 +403,15 @@ void CompositorGL::MakeCurrent() {
 }
 
 gfx::Size CompositorGL::GetSize() {
-  return gl_surface_->GetSize();
+  return size_;
 }
 
-GLuint CompositorGL::program() {
-  return program_;
+TextureProgramGL* CompositorGL::program_no_swizzle() {
+  return SharedResources::GetInstance()->program_no_swizzle();
 }
 
-GLuint CompositorGL::a_pos_loc() {
-  return a_pos_loc_;
-}
-
-GLuint CompositorGL::a_tex_loc() {
-  return a_tex_loc_;
-}
-
-GLuint CompositorGL::u_tex_loc() {
-  return u_tex_loc_;
-}
-
-GLuint CompositorGL::u_mat_loc() {
-  return u_mat_loc_;
+TextureProgramGL* CompositorGL::program_swizzle() {
+  return SharedResources::GetInstance()->program_swizzle();
 }
 
 Texture* CompositorGL::CreateTexture() {
@@ -255,173 +422,47 @@ Texture* CompositorGL::CreateTexture() {
 void CompositorGL::NotifyStart() {
   started_ = true;
   gl_context_->MakeCurrent(gl_surface_.get());
-  glViewport(0, 0,
-             gl_surface_->GetSize().width(), gl_surface_->GetSize().height());
+  glViewport(0, 0, size_.width(), size_.height());
+  glColorMask(true, true, true, true);
 
+#if defined(DEBUG)
   // Clear to 'psychedelic' purple to make it easy to spot un-rendered regions.
   glClearColor(223.0 / 255, 0, 1, 1);
-  glColorMask(true, true, true, true);
   glClear(GL_COLOR_BUFFER_BIT);
-  // Disable alpha writes, since we're using blending anyways.
-  glColorMask(true, true, true, false);
-}
-
-void CompositorGL::NotifyEnd() {
-  DCHECK(started_);
-  gl_surface_->SwapBuffers();
-  started_ = false;
-}
-
-namespace {
-
-GLuint CompileShader(GLenum type, const GLchar* source) {
-  GLuint shader = glCreateShader(type);
-  if (!shader)
-    return 0;
-
-  glShaderSource(shader, 1, &source, 0);
-  glCompileShader(shader);
-
-  GLint compiled;
-  glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-  if (!compiled) {
-    GLint info_len = 0;
-    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
-
-    if (info_len > 0) {
-      char* info_log = reinterpret_cast<char*> (
-          malloc(sizeof(info_log[0]) * info_len));
-      glGetShaderInfoLog(shader, info_len, NULL, info_log);
-
-      LOG(ERROR) << "Compile error: " <<  info_log;
-      free(info_log);
-      return 0;
-    }
-  }
-  return shader;
-}
-
-} // namespace (anonymous)
-
-bool CompositorGL::InitShaders() {
-  const GLchar* vertex_shader_source =
-        "attribute vec4 a_position;"
-        "attribute vec2 a_texCoord;"
-        "uniform mat4 u_matViewProjection;"
-        "varying vec2 v_texCoord;"
-        "void main()"
-        "{"
-        "  gl_Position = u_matViewProjection * a_position;"
-        "  v_texCoord = a_texCoord;"
-        "}";
-  GLuint vertex_shader = CompileShader(GL_VERTEX_SHADER, vertex_shader_source);
-  if (!vertex_shader)
-    return false;
-
-  const GLchar* frag_shader_source =
-        "#ifdef GL_ES\n"
-        "precision mediump float;\n"
-        "#endif\n"
-        "uniform sampler2D u_tex;"
-        "varying vec2 v_texCoord;"
-        "void main()"
-        "{"
-        "  gl_FragColor = texture2D(u_tex, v_texCoord).zyxw;"
-        "}";
-  GLuint frag_shader = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
-  if (!frag_shader)
-    return false;
-
-  program_ = glCreateProgram();
-  glAttachShader(program_, vertex_shader);
-  glAttachShader(program_, frag_shader);
-  glLinkProgram(program_);
-  if (glGetError() != GL_NO_ERROR)
-    return false;
-
-  // Store locations of program inputs.
-  a_pos_loc_ = glGetAttribLocation(program_, "a_position");
-  a_tex_loc_ = glGetAttribLocation(program_, "a_texCoord");
-  u_tex_loc_ = glGetUniformLocation(program_, "u_tex");
-  u_mat_loc_ = glGetUniformLocation(program_, "u_matViewProjection");
-
-  return true;
-}
-
-} // namespace
-
-// static
-Compositor* Compositor::Create(gfx::AcceleratedWidget widget) {
- gfx::GLSurface::InitializeOneOff();
- if (gfx::GetGLImplementation() != gfx::kGLImplementationNone)
-   return new glHidden::CompositorGL(widget);
-  return NULL;
-}
-#else
-class CompositorGL : public Compositor {
- public:
-  explicit CompositorGL(gfx::AcceleratedWidget widget);
-
- private:
-  // Overridden from Compositor.
-  void NotifyStart() OVERRIDE;
-  void NotifyEnd() OVERRIDE;
-  void DrawTextureWithTransform(TextureID txt,
-                                const ui::Transform& transform) OVERRIDE;
-  void SaveTransform() OVERRIDE;
-  void RestoreTransform() OVERRIDE;
-
-  // The GL context used for compositing.
-  scoped_refptr<gfx::GLSurface> gl_surface_;
-  scoped_refptr<gfx::GLContext> gl_context_;
-
-  // Keep track of whether compositing has started or not.
-  bool started_;
-
-  DISALLOW_COPY_AND_ASSIGN(CompositorGL);
-};
-
-CompositorGL::CompositorGL(gfx::AcceleratedWidget widget)
-    : started_(false) {
-  gl_surface_ = gfx::GLSurface::CreateViewGLSurface(widget);
-  gl_context_ = gfx::GLContext::CreateGLContext(NULL, gl_surface_.get());
-}
-
-void CompositorGL::NotifyStart() {
-  started_ = true;
-  gl_context_->MakeCurrent(gl_surface_.get());
-}
-
-void CompositorGL::NotifyEnd() {
-  DCHECK(started_);
-  gl_surface_->SwapBuffers();
-  started_ = false;
-}
-
-void CompositorGL::DrawTextureWithTransform(TextureID txt,
-                                            const ui::Transform& transform) {
-  DCHECK(started_);
-
-  // TODO(wjmaclean):
-  NOTIMPLEMENTED();
-}
-
-void CompositorGL::SaveTransform() {
-  // TODO(sadrul):
-  NOTIMPLEMENTED();
-}
-
-void CompositorGL::RestoreTransform() {
-  // TODO(sadrul):
-  NOTIMPLEMENTED();
-}
-
-// static
-Compositor* Compositor::Create(gfx::AcceleratedWidget widget) {
-  if (gfx::GetGLImplementation() != gfx::kGLImplementationNone)
-    return new CompositorGL(widget);
-  return NULL;
-}
 #endif
+  // Do not clear in release: root layer is responsible for drawing every pixel.
+}
+
+void CompositorGL::NotifyEnd() {
+  DCHECK(started_);
+  gl_surface_->SwapBuffers();
+  started_ = false;
+}
+
+void CompositorGL::Blur(const gfx::Rect& bounds) {
+  NOTIMPLEMENTED();
+}
+
+void CompositorGL::SchedulePaint() {
+  // TODO: X doesn't provide coalescing of regions, its left to the toolkit.
+  NOTIMPLEMENTED();
+}
+
+void CompositorGL::OnWidgetSizeChanged(const gfx::Size& size) {
+  size_ = size;
+}
+
+// static
+Compositor* Compositor::Create(gfx::AcceleratedWidget widget,
+                               const gfx::Size& size) {
+  // The following line of code exists soley to disable IO restrictions
+  // on this thread long enough to perform the GL bindings.
+  // TODO(wjmaclean) Remove this when GL initialisation cleaned up.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  if (gfx::GLSurface::InitializeOneOff() &&
+      gfx::GetGLImplementation() != gfx::kGLImplementationNone)
+    return new CompositorGL(widget, size);
+  return NULL;
+}
 
 }  // namespace ui

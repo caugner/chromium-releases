@@ -9,9 +9,11 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/renderer/render_process_observer.h"
 
 class GURL;
+class ResourceDispatcherDelegate;
 struct ContentSettings;
 
 // This class filters the incoming control messages (i.e. ones not destined for
@@ -28,10 +30,12 @@ class ChromeRenderProcessObserver : public RenderProcessObserver {
  private:
   // RenderProcessObserver implementation.
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void WebKitInitialized() OVERRIDE;
 
   void OnSetIsIncognitoProcess(bool is_incognito_process);
   void OnSetContentSettingsForCurrentURL(
       const GURL& url, const ContentSettings& content_settings);
+  void OnSetDefaultContentSettings(const ContentSettings& content_settings);
   void OnSetCacheCapacities(size_t min_dead_capacity,
                             size_t max_dead_capacity,
                             size_t capacity);
@@ -44,6 +48,7 @@ class ChromeRenderProcessObserver : public RenderProcessObserver {
   void OnPurgeMemory();
 
   static bool is_incognito_process_;
+  scoped_ptr<ResourceDispatcherDelegate> resource_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderProcessObserver);
 };

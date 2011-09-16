@@ -2,6 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Need Win 7 headers for WM_GESTURE and ChangeWindowMessageFilterEx
+// TODO(jschuh): See crbug.com/92941 for longterm fix.
+#undef  WINVER
+#define WINVER _WIN32_WINNT_WIN7
+#undef  _WIN32_WINNT
+#define _WIN32_WINNT _WIN32_WINNT_WIN7
+#include <windows.h>
+
 #include "chrome/browser/renderer_host/render_widget_host_view_win.h"
 
 #include <algorithm>
@@ -14,13 +22,14 @@
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/wrapped_window_proc.h"
-#include "chrome/browser/accessibility/browser_accessibility_manager.h"
-#include "chrome/browser/accessibility/browser_accessibility_state.h"
-#include "chrome/browser/accessibility/browser_accessibility_win.h"
 #include "chrome/browser/browser_trial.h"
+#include "chrome/browser/renderer_host/render_widget_host_view_views.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/browser/accessibility/browser_accessibility_state.h"
+#include "content/browser/accessibility/browser_accessibility_win.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/renderer_host/backing_store.h"
@@ -46,6 +55,7 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/gdi_util.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/screen.h"
 #include "views/accessibility/native_view_accessibility_win.h"
 #include "views/focus/focus_manager.h"
 #include "views/focus/focus_util_win.h"
@@ -104,7 +114,7 @@ BOOL CALLBACK DismissOwnedPopups(HWND window, LPARAM arg) {
 class NotifyPluginProcessHostTask : public Task {
  public:
   NotifyPluginProcessHostTask(HWND window, HWND parent)
-    : window_(window), parent_(parent), tries_(kMaxTries) { }
+      : window_(window), parent_(parent), tries_(kMaxTries) { }
 
  private:
   void Run() {
@@ -207,6 +217,14 @@ LRESULT CALLBACK PluginWrapperWindowProc(HWND window, unsigned int message,
   return ::DefWindowProc(window, message, wparam, lparam);
 }
 
+// Must be dynamically loaded to avoid startup failures on Win XP.
+typedef BOOL (WINAPI *ChangeWindowMessageFilterExFunction)(
+    HWND hwnd,
+    UINT message,
+    DWORD action,
+    PCHANGEFILTERSTRUCT change_filter_struct);
+ChangeWindowMessageFilterExFunction g_ChangeWindowMessageFilterEx;
+
 }  // namespace
 
 // RenderWidgetHostView --------------------------------------------------------
@@ -214,6 +232,8 @@ LRESULT CALLBACK PluginWrapperWindowProc(HWND window, unsigned int message,
 // static
 RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
     RenderWidgetHost* widget) {
+  if (views::Widget::IsPureViews())
+    return new RenderWidgetHostViewViews(widget);
   return new RenderWidgetHostViewWin(widget);
 }
 
@@ -237,10 +257,11 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       parent_hwnd_(NULL),
       is_loading_(false),
       overlay_color_(0),
-      text_input_type_(ui::TEXT_INPUT_TYPE_NONE) {
-  render_widget_host_->set_view(this);
+      text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
+      is_fullscreen_(false) {
+  render_widget_host_->SetView(this);
   registrar_.Add(this,
-                 NotificationType::RENDERER_PROCESS_TERMINATED,
+                 content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  NotificationService::AllSources());
 }
 
@@ -257,16 +278,17 @@ void RenderWidgetHostViewWin::CreateWnd(HWND parent) {
 
 void RenderWidgetHostViewWin::InitAsPopup(
     RenderWidgetHostView* parent_host_view, const gfx::Rect& pos) {
-  parent_hwnd_ = parent_host_view->GetNativeView();
   close_on_deactivate_ = true;
-  Create(parent_hwnd_, NULL, NULL, WS_POPUP, WS_EX_TOOLWINDOW);
-  MoveWindow(pos.x(), pos.y(), pos.width(), pos.height(), TRUE);
-  // Popups are not activated.
-  ShowWindow(IsActivatable() ? SW_SHOW : SW_SHOWNA);
+  DoPopupOrFullscreenInit(parent_host_view->GetNativeView(), pos,
+                          WS_EX_TOOLWINDOW);
 }
 
-void RenderWidgetHostViewWin::InitAsFullscreen() {
-  NOTIMPLEMENTED() << "Fullscreen not implemented on Win";
+void RenderWidgetHostViewWin::InitAsFullscreen(
+    RenderWidgetHostView* reference_host_view) {
+  gfx::Rect pos = gfx::Screen::GetMonitorAreaNearestWindow(
+      reference_host_view->GetNativeView());
+  is_fullscreen_ = true;
+  DoPopupOrFullscreenInit(GetDesktopWindow(), pos, 0);
 }
 
 RenderWidgetHost* RenderWidgetHostViewWin::GetRenderWidgetHost() const {
@@ -440,12 +462,30 @@ HWND RenderWidgetHostViewWin::ReparentWindow(HWND window) {
   }
   DCHECK(window_class);
 
+  HWND orig_parent = ::GetParent(window);
   HWND parent = CreateWindowEx(
       WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
       MAKEINTATOM(window_class), 0,
       WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-      0, 0, 0, 0, ::GetParent(window), 0, GetModuleHandle(NULL), 0);
+      0, 0, 0, 0, orig_parent, 0, GetModuleHandle(NULL), 0);
   ui::CheckWindowCreated(parent);
+  // If UIPI is enabled we need to add message filters for parents with
+  // children that cross process boundaries.
+  if (::GetPropW(orig_parent, webkit::npapi::kNativeWindowClassFilterProp)) {
+    // Process-wide message filters required on Vista must be added to:
+    // chrome_content_client.cc ChromeContentClient::SandboxPlugin
+    if (!g_ChangeWindowMessageFilterEx) {
+      g_ChangeWindowMessageFilterEx =
+          reinterpret_cast<ChangeWindowMessageFilterExFunction>(
+              ::GetProcAddress(::GetModuleHandle(L"user32.dll"),
+                               "ChangeWindowMessageFilterEx"));
+    }
+    // Process-wide message filters required on Vista must be added to:
+    // chrome_content_client.cc ChromeContentClient::SandboxPlugin
+    g_ChangeWindowMessageFilterEx(parent, WM_MOUSEWHEEL, MSGFLT_ALLOW, NULL);
+    g_ChangeWindowMessageFilterEx(parent, WM_GESTURE, MSGFLT_ALLOW, NULL);
+    ::SetPropW(orig_parent, webkit::npapi::kNativeWindowClassFilterProp, NULL);
+  }
   ::SetParent(window, parent);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -503,37 +543,33 @@ bool RenderWidgetHostViewWin::HasFocus() {
 }
 
 void RenderWidgetHostViewWin::Show() {
-  DCHECK(parent_hwnd_);
-  DCHECK(parent_hwnd_ != GetDesktopWindow());
-  SetParent(parent_hwnd_);
+  if (!is_fullscreen_) {
+    DCHECK(parent_hwnd_);
+    DCHECK(parent_hwnd_ != GetDesktopWindow());
+    SetParent(parent_hwnd_);
+  }
   ShowWindow(SW_SHOW);
-
-  // Save away our HWND in the parent window as a property so that the
-  // accessibility code can find it.
-  accessibility_prop_.reset(new ViewProp(
-      GetParent(),
-      views::kViewsNativeHostPropForAccessibility,
-      m_hWnd));
 
   DidBecomeSelected();
 }
 
 void RenderWidgetHostViewWin::Hide() {
-  if (GetParent() == GetDesktopWindow()) {
+  if (!is_fullscreen_ && GetParent() == GetDesktopWindow()) {
     LOG(WARNING) << "Hide() called twice in a row: " << this << ":" <<
         parent_hwnd_ << ":" << GetParent();
     return;
   }
 
-  accessibility_prop_.reset();
-
   if (::GetFocus() == m_hWnd)
     ::SetFocus(NULL);
   ShowWindow(SW_HIDE);
 
-  // Cache the old parent, then orphan the window so we stop receiving messages
-  parent_hwnd_ = GetParent();
-  SetParent(NULL);
+  if (!is_fullscreen_) {
+    // Cache the old parent, then orphan the window so we stop receiving
+    // messages.
+    parent_hwnd_ = GetParent();
+    SetParent(NULL);
+  }
 
   WasHidden();
 }
@@ -693,11 +729,6 @@ void RenderWidgetHostViewWin::WillWmDestroy() {
   CleanupCompositorWindow();
 }
 
-void RenderWidgetHostViewWin::WillDestroyRenderWidget(RenderWidgetHost* rwh) {
-  if (rwh == render_widget_host_)
-    render_widget_host_ = NULL;
-}
-
 void RenderWidgetHostViewWin::Destroy() {
   // We've been told to destroy.
   // By clearing close_on_deactivate_, we prevent further deactivations
@@ -705,6 +736,7 @@ void RenderWidgetHostViewWin::Destroy() {
   // triggering further destructions.  The deletion of this is handled by
   // OnFinalMessage();
   close_on_deactivate_ = false;
+  render_widget_host_ = NULL;
   being_destroyed_ = true;
   CleanupCompositorWindow();
   DestroyWindow();
@@ -749,23 +781,6 @@ void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
                                  background));
 }
 
-bool RenderWidgetHostViewWin::ContainsNativeView(
-    gfx::NativeView native_view) const {
-  if (m_hWnd == native_view)
-    return true;
-
-  // Traverse the set of parents of the given view to determine if native_view
-  // is a descendant of this window.
-  HWND parent_window = ::GetParent(native_view);
-  while (parent_window) {
-    if (parent_window == m_hWnd)
-      return true;
-    parent_window = ::GetParent(parent_window);
-  }
-
-  return false;
-}
-
 void RenderWidgetHostViewWin::SetVisuallyDeemphasized(const SkColor* color,
                                                       bool animate) {
   // |animate| is not yet implemented, and currently isn't used.
@@ -791,12 +806,6 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
   props_.push_back(views::SetWindowSupportsRerouteMouseWheel(m_hWnd));
   props_.push_back(new ViewProp(m_hWnd, kRenderWidgetHostViewKey,
                                 static_cast<RenderWidgetHostView*>(this)));
-  // Save away our HWND in the parent window as a property so that the
-  // accessibility code can find it.
-  accessibility_prop_.reset(new ViewProp(
-      GetParent(),
-      views::kViewsNativeHostPropForAccessibility,
-      m_hWnd));
 
   return 0;
 }
@@ -1025,7 +1034,8 @@ void RenderWidgetHostViewWin::OnCancelMode() {
   if (render_widget_host_)
     render_widget_host_->LostCapture();
 
-  if (close_on_deactivate_ && shutdown_factory_.empty()) {
+  if ((is_fullscreen_ || close_on_deactivate_) &&
+      shutdown_factory_.empty()) {
     // Dismiss popups and menus.  We do this asynchronously to avoid changing
     // activation within this callstack, which may interfere with another window
     // being activated.  We can synchronously hide the window, but we need to
@@ -1246,7 +1256,9 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
   // is the first non-child view of the view that was specified to the create
   // call).  So the TabContents window would have to be specified to the
   // RenderViewHostHWND as there is no way to retrieve it from the HWND.
-  if (!close_on_deactivate_) {  // Don't forward if the container is a popup.
+
+  // Don't forward if the container is a popup or fullscreen widget.
+  if (!is_fullscreen_ && !close_on_deactivate_) {
     switch (message) {
       case WM_LBUTTONDOWN:
       case WM_MBUTTONDOWN:
@@ -1284,6 +1296,13 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
 LRESULT RenderWidgetHostViewWin::OnKeyEvent(UINT message, WPARAM wparam,
                                             LPARAM lparam, BOOL& handled) {
   handled = TRUE;
+
+  // Force fullscreen windows to close on Escape.
+  if (is_fullscreen_ && (message == WM_KEYDOWN || message == WM_KEYUP) &&
+      wparam == VK_ESCAPE) {
+    SendMessage(WM_CANCELMODE);
+    return 0;
+  }
 
   // If we are a pop-up, forward tab related messages to our parent HWND, so
   // that we are dismissed appropriately and so that the focus advance in our
@@ -1395,7 +1414,7 @@ LRESULT RenderWidgetHostViewWin::OnWheelEvent(UINT message, WPARAM wparam,
   // This is a bit of a hack, but will work for now since we don't want to
   // pollute this object with TabContents-specific functionality...
   bool handled_by_TabContents = false;
-  if (GetParent()) {
+  if (!is_fullscreen_ && GetParent()) {
     // Use a special reflected message to break recursion. If we send
     // WM_MOUSEWHEEL, the focus manager subclass of web contents will
     // route it back here.
@@ -1468,10 +1487,10 @@ void RenderWidgetHostViewWin::OnAccessibilityNotifications(
   browser_accessibility_manager_->OnAccessibilityNotifications(params);
 }
 
-void RenderWidgetHostViewWin::Observe(NotificationType type,
+void RenderWidgetHostViewWin::Observe(int type,
                                       const NotificationSource& source,
                                       const NotificationDetails& details) {
-  DCHECK(type == NotificationType::RENDERER_PROCESS_TERMINATED);
+  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
 
   // Get the RenderProcessHost that posted this notification, and exit
   // if it's not the one associated with this host view.
@@ -1632,6 +1651,24 @@ void RenderWidgetHostViewWin::AccessibilityDoDefaultAction(int acc_obj_id) {
       render_widget_host_->routing_id(), acc_obj_id));
 }
 
+IAccessible* RenderWidgetHostViewWin::GetIAccessible() {
+  if (render_widget_host_ && !render_widget_host_->renderer_accessible()) {
+    // Attempt to detect screen readers by sending an event with our custom id.
+    NotifyWinEvent(EVENT_SYSTEM_ALERT, m_hWnd, kIdCustom, CHILDID_SELF);
+  }
+
+  if (!browser_accessibility_manager_.get()) {
+    // Return busy document tree while renderer accessibility tree loads.
+    webkit_glue::WebAccessibility loading_tree;
+    loading_tree.role = WebAccessibility::ROLE_DOCUMENT;
+    loading_tree.state = (1 << WebAccessibility::STATE_BUSY);
+    browser_accessibility_manager_.reset(
+      BrowserAccessibilityManager::Create(m_hWnd, loading_tree, this));
+  }
+
+  return browser_accessibility_manager_->GetRoot()->toBrowserAccessibilityWin();
+}
+
 LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,
                                              LPARAM lparam, BOOL& handled) {
   if (kIdCustom == lparam) {
@@ -1649,24 +1686,9 @@ LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,
     return static_cast<LRESULT>(0L);
   }
 
-  if (render_widget_host_ && !render_widget_host_->renderer_accessible()) {
-    // Attempt to detect screen readers by sending an event with our custom id.
-    NotifyWinEvent(EVENT_SYSTEM_ALERT, m_hWnd, kIdCustom, CHILDID_SELF);
-  }
-
-  if (!browser_accessibility_manager_.get()) {
-    // Return busy document tree while renderer accessibility tree loads.
-    webkit_glue::WebAccessibility loading_tree;
-    loading_tree.role = WebAccessibility::ROLE_DOCUMENT;
-    loading_tree.state = (1 << WebAccessibility::STATE_BUSY);
-    browser_accessibility_manager_.reset(
-      BrowserAccessibilityManager::Create(m_hWnd, loading_tree, this));
-  }
-
-  base::win::ScopedComPtr<IAccessible> root(
-      browser_accessibility_manager_->GetRoot()->toBrowserAccessibilityWin());
-  if (root.get())
-    return LresultFromObject(IID_IAccessible, wparam, root.Detach());
+  IAccessible* iaccessible = GetIAccessible();
+  if (iaccessible)
+    return LresultFromObject(IID_IAccessible, wparam, iaccessible);
 
   handled = false;
   return static_cast<LRESULT>(0L);
@@ -1693,8 +1715,7 @@ LRESULT RenderWidgetHostViewWin::OnParentNotify(UINT message, WPARAM wparam,
 
 void RenderWidgetHostViewWin::OnFinalMessage(HWND window) {
   // When the render widget host is being destroyed, it ends up calling
-  // WillDestroyRenderWidget (through the RENDER_WIDGET_HOST_DESTROYED
-  // notification) which NULLs render_widget_host_.
+  // Destroy() which NULLs render_widget_host_.
   // Note: the following bug http://crbug.com/24248 seems to report that
   // OnFinalMessage is called with a deleted |render_widget_host_|. It is not
   // clear how this could happen, hence the NULLing of render_widget_host_
@@ -1754,6 +1775,16 @@ void RenderWidgetHostViewWin::EnsureTooltip() {
     }
     ti.uFlags = TTF_TRANSPARENT;
     ti.lpszText = LPSTR_TEXTCALLBACK;
+
+    // Ensure web content tooltips are displayed for at least this amount of
+    // time, to give users a chance to read longer messages.
+    const int kMinimumAutopopDurationMs = 10 * 1000;
+    int autopop_duration_ms =
+        SendMessage(tooltip_hwnd_, TTM_GETDELAYTIME, TTDT_AUTOPOP, NULL);
+    if (autopop_duration_ms < kMinimumAutopopDurationMs) {
+      SendMessage(tooltip_hwnd_, TTM_SETDELAYTIME, TTDT_AUTOPOP,
+                  kMinimumAutopopDurationMs);
+    }
   }
 
   CRect cr;
@@ -1816,7 +1847,24 @@ void RenderWidgetHostViewWin::ShutdownHost() {
 RenderWidgetHostView*
     RenderWidgetHostView::GetRenderWidgetHostViewFromNativeView(
         gfx::NativeView native_view) {
+  if (views::Widget::IsPureViews()) {
+    // TODO(beng): Figure out what to do for Windows/v.o.v.
+    return NULL;
+  }
   return ::IsWindow(native_view) ?
       reinterpret_cast<RenderWidgetHostView*>(
           ViewProp::GetValue(native_view, kRenderWidgetHostViewKey)) : NULL;
+}
+
+void RenderWidgetHostViewWin::DoPopupOrFullscreenInit(HWND parent_hwnd,
+                                                      const gfx::Rect& pos,
+                                                      DWORD ex_style) {
+  parent_hwnd_ = parent_hwnd;
+  Create(parent_hwnd_, NULL, NULL, WS_POPUP, ex_style);
+  MoveWindow(pos.x(), pos.y(), pos.width(), pos.height(), TRUE);
+  // To show tooltip on popup window.(e.g. title in <select>)
+  // Popups default to showing, which means |DidBecomeSelected()| isn't invoked.
+  // Ensure the tooltip is created otherwise tooltips are never shown.
+  EnsureTooltip();
+  ShowWindow(IsActivatable() ? SW_SHOW : SW_SHOWNA);
 }

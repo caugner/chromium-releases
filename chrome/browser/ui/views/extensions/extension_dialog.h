@@ -10,9 +10,10 @@
 #include "chrome/browser/ui/views/extensions/extension_view.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "views/window/window_delegate.h"
+#include "views/widget/widget_delegate.h"
 
 class Browser;
+class ExtensionDialogObserver;
 class ExtensionHost;
 class GURL;
 class Profile;
@@ -25,20 +26,11 @@ class Widget;
 // Modal dialog containing contents provided by an extension.
 // Dialog is automatically centered in the browser window and has fixed size.
 // For example, used by the Chrome OS file browser.
-class ExtensionDialog : public views::WindowDelegate,
+class ExtensionDialog : public views::WidgetDelegate,
                         public ExtensionView::Container,
                         public NotificationObserver,
                         public base::RefCounted<ExtensionDialog> {
  public:
-  // Observer to ExtensionDialog events.
-  class Observer {
-   public:
-    // Called when the ExtensionDialog is closing. Note that it
-    // is ref-counted, and thus will be released shortly after
-    // making this delegate call.
-    virtual void ExtensionDialogIsClosing(ExtensionDialog* popup) = 0;
-  };
-
   virtual ~ExtensionDialog();
 
   // Create and show a dialog with |url| centered over the browser window.
@@ -47,7 +39,7 @@ class ExtensionDialog : public views::WindowDelegate,
   static ExtensionDialog* Show(const GURL& url, Browser* browser,
                                int width,
                                int height,
-                               Observer* observer);
+                               ExtensionDialogObserver* observer);
 
   // Notifies the dialog that the observer has been destroyed and should not
   // be sent notifications.
@@ -58,11 +50,13 @@ class ExtensionDialog : public views::WindowDelegate,
 
   ExtensionHost* host() const { return extension_host_.get(); }
 
-  // views::WindowDelegate overrides.
+  // views::WidgetDelegate overrides.
   virtual bool CanResize() const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
+  virtual views::Widget* GetWidget() OVERRIDE;
+  virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
 
   // ExtensionView::Container overrides.
@@ -71,14 +65,14 @@ class ExtensionDialog : public views::WindowDelegate,
   virtual void OnExtensionPreferredSizeChanged(ExtensionView* view);
 
   // NotificationObserver overrides.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
  private:
   // Use Show() to create instances.
   ExtensionDialog(Browser* browser, ExtensionHost* host, int width, int height,
-                  Observer* observer);
+                  ExtensionDialogObserver* observer);
 
   // Window that holds the extension host view.
   views::Widget* window_;
@@ -89,7 +83,7 @@ class ExtensionDialog : public views::WindowDelegate,
   NotificationRegistrar registrar_;
 
   // The observer of this popup.
-  Observer* observer_;
+  ExtensionDialogObserver* observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDialog);
 };

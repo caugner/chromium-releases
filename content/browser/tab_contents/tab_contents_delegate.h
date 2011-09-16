@@ -16,6 +16,10 @@
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
+namespace content {
+class JavaScriptDialogCreator;
+}
+
 namespace gfx {
 class Point;
 class Rect;
@@ -27,6 +31,7 @@ class HistoryAddPageArgs;
 }
 
 struct ContextMenuParams;
+class DownloadItem;
 class GURL;
 class HtmlDialogUIDelegate;
 struct NativeWebKeyboardEvent;
@@ -46,17 +51,21 @@ class TabContentsDelegate {
   //
   // A NULL source indicates the current tab (callers should probably use
   // OpenURL() for these cases which does it for you).
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url, const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition) = 0;
+  //
+  // Returns the TabContents the URL is opened in, or NULL if the URL wasn't
+  // opened immediately.
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const GURL& url,
+                                      const GURL& referrer,
+                                      WindowOpenDisposition disposition,
+                                      PageTransition::Type transition);
 
   // Called to inform the delegate that the tab content's navigation state
   // changed. The |changed_flags| indicates the parts of the navigation state
   // that have been updated, and is any combination of the
   // |TabContents::InvalidateTypes| bits.
   virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags) = 0;
+                                      unsigned changed_flags);
 
   // Returns the set of headers to add to the navigation request. Use
   // net::HttpUtil::AppendHeaderIfMissing to build the set of headers.
@@ -70,19 +79,19 @@ class TabContentsDelegate {
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) = 0;
+                              bool user_gesture);
 
   // Selects the specified contents, bringing its container to the front.
-  virtual void ActivateContents(TabContents* contents) = 0;
+  virtual void ActivateContents(TabContents* contents);
 
   // Deactivates the specified contents by deactivating its container and
   // potentialy moving it to the back of the Z order.
-  virtual void DeactivateContents(TabContents* contents) = 0;
+  virtual void DeactivateContents(TabContents* contents);
 
   // Notifies the delegate that this contents is starting or is done loading
   // some resource. The delegate should use this notification to represent
-  // loading feedback. See TabContents::is_loading()
-  virtual void LoadingStateChanged(TabContents* source) = 0;
+  // loading feedback. See TabContents::IsLoading()
+  virtual void LoadingStateChanged(TabContents* source);
 
   // Notifies the delegate that the page has made some progress loading.
   // |progress| is a value between 0.0 (nothing loaded) to 1.0 (page fully
@@ -93,11 +102,11 @@ class TabContentsDelegate {
 
   // Request the delegate to close this tab contents, and do whatever cleanup
   // it needs to do.
-  virtual void CloseContents(TabContents* source) = 0;
+  virtual void CloseContents(TabContents* source);
 
   // Request the delegate to move this tab contents to the specified position
   // in screen coordinates.
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) = 0;
+  virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
 
   // Causes the delegate to detach |source| and clean up any internal data
   // pointing to it.  After this call ownership of |source| passes to the
@@ -108,12 +117,6 @@ class TabContentsDelegate {
   // or a panel window.
   virtual bool IsPopupOrPanel(const TabContents* source) const;
 
-  // If |source| is constrained, returns the tab containing it.  Otherwise
-  // returns |source|. TODO(avi): Remove in favor of GetConstrainingContents on
-  // ContentSettingsTabHelperDelegate once uses of it in TabContents are
-  // removed.
-  virtual TabContents* GetConstrainingContents(TabContents* source);
-
   // Returns true if constrained windows should be focused. Default is true.
   virtual bool ShouldFocusConstrainedWindow();
 
@@ -121,7 +124,7 @@ class TabContentsDelegate {
   virtual void WillShowConstrainedWindow(TabContents* source);
 
   // Notification that the target URL has changed.
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) = 0;
+  virtual void UpdateTargetURL(TabContents* source, const GURL& url);
 
   // Notification that there was a mouse event, along with the absolute
   // coordinates of the mouse pointer and whether it was a normal motion event
@@ -160,9 +163,6 @@ class TabContentsDelegate {
                                  bool proceed,
                                  bool* proceed_to_fire_unload);
 
-  // If the delegate is hosting tabs externally.
-  virtual bool IsExternalTabContainer() const;
-
   // Sets focus to the location bar or some other place that is appropriate.
   // This is called when the tab wants to encourage user input, like for the
   // new tab page.
@@ -193,6 +193,12 @@ class TabContentsDelegate {
 
   // Notification that |tab_contents| has gained focus.
   virtual void TabContentsFocused(TabContents* tab_content);
+
+  // Asks the delegate if the given tab can download.
+  virtual bool CanDownload(TabContents* source, int request_id);
+
+  // Notifies the delegate that a download is starting.
+  virtual void OnStartDownload(TabContents* source, DownloadItem* download);
 
   // Return much extra vertical space should be allotted to the
   // render view widget during various animations (e.g. infobar closing).
@@ -260,25 +266,31 @@ class TabContentsDelegate {
   // typically happens when popups are created.
   virtual void TabContentsCreated(TabContents* new_contents);
 
-  // Whether the renderer should report its preferred size when it changes by
-  // calling UpdatePreferredSize().
-  // Note that this is set when the RenderViewHost is created and cannot be
-  // changed after that.
-  virtual bool ShouldEnablePreferredSizeNotifications();
-
-  // Notification that the preferred size of the contents has changed.
-  // Only called if ShouldEnablePreferredSizeNotifications() returns true.
-  virtual void UpdatePreferredSize(const gfx::Size& pref_size);
-
   // Notifies the delegate that the content restrictions for this tab has
   // changed.
   virtual void ContentRestrictionsChanged(TabContents* source);
 
-  // Returns true if the hung renderer dialog should be shown. Default is true.
-  virtual bool ShouldShowHungRendererDialog();
+  // Notification that the tab is hung.
+  virtual void RendererUnresponsive(TabContents* source);
+
+  // Notification that the tab is no longer hung.
+  virtual void RendererResponsive(TabContents* source);
 
   // Notification that a worker associated with this tab has crashed.
-  virtual void WorkerCrashed();
+  virtual void WorkerCrashed(TabContents* source);
+
+  // Invoked when a main fram navigation occurs.
+  virtual void DidNavigateMainFramePostCommit(TabContents* tab);
+
+  // Invoked when navigating to a pending entry. When invoked the
+  // NavigationController has configured its pending entry, but it has not yet
+  // been committed.
+  virtual void DidNavigateToPendingEntry(TabContents* tab);
+
+  // Returns a pointer to a service to create JavaScript dialogs. The default
+  // pointer returned is to a stub service that marks all dialogs as suppressed
+  // and displays nothing.
+  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator();
 
  protected:
   virtual ~TabContentsDelegate();

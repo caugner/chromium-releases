@@ -11,21 +11,25 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_bookmark_manager_api.h"
 #include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/webui/web_ui.h"
 
 class GURL;
-class ListValue;
 class PrefService;
 class Profile;
 class RenderViewHost;
 class TabContents;
 
+namespace base {
+class ListValue;
+class Value;
+}
+
 // This class implements WebUI for extensions and allows extensions to put UI in
 // the main tab contents area. For example, each extension can specify an
 // "options_page", and that page is displayed in the tab contents area and is
 // hosted by this class.
-class ExtensionWebUI : public WebUI {
+class ExtensionWebUI : public ChromeWebUI {
  public:
   static const char kExtensionURLOverrides[];
 
@@ -49,7 +53,7 @@ class ExtensionWebUI : public WebUI {
       const Extension::URLOverrideMap& overrides);
   static void UnregisterChromeURLOverride(const std::string& page,
                                           Profile* profile,
-                                          Value* override);
+                                          base::Value* override);
 
   // Called from BrowserPrefs
   static void RegisterUserPrefs(PrefService* prefs);
@@ -64,8 +68,8 @@ class ExtensionWebUI : public WebUI {
   // ensure that something takes its place.
   static void UnregisterAndReplaceOverride(const std::string& page,
                                            Profile* profile,
-                                           ListValue* list,
-                                           Value* override);
+                                           base::ListValue* list,
+                                           base::Value* override);
 
   // TODO(aa): This seems out of place. Why is it not with the event routers for
   // the other extension APIs?

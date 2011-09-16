@@ -4,7 +4,6 @@
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 
-#include "app/mac/nsimage_cache.h"
 #include "base/mac/mac_util.h"
 #include "base/metrics/histogram.h"
 #include "base/sys_string_conversions.h"
@@ -33,8 +32,8 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_name_folder_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/event_utils.h"
-#import "chrome/browser/ui/cocoa/fullscreen_controller.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
+#import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
@@ -44,13 +43,14 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/user_metrics.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 // Bookmark bar state changing and animations
 //
@@ -243,7 +243,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     folderImage_.reset(
         [rb.GetNativeImageNamed(IDR_BOOKMARK_BAR_FOLDER) retain]);
-    defaultImage_.reset([app::mac::GetCachedImageWithName(@"nav.pdf") retain]);
+    defaultImage_.reset([gfx::GetCachedImageWithName(@"nav.pdf") retain]);
 
     // Register for theme changes, bookmark button pulsing, ...
     NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
@@ -296,7 +296,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     [otherBookmarksButton_ setIsContinuousPulsing:doPulse];
     return;
   }
-  if (node->parent() == bookmarkModel_->GetBookmarkBarNode()) {
+  if (node->parent() == bookmarkModel_->bookmark_bar_node()) {
     [offTheSideButton_ setIsContinuousPulsing:doPulse];
     return;
   }
@@ -537,10 +537,10 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 - (BOOL)canEditBookmark:(const BookmarkNode*)node {
   // Don't allow edit/delete of the bar node, or of "Other Bookmarks"
-  if ((node == nil) ||
-      (node == bookmarkModel_->other_node()) ||
-      (node == bookmarkModel_->synced_node()) ||
-      (node == bookmarkModel_->GetBookmarkBarNode()))
+  if (node == nil ||
+      node == bookmarkModel_->bookmark_bar_node() ||
+      node == bookmarkModel_->other_node() ||
+      node == bookmarkModel_->synced_node())
     return NO;
   return YES;
 }
@@ -624,8 +624,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* node = [sender bookmarkNode];
   WindowOpenDisposition disposition =
       event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
-  RecordAppLaunch(browser_->profile(), node->GetURL());
-  [self openURL:node->GetURL() disposition:disposition];
+  RecordAppLaunch(browser_->profile(), node->url());
+  [self openURL:node->url() disposition:disposition];
 
   if (!animate)
     [self closeFolderAndStopTrackingMenus];
@@ -660,20 +660,20 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 - (IBAction)openBookmarkInNewForegroundTab:(id)sender {
   const BookmarkNode* node = [self nodeFromMenuItem:sender];
   if (node)
-    [self openURL:node->GetURL() disposition:NEW_FOREGROUND_TAB];
+    [self openURL:node->url() disposition:NEW_FOREGROUND_TAB];
   [self closeAllBookmarkFolders];
 }
 
 - (IBAction)openBookmarkInNewWindow:(id)sender {
   const BookmarkNode* node = [self nodeFromMenuItem:sender];
   if (node)
-    [self openURL:node->GetURL() disposition:NEW_WINDOW];
+    [self openURL:node->url() disposition:NEW_WINDOW];
 }
 
 - (IBAction)openBookmarkInIncognitoWindow:(id)sender {
   const BookmarkNode* node = [self nodeFromMenuItem:sender];
   if (node)
-    [self openURL:node->GetURL() disposition:OFF_THE_RECORD];
+    [self openURL:node->url() disposition:OFF_THE_RECORD];
 }
 
 - (IBAction)editBookmark:(id)sender {
@@ -731,7 +731,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* node = [self nodeFromMenuItem:sender];
   if (node) {
     int index = -1;
-    if (node != bookmarkModel_->GetBookmarkBarNode() && !node->is_folder()) {
+    if (node != bookmarkModel_->bookmark_bar_node() && !node->is_folder()) {
       const BookmarkNode* parent = node->parent();
       index = parent->GetIndexOf(node) + 1;
       if (index > parent->child_count())
@@ -780,7 +780,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 - (IBAction)addPage:(id)sender {
   const BookmarkNode* parent = [self nodeFromMenuItem:sender];
   if (!parent)
-    parent = bookmarkModel_->GetBookmarkBarNode();
+    parent = bookmarkModel_->bookmark_bar_node();
   BookmarkEditor::Show([[self view] window],
                        browser_->profile(),
                        parent,
@@ -843,14 +843,17 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   return (AnimatableView*)[self view];
 }
 
-// Position the off-the-side chevron to the left of the otherBookmarks button.
+// Position the off-the-side chevron to the left of the otherBookmarks button,
+// unless it's hidden in which case it's right aligned on top of it.
 - (void)positionOffTheSideButton {
   NSRect frame = [offTheSideButton_ frame];
   frame.size.height = bookmarks::kBookmarkFolderButtonHeight;
-  if (otherBookmarksButton_.get()) {
+  if (otherBookmarksButton_.get() && ![otherBookmarksButton_ isHidden]) {
     frame.origin.x = ([otherBookmarksButton_ frame].origin.x -
                       (frame.size.width +
                        bookmarks::kBookmarkHorizontalPadding));
+  } else {
+    frame.origin.x = (NSMaxX([otherBookmarksButton_ frame]) - frame.size.width);
   }
   [offTheSideButton_ setFrame:frame];
 }
@@ -867,8 +870,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
   [[offTheSideButton_ cell] setStartingChildIndex:displayedButtonCount_];
   [[offTheSideButton_ cell]
-   setBookmarkNode:bookmarkModel_->GetBookmarkBarNode()];
-  int bookmarkChildren = bookmarkModel_->GetBookmarkBarNode()->child_count();
+   setBookmarkNode:bookmarkModel_->bookmark_bar_node()];
+  int bookmarkChildren = bookmarkModel_->bookmark_bar_node()->child_count();
   if (bookmarkChildren > displayedButtonCount_) {
     [offTheSideButton_ setHidden:NO];
   } else {
@@ -1046,7 +1049,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (menu == [[self view] menu]) {
     thingsToDo = [buttons_ count] ? YES : NO;
   } else {
-    if (node && node->is_folder() && node->child_count()) {
+    if (node && node->is_folder() && !node->empty()) {
       thingsToDo = YES;
     }
   }
@@ -1139,7 +1142,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (child->is_folder()) {
     NSMenu* submenu = [[[NSMenu alloc] initWithTitle:title] autorelease];
     [menu setSubmenu:submenu forItem:item];
-    if (child->child_count()) {
+    if (!child->empty()) {
       [self addFolderNode:child toMenu:submenu];  // potentially recursive
     } else {
       [self tagEmptyMenu:submenu];
@@ -1201,14 +1204,14 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* node = bookmarkModel_->GetNodeByID(tag);
   WindowOpenDisposition disposition =
       event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
-  [self openURL:node->GetURL() disposition:disposition];
+  [self openURL:node->url() disposition:disposition];
 }
 
 // For the given root node of the bookmark bar, show or hide (as
 // appropriate) the "no items" container (text which says "bookmarks
 // go here").
 - (void)showOrHideNoItemContainerForNode:(const BookmarkNode*)node {
-  BOOL hideNoItemWarning = node->child_count() > 0;
+  BOOL hideNoItemWarning = !node->empty();
   [[buttonView_ noItemContainer] setHidden:hideNoItemWarning];
 }
 
@@ -1228,7 +1231,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     [buttons_ addObject:button];
   }
 }
-
 
 - (BookmarkButton*)buttonForNode:(const BookmarkNode*)node
                          xOffset:(int*)xOffset {
@@ -1265,6 +1267,13 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     [button setTarget:self];
     [button setAction:@selector(openBookmarkFolderFromButton:)];
     [button setActsOnMouseDown:YES];
+    // If it has a title, and it will be truncated, show full title in
+    // tooltip.
+    NSString* title = base::SysUTF16ToNSString(node->GetTitle());
+    if ([title length] &&
+        [[button cell] cellSize].width > bookmarks::kDefaultBookmarkWidth) {
+      [button setToolTip:title];
+    }
   } else {
     // Make the button do something
     [button setTarget:self];
@@ -1308,12 +1317,25 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   }
 }
 
+// Shows or hides the Other Bookmarks button as appropriate, and returns
+// whether it ended up visible.
+- (BOOL)setOtherBookmarksButtonVisibility {
+  if (!otherBookmarksButton_.get())
+    return NO;
+
+  BOOL visible = ![otherBookmarksButton_ bookmarkNode]->empty();
+  [otherBookmarksButton_ setHidden:!visible];
+  return visible;
+}
+
 // Create the button for "Other Bookmarks" on the right of the bar.
 - (void)createOtherBookmarksButton {
   // Can't create this until the model is loaded, but only need to
   // create it once.
-  if (otherBookmarksButton_.get())
+  if (otherBookmarksButton_.get()) {
+    [self setOtherBookmarksButtonVisibility];
     return;
+  }
 
   // TODO(jrg): remove duplicate code
   NSCell* cell = [self cellForBookmarkNode:bookmarkModel_->other_node()];
@@ -1339,6 +1361,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   [button setAction:@selector(openBookmarkFolderFromButton:)];
   [buttonView_ addSubview:button];
 
+  [self setOtherBookmarksButtonVisibility];
+
   // Now that it's here, move the chevron over.
   [self positionOffTheSideButton];
 }
@@ -1346,7 +1370,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // Now that the model is loaded, set the bookmark bar root as the node
 // represented by the bookmark bar (default, background) menu.
 - (void)setNodeForBarMenu {
-  const BookmarkNode* node = bookmarkModel_->GetBookmarkBarNode();
+  const BookmarkNode* node = bookmarkModel_->bookmark_bar_node();
   BookmarkMenu* menu = static_cast<BookmarkMenu*>([[self view] menu]);
 
   // Make sure types are compatible
@@ -1541,16 +1565,18 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 }
 
 - (void)redistributeButtonsOnBarAsNeeded {
-  const BookmarkNode* node = bookmarkModel_->GetBookmarkBarNode();
+  const BookmarkNode* node = bookmarkModel_->bookmark_bar_node();
   NSInteger barCount = node->child_count();
 
   // Determine the current maximum extent of the visible buttons.
   CGFloat maxViewX = NSMaxX([[self view] bounds]);
   NSButton* otherBookmarksButton = otherBookmarksButton_.get();
   // If necessary, pull in the width to account for the Other Bookmarks button.
-  if (otherBookmarksButton_)
+  if ([self setOtherBookmarksButtonVisibility])
     maxViewX = [otherBookmarksButton frame].origin.x -
         bookmarks::kBookmarkHorizontalPadding;
+
+  [self positionOffTheSideButton];
   // If we're already overflowing, then we need to account for the chevron.
   if (barCount > displayedButtonCount_)
     maxViewX = [offTheSideButton_ frame].origin.x -
@@ -1803,7 +1829,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
       }
       break;
     case NSKeyDown: {
-      bool result = NO;
       // Event hooks often see the same keydown event twice due to the way key
       // events get dispatched and redispatched, so ignore if this keydown
       // event has the EXACT same timestamp as the previous keydown.
@@ -1811,11 +1836,12 @@ void RecordAppLaunch(Profile* profile, GURL url) {
       NSTimeInterval thisTime = [event timestamp];
       if (lastKeyDownEventTime != thisTime) {
         lastKeyDownEventTime = thisTime;
-        if (folderController_) {
-          result = [folderController_ handleInputText:[event characters]];
-        }
+        if ([event modifierFlags] & NSCommandKeyMask)
+          return YES;
+        else if (folderController_)
+          return [folderController_ handleInputText:[event characters]];
       }
-      return result;
+      return NO;
     }
     case NSKeyUp:
       return NO;
@@ -1949,7 +1975,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     destIndex = [button bookmarkNode]->child_count();
   } else {
     // Else we're dropping somewhere on the bar, so find the right spot.
-    destParent = bookmarkModel_->GetBookmarkBarNode();
+    destParent = bookmarkModel_->bookmark_bar_node();
     destIndex = [self indexForDragToPoint:point];
   }
 
@@ -2059,7 +2085,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
   // Brute force nuke and build.
   savedFrameWidth_ = NSWidth([[self view] frame]);
-  const BookmarkNode* node = model->GetBookmarkBarNode();
+  const BookmarkNode* node = model->bookmark_bar_node();
   [self clearBookmarkBar];
   [self addNodesToButtonList:node];
   [self createOtherBookmarksButton];
@@ -2089,7 +2115,9 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   [newController addButtonForNode:newNode atIndex:newIndex];
   // If we go from 0 --> 1 bookmarks we may need to hide the
   // "bookmarks go here" text container.
-  [self showOrHideNoItemContainerForNode:model->GetBookmarkBarNode()];
+  [self showOrHideNoItemContainerForNode:model->bookmark_bar_node()];
+  // Cope with chevron or "Other Bookmarks" buttons possibly changing state.
+  [self reconfigureBookmarkBar];
 }
 
 // TODO(jrg): for now this is brute force.
@@ -2114,10 +2142,9 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   }
   // If the bar is one of the parents we may need to update the visibility
   // of the "bookmarks go here" presentation.
-  [self showOrHideNoItemContainerForNode:model->GetBookmarkBarNode()];
-  // If we moved the only item on the "off the side" menu somewhere
-  // else, we may no longer need to show it.
-  [self configureOffTheSideButtonContentsAndVisibility];
+  [self showOrHideNoItemContainerForNode:model->bookmark_bar_node()];
+  // Cope with chevron or "Other Bookmarks" buttons possibly changing state.
+  [self reconfigureBookmarkBar];
 }
 
 - (void)nodeRemoved:(BookmarkModel*)model
@@ -2132,7 +2159,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   [parentController removeButton:index animate:YES];
   // If we go from 1 --> 0 bookmarks we may need to show the
   // "bookmarks go here" text container.
-  [self showOrHideNoItemContainerForNode:model->GetBookmarkBarNode()];
+  [self showOrHideNoItemContainerForNode:model->bookmark_bar_node()];
   // If we deleted the only item on the "off the side" menu we no
   // longer need to show it.
   [self reconfigureBookmarkBar];
@@ -2598,7 +2625,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     destIndex = [button bookmarkNode]->child_count();
   } else {
     // Else we're dropping somewhere on the bar, so find the right spot.
-    destParent = bookmarkModel_->GetBookmarkBarNode();
+    destParent = bookmarkModel_->bookmark_bar_node();
     destIndex = [self indexForDragToPoint:point];
   }
 
@@ -2652,7 +2679,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
       // A button is being added to the bar and removed from off-the-side.
       // By now the node has already been inserted into the model so the
       // button to be added is represented by |toIndex|.
-      const BookmarkNode* node = bookmarkModel_->GetBookmarkBarNode();
+      const BookmarkNode* node = bookmarkModel_->bookmark_bar_node();
       const BookmarkNode* movedNode = node->GetChild(toIndex);
       DCHECK(movedNode);
       [self addButtonForNode:movedNode atIndex:toIndex];
@@ -2699,7 +2726,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     (const BookmarkNode*)node {
   // See if it's in the bar, then if it is in the hierarchy of visible
   // folder menus.
-  if (bookmarkModel_->GetBookmarkBarNode() == node)
+  if (bookmarkModel_->bookmark_bar_node() == node)
     return self;
   return [folderController_ controllerForNode:node];
 }

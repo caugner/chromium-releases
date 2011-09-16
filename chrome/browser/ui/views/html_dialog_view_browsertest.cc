@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/test/ui/ui_test.h"
-
 #include "base/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/url_constants.h"
@@ -17,7 +16,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 using testing::Eq;
 
@@ -42,7 +40,7 @@ class TestHtmlDialogUIDelegate : public HtmlDialogUIDelegate {
     return std::wstring(L"Test");
   }
   virtual GURL GetDialogContentURL() const {
-    return GURL(chrome::kAboutBlankURL);
+    return GURL(chrome::kChromeUIChromeURLsURL);
   }
   virtual void GetWebUIMessageHandlers(
       std::vector<WebUIMessageHandler*>* handlers) const { }
@@ -131,10 +129,10 @@ IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, MAYBE_SizeWindow) {
       new HtmlDialogView(browser()->profile(), delegate);
   TabContents* tab_contents = browser()->GetSelectedTabContents();
   ASSERT_TRUE(tab_contents != NULL);
-  views::Window::CreateChromeWindow(tab_contents->GetMessageBoxRootWindow(),
-                                    gfx::Rect(), html_view);
+  views::Widget::CreateWindowWithParent(html_view,
+                                        tab_contents->GetDialogRootWindow());
   html_view->InitDialog();
-  html_view->window()->Show();
+  html_view->GetWidget()->Show();
 
   MessageLoopForUI::current()->AddObserver(
       WindowChangedObserver::GetInstance());
@@ -201,6 +199,34 @@ IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, MAYBE_SizeWindow) {
   actual_bounds = html_view->GetWidget()->GetClientAreaScreenBounds();
   EXPECT_LT(0, actual_bounds.width());
   EXPECT_LT(0, actual_bounds.height());
+
+  MessageLoopForUI::current()->RemoveObserver(
+      WindowChangedObserver::GetInstance());
+}
+
+// This is timing out about 5~10% of runs. See crbug.com/86059.
+IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, DISABLED_TestStateTransition) {
+  HtmlDialogUIDelegate* delegate = new TestHtmlDialogUIDelegate();
+
+  HtmlDialogView* html_view =
+      new HtmlDialogView(browser()->profile(), delegate);
+  TabContents* tab_contents = browser()->GetSelectedTabContents();
+  ASSERT_TRUE(tab_contents != NULL);
+  views::Widget::CreateWindowWithParent(html_view,
+                                        tab_contents->GetDialogRootWindow());
+  // Test if the state transitions from INITIALIZED to -> PAINTED
+  EXPECT_EQ(HtmlDialogView::INITIALIZED, html_view->state_);
+
+  html_view->InitDialog();
+  html_view->GetWidget()->Show();
+
+  MessageLoopForUI::current()->AddObserver(
+      WindowChangedObserver::GetInstance());
+  // We use busy loop because the state is updated in notifications.
+  while (html_view->state_ != HtmlDialogView::PAINTED)
+    MessageLoop::current()->RunAllPending();
+
+  EXPECT_EQ(HtmlDialogView::PAINTED, html_view->state_);
 
   MessageLoopForUI::current()->RemoveObserver(
       WindowChangedObserver::GetInstance());

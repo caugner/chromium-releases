@@ -38,7 +38,7 @@ static void ShowTokenExpiredNotificationInBrowser() {
     cmd_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
   cmd_line.AppendSwitch(switches::kNotifyCloudPrintTokenExpired);
 
-  base::LaunchApp(cmd_line, false, false, NULL);
+  base::LaunchProcess(cmd_line, base::LaunchOptions(), NULL);
 }
 
 CloudPrintProxy::CloudPrintProxy()
@@ -181,6 +181,10 @@ void CloudPrintProxy::GetProxyInfo(cloud_print::CloudPrintProxyInfo* info) {
   if (enabled_)
     info->email = user_email();
   info->proxy_id = proxy_id_;
+  // If the Cloud Print service is not enabled, we may need to read the old
+  // value of proxy_id from prefs.
+  if (info->proxy_id.empty())
+    service_prefs_->GetString(prefs::kCloudPrintProxyId, &info->proxy_id);
 }
 
 // Notification methods from the backend. Called on UI thread.

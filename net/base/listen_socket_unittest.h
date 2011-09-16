@@ -29,11 +29,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_POSIX)
-// Used same name as in Windows to avoid #ifdef where refrenced
+// Used same name as in Windows to avoid #ifdef where referenced
 #define SOCKET int
 const int INVALID_SOCKET = -1;
 const int SOCKET_ERROR = -1;
 #endif
+
+namespace net {
 
 enum ActionType {
   ACTION_NONE = 0,
@@ -63,7 +65,7 @@ class ListenSocketTestAction {
 
 
 // This had to be split out into a separate class because I couldn't
-// make a the testing::Test class refcounted.
+// make the testing::Test class refcounted.
 class ListenSocketTester :
     public ListenSocket::ListenSocketDelegate,
     public base::RefCountedThreadSafe<ListenSocketTester> {
@@ -117,5 +119,7 @@ class ListenSocketTester :
 
   virtual ListenSocket* DoListen();
 };
+
+}  // namespace net
 
 #endif  // NET_BASE_LISTEN_SOCKET_UNITTEST_H_

@@ -19,12 +19,12 @@
 #include "content/renderer/navigation_state.h"
 #include "content/renderer/render_thread.h"
 #include "content/renderer/render_view.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 namespace safe_browsing {
-
 
 static GURL StripRef(const GURL& url) {
   GURL::Replacements replacements;
@@ -38,39 +38,6 @@ static base::LazyInstance<PhishingClassifierDelegates>
 
 static base::LazyInstance<scoped_ptr<const safe_browsing::Scorer> >
     g_phishing_scorer(base::LINKER_INITIALIZED);
-
-class ScorerCallback {
- public:
-  static Scorer::CreationCallback* CreateCallback() {
-    ScorerCallback* scorer_callback = new ScorerCallback();
-    return scorer_callback->callback_factory_->NewCallback(
-        &ScorerCallback::PhishingScorerCreated);
-  }
-
- private:
-  ScorerCallback() {
-    callback_factory_.reset(
-        new base::ScopedCallbackFactory<ScorerCallback>(this));
-  }
-
-  // Callback to be run once the phishing Scorer has been created.
-  void PhishingScorerCreated(safe_browsing::Scorer* scorer) {
-    if (!scorer) {
-      DLOG(ERROR) << "Unable to create a PhishingScorer - corrupt model?";
-      return;
-    }
-
-    g_phishing_scorer.Get().reset(scorer);
-
-    PhishingClassifierDelegates::iterator i;
-    for (i = g_delegates.Get().begin(); i != g_delegates.Get().end(); ++i)
-      (*i)->SetPhishingScorer(scorer);
-
-    delete this;
-  }
-
-  scoped_ptr<base::ScopedCallbackFactory<ScorerCallback> > callback_factory_;
-};
 
 // static
 PhishingClassifierFilter* PhishingClassifierFilter::Create() {
@@ -94,12 +61,17 @@ bool PhishingClassifierFilter::OnControlMessageReceived(
   return handled;
 }
 
-void PhishingClassifierFilter::OnSetPhishingModel(
-    IPC::PlatformFileForTransit model_file) {
-  safe_browsing::Scorer::CreateFromFile(
-      IPC::PlatformFileForTransitToPlatformFile(model_file),
-      RenderThread::current()->GetFileThreadMessageLoopProxy(),
-      ScorerCallback::CreateCallback());
+void PhishingClassifierFilter::OnSetPhishingModel(const std::string& model) {
+  safe_browsing::Scorer* scorer = safe_browsing::Scorer::Create(model);
+  if (!scorer) {
+    DLOG(ERROR) << "Unable to create a PhishingScorer - corrupt model?";
+    return;
+  }
+  PhishingClassifierDelegates::iterator i;
+  for (i = g_delegates.Get().begin(); i != g_delegates.Get().end(); ++i) {
+    (*i)->SetPhishingScorer(scorer);
+  }
+  g_phishing_scorer.Get().reset(scorer);
 }
 
 // static
@@ -138,13 +110,20 @@ void PhishingClassifierDelegate::SetPhishingScorer(
     const safe_browsing::Scorer* scorer) {
   if (!render_view()->webview())
     return;  // RenderView is tearing down.
-
+  if (is_classifying_) {
+    // If there is a classification going on right now it means we're
+    // actually replacing an existing scorer with a new model.  In
+    // this case we simply cancel the current classification.
+    // TODO(noelutz): if this happens too frequently we could also
+    // replace the old scorer with the new one once classification is done
+    // but this would complicate the code somewhat.
+    CancelPendingClassification(NEW_PHISHING_SCORER);
+  }
   classifier_->set_phishing_scorer(scorer);
   // Start classifying the current page if all conditions are met.
   // See MaybeStartClassification() for details.
   MaybeStartClassification();
 }
-
 
 void PhishingClassifierDelegate::OnStartPhishingDetection(const GURL& url) {
   last_url_received_from_browser_ = StripRef(url);
@@ -220,16 +199,15 @@ void PhishingClassifierDelegate::ClassificationDone(
   classifier_page_text_.clear();
   VLOG(2) << "Phishy verdict = " << verdict.is_phishing()
           << " score = " << verdict.client_score();
-  if (!verdict.is_phishing()) {
-    return;
+  if (verdict.client_score() != PhishingClassifier::kInvalidScore) {
+    DCHECK_EQ(last_url_sent_to_classifier_.spec(), verdict.url());
+    Send(new SafeBrowsingHostMsg_PhishingDetectionDone(
+        routing_id(), verdict.SerializeAsString()));
   }
-  DCHECK(last_url_sent_to_classifier_.spec() == verdict.url());
-  Send(new SafeBrowsingHostMsg_DetectedPhishingSite(
-      routing_id(), verdict.SerializeAsString()));
 }
 
 GURL PhishingClassifierDelegate::GetToplevelUrl() {
-  return render_view()->webview()->mainFrame()->url();
+  return render_view()->webview()->mainFrame()->document().url();
 }
 
 void PhishingClassifierDelegate::MaybeStartClassification() {

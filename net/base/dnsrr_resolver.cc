@@ -15,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_piece.h"
 #include "base/synchronization/lock.h"
 #include "base/task.h"
@@ -98,7 +98,6 @@ static bool DnsRRIsParsedByWindows(uint16 rrtype) {
 }
 #endif
 
-static const uint16 kClassIN = 1;
 // kMaxCacheEntries is the number of RRResponse objects that we'll cache.
 static const unsigned kMaxCacheEntries = 32;
 // kNegativeTTLSecs is the number of seconds for which we'll cache a negative

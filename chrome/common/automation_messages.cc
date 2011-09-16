@@ -4,6 +4,7 @@
 
 #include "chrome/common/common_param_traits.h"
 #include "content/common/common_param_traits.h"
+#include "ui/base/models/menu_model.h"
 
 #define IPC_MESSAGE_IMPL
 #include "chrome/common/automation_messages.h"
@@ -134,6 +135,7 @@ MiniContextMenuParams::MiniContextMenuParams(int in_screen_x,
                                              const GURL& in_unfiltered_link_url,
                                              const GURL& in_src_url,
                                              const GURL& in_page_url,
+                                             const GURL& in_keyword_url,
                                              const GURL& in_frame_url)
     : screen_x(in_screen_x),
       screen_y(in_screen_y),
@@ -141,10 +143,27 @@ MiniContextMenuParams::MiniContextMenuParams(int in_screen_x,
       unfiltered_link_url(in_unfiltered_link_url),
       src_url(in_src_url),
       page_url(in_page_url),
+      keyword_url(in_keyword_url),
       frame_url(in_frame_url) {
 }
 
 MiniContextMenuParams::~MiniContextMenuParams() {}
+
+ContextMenuModel::ContextMenuModel() {
+}
+
+ContextMenuModel::~ContextMenuModel() {
+  for (size_t i = 0; i < items.size(); ++i)
+    delete items[i].submenu;
+}
+
+ContextMenuModel::Item::Item()
+    : type(static_cast<int>(ui::MenuModel::TYPE_COMMAND)),
+      item_id(0),
+      checked(false),
+      enabled(true),
+      submenu(NULL) {
+}
 
 AttachExternalTabParams::AttachExternalTabParams()
     : cookie(0),
@@ -601,6 +620,7 @@ void ParamTraits<MiniContextMenuParams>::Write(Message* m,
   WriteParam(m, p.unfiltered_link_url);
   WriteParam(m, p.src_url);
   WriteParam(m, p.page_url);
+  WriteParam(m, p.keyword_url);
   WriteParam(m, p.frame_url);
 }
 
@@ -614,6 +634,7 @@ bool ParamTraits<MiniContextMenuParams>::Read(const Message* m,
       ReadParam(m, iter, &p->unfiltered_link_url) &&
       ReadParam(m, iter, &p->src_url) &&
       ReadParam(m, iter, &p->page_url) &&
+      ReadParam(m, iter, &p->keyword_url) &&
       ReadParam(m, iter, &p->frame_url);
 }
 
@@ -633,7 +654,90 @@ void ParamTraits<MiniContextMenuParams>::Log(const param_type& p,
   l->append(", ");
   LogParam(p.page_url, l);
   l->append(", ");
+  LogParam(p.keyword_url, l);
+  l->append(", ");
   LogParam(p.frame_url, l);
+  l->append(")");
+}
+
+// static
+void ParamTraits<ContextMenuModel>::Write(Message* m,
+                                          const param_type& p) {
+  WriteParam(m, p.items.size());
+  for (size_t i = 0; i < p.items.size(); ++i) {
+    WriteParam(m, static_cast<int>(p.items[i].type));
+    WriteParam(m, p.items[i].item_id);
+    WriteParam(m, p.items[i].label);
+    WriteParam(m, p.items[i].checked);
+    WriteParam(m, p.items[i].enabled);
+
+    if (p.items[i].type == static_cast<int>(ui::MenuModel::TYPE_SUBMENU)) {
+      Write(m, *p.items[i].submenu);
+    }
+  }
+}
+
+// static
+bool ParamTraits<ContextMenuModel>::Read(const Message* m,
+                                         void** iter,
+                                         param_type* p) {
+  size_t item_count = 0;
+  if (!ReadParam(m, iter, &item_count))
+    return false;
+
+  p->items.reserve(item_count);
+  for (size_t i = 0; i < item_count; ++i) {
+    ContextMenuModel::Item item;
+    if (!ReadParam(m, iter, &item.type))
+      return false;
+    if (!ReadParam(m, iter, &item.item_id))
+      return false;
+    if (!ReadParam(m, iter, &item.label))
+      return false;
+    if (!ReadParam(m, iter, &item.checked))
+      return false;
+    if (!ReadParam(m, iter, &item.enabled))
+      return false;
+
+    if (item.type == static_cast<int>(ui::MenuModel::TYPE_SUBMENU)) {
+      item.submenu = new ContextMenuModel;
+      if (!Read(m, iter, item.submenu)) {
+        delete item.submenu;
+        item.submenu = NULL;
+        return false;
+      }
+    }
+
+    p->items.push_back(item);
+  }
+
+  return true;
+}
+
+// static
+void ParamTraits<ContextMenuModel>::Log(const param_type& p,
+                                        std::string* l) {
+  l->append("(");
+  for (size_t i = 0; i < p.items.size(); ++i) {
+    const ContextMenuModel::Item& item = p.items[i];
+    if (i)
+      l->append(", ");
+    l->append("(");
+    LogParam(item.type, l);
+    l->append(", ");
+    LogParam(item.item_id, l);
+    l->append(", ");
+    LogParam(item.label, l);
+    l->append(", ");
+    LogParam(item.checked, l);
+    l->append(", ");
+    LogParam(item.enabled, l);
+    if (item.type == ui::MenuModel::TYPE_SUBMENU) {
+      l->append(", ");
+      Log(*item.submenu, l);
+    }
+    l->append(")");
+  }
   l->append(")");
 }
 

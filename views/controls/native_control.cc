@@ -178,7 +178,7 @@ NativeControl::NativeControl() : hwnd_view_(NULL),
                                  horizontal_alignment_(CENTER),
                                  fixed_height_(-1),
                                  vertical_alignment_(CENTER) {
-  focusable_ = true;
+  set_focusable(true);
 }
 
 NativeControl::~NativeControl() {
@@ -267,7 +267,7 @@ void NativeControl::Layout() {
 }
 
 void NativeControl::OnContextMenu(const POINT& location) {
-  if (!GetContextMenuController())
+  if (!context_menu_controller())
     return;
 
   if (location.x == -1 && location.y == -1)

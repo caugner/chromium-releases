@@ -31,11 +31,12 @@
 #include "content/browser/user_metrics.h"
 #include "content/common/bindings_policy.h"
 #include "content/common/content_constants.h"
+#include "content/common/content_notification_types.h"
+#include "content/common/desktop_notification_messages.h"
 #include "content/common/drag_messages.h"
 #include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "content/common/result_codes.h"
 #include "content/common/swapped_out_messages.h"
 #include "content/common/url_constants.h"
@@ -115,7 +116,7 @@ RenderViewHost::RenderViewHost(SiteInstance* instance,
   content::GetContentClient()->browser()->RenderViewHostCreated(this);
 
   NotificationService::current()->Notify(
-      NotificationType::RENDER_VIEW_HOST_CREATED,
+      content::NOTIFICATION_RENDER_VIEW_HOST_CREATED,
       Source<RenderViewHost>(this),
       NotificationService::NoDetails());
 }
@@ -125,7 +126,7 @@ RenderViewHost::~RenderViewHost() {
       RenderViewHostObserver, observers_, RenderViewHostDestruction());
 
   NotificationService::current()->Notify(
-      NotificationType::RENDER_VIEW_HOST_DELETED,
+      content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
       Source<RenderViewHost>(this),
       NotificationService::NoDetails());
 
@@ -160,9 +161,11 @@ bool RenderViewHost::CreateRenderView(const string16& frame_name) {
 
   renderer_initialized_ = true;
 
+  process()->SetCompositingSurface(routing_id(),
+                                   GetCompositingSurface());
+
   ViewMsg_New_Params params;
   params.parent_window = GetNativeViewId();
-  params.compositing_surface = GetCompositingSurface();
   params.renderer_preferences =
       delegate_->GetRendererPrefs(process()->profile());
   params.web_preferences = delegate_->GetWebkitPrefs();
@@ -213,22 +216,26 @@ void RenderViewHost::Navigate(const ViewMsg_Navigate_Params& params) {
     // incorrectly close the tab.
     is_waiting_for_unload_ack_ = false;
 
-    Send(nav_message);
+    // Unset this, in case we never finished committing a previous RVH swap.
+    // Otherwise we'll filter out the messages for this navigation.
+    is_swapped_out_ = false;
 
-    // Force the throbber to start. We do this because WebKit's "started
-    // loading" message will be received asynchronously from the UI of the
-    // browser. But we want to keep the throbber in sync with what's happening
-    // in the UI. For example, we want to start throbbing immediately when the
-    // user naivgates even if the renderer is delayed. There is also an issue
-    // with the throbber starting because the WebUI (which controls whether the
-    // favicon is displayed) happens synchronously. If the start loading
-    // messages was asynchronous, then the default favicon would flash in.
-    //
-    // WebKit doesn't send throb notifications for JavaScript URLs, so we
-    // don't want to either.
-    if (!params.url.SchemeIs(chrome::kJavaScriptScheme))
-      delegate_->DidStartLoading();
+    Send(nav_message);
   }
+
+  // Force the throbber to start. We do this because WebKit's "started
+  // loading" message will be received asynchronously from the UI of the
+  // browser. But we want to keep the throbber in sync with what's happening
+  // in the UI. For example, we want to start throbbing immediately when the
+  // user naivgates even if the renderer is delayed. There is also an issue
+  // with the throbber starting because the WebUI (which controls whether the
+  // favicon is displayed) happens synchronously. If the start loading
+  // messages was asynchronous, then the default favicon would flash in.
+  //
+  // WebKit doesn't send throb notifications for JavaScript URLs, so we
+  // don't want to either.
+  if (!params.url.SchemeIs(chrome::kJavaScriptScheme))
+    delegate_->DidStartLoading();
 
   FOR_EACH_OBSERVER(
       RenderViewHostObserver, observers_, Navigate(params));
@@ -351,7 +358,7 @@ void RenderViewHost::ClosePage() {
     // TODO(creis): Should this be moved to Shutdown?  It may not be called for
     // RenderViewHosts that have been swapped out.
     NotificationService::current()->Notify(
-        NotificationType::RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW,
+        content::NOTIFICATION_RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW,
         Source<RenderViewHost>(this),
         NotificationService::NoDetails());
 
@@ -421,6 +428,32 @@ void RenderViewHost::DragTargetDragLeave() {
 void RenderViewHost::DragTargetDrop(
     const gfx::Point& client_pt, const gfx::Point& screen_pt) {
   Send(new DragMsg_TargetDrop(routing_id(), client_pt, screen_pt));
+}
+
+void RenderViewHost::DesktopNotificationPermissionRequestDone(
+    int callback_context) {
+  Send(new DesktopNotificationMsg_PermissionRequestDone(
+      routing_id(), callback_context));
+}
+
+void RenderViewHost::DesktopNotificationPostDisplay(int callback_context) {
+  Send(new DesktopNotificationMsg_PostDisplay(routing_id(), callback_context));
+}
+
+void RenderViewHost::DesktopNotificationPostError(int notification_id,
+                                                  const string16& message) {
+  Send(new DesktopNotificationMsg_PostError(
+      routing_id(), notification_id, message));
+}
+
+void RenderViewHost::DesktopNotificationPostClose(int notification_id,
+                                                  bool by_user) {
+  Send(new DesktopNotificationMsg_PostClose(
+      routing_id(), notification_id, by_user));
+}
+
+void RenderViewHost::DesktopNotificationPostClick(int notification_id) {
+  Send(new DesktopNotificationMsg_PostClick(routing_id(), notification_id));
 }
 
 void RenderViewHost::ExecuteJavascriptInWebFrame(
@@ -549,10 +582,7 @@ void RenderViewHost::GotFocus() {
 
 void RenderViewHost::LostCapture() {
   RenderWidgetHost::LostCapture();
-
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  if (view)
-    view->LostCapture();
+  delegate_->LostCapture();
 }
 
 void RenderViewHost::SetInitialFocus(bool reverse) {
@@ -649,13 +679,13 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_OpenURL, OnMsgOpenURL)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidContentsPreferredSizeChange,
                         OnMsgDidContentsPreferredSizeChange)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_SetTooltipText, OnMsgSetTooltipText)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_RunJavaScriptMessage,
                                     OnMsgRunJavaScriptMessage)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_RunBeforeUnloadConfirm,
                                     OnMsgRunBeforeUnloadConfirm)
     IPC_MESSAGE_HANDLER(DragHostMsg_StartDragging, OnMsgStartDragging)
     IPC_MESSAGE_HANDLER(DragHostMsg_UpdateDragCursor, OnUpdateDragCursor)
+    IPC_MESSAGE_HANDLER(DragHostMsg_TargetDrop_ACK, OnTargetDropACK)
     IPC_MESSAGE_HANDLER(ViewHostMsg_TakeFocus, OnTakeFocus)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AddMessageToConsole, OnAddMessageToConsole)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShouldClose_ACK, OnMsgShouldCloseACK)
@@ -665,6 +695,12 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
                         OnAccessibilityNotifications)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ScriptEvalResponse, OnScriptEvalResponse)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidZoomURL, OnDidZoomURL)
+    IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_RequestPermission,
+                        OnRequestDesktopNotificationPermission)
+    IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_Show,
+                        OnShowDesktopNotification)
+    IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_Cancel,
+                        OnCancelDesktopNotification)
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowPopup, OnMsgShowPopup)
 #endif
@@ -871,7 +907,8 @@ void RenderViewHost::OnMsgUpdateTargetURL(int32 page_id,
 
 void RenderViewHost::OnUpdateInspectorSetting(
     const std::string& key, const std::string& value) {
-  delegate_->UpdateInspectorSetting(key, value);
+  content::GetContentClient()->browser()->UpdateInspectorSetting(
+      this, key, value);
 }
 
 void RenderViewHost::OnMsgClose() {
@@ -946,38 +983,6 @@ void RenderViewHost::OnMsgDidContentsPreferredSizeChange(
   view->UpdatePreferredSize(new_size);
 }
 
-void RenderViewHost::OnMsgSetTooltipText(
-    const std::wstring& tooltip_text,
-    WebTextDirection text_direction_hint) {
-  // First, add directionality marks around tooltip text if necessary.
-  // A naive solution would be to simply always wrap the text. However, on
-  // windows, Unicode directional embedding characters can't be displayed on
-  // systems that lack RTL fonts and are instead displayed as empty squares.
-  //
-  // To get around this we only wrap the string when we deem it necessary i.e.
-  // when the locale direction is different than the tooltip direction hint.
-  //
-  // Currently, we use element's directionality as the tooltip direction hint.
-  // An alternate solution would be to set the overall directionality based on
-  // trying to detect the directionality from the tooltip text rather than the
-  // element direction.  One could argue that would be a preferable solution
-  // but we use the current approach to match Fx & IE's behavior.
-  string16 wrapped_tooltip_text = WideToUTF16(tooltip_text);
-  if (!tooltip_text.empty()) {
-    if (text_direction_hint == WebKit::WebTextDirectionLeftToRight) {
-      // Force the tooltip to have LTR directionality.
-      wrapped_tooltip_text =
-          base::i18n::GetDisplayStringInLTRDirectionality(wrapped_tooltip_text);
-    } else if (text_direction_hint == WebKit::WebTextDirectionRightToLeft &&
-               !base::i18n::IsRTL()) {
-      // Force the tooltip to have RTL directionality.
-      base::i18n::WrapStringWithRTLFormatting(&wrapped_tooltip_text);
-    }
-  }
-  if (view())
-    view()->SetTooltipText(UTF16ToWide(wrapped_tooltip_text));
-}
-
 void RenderViewHost::OnMsgSelectionChanged(const std::string& text,
                                            const ui::Range& range) {
   if (view())
@@ -1023,7 +1028,10 @@ void RenderViewHost::OnMsgStartDragging(
 
   ChildProcessSecurityPolicy* policy =
       ChildProcessSecurityPolicy::GetInstance();
-  FilterURL(policy, process()->id(), &drag_url);
+
+  // Allow drag of Javascript URLs to enable bookmarklet drag to bookmark bar.
+  if (!drag_url.SchemeIs(chrome::kJavaScriptScheme))
+    FilterURL(policy, process()->id(), &drag_url);
   FilterURL(policy, process()->id(), &html_base_url);
 
   if (drag_url != drop_data.url || html_base_url != drop_data.html_base_url) {
@@ -1041,6 +1049,13 @@ void RenderViewHost::OnUpdateDragCursor(WebDragOperation current_op) {
   RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
   if (view)
     view->UpdateDragCursor(current_op);
+}
+
+void RenderViewHost::OnTargetDropACK() {
+  NotificationService::current()->Notify(
+      content::NOTIFICATION_RENDER_VIEW_HOST_DID_RECEIVE_DRAG_TARGET_DROP_ACK,
+      Source<RenderViewHost>(this),
+      NotificationService::NoDetails());
 }
 
 void RenderViewHost::OnTakeFocus(bool reverse) {
@@ -1071,15 +1086,12 @@ void RenderViewHost::RemoveObserver(RenderViewHostObserver* observer) {
 
 bool RenderViewHost::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  return view && view->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
+  return delegate_->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
 }
 
 void RenderViewHost::UnhandledKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  if (view)
-    view->HandleKeyboardEvent(event);
+  delegate_->HandleKeyboardEvent(event);
 }
 
 void RenderViewHost::OnUserGesture() {
@@ -1122,15 +1134,11 @@ void RenderViewHost::NotifyRendererResponsive() {
 }
 
 void RenderViewHost::OnMsgFocus() {
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  if (view)
-    view->Activate();
+  delegate_->Activate();
 }
 
 void RenderViewHost::OnMsgBlur() {
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  if (view)
-    view->Deactivate();
+  delegate_->Deactivate();
 }
 
 void RenderViewHost::ForwardMouseEvent(
@@ -1141,35 +1149,30 @@ void RenderViewHost::ForwardMouseEvent(
   WebKit::WebMouseEvent event_copy(mouse_event);
   RenderWidgetHost::ForwardMouseEvent(event_copy);
 
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  if (view) {
-    switch (event_copy.type) {
-      case WebInputEvent::MouseMove:
-        view->HandleMouseMove();
-        break;
-      case WebInputEvent::MouseLeave:
-        view->HandleMouseLeave();
-        break;
-      case WebInputEvent::MouseDown:
-        view->HandleMouseDown();
-        break;
-      case WebInputEvent::MouseWheel:
-        if (ignore_input_events())
-          delegate_->OnIgnoredUIEvent();
-        break;
-      case WebInputEvent::MouseUp:
-        view->HandleMouseUp();
-      default:
-        // For now, we don't care about the rest.
-        break;
-    }
+  switch (event_copy.type) {
+    case WebInputEvent::MouseMove:
+      delegate_->HandleMouseMove();
+      break;
+    case WebInputEvent::MouseLeave:
+      delegate_->HandleMouseLeave();
+      break;
+    case WebInputEvent::MouseDown:
+      delegate_->HandleMouseDown();
+      break;
+    case WebInputEvent::MouseWheel:
+      if (ignore_input_events())
+        delegate_->OnIgnoredUIEvent();
+      break;
+    case WebInputEvent::MouseUp:
+      delegate_->HandleMouseUp();
+    default:
+      // For now, we don't care about the rest.
+      break;
   }
 }
 
 void RenderViewHost::OnMouseActivate() {
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  if (view)
-    view->HandleMouseActivate();
+  delegate_->HandleMouseActivate();
 }
 
 void RenderViewHost::ForwardKeyboardEvent(
@@ -1225,17 +1228,13 @@ void RenderViewHost::OnAccessibilityNotifications(
       if (param.notification_type ==
               ViewHostMsg_AccessibilityNotification_Type::
                   NOTIFICATION_TYPE_LOAD_COMPLETE) {
-        // TODO(ctguil): Remove when mac processes OnAccessibilityNotifications.
-        if (view())
-          view()->UpdateAccessibilityTree(param.acc_obj);
-
         if (save_accessibility_tree_for_testing_)
           accessibility_tree_ = param.acc_obj;
       }
     }
 
     NotificationService::current()->Notify(
-        NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
+        content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
         Source<RenderViewHost>(this),
         NotificationService::NoDetails());
   }
@@ -1252,7 +1251,7 @@ void RenderViewHost::OnScriptEvalResponse(int id, const ListValue& result) {
   }
   std::pair<int, Value*> details(id, result_value);
   NotificationService::current()->Notify(
-      NotificationType::EXECUTE_JAVASCRIPT_RESULT,
+      content::NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT,
       Source<RenderViewHost>(this),
       Details<std::pair<int, Value*> >(&details));
 }
@@ -1277,6 +1276,34 @@ void RenderViewHost::OnDidZoomURL(double zoom_level,
     host_zoom_map->SetTemporaryZoomLevel(
         process()->id(), routing_id(), zoom_level);
   }
+}
+
+void RenderViewHost::OnRequestDesktopNotificationPermission(
+    const GURL& source_origin, int callback_context) {
+  content::GetContentClient()->browser()->RequestDesktopNotificationPermission(
+      source_origin, callback_context, process()->id(), routing_id());
+}
+
+void RenderViewHost::OnShowDesktopNotification(
+    const DesktopNotificationHostMsg_Show_Params& params) {
+  // Disallow HTML notifications from unwanted schemes.  javascript:
+  // in particular allows unwanted cross-domain access.
+  GURL url = params.contents_url;
+  if (params.is_html &&
+      !url.SchemeIs(chrome::kHttpScheme) &&
+      !url.SchemeIs(chrome::kHttpsScheme) &&
+      !url.SchemeIs(chrome::kExtensionScheme) &&
+      !url.SchemeIs(chrome::kDataScheme)) {
+    return;
+  }
+
+  content::GetContentClient()->browser()->ShowDesktopNotification(
+      params, process()->id(), routing_id(), false);
+}
+
+void RenderViewHost::OnCancelDesktopNotification(int notification_id) {
+  content::GetContentClient()->browser()->CancelDesktopNotification(
+      process()->id(), routing_id(), notification_id);
 }
 
 #if defined(OS_MACOSX)

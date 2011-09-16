@@ -8,8 +8,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/task.h"
+#include "base/tracked.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/test/browser_with_test_window_test.h"
 #include "chrome/test/profile_mock.h"
@@ -77,15 +79,15 @@ class ProfileSyncServiceSessionTest
     helper_.set_service(session_service);
     service()->SetWindowType(window_id_, Browser::TYPE_TABBED);
     service()->SetWindowBounds(window_id_, window_bounds_, false);
-    registrar_.Add(this, NotificationType::FOREIGN_SESSION_UPDATED,
+    registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
         NotificationService::AllSources());
   }
 
-  void Observe(NotificationType type,
+  void Observe(int type,
       const NotificationSource& source,
       const NotificationDetails& details) {
-    switch (type.value) {
-      case NotificationType::FOREIGN_SESSION_UPDATED:
+    switch (type) {
+      case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
         notified_of_update_ = true;
         break;
       default:
@@ -191,7 +193,7 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   ASSERT_NE(sync_api::kInvalidId, sync_id);
 
   // Check that we can get the correct session specifics back from the node.
-  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
+  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
   sync_api::ReadNode node(&trans);
   ASSERT_TRUE(node.InitByClientTagLookup(syncable::SESSIONS,
       machine_tag));
@@ -231,7 +233,7 @@ TEST_F(ProfileSyncServiceSessionTest, MAYBE_WriteFilledSessionToNode) {
   ASSERT_NE(sync_api::kInvalidId, sync_id);
 
   // Check that this machine's data is not included in the foreign windows.
-  std::vector<const ForeignSession*> foreign_sessions;
+  std::vector<const SyncedSession*> foreign_sessions;
   model_associator_->GetAllForeignSessions(&foreign_sessions);
   ASSERT_EQ(foreign_sessions.size(), 0U);
 
@@ -303,14 +305,14 @@ TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNode) {
   }
 
   // Check that the foreign session was associated and retrieve the data.
-  std::vector<const ForeignSession*> foreign_sessions;
+  std::vector<const SyncedSession*> foreign_sessions;
   model_associator_->GetAllForeignSessions(&foreign_sessions);
   ASSERT_EQ(1U, foreign_sessions.size());
-  ASSERT_EQ(machine_tag, foreign_sessions[0]->foreign_session_tag);
+  ASSERT_EQ(machine_tag, foreign_sessions[0]->session_tag);
   ASSERT_EQ(1U,  foreign_sessions[0]->windows.size());
   ASSERT_EQ(1U, foreign_sessions[0]->windows[0]->tabs.size());
   ASSERT_EQ(1U, foreign_sessions[0]->windows[0]->tabs[0]->navigations.size());
-  ASSERT_EQ(foreign_sessions[0]->foreign_session_tag, machine_tag);
+  ASSERT_EQ(foreign_sessions[0]->session_tag, machine_tag);
   ASSERT_EQ(1, foreign_sessions[0]->windows[0]->selected_tab_index);
   ASSERT_EQ(1, foreign_sessions[0]->windows[0]->type);
   ASSERT_EQ(13, foreign_sessions[0]->windows[0]->tabs[0]->tab_visual_index);
@@ -343,7 +345,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionUpdate) {
   record->id = node_id;
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   ASSERT_TRUE(notified_of_update_);
@@ -362,7 +364,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionAdd) {
   record->id = node_id;
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   ASSERT_TRUE(notified_of_update_);
@@ -381,7 +383,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionDelete) {
   record->id = node_id;
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   ASSERT_TRUE(notified_of_update_);

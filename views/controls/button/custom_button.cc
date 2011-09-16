@@ -7,7 +7,7 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/screen.h"
+#include "ui/gfx/screen.h"
 #include "views/widget/widget.h"
 
 namespace views {
@@ -69,7 +69,7 @@ bool CustomButton::IsMouseHovered() const {
   if (!GetWidget())
     return false;
 
-  gfx::Point cursor_pos(Screen::GetCursorScreenPoint());
+  gfx::Point cursor_pos(gfx::Screen::GetCursorScreenPoint());
   ConvertPointToView(NULL, this, &cursor_pos);
   return HitTest(cursor_pos);
 }
@@ -207,7 +207,7 @@ bool CustomButton::AcceleratorPressed(const Accelerator& accelerator) {
 }
 
 void CustomButton::ShowContextMenu(const gfx::Point& p, bool is_mouse_gesture) {
-  if (!GetContextMenuController())
+  if (!context_menu_controller())
     return;
 
   // We're about to show the context menu. Showing the context menu likely means

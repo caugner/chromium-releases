@@ -13,14 +13,16 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
-#include "content/common/notification_type.h"
+#include "content/common/content_notification_types.h"
 
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -61,20 +63,20 @@ class OmniboxApiTest : public ExtensionApiTest {
         autocomplete_controller();
   }
 
-  void WaitForTemplateURLModelToLoad() {
-    TemplateURLModel* model =
-        browser()->profile()->GetTemplateURLModel();
+  void WaitForTemplateURLServiceToLoad() {
+    TemplateURLService* model =
+        TemplateURLServiceFactory::GetForProfile(browser()->profile());
     model->Load();
     if (!model->loaded()) {
       ui_test_utils::WaitForNotification(
-          NotificationType::TEMPLATE_URL_MODEL_LOADED);
+          chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED);
     }
   }
 
   void WaitForAutocompleteDone(AutocompleteController* controller) {
     while (!controller->done()) {
       ui_test_utils::WaitForNotification(
-          NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_READY);
+          chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY);
     }
   }
 };
@@ -91,9 +93,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, MAYBE_Basic) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("omnibox")) << message_;
 
-  // The results depend on the TemplateURLModel being loaded. Make sure it is
+  // The results depend on the TemplateURLService being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
-  WaitForTemplateURLModelToLoad();
+  WaitForTemplateURLServiceToLoad();
 
   LocationBar* location_bar = GetLocationBar();
   AutocompleteController* autocomplete_controller = GetAutocompleteController();
@@ -198,4 +200,50 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, MAYBE_Basic) {
     location_bar->AcceptInput();
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
   }
+}
+
+// Tests that the autocomplete popup doesn't reopen after accepting input for
+// a given query.
+// http://crbug.com/88552
+IN_PROC_BROWSER_TEST_F(OmniboxApiTest, PopupStaysClosed) {
+#if defined(TOOLKIT_GTK)
+  // Disable the timer because, on Lucid at least, it triggers resize/move
+  // behavior in the browser window, which dismisses the autocomplete popup
+  // before the results can be read.
+  static_cast<BrowserWindowGtk*>(
+    browser()->window())->DisableDebounceTimerForTests(true);
+#endif
+
+  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(RunExtensionTest("omnibox")) << message_;
+
+  // The results depend on the TemplateURLService being loaded. Make sure it is
+  // loaded so that the autocomplete results are consistent.
+  WaitForTemplateURLServiceToLoad();
+
+  LocationBar* location_bar = GetLocationBar();
+  AutocompleteController* autocomplete_controller = GetAutocompleteController();
+  AutocompletePopupModel* popup_model =
+      GetLocationBar()->location_entry()->model()->popup_model();
+
+  // Input a keyword query and wait for suggestions from the extension.
+  autocomplete_controller->Start(
+      ASCIIToUTF16("keyword comman"), string16(), true, false, true,
+      AutocompleteInput::ALL_MATCHES);
+  WaitForAutocompleteDone(autocomplete_controller);
+  EXPECT_TRUE(autocomplete_controller->done());
+  EXPECT_TRUE(popup_model->IsOpen());
+
+  // Quickly type another query and accept it before getting suggestions back
+  // for the query. The popup will close after accepting input - ensure that it
+  // does not reopen when the extension returns its suggestions.
+  ResultCatcher catcher;
+  autocomplete_controller->Start(
+      ASCIIToUTF16("keyword command"), string16(), true, false, true,
+      AutocompleteInput::ALL_MATCHES);
+  location_bar->AcceptInput();
+  WaitForAutocompleteDone(autocomplete_controller);
+  EXPECT_TRUE(autocomplete_controller->done());
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+  EXPECT_FALSE(popup_model->IsOpen());
 }

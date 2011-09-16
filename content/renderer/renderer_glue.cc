@@ -17,6 +17,7 @@
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "content/common/clipboard_messages.h"
+#include "content/common/content_client.h"
 #include "content/common/content_switches.h"
 #include "content/common/socket_stream_dispatcher.h"
 #include "content/common/url_constants.h"
@@ -29,7 +30,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard.h"
-#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_switches.h"
 #include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/websocketstreamhandle_bridge.h"
@@ -118,16 +119,6 @@ ScopedClipboardWriterGlue::~ScopedClipboardWriterGlue() {
 
 namespace webkit_glue {
 
-base::StringPiece GetDataResource(int resource_id) {
-  return ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
-}
-
-#if defined(OS_WIN)
-HCURSOR LoadCursor(int cursor_id) {
-  return ResourceBundle::GetSharedInstance().LoadCursor(cursor_id);
-}
-#endif
-
 // Clipboard glue
 
 ui::Clipboard* ClipboardGetClipboard() {
@@ -190,6 +181,13 @@ bool ClipboardReadFilenames(ui::Clipboard::Buffer buffer,
   RenderThread::current()->Send(new ClipboardHostMsg_ReadFilenames(
       buffer, &result, filenames));
   return result;
+}
+
+uint64 ClipboardGetSequenceNumber() {
+  uint64 seq_num = 0;
+  RenderThread::current()->Send(
+      new ClipboardHostMsg_GetSequenceNumber(&seq_num));
+  return seq_num;
 }
 
 void GetPlugins(bool refresh,
@@ -268,5 +266,30 @@ bool GetFontTable(int fd, uint32_t table, uint8_t* output,
       fd, table, output, output_length);
 }
 #endif
+
+std::string GetWebKitLocale() {
+  // The browser process should have passed the locale to the renderer via the
+  // --lang command line flag.  In single process mode, this will return the
+  // wrong value.  TODO(tc): Fix this for single process mode.
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  const std::string& lang =
+      parsed_command_line.GetSwitchValueASCII(switches::kLang);
+  DCHECK(!lang.empty() ||
+      (!parsed_command_line.HasSwitch(switches::kRendererProcess) &&
+       !parsed_command_line.HasSwitch(switches::kPluginProcess)));
+  return lang;
+}
+
+string16 GetLocalizedString(int message_id) {
+  return content::GetContentClient()->GetLocalizedString(message_id);
+}
+
+base::StringPiece GetDataResource(int resource_id) {
+  return content::GetContentClient()->GetDataResource(resource_id);
+}
+
+std::string BuildUserAgent(bool mimic_windows) {
+  return content::GetContentClient()->GetUserAgent(mimic_windows);
+}
 
 }  // namespace webkit_glue

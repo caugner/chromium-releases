@@ -6,6 +6,7 @@
 
 #include "base/message_loop.h"
 #include "base/time.h"
+#include "base/tracked.h"
 #include "chrome/browser/sync/engine/apply_updates_command.h"
 #include "chrome/browser/sync/engine/build_and_process_conflict_sets_command.h"
 #include "chrome/browser/sync/engine/build_commit_command.h"
@@ -71,12 +72,14 @@ void Syncer::RequestEarlyExit() {
 }
 
 void Syncer::SyncShare(sessions::SyncSession* session,
-                       const SyncerStep first_step,
-                       const SyncerStep last_step) {
-  ScopedDirLookup dir(session->context()->directory_manager(),
-                      session->context()->account_name());
-  // The directory must be good here.
-  CHECK(dir.good());
+                       SyncerStep first_step,
+                       SyncerStep last_step) {
+  {
+    ScopedDirLookup dir(session->context()->directory_manager(),
+                        session->context()->account_name());
+    // The directory must be good here.
+    CHECK(dir.good());
+  }
 
   ScopedSessionContextConflictResolver scoped(session->context(),
                                               &resolver_);
@@ -152,7 +155,14 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         VLOG(1) << "Applying Updates";
         ApplyUpdatesCommand apply_updates;
         apply_updates.Execute(session);
-        next_step = BUILD_COMMIT_REQUEST;
+        if (last_step == APPLY_UPDATES) {
+          // We're in configuration mode, but we still need to run the
+          // SYNCER_END step.
+          last_step = SYNCER_END;
+          next_step = SYNCER_END;
+        } else {
+          next_step = BUILD_COMMIT_REQUEST;
+        }
         break;
       }
       // These two steps are combined since they are executed within the same
@@ -167,7 +177,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
           LOG(ERROR) << "Scoped dir lookup failed!";
           return;
         }
-        WriteTransaction trans(dir, SYNCER, __FILE__, __LINE__);
+        WriteTransaction trans(FROM_HERE, SYNCER, dir);
         sessions::ScopedSetSessionWriteTransaction set_trans(session, &trans);
 
         VLOG(1) << "Getting the Commit IDs";
@@ -263,20 +273,23 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         break;
       }
       case SYNCER_END: {
+        VLOG(1) << "Syncer End";
+        SyncerEndCommand syncer_end_command;
+        syncer_end_command.Execute(session);
+        next_step = SYNCER_END;
         break;
       }
       default:
         LOG(ERROR) << "Unknown command: " << current_step;
     }
+    VLOG(2) << "last step: " << last_step << ", current step: "
+            << current_step << ", next step: "
+            << next_step << ", snapshot: "
+            << session->TakeSnapshot().ToString();
     if (last_step == current_step)
       break;
     current_step = next_step;
   }
-
-  VLOG(1) << "Syncer End";
-  SyncerEndCommand syncer_end_command;
-  syncer_end_command.Execute(session);
-  return;
 }
 
 void Syncer::ProcessClientCommand(sessions::SyncSession* session) {

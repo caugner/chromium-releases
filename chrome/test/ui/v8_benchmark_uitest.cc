@@ -123,21 +123,9 @@ class V8BenchmarkReferenceTest : public V8BenchmarkTest {
     reference_ = true;
   }
 
-  // Override the browser directory that is used by UITest::SetUp to cause it
-  // to use the reference build instead.
   void SetUp() {
-    FilePath dir;
-    PathService::Get(chrome::DIR_TEST_TOOLS, &dir);
-    dir = dir.AppendASCII("reference_build");
-#if defined(OS_WIN)
-    dir = dir.AppendASCII("chrome");
-#elif defined(OS_LINUX)
-    dir = dir.AppendASCII("chrome_linux");
-#elif defined(OS_MACOSX)
-    dir = dir.AppendASCII("chrome_mac");
-#endif
-    browser_directory_ = dir;
-    UITest::SetUp();
+    UseReferenceBuild();
+    V8BenchmarkTest::SetUp();
   }
 };
 
@@ -148,7 +136,14 @@ TEST_F(V8BenchmarkTest, Perf) {
   RunTest();
 }
 
-TEST_F(V8BenchmarkReferenceTest, Perf) {
+// Bug 87162: Disable Perf for ChromeOS
+#if defined(OS_CHROMEOS)
+#define MAYBE_Perf DISABLED_Perf
+#else
+#define MAYBE_Perf Perf
+#endif
+
+TEST_F(V8BenchmarkReferenceTest, MAYBE_Perf) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunV8Benchmark))
     return;
 

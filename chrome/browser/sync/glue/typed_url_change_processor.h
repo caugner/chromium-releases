@@ -12,9 +12,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/glue/typed_url_model_associator.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/notification_type.h"
 
 class MessageLoop;
 class NotificationService;
@@ -29,7 +30,6 @@ class URLRow;
 
 namespace browser_sync {
 
-class TypedUrlModelAssociator;
 class UnrecoverableErrorHandler;
 
 // This class is responsible for taking changes from the history backend and
@@ -45,7 +45,7 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
 
   // NotificationObserver implementation.
   // History -> sync_api model change application.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -53,7 +53,11 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   virtual void ApplyChangesFromSyncModel(
       const sync_api::BaseTransaction* trans,
       const sync_api::SyncManager::ChangeRecord* changes,
-      int change_count);
+      int change_count) OVERRIDE;
+
+  // Commit changes here, after we've released the transaction lock to avoid
+  // jank.
+  virtual void CommitChangesFromSyncModel() OVERRIDE;
 
  protected:
   virtual void StartImpl(Profile* profile);
@@ -66,6 +70,18 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   void HandleURLsModified(history::URLsModifiedDetails* details);
   void HandleURLsDeleted(history::URLsDeletedDetails* details);
   void HandleURLsVisited(history::URLVisitedDetails* details);
+
+  // Returns true if the caller should sync as a result of the passed visit
+  // notification. We use this to throttle the number of sync changes we send
+  // to the server so we don't hit the server for every
+  // single typed URL visit.
+  bool ShouldSyncVisit(history::URLVisitedDetails* details);
+
+  // Utility routine that either updates an existing sync node or creates a
+  // new one for the passed |typed_url| if one does not already exist. Returns
+  // false and sets an unrecoverable error if the operation failed.
+  bool CreateOrUpdateSyncNode(const history::URLRow& typed_url,
+                              sync_api::WriteTransaction* transaction);
 
   // The two models should be associated according to this ModelAssociator.
   TypedUrlModelAssociator* model_associator_;
@@ -82,6 +98,15 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   MessageLoop* expected_loop_;
 
   scoped_ptr<NotificationService> notification_service_;
+
+  // The set of pending changes that will be written out on the next
+  // CommitChangesFromSyncModel() call.
+  TypedUrlModelAssociator::TypedUrlTitleVector pending_titles_;
+  TypedUrlModelAssociator::TypedUrlVector pending_new_urls_;
+  TypedUrlModelAssociator::TypedUrlUpdateVector pending_updated_urls_;
+  std::vector<GURL> pending_deleted_urls_;
+  TypedUrlModelAssociator::TypedUrlVisitVector pending_new_visits_;
+  history::VisitVector pending_deleted_visits_;
 
   DISALLOW_COPY_AND_ASSIGN(TypedUrlChangeProcessor);
 };

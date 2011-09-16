@@ -1,8 +1,6 @@
 /* Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
- *
- * This is the stylesheet used by the touch-enabled new tab page
  */
 
 html {
@@ -17,6 +15,7 @@ html {
 body {
   background-size: auto 100%;
   margin: 0;
+  text-align: center;
   /* Don't highlight links when they're tapped.  Safari has bugs here that
      show up as flicker when dragging in some situations */
   -webkit-tap-highlight-color: transparent;
@@ -28,6 +27,68 @@ body {
   display: none !important;
 }
 
+#notification {
+  background-color: #FFF199;
+  border: 1px solid lightGrey;
+  border-radius: 6px;
+  color: black;
+  display: inline-block;
+  font-weight: bold;
+  margin-top: 2px;
+  opacity: 100%;
+  padding: 7px 15px;
+  position: relative;
+  z-index: 100;
+  -webkit-transition-duration: 0.1s;
+  -webkit-transition-property: opacity;
+}
+
+#notification.inactive {
+  display: inline-block;
+  opacity: 0;
+  -webkit-transition-duration: 0.2s;
+}
+
+#notification > div > div,
+#notification > div {
+  display: inline-block;
+}
+
+#notification .close-button {
+  vertical-align: middle;
+  -webkit-margin-start: 0.5em;
+}
+
+.close-button {
+  background: no-repeat;
+  background-color: transparent;
+  /* TODO(estade): this should animate between states. */
+  background-image: url('chrome://theme/IDR_CLOSE_BAR');
+  border: 0;
+  cursor: default;
+  display: inline-block;
+  height: 16px;
+  padding: 0;
+  width: 16px;
+}
+
+.close-button:hover,
+.close-button:focus {
+  background-image: url('chrome://theme/IDR_CLOSE_BAR_H');
+}
+
+.close-button:active {
+  background-image: url('chrome://theme/IDR_CLOSE_BAR_P');
+}
+
+.linkButton {
+  color: #06C;
+  cursor: pointer;
+  display: inline-block;
+  text-decoration: underline;
+  -webkit-margin-start: 0.5em;
+}
+
 #card-slider-frame {
   /* Must match #footer height. */
   bottom: 50px;
@@ -37,7 +98,6 @@ body {
   position: fixed;
   top: 0;
   width: 100%;
-  -webkit-mask-image: -webkit-linear-gradient(bottom, transparent, black 30px);
 }
 
 #page-list {
@@ -49,7 +109,8 @@ body {
 #attribution {
   bottom: 0;
   position: absolute;
-  right: 0;
+  /* Leave room for the scrollbar. */
+  right: 13px;
   z-index: -5;
 }
 
@@ -61,10 +122,12 @@ body {
 }
 
 #footer {
-  background-color: rgba(255, 255, 255, 0.8);
+  background-image: -webkit-linear-gradient(
+      rgba(242, 242, 242, 0.9), rgba(222, 222, 222, 0.9));
   bottom: 0;
   position: fixed;
   width: 100%;
+  z-index: 5;
 }
 
 /* TODO(estade): remove this border hack and replace with a webkit-gradient
@@ -84,38 +147,57 @@ body {
   margin: 0 9px;
 }
 
+/* Trash. *********************************************************************/
+
 #trash {
-  position: absolute;
-  width: 110px;
   height: 100%;
+  position: absolute;
+  opacity: 0;
   right: 0;
-  bottom: 0;
-  background-image: url('../shared/images/trash.png');
-  background-size: 40px 40px;
+  top: 50px;
+  -webkit-transition: top 0.2s, opacity 0;
+  -webkit-transition-delay: 0, 0.2s;
+}
+
+#footer.dragging-mode #trash {
+  opacity: 1;
+  top: 0;
+  -webkit-transition-delay: 0, 0;
+}
+
+#trash > span {
+  background-image: url('./trash.png');
+  background-position: 7px;
   background-repeat: no-repeat;
-  background-position: 40px 12px;
-  /* Work-around chromium bug 74730 by using translate instead of the
-     GPU-accelerated translate3d */
-  -webkit-transform: translate(80px, 0);
-  -webkit-transition-property: -webkit-transform;
-  -webkit-transition-duration: 500ms;
-}
-
-#trash.hover {
-  background-image: url('../shared/images/trash-open.png');
-}
-
-.app.trashing img {
-  opacity: 0.3;
-}
-
-#footer.rearrange-mode #trash {
-  -webkit-transform: translate(0, 0);
-}
-
-.disclosure-triangle {
+  border: 1px dashed #7f7f7f;
+  border-radius: 4px;
   display: inline-block;
-  width: 9px;
-  height: 9px;
-  -webkit-mask-image: url('./ntp4_disclosure_triangle_mask.png');
+  font-size: 84%;
+  padding-bottom: 9px;
+  padding-top: 10px;
+  position: relative;
+  top: 7px;
+  -webkit-padding-end: 7px;
+  -webkit-padding-start: 30px;
+}
+
+/* Page switcher buttons. *****************************************************/
+
+.page-switcher {
+  background-color: transparent;
+  border: none;
+  font-size: 40px;
+  height: 100%;
+  padding: 0;
+  position: absolute;
+  max-width: 130px;
+  min-width: 26px;
+  opacity: 0.3;
+  top: 0;
+  z-index: 5;
+  -webkit-transition: width 150ms, right 150ms, background-color 150ms;
+}
+
+.page-switcher:hover {
+  background-color: rgba(0, 0, 0, 0.2);
 }

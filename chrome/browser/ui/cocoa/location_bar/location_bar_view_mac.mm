@@ -4,7 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -20,7 +20,8 @@
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/content_settings/content_setting_bubble_cocoa.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
@@ -40,6 +41,7 @@
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -99,7 +101,7 @@ LocationBarViewMac::LocationBarViewMac(
   }
 
   registrar_.Add(this,
-      NotificationType::EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
+      chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
       NotificationService::AllSources());
 
   edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
@@ -180,7 +182,7 @@ void LocationBarViewMac::UpdatePageActions() {
   Layout();
   if (page_action_decorations_.size() != count_before) {
     NotificationService::current()->Notify(
-        NotificationType::EXTENSION_PAGE_ACTION_COUNT_CHANGED,
+        chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
         Source<LocationBar>(this),
         NotificationService::NoDetails());
   }
@@ -192,7 +194,7 @@ void LocationBarViewMac::InvalidatePageActions() {
   Layout();
   if (page_action_decorations_.size() != count_before) {
     NotificationService::current()->Notify(
-        NotificationType::EXTENSION_PAGE_ACTION_COUNT_CHANGED,
+        chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
         Source<LocationBar>(this),
         NotificationService::NoDetails());
   }
@@ -462,8 +464,8 @@ NSPoint LocationBarViewMac::GetPageInfoBubblePoint() const {
 }
 
 NSImage* LocationBarViewMac::GetKeywordImage(const string16& keyword) {
-  const TemplateURL* template_url =
-      profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(keyword);
+  const TemplateURL* template_url = TemplateURLServiceFactory::GetForProfile(
+      profile_)->GetTemplateURLForKeyword(keyword);
   if (template_url && template_url->IsExtensionKeyword()) {
     const SkBitmap& bitmap = profile_->GetExtensionService()->
         GetOmniboxIcon(template_url->GetExtensionId());
@@ -473,11 +475,11 @@ NSImage* LocationBarViewMac::GetKeywordImage(const string16& keyword) {
   return OmniboxViewMac::ImageForResource(IDR_OMNIBOX_SEARCH);
 }
 
-void LocationBarViewMac::Observe(NotificationType type,
+void LocationBarViewMac::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED: {
+  switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED: {
       TabContents* contents = GetTabContents();
       if (Details<TabContents>(contents) != details)
         return;
@@ -487,7 +489,7 @@ void LocationBarViewMac::Observe(NotificationType type,
       break;
     }
 
-    case NotificationType::PREF_CHANGED:
+    case chrome::NOTIFICATION_PREF_CHANGED:
       star_decoration_->SetVisible(IsStarEnabled());
       OnChanged();
       break;
@@ -601,7 +603,7 @@ void LocationBarViewMac::Layout() {
   string16 short_name;
   bool is_extension_keyword = false;
   if (!keyword.empty()) {
-    short_name = profile_->GetTemplateURLModel()->
+    short_name = TemplateURLServiceFactory::GetForProfile(profile_)->
         GetKeywordShortName(keyword, &is_extension_keyword);
   }
 

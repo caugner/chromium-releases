@@ -34,9 +34,10 @@ class TabContentsContainerGtk : public NotificationObserver,
   void SetTab(TabContentsWrapper* tab);
   TabContentsWrapper* tab() const { return tab_; }
 
-  // Gets the tab contents currently being displayed (either |tab_contents_| or
-  // |preview_contents_|).
-  TabContents* GetVisibleTabContents();
+  // Returns the TabContentsWrapper currently displayed.
+  TabContentsWrapper* GetVisibleTab();
+
+  bool HasPreview() const { return preview_ != NULL; }
 
   void SetPreview(TabContentsWrapper* preview);
   void PopPreview();
@@ -45,7 +46,7 @@ class TabContentsContainerGtk : public NotificationObserver,
   void DetachTab(TabContentsWrapper* tab);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

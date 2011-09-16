@@ -14,7 +14,7 @@ cr.define('options', function() {
     this.activeNavTab = null;
     OptionsPage.call(this, 'searchEngines',
                      templateData.searchEngineManagerPageTabTitle,
-                     'searchEngineManagerPage');
+                     'search-engine-manager-page');
   }
 
   cr.addSingletonGetter(SearchEngineManager);
@@ -23,28 +23,34 @@ cr.define('options', function() {
     __proto__: OptionsPage.prototype,
 
     /**
-     * List for default search engine options
-     * @type {boolean}
+     * List for default search engine options.
      * @private
      */
     defaultsList_: null,
 
     /**
-     * List for other search engine options
-     * @type {boolean}
+     * List for other search engine options.
      * @private
      */
     othersList_: null,
+
+    /**
+     * List for extension keywords.
+     * @private
+    extensionList_ : null,
 
     /** inheritDoc */
     initializePage: function() {
       OptionsPage.prototype.initializePage.call(this);
 
-      this.defaultsList_ = $('defaultSearchEngineList');
+      this.defaultsList_ = $('default-search-engine-list');
       this.setUpList_(this.defaultsList_);
 
-      this.othersList_ = $('otherSearchEngineList');
+      this.othersList_ = $('other-search-engine-list');
       this.setUpList_(this.othersList_);
+
+      this.extensionList_ = $('extension-keyword-list');
+      this.setUpList_(this.extensionList_);
     },
 
     /**
@@ -62,22 +68,43 @@ cr.define('options', function() {
      * @private
      * @param {Array} defaultEngines List of possible default search engines.
      * @param {Array} otherEngines List of other search engines.
+     * @param {Array} keywords List of keywords from extensions.
      */
-    updateSearchEngineList_: function(defaultEngines, otherEngines) {
+    updateSearchEngineList_: function(defaultEngines, otherEngines, keywords) {
       this.defaultsList_.dataModel = new ArrayDataModel(defaultEngines);
+
+      otherEngines = otherEngines.map(function(x) {
+        return [x, x['name'].toLocaleLowerCase()];
+      }).sort(function(a,b){
+        return a[1].localeCompare(b[1]);
+      }).map(function(x){
+        return x[0];
+      });
+
       var othersModel = new ArrayDataModel(otherEngines);
       // Add a "new engine" row.
       othersModel.push({
-        'modelIndex': '-1'
+        'modelIndex': '-1',
+        'canBeEdited': true
       });
       this.othersList_.dataModel = othersModel;
+
+      if (keywords.length > 0) {
+        $('extension-keyword-list-title').hidden = false;
+        $('extension-keyword-list').hidden = false;
+        $('manage-extension-link').hidden = false;
+        var extensionsModel = new ArrayDataModel(keywords);
+        this.extensionList_.dataModel = extensionsModel;
+      }
     },
   };
 
   SearchEngineManager.updateSearchEngineList = function(defaultEngines,
-                                                        otherEngines) {
+                                                        otherEngines,
+                                                        keywords) {
     SearchEngineManager.getInstance().updateSearchEngineList_(defaultEngines,
-                                                              otherEngines);
+                                                              otherEngines,
+                                                              keywords);
   };
 
   SearchEngineManager.validityCheckCallback = function(validity, modelIndex) {

@@ -77,6 +77,7 @@ enum AutomationMsg_NavigationResponseValues {
   AUTOMATION_MSG_NAVIGATION_ERROR = 0,
   AUTOMATION_MSG_NAVIGATION_SUCCESS,
   AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+  AUTOMATION_MSG_NAVIGATION_BLOCKED_BY_MODAL_DIALOG,
 };
 
 enum AutomationMsg_ExtensionResponseValues {
@@ -94,5 +95,17 @@ enum AutomationMsg_ExtensionProperty {
   AUTOMATION_MSG_EXTENSION_BROWSER_ACTION_INDEX,
 };
 
+// Specifies the font size on a page which is requested by an automation
+// client.
+enum AutomationPageFontSize {
+  SMALLEST_FONT = 8,
+  SMALL_FONT = 12,
+  MEDIUM_FONT = 16,
+  LARGE_FONT = 24,
+  LARGEST_FONT = 36
+};
+
+enum FindInPageDirection { BACK = 0, FWD = 1 };
+enum FindInPageCase { IGNORE_CASE = 0, CASE_SENSITIVE = 1 };
 
 #endif  // CHROME_COMMON_AUTOMATION_CONSTANTS_H__

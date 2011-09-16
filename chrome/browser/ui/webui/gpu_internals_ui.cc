@@ -26,10 +26,10 @@
 #include "chrome/browser/net/connection_tester.h"
 #include "chrome/browser/net/passive_log_collector.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/shell_dialogs.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -50,21 +50,15 @@
 
 namespace {
 
-class GpuHTMLSource : public ChromeURLDataManager::DataSource {
- public:
-  GpuHTMLSource();
+ChromeWebUIDataSource* CreateGpuHTMLSource() {
+  ChromeWebUIDataSource* source =
+      new ChromeWebUIDataSource(chrome::kChromeUIGpuInternalsHost);
 
-  // Called when the network layer has requested a resource underneath
-  // the path we registered.
-  virtual void StartDataRequest(const std::string& path,
-                                bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const;
-
- private:
-  ~GpuHTMLSource() {}
-  DISALLOW_COPY_AND_ASSIGN(GpuHTMLSource);
-};
+  source->set_json_path("strings.js");
+  source->add_resource_path("gpu_internals.js", IDR_GPU_INTERNALS_JS);
+  source->set_default_resource(IDR_GPU_INTERNALS_HTML);
+  return source;
+}
 
 // This class receives javascript messages from the renderer.
 // Note that the WebUI infrastructure runs on the UI thread, therefore all of
@@ -152,50 +146,14 @@ class TaskProxy : public base::RefCountedThreadSafe<TaskProxy> {
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// GpuHTMLSource
-//
-////////////////////////////////////////////////////////////////////////////////
-
-GpuHTMLSource::GpuHTMLSource()
-    : DataSource(chrome::kChromeUIGpuInternalsHost, MessageLoop::current()) {
-}
-
-void GpuHTMLSource::StartDataRequest(const std::string& path,
-                                     bool is_incognito,
-                                     int request_id) {
-  DictionaryValue localized_strings;
-  SetFontAndTextDirection(&localized_strings);
-
-  base::StringPiece gpu_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_GPU_INTERNALS_HTML));
-  std::string full_html(gpu_html.data(), gpu_html.size());
-  jstemplate_builder::AppendJsonHtml(&localized_strings, &full_html);
-  jstemplate_builder::AppendI18nTemplateSourceHtml(&full_html);
-  jstemplate_builder::AppendI18nTemplateProcessHtml(&full_html);
-  jstemplate_builder::AppendJsTemplateSourceHtml(&full_html);
-
-
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
-}
-
-std::string GpuHTMLSource::GetMimeType(const std::string&) const {
-  return "text/html";
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
 // GpuMessageHandler
 //
 ////////////////////////////////////////////////////////////////////////////////
 
 GpuMessageHandler::GpuMessageHandler()
-  : gpu_info_update_callback_(NULL)
-  , trace_enabled_(false) {
+  : gpu_info_update_callback_(NULL),
+    select_trace_file_dialog_type_(SelectFileDialog::SELECT_NONE),
+    trace_enabled_(false) {
   gpu_data_manager_ = GpuDataManager::GetInstance();
   DCHECK(gpu_data_manager_);
 }
@@ -305,8 +263,10 @@ class ReadTraceFileTask : public Task {
 
   virtual void Run() {
     std::string* file_contents = new std::string();
-    if (!file_util::ReadFileToString(path_, file_contents))
+    if (!file_util::ReadFileToString(path_, file_contents)) {
+      delete file_contents;
       return;
+    }
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(proxy_.get(),
@@ -351,7 +311,7 @@ class WriteTraceFileTask : public Task {
 
 void GpuMessageHandler::FileSelected(
     const FilePath& path, int index, void* params) {
-  if(select_trace_file_dialog_type_ == SelectFileDialog::SELECT_OPEN_FILE)
+  if (select_trace_file_dialog_type_ == SelectFileDialog::SELECT_OPEN_FILE)
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
         new ReadTraceFileTask(new TaskProxy(AsWeakPtr()), path));
@@ -365,7 +325,7 @@ void GpuMessageHandler::FileSelected(
 
 void GpuMessageHandler::FileSelectionCanceled(void* params) {
   select_trace_file_dialog_.release();
-  if(select_trace_file_dialog_type_ == SelectFileDialog::SELECT_OPEN_FILE)
+  if (select_trace_file_dialog_type_ == SelectFileDialog::SELECT_OPEN_FILE)
     web_ui_->CallJavascriptFunction("tracingController.onLoadTraceFileCanceled");
   else
     web_ui_->CallJavascriptFunction("tracingController.onSaveTraceFileCanceled");
@@ -402,9 +362,6 @@ void GpuMessageHandler::OnSaveTraceFile(const ListValue* list) {
     return;
 
   DCHECK(list->GetSize() == 1);
-
-  Value* tmp;
-  list->Get(0, &tmp);
 
   std::string* trace_data = new std::string();
   bool ok = list->GetString(0, trace_data);
@@ -460,7 +417,7 @@ Value* GpuMessageHandler::OnRequestClientInfo(const ListValue* list) {
     dict->SetString("version", version_info.Version());
     dict->SetString("cl", version_info.LastChange());
     dict->SetString("version_mod",
-        platform_util::GetVersionStringModifier());
+        chrome::VersionInfo::GetVersionStringModifier());
     dict->SetString("official",
         l10n_util::GetStringUTF16(
             version_info.IsOfficialBuild() ?
@@ -468,7 +425,7 @@ Value* GpuMessageHandler::OnRequestClientInfo(const ListValue* list) {
             IDS_ABOUT_VERSION_UNOFFICIAL));
 
     dict->SetString("command_line",
-        CommandLine::ForCurrentProcess()->command_line_string());
+        CommandLine::ForCurrentProcess()->GetCommandLineString());
   }
 
   dict->SetString("blacklist_version",
@@ -641,11 +598,10 @@ void GpuMessageHandler::OnTraceBufferPercentFullReply(float percent_full) {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-GpuInternalsUI::GpuInternalsUI(TabContents* contents) : WebUI(contents) {
+GpuInternalsUI::GpuInternalsUI(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new GpuMessageHandler())->Attach(this));
 
-  GpuHTMLSource* html_source = new GpuHTMLSource();
-
-  // Set up the chrome://gpu/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  // Set up the chrome://gpu-internals/ source.
+  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+      CreateGpuHTMLSource());
 }

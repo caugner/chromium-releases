@@ -902,10 +902,10 @@ typedef void  (GL_APIENTRYP PFNGLUNMAPTEXSUBIMAGE2DCHROMIUM) (const void* mem);
 #ifdef GL_GLEXT_PROTOTYPES
 #define glCopyTextureToParentTextureCHROMIUM GLES2_GET_FUN(CopyTextureToParentTextureCHROMIUM)
 #if !defined(GLES2_USE_CPP_BINDINGS)
-GL_APICALL void* GL_APIENTRY glCopyTextureToParentTextureCHROMIUM (GLuint id, GLuint id2);
+GL_APICALL void GL_APIENTRY glCopyTextureToParentTextureCHROMIUM (GLuint id, GLuint id2);
 #endif
 #else
-typedef void* (GL_APIENTRYP PFNGLCOPYTEXTURETOPARENTTEXTURECHROMIUM) (GLuint id, GLuint id2);
+typedef void (GL_APIENTRYP PFNGLCOPYTEXTURETOPARENTTEXTURECHROMIUM) (GLuint id, GLuint id2);
 #endif
 #endif
 
@@ -987,6 +987,57 @@ GL_APICALL void GL_APIENTRY glRateLimitOffscreenContextCHROMIUM (void);
 #endif
 #else
 typedef void (GL_APIENTRYP PFNGLRATELIMITOFFSCREENCONTEXTCHROMIUM) ();
+#endif
+#endif
+
+/* GL_CHROMIUM_get_multiple */
+/*
+ * This extension provides functions for quering multiple GL state with a single
+ * call.
+ */
+#ifndef GL_CHROMIUM_get_multiple
+#define GL_CHROMIUM_get_multiple 1
+#ifdef GL_GLEXT_PROTOTYPES
+#define glGetMultipleIntegervCHROMIUM  GLES2_GET_FUN(GetMultipleIntegervCHROMIUM)
+#define glGetProgramInfoCHROMIUM  GLES2_GET_FUN(GetProgramInfovCHROMIUM)
+#if !defined(GLES2_USE_CPP_BINDINGS)
+GL_APICALL void GL_APIENTRY glGetMultipleIntegervCHROMIUM (const GLenum* pnames, GLuint count, GLint* results, GLsizeiptr size);
+GL_APICALL void GL_APIENTRY glGetProgrmaInfoCHROMIUM (GLuint program, GLsizei bufsize, GLsizei* size, void* info);
+#endif
+#else
+typedef void (GL_APIENTRYP PFNGLGETMULTIPLEINTEGERVCHROMIUM) ();
+typedef void (GL_APIENTRYP PFNGLGETPROGRAMINFOCHROMIUM) ();
+#endif
+#endif
+
+/* GL_CHROMIUM_flipy */
+/*
+ * This extension provides GL_UNPACK_FLIP_Y_CHROMIUM as a parameter to
+ * glPixelStorei. When true images submitted to glTexImage2D and glTexSubImage2D
+ * are flipped vertically.
+ */
+#ifndef GL_CHROMIUM_flipy
+#define GL_CHROMIUM_flipy 1
+#define GL_UNPACK_FLIP_Y_CHROMIUM 0x9240
+#endif
+
+/* GL_ARB_robustness */
+/* This extension is subsetted for the moment, incorporating only the
+ * enums necessary to describe the reasons that we might encounter for
+ * losing the context. The entry point querying the reset status is
+ * not yet incorporated; to do so, a spec will be needed of a GLES2
+ * subset of GL_ARB_robustness.
+ */
+#ifndef GL_ARB_robustness
+#define GL_ARB_robustness 1
+#ifndef GL_GUILTY_CONTEXT_RESET_ARB
+#define GL_GUILTY_CONTEXT_RESET_ARB 0x8253
+#endif
+#ifndef GL_INNOCENT_CONTEXT_RESET_ARB
+#define GL_INNOCENT_CONTEXT_RESET_ARB 0x8254
+#endif
+#ifndef GL_UNKNOWN_CONTEXT_RESET_ARB
+#define GL_UNKNOWN_CONTEXT_RESET_ARB 0x8255
 #endif
 #endif
 

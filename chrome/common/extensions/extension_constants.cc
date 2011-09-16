@@ -7,6 +7,7 @@
 namespace extension_manifest_keys {
 
 const char* kAllFrames = "all_frames";
+const char* kAltKey = "altKey";
 const char* kApp = "app";
 const char* kBackground = "background_page";
 const char* kBrowserAction = "browser_action";
@@ -15,6 +16,7 @@ const char* kContentScripts = "content_scripts";
 const char* kContentSecurityPolicy = "content_security_policy";
 const char* kConvertedFromUserScript = "converted_from_user_script";
 const char* kCss = "css";
+const char* kCtrlKey = "ctrlKey";
 const char* kCurrentLocale = "current_locale";
 const char* kDefaultLocale = "default_locale";
 const char* kDescription = "description";
@@ -25,16 +27,21 @@ const char* kFileFilters = "file_filters";
 const char* kFileBrowserHandlers = "file_browser_handlers";
 const char* kHomepageURL = "homepage_url";
 const char* kIcons = "icons";
+const char* kId = "id";
 const char* kIncognito = "incognito";
 const char* kIncludeGlobs = "include_globs";
+const char* kInputComponents = "input_components";
 const char* kIsolation = "app.isolation";
 const char* kJs = "js";
+const char* kKeycode = "keyCode";
+const char* kLanguage = "language";
 const char* kLaunch = "app.launch";
 const char* kLaunchContainer = "app.launch.container";
 const char* kLaunchHeight = "app.launch.height";
 const char* kLaunchLocalPath = "app.launch.local_path";
 const char* kLaunchWebURL = "app.launch.web_url";
 const char* kLaunchWidth = "app.launch.width";
+const char* kLayouts = "layouts";
 const char* kMatches = "matches";
 const char* kMinimumChromeVersion = "minimum_chrome_version";
 const char* kName = "name";
@@ -60,6 +67,8 @@ const char* kPluginsPath = "path";
 const char* kPluginsPublic = "public";
 const char* kPublicKey = "key";
 const char* kRunAt = "run_at";
+const char* kShiftKey = "shiftKey";
+const char* kShortcutKey = "shortcutKey";
 const char* kSidebar = "sidebar";
 const char* kSidebarDefaultIcon = "default_icon";
 const char* kSidebarDefaultPage = "default_page";
@@ -72,13 +81,20 @@ const char* kThemeImages = "images";
 const char* kThemeTints = "tints";
 const char* kToolstripPath = "path";
 const char* kToolstrips = "toolstrips";
-const char* kTts = "tts";
+const char* kTtsEngine = "tts_engine";
 const char* kTtsGenderFemale = "female";
 const char* kTtsGenderMale = "male";
 const char* kTtsVoices = "voices";
+const char* kTtsVoicesEventTypeEnd = "end";
+const char* kTtsVoicesEventTypeError = "error";
+const char* kTtsVoicesEventTypeMarker = "marker";
+const char* kTtsVoicesEventTypeSentence = "sentence";
+const char* kTtsVoicesEventTypeStart = "start";
+const char* kTtsVoicesEventTypeWord = "word";
+const char* kTtsVoicesEventTypes = "event_types";
 const char* kTtsVoicesGender = "gender";
-const char* kTtsVoicesLocale = "locale";
-const char* kTtsVoicesVoiceName = "voiceName";
+const char* kTtsVoicesLang = "lang";
+const char* kTtsVoicesVoiceName = "voice_name";
 const char* kType = "type";
 const char* kUpdateURL = "update_url";
 const char* kVersion = "version";
@@ -185,6 +201,22 @@ const char* kInvalidIcons =
     "Invalid value for 'icons'.";
 const char* kInvalidIncognitoBehavior =
     "Invalid value for 'incognito'.";
+const char* kInvalidInputComponents =
+    "Invalid value for 'input_components'";
+const char* kInvalidInputComponentDescription =
+    "Invalid value for 'input_conponents[*].description";
+const char* kInvalidInputComponentLayoutName =
+    "Invalid value for 'input_conponents[*].layouts[*]";
+const char* kInvalidInputComponentLayouts =
+    "Invalid value for 'input_conponents[*].layouts";
+const char* kInvalidInputComponentName =
+    "Invalid value for 'input_conponents[*].name";
+const char* kInvalidInputComponentShortcutKey =
+    "Invalid value for 'input_conponents[*].shortcutKey";
+const char* kInvalidInputComponentShortcutKeycode =
+    "Invalid value for 'input_conponents[*].shortcutKey.keyCode";
+const char* kInvalidInputComponentType =
+    "Invalid value for 'input_conponents[*].type";
 const char* kInvalidIsolation =
     "Invalid value for 'app.isolation'.";
 const char* kInvalidIsolationValue =
@@ -301,15 +333,17 @@ const char* kInvalidToolstrip =
 const char* kInvalidToolstrips =
     "Invalid value for 'toolstrips'.";
 const char* kInvalidTts =
-    "Invalid value for 'tts'.";
+    "Invalid value for 'tts_engine'.";
 const char* kInvalidTtsVoices =
-    "Invalid value for 'tts.voices'.";
+    "Invalid value for 'tts_engine.voices'.";
+const char* kInvalidTtsVoicesEventTypes =
+    "Invalid value for 'tts_engine.voices[*].event_types'.";
 const char* kInvalidTtsVoicesGender =
-    "Invalid value for 'tts.voices[*].gender'.";
-const char* kInvalidTtsVoicesLocale =
-    "Invalid value for 'tts.voices[*].locale'.";
+    "Invalid value for 'tts_engine.voices[*].gender'.";
+const char* kInvalidTtsVoicesLang =
+    "Invalid value for 'tts_engine.voices[*].lang'.";
 const char* kInvalidTtsVoicesVoiceName =
-    "Invalid value for 'tts.voices[*].voiceName'.";
+    "Invalid value for 'tts_engine.voices[*].voice_name'.";
 const char* kInvalidUpdateURL =
     "Invalid value for update url: '[*]'.";
 const char* kInvalidURLPatternError =
@@ -323,8 +357,11 @@ const char* kInvalidWebURLs =
     "Invalid value for 'app.urls'.";
 const char* kInvalidZipHash =
     "Required key 'zip_hash' is missing or invalid.";
+const char* kLaunchPathAndExtentAreExclusive =
+    "The 'app.launch.local_path' and 'app.urls' keys cannot both be set.";
 const char* kLaunchPathAndURLAreExclusive =
-    "The 'app.launch.local_path' and 'launch.web_url' keys cannot both be set.";
+    "The 'app.launch.local_path' and 'app.launch.web_url' keys cannot "
+    "both be set.";
 const char* kLaunchURLRequired =
     "Either 'app.launch.local_path' or 'app.launch.web_url' is required.";
 const char* kLocalesMessagesFileMissing =
@@ -382,10 +419,12 @@ const char* kDecodedMessageCatalogsFilename = "DECODED_MESSAGE_CATALOGS";
 namespace extension_misc {
 const char* kBookmarkManagerId = "eemcgdkfndhakfknompkggombfjjjeno";
 const char* kWebStoreAppId = "ahfgeienlihckogmohjhadlkjgocpleb";
+const char* kCloudPrintAppId = "mfehgcgbbipciphmccgaenjidiccnmng";
 const char* kAppsPromoHistogram = "Extensions.AppsPromo";
 const char* kAppLaunchHistogram = "Extensions.AppLaunch";
 #if defined(OS_CHROMEOS)
 const char* kAccessExtensionPath =
     "/usr/share/chromeos-assets/accessibility/extensions";
+const char* kChromeVoxDirectoryName = "access_chromevox";
 #endif
 }

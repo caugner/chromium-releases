@@ -314,7 +314,7 @@ void CompactLocationBarViewHost::ActiveTabChanged(
     int index,
     bool user_gesture) {
   current_tab_model_index_ = index;
-  if (new_contents && new_contents->tab_contents()->is_loading()) {
+  if (new_contents && new_contents->tab_contents()->IsLoading()) {
     Show(false);
   } else {
     Hide(false);
@@ -349,12 +349,12 @@ void CompactLocationBarViewHost::TabChangedAt(TabContentsWrapper* contents,
     }
     Update(tab_contents, false);
     if (was_not_visible) {
-      if (tab_contents->is_loading()) {
+      if (tab_contents->IsLoading()) {
         // Register to NavigationController LOAD_STOP so that we can autohide
         // when loading is done.
-        if (!registrar_.IsRegistered(this, NotificationType::LOAD_STOP,
+        if (!registrar_.IsRegistered(this, content::NOTIFICATION_LOAD_STOP,
             Source<NavigationController>(&tab_contents->controller()))) {
-          registrar_.Add(this, NotificationType::LOAD_STOP,
+          registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
               Source<NavigationController>(&tab_contents->controller()));
         }
       } else {
@@ -374,14 +374,14 @@ void CompactLocationBarViewHost::ActiveTabClicked(int index) {
 ////////////////////////////////////////////////////////////////////////////////
 // CompactLocationBarViewHost, NotificationObserver implementation:
 
-void CompactLocationBarViewHost::Observe(NotificationType type,
+void CompactLocationBarViewHost::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::LOAD_STOP: {
+  switch (type) {
+    case content::NOTIFICATION_LOAD_STOP: {
       StartAutoHideTimer();
       // This is one shot deal...
-      registrar_.Remove(this, NotificationType::LOAD_STOP, source);
+      registrar_.Remove(this, content::NOTIFICATION_LOAD_STOP, source);
       break;
     }
     default:
@@ -452,7 +452,7 @@ void CompactLocationBarViewHost::Update(TabContents* contents, bool animate) {
   GetCompactLocationBarView()->Update(contents);
   Show(animate && !showing_in_same_tab);
   // If the tab is loading, we must wait for the notification that it is done.
-  if (contents && !contents->is_loading()) {
+  if (contents && !contents->IsLoading()) {
     // This will be a NOOP if we have focus.
     // We never want to stay up, unless we have focus.
     StartAutoHideTimer();

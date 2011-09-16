@@ -11,14 +11,15 @@
   </outputs>
   <release seq="1">
     <includes>
-      <if expr="os.find('win') != -1">
+      <if expr="is_win">
         <!-- IDR_BITMAP_BRUSH_IMAGE is for canvas_direct2d_unittest on win -->
         <!-- TODO(sky): we don't want a test only image in the release builds -->
         <include name="IDR_BITMAP_BRUSH_IMAGE" file="resources\bitmap_brush_image.png" type="BINDATA" />
         <include name="IDR_COMPOSITOR_FX" file="resources\compositor.fx" type="BINDATA" />
+        <include name="IDR_BLUR_FX" file="resources\blur.fx" type="BINDATA" />
       </if>
 
-      <if expr="os == 'linux2' or os.find('bsd') != -1 or os == 'sunos5'">
+      <if expr="is_posix and not is_macosx">
         <include name="IDR_LINUX_CHECKBOX_DISABLED_INDETERMINATE" file="resources\linux-checkbox-disabled-indeterminate.png" type="BINDATA" />
         <include name="IDR_LINUX_CHECKBOX_DISABLED_OFF" file="resources\linux-checkbox-disabled-off.png" type="BINDATA" />
         <include name="IDR_LINUX_CHECKBOX_DISABLED_ON" file="resources\linux-checkbox-disabled-on.png" type="BINDATA" />

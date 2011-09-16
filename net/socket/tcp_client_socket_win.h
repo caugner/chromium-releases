@@ -8,7 +8,7 @@
 
 #include <winsock2.h>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
@@ -53,6 +53,8 @@ class NET_API TCPClientSocketWin : public StreamSocket,
   virtual void SetOmniboxSpeculation();
   virtual bool WasEverUsed() const;
   virtual bool UsingTCPFastOpen() const;
+  virtual int64 NumBytesRead() const;
+  virtual base::TimeDelta GetConnectTimeMicros() const;
 
   // Socket methods:
   // Multiple outstanding requests are not supported.
@@ -140,6 +142,10 @@ class NET_API TCPClientSocketWin : public StreamSocket,
   // Record of connectivity and transmissions, for use in speculative connection
   // histograms.
   UseHistory use_history_;
+
+  base::TimeTicks connect_start_time_;
+  base::TimeDelta connect_time_micros_;
+  int64 num_bytes_read_;
 
   DISALLOW_COPY_AND_ASSIGN(TCPClientSocketWin);
 };

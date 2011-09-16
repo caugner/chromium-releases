@@ -10,6 +10,7 @@
 #include "base/i18n/rtl.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -109,18 +110,20 @@ bool DraggedTabControllerGtk::IsTabDetached(const TabGtk* tab) const {
 ////////////////////////////////////////////////////////////////////////////////
 // DraggedTabControllerGtk, TabContentsDelegate implementation:
 
-void DraggedTabControllerGtk::OpenURLFromTab(TabContents* source,
-                                             const GURL& url,
-                                             const GURL& referrer,
-                                             WindowOpenDisposition disposition,
-                                             PageTransition::Type transition) {
+TabContents* DraggedTabControllerGtk::OpenURLFromTab(
+    TabContents* source,
+    const GURL& url,
+    const GURL& referrer,
+    WindowOpenDisposition disposition,
+    PageTransition::Type transition) {
   if (original_delegate_) {
     if (disposition == CURRENT_TAB)
       disposition = NEW_WINDOW;
 
-    original_delegate_->OpenURLFromTab(source, url, referrer,
-                                       disposition, transition);
+    return original_delegate_->OpenURLFromTab(source, url, referrer,
+                                              disposition, transition);
   }
+  return NULL;
 }
 
 void DraggedTabControllerGtk::NavigationStateChanged(const TabContents* source,
@@ -144,14 +147,6 @@ void DraggedTabControllerGtk::AddNewContents(TabContents* source,
   }
 }
 
-void DraggedTabControllerGtk::ActivateContents(TabContents* contents) {
-  // Ignored.
-}
-
-void DraggedTabControllerGtk::DeactivateContents(TabContents* contents) {
-  // Ignored.
-}
-
 void DraggedTabControllerGtk::LoadingStateChanged(TabContents* source) {
   // TODO(jhawkins): It would be nice to respond to this message by changing the
   // screen shot in the dragged tab.
@@ -159,34 +154,22 @@ void DraggedTabControllerGtk::LoadingStateChanged(TabContents* source) {
     dragged_tab_->Update();
 }
 
-void DraggedTabControllerGtk::CloseContents(TabContents* source) {
-  // Theoretically could be called by a window. Should be ignored
-  // because window.close() is ignored (usually, even though this
-  // method gets called.)
-}
-
-void DraggedTabControllerGtk::MoveContents(TabContents* source,
-                                        const gfx::Rect& pos) {
-  // Theoretically could be called by a web page trying to move its
-  // own window. Should be ignored since we're moving the window...
-}
-
 bool DraggedTabControllerGtk::IsPopup(const TabContents* source) const {
   return false;
 }
 
-void DraggedTabControllerGtk::UpdateTargetURL(TabContents* source,
-                                              const GURL& url) {
-  // Ignored.
+content::JavaScriptDialogCreator*
+DraggedTabControllerGtk::GetJavaScriptDialogCreator() {
+  return GetJavaScriptDialogCreatorInstance();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // DraggedTabControllerGtk, NotificationObserver implementation:
 
-void DraggedTabControllerGtk::Observe(NotificationType type,
+void DraggedTabControllerGtk::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  DCHECK(type == NotificationType::TAB_CONTENTS_DESTROYED);
+  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
   DCHECK_EQ(Source<TabContents>(source).ptr(),
             dragged_contents_->tab_contents());
   EndDragImpl(TAB_DESTROYED);
@@ -206,7 +189,7 @@ void DraggedTabControllerGtk::SetDraggedContents(
     TabContentsWrapper* new_contents) {
   if (dragged_contents_) {
     registrar_.Remove(this,
-                      NotificationType::TAB_CONTENTS_DESTROYED,
+                      content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                       Source<TabContents>(dragged_contents_->tab_contents()));
     if (original_delegate_)
       dragged_contents_->tab_contents()->set_delegate(original_delegate_);
@@ -215,7 +198,7 @@ void DraggedTabControllerGtk::SetDraggedContents(
   dragged_contents_ = new_contents;
   if (dragged_contents_) {
     registrar_.Add(this,
-                   NotificationType::TAB_CONTENTS_DESTROYED,
+                   content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                    Source<TabContents>(dragged_contents_->tab_contents()));
 
     // We need to be the delegate so we receive messages about stuff,

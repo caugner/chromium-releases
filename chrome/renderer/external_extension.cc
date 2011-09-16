@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/search_provider.h"
 #include "content/renderer/render_view.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "v8/include/v8.h"
@@ -143,10 +144,10 @@ v8::Handle<v8::Value> ExternalExtensionWrapper::AddSearchProvider(
 v8::Handle<v8::Value> ExternalExtensionWrapper::IsSearchProviderInstalled(
     const v8::Arguments& args) {
   if (!args.Length()) return v8::Undefined();
+  v8::String::Utf8Value utf8name(args[0]);
+  if (!utf8name.length()) return v8::Undefined();
 
-  std::string name = std::string(*v8::String::Utf8Value(args[0]));
-  if (!name.length()) return v8::Undefined();
-
+  std::string name = std::string(*utf8name);
   RenderView* render_view = GetRenderView();
   if (!render_view) return v8::Undefined();
 
@@ -157,7 +158,10 @@ v8::Handle<v8::Value> ExternalExtensionWrapper::IsSearchProviderInstalled(
   GURL inquiry_url = GURL(name);
   if (!inquiry_url.is_empty()) {
       render_view->Send(new ViewHostMsg_GetSearchProviderInstallState(
-          render_view->routing_id(), webframe->url(), inquiry_url, &install));
+          render_view->routing_id(),
+          webframe->document().url(),
+          inquiry_url,
+          &install));
   }
 
   if (install == search_provider::DENIED) {

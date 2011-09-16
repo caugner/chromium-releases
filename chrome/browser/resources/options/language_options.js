@@ -12,12 +12,15 @@ cr.define('options', function() {
   // Some input methods like Chinese Pinyin have config pages.
   // This is the map of the input method names to their config page names.
   const INPUT_METHOD_ID_TO_CONFIG_PAGE_NAME = {
+    // TODO(nona): Remove ibus-hangul support.
     'hangul': 'languageHangul',
     'mozc': 'languageMozc',
     'mozc-chewing': 'languageChewing',
     'mozc-dv': 'languageMozc',
+    'mozc-hangul': 'languageHangul',
     'mozc-jp': 'languageMozc',
     'pinyin': 'languagePinyin',
+    'pinyin-dv': 'languagePinyin',
   };
 
   /////////////////////////////////////////////////////////////////////////////
@@ -92,8 +95,16 @@ cr.define('options', function() {
           $('auto-spell-correction-option').hidden = false;
         }
       }
+
+      if(!cr.isChromeOS) {
+        // Handle spell check enable/disable.
+        Preferences.getInstance().addEventListener(this.enableSpellCheckPref,
+            this.updateEnableSpellCheck_.bind(this));
+      }
     },
 
+    // The preference is a boolean that enables/disables spell checking.
+    enableSpellCheckPref: 'browser.enable_spellchecking',
     // The preference is a CSV string that describes preload engines
     // (i.e. active input methods).
     preloadEnginesPref: 'settings.language.preload_engines',
@@ -304,7 +315,13 @@ cr.define('options', function() {
         languageDisplayName += ' - ' + languageNativeDisplayName;
       }
       // Update the currently selected language name.
-      $('language-options-language-name').textContent = languageDisplayName;
+      var languageName = $('language-options-language-name');
+      if (languageDisplayName) {
+        languageName.hidden = false;
+        languageName.textContent = languageDisplayName;
+      } else {
+        languageName.hidden = true;
+      }
     },
 
     /**
@@ -363,6 +380,7 @@ cr.define('options', function() {
      * @private
      */
     updateSpellCheckLanguageButton_: function(languageCode) {
+      var display = 'block';
       var spellCheckLanguageButton = $(
           'language-options-spell-check-language-button');
       // Check if the language code matches the current spell check language.
@@ -385,6 +403,8 @@ cr.define('options', function() {
         // Add an event listner to the click event.
         spellCheckLanguageButton.addEventListener('click',
             this.handleSpellCheckLanguageButtonClick_.bind(this));
+      } else if (!languageCode) {
+        display = 'none';
       } else {
         // If the language is not supported as spell check language, the
         // button just says that this language cannot be used for spell
@@ -394,7 +414,7 @@ cr.define('options', function() {
         spellCheckLanguageButton.className = 'text-button';
         spellCheckLanguageButton.onclick = undefined;
       }
-      spellCheckLanguageButton.style.display = 'block';
+      spellCheckLanguageButton.style.display = display;
       $('language-options-ui-notification-bar').style.display = 'none';
     },
 
@@ -551,6 +571,18 @@ cr.define('options', function() {
       return (!cr.isChromeOS ||
               this.canDeleteLanguage_(languageCode));
     },
+
+    /**
+     * Handles browse.enable_spellchecking change.
+     * @param {Event} e Change event.
+     * @private
+     */
+     updateEnableSpellCheck_: function() {
+       var value = !$('enable-spell-check').checked;
+
+       $('language-options-spell-check-language-button').disabled = value;
+       $('language-options-add-button').disabled = value;
+     },
 
     /**
      * Handles spellCheckDictionaryPref change.

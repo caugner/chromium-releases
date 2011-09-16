@@ -16,7 +16,6 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/tab_contents/infobar_container.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
-#include "chrome/browser/ui/download/download_tab_helper_delegate.h"
 #include "chrome/browser/ui/views/frame/browser_bubble_host.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
@@ -45,7 +44,6 @@ class ViewProp;
 // TabContents as well as an implementation of TabContentsDelegate.
 class ExternalTabContainer : public TabContentsDelegate,
                              public TabContentsObserver,
-                             public DownloadTabHelperDelegate,
                              public NotificationObserver,
                              public views::NativeWidgetWin,
                              public base::RefCounted<ExternalTabContainer>,
@@ -57,9 +55,10 @@ class ExternalTabContainer : public TabContentsDelegate,
   typedef std::map<uintptr_t, scoped_refptr<ExternalTabContainer> > PendingTabs;
 
   ExternalTabContainer(AutomationProvider* automation,
-      AutomationResourceMessageFilter* filter);
+                       AutomationResourceMessageFilter* filter);
 
   TabContents* tab_contents() const;
+  TabContentsWrapper* tab_contents_wrapper() { return tab_contents_.get(); }
 
   // Temporary hack so we can send notifications back
   void SetTabHandle(int handle);
@@ -116,11 +115,11 @@ class ExternalTabContainer : public TabContentsDelegate,
   static ExternalTabContainer* GetContainerForTab(HWND tab_window);
 
   // Overridden from TabContentsDelegate:
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url,
-                              const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition);
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const GURL& url,
+                                      const GURL& referrer,
+                                      WindowOpenDisposition disposition,
+                                      PageTransition::Type transition);
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags);
   virtual void AddNewContents(TabContents* source,
@@ -128,44 +127,29 @@ class ExternalTabContainer : public TabContentsDelegate,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture);
-  virtual void ActivateContents(TabContents* contents);
-  virtual void DeactivateContents(TabContents* contents);
-  virtual void LoadingStateChanged(TabContents* source);
   virtual void CloseContents(TabContents* source);
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
   virtual bool IsPopup(const TabContents* source) const;
   virtual void UpdateTargetURL(TabContents* source, const GURL& url);
   virtual void ContentsZoomChange(bool zoom_in);
-  virtual bool IsExternalTabContainer() const;
   virtual gfx::NativeWindow GetFrameNativeWindow();
-
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-
   virtual bool TakeFocus(bool reverse);
-
+  virtual bool CanDownload(TabContents* source, int request_id);
   virtual bool OnGoToEntryOffset(int offset);
-
   virtual void ShowPageInfo(Profile* profile,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
-
-  // Handles the context menu display operation. This allows external
-  // hosts to customize the menu.
   virtual bool HandleContextMenu(const ContextMenuParams& params);
-
-  // Executes the context menu command identified by the command
-  // parameter.
   virtual bool ExecuteContextMenuCommand(int command);
-
   virtual void BeforeUnloadFired(TabContents* tab,
                                  bool proceed,
                                  bool* proceed_to_fire_unload);
-
+  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator();
   void ShowRepostFormWarningDialog(TabContents* tab_contents);
-
   void RegisterRenderViewHost(RenderViewHost* render_view_host);
   void UnregisterRenderViewHost(RenderViewHost* render_view_host);
 
@@ -179,23 +163,14 @@ class ExternalTabContainer : public TabContentsDelegate,
                                       const std::string& target);
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
-
-  // Overridden from DownloadTabHelperDelegate:
-  virtual bool CanDownload(int request_id) OVERRIDE;
-  virtual void OnStartDownload(DownloadItem* download,
-                               TabContentsWrapper* tab) OVERRIDE;
 
   // Returns the ExternalTabContainer instance associated with the cookie
   // passed in. It also erases the corresponding reference from the map.
   // Returns NULL if we fail to find the cookie in the map.
   static scoped_refptr<ExternalTabContainer> RemovePendingTab(uintptr_t cookie);
-
-  // Overridden from views::NativeWidgetWin:
-  virtual views::Window* GetContainingWindow() OVERRIDE;
-  virtual const views::Window* GetContainingWindow() const OVERRIDE;
 
   // Handles the specified |accelerator| being pressed.
   bool AcceleratorPressed(const views::Accelerator& accelerator);
@@ -280,8 +255,6 @@ class ExternalTabContainer : public TabContentsDelegate,
   scoped_refptr<AutomationProvider> automation_;
 
   NotificationRegistrar registrar_;
-
-  TabContentsObserver::Registrar tab_contents_registrar_;
 
   // A view to handle focus cycling
   TabContentsContainer* tab_contents_container_;
@@ -371,13 +344,14 @@ class TemporaryPopupExternalTabContainer : public ExternalTabContainer {
     return false;
   }
 
-  virtual void Observe(NotificationType type, const NotificationSource& source,
+  virtual void Observe(int type, const NotificationSource& source,
                        const NotificationDetails& details) {}
 
-  virtual void OpenURLFromTab(TabContents* source, const GURL& url,
-                              const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition);
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const GURL& url,
+                                      const GURL& referrer,
+                                      WindowOpenDisposition disposition,
+                                      PageTransition::Type transition);
 
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) {

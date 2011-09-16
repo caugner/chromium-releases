@@ -7,22 +7,22 @@
 #pragma once
 
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/search_engines/template_url_model_observer.h"
+#include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "ui/base/models/table_model_observer.h"
 
 class AutocompleteController;
 class CustomHomePagesTableModel;
-class OptionsManagedBannerHandler;
-class TemplateURLModel;
+class TemplateURLService;
 
 // Chrome browser options page UI handler.
 class BrowserOptionsHandler : public OptionsPageUIHandler,
                               public AutocompleteControllerDelegate,
                               public ShellIntegration::DefaultWebClientObserver,
-                              public TemplateURLModelObserver,
+                              public TemplateURLServiceObserver,
                               public ui::TableModelObserver {
  public:
   BrowserOptionsHandler();
@@ -41,8 +41,8 @@ class BrowserOptionsHandler : public OptionsPageUIHandler,
   virtual void SetDefaultWebClientUIState(
       ShellIntegration::DefaultWebClientUIState state);
 
-  // TemplateURLModelObserver implementation.
-  virtual void OnTemplateURLModelChanged();
+  // TemplateURLServiceObserver implementation.
+  virtual void OnTemplateURLServiceChanged();
 
   // ui::TableModelObserver implementation.
   virtual void OnModelChanged();
@@ -52,7 +52,7 @@ class BrowserOptionsHandler : public OptionsPageUIHandler,
 
  private:
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -79,6 +79,9 @@ class BrowserOptionsHandler : public OptionsPageUIHandler,
   // Sets the startup page set to the current pages. Called from WebUI.
   void SetStartupPagesToCurrentPages(const ListValue* args);
 
+  // Writes the current set of startup pages to prefs. Called from WebUI.
+  void DragDropStartupPage(const ListValue* args);
+
   // Gets autocomplete suggestions asychronously for the given string.
   // Called from WebUI.
   void RequestAutocompleteSuggestions(const ListValue* args);
@@ -86,6 +89,13 @@ class BrowserOptionsHandler : public OptionsPageUIHandler,
   // Called when the 'Always show the bookmarks bar' checkbox is toggled.
   // Notifies any listeners interested in this event.  |args| is ignored.
   void ToggleShowBookmarksBar(const ListValue* args);
+
+  // Enables/disables Instant.
+  void EnableInstant(const ListValue* args);
+  void DisableInstant(const ListValue* args);
+
+  // Called to request information about the Instant field trial.
+  void GetInstantFieldTrialStatus(const ListValue* args);
 
   // Returns the string ID for the given default browser state.
   int StatusStringIdForState(ShellIntegration::DefaultWebClientState state);
@@ -112,13 +122,16 @@ class BrowserOptionsHandler : public OptionsPageUIHandler,
   StringPrefMember homepage_;
   BooleanPrefMember default_browser_policy_;
 
-  TemplateURLModel* template_url_model_;  // Weak.
+  // Used to observe updates to the preference of the list of URLs to load
+  // on startup, which can be updated via sync.
+  PrefChangeRegistrar pref_change_registrar_;
+
+  TemplateURLService* template_url_service_;  // Weak.
 
   // TODO(stuartmorgan): Once there are no other clients of
   // CustomHomePagesTableModel, consider changing it to something more like
-  // TemplateURLModel.
+  // TemplateURLService.
   scoped_ptr<CustomHomePagesTableModel> startup_custom_pages_table_model_;
-  scoped_ptr<OptionsManagedBannerHandler> banner_handler_;
 
   scoped_ptr<AutocompleteController> autocomplete_controller_;
 

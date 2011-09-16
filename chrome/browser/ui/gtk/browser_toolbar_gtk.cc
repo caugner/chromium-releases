@@ -35,15 +35,14 @@
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
-#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/browser/upgrade_detector.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -98,10 +97,10 @@ BrowserToolbarGtk::BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window)
   browser_->command_updater()->AddCommandObserver(IDC_BOOKMARK_PAGE, this);
 
   registrar_.Add(this,
-                 NotificationType::BROWSER_THEME_CHANGED,
+                 chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
   registrar_.Add(this,
-                 NotificationType::UPGRADE_RECOMMENDED,
+                 chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                  NotificationService::AllSources());
 }
 
@@ -212,7 +211,7 @@ void BrowserToolbarGtk::Init(Profile* profile,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)).c_str());
   g_signal_connect(wrench_button, "button-press-event",
                    G_CALLBACK(OnMenuButtonPressEventThunk), this);
-  GTK_WIDGET_UNSET_FLAGS(wrench_button, GTK_CAN_FOCUS);
+  gtk_widget_set_can_focus(wrench_button, FALSE);
 
   // Put the wrench button in a box so that we can paint the update notification
   // over it.
@@ -223,7 +222,7 @@ void BrowserToolbarGtk::Init(Profile* profile,
   gtk_box_pack_start(GTK_BOX(toolbar_), wrench_box, FALSE, FALSE, 4);
 
   wrench_menu_.reset(new MenuGtk(this, &wrench_menu_model_));
-  registrar_.Add(this, NotificationType::ZOOM_LEVEL_CHANGED,
+  registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
       Source<HostZoomMap>(browser_->profile()->GetHostZoomMap()));
 
   if (ShouldOnlyShowLocation()) {
@@ -302,7 +301,7 @@ void BrowserToolbarGtk::EnabledStateChangedForCommand(int id, bool enabled) {
       break;
   }
   if (widget) {
-    if (!enabled && GTK_WIDGET_STATE(widget) == GTK_STATE_PRELIGHT) {
+    if (!enabled && gtk_widget_get_state(widget) == GTK_STATE_PRELIGHT) {
       // If we're disabling a widget, GTK will helpfully restore it to its
       // previous state when we re-enable it, even if that previous state
       // is the prelight.  This looks bad.  See the bug for a simple repro.
@@ -347,12 +346,12 @@ bool BrowserToolbarGtk::GetAcceleratorForCommandId(
 
 // NotificationObserver --------------------------------------------------------
 
-void BrowserToolbarGtk::Observe(NotificationType type,
+void BrowserToolbarGtk::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  if (type == NotificationType::PREF_CHANGED) {
+  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     NotifyPrefChanged(Details<std::string>(details).ptr());
-  } else if (type == NotificationType::BROWSER_THEME_CHANGED) {
+  } else if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     // Update the spacing around the menu buttons
     bool use_gtk = theme_service_->UsingNativeTheme();
     int border = use_gtk ? 0 : 2;
@@ -385,10 +384,10 @@ void BrowserToolbarGtk::Observe(NotificationType type,
     }
 
     UpdateRoundedness();
-  } else if (type == NotificationType::UPGRADE_RECOMMENDED) {
+  } else if (type == chrome::NOTIFICATION_UPGRADE_RECOMMENDED) {
     // Redraw the wrench menu to update the badge.
     gtk_widget_queue_draw(wrench_menu_button_->widget());
-  } else if (type == NotificationType::ZOOM_LEVEL_CHANGED) {
+  } else if (type == content::NOTIFICATION_ZOOM_LEVEL_CHANGED) {
     // If our zoom level changed, we need to tell the menu to update its state,
     // since the menu could still be open.
     wrench_menu_->UpdateMenu();
@@ -607,8 +606,8 @@ void BrowserToolbarGtk::OnDragDataReceived(GtkWidget* widget,
   if (!url.is_valid())
     return;
 
-  bool url_is_newtab =
-      web_ui_util::ChromeURLHostEquals(url, chrome::kChromeUINewTabHost);
+  bool url_is_newtab = url.SchemeIs(chrome::kChromeUIScheme) &&
+                       url.host() == chrome::kChromeUINewTabHost;
   home_page_is_new_tab_page_.SetValue(url_is_newtab);
   if (!url_is_newtab)
     home_page_.SetValue(url.spec());
@@ -616,11 +615,8 @@ void BrowserToolbarGtk::OnDragDataReceived(GtkWidget* widget,
 
 void BrowserToolbarGtk::NotifyPrefChanged(const std::string* pref) {
   if (!pref || *pref == prefs::kShowHomeButton) {
-    if (show_home_button_.GetValue() && !ShouldOnlyShowLocation()) {
-      gtk_widget_show(home_->widget());
-    } else {
-      gtk_widget_hide(home_->widget());
-    }
+    bool visible = show_home_button_.GetValue() && !ShouldOnlyShowLocation();
+    gtk_widget_set_visible(home_->widget(), visible);
   }
 
   if (!pref ||

@@ -11,10 +11,12 @@
 
 namespace chromeos {
 
+class EnterpriseEnrollmentScreenActor;
 class EulaScreenActor;
+class NetworkScreenActor;
 class ScreenObserver;
 class UpdateScreenActor;
-class NetworkScreenActor;
+class UserImageScreenActor;
 // TODO(altimofeev): use real actors instead
 class ViewScreenDelegate;
 class WizardScreen;
@@ -31,15 +33,17 @@ class OobeDisplay {
   // Hides the given screen.
   virtual void HideScreen(WizardScreen* screen) = 0;
 
-  // Actors to be used by the specific screens.
-  virtual UpdateScreenActor* CreateUpdateScreenActor() = 0;
-  virtual NetworkScreenActor* CreateNetworkScreenActor() = 0;
-  virtual EulaScreenActor* CreateEulaScreenActor() = 0;
-  // TODO: use real actors instead.
-  virtual ViewScreenDelegate* CreateEnterpriseEnrollmentScreenActor() = 0;
-  virtual ViewScreenDelegate* CreateUserImageScreenActor() = 0;
-  virtual ViewScreenDelegate* CreateRegistrationScreenActor() = 0;
-  virtual ViewScreenDelegate* CreateHTMLPageScreenActor() = 0;
+  // Pointers to actors which should be used by the specific screens. Actors
+  // must be owned by the OobeDisplay implementation.
+  virtual UpdateScreenActor* GetUpdateScreenActor() = 0;
+  virtual NetworkScreenActor* GetNetworkScreenActor() = 0;
+  virtual EulaScreenActor* GetEulaScreenActor() = 0;
+  virtual EnterpriseEnrollmentScreenActor*
+      GetEnterpriseEnrollmentScreenActor() = 0;
+  virtual UserImageScreenActor* GetUserImageScreenActor() = 0;
+  // TODO(altimofeev): use real actors instead.
+  virtual ViewScreenDelegate* GetRegistrationScreenActor() = 0;
+  virtual ViewScreenDelegate* GetHTMLPageScreenActor() = 0;
 };
 
 }  // namespace chromeos

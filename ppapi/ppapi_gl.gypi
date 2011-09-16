@@ -2,19 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-
-# This file was split off from ppapi.gyp to prevent PPAPI users from
-# needing to DEPS in ~10K files due to mesa.
 {
   'includes': [
     '../third_party/mesa/mesa.gypi',
   ],
   'targets': [
     {
-      'target_name': 'ppapi_egl',
+      'target_name': 'ppapi_egl<(nacl_ppapi_library_suffix)',
       'type': 'static_library',
       'dependencies': [
-        '<(DEPTH)/ppapi/ppapi.gyp:ppapi_c',
+        '<(DEPTH)/ppapi/ppapi.gyp:ppapi_c<(nacl_ppapi_library_suffix)',
       ],
       'include_dirs': [
         'lib/gl/include',
@@ -48,10 +45,10 @@
       ],
     },
     {
-      'target_name': 'ppapi_gles2',
+      'target_name': 'ppapi_gles2<(nacl_ppapi_library_suffix)',
       'type': 'static_library',
       'dependencies': [
-        'ppapi_c',
+        'ppapi_c<(nacl_ppapi_library_suffix)',
       ],
       'include_dirs': [
         'lib/gl/include',

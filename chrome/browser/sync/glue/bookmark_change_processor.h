@@ -8,10 +8,10 @@
 
 #include <vector>
 
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/sync/engine/syncapi.h"
-#include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
+#include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 
 namespace browser_sync {
@@ -29,7 +29,7 @@ class BookmarkChangeProcessor : public BookmarkModelObserver,
 
   // BookmarkModelObserver implementation.
   // BookmarkModel -> sync_api model change application.
-  virtual void Loaded(BookmarkModel* model) OVERRIDE;
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,

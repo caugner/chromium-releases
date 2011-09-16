@@ -37,7 +37,6 @@
       ],
       'conditions': [
          ['OS=="win"', {
-            'msvs_guid': '5916D37D-8C97-424F-A904-74E52594C2D6',
             'link_settings': {
               'libraries': ['-lurlmon.lib'],
             },
@@ -79,9 +78,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

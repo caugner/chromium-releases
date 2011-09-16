@@ -22,7 +22,10 @@
 #include "ui/gfx/native_widget_types.h"
 
 class AppCacheDispatcher;
+class AudioInputMessageFilter;
+class AudioMessageFilter;
 class DBMessageFilter;
+class DevToolsAgentFilter;
 class FilePath;
 class GpuChannelHost;
 class IndexedDBDispatcher;
@@ -32,6 +35,7 @@ class RenderProcessObserver;
 class RendererNetPredictor;
 class RendererWebKitClientImpl;
 class SkBitmap;
+class VideoCaptureImplManager;
 class WebDatabaseObserverImpl;
 
 struct RendererPreferences;
@@ -164,6 +168,18 @@ class RenderThread : public RenderThreadBase,
     return indexed_db_dispatcher_.get();
   }
 
+  AudioInputMessageFilter* audio_input_message_filter() {
+    return audio_input_message_filter_.get();
+  }
+
+  AudioMessageFilter* audio_message_filter() {
+    return audio_message_filter_.get();
+  }
+
+  VideoCaptureImplManager* video_capture_impl_manager() const {
+    return vc_manager_.get();
+  }
+
   bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
 
   double idle_notification_delay_in_s() const {
@@ -192,11 +208,6 @@ class RenderThread : public RenderThreadBase,
 
   // Sends a message to the browser to enable/disable spdy.
   void EnableSpdy(bool enable);
-
-  // Asynchronously establish a channel to the GPU plugin if not previously
-  // established or if it has been lost (for example if the GPU plugin crashed).
-  // Use GetGpuChannel() to determine when the channel is ready for use.
-  void EstablishGpuChannel(content::CauseForGpuLaunch);
 
   // Synchronously establish a channel to the GPU plugin if not previously
   // established or if it has been lost (for example if the GPU plugin crashed).
@@ -237,9 +248,7 @@ class RenderThread : public RenderThreadBase,
   void OnCreateNewView(const ViewMsg_New_Params& params);
   void OnTransferBitmap(const SkBitmap& bitmap, int resource_id);
   void OnPurgePluginListCache(bool reload_pages);
-  void OnGpuChannelEstablished(const IPC::ChannelHandle& channel_handle,
-                               base::ProcessHandle renderer_process_for_gpu,
-                               const GPUInfo& gpu_info);
+  void OnNetworkStateChanged(bool online);
   void OnGetAccessibilityTree();
 
   // We initialize WebKit as late as possible.
@@ -254,6 +263,12 @@ class RenderThread : public RenderThreadBase,
 
   // Used on the renderer and IPC threads.
   scoped_refptr<DBMessageFilter> db_message_filter_;
+  scoped_refptr<AudioInputMessageFilter> audio_input_message_filter_;
+  scoped_refptr<AudioMessageFilter> audio_message_filter_;
+  scoped_refptr<DevToolsAgentFilter> devtools_agent_message_filter_;
+
+  // Used on multiple threads.
+  scoped_refptr<VideoCaptureImplManager> vc_manager_;
 
   // Used on multiple script execution context threads.
   scoped_ptr<WebDatabaseObserverImpl> web_database_observer_impl_;

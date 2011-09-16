@@ -15,7 +15,7 @@ namespace views {
 class NativeButtonWin : public NativeControlWin,
                         public NativeButtonWrapper {
  public:
-  explicit NativeButtonWin(NativeButtonBase* native_button);
+  explicit NativeButtonWin(NativeButton* native_button);
   virtual ~NativeButtonWin();
 
   // Overridden from NativeButtonWrapper:
@@ -49,7 +49,7 @@ class NativeButtonWin : public NativeControlWin,
 
  private:
   // The NativeButton we are bound to.
-  NativeButtonBase* native_button_;
+  NativeButton* native_button_;
 
   // It's expensive to find the size of a button on windows, so we cache it.
   mutable gfx::Size button_size_;
@@ -61,7 +61,7 @@ class NativeButtonWin : public NativeControlWin,
 // A View that hosts a native Windows checkbox.
 class NativeCheckboxWin : public NativeButtonWin {
  public:
-  explicit NativeCheckboxWin(Checkbox* native_button);
+  explicit NativeCheckboxWin(NativeCheckbox* native_button);
   virtual ~NativeCheckboxWin();
 
   // Overridden from View:
@@ -89,7 +89,7 @@ class NativeCheckboxWin : public NativeButtonWin {
 
  private:
   // The Checkbox we are bound to.
-  Checkbox* checkbox_;
+  NativeCheckbox* checkbox_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeCheckboxWin);
 };

@@ -7,7 +7,7 @@
 #include <gtk/gtk.h>
 
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
@@ -77,8 +77,7 @@ View* NativeTabbedPaneGtk::RemoveTabAtIndex(int index) {
 
   GtkWidget* page =
       gtk_notebook_get_nth_page(GTK_NOTEBOOK(native_view()), index);
-  Widget* widget =
-      NativeWidget::GetNativeWidgetForNativeView(page)->GetWidget();
+  Widget* widget = Widget::GetWidgetForNativeView(page);
 
   // detach the content view from widget so that we can delete widget
   // without destroying the content view.
@@ -197,16 +196,16 @@ Widget* NativeTabbedPaneGtk::GetWidgetAt(int index) {
   DCHECK(index <= GetTabCount());
   GtkWidget* page = gtk_notebook_get_nth_page(GTK_NOTEBOOK(native_view()),
                                               index);
-  Widget* widget =
-      NativeWidget::GetNativeWidgetForNativeView(page)->GetWidget();
+  Widget* widget = Widget::GetWidgetForNativeView(page);
   DCHECK(widget);
   return widget;
 }
 
 View* NativeTabbedPaneGtk::GetTabViewAt(int index) {
   Widget* widget = GetWidgetAt(index);
-  DCHECK(widget && widget->GetRootView()->child_count() == 1);
-  return widget->GetRootView()->GetChildViewAt(0);
+  DCHECK(widget);
+  DCHECK_EQ(1, widget->GetRootView()->child_count());
+  return widget->GetRootView()->child_at(0);
 }
 
 void NativeTabbedPaneGtk::OnSwitchPage(int selected_tab_index) {

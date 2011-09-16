@@ -7,12 +7,14 @@
 
 #include <string>
 
-#include "chrome/browser/custom_handlers/protocol_handler.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
+#include "chrome/common/custom_handlers/protocol_handler.h"
 #include "content/common/notification_registrar.h"
 
+namespace base {
 class DictionaryValue;
+}
 
 class HandlerOptionsHandler : public OptionsPageUIHandler {
  public:
@@ -20,12 +22,12 @@ class HandlerOptionsHandler : public OptionsPageUIHandler {
   virtual ~HandlerOptionsHandler();
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(DictionaryValue* localized_strings);
+  virtual void GetLocalizedValues(base::DictionaryValue* localized_strings);
   virtual void Initialize();
   virtual void RegisterMessages();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -46,7 +48,11 @@ class HandlerOptionsHandler : public OptionsPageUIHandler {
 
   // Returns a JSON object describing the set of protocol handlers for the
   // given protocol.
-  DictionaryValue* GetHandlersForProtocol(const std::string& protocol);
+  void GetHandlersForProtocol(const std::string& protocol,
+                              base::DictionaryValue* value);
+
+  // Returns a JSON list of the ignored protocol handlers.
+  void GetIgnoredHandlers(ListValue* handlers);
 
   // Called when the JS PasswordManager object is initialized.
   void UpdateHandlerList();
@@ -54,6 +60,10 @@ class HandlerOptionsHandler : public OptionsPageUIHandler {
   // Remove a handler.
   // |args| is a list of [protocol, url, title].
   void RemoveHandler(const ListValue* args);
+
+  // Remove an ignored handler.
+  // |args| is a list of [protocol, url, title].
+  void RemoveIgnoredHandler(const ListValue* args);
 
   ProtocolHandlerRegistry* GetProtocolHandlerRegistry();
 

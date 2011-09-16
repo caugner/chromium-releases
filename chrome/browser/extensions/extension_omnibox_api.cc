@@ -6,6 +6,7 @@
 
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -14,6 +15,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "content/common/notification_service.h"
 
 namespace events {
@@ -97,7 +100,7 @@ void ExtensionOmniboxEventRouter::OnInputEntered(
       extension_id, events::kOnInputEntered, json_args, profile, GURL());
 
   NotificationService::current()->Notify(
-      NotificationType::EXTENSION_OMNIBOX_INPUT_ENTERED,
+      chrome::NOTIFICATION_EXTENSION_OMNIBOX_INPUT_ENTERED,
       Source<Profile>(profile), NotificationService::NoDetails());
 }
 
@@ -138,7 +141,7 @@ bool OmniboxSendSuggestionsFunction::RunImpl() {
   }
 
   NotificationService::current()->Notify(
-      NotificationType::EXTENSION_OMNIBOX_SUGGESTIONS_READY,
+      chrome::NOTIFICATION_EXTENSION_OMNIBOX_SUGGESTIONS_READY,
       Source<Profile>(profile_),
       Details<ExtensionOmniboxSuggestions>(&suggestions));
 
@@ -169,7 +172,7 @@ bool OmniboxSetDefaultSuggestionFunction::RunImpl() {
       suggestion);
 
   NotificationService::current()->Notify(
-      NotificationType::EXTENSION_OMNIBOX_DEFAULT_SUGGESTION_CHANGED,
+      chrome::NOTIFICATION_EXTENSION_OMNIBOX_DEFAULT_SUGGESTION_CHANGED,
       Source<Profile>(profile_),
       NotificationService::NoDetails());
 
@@ -276,6 +279,10 @@ void LaunchAppFromOmnibox(const AutocompleteMatch& match,
   // ignore the request.
   if (!extension)
     return;
+
+  UMA_HISTOGRAM_ENUMERATION(extension_misc::kAppLaunchHistogram,
+                            extension_misc::APP_LAUNCH_OMNIBOX_APP,
+                            extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
 
   // Look at the preferences to find the right launch container.  If no
   // preference is set, launch as a regular tab.

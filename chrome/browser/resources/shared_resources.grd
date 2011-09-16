@@ -20,6 +20,10 @@ without changes to the corresponding grd file. paaaae -->
                file="shared/css/list.css" type="BINDATA" />
       <include name="IDR_SHARED_CSS_MENU"
                file="shared/css/menu.css" type="BINDATA" />
+      <include name="IDR_SHARED_CSS_CHROME"
+               file="shared/css/chrome_shared.css" type="BINDATA" />
+      <include name="IDR_SHARED_CSS_SELECT"
+               file="shared/css/select.css" type="BINDATA" />
       <include name="IDR_SHARED_CSS_TABLE"
                file="shared/css/table.css" type="BINDATA" />
       <include name="IDR_SHARED_CSS_TABS"
@@ -30,18 +34,16 @@ without changes to the corresponding grd file. paaaae -->
                file="shared/css/tree.css" type="BINDATA" />
       <include name="IDR_SHARED_CSS_TREE_JS"
                file="shared/css/tree.css.js" type="BINDATA" />
-      <include name="IDR_SHARED_IMAGES_ACTIVE_DOWNLOADS_MENU"
-               file="shared/images/active_downloads_menu.png" type="BINDATA" />
-      <include name="IDR_SHARED_IMAGES_ICON_FILE"
-               file="shared/images/icon_file.png" type="BINDATA" />
-      <include name="IDR_SHARED_IMAGES_ICON_FOLDER"
-               file="shared/images/icon_folder.png" type="BINDATA" />
-      <include name="IDR_SHARED_IMAGES_ICON_MEDIA"
-               file="shared/images/icon_media.png" type="BINDATA" />
-      <include name="IDR_SHARED_IMAGES_ICON_PHOTO"
-               file="shared/images/icon_photo.png" type="BINDATA" />
+      <include name="IDR_SHARED_IMAGES_GOOGLE_TRANSPARENT"
+               file="shared/images/google-transparent.png" type="BINDATA" />
+      <include name="IDR_SHARED_IMAGES_SELECT"
+               file="shared/images/select.png" type="BINDATA" />
       <include name="IDR_SHARED_IMAGES_THROBBER"
                file="shared/images/throbber.svg" type="BINDATA" />
+      <include name="IDR_SHARED_IMAGES_CHECKBOX_BLACK"
+               file="shared/images/checkbox_black.png" type="BINDATA" />
+      <include name="IDR_SHARED_IMAGES_CHECKBOX_WHITE"
+               file="shared/images/checkbox_white.png" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR"
                file="shared/js/cr.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR_COMMAND_LINE"
@@ -50,8 +52,6 @@ without changes to the corresponding grd file. paaaae -->
                file="shared/js/cr/event_target.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR_LINK_CONTROLLER"
                file="shared/js/cr/link_controller.js" type="BINDATA" />
-      <include name="IDR_SHARED_JS_CR_LOCALE"
-               file="shared/js/cr/locale.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR_PROMISE"
                file="shared/js/cr/promise.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_CR_UI"
@@ -111,7 +111,8 @@ without changes to the corresponding grd file. paaaae -->
       <include name="IDR_SHARED_JS_I18N_TEMPLATE"
                file="shared/js/i18n_template.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_JSTEMPLATE_COMPILED"
-               file="shared/js/jstemplate_compiled.js" type="BINDATA" />
+               file="shared/js/jstemplate_compiled.js" 
+               flattenhtml="true" type="BINDATA" />
       <include name="IDR_SHARED_JS_LOCAL_STRINGS"
                file="shared/js/local_strings.js" type="BINDATA" />
       <include name="IDR_SHARED_JS_MEDIA_COMMON"

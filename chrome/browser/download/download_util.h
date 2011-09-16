@@ -14,7 +14,6 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
-#include "chrome/browser/download/download_process_handle.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -23,7 +22,6 @@
 
 class BaseDownloadItemModel;
 class CrxInstaller;
-class DictionaryValue;
 class DownloadItem;
 class DownloadManager;
 class GURL;
@@ -33,6 +31,11 @@ class SkBitmap;
 
 struct DownloadCreateInfo;
 struct DownloadSaveInfo;
+
+namespace base {
+class DictionaryValue;
+class TimeTicks;
+}
 
 namespace content {
 class ResourceContext;
@@ -63,10 +66,7 @@ void GenerateExtension(const FilePath& file_name,
                        FilePath::StringType* generated_extension);
 
 // Create a file name based on the response from the server.
-void GenerateFileNameFromRequest(const GURL& url,
-                                 const std::string& content_disposition,
-                                 const std::string& referrer_charset,
-                                 const std::string& mime_type,
+void GenerateFileNameFromRequest(const DownloadItem& download_item,
                                  FilePath* generated_name);
 
 void GenerateFileNameFromSuggestedName(const GURL& url,
@@ -84,14 +84,6 @@ void GenerateFileName(const GURL& url,
 // download.  |file_name| can either be just the file name or it can be a
 // full path to a file.
 void GenerateSafeFileName(const std::string& mime_type, FilePath* file_name);
-
-// Start installing a downloaded item item as a CRX (extension, theme, app,
-// ...).  The installer does work on the file thread, so the installation
-// is not complete when this function returns.  Returns the object managing
-// the installation.
-scoped_refptr<CrxInstaller> OpenChromeExtension(
-    Profile* profile,
-    const DownloadItem& download_item);
 
 // Download progress animations ------------------------------------------------
 
@@ -164,11 +156,23 @@ enum DownloadCountTypes {
   // Downloads that are cancelled before completion (user action or error).
   CANCELLED_COUNT,
 
+  // Downloads that are started. Should be equal to UNTHROTTLED_COUNT.
+  START_COUNT,
+
+  // Downloads that were interrupted by the OS.
+  INTERRUPTED_COUNT,
+
   DOWNLOAD_COUNT_TYPES_LAST_ENTRY
 };
 
 // Increment one of the above counts.
 void RecordDownloadCount(DownloadCountTypes type);
+
+// Record COMPLETED_COUNT and how long the download took.
+void RecordDownloadCompleted(const base::TimeTicks& start);
+
+// Record INTERRUPTED_COUNT, |error|, |received| and |total| bytes.
+void RecordDownloadInterrupted(int error, int64 received, int64 total);
 
 // Paint the common download animation progress foreground and background,
 // clipping the foreground to 'percent' full. If percent is -1, then we don't
@@ -220,7 +224,7 @@ void DragDownload(const DownloadItem* download,
 
 // Creates a representation of a download in a format that the downloads
 // HTML page can understand.
-DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id);
+base::DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id);
 
 // Get the localized status text for an in-progress download.
 string16 GetProgressStatusText(DownloadItem* download);
@@ -252,13 +256,6 @@ void DownloadUrl(const GURL& url,
                  int render_process_host_id,
                  int render_view_id,
                  const content::ResourceContext* context);
-
-// Tells the resource dispatcher host to cancel a download request.
-// Must be called on the IO thread.
-// |process_handle| is passed by value because it is ultimately passed to
-// other threads, and this way we don't have to worry about object lifetimes.
-void CancelDownloadRequest(ResourceDispatcherHost* rdh,
-                           DownloadProcessHandle process_handle);
 
 // Sends a notification on downloads being initiated
 // Must be called on the UI thread.

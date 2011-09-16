@@ -109,7 +109,7 @@ std::string GetFileLookupKey(
 
 namespace fileapi {
 
-FileSystemDirectoryDatabase::FileInfo::FileInfo() {
+FileSystemDirectoryDatabase::FileInfo::FileInfo() : parent_id(0) {
 }
 
 FileSystemDirectoryDatabase::FileInfo::~FileInfo() {
@@ -177,7 +177,7 @@ bool FileSystemDirectoryDatabase::ListChildren(
   scoped_ptr<leveldb::Iterator> iter(db_->NewIterator(leveldb::ReadOptions()));
   iter->Seek(child_key_prefix);
   children->clear();
-  while(iter->Valid() &&
+  while (iter->Valid() &&
       StartsWithASCII(iter->key().ToString(), child_key_prefix, true)) {
     std::string child_id_string = iter->value().ToString();
     FileId child_id;
@@ -525,7 +525,7 @@ bool FileSystemDirectoryDatabase::RemoveFileInfoHelper(
     // TODO(ericu): Make a faster is-the-directory-empty check.
     if (!ListChildren(file_id, &children))
       return false;
-    if(children.size()) {
+    if (children.size()) {
       LOG(ERROR) << "Can't remove a directory with children.";
       return false;
     }

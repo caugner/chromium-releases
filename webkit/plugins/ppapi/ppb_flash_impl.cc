@@ -10,6 +10,8 @@
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/shared_impl/time_conversion.h"
+#include "ppapi/thunk/enter.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -17,6 +19,10 @@
 #include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
 #include "webkit/plugins/ppapi/var.h"
+
+using ppapi::PPTimeToTime;
+using ppapi::thunk::EnterResource;
+using ppapi::thunk::PPB_URLRequestInfo_API;
 
 namespace webkit {
 namespace ppapi {
@@ -42,16 +48,17 @@ PP_Var GetProxyForURL(PP_Instance pp_instance, const char* url) {
   std::string proxy_host = instance->delegate()->ResolveProxy(gurl);
   if (proxy_host.empty())
     return PP_MakeUndefined();  // No proxy.
-  return StringVar::StringToPPVar(instance->module(), proxy_host);
+  return StringVar::StringToPPVar(instance->module()->pp_module(), proxy_host);
 }
 
 int32_t Navigate(PP_Resource request_id,
                  const char* target,
                  bool from_user_action) {
-  scoped_refptr<PPB_URLRequestInfo_Impl> request(
-      Resource::GetAs<PPB_URLRequestInfo_Impl>(request_id));
-  if (!request)
+  EnterResource<PPB_URLRequestInfo_API> enter(request_id, true);
+  if (enter.failed())
     return PP_ERROR_BADRESOURCE;
+  PPB_URLRequestInfo_Impl* request =
+      static_cast<PPB_URLRequestInfo_Impl*>(enter.object());
 
   if (!target)
     return PP_ERROR_BADARGUMENT;
@@ -89,8 +96,7 @@ double GetLocalTimeZoneOffset(PP_Instance pp_instance, PP_Time t) {
 
   // We can't do the conversion here because on Linux, the localtime calls
   // require filesystem access prohibited by the sandbox.
-  return instance->delegate()->GetLocalTimeZoneOffset(
-      base::Time::FromDoubleT(t));
+  return instance->delegate()->GetLocalTimeZoneOffset(PPTimeToTime(t));
 }
 
 PP_Var GetCommandLineArgs(PP_Module pp_module) {
@@ -103,7 +109,7 @@ PP_Var GetCommandLineArgs(PP_Module pp_module) {
     return PP_MakeUndefined();
 
   std::string args = instance->delegate()->GetFlashCommandLineArgs();
-  return StringVar::StringToPPVar(module, args);
+  return StringVar::StringToPPVar(pp_module, args);
 }
 
 const PPB_Flash ppb_flash = {

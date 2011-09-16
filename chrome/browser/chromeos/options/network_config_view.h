@@ -12,9 +12,8 @@
 #include "views/window/dialog_delegate.h"
 
 namespace views {
-class NativeButton;
+class NativeTextButton;
 class View;
-class Window;
 }
 
 namespace chromeos {
@@ -22,8 +21,7 @@ namespace chromeos {
 class ChildNetworkConfigView;
 
 // A dialog box for showing a password textfield.
-class NetworkConfigView : public views::View,
-                          public views::DialogDelegate,
+class NetworkConfigView : public views::DialogDelegateView,
                           public views::ButtonListener {
  public:
   class Delegate {
@@ -56,7 +54,7 @@ class NetworkConfigView : public views::View,
   virtual bool Accept() OVERRIDE;
   virtual views::View* GetExtraView() OVERRIDE;
 
-  // views::WindowDelegate method.
+  // views::WidgetDelegate methods.
   virtual bool IsModal() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
   virtual std::wstring GetWindowTitle() const OVERRIDE;
@@ -94,7 +92,7 @@ class NetworkConfigView : public views::View,
   Delegate* delegate_;
 
   // Button in lower-left corner, may be null or hidden.
-  views::NativeButton* advanced_button_;
+  views::NativeTextButton* advanced_button_;
   views::View* advanced_button_container_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConfigView);
@@ -128,8 +126,8 @@ class ChildNetworkConfigView : public views::View {
   // post-construction after the view has a parent window.
   virtual void InitFocus() = 0;
 
-  // Width of passphrase fields.
-  static const int kPassphraseWidth;
+  // Minimum with of input fields / combo boxes.
+  static const int kInputFieldMinWidth;
 
  protected:
   std::string service_path_;

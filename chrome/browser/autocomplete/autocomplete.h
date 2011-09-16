@@ -112,6 +112,7 @@
 //
 // QUERY input type:
 // --------------------------------------------------------------------|-----
+// Search Primary or Secondary (past query in history within 2 days)   | 1599**
 // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
 // Keyword (substituting, exact match)                                 | 1450
 // Extension App (exact match)                                         | 1425
@@ -172,6 +173,7 @@ struct AutocompleteMatch;
 class AutocompleteProvider;
 class AutocompleteResult;
 class HistoryContentsProvider;
+class KeywordProvider;
 class Profile;
 class SearchProvider;
 class TemplateURL;
@@ -402,6 +404,9 @@ class AutocompleteProvider
   // NOTE: Remember to call OnProviderUpdate() if matches_ is updated.
   virtual void DeleteMatch(const AutocompleteMatch& match);
 
+#ifdef UNIT_TEST
+  void set_listener(ACProviderListener* listener) { listener_ = listener; }
+#endif
   // A suggested upper bound for how many matches a provider should return.
   // TODO(pkasting): http://b/1111299 , http://b/933133 This should go away once
   // we have good relevance heuristics; the controller should handle all
@@ -485,6 +490,13 @@ class AutocompleteResult {
     bool is_history_what_you_typed_match;
   };
 
+  // Max number of matches we'll show from the various providers.
+  static const size_t kMaxMatches;
+
+  // The lowest score a match can have and still potentially become the default
+  // match for the result set.
+  static const int kLowestDefaultScore;
+
   AutocompleteResult();
   ~AutocompleteResult();
 
@@ -539,9 +551,6 @@ class AutocompleteResult {
   void Validate() const;
 #endif
 
-  // Max number of matches we'll show from the various providers.
-  static const size_t kMaxMatches;
-
  private:
   typedef std::map<AutocompleteProvider*, ACMatches> ProviderToMatches;
 
@@ -590,12 +599,14 @@ class AutocompleteController : public ACProviderListener {
   AutocompleteController(Profile* profile,
                          AutocompleteControllerDelegate* delegate);
 #ifdef UNIT_TEST
-  explicit AutocompleteController(const ACProviders& providers)
+  AutocompleteController(const ACProviders& providers, Profile* profile)
       : delegate_(NULL),
         providers_(providers),
+        keyword_provider_(NULL),
         search_provider_(NULL),
         done_(true),
-        in_start_(false) {
+        in_start_(false),
+        profile_(profile) {
   }
 #endif
   ~AutocompleteController();
@@ -657,6 +668,11 @@ class AutocompleteController : public ACProviderListener {
   // the popup to ensure it's not showing an out-of-date query.
   void ExpireCopiedEntries();
 
+#ifdef UNIT_TEST
+  void set_search_provider(SearchProvider* provider) {
+    search_provider_ = provider;
+  }
+#endif
   SearchProvider* search_provider() const { return search_provider_; }
 
   // Getters
@@ -673,6 +689,10 @@ class AutocompleteController : public ACProviderListener {
   // Start() is calling this to get the synchronous result.
   void UpdateResult(bool is_synchronous_pass);
 
+  // For each group of contiguous matches from the same TemplateURL, show the
+  // provider name as a description on the first match in the group.
+  void UpdateKeywordDescriptions(AutocompleteResult* result);
+
   // Calls AutocompleteControllerDelegate::OnResultChanged() and if done sends
   // AUTOCOMPLETE_CONTROLLER_RESULT_READY.
   void NotifyChanged(bool notify_default_match);
@@ -687,6 +707,8 @@ class AutocompleteController : public ACProviderListener {
 
   // A list of all providers.
   ACProviders providers_;
+
+  KeywordProvider* keyword_provider_;
 
   SearchProvider* search_provider_;
 
@@ -706,6 +728,8 @@ class AutocompleteController : public ACProviderListener {
   // Are we in Start()? This is used to avoid updating |result_| and sending
   // notifications until Start() has been invoked on all providers.
   bool in_start_;
+
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteController);
 };

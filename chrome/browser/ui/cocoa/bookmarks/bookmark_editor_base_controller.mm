@@ -6,6 +6,7 @@
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_base_controller.h"
 
+#include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
@@ -50,6 +51,11 @@
 // the selection path thereto.
 - (NSIndexPath*)selectionPathForNode:(const BookmarkNode*)node;
 
+// Implementation of getExpandedNodes. See description in header for details.
+- (void)getExpandedNodes:(BookmarkExpandedStateTracker::Nodes*)nodes
+                  folder:(BookmarkFolderInfo*)info
+                    path:(std::vector<NSUInteger>*)path
+                    root:(id)root;
 @end
 
 // static; implemented for each platform.  Update this function for new
@@ -85,7 +91,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
         importing_(false)
   { }
 
-  virtual void Loaded(BookmarkModel* model) OVERRIDE{
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {
     [controller_ modelChangedPreserveSelection:YES];
   }
 
@@ -239,6 +245,8 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 }
 
 - (IBAction)ok:(id)sender {
+  NSWindow* window = [self window];
+  [window makeFirstResponder:window];
   // At least one of these two functions should be provided by derived classes.
   BOOL hasWillCommit = [self respondsToSelector:@selector(willCommit)];
   BOOL hasDidCommit = [self respondsToSelector:@selector(didCommit)];
@@ -257,7 +265,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
       shouldContinue = [hasDidContinue boolValue];
   }
   if (shouldContinue)
-    [NSApp endSheet:[self window]];
+    [NSApp endSheet:window];
 }
 
 - (IBAction)cancel:(id)sender {
@@ -280,6 +288,10 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 
 - (BookmarkModel*)bookmarkModel {
   return profile_->GetBookmarkModel();
+}
+
+- (Profile*)profile {
+  return profile_;
 }
 
 - (const BookmarkNode*)parentNode {
@@ -328,6 +340,53 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
     selectedNode = parentNode_;
   }
   return selectedNode;
+}
+
+- (void)expandNodes:(const BookmarkExpandedStateTracker::Nodes&)nodes {
+  id treeControllerRoot = [folderTreeController_ arrangedObjects];
+  for (BookmarkExpandedStateTracker::Nodes::const_iterator i = nodes.begin();
+       i != nodes.end(); ++i) {
+    NSIndexPath* path = [self selectionPathForNode:*i];
+    id folderNode = [treeControllerRoot descendantNodeAtIndexPath:path];
+    [folderTreeView_ expandItem:folderNode];
+  }
+}
+
+- (BookmarkExpandedStateTracker::Nodes)getExpandedNodes {
+  BookmarkExpandedStateTracker::Nodes nodes;
+  std::vector<NSUInteger> path;
+  NSArray* folderNodes = [self folderTreeArray];
+  NSUInteger i = 0;
+  for (BookmarkFolderInfo* folder in folderNodes) {
+    path.push_back(i);
+    [self getExpandedNodes:&nodes
+                    folder:folder
+                      path:&path
+                      root:[folderTreeController_ arrangedObjects]];
+    path.clear();
+    ++i;
+  }
+  return nodes;
+}
+
+- (void)getExpandedNodes:(BookmarkExpandedStateTracker::Nodes*)nodes
+                  folder:(BookmarkFolderInfo*)folder
+                    path:(std::vector<NSUInteger>*)path
+                    root:(id)root {
+  NSIndexPath* indexPath = [NSIndexPath indexPathWithIndexes:&(path->front())
+                                                      length:path->size()];
+  id node = [root descendantNodeAtIndexPath:indexPath];
+  if (![folderTreeView_ isItemExpanded:node])
+    return;
+  nodes->insert([folder folderNode]);
+  NSArray* children = [folder children];
+  NSUInteger i = 0;
+  for (BookmarkFolderInfo* childFolder in children) {
+    path->push_back(i);
+    [self getExpandedNodes:nodes folder:childFolder path:path root:root];
+    path->pop_back();
+    ++i;
+  }
 }
 
 - (NSArray*)folderTreeArray {
@@ -424,6 +483,8 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 }
 
 - (void)modelChangedPreserveSelection:(BOOL)preserve {
+  if (creatingNewFolders_)
+    return;
   const BookmarkNode* selectedNode = [self selectedNode];
   [self buildFolderTree];
   if (preserve &&
@@ -436,7 +497,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
          fromParent:(const BookmarkNode*)parent {
   if (node->is_folder()) {
     if (parentNode_ == node || parentNode_->HasAncestor(node)) {
-      parentNode_ = [self bookmarkModel]->GetBookmarkBarNode();
+      parentNode_ = [self bookmarkModel]->bookmark_bar_node();
       if (configuration_ != BookmarkEditor::SHOW_TREE) {
         // The user can't select a different folder, so just close up shop.
         [self cancel:self];
@@ -464,16 +525,11 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
     if ([subFolderInfo newFolder]) {
       BookmarkModel* model = [self bookmarkModel];
       const BookmarkNode* newFolder =
-      model->AddFolder(parentNode, i,
-                       base::SysNSStringToUTF16([subFolderInfo folderName]));
+          model->AddFolder(parentNode, i,
+              base::SysNSStringToUTF16([subFolderInfo folderName]));
       // Update our dictionary with the actual folder node just created.
       [subFolderInfo setFolderNode:newFolder];
       [subFolderInfo setNewFolder:NO];
-      // If the newly created folder was selected, update the selection path.
-      if (subFolderInfo == selectedFolderInfo) {
-        NSIndexPath* selectionPath = [self selectionPathForNode:newFolder];
-        [self setTableSelectionPath:selectionPath];
-      }
     }
     [self createNewFoldersForFolder:subFolderInfo
                  selectedFolderInfo:selectedFolderInfo];
@@ -513,16 +569,13 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 }
 
 - (void)createNewFolders {
-  // Turn off notifications while "importing" folders (as created in the sheet).
-  observer_->BookmarkImportBeginning([self bookmarkModel]);
+  AutoReset<BOOL> creatingNewFoldersSetter(&creatingNewFolders_, YES);
   // Scan the tree looking for nodes marked 'newFolder' and create those nodes.
   NSArray* folderTreeArray = [self folderTreeArray];
   for (BookmarkFolderInfo *folderInfo in folderTreeArray) {
     [self createNewFoldersForFolder:folderInfo
                  selectedFolderInfo:[self selectedFolder]];
   }
-  // Notifications back on.
-  observer_->BookmarkImportEnding([self bookmarkModel]);
 }
 
 #pragma mark For Unit Test Use Only

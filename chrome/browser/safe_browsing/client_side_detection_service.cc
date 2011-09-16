@@ -5,36 +5,38 @@
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util_proxy.h"
 #include "base/logging.h"
+#include "base/time.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/platform_file.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "chrome/common/net/http_return.h"
+#include "chrome/common/safe_browsing/client_model.pb.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/common/notification_service.h"
 #include "content/common/url_fetcher.h"
+#include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
-#include "ipc/ipc_platform_file.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
-#if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
-#endif
-
 namespace safe_browsing {
 
+const size_t ClientSideDetectionService::kMaxModelSizeBytes = 90 * 1024;
 const int ClientSideDetectionService::kMaxReportsPerInterval = 3;
+// TODO(noelutz): once we know this mechanism works as intended we should fetch
+// the model much more frequently.  E.g., every 5 minutes or so.
+const int ClientSideDetectionService::kClientModelFetchIntervalMs = 3600 * 1000;
+const int ClientSideDetectionService::kInitialClientModelFetchDelayMs = 10000;
 
 const base::TimeDelta ClientSideDetectionService::kReportsInterval =
     base::TimeDelta::FromDays(1);
@@ -48,11 +50,8 @@ const char ClientSideDetectionService::kClientReportPhishingUrl[] =
 // Note: when updatng the model version, don't forget to change the filename
 // in chrome/common/chrome_constants.cc as well, or else existing users won't
 // download the new model.
-//
-// TODO(bryner): add version metadata so that clients can download new models
-// without needing a new model filename.
 const char ClientSideDetectionService::kClientModelUrl[] =
-    "https://ssl.gstatic.com/safebrowsing/csd/client_model_v1.pb";
+    "https://ssl.gstatic.com/safebrowsing/csd/client_model_v3.pb";
 
 struct ClientSideDetectionService::ClientReportInfo {
   scoped_ptr<ClientReportPhishingRequestCallback> callback;
@@ -64,15 +63,10 @@ ClientSideDetectionService::CacheState::CacheState(bool phish, base::Time time)
       timestamp(time) {}
 
 ClientSideDetectionService::ClientSideDetectionService(
-    const FilePath& model_path,
     net::URLRequestContextGetter* request_context_getter)
-    : model_path_(model_path),
-      model_status_(UNKNOWN_STATUS),
-      model_file_(base::kInvalidPlatformFileValue),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
       request_context_getter_(request_context_getter) {
-  registrar_.Add(this, NotificationType::RENDERER_PROCESS_CREATED,
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                  NotificationService::AllSources());
 }
 
@@ -81,40 +75,39 @@ ClientSideDetectionService::~ClientSideDetectionService() {
   STLDeleteContainerPairPointers(client_phishing_reports_.begin(),
                                  client_phishing_reports_.end());
   client_phishing_reports_.clear();
-  CloseModelFile();
 }
 
-/* static */
+// static
 ClientSideDetectionService* ClientSideDetectionService::Create(
-    const FilePath& model_path,
+    const FilePath& model_dir,
     net::URLRequestContextGetter* request_context_getter) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   scoped_ptr<ClientSideDetectionService> service(
-      new ClientSideDetectionService(model_path, request_context_getter));
+      new ClientSideDetectionService(request_context_getter));
   if (!service->InitializePrivateNetworks()) {
     UMA_HISTOGRAM_COUNTS("SBClientPhishing.InitPrivateNetworksFailed", 1);
     return NULL;
   }
+  // We fetch the model at every browser restart.  In a lot of cases the model
+  // will be in the cache so it won't actually be fetched from the network.
+  // We delay the first model fetch to avoid slowing down browser startup.
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      service->method_factory_.NewRunnableMethod(
+          &ClientSideDetectionService::StartFetchModel),
+      kInitialClientModelFetchDelayMs);
 
-  // We try to open the model file right away and start fetching it if
-  // it does not already exist on disk.
-  base::FileUtilProxy::CreateOrOpenCallback* cb =
-      service.get()->callback_factory_.NewCallback(
-          &ClientSideDetectionService::OpenModelFileDone);
-  if (!base::FileUtilProxy::CreateOrOpen(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-          model_path,
-          base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ,
-          cb)) {
-    delete cb;
-    return NULL;
-  }
-
-  // Delete the previous-version model file.
-  // TODO(bryner): Remove this for M14.
+  // Delete the previous-version model files.
+  // TODO(bryner): Remove this for M15 (including the model_dir argument to
+  // Create()).
   base::FileUtilProxy::Delete(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-      model_path.DirName().AppendASCII("Safe Browsing Phishing Model"),
+      model_dir.AppendASCII("Safe Browsing Phishing Model"),
+      false /* not recursive */,
+      NULL /* not interested in result */);
+  base::FileUtilProxy::Delete(
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
+      model_dir.AppendASCII("Safe Browsing Phishing Model v1"),
       false /* not recursive */,
       NULL /* not interested in result */);
   return service.release();
@@ -150,6 +143,35 @@ bool ClientSideDetectionService::IsPrivateIPAddress(
   return false;
 }
 
+bool ClientSideDetectionService::IsBadIpAddress(
+    const std::string& ip_address) const {
+  net::IPAddressNumber ip_number;
+  if (!net::ParseIPLiteralToNumber(ip_address, &ip_number)) {
+    DLOG(WARNING) << "Unable to parse IP address: " << ip_address;
+    return false;
+  }
+  if (ip_number.size() == net::kIPv4AddressSize) {
+    ip_number = net::ConvertIPv4NumberToIPv6Number(ip_number);
+  }
+  if (ip_number.size() != net::kIPv6AddressSize) {
+    DLOG(WARNING) << "Unable to convert IPv4 address to IPv6: " << ip_address;
+    return false;  // better safe than sorry.
+  }
+  for (BadSubnetMap::const_iterator it = bad_subnets_.begin();
+       it != bad_subnets_.end(); ++it) {
+    const std::string& mask = it->first;
+    DCHECK_EQ(mask.size(), ip_number.size());
+    std::string subnet(net::kIPv6AddressSize, '.');
+    for (size_t i = 0; i < net::kIPv6AddressSize; ++i) {
+      subnet[i] = ip_number[i] & mask[i];
+    }
+    if (it->second.count(crypto::SHA256HashString(subnet)) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void ClientSideDetectionService::OnURLFetchComplete(
     const URLFetcher* source,
     const GURL& url,
@@ -167,124 +189,68 @@ void ClientSideDetectionService::OnURLFetchComplete(
   }
 }
 
-void ClientSideDetectionService::Observe(NotificationType type,
+void ClientSideDetectionService::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  DCHECK(type == NotificationType::RENDERER_PROCESS_CREATED);
-  if (model_status_ == UNKNOWN_STATUS) {
-    // The model isn't ready.  When it's known, we'll call all renderers.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_CREATED);
+  if (!model_.get()) {
+    // Model might not be ready or maybe there was an error.
     return;
   }
-
-  RenderProcessHost* process = Source<RenderProcessHost>(source).ptr();
-  SendModelToProcess(process);
+  SendModelToProcess(Source<RenderProcessHost>(source).ptr());
 }
 
 void ClientSideDetectionService::SendModelToProcess(
     RenderProcessHost* process) {
-  if (model_file_ == base::kInvalidPlatformFileValue)
-    return;
-
-  IPC::PlatformFileForTransit file;
-#if defined(OS_POSIX)
-  file = base::FileDescriptor(model_file_, false);
-#elif defined(OS_WIN)
-  ::DuplicateHandle(::GetCurrentProcess(), model_file_, process->GetHandle(),
-                    &file, 0, false, DUPLICATE_SAME_ACCESS);
-#endif
-  process->Send(new SafeBrowsingMsg_SetPhishingModel(file));
+  VLOG(2) << "Sending phishing model to renderer";
+  process->Send(new SafeBrowsingMsg_SetPhishingModel(model_str_));
 }
 
-void ClientSideDetectionService::SetModelStatus(ModelStatus status) {
-  DCHECK_NE(READY_STATUS, model_status_);
-  model_status_ = status;
-
+void ClientSideDetectionService::SendModelToRenderers() {
   for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance()) {
-    RenderProcessHost* process = i.GetCurrentValue();
-    if (process->GetHandle())
-      SendModelToProcess(process);
+    SendModelToProcess(i.GetCurrentValue());
   }
 }
 
-void ClientSideDetectionService::OpenModelFileDone(
-    base::PlatformFileError error_code,
-    base::PassPlatformFile file,
-    bool created) {
-  DCHECK(!created);
-  if (base::PLATFORM_FILE_OK == error_code) {
-    // The model file already exists.  There is no need to fetch the model.
-    model_file_ = file.ReleaseValue();
-    SetModelStatus(READY_STATUS);
-#if defined(OS_MACOSX)
-    base::mac::SetFileBackupExclusion(model_path_);
-#endif
-  } else if (base::PLATFORM_FILE_ERROR_NOT_FOUND == error_code) {
-    // We need to fetch the model since it does not exist yet.
-    model_fetcher_.reset(URLFetcher::Create(0 /* ID is not used */,
-                                            GURL(kClientModelUrl),
-                                            URLFetcher::GET,
-                                            this));
-    model_fetcher_->set_request_context(request_context_getter_.get());
-    model_fetcher_->Start();
-  } else {
-    // It is not clear what we should do in this case.  For now we simply fail.
-    // Hopefully, we'll be able to read the model during the next browser
-    // restart.
-    SetModelStatus(ERROR_STATUS);
-  }
+void ClientSideDetectionService::StartFetchModel() {
+  // Start fetching the model either from the cache or possibly from the
+  // network if the model isn't in the cache.
+  model_fetcher_.reset(URLFetcher::Create(0 /* ID is not used */,
+                                          GURL(kClientModelUrl),
+                                          URLFetcher::GET,
+                                          this));
+  model_fetcher_->set_request_context(request_context_getter_.get());
+  model_fetcher_->Start();
 }
 
-void ClientSideDetectionService::CreateModelFileDone(
-    base::PlatformFileError error_code,
-    base::PassPlatformFile file,
-    bool created) {
-  model_file_ = file.ReleaseValue();
-  base::FileUtilProxy::WriteCallback* cb = callback_factory_.NewCallback(
-      &ClientSideDetectionService::WriteModelFileDone);
-  if (!created ||
-      base::PLATFORM_FILE_OK != error_code ||
-      !base::FileUtilProxy::Write(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-          model_file_,
-          0 /* offset */, tmp_model_string_->data(), tmp_model_string_->size(),
-          cb)) {
-    delete cb;
-    // An error occurred somewhere.  We close the model file if necessary and
-    // then run all the pending callbacks giving them an invalid model file.
-    CloseModelFile();
-    SetModelStatus(ERROR_STATUS);
-#if defined(OS_MACOSX)
-  } else {
-    base::mac::SetFileBackupExclusion(model_path_);
-#endif
+void ClientSideDetectionService::EndFetchModel(ClientModelStatus status) {
+  UMA_HISTOGRAM_ENUMERATION("SBClientPhishing.ClientModelStatus",
+                            status,
+                            MODEL_STATUS_MAX);
+  if (status == MODEL_SUCCESS) {
+    SetBadSubnets(*model_, &bad_subnets_);
+    SendModelToRenderers();
   }
-}
+  int delay_ms = kClientModelFetchIntervalMs;
+  // If the most recently fetched model had a valid max-age and the model was
+  // valid we're scheduling the next model update for after the max-age expired.
+  if (model_max_age_.get() &&
+      (status == MODEL_SUCCESS || status == MODEL_NOT_CHANGED)) {
+    // We're adding 60s of additional delay to make sure we're past
+    // the model's age.
+    *model_max_age_ += base::TimeDelta::FromMinutes(1);
+    delay_ms = model_max_age_->InMilliseconds();
+  }
+  model_max_age_.reset();
 
-void ClientSideDetectionService::WriteModelFileDone(
-    base::PlatformFileError error_code,
-    int bytes_written) {
-  if (base::PLATFORM_FILE_OK == error_code) {
-    SetModelStatus(READY_STATUS);
-  } else {
-    // TODO(noelutz): maybe we should retry writing the model since we
-    // did already fetch the model?
-    CloseModelFile();
-    SetModelStatus(ERROR_STATUS);
-  }
-  // Delete the model string that we kept around while we were writing the
-  // string to disk - we don't need it anymore.
-  tmp_model_string_.reset();
-}
-
-void ClientSideDetectionService::CloseModelFile() {
-  if (model_file_ != base::kInvalidPlatformFileValue) {
-    base::FileUtilProxy::Close(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-        model_file_,
-        NULL);
-  }
-  model_file_ = base::kInvalidPlatformFileValue;
+  // Schedule the next model reload.
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(
+          &ClientSideDetectionService::StartFetchModel),
+      delay_ms);
 }
 
 void ClientSideDetectionService::StartClientReportPhishingRequest(
@@ -298,7 +264,9 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
   if (!request->SerializeToString(&request_data)) {
     UMA_HISTOGRAM_COUNTS("SBClientPhishing.RequestNotSerialized", 1);
     VLOG(1) << "Unable to serialize the CSD request. Proto file changed?";
-    cb->Run(GURL(request->url()), false);
+    if (cb.get()) {
+      cb->Run(GURL(request->url()), false);
+    }
     return;
   }
 
@@ -329,28 +297,38 @@ void ClientSideDetectionService::HandleModelResponse(
     int response_code,
     const net::ResponseCookies& cookies,
     const std::string& data) {
-  if (status.is_success() && RC_REQUEST_OK == response_code) {
-    // Copy the model because it has to be accessible after this function
-    // returns.  Once we have written the model to a file we will delete the
-    // temporary model string. TODO(noelutz): don't store the model to disk if
-    // it's invalid.
-    tmp_model_string_.reset(new std::string(data));
-    base::FileUtilProxy::CreateOrOpenCallback* cb =
-        callback_factory_.NewCallback(
-            &ClientSideDetectionService::CreateModelFileDone);
-    if (!base::FileUtilProxy::CreateOrOpen(
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-            model_path_,
-            base::PLATFORM_FILE_CREATE_ALWAYS |
-            base::PLATFORM_FILE_WRITE |
-            base::PLATFORM_FILE_READ,
-            cb)) {
-      delete cb;
-      SetModelStatus(ERROR_STATUS);
-    }
-  } else {
-    SetModelStatus(ERROR_STATUS);
+  base::TimeDelta max_age;
+  if (status.is_success() && RC_REQUEST_OK == response_code &&
+      source->response_headers() &&
+      source->response_headers()->GetMaxAgeValue(&max_age)) {
+    model_max_age_.reset(new base::TimeDelta(max_age));
   }
+  scoped_ptr<ClientSideModel> model(new ClientSideModel());
+  ClientModelStatus model_status;
+  if (!status.is_success() || RC_REQUEST_OK != response_code) {
+    model_status = MODEL_FETCH_FAILED;
+  } else if (data.empty()) {
+    model_status = MODEL_EMPTY;
+  } else if (data.size() > kMaxModelSizeBytes) {
+    model_status = MODEL_TOO_LARGE;
+  } else if (!model->ParseFromString(data)) {
+    model_status = MODEL_PARSE_ERROR;
+  } else if (!model->IsInitialized() || !model->has_version()) {
+    model_status = MODEL_MISSING_FIELDS;
+  } else if (!ModelHasValidHashIds(*model)) {
+    model_status = MODEL_BAD_HASH_IDS;
+  } else if (model->version() < 0 ||
+             (model_.get() && model->version() < model_->version())) {
+    model_status = MODEL_INVALID_VERSION_NUMBER;
+  } else if (model_.get() && model->version() == model_->version()) {
+    model_status = MODEL_NOT_CHANGED;
+  } else {
+    // The model is valid => replace the existing model with the new one.
+    model_str_.assign(data);
+    model_.swap(model);
+    model_status = MODEL_SUCCESS;
+  }
+  EndFetchModel(model_status);
 }
 
 void ClientSideDetectionService::HandlePhishingVerdict(
@@ -362,17 +340,20 @@ void ClientSideDetectionService::HandlePhishingVerdict(
     const std::string& data) {
   ClientPhishingResponse response;
   scoped_ptr<ClientReportInfo> info(client_phishing_reports_[source]);
+  bool is_phishing = false;
   if (status.is_success() && RC_REQUEST_OK == response_code &&
       response.ParseFromString(data)) {
     // Cache response, possibly flushing an old one.
     cache_[info->phishing_url] =
         make_linked_ptr(new CacheState(response.phishy(), base::Time::Now()));
-    info->callback->Run(info->phishing_url, response.phishy());
+    is_phishing = response.phishy();
   } else {
     DLOG(ERROR) << "Unable to get the server verdict for URL: "
                 << info->phishing_url << " status: " << status.status() << " "
                 << "response_code:" << response_code;
-    info->callback->Run(info->phishing_url, false);
+  }
+  if (info->callback.get()) {
+    info->callback->Run(info->phishing_url, is_phishing);
   }
   client_phishing_reports_.erase(source);
   delete source;
@@ -470,4 +451,55 @@ bool ClientSideDetectionService::InitializePrivateNetworks() {
   return true;
 }
 
+// static
+void ClientSideDetectionService::SetBadSubnets(const ClientSideModel& model,
+                                               BadSubnetMap* bad_subnets) {
+  bad_subnets->clear();
+  for (int i = 0; i < model.bad_subnet_size(); ++i) {
+    int size = model.bad_subnet(i).size();
+    if (size < 0 || size > static_cast<int>(net::kIPv6AddressSize) * 8) {
+      DLOG(ERROR) << "Invalid bad subnet size: " << size;
+      continue;
+    }
+    if (model.bad_subnet(i).prefix().size() != crypto::SHA256_LENGTH) {
+      DLOG(ERROR) << "Invalid bad subnet prefix length: "
+                  << model.bad_subnet(i).prefix().size();
+      continue;
+    }
+    // We precompute the mask for the given subnet size to speed up lookups.
+    // Basically we need to create a 16B long string which has the highest
+    // |size| bits sets to one.
+    std::string mask(net::kIPv6AddressSize, '\x00');
+    mask.replace(0, size / 8, size / 8, '\xFF');
+    if (size % 8) {
+      mask[size / 8] = 0xFF << (8 - (size % 8));
+    }
+    (*bad_subnets)[mask].insert(model.bad_subnet(i).prefix());
+  }
+}
+
+// static
+bool ClientSideDetectionService::ModelHasValidHashIds(
+    const ClientSideModel& model) {
+  const int max_index = model.hashes_size() - 1;
+  for (int i = 0; i < model.rule_size(); ++i) {
+    for (int j = 0; j < model.rule(i).feature_size(); ++j) {
+      if (model.rule(i).feature(j) < 0 ||
+          model.rule(i).feature(j) > max_index) {
+        return false;
+      }
+    }
+  }
+  for (int i = 0; i < model.page_term_size(); ++i) {
+    if (model.page_term(i) < 0 || model.page_term(i) > max_index) {
+      return false;
+    }
+  }
+  for (int i = 0; i < model.page_word_size(); ++i) {
+    if (model.page_word(i) < 0 || model.page_word(i) > max_index) {
+      return false;
+    }
+  }
+  return true;
+}
 }  // namespace safe_browsing

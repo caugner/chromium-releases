@@ -5,19 +5,20 @@
 #include "chrome/browser/tabs/tab_finder.h"
 
 #include "base/command_line.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "content/common/page_transition_types.h"
 #include "content/common/view_messages.h"
 
@@ -95,7 +96,8 @@ TabContents* TabFinder::FindTab(Browser* browser,
   // Then check other browsers.
   for (BrowserList::const_iterator i = BrowserList::begin();
        i != BrowserList::end(); ++i) {
-    if (!(*i)->profile()->IsOffTheRecord()) {
+    if (!(*i)->profile()->IsOffTheRecord() &&
+         (*i)->profile()->IsSameProfile(browser->profile())) {
       tab_in_browser = FindTabInBrowser(*i, url);
       if (tab_in_browser) {
         *existing_browser = *i;
@@ -107,32 +109,23 @@ TabContents* TabFinder::FindTab(Browser* browser,
   return NULL;
 }
 
-void TabFinder::Observe(NotificationType type,
+void TabFinder::Observe(int type,
                         const NotificationSource& source,
                         const NotificationDetails& details) {
-  DCHECK_EQ(type.value, NotificationType::TAB_PARENTED);
+  DCHECK_EQ(type, content::NOTIFICATION_TAB_PARENTED);
 
   // The tab was added to a browser. Query for its state now.
-  NavigationController* controller =
-      Source<NavigationController>(source).ptr();
-  TrackTab(controller->tab_contents());
+  TabContentsWrapper* tab = Source<TabContentsWrapper>(source).ptr();
+  TrackTab(tab->tab_contents());
 }
 
 TabFinder::TabFinder() {
-  registrar_.Add(this, NotificationType::TAB_PARENTED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
                  NotificationService::AllSources());
 }
 
 TabFinder::~TabFinder() {
   STLDeleteElements(&tab_contents_observers_);
-}
-
-void TabFinder::Init() {
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    if (!(*i)->profile()->IsOffTheRecord())
-      TrackBrowser(*i);
-  }
 }
 
 void TabFinder::DidNavigateAnyFramePostCommit(
@@ -181,11 +174,6 @@ void TabFinder::TrackTab(TabContents* tab) {
   TabContentsObserverImpl* observer = new TabContentsObserverImpl(tab, this);
   tab_contents_observers_.insert(observer);
   FetchRedirectStart(tab);
-}
-
-void TabFinder::TrackBrowser(Browser* browser) {
-  for (int i = 0; i < browser->tab_count(); ++i)
-    FetchRedirectStart(browser->GetTabContentsAt(i));
 }
 
 void TabFinder::TabDestroyed(TabContentsObserverImpl* observer) {

@@ -27,13 +27,13 @@
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/notifications/balloon_view_host_gtk.h"
 #include "chrome/browser/ui/gtk/rounded_window.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -287,7 +287,7 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   gtk_widget_set_tooltip_text(close_button_->widget(), dismiss_text.c_str());
   g_signal_connect(close_button_->widget(), "clicked",
                    G_CALLBACK(OnCloseButtonThunk), this);
-  GTK_WIDGET_UNSET_FLAGS(close_button_->widget(), GTK_CAN_FOCUS);
+  gtk_widget_set_can_focus(close_button_->widget(), FALSE);
   GtkWidget* close_alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(close_alignment),
                             kShelfVerticalMargin, kShelfVerticalMargin,
@@ -304,7 +304,7 @@ void BalloonViewImpl::Show(Balloon* balloon) {
                               options_text.c_str());
   g_signal_connect(options_menu_button_->widget(), "button-press-event",
                    G_CALLBACK(OnOptionsMenuButtonThunk), this);
-  GTK_WIDGET_UNSET_FLAGS(options_menu_button_->widget(), GTK_CAN_FOCUS);
+  gtk_widget_set_can_focus(options_menu_button_->widget(), FALSE);
   GtkWidget* options_alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(options_alignment),
                             kShelfVerticalMargin, kShelfVerticalMargin,
@@ -313,8 +313,8 @@ void BalloonViewImpl::Show(Balloon* balloon) {
                     options_menu_button_->widget());
   gtk_box_pack_end(GTK_BOX(hbox_), options_alignment, FALSE, FALSE, 0);
 
-  notification_registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                              NotificationService::AllSources());
+  notification_registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                              Source<ThemeService>(theme_service_));
 
   // We don't do InitThemesFor() because it just forces a redraw.
   gtk_util::ActAsRoundedWindow(frame_container_, gtk_util::kGdkBlack, 3,
@@ -337,7 +337,8 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   gtk_widget_show_all(frame_container_);
 
   notification_registrar_.Add(this,
-      NotificationType::NOTIFY_BALLOON_DISCONNECTED, Source<Balloon>(balloon));
+      chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED,
+      Source<Balloon>(balloon));
 }
 
 void BalloonViewImpl::Update() {
@@ -380,17 +381,17 @@ gfx::Rect BalloonViewImpl::GetContentsRectangle() const {
                    content_size.width(), content_size.height());
 }
 
-void BalloonViewImpl::Observe(NotificationType type,
+void BalloonViewImpl::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  if (type == NotificationType::NOTIFY_BALLOON_DISCONNECTED) {
+  if (type == chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED) {
     // If the renderer process attached to this balloon is disconnected
     // (e.g., because of a crash), we want to close the balloon.
     notification_registrar_.Remove(this,
-        NotificationType::NOTIFY_BALLOON_DISCONNECTED,
+        chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED,
         Source<Balloon>(balloon_));
     Close(false);
-  } else if (type == NotificationType::BROWSER_THEME_CHANGED) {
+  } else if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     // Since all the buttons change their own properties, and our expose does
     // all the real differences, we'll need a redraw.
     gtk_widget_queue_draw(frame_container_);

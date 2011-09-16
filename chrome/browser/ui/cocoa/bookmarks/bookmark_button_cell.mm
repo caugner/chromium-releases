@@ -4,20 +4,21 @@
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
 
-#include "app/mac/nsimage_cache.h"
 #include "base/logging.h"
 #include "base/sys_string_conversions.h"
 #import "chrome/browser/bookmarks/bookmark_model.h"
-#import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu.h"
 #import "chrome/browser/ui/cocoa/image_utils.h"
 #include "content/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 
 @interface BookmarkButtonCell(Private)
 - (void)configureBookmarkButtonCell;
+- (void)applyTextColor;
 @end
 
 
@@ -45,7 +46,7 @@
         cellImage:(NSImage*)cellImage {
   if ((self = [super initTextCell:cellText])) {
     [self configureBookmarkButtonCell];
-
+    [self setTextColor:[NSColor blackColor]];
     [self setBookmarkNode:node];
 
     if (node) {
@@ -160,32 +161,35 @@
   return menu;
 }
 
-// Unfortunately, NSCell doesn't already have something like this.
-// TODO(jrg): consider placing in GTM.
+- (void)setTitle:(NSString*)title {
+  if ([[self title] isEqualTo:title])
+    return;
+  [super setTitle:title];
+  [self applyTextColor];
+}
+
 - (void)setTextColor:(NSColor*)color {
+  if ([textColor_ isEqualTo:color])
+    return;
+  textColor_.reset([color copy]);
+  [self applyTextColor];
+}
 
-  // We can't properly set the cell's text color without a control.
-  // In theory we could just save the next for later and wait until
-  // the cell is moved to a control, but there is no obvious way to
-  // accomplish that (e.g. no "cellDidMoveToControl" notification.)
-  DCHECK([self controlView]);
-
+// We must reapply the text color after any setTitle: call
+- (void)applyTextColor {
   scoped_nsobject<NSMutableParagraphStyle> style([NSMutableParagraphStyle new]);
   [style setAlignment:NSLeftTextAlignment];
   NSDictionary* dict = [NSDictionary
-                         dictionaryWithObjectsAndKeys:color,
+                         dictionaryWithObjectsAndKeys:textColor_,
                          NSForegroundColorAttributeName,
                          [self font], NSFontAttributeName,
                          style.get(), NSParagraphStyleAttributeName,
+                         [NSNumber numberWithFloat:0.2], NSKernAttributeName,
                          nil];
   scoped_nsobject<NSAttributedString> ats([[NSAttributedString alloc]
                                             initWithString:[self title]
                                                 attributes:dict]);
-  NSButton* button = static_cast<NSButton*>([self controlView]);
-  if (button) {
-    DCHECK([button isKindOfClass:[NSButton class]]);
-    [button setAttributedTitle:ats.get()];
-  }
+  [self setAttributedTitle:ats.get()];
 }
 
 // To implement "hover open a bookmark button to open the folder"
@@ -208,7 +212,7 @@
   drawFolderArrow_ = draw;
   if (draw && !arrowImage_) {
     arrowImage_.reset(
-        [app::mac::GetCachedImageWithName(@"menu_hierarchy_arrow.pdf") retain]);
+        [gfx::GetCachedImageWithName(@"menu_hierarchy_arrow.pdf") retain]);
   }
 }
 

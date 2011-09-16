@@ -5,17 +5,18 @@
 #import "chrome/browser/chrome_browser_application_mac.h"
 
 #import "base/logging.h"
+#import "base/mac/mac_util.h"
 #import "base/mac/scoped_nsexception_enabler.h"
 #import "base/metrics/histogram.h"
 #import "base/memory/scoped_nsobject.h"
 #import "base/sys_string_conversions.h"
 #import "chrome/app/breakpad_mac.h"
-#include "chrome/browser/accessibility/browser_accessibility_state.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/objc_method_swizzle.h"
 #import "chrome/browser/ui/cocoa/objc_zombie.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/renderer_host/render_view_host.h"
 
 // The implementation of NSExceptions break various assumptions in the
@@ -24,18 +25,18 @@
 // the debugger when an exception is raised.  -raise sounds more
 // obvious to intercept, but it doesn't catch the original throw
 // because the objc runtime doesn't use it.
-@interface NSException (NSExceptionSwizzle)
-- (id)chromeInitWithName:(NSString*)aName
-                  reason:(NSString*)aReason
-                userInfo:(NSDictionary *)someUserInfo;
+@interface NSException (CrNSExceptionSwizzle)
+- (id)crInitWithName:(NSString*)aName
+              reason:(NSString*)aReason
+            userInfo:(NSDictionary*)someUserInfo;
 @end
 
 static IMP gOriginalInitIMP = NULL;
 
-@implementation NSException (NSExceptionSwizzle)
-- (id)chromeInitWithName:(NSString*)aName
-                  reason:(NSString*)aReason
-                userInfo:(NSDictionary *)someUserInfo {
+@implementation NSException (CrNSExceptionSwizzle)
+- (id)crInitWithName:(NSString*)aName
+              reason:(NSString*)aReason
+            userInfo:(NSDictionary*)someUserInfo {
   // Method only called when swizzled.
   DCHECK(_cmd == @selector(initWithName:reason:userInfo:));
 
@@ -82,10 +83,19 @@ static IMP gOriginalInitIMP = NULL;
     }
 
     // Mostly "unrecognized selector sent to (instance|class)".  A
-    // very small number of things like nil being passed to an
-    // inappropriate receiver.
+    // very small number of things like inappropriate nil being passed.
     if (aName == NSInvalidArgumentException) {
       fatal = YES;
+
+      // TODO(shess): http://crbug.com/85463 throws this exception
+      // from ImageKit.  Our code is not on the stack, so it needs to
+      // be whitelisted for now.
+      NSString* const kNSURLInitNilCheck =
+          @"*** -[NSURL initFileURLWithPath:isDirectory:]: "
+          @"nil string parameter";
+      if ([aReason isEqualToString:kNSURLInitNilCheck]) {
+        fatal = NO;
+      }
     }
 
     // Dear reader: Something you just did provoked an NSException.
@@ -109,6 +119,29 @@ static IMP gOriginalInitIMP = NULL;
 
   // Forward to the original version.
   return gOriginalInitIMP(self, _cmd, aName, aReason, someUserInfo);
+}
+@end
+
+static IMP gOriginalNSBundleLoadIMP = NULL;
+
+@interface NSBundle (CrNSBundleSwizzle)
+- (BOOL)crLoad;
+@end
+
+@implementation NSBundle (CrNSBundleSwizzle)
+- (BOOL)crLoad {
+  // Method only called when swizzled.
+  DCHECK(_cmd == @selector(load));
+
+  // MultiClutchInputManager is broken in Chrome on Lion.
+  // http://crbug.com/90075.
+  if (base::mac::IsOSLionOrLater() &&
+      [[self bundleIdentifier]
+       isEqualToString:@"net.wonderboots.multiclutchinputmanager"]) {
+    return NO;
+  }
+
+  return gOriginalNSBundleLoadIMP(self, _cmd) != nil;
 }
 @end
 
@@ -184,15 +217,21 @@ void CancelTerminate() {
 
 namespace {
 
-// Do-nothing wrapper so that we can arrange to only swizzle
-// -[NSException raise] when DCHECK() is turned on (as opposed to
-// replicating the preprocess logic which turns DCHECK() on).
-BOOL SwizzleNSExceptionInit() {
+void SwizzleInit() {
+  // Do-nothing wrapper so that we can arrange to only swizzle
+  // -[NSException raise] when DCHECK() is turned on (as opposed to
+  // replicating the preprocess logic which turns DCHECK() on).
   gOriginalInitIMP = ObjcEvilDoers::SwizzleImplementedInstanceMethods(
       [NSException class],
       @selector(initWithName:reason:userInfo:),
-      @selector(chromeInitWithName:reason:userInfo:));
-  return YES;
+      @selector(crInitWithName:reason:userInfo:));
+
+  // Avoid loading broken input managers.
+  gOriginalNSBundleLoadIMP =
+      ObjcEvilDoers::SwizzleImplementedInstanceMethods(
+          [NSBundle class],
+          @selector(load),
+          @selector(crLoad));
 }
 
 }  // namespace
@@ -205,8 +244,8 @@ BOOL SwizzleNSExceptionInit() {
   ObjcEvilDoers::ZombieEnable(YES, 10000);
 }
 
-- init {
-  CHECK(SwizzleNSExceptionInit());
+- (id)init {
+  SwizzleInit();
   return [super init];
 }
 

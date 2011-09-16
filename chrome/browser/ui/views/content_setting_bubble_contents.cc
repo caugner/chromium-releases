@@ -16,12 +16,12 @@
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/browser/ui/views/bubble/bubble.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/controls/button/native_button.h"
 #include "views/controls/button/radio_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
@@ -105,7 +105,7 @@ ContentSettingBubbleContents::ContentSettingBubbleContents(
       custom_link_(NULL),
       manage_link_(NULL),
       close_button_(NULL) {
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  Source<TabContents>(tab_contents));
 }
 
@@ -168,10 +168,10 @@ void ContentSettingBubbleContents::LinkClicked(views::Link* source,
   content_setting_bubble_model_->OnPopupClicked(i->second);
 }
 
-void ContentSettingBubbleContents::Observe(NotificationType type,
+void ContentSettingBubbleContents::Observe(int type,
                                            const NotificationSource& source,
                                            const NotificationDetails& details) {
-  DCHECK(type == NotificationType::TAB_CONTENTS_DESTROYED);
+  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
   DCHECK(source == Source<TabContents>(tab_contents_));
   tab_contents_ = NULL;
 }
@@ -326,7 +326,7 @@ void ContentSettingBubbleContents::InitControlLayout() {
   layout->AddView(manage_link_);
 
   close_button_ =
-      new views::NativeButton(this,
-                              UTF16ToWide(l10n_util::GetStringUTF16(IDS_DONE)));
+      new views::NativeTextButton(this,
+          UTF16ToWide(l10n_util::GetStringUTF16(IDS_DONE)));
   layout->AddView(close_button_);
 }

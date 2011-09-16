@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/app_paths.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
@@ -10,7 +9,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "views/desktop/desktop_views_delegate.h"
-#include "views/desktop/desktop_window.h"
+#include "views/desktop/desktop_window_view.h"
 #include "views/focus/accelerator_handler.h"
 #include "views/widget/widget.h"
 
@@ -35,9 +34,7 @@ int main(int argc, char** argv) {
   // The exit manager is in charge of calling the dtors of singleton objects.
   base::AtExitManager exit_manager;
 
-  app::RegisterPathProvider();
   ui::RegisterPathProvider();
-
   icu_util::Initialize();
 
   ResourceBundle::InitSharedInstance("en-US");
@@ -49,7 +46,12 @@ int main(int argc, char** argv) {
   // Desktop mode only supports a pure-views configuration.
   views::Widget::SetPureViews(true);
 
-  views::desktop::DesktopWindow::CreateDesktopWindow();
+  views::desktop::DesktopWindowView::CreateDesktopWindow(
+      views::desktop::DesktopWindowView::DESKTOP_DEFAULT);
+  views::desktop::DesktopWindowView::desktop_window_view->CreateTestWindow(
+      L"Sample Window 1", SK_ColorWHITE, gfx::Rect(500, 200, 400, 400), true);
+  views::desktop::DesktopWindowView::desktop_window_view->CreateTestWindow(
+      L"Sample Window 2", SK_ColorRED, gfx::Rect(600, 450, 450, 300), false);
 
   views::AcceleratorHandler accelerator_handler;
   MessageLoopForUI::current()->Run(&accelerator_handler);

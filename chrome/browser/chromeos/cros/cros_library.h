@@ -20,8 +20,8 @@ namespace chromeos {
 
 class BrightnessLibrary;
 class BurnLibrary;
+class CertLibrary;
 class CryptohomeLibrary;
-class InputMethodLibrary;
 class LibCrosServiceLibrary;
 class LibraryLoader;
 class LoginLibrary;
@@ -30,8 +30,6 @@ class NetworkLibrary;
 class PowerLibrary;
 class ScreenLockLibrary;
 class SpeechSynthesisLibrary;
-class SyslogsLibrary;
-class TouchpadLibrary;
 class UpdateLibrary;
 
 // This class handles access to sub-parts of ChromeOS library. it provides
@@ -57,9 +55,9 @@ class CrosLibrary {
     // Setter for LibraryLoader.
     void SetLibraryLoader(LibraryLoader* loader, bool own);
     void SetBrightnessLibrary(BrightnessLibrary* library, bool own);
+    void SetCertLibrary(CertLibrary* library, bool own);
     void SetBurnLibrary(BurnLibrary* library, bool own);
     void SetCryptohomeLibrary(CryptohomeLibrary* library, bool own);
-    void SetInputMethodLibrary(InputMethodLibrary* library, bool own);
     void SetLibCrosServiceLibrary(LibCrosServiceLibrary* library, bool own);
     void SetLoginLibrary(LoginLibrary* library, bool own);
     void SetMountLibrary(MountLibrary* library, bool own);
@@ -67,8 +65,6 @@ class CrosLibrary {
     void SetPowerLibrary(PowerLibrary* library, bool own);
     void SetScreenLockLibrary(ScreenLockLibrary* library, bool own);
     void SetSpeechSynthesisLibrary(SpeechSynthesisLibrary* library, bool own);
-    void SetSyslogsLibrary(SyslogsLibrary* library, bool own);
-    void SetTouchpadLibrary(TouchpadLibrary* library, bool own);
     void SetUpdateLibrary(UpdateLibrary* library, bool own);
 
    private:
@@ -82,8 +78,8 @@ class CrosLibrary {
 
   BrightnessLibrary* GetBrightnessLibrary();
   BurnLibrary* GetBurnLibrary();
+  CertLibrary* GetCertLibrary();
   CryptohomeLibrary* GetCryptohomeLibrary();
-  InputMethodLibrary* GetInputMethodLibrary();
   LibCrosServiceLibrary* GetLibCrosServiceLibrary();
   LoginLibrary* GetLoginLibrary();
   MountLibrary* GetMountLibrary();
@@ -91,8 +87,6 @@ class CrosLibrary {
   PowerLibrary* GetPowerLibrary();
   ScreenLockLibrary* GetScreenLockLibrary();
   SpeechSynthesisLibrary* GetSpeechSynthesisLibrary();
-  SyslogsLibrary* GetSyslogsLibrary();
-  TouchpadLibrary* GetTouchpadLibrary();
   UpdateLibrary* GetUpdateLibrary();
 
   // Getter for Test API that gives access to internal members of this class.
@@ -134,7 +128,7 @@ class CrosLibrary {
       if (!library_) {
         own_ = true;
         if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kForceStubLibcros))
+            switches::kStubCros))
           use_stub_impl = true;
         library_ = L::GetImpl(use_stub_impl);
       }
@@ -157,8 +151,8 @@ class CrosLibrary {
 
   Library<BrightnessLibrary> brightness_lib_;
   Library<BurnLibrary> burn_lib_;
+  Library<CertLibrary> cert_lib_;
   Library<CryptohomeLibrary> crypto_lib_;
-  Library<InputMethodLibrary> input_method_lib_;
   Library<LibCrosServiceLibrary> libcros_service_lib_;
   Library<LoginLibrary> login_lib_;
   Library<MountLibrary> mount_lib_;
@@ -166,8 +160,6 @@ class CrosLibrary {
   Library<PowerLibrary> power_lib_;
   Library<ScreenLockLibrary> screen_lock_lib_;
   Library<SpeechSynthesisLibrary> speech_synthesis_lib_;
-  Library<SyslogsLibrary> syslogs_lib_;
-  Library<TouchpadLibrary> touchpad_lib_;
   Library<UpdateLibrary> update_lib_;
 
   // Stub implementations of the libraries should be used.

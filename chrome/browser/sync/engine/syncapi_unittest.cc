@@ -6,6 +6,7 @@
 // functionality is provided by the Syncable layer, which has its own
 // unit tests. We'll test SyncApi specific things in this harness.
 
+#include <cstddef>
 #include <map>
 
 #include "base/basictypes.h"
@@ -15,6 +16,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/password_manager/encryptor.h"
@@ -29,7 +31,9 @@
 #include "chrome/browser/sync/js_test_util.h"
 #include "chrome/browser/sync/notifier/sync_notifier.h"
 #include "chrome/browser/sync/notifier/sync_notifier_observer.h"
+#include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
+#include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/protocol/proto_value_conversions.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
@@ -83,7 +87,7 @@ void ExpectInt64Value(int64 expected_value,
 int64 MakeNode(UserShare* share,
                ModelType model_type,
                const std::string& client_tag) {
-  WriteTransaction trans(share);
+  WriteTransaction trans(FROM_HERE, share);
   ReadNode root_node(&trans);
   root_node.InitByRootLookup();
   WriteNode node(&trans);
@@ -98,9 +102,9 @@ int64 MakeNodeWithParent(UserShare* share,
                          ModelType model_type,
                          const std::string& client_tag,
                          int64 parent_id) {
-  WriteTransaction trans(share);
+  WriteTransaction trans(FROM_HERE, share);
   ReadNode parent_node(&trans);
-  parent_node.InitByIdLookup(parent_id);
+  EXPECT_TRUE(parent_node.InitByIdLookup(parent_id));
   WriteNode node(&trans);
   EXPECT_TRUE(node.InitUniqueByCreation(model_type, parent_node, client_tag));
   node.SetIsFolder(false);
@@ -113,9 +117,9 @@ int64 MakeFolderWithParent(UserShare* share,
                            ModelType model_type,
                            int64 parent_id,
                            BaseNode* predecessor) {
-  WriteTransaction trans(share);
+  WriteTransaction trans(FROM_HERE, share);
   ReadNode parent_node(&trans);
-  parent_node.InitByIdLookup(parent_id);
+  EXPECT_TRUE(parent_node.InitByIdLookup(parent_id));
   WriteNode node(&trans);
   EXPECT_TRUE(node.InitByCreation(model_type, parent_node, predecessor));
   node.SetIsFolder(true);
@@ -131,7 +135,7 @@ int64 MakeServerNodeForType(UserShare* share,
   syncable::AddDefaultExtensionValue(model_type, &specifics);
   syncable::ScopedDirLookup dir(share->dir_manager.get(), share->name);
   EXPECT_TRUE(dir.good());
-  syncable::WriteTransaction trans(dir, syncable::UNITTEST, __FILE__, __LINE__);
+  syncable::WriteTransaction trans(FROM_HERE, syncable::UNITTEST, dir);
   // Attempt to lookup by nigori tag.
   std::string type_tag = syncable::ModelTypeToRootTag(model_type);
   syncable::Id node_id = syncable::Id::CreateFromServerId(type_tag);
@@ -170,16 +174,16 @@ class SyncApiTest : public testing::Test {
 
 TEST_F(SyncApiTest, SanityCheckTest) {
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     EXPECT_TRUE(trans.GetWrappedTrans() != NULL);
   }
   {
-    WriteTransaction trans(test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     EXPECT_TRUE(trans.GetWrappedTrans() != NULL);
   }
   {
     // No entries but root should exist
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode node(&trans);
     // Metahandle 1 can be root, sanity check 2
     EXPECT_FALSE(node.InitByIdLookup(2));
@@ -188,7 +192,7 @@ TEST_F(SyncApiTest, SanityCheckTest) {
 
 TEST_F(SyncApiTest, BasicTagWrite) {
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
     EXPECT_EQ(root_node.GetFirstChildId(), 0);
@@ -198,7 +202,7 @@ TEST_F(SyncApiTest, BasicTagWrite) {
                          syncable::BOOKMARKS, "testtag"));
 
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode node(&trans);
     EXPECT_TRUE(node.InitByClientTagLookup(syncable::BOOKMARKS,
         "testtag"));
@@ -228,7 +232,7 @@ TEST_F(SyncApiTest, GenerateSyncableHash) {
 
 TEST_F(SyncApiTest, ModelTypesSiloed) {
   {
-    WriteTransaction trans(test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
     EXPECT_EQ(root_node.GetFirstChildId(), 0);
@@ -242,7 +246,7 @@ TEST_F(SyncApiTest, ModelTypesSiloed) {
                          syncable::AUTOFILL, "collideme"));
 
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
 
     ReadNode bookmarknode(&trans);
     EXPECT_TRUE(bookmarknode.InitByClientTagLookup(syncable::BOOKMARKS,
@@ -264,13 +268,13 @@ TEST_F(SyncApiTest, ModelTypesSiloed) {
 
 TEST_F(SyncApiTest, ReadMissingTagsFails) {
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode node(&trans);
     EXPECT_FALSE(node.InitByClientTagLookup(syncable::BOOKMARKS,
         "testtag"));
   }
   {
-    WriteTransaction trans(test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     WriteNode node(&trans);
     EXPECT_FALSE(node.InitByClientTagLookup(syncable::BOOKMARKS,
         "testtag"));
@@ -285,7 +289,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
   std::wstring test_title(L"test1");
 
   {
-    WriteTransaction trans(test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -306,7 +310,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
 
   // Ensure we can delete something with a tag.
   {
-    WriteTransaction trans(test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     WriteNode wnode(&trans);
     EXPECT_TRUE(wnode.InitByClientTagLookup(syncable::BOOKMARKS,
         "testtag"));
@@ -319,7 +323,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
   // Lookup of a node which was deleted should return failure,
   // but have found some data about the node.
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode node(&trans);
     EXPECT_FALSE(node.InitByClientTagLookup(syncable::BOOKMARKS,
         "testtag"));
@@ -329,7 +333,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
   }
 
   {
-    WriteTransaction trans(test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode folder_node(&trans);
     EXPECT_TRUE(folder_node.InitByIdLookup(folder_id));
 
@@ -346,7 +350,7 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
 
   // Now look up should work.
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode node(&trans);
     EXPECT_TRUE(node.InitByClientTagLookup(syncable::BOOKMARKS,
         "testtag"));
@@ -358,11 +362,11 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
 TEST_F(SyncApiTest, WriteAndReadPassword) {
   KeyParams params = {"localhost", "username", "passphrase"};
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     trans.GetCryptographer()->AddKey(params);
   }
   {
-    WriteTransaction trans(test_user_share_.user_share());
+    WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -374,7 +378,7 @@ TEST_F(SyncApiTest, WriteAndReadPassword) {
     password_node.SetPasswordSpecifics(data);
   }
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -387,12 +391,49 @@ TEST_F(SyncApiTest, WriteAndReadPassword) {
   }
 }
 
+TEST_F(SyncApiTest, BaseNodeSetSpecifics) {
+  int64 child_id = MakeNode(test_user_share_.user_share(),
+                            syncable::BOOKMARKS, "testtag");
+  WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  WriteNode node(&trans);
+  EXPECT_TRUE(node.InitByIdLookup(child_id));
+
+  sync_pb::EntitySpecifics entity_specifics;
+  entity_specifics.MutableExtension(sync_pb::bookmark)->
+      set_url("http://www.google.com");
+
+  EXPECT_NE(entity_specifics.SerializeAsString(),
+            node.GetEntitySpecifics().SerializeAsString());
+  node.SetEntitySpecifics(entity_specifics);
+  EXPECT_EQ(entity_specifics.SerializeAsString(),
+            node.GetEntitySpecifics().SerializeAsString());
+}
+
+TEST_F(SyncApiTest, BaseNodeSetSpecificsPreservesUnknownFields) {
+  int64 child_id = MakeNode(test_user_share_.user_share(),
+                            syncable::BOOKMARKS, "testtag");
+  WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
+  WriteNode node(&trans);
+  EXPECT_TRUE(node.InitByIdLookup(child_id));
+  EXPECT_TRUE(node.GetEntitySpecifics().unknown_fields().empty());
+
+  sync_pb::EntitySpecifics entity_specifics;
+  entity_specifics.MutableExtension(sync_pb::bookmark)->
+      set_url("http://www.google.com");
+  entity_specifics.mutable_unknown_fields()->AddFixed32(5, 100);
+  node.SetEntitySpecifics(entity_specifics);
+  EXPECT_FALSE(node.GetEntitySpecifics().unknown_fields().empty());
+
+  entity_specifics.mutable_unknown_fields()->Clear();
+  node.SetEntitySpecifics(entity_specifics);
+  EXPECT_FALSE(node.GetEntitySpecifics().unknown_fields().empty());
+}
+
 namespace {
 
-void CheckNodeValue(const BaseNode& node, const DictionaryValue& value) {
+void CheckNodeValue(const BaseNode& node, const DictionaryValue& value,
+                    bool is_detailed) {
   ExpectInt64Value(node.GetId(), value, "id");
-  ExpectInt64Value(node.GetModificationTime(), value, "modificationTime");
-  ExpectInt64Value(node.GetParentId(), value, "parentId");
   {
     bool is_folder = false;
     EXPECT_TRUE(value.GetBoolean("isFolder", &is_folder));
@@ -415,28 +456,46 @@ void CheckNodeValue(const BaseNode& node, const DictionaryValue& value) {
       ADD_FAILURE();
     }
   }
-  ExpectInt64Value(node.GetExternalId(), value, "externalId");
-  ExpectInt64Value(node.GetPredecessorId(), value, "predecessorId");
-  ExpectInt64Value(node.GetSuccessorId(), value, "successorId");
-  ExpectInt64Value(node.GetFirstChildId(), value, "firstChildId");
-  {
-    scoped_ptr<DictionaryValue> expected_entry(node.GetEntry()->ToValue());
-    Value* entry = NULL;
-    EXPECT_TRUE(value.Get("entry", &entry));
-    EXPECT_TRUE(Value::Equals(entry, expected_entry.get()));
+  if (is_detailed) {
+    ExpectInt64Value(node.GetParentId(), value, "parentId");
+    ExpectInt64Value(node.GetModificationTime(), value, "modificationTime");
+    ExpectInt64Value(node.GetExternalId(), value, "externalId");
+    ExpectInt64Value(node.GetPredecessorId(), value, "predecessorId");
+    ExpectInt64Value(node.GetSuccessorId(), value, "successorId");
+    ExpectInt64Value(node.GetFirstChildId(), value, "firstChildId");
+    {
+      scoped_ptr<DictionaryValue> expected_entry(node.GetEntry()->ToValue());
+      Value* entry = NULL;
+      EXPECT_TRUE(value.Get("entry", &entry));
+      EXPECT_TRUE(Value::Equals(entry, expected_entry.get()));
+    }
+    EXPECT_EQ(11u, value.size());
+  } else {
+    EXPECT_EQ(4u, value.size());
   }
-  EXPECT_EQ(11u, value.size());
 }
 
 }  // namespace
 
-TEST_F(SyncApiTest, BaseNodeToValue) {
-  ReadTransaction trans(test_user_share_.user_share());
+TEST_F(SyncApiTest, BaseNodeGetSummaryAsValue) {
+  ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
   ReadNode node(&trans);
   node.InitByRootLookup();
-  scoped_ptr<DictionaryValue> value(node.ToValue());
-  if (value.get()) {
-    CheckNodeValue(node, *value);
+  scoped_ptr<DictionaryValue> details(node.GetSummaryAsValue());
+  if (details.get()) {
+    CheckNodeValue(node, *details, false);
+  } else {
+    ADD_FAILURE();
+  }
+}
+
+TEST_F(SyncApiTest, BaseNodeGetDetailsAsValue) {
+  ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
+  ReadNode node(&trans);
+  node.InitByRootLookup();
+  scoped_ptr<DictionaryValue> details(node.GetDetailsAsValue());
+  if (details.get()) {
+    CheckNodeValue(node, *details, true);
   } else {
     ADD_FAILURE();
   }
@@ -474,8 +533,8 @@ void CheckNonDeleteChangeRecordValue(const SyncManager::ChangeRecord& record,
   {
     ReadNode node(trans);
     EXPECT_TRUE(node.InitByIdLookup(record.id));
-    scoped_ptr<DictionaryValue> expected_node_value(node.ToValue());
-    ExpectDictDictionaryValue(*expected_node_value, value, "node");
+    scoped_ptr<DictionaryValue> expected_details(node.GetDetailsAsValue());
+    ExpectDictDictionaryValue(*expected_details, value, "node");
   }
 }
 
@@ -515,7 +574,7 @@ TEST_F(SyncApiTest, ChangeRecordToValue) {
                             syncable::BOOKMARKS, "testtag");
   sync_pb::EntitySpecifics child_specifics;
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ReadNode node(&trans);
     EXPECT_TRUE(node.InitByIdLookup(child_id));
     child_specifics = node.GetEntry()->Get(syncable::SPECIFICS);
@@ -523,7 +582,7 @@ TEST_F(SyncApiTest, ChangeRecordToValue) {
 
   // Add
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     SyncManager::ChangeRecord record;
     record.action = SyncManager::ChangeRecord::ACTION_ADD;
     record.id = 1;
@@ -535,7 +594,7 @@ TEST_F(SyncApiTest, ChangeRecordToValue) {
 
   // Update
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     SyncManager::ChangeRecord record;
     record.action = SyncManager::ChangeRecord::ACTION_UPDATE;
     record.id = child_id;
@@ -547,7 +606,7 @@ TEST_F(SyncApiTest, ChangeRecordToValue) {
 
   // Delete (no extra)
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     SyncManager::ChangeRecord record;
     record.action = SyncManager::ChangeRecord::ACTION_DELETE;
     record.id = child_id + 1;
@@ -558,7 +617,7 @@ TEST_F(SyncApiTest, ChangeRecordToValue) {
 
   // Delete (with extra)
   {
-    ReadTransaction trans(test_user_share_.user_share());
+    ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     SyncManager::ChangeRecord record;
     record.action = SyncManager::ChangeRecord::ACTION_DELETE;
     record.id = child_id + 1;
@@ -618,6 +677,7 @@ class SyncNotifierMock : public sync_notifier::SyncNotifier {
  public:
   MOCK_METHOD1(AddObserver, void(sync_notifier::SyncNotifierObserver*));
   MOCK_METHOD1(RemoveObserver, void(sync_notifier::SyncNotifierObserver*));
+  MOCK_METHOD1(SetUniqueId, void(const std::string&));
   MOCK_METHOD1(SetState, void(const std::string&));
   MOCK_METHOD2(UpdateCredentials,
                void(const std::string&, const std::string&));
@@ -631,8 +691,14 @@ class SyncManagerTest : public testing::Test,
  protected:
   SyncManagerTest()
       : ui_thread_(BrowserThread::UI, &ui_loop_),
+        sync_notifier_mock_(NULL),
+        sync_manager_("Test sync manager"),
         sync_notifier_observer_(NULL),
         update_enabled_types_call_count_(0) {}
+
+  virtual ~SyncManagerTest() {
+    EXPECT_FALSE(sync_notifier_mock_);
+  }
 
   // Test implementation.
   void SetUp() {
@@ -642,9 +708,10 @@ class SyncManagerTest : public testing::Test,
     credentials.email = "foo@bar.com";
     credentials.sync_token = "sometoken";
 
-    sync_notifier_mock_.reset(new StrictMock<SyncNotifierMock>());
+    sync_notifier_mock_ = new StrictMock<SyncNotifierMock>();
     EXPECT_CALL(*sync_notifier_mock_, AddObserver(_)).
         WillOnce(Invoke(this, &SyncManagerTest::SyncNotifierAddObserver));
+    EXPECT_CALL(*sync_notifier_mock_, SetUniqueId(_));
     EXPECT_CALL(*sync_notifier_mock_, SetState(""));
     EXPECT_CALL(*sync_notifier_mock_,
                 UpdateCredentials(credentials.email, credentials.sync_token));
@@ -657,9 +724,10 @@ class SyncManagerTest : public testing::Test,
 
     EXPECT_FALSE(sync_notifier_observer_);
 
+    // Takes ownership of |sync_notifier_mock_|.
     sync_manager_.Init(temp_dir_.path(), "bogus", 0, false,
                        new TestHttpPostProviderFactory(), this, "bogus",
-                       credentials, sync_notifier_mock_.get(), "",
+                       credentials, sync_notifier_mock_, "",
                        true /* setup_for_test_mode */);
 
     EXPECT_TRUE(sync_notifier_observer_);
@@ -683,6 +751,7 @@ class SyncManagerTest : public testing::Test,
   void TearDown() {
     sync_manager_.RemoveObserver(&observer_);
     sync_manager_.Shutdown();
+    sync_notifier_mock_ = NULL;
     EXPECT_FALSE(sync_notifier_observer_);
   }
 
@@ -713,7 +782,7 @@ class SyncManagerTest : public testing::Test,
       return false;
 
     // Set the nigori cryptographer information.
-    WriteTransaction trans(share);
+    WriteTransaction trans(FROM_HERE, share);
     Cryptographer* cryptographer = trans.GetCryptographer();
     if (!cryptographer)
       return false;
@@ -722,7 +791,7 @@ class SyncManagerTest : public testing::Test,
     sync_pb::NigoriSpecifics nigori;
     cryptographer->GetKeys(nigori.mutable_encrypted());
     WriteNode node(&trans);
-    node.InitByIdLookup(nigori_id);
+    EXPECT_TRUE(node.InitByIdLookup(nigori_id));
     node.SetNigoriSpecifics(nigori);
     return cryptographer->is_ready();
   }
@@ -767,7 +836,7 @@ class SyncManagerTest : public testing::Test,
   ScopedTempDir temp_dir_;
   // Sync Id's for the roots of the enabled datatypes.
   std::map<ModelType, int64> type_roots_;
-  scoped_ptr<StrictMock<SyncNotifierMock> > sync_notifier_mock_;
+  StrictMock<SyncNotifierMock>* sync_notifier_mock_;
 
  protected:
   SyncManager sync_manager_;
@@ -843,7 +912,7 @@ TEST_F(SyncManagerTest, ProcessMessage) {
   }
 }
 
-TEST_F(SyncManagerTest, ProcessMessageGetRootNode) {
+TEST_F(SyncManagerTest, ProcessMessageGetRootNodeDetails) {
   const JsArgList kNoArgs;
 
   browser_sync::JsBackend* js_backend = sync_manager_.GetJsBackend();
@@ -854,22 +923,22 @@ TEST_F(SyncManagerTest, ProcessMessageGetRootNode) {
   JsArgList return_args;
 
   EXPECT_CALL(event_router,
-              RouteJsMessageReply("getRootNode", _, &event_handler))
+              RouteJsMessageReply("getRootNodeDetails", _, &event_handler))
       .WillOnce(SaveArg<1>(&return_args));
 
   js_backend->SetParentJsEventRouter(&event_router);
 
   // Should trigger the reply.
-  js_backend->ProcessMessage("getRootNode", kNoArgs, &event_handler);
+  js_backend->ProcessMessage("getRootNodeDetails", kNoArgs, &event_handler);
 
   EXPECT_EQ(1u, return_args.Get().GetSize());
   DictionaryValue* node_info = NULL;
   EXPECT_TRUE(return_args.Get().GetDictionary(0, &node_info));
   if (node_info) {
-    ReadTransaction trans(sync_manager_.GetUserShare());
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode node(&trans);
     node.InitByRootLookup();
-    CheckNodeValue(node, *node_info);
+    CheckNodeValue(node, *node_info, true);
   } else {
     ADD_FAILURE();
   }
@@ -879,7 +948,8 @@ TEST_F(SyncManagerTest, ProcessMessageGetRootNode) {
 
 void CheckGetNodesByIdReturnArgs(const SyncManager& sync_manager,
                                  const JsArgList& return_args,
-                                 int64 id) {
+                                 int64 id,
+                                 bool is_detailed) {
   EXPECT_EQ(1u, return_args.Get().GetSize());
   ListValue* nodes = NULL;
   ASSERT_TRUE(return_args.Get().GetList(0, &nodes));
@@ -888,126 +958,146 @@ void CheckGetNodesByIdReturnArgs(const SyncManager& sync_manager,
   DictionaryValue* node_info = NULL;
   EXPECT_TRUE(nodes->GetDictionary(0, &node_info));
   ASSERT_TRUE(node_info);
-  ReadTransaction trans(sync_manager.GetUserShare());
+  ReadTransaction trans(FROM_HERE, sync_manager.GetUserShare());
   ReadNode node(&trans);
-  node.InitByIdLookup(id);
-  CheckNodeValue(node, *node_info);
+  EXPECT_TRUE(node.InitByIdLookup(id));
+  CheckNodeValue(node, *node_info, is_detailed);
 }
 
-TEST_F(SyncManagerTest, ProcessMessageGetNodesById) {
-  int64 child_id =
-      MakeNode(sync_manager_.GetUserShare(), syncable::BOOKMARKS, "testtag");
+class SyncManagerGetNodesByIdTest : public SyncManagerTest {
+ protected:
+  virtual ~SyncManagerGetNodesByIdTest() {}
 
-  browser_sync::JsBackend* js_backend = sync_manager_.GetJsBackend();
+  void RunGetNodesByIdTest(const char* message_name, bool is_detailed) {
+    int64 root_id = kInvalidId;
+    {
+      ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+      ReadNode root_node(&trans);
+      root_node.InitByRootLookup();
+      root_id = root_node.GetId();
+    }
 
-  StrictMock<MockJsEventHandler> event_handler;
-  StrictMock<MockJsEventRouter> event_router;
+    int64 child_id =
+        MakeNode(sync_manager_.GetUserShare(),
+                 syncable::BOOKMARKS, "testtag");
 
-  JsArgList return_args;
+    browser_sync::JsBackend* js_backend = sync_manager_.GetJsBackend();
 
-  EXPECT_CALL(event_router,
-              RouteJsMessageReply("getNodesById", _, &event_handler))
-      .Times(2).WillRepeatedly(SaveArg<1>(&return_args));
+    StrictMock<MockJsEventHandler> event_handler;
+    StrictMock<MockJsEventRouter> event_router;
 
-  js_backend->SetParentJsEventRouter(&event_router);
+    JsArgList return_args;
 
-  // Should trigger the reply.
-  {
-    ListValue args;
-    ListValue* ids = new ListValue();
-    args.Append(ids);
-    ids->Append(Value::CreateStringValue("1"));
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
+    const int64 ids[] = { root_id, child_id };
+
+    EXPECT_CALL(event_router,
+                RouteJsMessageReply(message_name, _, &event_handler))
+        .Times(arraysize(ids)).WillRepeatedly(SaveArg<1>(&return_args));
+
+    js_backend->SetParentJsEventRouter(&event_router);
+
+    for (size_t i = 0; i < arraysize(ids); ++i) {
+      ListValue args;
+      ListValue* id_values = new ListValue();
+      args.Append(id_values);
+      id_values->Append(Value::CreateStringValue(base::Int64ToString(ids[i])));
+      js_backend->ProcessMessage(message_name,
+                                 JsArgList(&args), &event_handler);
+
+      CheckGetNodesByIdReturnArgs(sync_manager_, return_args,
+                                  ids[i], is_detailed);
+    }
+
+    js_backend->RemoveParentJsEventRouter();
   }
 
-  CheckGetNodesByIdReturnArgs(sync_manager_, return_args, 1);
+  void RunGetNodesByIdFailureTest(const char* message_name) {
+    browser_sync::JsBackend* js_backend = sync_manager_.GetJsBackend();
 
-  // Should trigger another reply.
-  {
-    ListValue args;
-    ListValue* ids = new ListValue();
-    args.Append(ids);
-    ids->Append(Value::CreateStringValue(base::Int64ToString(child_id)));
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
+    StrictMock<MockJsEventHandler> event_handler;
+    StrictMock<MockJsEventRouter> event_router;
+
+    ListValue empty_list_args;
+    empty_list_args.Append(new ListValue());
+
+    EXPECT_CALL(event_router,
+                RouteJsMessageReply(message_name,
+                                    HasArgsAsList(empty_list_args),
+                                    &event_handler))
+        .Times(6);
+
+    js_backend->SetParentJsEventRouter(&event_router);
+
+    {
+      ListValue args;
+      js_backend->ProcessMessage(message_name,
+                                 JsArgList(&args), &event_handler);
+    }
+
+    {
+      ListValue args;
+      args.Append(new ListValue());
+      js_backend->ProcessMessage(message_name,
+                                 JsArgList(&args), &event_handler);
+    }
+
+    {
+      ListValue args;
+      ListValue* ids = new ListValue();
+      args.Append(ids);
+      ids->Append(Value::CreateStringValue(""));
+      js_backend->ProcessMessage(message_name,
+                                 JsArgList(&args), &event_handler);
+    }
+
+    {
+      ListValue args;
+      ListValue* ids = new ListValue();
+      args.Append(ids);
+      ids->Append(Value::CreateStringValue("nonsense"));
+      js_backend->ProcessMessage(message_name,
+                                 JsArgList(&args), &event_handler);
+    }
+
+    {
+      ListValue args;
+      ListValue* ids = new ListValue();
+      args.Append(ids);
+      ids->Append(Value::CreateStringValue("0"));
+      js_backend->ProcessMessage(message_name,
+                                 JsArgList(&args), &event_handler);
+    }
+
+    {
+      ListValue args;
+      ListValue* ids = new ListValue();
+      args.Append(ids);
+      ids->Append(Value::CreateStringValue("9999"));
+      js_backend->ProcessMessage(message_name,
+                                 JsArgList(&args), &event_handler);
+    }
+
+    js_backend->RemoveParentJsEventRouter();
   }
+};
 
-  CheckGetNodesByIdReturnArgs(sync_manager_, return_args, child_id);
-
-  js_backend->RemoveParentJsEventRouter();
+TEST_F(SyncManagerGetNodesByIdTest, GetNodeSummariesById) {
+  RunGetNodesByIdTest("getNodeSummariesById", false);
 }
 
-TEST_F(SyncManagerTest, ProcessMessageGetNodesByIdFailure) {
-  browser_sync::JsBackend* js_backend = sync_manager_.GetJsBackend();
-
-  StrictMock<MockJsEventHandler> event_handler;
-  StrictMock<MockJsEventRouter> event_router;
-
-  ListValue empty_list_args;
-  empty_list_args.Append(new ListValue());
-
-  EXPECT_CALL(event_router,
-              RouteJsMessageReply("getNodesById",
-                                  HasArgsAsList(empty_list_args),
-                                  &event_handler))
-      .Times(6);
-
-  js_backend->SetParentJsEventRouter(&event_router);
-
-  {
-    ListValue args;
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
-  }
-
-  {
-    ListValue args;
-    args.Append(new ListValue());
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
-  }
-
-  {
-    ListValue args;
-    ListValue* ids = new ListValue();
-    args.Append(ids);
-    ids->Append(Value::CreateStringValue(""));
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
-  }
-
-  {
-    ListValue args;
-    ListValue* ids = new ListValue();
-    args.Append(ids);
-    ids->Append(Value::CreateStringValue("nonsense"));
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
-  }
-
-  {
-    ListValue args;
-    ListValue* ids = new ListValue();
-    args.Append(ids);
-    ids->Append(Value::CreateStringValue("0"));
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
-  }
-
-  {
-    ListValue args;
-    ListValue* ids = new ListValue();
-    args.Append(ids);
-    ids->Append(Value::CreateStringValue("9999"));
-    js_backend->ProcessMessage("getNodesById",
-                               JsArgList(&args), &event_handler);
-  }
-
-  js_backend->RemoveParentJsEventRouter();
+TEST_F(SyncManagerGetNodesByIdTest, GetNodeDetailsById) {
+  RunGetNodesByIdTest("getNodeDetailsById", true);
 }
 
-TEST_F(SyncManagerTest, ProcessMessageGetChildNodeIds) {
+TEST_F(SyncManagerGetNodesByIdTest, GetNodeSummariesByIdFailure) {
+  RunGetNodesByIdFailureTest("getNodeSummariesById");
+}
+
+TEST_F(SyncManagerGetNodesByIdTest, GetNodeDetailsByIdFailure) {
+  RunGetNodesByIdFailureTest("getNodeDetailsById");
+}
+
+TEST_F(SyncManagerTest, GetChildNodeIds) {
   browser_sync::JsBackend* js_backend = sync_manager_.GetJsBackend();
 
   StrictMock<MockJsEventHandler> event_handler;
@@ -1038,7 +1128,7 @@ TEST_F(SyncManagerTest, ProcessMessageGetChildNodeIds) {
   js_backend->RemoveParentJsEventRouter();
 }
 
-TEST_F(SyncManagerTest, ProcessMessageGetChildNodeIdsFailure) {
+TEST_F(SyncManagerTest, GetChildNodeIdsFailure) {
   browser_sync::JsBackend* js_backend = sync_manager_.GetJsBackend();
 
   StrictMock<MockJsEventHandler> event_handler;
@@ -1091,6 +1181,8 @@ TEST_F(SyncManagerTest, ProcessMessageGetChildNodeIdsFailure) {
 
   js_backend->RemoveParentJsEventRouter();
 }
+
+// TODO(akalin): Add unit tests for findNodesContainingString message.
 
 TEST_F(SyncManagerTest, OnNotificationStateChange) {
   InSequence dummy;
@@ -1164,6 +1256,23 @@ TEST_F(SyncManagerTest, OnIncomingNotification) {
   sync_manager_.TriggerOnIncomingNotificationForTest(model_types);
 }
 
+TEST_F(SyncManagerTest, RefreshEncryptionReady) {
+  EXPECT_TRUE(SetUpEncryption());
+  sync_manager_.RefreshEncryption();
+  syncable::ModelTypeSet encrypted_types =
+      sync_manager_.GetEncryptedDataTypes();
+  EXPECT_EQ(1U, encrypted_types.count(syncable::PASSWORDS));
+}
+
+// Attempt to refresh encryption when nigori not downloaded.
+TEST_F(SyncManagerTest, RefreshEncryptionNotReady) {
+  // Don't set up encryption (no nigori node created).
+  sync_manager_.RefreshEncryption();  // Should fail.
+  syncable::ModelTypeSet encrypted_types =
+      sync_manager_.GetEncryptedDataTypes();
+  EXPECT_EQ(1U, encrypted_types.count(syncable::PASSWORDS));  // Hardcoded.
+}
+
 TEST_F(SyncManagerTest, EncryptDataTypesWithNoData) {
   EXPECT_TRUE(SetUpEncryption());
   ModelTypeSet encrypted_types;
@@ -1175,7 +1284,7 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithNoData) {
   EXPECT_CALL(observer_, OnEncryptionComplete(expected_types));
   sync_manager_.EncryptDataTypes(encrypted_types);
   {
-    ReadTransaction trans(sync_manager_.GetUserShare());
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     EXPECT_EQ(expected_types,
               GetEncryptedTypes(&trans));
   }
@@ -1210,14 +1319,17 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
   }
 
   {
-    ReadTransaction trans(sync_manager_.GetUserShare());
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
                                                    syncable::BOOKMARKS,
                                                    false /* not encrypted */));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
                                                    syncable::SESSIONS,
                                                    false /* not encrypted */));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
                                                    syncable::THEMES,
                                                    false /* not encrypted */));
   }
@@ -1230,25 +1342,56 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
   sync_manager_.EncryptDataTypes(encrypted_types);
 
   {
-    ReadTransaction trans(sync_manager_.GetUserShare());
-    EXPECT_EQ(encrypted_types,
-              GetEncryptedTypes(&trans));
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    EXPECT_EQ(encrypted_types, GetEncryptedTypes(&trans));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
                                                    syncable::BOOKMARKS,
                                                    true /* is encrypted */));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
                                                    syncable::SESSIONS,
                                                    true /* is encrypted */));
     EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
                                                    syncable::THEMES,
                                                    false /* not encrypted */));
   }
+
+  // Trigger's a ReEncryptEverything with new passphrase.
+  testing::Mock::VerifyAndClearExpectations(&observer_);
+  EXPECT_CALL(observer_, OnPassphraseAccepted(_)).Times(1);
+  EXPECT_CALL(observer_, OnEncryptionComplete(encrypted_types)).Times(1);
+  sync_manager_.SetPassphrase("new_passphrase", true);
+  {
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+    EXPECT_EQ(encrypted_types, GetEncryptedTypes(&trans));
+    EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
+                                                   syncable::BOOKMARKS,
+                                                   true /* is encrypted */));
+    EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
+                                                   syncable::SESSIONS,
+                                                   true /* is encrypted */));
+    EXPECT_TRUE(syncable::VerifyDataTypeEncryption(trans.GetWrappedTrans(),
+                                                   trans.GetCryptographer(),
+                                                   syncable::THEMES,
+                                                   false /* not encrypted */));
+  }
+  // Calling EncryptDataTypes with an empty encrypted types should not trigger
+  // a reencryption and should just notify immediately.
+  // TODO(zea): add logic to ensure nothing was written.
+  testing::Mock::VerifyAndClearExpectations(&observer_);
+  EXPECT_CALL(observer_, OnPassphraseAccepted(_)).Times(0);
+  EXPECT_CALL(observer_, OnEncryptionComplete(encrypted_types)).Times(1);
+  sync_manager_.EncryptDataTypes(encrypted_types);
 }
 
 TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
   EXPECT_TRUE(SetUpEncryption());
   {
-    WriteTransaction trans(sync_manager_.GetUserShare());
+    WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -1263,10 +1406,7 @@ TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
   EXPECT_CALL(observer_, OnEncryptionComplete(_));
   sync_manager_.SetPassphrase("new_passphrase", true);
   {
-    ReadTransaction trans(sync_manager_.GetUserShare());
-    ReadNode root_node(&trans);
-    root_node.InitByRootLookup();
-
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode password_node(&trans);
     EXPECT_TRUE(password_node.InitByClientTagLookup(syncable::PASSWORDS,
                                                     "foo"));
@@ -1281,7 +1421,7 @@ TEST_F(SyncManagerTest, SetPassphraseWithEmptyPasswordNode) {
   int64 node_id = 0;
   std::string tag = "foo";
   {
-    WriteTransaction trans(sync_manager_.GetUserShare());
+    WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
 
@@ -1294,19 +1434,13 @@ TEST_F(SyncManagerTest, SetPassphraseWithEmptyPasswordNode) {
   EXPECT_CALL(observer_, OnEncryptionComplete(_));
   sync_manager_.SetPassphrase("new_passphrase", true);
   {
-    ReadTransaction trans(sync_manager_.GetUserShare());
-    ReadNode root_node(&trans);
-    root_node.InitByRootLookup();
-
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode password_node(&trans);
     EXPECT_FALSE(password_node.InitByClientTagLookup(syncable::PASSWORDS,
                                                      tag));
   }
   {
-    ReadTransaction trans(sync_manager_.GetUserShare());
-    ReadNode root_node(&trans);
-    root_node.InitByRootLookup();
-
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode password_node(&trans);
     EXPECT_FALSE(password_node.InitByIdLookup(node_id));
   }

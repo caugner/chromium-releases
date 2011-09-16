@@ -6,15 +6,15 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include <resolv.h>
-#endif
-
 #include "base/logging.h"
 #include "net/base/address_list.h"
 #include "net/base/dns_reload_timer.h"
 #include "net/base/net_errors.h"
 #include "net/base/sys_addrinfo.h"
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#include <resolv.h>
+#endif
 
 namespace net {
 
@@ -198,7 +198,8 @@ int SystemHostResolverProc(const std::string& host,
 
   int err = getaddrinfo(host.c_str(), NULL, &hints, &ai);
   bool should_retry = false;
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD) && \
+    !defined(OS_ANDROID)
   // If we fail, re-initialise the resolver just in case there have been any
   // changes to /etc/resolv.conf and retry. See http://crbug.com/11380 for info.
   if (err && DnsReloadTimerHasExpired()) {
@@ -248,7 +249,7 @@ int SystemHostResolverProc(const std::string& host,
 #if defined(OS_WIN)
     if (err != WSAHOST_NOT_FOUND && err != WSANO_DATA)
       return ERR_NAME_RESOLUTION_FAILED;
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) && !defined(OS_FREEBSD)
     if (err != EAI_NONAME && err != EAI_NODATA)
       return ERR_NAME_RESOLUTION_FAILED;
 #endif

@@ -18,6 +18,9 @@ class MockNetworkLibrary : public NetworkLibrary {
   MockNetworkLibrary();
   virtual ~MockNetworkLibrary();
 
+  MOCK_METHOD0(Init, void(void));
+  MOCK_CONST_METHOD0(IsCros, bool(void));
+
   MOCK_METHOD1(AddNetworkManagerObserver, void(NetworkManagerObserver*));
   MOCK_METHOD1(RemoveNetworkManagerObserver, void(NetworkManagerObserver*));
   MOCK_METHOD2(AddNetworkObserver, void(const std::string&, NetworkObserver*));
@@ -96,20 +99,14 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_METHOD1(GetWifiAccessPoints, bool(WifiAccessPointVector*));
   MOCK_CONST_METHOD1(CanConnectToNetwork, bool(const Network*));
   MOCK_METHOD1(ConnectToWifiNetwork, void(WifiNetwork*));
-  MOCK_METHOD1(ConnectToWifiNetwork, void(const std::string&));
-  MOCK_METHOD3(ConnectToWifiNetwork, void(const std::string&,
-                                          ConnectionSecurity security,
-                                          const std::string&));
-  MOCK_METHOD10(ConnectToWifiNetwork8021x, void(const std::string&,
-                                                EAPMethod,
-                                                EAPPhase2Auth,
-                                                const std::string&,
-                                                bool,
-                                                const std::string&,
-                                                const std::string&,
-                                                const std::string&,
-                                                const std::string&,
-                                                bool));
+  MOCK_METHOD2(ConnectToWifiNetwork, void(WifiNetwork*, bool));
+  MOCK_METHOD6(ConnectToUnconfiguredWifiNetwork,
+               void(const std::string&,
+                    ConnectionSecurity,
+                    const std::string&,
+                    const EAPConfigData*,
+                    bool,
+                    bool));
   MOCK_METHOD1(ConnectToCellularNetwork, void(CellularNetwork*));
   MOCK_METHOD1(ConnectToVirtualNetwork, void(VirtualNetwork*));
   MOCK_METHOD5(ConnectToVirtualNetworkPSK, void(const std::string&,
@@ -144,6 +141,7 @@ class MockNetworkLibrary : public NetworkLibrary {
 
   MOCK_CONST_METHOD0(active_network, const Network*(void));
   MOCK_CONST_METHOD0(connected_network, const Network*(void));
+  MOCK_CONST_METHOD0(connecting_network, const Network*(void));
 
   MOCK_CONST_METHOD0(offline_mode, bool(void));
 

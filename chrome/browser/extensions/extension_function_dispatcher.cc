@@ -13,9 +13,12 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/execute_code_in_tab_function.h"
 #include "chrome/browser/extensions/extension_accessibility_api.h"
+#include "chrome/browser/extensions/extension_app_api.h"
 #include "chrome/browser/extensions/extension_bookmark_manager_api.h"
 #include "chrome/browser/extensions/extension_bookmarks_module.h"
 #include "chrome/browser/extensions/extension_browser_actions_api.h"
+#include "chrome/browser/extensions/extension_chrome_auth_private_api.h"
+#include "chrome/browser/extensions/extension_content_settings_api.h"
 #include "chrome/browser/extensions/extension_context_menu_api.h"
 #include "chrome/browser/extensions/extension_cookies_api.h"
 #include "chrome/browser/extensions/extension_debugger_api.h"
@@ -38,6 +41,7 @@
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/extensions/extension_tts_api.h"
+#include "chrome/browser/extensions/extension_tts_engine_api.h"
 #include "chrome/browser/extensions/extension_web_socket_proxy_private_api.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/extension_webrequest_api.h"
@@ -45,6 +49,7 @@
 #include "chrome/browser/extensions/extensions_quota_service.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -67,6 +72,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/extensions/extension_file_browser_private_api.h"
 #include "chrome/browser/extensions/extension_info_private_api_chromeos.h"
+#include "chrome/browser/extensions/extension_input_method_api.h"
 #include "chrome/browser/extensions/extension_mediaplayer_private_api.h"
 #endif
 
@@ -162,6 +168,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<GetBookmarkChildrenFunction>();
   RegisterFunction<GetBookmarkRecentFunction>();
   RegisterFunction<GetBookmarkTreeFunction>();
+  RegisterFunction<GetBookmarkSubTreeFunction>();
   RegisterFunction<SearchBookmarksFunction>();
   RegisterFunction<RemoveBookmarkFunction>();
   RegisterFunction<RemoveTreeBookmarkFunction>();
@@ -184,6 +191,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<StartDragBookmarkManagerFunction>();
   RegisterFunction<DropBookmarkManagerFunction>();
   RegisterFunction<GetSubtreeBookmarkManagerFunction>();
+  RegisterFunction<CanEditBookmarkManagerFunction>();
 
   // History
   RegisterFunction<AddUrlHistoryFunction>();
@@ -244,10 +252,11 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<SetAccessibilityEnabledFunction>();
 
   // Text-to-speech.
+  RegisterFunction<ExtensionTtsEngineSendTtsEventFunction>();
+  RegisterFunction<ExtensionTtsGetVoicesFunction>();
+  RegisterFunction<ExtensionTtsIsSpeakingFunction>();
   RegisterFunction<ExtensionTtsSpeakFunction>();
   RegisterFunction<ExtensionTtsStopSpeakingFunction>();
-  RegisterFunction<ExtensionTtsIsSpeakingFunction>();
-  RegisterFunction<ExtensionTtsSpeakCompletedFunction>();
 
   // Context Menus.
   RegisterFunction<CreateContextMenuFunction>();
@@ -277,6 +286,7 @@ void FactoryRegistry::ResetFunctions() {
 
 #if defined(TOUCH_UI)
   RegisterFunction<HideKeyboardFunction>();
+  RegisterFunction<SetKeyboardHeightFunction>();
 #endif
 
 #if defined(OS_CHROMEOS) && defined(TOUCH_UI)
@@ -331,9 +341,15 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<ExecuteTasksFileBrowserFunction>();
   RegisterFunction<FileDialogStringsFunction>();
   RegisterFunction<GetFileTasksFileBrowserFunction>();
+  RegisterFunction<GetVolumeMetadataFunction>();
   RegisterFunction<RequestLocalFileSystemFunction>();
+  RegisterFunction<AddFileWatchBrowserFunction>();
+  RegisterFunction<RemoveFileWatchBrowserFunction>();
   RegisterFunction<SelectFileFunction>();
   RegisterFunction<SelectFilesFunction>();
+  RegisterFunction<AddMountFunction>();
+  RegisterFunction<RemoveMountFunction>();
+  RegisterFunction<GetMountPointsFunction>();
   RegisterFunction<ViewFilesFunction>();
 
   // Mediaplayer
@@ -342,6 +358,10 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<GetPlaylistMediaplayerFunction>();
   RegisterFunction<TogglePlaylistPanelMediaplayerFunction>();
   RegisterFunction<ToggleFullscreenMediaplayerFunction>();
+
+  // InputMethod
+  RegisterFunction<GetInputMethodFunction>();
+
 #if defined(TOUCH_UI)
   // Input
   RegisterFunction<SendHandwritingStrokeFunction>();
@@ -356,6 +376,19 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<AttachDebuggerFunction>();
   RegisterFunction<DetachDebuggerFunction>();
   RegisterFunction<SendRequestDebuggerFunction>();
+
+  // Content settings.
+  RegisterFunction<GetResourceIdentifiersFunction>();
+  RegisterFunction<ClearContentSettingsFunction>();
+  RegisterFunction<GetContentSettingFunction>();
+  RegisterFunction<SetContentSettingFunction>();
+
+  // ChromeAuth settings.
+  RegisterFunction<SetCloudPrintCredentialsFunction>();
+
+  // Experimental App API.
+  RegisterFunction<AppNotifyFunction>();
+  RegisterFunction<AppClearAllNotificationsFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -402,6 +435,36 @@ void ExtensionFunctionDispatcher::ResetFunctions() {
   FactoryRegistry::GetInstance()->ResetFunctions();
 }
 
+// static
+void ExtensionFunctionDispatcher::DispatchOnIOThread(
+    const ExtensionInfoMap* extension_info_map,
+    void* profile,
+    int render_process_id,
+    base::WeakPtr<ChromeRenderMessageFilter> ipc_sender,
+    int routing_id,
+    const ExtensionHostMsg_Request_Params& params) {
+  const Extension* extension =
+      extension_info_map->extensions().GetByURL(params.source_url);
+
+  scoped_refptr<ExtensionFunction> function(
+      CreateExtensionFunction(params, extension, profile, render_process_id,
+                              ipc_sender, routing_id));
+  if (!function)
+    return;
+
+  IOThreadExtensionFunction* function_io =
+      function->AsIOThreadExtensionFunction();
+  if (!function_io) {
+    NOTREACHED();
+    return;
+  }
+  function_io->set_ipc_sender(ipc_sender, routing_id);
+  function_io->set_extension_info_map(extension_info_map);
+  function->set_include_incognito(
+      extension_info_map->IsIncognitoEnabled(extension->id()));
+  function->Run();
+}
+
 ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(Profile* profile,
                                                          Delegate* delegate)
   : profile_(profile),
@@ -439,21 +502,6 @@ Browser* ExtensionFunctionDispatcher::GetCurrentBrowser(
 void ExtensionFunctionDispatcher::Dispatch(
     const ExtensionHostMsg_Request_Params& params,
     RenderViewHost* render_view_host) {
-  // TODO(aa): It would be cool to use ExtensionProcessManager to track which
-  // processes are extension processes rather than ChildProcessSecurityPolicy.
-  // EPM has richer information: it not only knows which processes contain
-  // at least one extension, but it knows which extensions are inside and what
-  // permissions the have. So we would be able to enforce permissions more
-  // granularly.
-  if (!ChildProcessSecurityPolicy::GetInstance()->HasExtensionBindings(
-          render_view_host->process()->id())) {
-    // TODO(aa): Allow content scripts access to low-threat extension APIs.
-    // See: crbug.com/80308.
-    LOG(ERROR) << "Extension API called from non-extension process.";
-    SendAccessDenied(render_view_host, params.request_id);
-    return;
-  }
-
   ExtensionService* service = profile()->GetExtensionService();
   if (!service)
     return;
@@ -461,7 +509,8 @@ void ExtensionFunctionDispatcher::Dispatch(
   if (!service->ExtensionBindingsAllowed(params.source_url)) {
     LOG(ERROR) << "Extension bindings not allowed for URL: "
                << params.source_url.spec();
-    SendAccessDenied(render_view_host, params.request_id);
+    SendAccessDenied(render_view_host, render_view_host->routing_id(),
+                     params.request_id);
     return;
   }
 
@@ -470,22 +519,14 @@ void ExtensionFunctionDispatcher::Dispatch(
   const Extension* extension = service->GetExtensionByURL(params.source_url);
   if (!extension)
     extension = service->GetExtensionByWebExtent(params.source_url);
-  if (!extension) {
-    LOG(ERROR) << "Extension does not exist for URL: "
-               << params.source_url.spec();
-    SendAccessDenied(render_view_host, params.request_id);
-    return;
-  }
 
-  if (!extension->HasApiPermission(params.name)) {
-    LOG(ERROR) << "Extension " << extension->id() << " does not have "
-               << "permission to function: " << params.name;
-    SendAccessDenied(render_view_host, params.request_id);
+  scoped_refptr<ExtensionFunction> function(CreateExtensionFunction(
+      params, extension, profile_,
+      render_view_host->process()->id(),
+      render_view_host, render_view_host->routing_id()));
+  if (!function)
     return;
-  }
 
-  scoped_refptr<ExtensionFunction> function(
-      FactoryRegistry::GetInstance()->NewFunction(params.name));
   UIThreadExtensionFunction* function_ui =
       function->AsUIThreadExtensionFunction();
   if (!function_ui) {
@@ -495,14 +536,6 @@ void ExtensionFunctionDispatcher::Dispatch(
   function_ui->SetRenderViewHost(render_view_host);
   function_ui->set_dispatcher(AsWeakPtr());
   function_ui->set_profile(profile_);
-
-  function->set_profile_id(profile_->GetRuntimeId());
-  function->set_extension(extension);
-  function->SetArgs(&params.arguments);
-  function->set_source_url(params.source_url);
-  function->set_request_id(params.request_id);
-  function->set_has_callback(params.has_callback);
-  function->set_user_gesture(params.user_gesture);
   function->set_include_incognito(service->CanCrossIncognito(extension));
 
   ExtensionsQuotaService* quota = service->quota_service();
@@ -519,9 +552,59 @@ void ExtensionFunctionDispatcher::Dispatch(
   }
 }
 
+// static
+ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
+    const ExtensionHostMsg_Request_Params& params,
+    const Extension* extension,
+    void* profile,
+    int render_process_id,
+    IPC::Message::Sender* ipc_sender,
+    int routing_id) {
+  // TODO(aa): It would be cool to use ExtensionProcessManager to track which
+  // processes are extension processes rather than ChildProcessSecurityPolicy.
+  // EPM has richer information: it not only knows which processes contain
+  // at least one extension, but it knows which extensions are inside and what
+  // permissions the have. So we would be able to enforce permissions more
+  // granularly.
+  if (!ChildProcessSecurityPolicy::GetInstance()->HasExtensionBindings(
+          render_process_id)) {
+    // TODO(aa): Allow content scripts access to low-threat extension APIs.
+    // See: crbug.com/80308.
+    LOG(ERROR) << "Extension API called from non-extension process.";
+    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    return NULL;
+  }
+
+  if (!extension) {
+    LOG(ERROR) << "Extension does not exist for URL: "
+               << params.source_url.spec();
+    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    return NULL;
+  }
+
+  if (!extension->HasAPIPermission(params.name)) {
+    LOG(ERROR) << "Extension " << extension->id() << " does not have "
+               << "permission to function: " << params.name;
+    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    return NULL;
+  }
+
+  ExtensionFunction* function =
+      FactoryRegistry::GetInstance()->NewFunction(params.name);
+  function->SetArgs(&params.arguments);
+  function->set_source_url(params.source_url);
+  function->set_request_id(params.request_id);
+  function->set_has_callback(params.has_callback);
+  function->set_user_gesture(params.user_gesture);
+  function->set_extension(extension);
+  function->set_profile(profile);
+  return function;
+}
+
+// static
 void ExtensionFunctionDispatcher::SendAccessDenied(
-    RenderViewHost* render_view_host, int request_id) {
-  render_view_host->Send(new ExtensionMsg_Response(
-      render_view_host->routing_id(), request_id, false, std::string(),
+    IPC::Message::Sender* ipc_sender, int routing_id, int request_id) {
+  ipc_sender->Send(new ExtensionMsg_Response(
+      routing_id, request_id, false, std::string(),
       "Access to extension API denied."));
 }

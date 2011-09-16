@@ -57,7 +57,7 @@ class CustomDrawButtonBase : public NotificationObserver {
   void SetBackground(SkColor color, SkBitmap* image, SkBitmap* mask);
 
   // Provide NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -174,6 +174,10 @@ class CustomDrawButton : public NotificationObserver {
   int width() const { return widget_->allocation.width; }
   int height() const { return widget_->allocation.height; }
 
+  // Returns the dimensions of the first surface.
+  int SurfaceWidth() const;
+  int SurfaceHeight() const;
+
   // Set the state to draw. We will paint the widget as if it were in this
   // state.
   void SetPaintOverride(GtkStateType state);
@@ -185,7 +189,7 @@ class CustomDrawButton : public NotificationObserver {
   void SetBackground(SkColor color, SkBitmap* image, SkBitmap* mask);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

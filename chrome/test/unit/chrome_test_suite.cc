@@ -4,7 +4,6 @@
 
 #include "chrome/test/unit/chrome_test_suite.h"
 
-#include "app/app_paths.h"
 #include "base/command_line.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/metrics/stats_table.h"
@@ -21,6 +20,9 @@
 #include "net/base/net_errors.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#if defined(TOOLKIT_VIEWS)
+#include "views/view.h"
+#endif
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -106,7 +108,6 @@ void ChromeTestSuite::Initialize() {
   scoped_host_resolver_proc_.Init(host_resolver_proc_.get());
 
   chrome::RegisterPathProvider();
-  app::RegisterPathProvider();
   content::RegisterPathProvider();
   ui::RegisterPathProvider();
   g_browser_process = new TestingBrowserProcess;
@@ -141,6 +142,11 @@ void ChromeTestSuite::Initialize() {
   RemoveSharedMemoryFile(stats_filename_);
   stats_table_ = new base::StatsTable(stats_filename_, 20, 200);
   base::StatsTable::set_current(stats_table_);
+
+#if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
+  // Turn of GPU compositing in browser during unit tests.
+  views::View::set_use_acceleration_when_possible(false);
+#endif
 }
 
 void ChromeTestSuite::Shutdown() {

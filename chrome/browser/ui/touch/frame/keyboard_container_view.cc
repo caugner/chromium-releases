@@ -9,14 +9,15 @@
 #include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/site_instance.h"
+#include "content/browser/tab_contents/tab_contents.h"
 
 namespace {
 
 // Make the provided view and all of its descendents unfocusable.
 void MakeViewHierarchyUnfocusable(views::View* view) {
-  view->SetFocusable(false);
+  view->set_focusable(false);
   for (int i = 0; i < view->child_count(); ++i) {
-    MakeViewHierarchyUnfocusable(view->GetChildViewAt(i));
+    MakeViewHierarchyUnfocusable(view->child_at(i));
   }
 }
 
@@ -33,7 +34,6 @@ KeyboardContainerView::KeyboardContainerView(Profile* profile, Browser* browser)
     : dom_view_(new DOMView),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(profile, this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(tab_contents_registrar_(this)),
       browser_(browser) {
   GURL keyboard_url(chrome::kChromeUIKeyboardURL);
   dom_view_->Init(profile,
@@ -44,7 +44,7 @@ KeyboardContainerView::KeyboardContainerView(Profile* profile, Browser* browser)
   AddChildView(dom_view_);
 
   // We have Inited the dom_view. So we must have a tab contents.
-  tab_contents_registrar_.Observe(dom_view_->tab_contents());
+  Observe(dom_view_->tab_contents());
 }
 
 KeyboardContainerView::~KeyboardContainerView() {
@@ -57,6 +57,10 @@ std::string KeyboardContainerView::GetClassName() const {
 void KeyboardContainerView::Layout() {
   // TODO(bryeung): include a border between the keyboard and the client view
   dom_view_->SetBounds(0, 0, width(), height());
+}
+
+void KeyboardContainerView::LoadURL(const GURL& keyboard_url) {
+  dom_view_->LoadURL(keyboard_url);
 }
 
 Browser* KeyboardContainerView::GetBrowser() {
@@ -74,7 +78,7 @@ TabContents* KeyboardContainerView::GetAssociatedTabContents() const {
 void KeyboardContainerView::ViewHierarchyChanged(bool is_add,
                                                  View* parent,
                                                  View* child) {
-  if (is_add)
+  if (is_add && Contains(child))
     MakeViewHierarchyUnfocusable(child);
 }
 

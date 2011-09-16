@@ -19,11 +19,6 @@ RenderViewHostDelegate::GetRendererManagementDelegate() {
   return NULL;
 }
 
-RenderViewHostDelegate::BookmarkDrag*
-RenderViewHostDelegate::GetBookmarkDragDelegate() {
-  return NULL;
-}
-
 bool RenderViewHostDelegate::OnMessageReceived(const IPC::Message& message) {
   return false;
 }
@@ -44,11 +39,7 @@ WebPreferences RenderViewHostDelegate::GetWebkitPrefs() {
   return WebPreferences();
 }
 
-bool RenderViewHostDelegate::IsExternalTabContainer() const {
-  return false;
-}
-
-bool RenderViewHostDelegate::RequestDesktopNotificationPermission(
-    const GURL& source_origin, int callback_context) {
+bool RenderViewHostDelegate::PreHandleKeyboardEvent(
+    const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
   return false;
 }

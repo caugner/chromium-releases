@@ -12,6 +12,7 @@
 #include "chrome/browser/chromeos/status/status_area_host.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
@@ -20,7 +21,6 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 #include "unicode/datefmt.h"
 
 namespace {
@@ -41,8 +41,8 @@ const int kTimerSlopSeconds = 1;
 
 ClockMenuButton::ClockMenuButton(StatusAreaHost* host)
     : StatusAreaButton(host, this) {
-  // Add as SystemAccess observer. We update the clock if timezone changes.
-  SystemAccess::GetInstance()->AddObserver(this);
+  // Add as TimezoneSettings observer. We update the clock if timezone changes.
+  system::TimezoneSettings::GetInstance()->AddObserver(this);
   CrosLibrary::Get()->GetPowerLibrary()->AddObserver(this);
   // Start monitoring the kUse24HourClock preference.
   if (host->GetProfile()) {  // This can be NULL in the login screen.
@@ -54,8 +54,9 @@ ClockMenuButton::ClockMenuButton(StatusAreaHost* host)
 }
 
 ClockMenuButton::~ClockMenuButton() {
+  timer_.Stop();
   CrosLibrary::Get()->GetPowerLibrary()->RemoveObserver(this);
-  SystemAccess::GetInstance()->RemoveObserver(this);
+  system::TimezoneSettings::GetInstance()->RemoveObserver(this);
 }
 
 void ClockMenuButton::UpdateTextAndSetNextTimer() {
@@ -92,16 +93,17 @@ void ClockMenuButton::UpdateText() {
       time,
       use_24hour_clock ? base::k24HourClock : base::k12HourClock,
       base::kDropAmPm)));
-  SetTooltipText(UTF16ToWide(base::TimeFormatShortDate(time)));
+  SetTooltipText(UTF16ToWide(base::TimeFormatFriendlyDateAndTime(time)));
+  SetAccessibleName(base::TimeFormatFriendlyDateAndTime(time));
   SchedulePaint();
 }
 
 // ClockMenuButton, NotificationObserver implementation:
 
-void ClockMenuButton::Observe(NotificationType type,
+void ClockMenuButton::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  if (type == NotificationType::PREF_CHANGED) {
+  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     std::string* pref_name = Details<std::string>(details).ptr();
     if (*pref_name == prefs::kUse24HourClock) {
       UpdateText();
@@ -159,9 +161,9 @@ void ClockMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
   // to a NativeWindow that we can pass to MenuItemView::RunMenuAt().
   gfx::NativeWindow window = GTK_WINDOW(source->GetWidget()->GetNativeView());
 
-  gfx::Point screen_loc;
-  views::View::ConvertPointToScreen(source, &screen_loc);
-  gfx::Rect bounds(screen_loc, source->size());
+  gfx::Point screen_location;
+  views::View::ConvertPointToScreen(source, &screen_location);
+  gfx::Rect bounds(screen_location, source->size());
   menu_->RunMenuAt(
       window,
       this,

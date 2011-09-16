@@ -20,6 +20,7 @@
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/browser/sync/protocol/proto_enum_conversions.h"
+#include "chrome/browser/sync/protocol/search_engine_specifics.pb.h"
 #include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/protocol/theme_specifics.pb.h"
@@ -223,6 +224,7 @@ DictionaryValue* BookmarkSpecificsToValue(
   DictionaryValue* value = new DictionaryValue();
   SET_STR(url);
   SET_BYTES(favicon);
+  SET_STR(title);
   return value;
 }
 
@@ -243,6 +245,16 @@ DictionaryValue* NigoriSpecificsToValue(
   DictionaryValue* value = new DictionaryValue();
   SET(encrypted, EncryptedDataToValue);
   SET_BOOL(using_explicit_passphrase);
+  SET_BOOL(encrypt_bookmarks);
+  SET_BOOL(encrypt_preferences);
+  SET_BOOL(encrypt_autofill_profile);
+  SET_BOOL(encrypt_autofill);
+  SET_BOOL(encrypt_themes);
+  SET_BOOL(encrypt_typed_urls);
+  SET_BOOL(encrypt_extensions);
+  SET_BOOL(encrypt_sessions);
+  SET_BOOL(encrypt_apps);
+  SET_BOOL(encrypt_search_engines);
   return value;
 }
 
@@ -258,6 +270,30 @@ DictionaryValue* PreferenceSpecificsToValue(
   DictionaryValue* value = new DictionaryValue();
   SET_STR(name);
   SET_STR(value);
+  return value;
+}
+
+DictionaryValue* SearchEngineSpecificsToValue(
+    const sync_pb::SearchEngineSpecifics& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_STR(short_name);
+  SET_STR(keyword);
+  SET_STR(favicon_url);
+  SET_STR(url);
+  SET_BOOL(safe_for_autoreplace);
+  SET_STR(originating_url);
+  SET_INT64(date_created);
+  SET_STR(input_encodings);
+  SET_BOOL(show_in_default_list);
+  SET_STR(suggestions_url);
+  SET_INT32(prepopulate_id);
+  SET_BOOL(autogenerate_keyword);
+  SET_INT32(logo_id);
+  SET_BOOL(created_by_policy);
+  SET_STR(instant_url);
+  SET_INT64(id);
+  SET_INT64(last_modified);
+  SET_STR(sync_guid);
   return value;
 }
 
@@ -286,10 +322,9 @@ DictionaryValue* TypedUrlSpecificsToValue(
   DictionaryValue* value = new DictionaryValue();
   SET_STR(url);
   SET_STR(title);
-  SET_INT32(typed_count);
   SET_BOOL(hidden);
-  SET_INT64_REP(visit);
-  SET_INT32(visited_count);
+  SET_INT64_REP(visits);
+  SET_INT32_REP(visit_transitions);
   return value;
 }
 
@@ -304,6 +339,7 @@ DictionaryValue* EntitySpecificsToValue(
   SET_EXTENSION(sync_pb, nigori, NigoriSpecificsToValue);
   SET_EXTENSION(sync_pb, password, PasswordSpecificsToValue);
   SET_EXTENSION(sync_pb, preference, PreferenceSpecificsToValue);
+  SET_EXTENSION(sync_pb, search_engine, SearchEngineSpecificsToValue);
   SET_EXTENSION(sync_pb, session, SessionSpecificsToValue);
   SET_EXTENSION(sync_pb, theme, ThemeSpecificsToValue);
   SET_EXTENSION(sync_pb, typed_url, TypedUrlSpecificsToValue);

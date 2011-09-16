@@ -37,7 +37,7 @@ bool MockDefaultProvider::DefaultSettingIsManaged(
   return content_type == content_type_ && is_managed_;
 }
 
-void MockDefaultProvider::ResetToDefaults() {
+void MockDefaultProvider::ShutdownOnUIThread() {
 }
 
 MockProvider::MockProvider()

@@ -17,7 +17,6 @@
     {
       'target_name': 'isimpledom',
       'type': 'static_library',
-      'msvs_guid': '1814CEEB-49E2-407F-AF99-FA755A7D2607',
       'sources': [
         'ISimpleDOMDocument.idl',
         'ISimpleDOMNode.idl',
@@ -47,9 +46,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

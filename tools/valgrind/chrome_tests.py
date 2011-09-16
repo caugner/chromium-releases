@@ -213,23 +213,30 @@ class ChromeTests:
   def TestBase(self):
     return self.SimpleTest("base", "base_unittests")
 
-  def TestBrowser(self):
-    return self.SimpleTest("chrome", "browser_tests")
+  def TestCourgette(self):
+    return self.SimpleTest("courgette", "courgette_unittests")
 
   def TestCrypto(self):
     return self.SimpleTest("crypto", "crypto_unittests")
 
+  def TestGfx(self):
+    return self.SimpleTest("chrome", "gfx_unittests")
+
   def TestGURL(self):
     return self.SimpleTest("chrome", "googleurl_unittests")
 
-  def TestCourgette(self):
-    return self.SimpleTest("courgette", "courgette_unittests")
+  def TestIpc(self):
+    return self.SimpleTest("ipc", "ipc_tests",
+                           valgrind_test_args=["--trace_children"])
+
+  def TestJingle(self):
+    return self.SimpleTest("chrome", "jingle_unittests")
 
   def TestMedia(self):
     return self.SimpleTest("chrome", "media_unittests")
 
-  def TestJingle(self):
-    return self.SimpleTest("chrome", "jingle_unittests")
+  def TestNet(self):
+    return self.SimpleTest("net", "net_unittests")
 
   def TestPrinting(self):
     return self.SimpleTest("chrome", "printing_unittests")
@@ -240,22 +247,11 @@ class ChromeTests:
                                "--ui-test-action-timeout=120000",
                                "--ui-test-action-max-timeout=280000"])
 
-  def TestIpc(self):
-    return self.SimpleTest("ipc", "ipc_tests",
-                           valgrind_test_args=["--trace_children"])
+  def TestSql(self):
+    return self.SimpleTest("chrome", "sql_unittests")
 
-  def TestNet(self):
-    return self.SimpleTest("net", "net_unittests")
-
-  def TestStartup(self):
-    # We don't need the performance results, we're just looking for pointer
-    # errors, so set number of iterations down to the minimum.
-    os.putenv("STARTUP_TESTS_NUMCYCLES", "1")
-    logging.info("export STARTUP_TESTS_NUMCYCLES=1");
-    return self.SimpleTest("chrome", "startup_tests",
-                           valgrind_test_args=[
-                            "--trace_children",
-                            "--indirect"])
+  def TestSync(self):
+    return self.SimpleTest("chrome", "sync_unit_tests")
 
   def TestTestShell(self):
     return self.SimpleTest("webkit", "test_shell_tests")
@@ -263,27 +259,25 @@ class ChromeTests:
   def TestUnit(self):
     return self.SimpleTest("chrome", "unit_tests")
 
-  def TestApp(self):
-    return self.SimpleTest("chrome", "app_unittests")
-
   def TestUIUnit(self):
     return self.SimpleTest("chrome", "ui_unittests")
 
-  def TestGfx(self):
-    return self.SimpleTest("chrome", "gfx_unittests")
+  def TestViews(self):
+    return self.SimpleTest("views", "views_unittests")
 
   # Valgrind timeouts are in seconds.
   UI_VALGRIND_ARGS = ["--timeout=7200", "--trace_children", "--indirect"]
   # UI test timeouts are in milliseconds.
   UI_TEST_ARGS = ["--ui-test-action-timeout=120000",
                   "--ui-test-action-max-timeout=280000"]
-  def TestUI(self):
-    return self.SimpleTest("chrome", "ui_tests",
-                           valgrind_test_args=self.UI_VALGRIND_ARGS,
-                           cmd_args=self.UI_TEST_ARGS)
 
   def TestAutomatedUI(self):
     return self.SimpleTest("chrome", "automated_ui_tests",
+                           valgrind_test_args=self.UI_VALGRIND_ARGS,
+                           cmd_args=self.UI_TEST_ARGS)
+
+  def TestBrowser(self):
+    return self.SimpleTest("chrome", "browser_tests",
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
                            cmd_args=self.UI_TEST_ARGS)
 
@@ -306,13 +300,15 @@ class ChromeTests:
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
                            cmd_args=(["--test-terminate-timeout=900000"]))
 
-  def TestSync(self):
-    return self.SimpleTest("chrome", "sync_unit_tests")
-
   def TestSyncIntegration(self):
     return self.SimpleTest("chrome", "sync_integration_tests",
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
                            cmd_args=(["--test-terminate-timeout=900000"]))
+
+  def TestUI(self):
+    return self.SimpleTest("chrome", "ui_tests",
+                           valgrind_test_args=self.UI_VALGRIND_ARGS,
+                           cmd_args=self.UI_TEST_ARGS)
 
   def TestLayoutChunk(self, chunk_num, chunk_size):
     # Run tests [chunk_num*chunk_size .. (chunk_num+1)*chunk_size) from the
@@ -435,16 +431,16 @@ class ChromeTests:
     "reliability": TestReliability, "reliability_tests": TestReliability,
     "remoting": TestRemoting,    "remoting_unittests": TestRemoting,
     "safe_browsing": TestSafeBrowsing, "safe_browsing_tests": TestSafeBrowsing,
-    "startup": TestStartup,      "startup_tests": TestStartup,
     "sync": TestSync,            "sync_unit_tests": TestSync,
     "sync_integration_tests": TestSyncIntegration,
     "sync_integration": TestSyncIntegration,
     "test_shell": TestTestShell, "test_shell_tests": TestTestShell,
     "ui": TestUI,                "ui_tests": TestUI,
     "unit": TestUnit,            "unit_tests": TestUnit,
-    "app": TestApp,              "app_unittests": TestApp,
+    "sql": TestSql,              "sql_unittests": TestSql,
     "ui_unit": TestUIUnit,       "ui_unittests": TestUIUnit,
     "gfx": TestGfx,              "gfx_unittests": TestGfx,
+    "views": TestViews,          "views_unittests": TestViews,
   }
 
 def _main(_):

@@ -84,6 +84,10 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // An alternative to Cancel(EXIT_ALL) that can be used with a OneShotTimer.
   void CancelAll() { Cancel(EXIT_ALL); }
 
+  // Returns the current exit type. This returns a value other than EXIT_NONE if
+  // the menu is being canceled.
+  ExitType exit_type() const { return exit_type_; }
+
   // Various events, forwarded from the submenu.
   //
   // NOTE: the coordinates of the events are in that of the
@@ -207,13 +211,10 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // Dispatcher method. This returns true if the menu was canceled, or
   // if the message is such that the menu should be closed.
   virtual bool Dispatch(const MSG& msg);
-
+#elif defined(TOUCH_UI)
+  virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(XEvent* xevent);
 #else
   virtual bool Dispatch(GdkEvent* event);
-#endif
-
-#if defined(TOUCH_UI)
-  virtual MessagePumpGlibXDispatcher::DispatchStatus DispatchX(XEvent* xevent);
 #endif
 
   // Key processing. The return value of this is returned from Dispatch.

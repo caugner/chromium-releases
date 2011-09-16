@@ -14,6 +14,7 @@ var chrome = chrome || {};
   native function GetChromeHidden();
   native function GetNextRequestId();
   native function GetNextContextMenuId();
+  native function GetNextTtsEventId();
   native function OpenChannelToTab();
   native function GetRenderViewId();
   native function SetIconCommon();
@@ -76,6 +77,8 @@ var chrome = chrome || {};
 
         throw new Error(message);
       } else if (!schemas[i].optional) {
+        console.log(chromeHidden.JSON.stringify(args));
+        console.log(chromeHidden.JSON.stringify(schemas));
         throw new Error("Parameter " + (i + 1) + " is required.");
       }
     }
@@ -125,7 +128,7 @@ var chrome = chrome || {};
                 request.callbackSchema.parameters);
           } catch (exception) {
             return "Callback validation error during " + name + " -- " +
-                   exception;
+                   exception.stack;
           }
         }
 
@@ -183,31 +186,35 @@ var chrome = chrome || {};
   }
 
   // Send an API request and optionally register a callback.
-  function sendRequest(functionName, args, argSchemas, customCallback) {
+  // |opt_args| is an object with optional parameters as follows:
+  // - noStringify: true if we should not stringify the request arguments.
+  // - customCallback: a callback that should be called instead of the standard
+  //   callback.
+  // - nativeFunction: the v8 native function to handle the request, or
+  //   StartRequest if missing.
+  // - forIOThread: true if this function should be handled on the browser IO
+  //   thread.
+  function sendRequest(functionName, args, argSchemas, opt_args) {
+    if (!opt_args)
+      opt_args = {};
     var request = prepareRequest(args, argSchemas);
-    if (customCallback) {
-      request.customCallback = customCallback;
+    if (opt_args.customCallback) {
+      request.customCallback = opt_args.customCallback;
     }
     // JSON.stringify doesn't support a root object which is undefined.
     if (request.args === undefined)
       request.args = null;
 
-    var sargs = chromeHidden.JSON.stringify(request.args);
+    var sargs = opt_args.noStringify ?
+        request.args : chromeHidden.JSON.stringify(request.args);
+    var nativeFunction = opt_args.nativeFunction || StartRequest;
 
     var requestId = GetNextRequestId();
     requests[requestId] = request;
-    var hasCallback = (request.callback || customCallback) ? true : false;
-    return StartRequest(functionName, sargs, requestId, hasCallback);
-  }
-
-  // Send a special API request that is not JSON stringifiable, and optionally
-  // register a callback.
-  function sendCustomRequest(nativeFunction, functionName, args, argSchemas) {
-    var request = prepareRequest(args, argSchemas);
-    var requestId = GetNextRequestId();
-    requests[requestId] = request;
-    return nativeFunction(functionName, request.args, requestId,
-                          request.callback ? true : false);
+    var hasCallback =
+        (request.callback || opt_args.customCallback) ? true : false;
+    return nativeFunction(functionName, sargs, requestId, hasCallback,
+                          opt_args.forIOThread);
   }
 
   // Helper function for positioning pop-up windows relative to DOM objects.
@@ -347,7 +354,7 @@ var chrome = chrome || {};
   var customBindings = {};
 
   function setupChromeSetting() {
-    customBindings['ChromeSetting'] = function(prefKey, valueSchema) {
+    function ChromeSetting(prefKey, valueSchema) {
       this.get = function(details, callback) {
         var getSchema = this.parameters.get;
         chromeHidden.validate([details, callback], getSchema);
@@ -373,7 +380,45 @@ var chrome = chrome || {};
       this.onChange = new chrome.Event('types.ChromeSetting.' + prefKey +
                                        '.onChange');
     };
-    customBindings['ChromeSetting'].prototype = new CustomBindingsObject();
+    ChromeSetting.prototype = new CustomBindingsObject();
+    customBindings['ChromeSetting'] = ChromeSetting;
+  }
+
+  function setupContentSetting() {
+    function ContentSetting(contentType, settingSchema) {
+      this.get = function(details, callback) {
+        var getSchema = this.parameters.get;
+        chromeHidden.validate([details, callback], getSchema);
+        return sendRequest('experimental.contentSettings.get',
+                           [contentType, details, callback],
+                           extendSchema(getSchema));
+      };
+      this.set = function(details, callback) {
+        var setSchema = this.parameters.set.slice();
+        setSchema[0].properties.setting = settingSchema;
+        chromeHidden.validate([details, callback], setSchema);
+        return sendRequest('experimental.contentSettings.set',
+                           [contentType, details, callback],
+                           extendSchema(setSchema));
+      };
+      this.clear = function(details, callback) {
+        var clearSchema = this.parameters.clear;
+        chromeHidden.validate([details, callback], clearSchema);
+        return sendRequest('experimental.contentSettings.clear',
+                           [contentType, details, callback],
+                           extendSchema(clearSchema));
+      };
+      this.getResourceIdentifiers = function(callback) {
+        var schema = this.parameters.getResourceIdentifiers;
+        chromeHidden.validate([callback], schema);
+        return sendRequest(
+            'experimental.contentSettings.getResourceIdentifiers',
+            [contentType, callback],
+            extendSchema(schema));
+      };
+    }
+    ContentSetting.prototype = new CustomBindingsObject();
+    customBindings['ContentSetting'] = ContentSetting;
   }
 
   // Page action events send (pageActionId, {tabId, tabUrl}).
@@ -487,16 +532,53 @@ var chrome = chrome || {};
   }
 
   function setupTtsEvents() {
-    chrome.experimental.tts.onSpeak.dispatch =
+    chromeHidden.tts = {};
+    chromeHidden.tts.handlers = {};
+    chrome.ttsEngine.onSpeak.dispatch =
         function(text, options, requestId) {
-      var callback = function(errorMessage) {
-        if (errorMessage)
-          chrome.experimental.tts.speakCompleted(requestId, errorMessage);
-        else
-          chrome.experimental.tts.speakCompleted(requestId);
-      };
-      chrome.Event.prototype.dispatch.apply(this, [text, options, callback]);
-    };
+          var sendTtsEvent = function(event) {
+            chrome.ttsEngine.sendTtsEvent(requestId, event);
+          };
+          chrome.Event.prototype.dispatch.apply(
+              this, [text, options, sendTtsEvent]);
+        };
+    try {
+      chrome.tts.onEvent.addListener(
+          function(event) {
+            var eventHandler = chromeHidden.tts.handlers[event.srcId];
+            if (eventHandler) {
+              eventHandler({
+                             type: event.type,
+                             charIndex: event.charIndex,
+                             errorMessage: event.errorMessage
+                           });
+              if (event.isFinalEvent) {
+                delete chromeHidden.tts.handlers[event.srcId];
+              }
+            }
+          });
+      } catch (e) {
+        // This extension doesn't have permission to access TTS, so we
+        // can safely ignore this.
+      }
+  }
+
+  // Get the platform from navigator.appVersion.
+  function getPlatform() {
+    var platforms = [
+      [/CrOS Touch/, "chromeos touch"],
+      [/CrOS/, "chromeos"],
+      [/Linux/, "linux"],
+      [/Mac/, "mac"],
+      [/Win/, "win"],
+    ];
+
+    for (var i = 0; i < platforms.length; i++) {
+      if (platforms[i][0].test(navigator.appVersion)) {
+        return platforms[i][1];
+      }
+    }
+    return "unknown";
   }
 
   chromeHidden.onLoad.addListener(function (extensionId) {
@@ -508,6 +590,10 @@ var chrome = chrome || {};
     // Setup the ChromeSetting class so we can use it to construct
     // ChromeSetting objects from the API definition.
     setupChromeSetting();
+
+    // Setup the ContentSetting class so we can use it to construct
+    // ContentSetting objects from the API definition.
+    setupContentSetting();
 
     // |apiFunctions| is a hash of name -> object that stores the
     // name & definition of the apiFunction. Custom handling of api functions
@@ -521,8 +607,14 @@ var chrome = chrome || {};
     // TOOD(rafaelw): Consider providing some convenient override points
     //   for api functions that wish to insert themselves into the call.
     var apiDefinitions = chromeHidden.JSON.parse(GetExtensionAPIDefinition());
+    var platform = getPlatform();
 
     apiDefinitions.forEach(function(apiDef) {
+      // Check platform, if apiDef has platforms key.
+      if (apiDef.platforms && apiDef.platforms.indexOf(platform) == -1) {
+        return;
+      }
+
       var module = chrome;
       var namespaces = apiDef.namespace.split('.');
       for (var index = 0, name; name = namespaces[index]; index++) {
@@ -567,7 +659,7 @@ var chrome = chrome || {};
             } else {
               retval = sendRequest(this.name, args,
                                    this.definition.parameters,
-                                   this.customCallback);
+                                   {customCallback: this.customCallback});
             }
 
             // Validate return value if defined - only in debug.
@@ -601,33 +693,41 @@ var chrome = chrome || {};
         });
       }
 
-
-      // Parse any values defined for properties.
-      if (apiDef.properties) {
-        forEach(apiDef.properties, function(prop, property) {
-          if (property.value) {
+      function addProperties(m, def) {
+        // Parse any values defined for properties.
+        if (def.properties) {
+          forEach(def.properties, function(prop, property) {
             var value = property.value;
-            if (property.type === 'integer') {
-              value = parseInt(value);
-            } else if (property.type === 'boolean') {
-              value = value === "true";
-            } else if (property["$ref"]) {
-              var constructor = customBindings[property["$ref"]];
-              var args = value;
-              // For an object property, |value| is an array of constructor
-              // arguments, but we want to pass the arguments directly
-              // (i.e. not as an array), so we have to fake calling |new| on the
-              // constructor.
-              value = { __proto__: constructor.prototype };
-              constructor.apply(value, args);
-            } else if (property.type !== 'string') {
-              throw "NOT IMPLEMENTED (extension_api.json error): Cannot " +
-                  "parse values for type \"" + property.type + "\"";
+            if (value) {
+              if (property.type === 'integer') {
+                value = parseInt(value);
+              } else if (property.type === 'boolean') {
+                value = value === "true";
+              } else if (property["$ref"]) {
+                var constructor = customBindings[property["$ref"]];
+                var args = value;
+                // For an object property, |value| is an array of constructor
+                // arguments, but we want to pass the arguments directly
+                // (i.e. not as an array), so we have to fake calling |new| on
+                // the constructor.
+                value = { __proto__: constructor.prototype };
+                constructor.apply(value, args);
+              } else if (property.type === 'object') {
+                // Recursively add properties.
+                addProperties(value, property);
+              } else if (property.type !== 'string') {
+                throw "NOT IMPLEMENTED (extension_api.json error): Cannot " +
+                    "parse values for type \"" + property.type + "\"";
+              }
             }
-            module[prop] = value;
-          }
-        });
+            if (value) {
+              m[prop] = value;
+            }
+          });
+        }
       }
+
+      addProperties(module, apiDef);
 
       // getTabContentses is retained for backwards compatibility
       // See http://crbug.com/21433
@@ -750,7 +850,8 @@ var chrome = chrome || {};
               "is no larger than " + iconSize + " pixels square.");
         }
 
-        sendCustomRequest(nativeFunction, name, [details], parameters);
+        sendRequest(name, [details], parameters,
+                    {noStringify: true, nativeFunction: nativeFunction});
       } else if ("path" in details) {
         var img = new Image();
         img.onerror = function() {
@@ -768,7 +869,8 @@ var chrome = chrome || {};
           delete details.path;
           details.imageData = canvas_context.getImageData(0, 0, canvas.width,
                                                           canvas.height);
-          sendCustomRequest(nativeFunction, name, [details], parameters);
+          sendRequest(name, [details], parameters,
+                      {noStringify: true, nativeFunction: nativeFunction});
         };
         img.src = details.path;
       } else {
@@ -808,7 +910,7 @@ var chrome = chrome || {};
       var id = GetNextContextMenuId();
       args[0].generatedId = id;
       sendRequest(this.name, args, this.definition.parameters,
-                  this.customCallback);
+                  {customCallback: this.customCallback});
       return id;
     };
 
@@ -816,6 +918,20 @@ var chrome = chrome || {};
         function(details) {
       var parseResult = parseOmniboxDescription(details.description);
       sendRequest(this.name, [parseResult], this.definition.parameters);
+    };
+
+    apiFunctions["experimental.webRequest.addEventListener"].handleRequest =
+        function() {
+      var args = Array.prototype.slice.call(arguments);
+      sendRequest(this.name, args, this.definition.parameters,
+                  {forIOThread: true});
+    };
+
+    apiFunctions["experimental.webRequest.eventHandled"].handleRequest =
+        function() {
+      var args = Array.prototype.slice.call(arguments);
+      sendRequest(this.name, args, this.definition.parameters,
+                  {forIOThread: true});
     };
 
     apiFunctions["contextMenus.create"].customCallback =
@@ -894,6 +1010,17 @@ var chrome = chrome || {};
       return [requestId, suggestions];
     };
 
+    apiFunctions["tts.speak"].handleRequest = function() {
+      var args = arguments;
+      if (args.length > 1 && args[1] && args[1].onEvent) {
+        var id = GetNextTtsEventId();
+        args[1].srcId = id;
+        chromeHidden.tts.handlers[id] = args[1].onEvent;
+      }
+      sendRequest(this.name, args, this.definition.parameters);
+      return id;
+    };
+
     if (chrome.test) {
       chrome.test.getApiDefinitions = GetExtensionAPIDefinition;
     }
@@ -911,6 +1038,9 @@ var chrome = chrome || {};
   if (!chrome.experimental.accessibility)
     chrome.experimental.accessibility = {};
 
-  if (!chrome.experimental.tts)
-    chrome.experimental.tts = {};
+  if (!chrome.tts)
+    chrome.tts = {};
+
+  if (!chrome.ttsEngine)
+    chrome.ttsEngine = {};
 })();

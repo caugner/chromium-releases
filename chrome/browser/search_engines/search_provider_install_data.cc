@@ -13,15 +13,15 @@
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 
 typedef SearchHostToURLsMap::TemplateURLSet TemplateURLSet;
 
@@ -103,11 +103,11 @@ class GoogleURLObserver : public NotificationObserver {
  public:
   GoogleURLObserver(
       GoogleURLChangeNotifier* change_notifier,
-      NotificationType ui_death_notification,
+      int ui_death_notification,
       const NotificationSource& ui_death_source);
 
   // Implementation of NotificationObserver.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -122,19 +122,19 @@ class GoogleURLObserver : public NotificationObserver {
 
 GoogleURLObserver::GoogleURLObserver(
       GoogleURLChangeNotifier* change_notifier,
-      NotificationType ui_death_notification,
+      int ui_death_notification,
       const NotificationSource& ui_death_source)
     : change_notifier_(change_notifier) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  registrar_.Add(this, NotificationType::GOOGLE_URL_UPDATED,
+  registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
                  NotificationService::AllSources());
   registrar_.Add(this, ui_death_notification, ui_death_source);
 }
 
-void GoogleURLObserver::Observe(NotificationType type,
+void GoogleURLObserver::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  if (type == NotificationType::GOOGLE_URL_UPDATED) {
+  if (type == chrome::NOTIFICATION_GOOGLE_URL_UPDATED) {
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(change_notifier_.get(),
                           &GoogleURLChangeNotifier::OnChange,
@@ -153,7 +153,7 @@ static bool IsSameOrigin(const GURL& requested_origin,
                          const SearchTermsData& search_terms_data) {
   DCHECK(requested_origin == requested_origin.GetOrigin());
   return template_url && requested_origin ==
-      TemplateURLModel::GenerateSearchURLUsingTermsData(
+      TemplateURLService::GenerateSearchURLUsingTermsData(
           template_url,
           search_terms_data).GetOrigin();
 }
@@ -162,7 +162,7 @@ static bool IsSameOrigin(const GURL& requested_origin,
 
 SearchProviderInstallData::SearchProviderInstallData(
     WebDataService* web_service,
-    NotificationType ui_death_notification,
+    int ui_death_notification,
     const NotificationSource& ui_death_source)
     : web_service_(web_service),
       load_handle_(0),
@@ -276,7 +276,7 @@ void SearchProviderInstallData::SetDefault(const TemplateURL* template_url) {
   }
 
   IOThreadSearchTermsData search_terms_data(google_base_url_);
-  const GURL url(TemplateURLModel::GenerateSearchURLUsingTermsData(
+  const GURL url(TemplateURLService::GenerateSearchURLUsingTermsData(
       template_url, search_terms_data));
   if (!url.is_valid() || !url.has_host()) {
     default_search_origin_.clear();

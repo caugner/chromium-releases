@@ -22,6 +22,12 @@ _LICENSE = """// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 
 """
 
+_DO_NOT_EDIT_WARNING = """// This file is auto-generated from
+// gpu/command_buffer/build_gles2_cmd_buffer.py
+// DO NOT EDIT!
+
+"""
+
 # This string is copied directly out of the gl2.h file from GLES2.0
 #
 # Edits:
@@ -149,7 +155,7 @@ GL_APICALL void         GL_APIENTRY glReleaseShaderCompiler (void);
 GL_APICALL void         GL_APIENTRY glRenderbufferStorage (GLenumRenderBufferTarget target, GLenumRenderBufferFormat internalformat, GLsizei width, GLsizei height);
 GL_APICALL void         GL_APIENTRY glSampleCoverage (GLclampf value, GLboolean invert);
 GL_APICALL void         GL_APIENTRY glScissor (GLint x, GLint y, GLsizei width, GLsizei height);
-GL_APICALL void         GL_APIENTRY glShaderBinary (GLsizeiNotNegative n, const GLuint* shaders, GLenum binaryformat, const void* binary, GLsizeiNotNegative length);
+GL_APICALL void         GL_APIENTRY glShaderBinary (GLsizeiNotNegative n, const GLuint* shaders, GLenumShaderBinaryFormat binaryformat, const void* binary, GLsizeiNotNegative length);
 GL_APICALL void         GL_APIENTRY glShaderSource (GLidShader shader, GLsizeiNotNegative count, const char** str, const GLint* length);
 GL_APICALL void         GL_APIENTRY glStencilFunc (GLenumCmpFunction func, GLint ref, GLuint mask);
 GL_APICALL void         GL_APIENTRY glStencilFuncSeparate (GLenumFaceType face, GLenumCmpFunction func, GLint ref, GLuint mask);
@@ -211,10 +217,10 @@ GL_APICALL void         GL_APIENTRY glCopyTextureToParentTextureCHROMIUM (GLidBi
 GL_APICALL void         GL_APIENTRY glResizeCHROMIUM (GLuint width, GLuint height);
 GL_APICALL const GLchar* GL_APIENTRY glGetRequestableExtensionsCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glRequestExtensionCHROMIUM (const char* extension);
-GL_APICALL void         GL_APIENTRY glSetLatchCHROMIUM (GLuint latch_id);
-GL_APICALL void         GL_APIENTRY glWaitLatchCHROMIUM (GLuint latch_id);
 GL_APICALL void         GL_APIENTRY glRateLimitOffscreenContextCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glSetSurfaceCHROMIUM (GLint surface_id);
+GL_APICALL void         GL_APIENTRY glGetMultipleIntegervCHROMIUM (const GLenum* pnames, GLuint count, GLint* results, GLsizeiptr size);
+GL_APICALL void         GL_APIENTRY glGetProgramInfoCHROMIUM (GLidProgram program, GLsizeiNotNegative bufsize, GLsizei* size, void* info);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -418,9 +424,9 @@ _CMD_ID_TABLE = {
   'ResizeCHROMIUM':                                            448,
   'GetRequestableExtensionsCHROMIUM':                          449,
   'RequestExtensionCHROMIUM':                                  450,
-  'SetLatchCHROMIUM':                                          451,
-  'WaitLatchCHROMIUM':                                         452,
   'SetSurfaceCHROMIUM':                                        453,
+  'GetMultipleIntegervCHROMIUM':                               454,
+  'GetProgramInfoCHROMIUM':                                    455,
 }
 
 # This is a list of enum names and their valid values. It is used to map
@@ -959,6 +965,11 @@ _ENUM_LISTS = {
       'GL_STENCIL_INDEX8',
     ],
   },
+  'ShaderBinaryFormat': {
+    'type': 'GLenum',
+    'valid': [
+    ],
+  },
   'StencilOp': {
     'type': 'GLenum',
     'valid': [
@@ -1089,12 +1100,15 @@ _ENUM_LISTS = {
 #               when they can not be automatically determined.
 
 _FUNCTION_INFO = {
-  'ActiveTexture': {'decoder_func': 'DoActiveTexture', 'unit_test': False},
+  'ActiveTexture': {
+    'decoder_func': 'DoActiveTexture',
+    'unit_test': False,
+    'impl_func': False,
+  },
   'AttachShader': {'decoder_func': 'DoAttachShader'},
   'BindAttribLocation': {'type': 'GLchar', 'bucket': True, 'needs_size': True},
   'BindBuffer': {
     'type': 'Bind',
-    'impl_decl': False,
     'decoder_func': 'DoBindBuffer',
     'gen_func': 'GenBuffersARB',
   },
@@ -1134,7 +1148,7 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoClearDepthf',
     'gl_test_func': 'glClearDepth',
   },
-  'ColorMask': {'decoder_func': 'DoColorMask'},
+  'ColorMask': {'decoder_func': 'DoColorMask', 'expectation': False},
   'ClearStencil': {'decoder_func': 'DoClearStencil'},
   'CommandBufferEnableCHROMIUM': {
     'type': 'Custom',
@@ -1169,7 +1183,6 @@ _FUNCTION_INFO = {
   'DeleteBuffers': {
     'type': 'DELn',
     'gl_test_func': 'glDeleteBuffersARB',
-    'impl_decl': False,
   },
   'DeleteFramebuffers': {
     'type': 'DELn',
@@ -1192,7 +1205,7 @@ _FUNCTION_INFO = {
   },
   'DeleteTextures': {'type': 'DELn'},
   'DepthRangef': {'decoder_func': 'glDepthRange'},
-  'DepthMask': {'decoder_func': 'DoDepthMask'},
+  'DepthMask': {'decoder_func': 'DoDepthMask', 'expectation': False},
   'DetachShader': {'decoder_func': 'DoDetachShader'},
   'Disable': {
     'decoder_func': 'DoDisable',
@@ -1202,9 +1215,8 @@ _FUNCTION_INFO = {
     'impl_decl': False,
   },
   'DrawArrays': {
-    'decoder_func': 'DoDrawArrays',
-    'unit_test': False,
-    'impl_decl': False,
+    'type': 'Manual',
+    'cmd_args': 'GLenum mode, GLint first, GLsizei count',
   },
   'DrawElements': {
     'type': 'Manual',
@@ -1321,10 +1333,31 @@ _FUNCTION_INFO = {
     'extension': True,
     'chromium': True,
   },
+  'GetMultipleIntegervCHROMIUM': {
+    'type': 'Custom',
+    'immediate': False,
+    'expectation': False,
+    'extension': True,
+    'chromium': True,
+  },
   'GetProgramiv': {
     'type': 'GETn',
     'decoder_func': 'DoGetProgramiv',
     'result': ['SizedResult<GLint>'],
+  },
+  'GetProgramInfoCHROMIUM': {
+    'type': 'Custom',
+    'immediate': False,
+    'expectation': False,
+    'impl_func': False,
+    'extension': True,
+    'chromium': True,
+    'cmd_args': 'GLidProgram program, uint32 bucket_id',
+    'result': [
+      'uint32 link_status',
+      'uint32 num_attribs',
+      'uint32 num_uniforms',
+    ],
   },
   'GetProgramInfoLog': {
     'type': 'STRn',
@@ -1507,8 +1540,11 @@ _FUNCTION_INFO = {
     'cmd_args':
         'GLuint shader, const char* data',
   },
-  'StencilMask': {'decoder_func': 'DoStencilMask'},
-  'StencilMaskSeparate': {'decoder_func': 'DoStencilMaskSeparate'},
+  'StencilMask': {'decoder_func': 'DoStencilMask', 'expectation': False},
+  'StencilMaskSeparate': {
+    'decoder_func': 'DoStencilMaskSeparate',
+    'expectation': False,
+  },
   'SwapBuffers': {
     'type': 'Custom',
     'impl_func': False,
@@ -1697,12 +1733,6 @@ _FUNCTION_INFO = {
     'extension': True,
     'chromium': True,
   },
-  'SetLatchCHROMIUM': {
-    'type': 'Custom',
-  },
-  'WaitLatchCHROMIUM': {
-    'type': 'Custom',
-  },
   'RateLimitOffscreenContextCHROMIUM': {
     'gen_cmd': False,
     'extension': True,
@@ -1774,10 +1804,10 @@ class CWriter(object):
   def __FindSplit(self, string):
     """Finds a place to split a string."""
     splitter = string.find('=')
-    if splitter >= 0 and not string[splitter + 1] == '=' and splitter < 80:
+    if splitter >= 1 and not string[splitter + 1] == '=' and splitter < 80:
       return splitter
     # parts = string.split('(')
-    parts = re.split("(?<=[^\"])\(", string)
+    parts = re.split("(?<=[^\"])\((?!\")", string)
     fptr = re.compile('\*\w*\)')
     if len(parts) > 1:
       splitter = len(parts[0])
@@ -1849,9 +1879,7 @@ class CHeaderWriter(CWriter):
     self.guard = self._non_alnum_re.sub('_', hpath).upper() + '_'
 
     self.Write(_LICENSE)
-    self.Write(
-        "// This file is auto-generated. DO NOT EDIT!\n"
-        "\n")
+    self.Write(_DO_NOT_EDIT_WARNING)
     if not file_comment == None:
       self.Write(file_comment)
     self.Write("#ifndef %s\n" % self.guard)
@@ -2235,6 +2263,20 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
                   func.MakeTypedOriginalArgString("")))
       file.Write("\n")
 
+  def WriteClientGLCallLog(self, func, file):
+    """Writes a logging macro for the client side code."""
+    comma = ""
+    if len(func.GetOriginalArgs()):
+      comma = " << "
+    file.Write(
+        '  GPU_CLIENT_LOG("[" << this << "] gl%s("%s%s << ")");\n' %
+        (func.original_name, comma, func.MakeLogArgString()))
+
+  def WriteClientGLReturnLog(self, func, file):
+    """Writes the return value logging code."""
+    if func.return_type != "void":
+      file.Write('  GPU_CLIENT_LOG("return:" << result)\n')
+
   def WriteGLES2ImplementationHeader(self, func, file):
     """Writes the GLES2 Implemention."""
     impl_func = func.GetInfo('impl_func')
@@ -2247,10 +2289,13 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       file.Write("%s %s(%s) {\n" %
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
+      self.WriteClientGLCallLog(func, file)
+      func.WriteDestinationInitalizationValidation(file)
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
       file.Write("  helper_->%s(%s);\n" %
                  (func.name, func.MakeOriginalArgString("")))
+      self.WriteClientGLReturnLog(func, file)
       file.Write("}\n")
       file.Write("\n")
     else:
@@ -2668,13 +2713,15 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       file.Write("%s %s(%s) {\n" %
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
+      func.WriteDestinationInitalizationValidation(file)
+      self.WriteClientGLCallLog(func, file)
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
       code = """  if (Is%(type)sReservedId(%(id)s)) {
     SetGLError(GL_INVALID_OPERATION, "%(name)s: %(id)s reserved id");
     return;
   }
-  %(lc_type)s_id_handler_->MarkAsUsedForBind(%(id)s);
+  Bind%(type)sHelper(%(arg_string)s);
   helper_->%(name)s(%(arg_string)s);
 }
 
@@ -2725,7 +2772,13 @@ class GENnHandler(TypeHandler):
 
   def WriteGLES2ImplementationHeader(self, func, file):
     """Overrriden from TypeHandler."""
+    log_code = ("""  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (GLsizei i = 0; i < n; ++i) {
+      GPU_CLIENT_LOG("  " << i << ": " << %s[i]);
+    }
+  });""" % func.GetOriginalArgs()[1].name)
     args = {
+        'log_code': log_code,
         'return_type': func.return_type,
         'name': func.original_name,
         'typed_args': func.MakeTypedOriginalArgString(""),
@@ -2734,10 +2787,13 @@ class GENnHandler(TypeHandler):
         'count_name': func.GetOriginalArgs()[0].name,
       }
     file.Write("%(return_type)s %(name)s(%(typed_args)s) {\n" % args)
+    func.WriteDestinationInitalizationValidation(file)
+    self.WriteClientGLCallLog(func, file)
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     code = """  %(resource_type)s_id_handler_->MakeIds(0, %(args)s);
   helper_->%(name)sImmediate(%(args)s);
+%(log_code)s
 }
 
 """
@@ -2962,12 +3018,15 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    func.WriteDestinationInitalizationValidation(file)
+    self.WriteClientGLCallLog(func, file)
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  GLuint client_id;\n")
     file.Write("  program_and_shader_id_handler_->MakeIds(0, 1, &client_id);\n")
     file.Write("  helper_->%s(%s);\n" %
                (func.name, func.MakeCmdArgString("")))
+    file.Write('  GPU_CLIENT_LOG("returned " << client_id);\n')
     file.Write("  return client_id;\n")
     file.Write("}\n")
     file.Write("\n")
@@ -2988,8 +3047,12 @@ class DeleteHandler(TypeHandler):
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    func.WriteDestinationInitalizationValidation(file)
+    self.WriteClientGLCallLog(func, file)
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
+    file.Write(
+        "  GPU_CLIENT_DCHECK(%s != 0);\n" % func.GetOriginalArgs()[-1].name)
     file.Write("  program_and_shader_id_handler_->FreeIds(1, &%s);\n" %
                func.GetOriginalArgs()[-1].name)
     file.Write("  helper_->%s(%s);\n" %
@@ -3105,9 +3168,23 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
           'count_name': func.GetOriginalArgs()[0].name,
         }
       file.Write("%(return_type)s %(name)s(%(typed_args)s) {\n" % args)
+      func.WriteDestinationInitalizationValidation(file)
+      self.WriteClientGLCallLog(func, file)
+      file.Write("""  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (GLsizei i = 0; i < n; ++i) {
+      GPU_CLIENT_LOG("  " << i << ": " << %s[i]);
+    }
+  });
+""" % func.GetOriginalArgs()[1].name)
+      file.Write("""  GPU_CLIENT_DCHECK_CODE_BLOCK({
+    for (GLsizei i = 0; i < n; ++i) {
+      GPU_DCHECK(%s[i] != 0);
+    }
+  });
+""" % func.GetOriginalArgs()[1].name)
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
-      code = """%(resource_type)s_id_handler_->FreeIds(%(args)s);
+      code = """  %(name)sHelper(%(args)s);
   helper_->%(name)sImmediate(%(args)s);
 }
 
@@ -3272,23 +3349,36 @@ class GETnHandler(TypeHandler):
       file.Write("%s %s(%s) {\n" %
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
+      func.WriteDestinationInitalizationValidation(file)
+      self.WriteClientGLCallLog(func, file)
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
       all_but_last_args = func.GetOriginalArgs()[:-1]
       arg_string = (
           ", ".join(["%s" % arg.name for arg in all_but_last_args]))
-      code = """  typedef %(func_name)s::Result Result;
+      all_arg_string = (
+          ", ".join(["%s" % arg.name for arg in func.GetOriginalArgs()]))
+      code = """  if (%(func_name)sHelper(%(all_arg_string)s)) {
+    return;
+  }
+  typedef %(func_name)s::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
   helper_->%(func_name)s(%(arg_string)s,
       result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
+  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (int32 i = 0; i < result->GetNumResults(); ++i) {
+      GPU_CLIENT_LOG("  " << i << ": " << result->GetData()[i]);
+    }
+  });
 }
 """
       file.Write(code % {
           'func_name': func.name,
           'arg_string': arg_string,
+          'all_arg_string': all_arg_string,
         })
 
   def WriteServiceUnitTest(self, func, file):
@@ -3449,6 +3539,12 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    func.WriteDestinationInitalizationValidation(file)
+    self.WriteClientGLCallLog(func, file)
+    last_arg_name = func.GetLastOriginalArg().name
+    values_str = ' << ", " << '.join(
+        ["%s[%d]" % (last_arg_name, ndx) for ndx in range(0, func.info.count)])
+    file.Write('  GPU_CLIENT_LOG("values: " << %s);\n' % values_str)
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  helper_->%sImmediate(%s);\n" %
@@ -3668,6 +3764,18 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    func.WriteDestinationInitalizationValidation(file)
+    self.WriteClientGLCallLog(func, file)
+    last_arg_name = func.GetLastOriginalArg().name
+    file.Write("""  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (GLsizei i = 0; i < count; ++i) {
+""")
+    values_str = ' << ", " << '.join(
+        ["%s[%d + i * %d]" % (
+            last_arg_name, ndx, func.info.count) for ndx in range(
+                0, func.info.count)])
+    file.Write('       GPU_CLIENT_LOG("  " << i << ": " << %s);\n' % values_str)
+    file.Write("    }\n  });\n")
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  helper_->%sImmediate(%s);\n" %
@@ -4042,6 +4150,8 @@ TEST_F(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
       file.Write("%s %s(%s) {\n" %
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
+      func.WriteDestinationInitalizationValidation(file)
+      self.WriteClientGLCallLog(func, file)
       file.Write("  typedef %s::Result Result;\n" % func.name)
       file.Write("  Result* result = GetResultAs<Result*>();\n")
       file.Write("  *result = 0;\n")
@@ -4052,6 +4162,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
       file.Write("  helper_->%s(%s%sresult_shm_id(), result_shm_offset());\n" %
                  (func.name, arg_string, comma))
       file.Write("  WaitForCmd();\n")
+      file.Write('  GPU_CLIENT_LOG("returned " << *result);\n')
       file.Write("  return *result;\n")
       file.Write("}\n")
       file.Write("\n")
@@ -4076,7 +4187,12 @@ class STRnHandler(TypeHandler):
 
   def WriteGLES2ImplementationHeader(self, func, file):
     """Overrriden from TypeHandler."""
-    code = """%(return_type)s %(func_name)s(%(args)s) {
+    code_1 = "%(return_type)s %(func_name)s(%(args)s) {\n"
+    code_2 = """  GPU_CLIENT_LOG("[" << this << "] gl%(func_name)s" << "("
+      << %(arg0)s << ", "
+      << %(arg1)s << ", "
+      << static_cast<void*>(%(arg2)s) << ", "
+      << static_cast<void*>(%(arg3)s) << ")");
   helper_->SetBucketSize(kResultBucketId, 0);
   helper_->%(func_name)s(%(id_name)s, kResultBucketId);
   if (bufsize > 0) {
@@ -4089,20 +4205,28 @@ class STRnHandler(TypeHandler):
       }
       memcpy(%(dest_name)s, str.c_str(), max_size);
       %(dest_name)s[max_size] = '\\0';
+      GPU_CLIENT_LOG("------\\n" << %(dest_name)s << "\\n------");
     }
   }
 }
 """
     args = func.GetOriginalArgs()
-    file.Write(code % {
-          'return_type': func.return_type,
-          'func_name': func.original_name,
-          'args': func.MakeTypedOriginalArgString(""),
-          'id_name': args[0].name,
-          'bufsize_name': args[1].name,
-          'length_name': args[2].name,
-          'dest_name': args[3].name,
-        })
+    str_args = {
+      'return_type': func.return_type,
+      'func_name': func.original_name,
+      'args': func.MakeTypedOriginalArgString(""),
+      'id_name': args[0].name,
+      'bufsize_name': args[1].name,
+      'length_name': args[2].name,
+      'dest_name': args[3].name,
+      'arg0': args[0].name,
+      'arg1': args[1].name,
+      'arg2': args[2].name,
+      'arg3': args[3].name,
+    }
+    file.Write(code_1 % str_args)
+    func.WriteDestinationInitalizationValidation(file)
+    file.Write(code_2 % str_args)
 
   def WriteServiceUnitTest(self, func, file):
     """Overrriden from TypeHandler."""
@@ -4232,6 +4356,14 @@ class Argument(object):
     """returns an invalid value and expected parse result by index."""
     return ("---ERROR0---", "---ERROR2---", None)
 
+  def GetLogArg(self):
+    """Get argument appropriate for LOG macro."""
+    if self.type == 'GLboolean':
+      return 'GLES2Util::GetStringBool(%s)' % self.name
+    if self.type == 'GLenum':
+      return 'GLES2Util::GetStringEnum(%s)' % self.name
+    return self.name
+
   def WriteGetCode(self, file):
     """Writes the code to get an argument from a command structure."""
     file.Write("  %s %s = static_cast<%s>(c.%s);\n" %
@@ -4255,7 +4387,7 @@ class Argument(object):
     if len(parts) > 1:
       return
     if parts[0] in self.need_validation_:
-      file.Write("  GL_CLIENT_VALIDATE_DESTINATION_INITALIZATION(%s, %s);\n" %
+      file.Write("  GPU_CLIENT_VALIDATE_DESTINATION_INITALIZATION(%s, %s);\n" %
           (self.type[:-1], self.name))
 
 
@@ -4270,6 +4402,22 @@ class Argument(object):
   def GetBucketVersion(self):
     """Gets the bucket version of this argument."""
     return self
+
+
+class BoolArgument(Argument):
+  """class for GLboolean"""
+
+  def __init__(self, name, type):
+    Argument.__init__(self, name, 'GLboolean')
+
+  def GetValidArg(self, func, offset, index):
+    """Gets a valid value for this argument."""
+    return 'true'
+
+  def GetValidGLArg(self, func, offset, index):
+    """Gets a valid GL value for this argument."""
+    return 'true'
+
 
 class DataSizeArgument(Argument):
   """class for data_size which Bucket commands do not need."""
@@ -4335,7 +4483,7 @@ class SizeNotNegativeArgument(SizeArgument):
 
 
 class EnumBaseArgument(Argument):
-  """Base class for EnumArgument, IntArgument and BoolArgument"""
+  """Base class for EnumArgument, IntArgument and ValidatedBoolArgument"""
 
   def __init__(self, name, gl_type, type, gl_error):
     Argument.__init__(self, name, gl_type)
@@ -4393,6 +4541,11 @@ class EnumArgument(EnumBaseArgument):
   def __init__(self, name, type):
     EnumBaseArgument.__init__(self, name, "GLenum", type, "GL_INVALID_ENUM")
 
+  def GetLogArg(self):
+    """Overridden from Argument."""
+    return ("GLES2Util::GetString%s(%s)" %
+            (self.type_name, self.name))
+
 
 class IntArgument(EnumBaseArgument):
   """A class for a GLint argument that can only except specific values.
@@ -4405,7 +4558,7 @@ class IntArgument(EnumBaseArgument):
     EnumBaseArgument.__init__(self, name, "GLint", type, "GL_INVALID_VALUE")
 
 
-class BoolArgument(EnumBaseArgument):
+class ValidatedBoolArgument(EnumBaseArgument):
   """A class for a GLboolean argument that can only except specific values.
 
   For example glUniformMatrix takes a GLboolean for it's transpose but it
@@ -4414,6 +4567,10 @@ class BoolArgument(EnumBaseArgument):
 
   def __init__(self, name, type):
     EnumBaseArgument.__init__(self, name, "GLboolean", type, "GL_INVALID_VALUE")
+
+  def GetLogArg(self):
+    """Overridden from Argument."""
+    return 'GLES2Util::GetStringBool(%s)' % self.name
 
 
 class ImmediatePointerArgument(Argument):
@@ -4450,6 +4607,10 @@ class ImmediatePointerArgument(Argument):
     """Overridden from Argument."""
     self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
 
+  def GetLogArg(self):
+    """Overridden from Argument."""
+    return "static_cast<const void*>(%s)" % self.name
+
 
 class BucketPointerArgument(Argument):
   """A class that represents an bucket argument to a function."""
@@ -4478,6 +4639,10 @@ class BucketPointerArgument(Argument):
   def WriteDestinationInitalizationValidation(self, file, func):
     """Overridden from Argument."""
     self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
+
+  def GetLogArg(self):
+    """Overridden from Argument."""
+    return "static_cast<const void*>(%s)" % self.name
 
 
 class PointerArgument(Argument):
@@ -4509,6 +4674,10 @@ class PointerArgument(Argument):
     else:
       return ("shared_memory_id_, kInvalidSharedMemoryOffset",
               "kOutOfBounds", None)
+
+  def GetLogArg(self):
+    """Overridden from Argument."""
+    return "static_cast<const void*>(%s)" % self.name
 
   def AddCmdArgs(self, args):
     """Overridden from Argument."""
@@ -4805,6 +4974,11 @@ class Function(object):
         ["%s%s" % (prefix, arg.name) for arg in args])
     return self.__GetArgList(arg_string, add_comma)
 
+  def MakeLogArgString(self):
+    """Makes a string of the arguments for the LOG macros"""
+    args = self.GetOriginalArgs()
+    return ' << ", " << '.join([arg.GetLogArg() for arg in args])
+
   def WriteCommandDescription(self, file):
     """Writes a description of the command."""
     file.Write("//! Command that corresponds to gl%s.\n" % self.original_name)
@@ -5059,6 +5233,8 @@ def CreateArg(arg_string):
   elif arg_parts[0].startswith('GLenum') and len(arg_parts[0]) > 6:
     return EnumArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   elif arg_parts[0].startswith('GLboolean') and len(arg_parts[0]) > 9:
+    return ValidatedBoolArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
+  elif arg_parts[0].startswith('GLboolean'):
     return BoolArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   elif (arg_parts[0].startswith('GLint') and len(arg_parts[0]) > 5 and
         not arg_parts[0].startswith('GLintptr')):
@@ -5375,24 +5551,12 @@ class GLGenerator(object):
       file.Write("%s GLES2%s(%s) {\n" %
                  (func.return_type, func.name,
                   func.MakeTypedOriginalArgString("")))
-      func.WriteDestinationInitalizationValidation(file)
-      comma = ""
-      if len(func.GetOriginalArgs()):
-        comma = " << "
-      file.Write(
-          '  GPU_CLIENT_LOG("%s" << "("%s%s << ")");\n' %
-          (func.original_name, comma, func.MakeOriginalArgString(
-              "", separator=' << ", " << ')))
-      result_string = "%s result = " % func.return_type
-      return_string = (
-          '  GPU_CLIENT_LOG("return:" << result)\n  return result;\n')
+      result_string = "return "
       if func.return_type == "void":
         result_string = ""
-        return_string = ""
       file.Write("  %sgles2::GetGLContext()->%s(%s);\n" %
                  (result_string, func.original_name,
                   func.MakeOriginalArgString("")))
-      file.Write(return_string)
       file.Write("}\n")
 
     file.Write("\n")
@@ -5454,6 +5618,66 @@ class GLGenerator(object):
     file.Write("}\n\n");
     file.Close()
 
+  def WriteCommonUtilsHeader(self, filename):
+    """Writes the gles2 common utility header."""
+    file = CHeaderWriter(filename)
+    enums = sorted(_ENUM_LISTS.keys())
+    for enum in enums:
+      if _ENUM_LISTS[enum]['type'] == 'GLenum':
+        file.Write("static std::string GetString%s(uint32 value);\n" % enum)
+    file.Write("\n")
+    file.Close()
+
+  def WriteCommonUtilsImpl(self, filename):
+    """Writes the gles2 common utility header."""
+    enum_re = re.compile(r'\#define\s+(GL_[a-zA-Z0-9_]+)\s+([0-9A-Fa-fx]+)')
+    dict = {}
+    for fname in ['../GLES2/gl2.h', '../GLES2/gl2ext.h']:
+      lines = open(fname).readlines()
+      for line in lines:
+        m = enum_re.match(line)
+        if m:
+          name = m.group(1)
+          value = m.group(2)
+          if not value in dict:
+            dict[value] = name
+
+    file = CHeaderWriter(filename)
+    file.Write("static GLES2Util::EnumToString enum_to_string_table[] = {\n")
+    for value in dict:
+      file.Write('  { %s, "%s", },\n' % (value, dict[value]))
+    file.Write("""};
+
+const GLES2Util::EnumToString* GLES2Util::enum_to_string_table_ =
+    enum_to_string_table;
+const size_t GLES2Util::enum_to_string_table_len_ =
+    sizeof(enum_to_string_table) / sizeof(enum_to_string_table[0]);
+
+""")
+
+    enums = sorted(_ENUM_LISTS.keys())
+    for enum in enums:
+      if _ENUM_LISTS[enum]['type'] == 'GLenum':
+        file.Write("std::string GLES2Util::GetString%s(uint32 value) {\n" %
+                   enum)
+        if len(_ENUM_LISTS[enum]['valid']) > 0:
+          file.Write("  static EnumToString string_table[] = {\n")
+          for value in _ENUM_LISTS[enum]['valid']:
+            file.Write('    { %s, "%s" },\n' % (value, value))
+          file.Write("""  };
+  return GLES2Util::GetQualifiedEnumString(
+      string_table, arraysize(string_table), value);
+}
+
+""")
+        else:
+          file.Write("""  return GLES2Util::GetQualifiedEnumString(
+      NULL, 0, value);
+}
+
+""")
+    file.Close()
+
   def WritePepperGLES2Interface(self, filename):
     """Writes the Pepper OpenGLES interface definition."""
     file = CHeaderWriter(
@@ -5492,17 +5716,28 @@ class GLGenerator(object):
 
     file = CWriter(filename)
     file.Write(_LICENSE)
-    file.Write("// This file is auto-generated. DO NOT EDIT!\n\n")
+    file.Write(_DO_NOT_EDIT_WARNING)
 
-    file.Write("#include \"webkit/plugins/ppapi/ppb_opengles_impl.h\"\n\n")
-
+    file.Write("#include \"ppapi/shared_impl/opengles2_impl.h\"\n\n")
+    file.Write("#include \"base/logging.h\"\n")
     file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"\n")
-    file.Write("#include \"ppapi/c/dev/ppb_opengles_dev.h\"\n")
-    file.Write("#include \"webkit/plugins/ppapi/ppb_context_3d_impl.h\"\n\n")
+    file.Write("#include \"ppapi/shared_impl/graphics_3d_impl.h\"\n")
+    file.Write("#include \"ppapi/thunk/enter.h\"\n")
+    file.Write("#include \"ppapi/thunk/ppb_context_3d_api.h\"\n\n")
 
-    file.Write("namespace webkit {\n")
     file.Write("namespace ppapi {\n\n")
     file.Write("namespace {\n\n")
+
+    file.Write("gpu::gles2::GLES2Implementation* GetGLES(PP_Resource context) {\n")
+    file.Write("  thunk::EnterResource<thunk::PPB_Graphics3D_API> enter_g3d(context, false);\n")
+    file.Write("  if (enter_g3d.succeeded()) {\n")
+    file.Write("    return static_cast<Graphics3DImpl*>(enter_g3d.object())->gles2_impl();\n")
+    file.Write("  } else {\n")
+    file.Write("    thunk::EnterResource<thunk::PPB_Context3D_API> enter_c3d(context, true);\n")
+    file.Write("    DCHECK(enter_c3d.succeeded());\n")
+    file.Write("    return enter_c3d.object()->GetGLES2Impl();\n")
+    file.Write("  }\n")
+    file.Write("}\n\n")
 
     for func in self.original_functions:
       if not func.IsCoreGLFunction():
@@ -5516,12 +5751,8 @@ class GLGenerator(object):
         arg = context_arg
       file.Write("%s %s(%s) {\n" % (func.return_type, func.name, arg))
 
-      file.Write("""  scoped_refptr<PPB_Context3D_Impl> context =
-      Resource::GetAs<PPB_Context3D_Impl>(context_id);
-""")
-
       return_str = "" if func.return_type == "void" else "return "
-      file.Write("  %scontext->gles2_impl()->%s(%s);\n" %
+      file.Write("  %sGetGLES(context_id)->%s(%s);\n" %
                  (return_str, func.original_name,
                   func.MakeOriginalArgString("")))
       file.Write("}\n\n")
@@ -5536,101 +5767,12 @@ class GLGenerator(object):
     file.Write("}  // namespace\n")
 
     file.Write("""
-const PPB_OpenGLES2_Dev* PPB_OpenGLES_Impl::GetInterface() {
+const PPB_OpenGLES2_Dev* OpenGLES2Impl::GetInterface() {
   return &ppb_opengles2;
 }
 
 """)
     file.Write("}  // namespace ppapi\n")
-    file.Write("}  // namespace webkit\n\n")
-
-    file.Close()
-
-  def WritePepperGLES2ProxyImplementation(self, filename):
-    """Writes the Pepper OpenGLES interface implementation."""
-
-    file = CWriter(filename)
-    file.Write(_LICENSE)
-    file.Write("// This file is auto-generated. DO NOT EDIT!\n\n")
-
-    file.Write("#include \"ppapi/proxy/ppb_opengles2_proxy.h\"\n\n")
-
-    file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"\n")
-    file.Write("#include \"ppapi/c/pp_errors.h\"\n")
-    file.Write("#include \"ppapi/c/pp_resource.h\"\n")
-    file.Write("#include \"ppapi/c/dev/ppb_opengles_dev.h\"\n")
-    file.Write("#include \"ppapi/proxy/plugin_dispatcher.h\"\n")
-    file.Write("#include \"ppapi/proxy/plugin_resource.h\"\n")
-    file.Write("#include \"ppapi/proxy/ppb_context_3d_proxy.h\"\n\n")
-
-    file.Write("namespace pp {\n")
-    file.Write("namespace proxy {\n\n")
-    file.Write("namespace {\n\n")
-
-
-    for func in self.original_functions:
-      if not func.IsCoreGLFunction():
-        continue
-
-      original_arg = func.MakeTypedOriginalArgString("")
-      context_arg = "PP_Resource context_id"
-      if len(original_arg):
-        arg = context_arg + ", " + original_arg
-      else:
-        arg = context_arg
-      file.Write("%s %s(%s) {\n" % (func.return_type, func.name, arg))
-
-      file.Write("""  Context3D* context = PluginResource::GetAs<Context3D>(context_id);\n""")
-
-      return_str = "" if func.return_type == "void" else "return "
-      file.Write("  %scontext->gles2_impl()->%s(%s);\n" %
-                 (return_str, func.original_name,
-                  func.MakeOriginalArgString("")))
-      file.Write("}\n\n")
-
-    file.Write("const struct PPB_OpenGLES2_Dev opengles2_interface = {\n")
-    file.Write("  &")
-    file.Write(",\n  &".join(
-      f.name for f in self.original_functions if f.IsCoreGLFunction()))
-    file.Write("\n")
-    file.Write("};\n\n")
-
-    file.Write("""
-InterfaceProxy* CreateOpenGLES2Proxy(Dispatcher* dispatcher,
-                                     const void* target_interface) {
-  return new PPB_OpenGLES2_Proxy(dispatcher, target_interface);
-}
-
-}  // namespace
-
-PPB_OpenGLES2_Proxy::PPB_OpenGLES2_Proxy(Dispatcher* dispatcher,
-                                         const void* target_interface)
-    : InterfaceProxy(dispatcher, target_interface) {
-}
-
-PPB_OpenGLES2_Proxy::~PPB_OpenGLES2_Proxy() {
-}
-
-// static
-const InterfaceProxy::Info* PPB_OpenGLES2_Proxy::GetInfo() {
-  static const Info info = {
-    &opengles2_interface,
-    PPB_OPENGLES2_DEV_INTERFACE,
-    INTERFACE_ID_PPB_OPENGLES2,
-    false,
-    &CreateOpenGLES2Proxy,
-  };
-  return &info;
-}
-
-bool PPB_OpenGLES2_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  return false;
-}
-
-""")
-    file.Write("}  // namespace proxy\n")
-    file.Write("}  // namespace pp\n")
-
     file.Close()
 
   def WriteGLES2ToPPAPIBridge(self, filename):
@@ -5638,7 +5780,7 @@ bool PPB_OpenGLES2_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
     file = CWriter(filename)
     file.Write(_LICENSE)
-    file.Write("// This file is auto-generated. DO NOT EDIT!\n\n")
+    file.Write(_DO_NOT_EDIT_WARNING)
 
     file.Write("#include <GLES2/gl2.h>\n")
     file.Write("#include \"ppapi/lib/gl/gles2/gl2ext_ppapi.h\"\n\n")
@@ -5667,7 +5809,7 @@ bool PPB_OpenGLES2_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
     file = CWriter(filename)
     file.Write(_LICENSE)
-    file.Write("// This file is auto-generated. DO NOT EDIT!\n\n")
+    file.Write(_DO_NOT_EDIT_WARNING)
 
     file.Write("#include \"native_client/src/shared/ppapi_proxy"
         "/plugin_context_3d.h\"\n\n")
@@ -5760,12 +5902,7 @@ def main(argv):
 
   elif options.alternate_mode == "chrome_ppapi":
     # To trigger this action, do "make ppapi_gles_implementation"
-    gen.WritePepperGLES2Implementation(
-        "webkit/plugins/ppapi/ppb_opengles_impl.cc")
-
-  elif options.alternate_mode == "chrome_ppapi_proxy":
-    gen.WritePepperGLES2ProxyImplementation(
-        "ppapi/proxy/ppb_opengles2_proxy.cc")
+    gen.WritePepperGLES2Implementation("ppapi/shared_impl/opengles2_impl.cc")
 
   elif options.alternate_mode == "nacl_ppapi":
     gen.WritePepperGLES2NaClProxy(
@@ -5784,6 +5921,8 @@ def main(argv):
     gen.WriteServiceUtilsHeader("service/gles2_cmd_validation_autogen.h")
     gen.WriteServiceUtilsImplementation(
         "service/gles2_cmd_validation_implementation_autogen.h")
+    gen.WriteCommonUtilsHeader("common/gles2_cmd_utils_autogen.h")
+    gen.WriteCommonUtilsImpl("common/gles2_cmd_utils_implementation_autogen.h")
 
     if options.generate_command_id_tests:
       gen.WriteCommandIdTest("common/gles2_cmd_id_test_autogen.h")

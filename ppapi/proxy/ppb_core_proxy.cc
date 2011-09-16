@@ -6,6 +6,7 @@
 
 #include <stdlib.h>  // For malloc
 
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
@@ -16,6 +17,10 @@
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/time_conversion.h"
+
+using ppapi::TimeToPPTime;
+using ppapi::TimeTicksToPPTimeTicks;
 
 namespace pp {
 namespace proxy {
@@ -45,14 +50,18 @@ void MemFree(void* ptr) {
 }
 
 double GetTime() {
-  return base::Time::Now().ToDoubleT();
+  return TimeToPPTime(base::Time::Now());
 }
 
 double GetTimeTicks() {
-  // TODO(brettw) http://code.google.com/p/chromium/issues/detail?id=57448
-  // This should be a tick timer rather than wall clock time, but needs to
-  // match message times, which also currently use wall clock time.
-  return GetTime();
+  return TimeTicksToPPTimeTicks(base::TimeTicks::Now());
+}
+
+void CallbackWrapper(PP_CompletionCallback callback, int32_t result) {
+  TRACE_EVENT2("ppapi proxy", "CallOnMainThread callback",
+               "Func", reinterpret_cast<void*>(callback.func),
+               "UserData", callback.user_data);
+  PP_RunCompletionCallback(&callback, result);
 }
 
 void CallOnMainThread(int delay_in_ms,
@@ -60,19 +69,17 @@ void CallOnMainThread(int delay_in_ms,
                       int32_t result) {
   GetMainThreadMessageLoop()->PostDelayedTask(
       FROM_HERE,
-      NewRunnableFunction(callback.func, callback.user_data, result),
+      NewRunnableFunction(&CallbackWrapper, callback, result),
       delay_in_ms);
 }
 
 PP_Bool IsMainThread() {
-  return BoolToPPBool(GetMainThreadMessageLoop()->BelongsToCurrentThread());
+  return PP_FromBool(GetMainThreadMessageLoop()->BelongsToCurrentThread());
 }
 
 const PPB_Core core_interface = {
   &AddRefResource,
   &ReleaseResource,
-  &MemAlloc,
-  &MemFree,
   &GetTime,
   &GetTimeTicks,
   &CallOnMainThread,

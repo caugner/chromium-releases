@@ -10,11 +10,12 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/test/test_timeouts.h"
-#include "chrome/browser/net/url_request_failed_dns_job.h"
-#include "chrome/browser/net/url_request_mock_http_job.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "content/browser/net/url_request_failed_dns_job.h"
+#include "content/browser/net/url_request_mock_http_job.h"
 #include "content/common/test_url_constants.h"
 #include "content/common/url_constants.h"
 #include "net/base/net_util.h"
@@ -226,8 +227,15 @@ TEST_F(ResourceDispatcherTest, CrossSiteImmediateLoadOnunloadCookie) {
   ASSERT_STREQ("foo", value_result.c_str());
 }
 
+#if defined(OS_WIN)
+// Seems to fail sometimes on Windows: http://crbug.com/80596
+#define MAYBE_CrossSiteNoUnloadOn204 FLAKY_CrossSiteNoUnloadOn204
+#else
+#define MAYBE_CrossSiteNoUnloadOn204 CrossSiteNoUnloadOn204
+#endif
+
 // Tests that the unload handler is not run for 204 responses.
-TEST_F(ResourceDispatcherTest, CrossSiteNoUnloadOn204) {
+TEST_F(ResourceDispatcherTest, MAYBE_CrossSiteNoUnloadOn204) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());

@@ -17,7 +17,16 @@ CustomContextMenuContext::CustomContextMenuContext()
 
 }  // namespace webkit_glue
 
-ContextMenuParams::ContextMenuParams() {
+ContextMenuParams::ContextMenuParams()
+    : media_type(WebKit::WebContextMenuData::MediaTypeNone),
+      x(0),
+      y(0),
+      is_image_blocked(false),
+      frame_id(0),
+      media_flags(0),
+      spellcheck_enabled(false),
+      is_editable(false),
+      edit_flags(0) {
 }
 
 ContextMenuParams::ContextMenuParams(const WebKit::WebContextMenuData& data)
@@ -29,7 +38,9 @@ ContextMenuParams::ContextMenuParams(const WebKit::WebContextMenuData& data)
       src_url(data.srcURL),
       is_image_blocked(data.isImageBlocked),
       page_url(data.pageURL),
+      keyword_url(data.keywordURL),
       frame_url(data.frameURL),
+      frame_id(0),
       media_flags(data.mediaFlags),
       selection_text(data.selectedText),
       misspelled_word(data.misspelledWord),

@@ -9,23 +9,19 @@
 #include <string>
 #include <vector>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "base/values.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
-#include "chrome/browser/prerender/prerender_render_view_host_observer.h"
-#include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
-#include "chrome/browser/ui/download/download_tab_helper_delegate.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/window_container_type.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class RenderViewHost;
 class TabContents;
 class TabContentsWrapper;
 struct FaviconURL;
 struct ViewHostMsg_FrameNavigate_Params;
-struct WebPreferences;
 
 namespace base {
 class ProcessMetrics;
@@ -38,6 +34,7 @@ class Rect;
 namespace prerender {
 
 class PrerenderManager;
+class PrerenderRenderViewHostObserver;
 class PrerenderTracker;
 
 // This class is a peer of TabContents. It can host a renderer, but does not
@@ -46,8 +43,7 @@ class PrerenderTracker;
 // programatically view window.location.href) or RenderViewHostManager because
 // it is never allowed to navigate across a SiteInstance boundary.
 class PrerenderContents : public NotificationObserver,
-                          public TabContentsObserver,
-                          public DownloadTabHelperDelegate {
+                          public TabContentsObserver {
  public:
   // PrerenderContents::Create uses the currently registered Factory to create
   // the PrerenderContents. Factory is intended for testing.
@@ -63,7 +59,9 @@ class PrerenderContents : public NotificationObserver,
         PrerenderTracker* prerender_tracker,
         Profile* profile,
         const GURL& url,
-        const GURL& referrer) = 0;
+        const GURL& referrer,
+        Origin origin,
+        uint8 experiment_id) = 0;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Factory);
@@ -93,6 +91,7 @@ class PrerenderContents : public NotificationObserver,
   string16 title() const { return title_; }
   int32 page_id() const { return page_id_; }
   GURL icon_url() const { return icon_url_; }
+  const GURL& prerender_url() const { return prerender_url_; }
   bool has_stopped_loading() const { return has_stopped_loading_; }
   bool prerendering_has_started() const { return prerendering_has_started_; }
 
@@ -108,7 +107,9 @@ class PrerenderContents : public NotificationObserver,
   // should only be called once, and should be called before the prerender
   // contents are destroyed.
   void set_final_status(FinalStatus final_status);
-  FinalStatus final_status() const;
+  FinalStatus final_status() const { return final_status_; }
+
+  Origin origin() const { return origin_; }
 
   base::TimeTicks load_start_time() const { return load_start_time_; }
 
@@ -130,20 +131,15 @@ class PrerenderContents : public NotificationObserver,
   virtual void DidStopLoading() OVERRIDE;
 
   // NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
-
-  // DownloadTabHelperDelegate implementation.
-  virtual bool CanDownload(int request_id) OVERRIDE;
-  virtual void OnStartDownload(DownloadItem* download,
-                               TabContentsWrapper* tab) OVERRIDE;
 
   // Adds an alias URL, for one of the many redirections. If the URL can not
   // be prerendered - for example, it's an ftp URL - |this| will be destroyed
   // and false is returned. Otherwise, true is returned and the alias is
   // remembered.
-  bool AddAliasURL(const GURL& url);
+  virtual bool AddAliasURL(const GURL& url);
 
   // The preview TabContents (may be null).
   TabContentsWrapper* prerender_contents() const {
@@ -162,14 +158,21 @@ class PrerenderContents : public NotificationObserver,
 
   int32 starting_page_id() { return starting_page_id_; }
 
+  base::Value* GetAsValue() const;
+
+  // Returns whether a pending cross-site navigation is happening.
+  // This could happen with renderer-issued navigations, such as a
+  // MouseEvent being dispatched by a link to a website installed as an app.
+  bool IsCrossSiteNavigationPending() const;
+
  protected:
   PrerenderContents(PrerenderManager* prerender_manager,
                     PrerenderTracker* prerender_tracker,
                     Profile* profile,
                     const GURL& url,
-                    const GURL& referrer);
-
-  const GURL& prerender_url() const { return prerender_url_; }
+                    const GURL& referrer,
+                    Origin origin,
+                    uint8 experiment_id);
 
   NotificationRegistrar& notification_registrar() {
     return notification_registrar_;
@@ -206,9 +209,6 @@ class PrerenderContents : public NotificationObserver,
   // The prerender tracker tracking prerenders.
   PrerenderTracker* prerender_tracker_;
 
-  // Common implementations of some RenderViewHostDelegate::View methods.
-  RenderViewHostDelegateViewHelper delegate_view_helper_;
-
   // The URL being prerendered.
   GURL prerender_url_;
 
@@ -231,7 +231,6 @@ class PrerenderContents : public NotificationObserver,
   GURL url_;
   GURL icon_url_;
   NotificationRegistrar notification_registrar_;
-  TabContentsObserver::Registrar tab_contents_observer_registrar_;
 
   // A vector of URLs that this prerendered page matches against.
   // This array can contain more than element as a result of redirects,
@@ -272,6 +271,12 @@ class PrerenderContents : public NotificationObserver,
 
   // Page ID at which prerendering started.
   int32 starting_page_id_;
+
+  // Origin for this prerender.
+  Origin origin_;
+
+  // Experiment during which this prerender is performed.
+  uint8 experiment_id_;
 
   // Offset by which to offset prerendered pages
   static const int32 kPrerenderPageIdOffset = 10;

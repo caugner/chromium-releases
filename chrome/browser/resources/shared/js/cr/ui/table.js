@@ -89,6 +89,35 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * Returns render function for row.
+     * @return {Function(*, cr.ui.Table): HTMLElement} Render function.
+     */
+    getRenderFunction: function() {
+      return this.list_.renderFunction_;
+    },
+
+    /**
+     * Sets render function for row.
+     * @param {Function(*, cr.ui.Table): HTMLElement} Render function.
+     */
+    setRenderFunction: function(renderFunction) {
+      if (renderFunction === this.list_.renderFunction_)
+        return;
+
+      this.list_.renderFunction_ = renderFunction;
+      cr.dispatchSimpleEvent(this, 'change');
+    },
+
+    /**
+     * The header of the table.
+     *
+     * @type {cr.ui.table.TableColumnModel}
+     */
+    get header() {
+      return this.header_;
+    },
+
+    /**
      * Sets width of the column at the given index.
      *
      * @param {number} index The index of the column.
@@ -120,9 +149,12 @@ cr.define('cr.ui', function() {
       this.boundResize_ = this.resize.bind(this);
       this.boundHandleSorted_ = this.handleSorted_.bind(this);
 
-      // Make table focusable
-      if (!this.hasAttribute('tabindex'))
-        this.tabIndex = 0;
+      // The contained list should be focusable, not the table itself.
+      if (this.hasAttribute('tabindex')) {
+        this.list_.setAttribute('tabindex', this.getAttribute('tabindex'));
+        this.removeAttribute('tabindex');
+      }
+
       this.addEventListener('focus', this.handleElementFocus_, true);
       this.addEventListener('blur', this.handleElementBlur_, true);
     },

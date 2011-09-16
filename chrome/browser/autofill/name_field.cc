@@ -77,13 +77,12 @@ bool NameField::ClassifyField(FieldTypeMap* map) const {
 }
 
 FullNameField* FullNameField::Parse(AutofillScanner* scanner) {
-  // Exclude labels containing the string "username", which typically
-  // denotes a login ID rather than the user's actual name.
+  // Exclude e.g. "username" or "nickname" fields.
   scanner->SaveCursor();
-  bool is_username = ParseField(
-      scanner, l10n_util::GetStringUTF16(IDS_AUTOFILL_USERNAME_RE), NULL);
+  bool should_ignore = ParseField(
+      scanner, l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_IGNORED_RE), NULL);
   scanner->Rewind();
-  if (is_username)
+  if (should_ignore)
     return NULL;
 
   // Searching for any label containing the word "name" is too general;
@@ -150,17 +149,17 @@ FirstLastNameField* FirstLastNameField::ParseComponentNames(
 
   // Allow name fields to appear in any order.
   while (!scanner->IsEnd()) {
+    // Skip over any unrelated fields, e.g. "username" or "nickname".
+    if (ParseField(scanner,
+                   l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_IGNORED_RE),
+                   NULL)) {
+          continue;
+    }
+
     if (!v->first_name_ &&
         ParseField(scanner,
                    l10n_util::GetStringUTF16(IDS_AUTOFILL_FIRST_NAME_RE),
                    &v->first_name_)) {
-      continue;
-    }
-
-    if (!v->last_name_ &&
-        ParseField(scanner,
-                   l10n_util::GetStringUTF16(IDS_AUTOFILL_LAST_NAME_RE),
-                   &v->last_name_)) {
       continue;
     }
 
@@ -181,6 +180,13 @@ FirstLastNameField* FirstLastNameField::ParseComponentNames(
         ParseField(scanner,
                    l10n_util::GetStringUTF16(IDS_AUTOFILL_MIDDLE_NAME_RE),
                    &v->middle_name_)) {
+      continue;
+    }
+
+    if (!v->last_name_ &&
+        ParseField(scanner,
+                   l10n_util::GetStringUTF16(IDS_AUTOFILL_LAST_NAME_RE),
+                   &v->last_name_)) {
       continue;
     }
 

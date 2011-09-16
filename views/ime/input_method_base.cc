@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "views/ime/input_method_base.h"
+#include "views/ime/text_input_type_tracker.h"
 #include "views/view.h"
 #include "views/widget/widget.h"
 
@@ -39,15 +40,29 @@ void InputMethodBase::Init(Widget* widget) {
   }
 
   widget_ = widget;
+  View* focused = widget->GetFocusManager()->GetFocusedView();
+  if (focused)
+    FocusWillChange(NULL, focused);
   widget->GetFocusManager()->AddFocusChangeListener(this);
 }
 
 void InputMethodBase::OnFocus() {
   widget_focused_ = true;
+  TextInputTypeTracker::GetInstance()->OnTextInputTypeChanged(
+      GetTextInputType(), widget_);
 }
 
 void InputMethodBase::OnBlur() {
   widget_focused_ = false;
+  TextInputTypeTracker::GetInstance()->OnTextInputTypeChanged(
+      GetTextInputType(), widget_);
+}
+
+void InputMethodBase::OnTextInputTypeChanged(View* view) {
+  if (IsViewFocused(view)) {
+    TextInputTypeTracker::GetInstance()->OnTextInputTypeChanged(
+        GetTextInputType(), widget_);
+  }
 }
 
 TextInputClient* InputMethodBase::GetTextInputClient() const {
@@ -65,6 +80,11 @@ void InputMethodBase::FocusWillChange(View* focused_before, View* focused) {
   FocusedViewWillChange();
   focused_view_ = focused;
   FocusedViewDidChange();
+
+  if (widget_focused_) {
+    TextInputTypeTracker::GetInstance()->OnTextInputTypeChanged(
+        GetTextInputType(), widget_);
+  }
 }
 
 bool InputMethodBase::IsViewFocused(View* view) const {
@@ -92,14 +112,7 @@ bool InputMethodBase::GetCaretBoundsInWidget(gfx::Rect* rect) const {
   if (!client || client->GetTextInputType() == ui::TEXT_INPUT_TYPE_NONE)
     return false;
 
-  *rect = client->GetCaretBounds();
-  gfx::Point origin = rect->origin();
-  gfx::Point end = gfx::Point(rect->right(), rect->bottom());
-
-  View::ConvertPointToWidget(focused_view_, &origin);
-  View::ConvertPointToWidget(focused_view_, &end);
-  rect->SetRect(origin.x(), origin.y(),
-                end.x() - origin.x(), end.y() - origin.y());
+  *rect = focused_view_->ConvertRectToWidget(client->GetCaretBounds());
 
   // We need to do coordinate conversion if the focused view is inside a child
   // Widget.

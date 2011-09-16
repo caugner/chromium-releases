@@ -5,7 +5,8 @@
 #include "chrome/browser/policy/device_policy_cache.h"
 
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/policy/device_policy_identity_strategy.h"
+#include "chrome/browser/chromeos/login/mock_signed_settings_helper.h"
+#include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "policy/configuration_policy_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -23,40 +24,6 @@ using ::chromeos::SignedSettingsHelper;
 using ::testing::_;
 using ::testing::InSequence;
 
-class MockSignedSettingsHelper : public SignedSettingsHelper {
- public:
-  MockSignedSettingsHelper() {}
-  virtual ~MockSignedSettingsHelper() {}
-
-  MOCK_METHOD2(StartStorePolicyOp, void(const em::PolicyFetchResponse&,
-                                        SignedSettingsHelper::Callback*));
-  MOCK_METHOD1(StartRetrievePolicyOp, void(SignedSettingsHelper::Callback*));
-  MOCK_METHOD1(CancelCallback, void(SignedSettingsHelper::Callback*));
-
-  // This test doesn't need these methods, but since they're pure virtual in
-  // SignedSettingsHelper, they must be implemented:
-  MOCK_METHOD2(StartCheckWhitelistOp, void(const std::string&,
-                                           SignedSettingsHelper::Callback*));
-  MOCK_METHOD3(StartWhitelistOp, void(const std::string&, bool,
-                                      SignedSettingsHelper::Callback*));
-  MOCK_METHOD3(StartStorePropertyOp, void(const std::string&,
-                                          const std::string&,
-                                          SignedSettingsHelper::Callback*));
-  MOCK_METHOD2(StartRetrieveProperty, void(const std::string&,
-                                           SignedSettingsHelper::Callback*));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockSignedSettingsHelper);
-};
-
-ACTION_P(MockSignedSettingsHelperStorePolicy, status_code) {
-  arg1->OnStorePolicyCompleted(status_code);
-}
-
-ACTION_P2(MockSignedSettingsHelperRetrievePolicy, status_code, policy) {
-  arg0->OnRetrievePolicyCompleted(status_code, policy);
-}
-
 void CreateRefreshRatePolicy(em::PolicyFetchResponse* policy,
                              const std::string& user,
                              int refresh_rate) {
@@ -64,7 +31,8 @@ void CreateRefreshRatePolicy(em::PolicyFetchResponse* policy,
   // timestamp, machine_name, policy_type, public key info.
   em::PolicyData signed_response;
   em::ChromeDeviceSettingsProto settings;
-  settings.mutable_policy_refresh_rate()->set_policy_refresh_rate(refresh_rate);
+  settings.mutable_device_policy_refresh_rate()->
+      set_device_policy_refresh_rate(refresh_rate);
   signed_response.set_username(user);
   signed_response.set_request_token("dmtoken");
   signed_response.set_device_id("deviceid");
@@ -108,7 +76,8 @@ class DevicePolicyCacheTest : public testing::Test {
         install_attributes_(cryptohome_.get()) {}
 
   virtual void SetUp() {
-    cache_.reset(new DevicePolicyCache(&identity_strategy_,
+    data_store_.reset(CloudPolicyDataStore::CreateForUserPolicies());
+    cache_.reset(new DevicePolicyCache(data_store_.get(),
                                        &install_attributes_,
                                        &signed_settings_helper_));
   }
@@ -133,8 +102,8 @@ class DevicePolicyCacheTest : public testing::Test {
 
   scoped_ptr<chromeos::CryptohomeLibrary> cryptohome_;
   EnterpriseInstallAttributes install_attributes_;
-  DevicePolicyIdentityStrategy identity_strategy_;
-  MockSignedSettingsHelper signed_settings_helper_;
+  scoped_ptr<CloudPolicyDataStore> data_store_;
+  chromeos::MockSignedSettingsHelper signed_settings_helper_;
   scoped_ptr<DevicePolicyCache> cache_;
 
  private:
@@ -151,7 +120,8 @@ TEST_F(DevicePolicyCacheTest, Startup) {
   testing::Mock::VerifyAndClearExpectations(&signed_settings_helper_);
   FundamentalValue expected(120);
   EXPECT_TRUE(Value::Equals(&expected,
-                            GetMandatoryPolicy(kPolicyPolicyRefreshRate)));
+                            GetMandatoryPolicy(
+                                kPolicyDevicePolicyRefreshRate)));
 }
 
 TEST_F(DevicePolicyCacheTest, SetPolicy) {
@@ -169,7 +139,8 @@ TEST_F(DevicePolicyCacheTest, SetPolicy) {
   testing::Mock::VerifyAndClearExpectations(&signed_settings_helper_);
   FundamentalValue expected(120);
   EXPECT_TRUE(Value::Equals(&expected,
-                            GetMandatoryPolicy(kPolicyPolicyRefreshRate)));
+                            GetMandatoryPolicy(
+                                kPolicyDevicePolicyRefreshRate)));
 
   // Set new policy information.
   em::PolicyFetchResponse new_policy;
@@ -179,11 +150,13 @@ TEST_F(DevicePolicyCacheTest, SetPolicy) {
   EXPECT_CALL(signed_settings_helper_, StartRetrievePolicyOp(_)).WillOnce(
       MockSignedSettingsHelperRetrievePolicy(SignedSettings::SUCCESS,
                                              new_policy));
+  EXPECT_CALL(signed_settings_helper_, CancelCallback(_));
   cache_->SetPolicy(new_policy);
   testing::Mock::VerifyAndClearExpectations(&signed_settings_helper_);
   FundamentalValue updated_expected(300);
   EXPECT_TRUE(Value::Equals(&updated_expected,
-                            GetMandatoryPolicy(kPolicyPolicyRefreshRate)));
+                            GetMandatoryPolicy(
+                                kPolicyDevicePolicyRefreshRate)));
 }
 
 TEST_F(DevicePolicyCacheTest, SetPolicyWrongUser) {
@@ -209,7 +182,8 @@ TEST_F(DevicePolicyCacheTest, SetPolicyWrongUser) {
 
   FundamentalValue expected(120);
   EXPECT_TRUE(Value::Equals(&expected,
-                            GetMandatoryPolicy(kPolicyPolicyRefreshRate)));
+                            GetMandatoryPolicy(
+                                kPolicyDevicePolicyRefreshRate)));
 }
 
 TEST_F(DevicePolicyCacheTest, SetPolicyNonEnterpriseDevice) {
@@ -233,7 +207,8 @@ TEST_F(DevicePolicyCacheTest, SetPolicyNonEnterpriseDevice) {
 
   FundamentalValue expected(120);
   EXPECT_TRUE(Value::Equals(&expected,
-                            GetMandatoryPolicy(kPolicyPolicyRefreshRate)));
+                            GetMandatoryPolicy(
+                                kPolicyDevicePolicyRefreshRate)));
 }
 
 TEST_F(DevicePolicyCacheTest, SetProxyPolicy) {

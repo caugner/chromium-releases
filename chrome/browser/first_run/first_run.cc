@@ -21,7 +21,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -136,7 +137,8 @@ bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
       int retcode = 0;
       if (!LaunchSetupWithParam(installer::switches::kShowEula,
                                 inner_html.value(), &retcode) ||
-          (retcode == installer::EULA_REJECTED)) {
+          (retcode != installer::EULA_ACCEPTED &&
+           retcode != installer::EULA_ACCEPTED_OPT_IN)) {
         LOG(WARNING) << "EULA rejected. Fast exit.";
         ::ExitProcess(1);
       }
@@ -439,7 +441,7 @@ int FirstRun::ImportFromFile(Profile* profile, const CommandLine& cmdline) {
   importer_host->set_headless();
 
   importer::SourceProfile source_profile;
-  source_profile.importer_type = importer::BOOKMARKS_HTML;
+  source_profile.importer_type = importer::TYPE_BOOKMARKS_FILE;
   source_profile.source_path = file_path;
 
   FirstRunImportObserver importer_observer;
@@ -567,7 +569,8 @@ void FirstRun::AutoImport(
     ShellIntegration::SetAsDefaultBrowser();
 
   // Don't display the minimal bubble if there is no default search provider.
-  TemplateURLModel* search_engines_model = profile->GetTemplateURLModel();
+  TemplateURLService* search_engines_model =
+      TemplateURLServiceFactory::GetForProfile(profile);
   if (search_engines_model &&
       search_engines_model->GetDefaultSearchProvider()) {
     FirstRun::SetShowFirstRunBubblePref(true);

@@ -13,7 +13,9 @@
 #include "base/memory/ref_counted.h"
 #include "net/base/net_api.h"
 
+namespace base {
 class Value;
+}
 
 namespace base {
 class TimeTicks;
@@ -30,12 +32,6 @@ namespace net {
 // is usually accessed through a BoundNetLog, which will always pass in a
 // specific source ID.
 //
-// ******** The NetLog (and associated logging) is a work in progress ********
-//
-// TODO(eroman): Remove the 'const' qualitifer from the BoundNetLog methods.
-// TODO(eroman): Start a new Source each time URLRequest redirects
-//               (simpler to reason about each as a separate entity).
-
 class NET_API NetLog {
  public:
   enum EventType {
@@ -70,7 +66,7 @@ class NET_API NetLog {
     bool is_valid() const { return id != kInvalidId; }
 
     // The caller takes ownership of the returned Value*.
-    Value* ToValue() const;
+    base::Value* ToValue() const;
 
     SourceType type;
     uint32 id;
@@ -88,7 +84,7 @@ class NET_API NetLog {
     // Serializes the parameters to a Value tree. This is intended to be a
     // lossless conversion, which is used to serialize the parameters to JSON.
     // The caller takes ownership of the returned Value*.
-    virtual Value* ToValue() const = 0;
+    virtual base::Value* ToValue() const = 0;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(EventParameters);
@@ -152,12 +148,12 @@ class NET_API NetLog {
 
   // Serializes the specified event to a DictionaryValue.
   // If |use_strings| is true, uses strings rather than numeric ids.
-  static Value* EntryToDictionaryValue(NetLog::EventType type,
-                                       const base::TimeTicks& time,
-                                       const NetLog::Source& source,
-                                       NetLog::EventPhase phase,
-                                       NetLog::EventParameters* params,
-                                       bool use_strings);
+  static base::Value* EntryToDictionaryValue(NetLog::EventType type,
+                                             const base::TimeTicks& time,
+                                             const NetLog::Source& source,
+                                             NetLog::EventPhase phase,
+                                             NetLog::EventParameters* params,
+                                             bool use_strings);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetLog);
@@ -202,6 +198,11 @@ class NET_API BoundNetLog {
   void EndEventWithNetErrorCode(NetLog::EventType event_type,
                                 int net_error) const;
 
+  // Logs a byte transfer event to the NetLog.  Determines whether to log the
+  // received bytes or not based on the current logging level.
+  void AddByteTransferEvent(NetLog::EventType event_type,
+                            int byte_count, char* bytes) const;
+
   NetLog::LogLevel GetLogLevel() const;
 
   // Returns true if the log level is LOG_ALL.
@@ -234,7 +235,7 @@ class NetLogStringParameter : public NetLog::EventParameters {
     return value_;
   }
 
-  virtual Value* ToValue() const;
+  virtual base::Value* ToValue() const;
 
  private:
   const char* const name_;
@@ -253,7 +254,7 @@ class NetLogIntegerParameter : public NetLog::EventParameters {
     return value_;
   }
 
-  virtual Value* ToValue() const;
+  virtual base::Value* ToValue() const;
 
  private:
   const char* name_;
@@ -262,7 +263,7 @@ class NetLogIntegerParameter : public NetLog::EventParameters {
 
 // NetLogSourceParameter is a subclass of EventParameters that encapsulates a
 // single NetLog::Source parameter.
-class NetLogSourceParameter : public NetLog::EventParameters {
+class NET_API NetLogSourceParameter : public NetLog::EventParameters {
  public:
   // |name| must be a string literal.
   NetLogSourceParameter(const char* name, const NetLog::Source& value)
@@ -272,7 +273,7 @@ class NetLogSourceParameter : public NetLog::EventParameters {
     return value_;
   }
 
-  virtual Value* ToValue() const;
+  virtual base::Value* ToValue() const;
 
  private:
   const char* name_;

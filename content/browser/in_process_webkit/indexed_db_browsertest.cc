@@ -7,16 +7,16 @@
 #include "base/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/scoped_temp_dir.h"
+#include "base/test/thread_test_helper.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/testing_profile.h"
-#include "chrome/test/thread_test_helper.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/in_process_webkit/indexed_db_context.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/content_switches.h"
 
 // This browser test is aimed towards exercising the IndexedDB bindings and
 // the actual implementation that lives in the browser side (in_process_webkit).
@@ -35,28 +35,30 @@ class IndexedDBBrowserTest : public InProcessBrowserTest {
     return ui_test_utils::GetTestUrl(kTestDir, file_path);
   }
 
-  void SimpleTest(const GURL& test_url) {
+  void SimpleTest(const GURL& test_url, bool incognito = false) {
     // The test page will perform tests on IndexedDB, then navigate to either
     // a #pass or #fail ref.
+    Browser* the_browser = incognito ? CreateIncognitoBrowser() : browser();
+
     LOG(INFO) << "Navigating to URL and blocking.";
     ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
-        browser(), test_url, 2);
+        the_browser, test_url, 2);
     LOG(INFO) << "Navigation done.";
-    std::string result = browser()->GetSelectedTabContents()->GetURL().ref();
+    std::string result = the_browser->GetSelectedTabContents()->GetURL().ref();
     if (result != "pass") {
       std::string js_result;
       ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-          browser()->GetSelectedTabContents()->render_view_host(), L"",
+          the_browser->GetSelectedTabContents()->render_view_host(), L"",
           L"window.domAutomationController.send(getLog())", &js_result));
       FAIL() << "Failed: " << js_result;
     }
   }
 };
 
-class IndexedDBLevelDBBrowserTest : public IndexedDBBrowserTest {
+class IndexedDBSQLiteBrowserTest : public IndexedDBBrowserTest {
  public:
   virtual void SetUpCommandLine(CommandLine* command_line) {
-    command_line->AppendSwitch(switches::kLevelDBIndexedDatabase);
+    command_line->AppendSwitch(switches::kSQLiteIndexedDatabase);
   }
 };
 
@@ -64,8 +66,13 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTest) {
   SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("cursor_test.html"))));
 }
 
-IN_PROC_BROWSER_TEST_F(IndexedDBLevelDBBrowserTest, CursorTest) {
+IN_PROC_BROWSER_TEST_F(IndexedDBSQLiteBrowserTest, CursorTest) {
   SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("cursor_test.html"))));
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTestIncognito) {
+  SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("cursor_test.html"))),
+             true /* incognito */);
 }
 
 // Flaky: http://crbug.com/70773
@@ -140,8 +147,9 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ClearLocalState) {
     webkit_context->set_clear_local_state_on_exit(true);
   }
   // Make sure we wait until the destructor has run.
-  scoped_refptr<ThreadTestHelper> helper(
-      new ThreadTestHelper(BrowserThread::WEBKIT));
+  scoped_refptr<base::ThreadTestHelper> helper(
+      new base::ThreadTestHelper(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::WEBKIT)));
   ASSERT_TRUE(helper->Run());
 
   // Because we specified https for scheme to be skipped the second file

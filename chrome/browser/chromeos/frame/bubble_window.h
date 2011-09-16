@@ -7,7 +7,7 @@
 #pragma once
 
 #include "third_party/skia/include/core/SkColor.h"
-#include "views/window/native_window_gtk.h"
+#include "views/widget/native_widget_gtk.h"
 
 namespace gfx {
 class Rect;
@@ -15,13 +15,13 @@ class Rect;
 
 namespace views {
 class Throbber;
-class WindowDelegate;
+class WidgetDelegate;
 }
 
 namespace chromeos {
 
 // A window that uses BubbleFrameView as its frame.
-class BubbleWindow : public views::NativeWindowGtk {
+class BubbleWindow : public views::NativeWidgetGtk {
  public:
   enum Style {
     STYLE_GENERIC = 0, // Default style.
@@ -30,23 +30,29 @@ class BubbleWindow : public views::NativeWindowGtk {
     STYLE_XSHAPE = 1 << 2 // Trim the window margins and round corners.
   };
 
-  static views::Window* Create(gfx::NativeWindow parent,
+  static views::Widget* Create(gfx::NativeWindow parent,
                                const gfx::Rect& bounds,
                                Style style,
-                               views::WindowDelegate* window_delegate);
+                               views::WidgetDelegate* widget_delegate);
 
   static const SkColor kBackgroundColor;
 
  protected:
-  explicit BubbleWindow(views::Window* window);
+  BubbleWindow(views::Widget* window, Style style);
 
-  // Overidden from views::NativeWindowGtk:
+  // Overridden from views::NativeWidgetGtk:
   virtual void InitNativeWidget(
       const views::Widget::InitParams& params) OVERRIDE;
+  virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 
   // Trims the window margins and rounds off the corners.
   void TrimMargins(int margin_left, int margin_right, int margin_top,
                    int margin_bottom, int border_radius);
+
+ private:
+  Style style_;
+
+  DISALLOW_COPY_AND_ASSIGN(BubbleWindow);
 };
 
 }  // namespace chromeos

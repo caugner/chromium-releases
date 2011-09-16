@@ -13,7 +13,6 @@
     {
       'target_name': 'base_i18n',
       'type': 'static_library',
-      'msvs_guid': '968F3222-9798-4D21-BE08-15ECB5EF2994',
       'dependencies': [
         'base',
         '../third_party/icu/icu.gyp:icui18n',
@@ -101,7 +100,6 @@
     {
       'target_name': 'base_unittests',
       'type': 'executable',
-      'msvs_guid': '27A30967-4BBA-48D1-8522-CDE95F7B1CEC',
       'sources': [
         # Infrastructure files.
         'test/run_all_unittests.cc',
@@ -132,6 +130,7 @@
         'i18n/case_conversion_unittest.cc',
         'i18n/file_util_icu_unittest.cc',
         'i18n/icu_string_conversions_unittest.cc',
+        'i18n/number_formatting_unittest.cc',
         'i18n/rtl_unittest.cc',
         'i18n/time_formatting_unittest.cc',
         'json/json_reader_unittest.cc',
@@ -145,6 +144,7 @@
         'md5_unittest.cc',
         'memory/linked_ptr_unittest.cc',
         'memory/mru_cache_unittest.cc',
+        'memory/ref_counted_memory_unittest.cc',
         'memory/ref_counted_unittest.cc',
         'memory/scoped_ptr_unittest.cc',
         'memory/scoped_vector_unittest.cc',
@@ -314,15 +314,25 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
+        ['os_posix==0', {
+          'sources!': [
+            'test/scoped_locale.cc',
+            'test/scoped_locale.h',
+          ],
+        }],
       ],
       'sources': [
         'perftimer.cc',
         'test/mock_chrome_application_mac.h',
         'test/mock_chrome_application_mac.mm',
+        'test/mock_time_provider.cc',
+        'test/mock_time_provider.h',
         'test/multiprocess_test.cc',
         'test/multiprocess_test.h',
         'test/perf_test_suite.cc',
         'test/perf_test_suite.h',
+        'test/scoped_locale.cc',
+        'test/scoped_locale.h',
         'test/test_file_util.h',
         'test/test_file_util_linux.cc',
         'test/test_file_util_mac.cc',
@@ -334,6 +344,8 @@
         'test/test_switches.h',
         'test/test_timeouts.cc',
         'test/test_timeouts.h',
+        'test/thread_test_helper.cc',
+        'test/thread_test_helper.h',
       ],
     },
     {
@@ -384,9 +396,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

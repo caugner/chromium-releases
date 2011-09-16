@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_TOOLBAR_WRENCH_MENU_MODEL_H_
 #pragma once
 
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "content/common/notification_observer.h"
@@ -119,7 +120,7 @@ class WrenchMenuModel : public ui::SimpleMenuModel,
   virtual void TabStripModelDeleted() OVERRIDE;
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 

@@ -102,6 +102,7 @@ bool WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_DidPaint, OnDidPaint)
     IPC_MESSAGE_HANDLER(PluginMsg_GetPluginScriptableObject,
                         OnGetPluginScriptableObject)
+    IPC_MESSAGE_HANDLER(PluginMsg_GetFormValue, OnGetFormValue)
     IPC_MESSAGE_HANDLER(PluginMsg_UpdateGeometry, OnUpdateGeometry)
     IPC_MESSAGE_HANDLER(PluginMsg_UpdateGeometrySync, OnUpdateGeometry)
     IPC_MESSAGE_HANDLER(PluginMsg_SendJavaScriptStream,
@@ -265,13 +266,9 @@ void WebPluginDelegateStub::OnUpdateGeometry(
     const PluginMsg_UpdateGeometry_Param& param) {
   webplugin_->UpdateGeometry(
       param.window_rect, param.clip_rect,
-      param.windowless_buffer, param.background_buffer,
-      param.transparent
-#if defined(OS_MACOSX)
-      ,
-      param.ack_key
-#endif
-      );
+      param.windowless_buffer0, param.windowless_buffer1,
+      param.windowless_buffer_index, param.background_buffer,
+      param.transparent);
 }
 
 void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id) {
@@ -290,6 +287,13 @@ void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id) {
 
   // Release ref added by GetPluginScriptableObject (our stub holds its own).
   WebBindings::releaseObject(object);
+}
+
+void WebPluginDelegateStub::OnGetFormValue(string16* value, bool* success) {
+  *success = false;
+  if (!delegate_)
+    return;
+  *success = delegate_->GetFormValue(value);
 }
 
 void WebPluginDelegateStub::OnSendJavaScriptStream(const GURL& url,

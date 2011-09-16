@@ -11,6 +11,13 @@ cr.define('ntp4', function() {
   function getCurrentlyDraggingTile() {
     return currentlyDraggingTile;
   }
+  function setCurrentlyDraggingTile(tile) {
+    currentlyDraggingTile = tile;
+    if (tile)
+      ntp4.enterRearrangeMode();
+    else
+      ntp4.leaveRearrangeMode();
+  }
 
   /**
    * Creates a new Tile object. Tiles wrap content on a TilePage, providing
@@ -38,6 +45,9 @@ cr.define('ntp4', function() {
       this.addEventListener('dragstart', this.onDragStart_);
       this.addEventListener('drag', this.onDragMove_);
       this.addEventListener('dragend', this.onDragEnd_);
+
+      this.firstChild.addEventListener(
+          'webkitAnimationEnd', this.onContentsAnimationEnd_.bind(this));
 
       this.eventTracker = new EventTracker();
     },
@@ -68,7 +78,9 @@ cr.define('ntp4', function() {
      * @param {number} y The y coordinate, in pixels.
      */
     moveTo: function(x, y) {
+      // left overrides right in LTR, and right takes precedence in RTL.
       this.style.left = x + 'px';
+      this.style.right = x + 'px';
       this.style.top = y + 'px';
     },
 
@@ -78,12 +90,20 @@ cr.define('ntp4', function() {
      * @private
      */
     onDragStart_: function(e) {
+      // TODO(estade): most visited dragging is disabled for now, remove this
+      // when it does something useful.
+      if (this.querySelector('.most-visited')) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
       // The user may start dragging again during a previous drag's finishing
       // animation.
       if (this.classList.contains('dragging'))
         this.finalizeDrag_();
 
-      currentlyDraggingTile = this;
+      setCurrentlyDraggingTile(this);
 
       e.dataTransfer.effectAllowed = 'copyMove';
       // TODO(estade): fill this in.
@@ -93,14 +113,21 @@ cr.define('ntp4', function() {
       // It's attached to the top level document element so that it floats above
       // image masks.
       this.dragClone = this.cloneNode(true);
+      this.dragClone.style.right = '';
       this.dragClone.classList.add('drag-representation');
-      this.ownerDocument.documentElement.appendChild(this.dragClone);
+      $('card-slider-frame').appendChild(this.dragClone);
       this.eventTracker.add(this.dragClone, 'webkitTransitionEnd',
                             this.onDragCloneTransitionEnd_.bind(this));
 
       this.classList.add('dragging');
-      this.dragOffsetX = e.pageX - this.offsetLeft;
-      this.dragOffsetY = e.pageY - this.offsetTop - this.parentNode.offsetTop;
+      // offsetLeft is mirrored in RTL. Un-mirror it.
+      var offsetLeft = ntp4.isRTL() ?
+          this.parentNode.clientWidth - this.offsetLeft :
+          this.offsetLeft;
+      this.dragOffsetX = e.x - offsetLeft - this.parentNode.offsetLeft;
+      this.dragOffsetY = e.y - this.offsetTop -
+          // Unlike offsetTop, this value takes scroll position into account.
+          this.parentNode.getBoundingClientRect().top;
 
       this.onDragMove_(e);
     },
@@ -111,15 +138,15 @@ cr.define('ntp4', function() {
      * @private
      */
     onDragMove_: function(e) {
-      if (e.view != window || (e.pageX == 0 && e.pageY == 0)) {
+      if (e.view != window || (e.x == 0 && e.y == 0)) {
         // attribute hidden seems to be overridden by display.
         this.dragClone.classList.add('hidden');
         return;
       }
 
       this.dragClone.classList.remove('hidden');
-      this.dragClone.style.left = (e.pageX - this.dragOffsetX) + 'px';
-      this.dragClone.style.top = (e.pageY - this.dragOffsetY) + 'px';
+      this.dragClone.style.left = (e.x - this.dragOffsetX) + 'px';
+      this.dragClone.style.top = (e.y - this.dragOffsetY) + 'px';
     },
 
     /**
@@ -132,18 +159,32 @@ cr.define('ntp4', function() {
       this.dragClone.classList.remove('hidden');
       this.dragClone.classList.add('placing');
 
-      currentlyDraggingTile = null;
+      setCurrentlyDraggingTile(null);
+
+      if (!this.tilePage) {
+        this.dragClone.firstChild.classList.add('deleting');
+        return;
+      }
+
       this.tilePage.positionTile_(this.index);
 
-      // The tile's contents may have moved following the respositioning; adjust
-      // for that.
-      var contentDiffX = this.dragClone.firstChild.offsetLeft -
-          this.firstChild.offsetLeft;
-      var contentDiffY = this.dragClone.firstChild.offsetTop -
-          this.firstChild.offsetTop;
-      this.dragClone.style.left = (this.gridX - contentDiffX) + 'px';
-      this.dragClone.style.top =
-          (this.gridY + this.parentNode.offsetTop - contentDiffY) + 'px';
+      if (this.tilePage.selected) {
+        // The tile's contents may have moved following the respositioning;
+        // adjust for that.
+        var contentDiffX = this.dragClone.firstChild.offsetLeft -
+            this.firstChild.offsetLeft;
+        var contentDiffY = this.dragClone.firstChild.offsetTop -
+            this.firstChild.offsetTop;
+        this.dragClone.style.left = (this.gridX + this.parentNode.offsetLeft -
+            contentDiffX) + 'px';
+        this.dragClone.style.top =
+            (this.gridY + this.parentNode.getBoundingClientRect().top -
+            contentDiffY) + 'px';
+      } else {
+        // When we're showing another page and a drag fails or gets cancelled,
+        // the tile shrinks to a dot.
+        this.dragClone.firstChild.style.webkitTransform = 'scale(0)';
+      }
     },
 
     /**
@@ -168,6 +209,9 @@ cr.define('ntp4', function() {
 
       this.appendChild(clone);
       this.doppleganger_ = clone;
+
+      if (ntp4.isRTL())
+        x *= -1;
 
       this.doppleganger_.style.WebkitTransform = 'translate(' + x + 'px, ' +
                                                                 y + 'px)';
@@ -215,9 +259,29 @@ cr.define('ntp4', function() {
      */
     onDragCloneTransitionEnd_: function(e) {
       if (this.classList.contains('dragging') &&
-          (e.propertyName == 'left' || e.propertyName == 'top')) {
+          (e.propertyName == 'left' || e.propertyName == 'top' ||
+           e.propertyName == '-webkit-transform')) {
         this.finalizeDrag_();
       }
+    },
+
+    /**
+     * Called when an app is removed from Chrome. Animates its disappearance.
+     */
+    doRemove: function() {
+      var contents = this.firstChild;
+      this.firstChild.classList.add('removing-tile-contents');
+    },
+
+    /**
+     * Callback for the webkitAnimationEnd event on the tile's contents.
+     * @param {Event} e The event object.
+     */
+    onContentsAnimationEnd_: function(e) {
+      if (this.firstChild.classList.contains('new-tile-contents'))
+        this.firstChild.classList.remove('new-tile-contents');
+      else if (this.firstChild.classList.contains('removing-tile-contents'))
+        this.tilePage.removeTile(this);
     },
   };
 
@@ -255,21 +319,20 @@ cr.define('ntp4', function() {
   var TILE_SPACING_FRACTION = 1 / 8;
 
   // The smallest amount of horizontal blank space to display on the sides when
-  // displaying a wide arrangement.
-  var MIN_WIDE_MARGIN = 44;
+  // displaying a wide arrangement. There is an additional 26px of margin from
+  // the tile page padding.
+  var MIN_WIDE_MARGIN = 18;
 
   /**
    * Creates a new TilePage object. This object contains tiles and controls
    * their layout.
-   * @param {string} name The display name for the page.
    * @param {Object} gridValues Pixel values that define the size and layout
    *     of the tile grid.
    * @constructor
    * @extends {HTMLDivElement}
    */
-  function TilePage(name, gridValues) {
+  function TilePage(gridValues) {
     var el = cr.doc.createElement('div');
-    el.pageName = name;
     el.gridValues_ = gridValues;
     el.__proto__ = TilePage.prototype;
     el.initialize();
@@ -307,20 +370,31 @@ cr.define('ntp4', function() {
     initialize: function() {
       this.className = 'tile-page';
 
-      var title = this.ownerDocument.createElement('span');
-      title.textContent = this.pageName;
-      title.className = 'tile-page-title';
-      this.appendChild(title);
+      // Div that acts as a custom scrollbar. The scrollbar has to live
+      // outside the content div so it doesn't flicker when scrolling (due to
+      // repainting after the scroll, then repainting again when moved in the
+      // onScroll handler). |scrollbar_| is only aesthetic, and it only
+      // represents the thumb. Actual events are still handled by the invisible
+      // native scrollbars. This div gives us more flexibility with the visuals.
+      this.scrollbar_ = this.ownerDocument.createElement('div');
+      this.scrollbar_.className = 'tile-page-scrollbar';
+      this.scrollbar_.hidden = true;
+      this.appendChild(this.scrollbar_);
+
+      // This contains everything but the scrollbar.
+      this.content_ = this.ownerDocument.createElement('div');
+      this.content_.className = 'tile-page-content';
+      this.appendChild(this.content_);
 
       // Div that sets the vertical position of the tile grid.
       this.topMargin_ = this.ownerDocument.createElement('div');
       this.topMargin_.className = 'top-margin';
-      this.appendChild(this.topMargin_);
+      this.content_.appendChild(this.topMargin_);
 
       // Div that holds the tiles.
       this.tileGrid_ = this.ownerDocument.createElement('div');
       this.tileGrid_.className = 'tile-grid';
-      this.appendChild(this.tileGrid_);
+      this.content_.appendChild(this.tileGrid_);
 
       // Ordered list of our tiles.
       this.tileElements_ = this.tileGrid_.getElementsByClassName('tile real');
@@ -332,12 +406,38 @@ cr.define('ntp4', function() {
       this.eventTracker = new EventTracker();
       this.eventTracker.add(window, 'resize', this.onResize_.bind(this));
 
-      this.tileGrid_.addEventListener('dragenter',
-                                      this.onDragEnter_.bind(this));
-      this.tileGrid_.addEventListener('dragover', this.onDragOver_.bind(this));
-      this.tileGrid_.addEventListener('drop', this.onDrop_.bind(this));
-      this.tileGrid_.addEventListener('dragleave',
-                                      this.onDragLeave_.bind(this));
+      this.addEventListener('DOMNodeInsertedIntoDocument',
+                            this.onNodeInsertedIntoDocument_);
+      this.content_.addEventListener('scroll', this.onScroll_.bind(this));
+
+      this.dragWrapper_ = new DragWrapper(this.tileGrid_, this);
+    },
+
+    get tileCount() {
+      return this.tileElements_.length;
+    },
+
+    get selected() {
+      return Array.prototype.indexOf.call(this.parentNode.children, this) ==
+          ntp4.getCardSlider().currentCard;
+    },
+
+    /**
+     * The size of the margin (unused space) on the sides of the tile grid, in
+     * pixels.
+     * @type {number}
+     */
+    get sideMargin() {
+      return this.layoutValues_.leftMargin;
+    },
+
+    /**
+     * Returns the width of the scrollbar, in pixels, if it is active, or 0
+     * otherwise.
+     * @type {number}
+     */
+    get scrollbarWidth() {
+      return this.scrollbar_.hidden ? 0 : 13;
     },
 
     /**
@@ -349,19 +449,27 @@ cr.define('ntp4', function() {
     },
 
     /**
+     * Appends a tile to the end of the tile grid.
+     * @param {HTMLElement} tileElement The contents of the tile.
+     * @param {?boolean} animate If true, the append will be animated.
      * @protected
      */
-    appendTile: function(tileElement) {
-      this.addTileAt(tileElement, this.tileElements_.length);
+    appendTile: function(tileElement, animate) {
+      this.addTileAt(tileElement, this.tileElements_.length, animate);
     },
 
     /**
      * Adds the given element to the tile grid.
      * @param {Node} tileElement The tile object/node to insert.
      * @param {number} index The location in the tile grid to insert it at.
+     * @param {?boolean} animate If true, the tile in question will be animated
+     *     (other tiles, if they must reposition, do not animate).
      * @protected
      */
-    addTileAt: function(tileElement, index) {
+    addTileAt: function(tileElement, index, animate) {
+      this.classList.remove('animating-tile-page');
+      if (animate)
+        tileElement.classList.add('new-tile-contents');
       var wrapperDiv = new Tile(tileElement);
       if (index == this.tileElements_.length) {
         this.tileGrid_.appendChild(wrapperDiv);
@@ -372,16 +480,21 @@ cr.define('ntp4', function() {
       this.calculateLayoutValues_();
 
       this.positionTile_(index);
-      this.classList.remove('animating-tile-page');
     },
 
     /**
-     * Controls whether this page will accept drags that originate from outside
-     * the page.
-     * @return {boolean} True if this page accepts drags from outside sources.
+     * Removes the given tile and animates the respositioning of the other
+     * tiles.
+     * @param {HTMLElement} tile The tile to remove from |tileGrid_|.
      */
-    acceptOutsideDrags: function() {
-      return true;
+    removeTile: function(tile) {
+      this.classList.add('animating-tile-page');
+      var index = Array.prototype.indexOf.call(this.tileElements_, tile);
+      tile.parentNode.removeChild(tile);
+      this.calculateLayoutValues_();
+      for (var i = index; i < this.tileElements_.length; i++) {
+        this.positionTile_(i);
+      }
     },
 
     /**
@@ -421,6 +534,17 @@ cr.define('ntp4', function() {
 
       // We need to update the top margin as well.
       this.updateTopMargin_();
+      this.fireLayoutEvent_();
+    },
+
+    /**
+     * Dispatches the custom pagelayout event. Called after changes to layout so
+     * listeners may update as needed.
+     */
+    fireLayoutEvent_: function() {
+      var event = document.createEvent('Event');
+      event.initEvent('pagelayout', true, true);
+      this.dispatchEvent(event);
     },
 
     /**
@@ -465,12 +589,17 @@ cr.define('ntp4', function() {
       var offTheRight = col == layout.numRowTiles ||
           (col == layout.numRowTiles - 1 && tile.hasDoppleganger());
       var offTheLeft = col == -1 || (col == 0 && tile.hasDoppleganger());
-      if (this.isCurrentDragTarget_ && (offTheRight || offTheLeft)) {
+      if (this.isCurrentDragTarget && (offTheRight || offTheLeft)) {
         var sign = offTheRight ? 1 : -1;
         tile.showDoppleganger(-layout.numRowTiles * layout.colWidth * sign,
                               layout.rowHeight * sign);
       } else {
         tile.clearDoppleganger();
+      }
+
+      if (index == this.tileElements_.length - 1) {
+        this.tileGrid_.style.height = (realY + layout.rowHeight) + 'px';
+        this.queueUpdateScrollbars_();
       }
     },
 
@@ -492,7 +621,11 @@ cr.define('ntp4', function() {
       if (col < 0 || col >= layout.numRowTiles)
         return -1;
 
-      var row = Math.floor((y - this.tileGrid_.offsetTop) / layout.rowHeight);
+      if (ntp4.isRTL())
+        col = layout.numRowTiles - 1 - col;
+
+      var row = Math.floor(
+          (y - this.tileGrid_.getBoundingClientRect().top) / layout.rowHeight);
       return row * layout.numRowTiles + col;
     },
 
@@ -511,6 +644,7 @@ cr.define('ntp4', function() {
       this.lastWidth_ = this.clientWidth;
       this.lastHeight_ = this.clientHeight;
       this.classList.add('animating-tile-page');
+      this.heightChanged_();
 
       for (var i = 0; i < this.tileElements_.length; i++) {
         this.positionTile_(i);
@@ -524,23 +658,23 @@ cr.define('ntp4', function() {
      * @private
      */
     updateMask_: function() {
-      if (!this.isCurrentDragTarget_) {
-        this.style.WebkitMaskBoxImage = '';
+      if (!this.isCurrentDragTarget) {
+        this.tileGrid_.style.WebkitMaskBoxImage = '';
         return;
       }
 
       var leftMargin = this.layoutValues_.leftMargin;
-      var fadeDistance = 20;
+      var fadeDistance = Math.min(leftMargin, 20);
       var gradient =
           '-webkit-linear-gradient(left,' +
               'transparent, ' +
               'transparent ' + (leftMargin - fadeDistance) + 'px, ' +
               'black ' + leftMargin + 'px, ' +
-              'black ' + (this.clientWidth - leftMargin) + 'px, ' +
-              'transparent ' + (this.clientWidth - leftMargin + fadeDistance) +
-                  'px, ' +
+              'black ' + (this.tileGrid_.clientWidth - leftMargin) + 'px, ' +
+              'transparent ' + (this.tileGrid_.clientWidth - leftMargin +
+                                fadeDistance) + 'px, ' +
               'transparent)';
-      this.style.WebkitMaskBoxImage = gradient;
+      this.tileGrid_.style.WebkitMaskBoxImage = gradient;
     },
 
     updateTopMargin_: function() {
@@ -548,7 +682,9 @@ cr.define('ntp4', function() {
 
       // The top margin is set so that the vertical midpoint of the grid will
       // be 1/3 down the page.
-      var numRows = Math.ceil(this.tileElements_.length / layout.numRowTiles);
+      var numTiles = this.tileCount +
+          (this.isCurrentDragTarget && !this.withinPageDrag_ ? 1 : 0);
+      var numRows = Math.ceil(numTiles / layout.numRowTiles);
       var usedHeight = layout.rowHeight * numRows;
       // 100 matches the top padding of tile-page.
       var newMargin = document.documentElement.clientHeight / 3 -
@@ -579,6 +715,88 @@ cr.define('ntp4', function() {
     },
 
     /**
+     * Handles final setup that can only happen after |this| is inserted into
+     * the page.
+     */
+    onNodeInsertedIntoDocument_: function(e) {
+      this.calculateLayoutValues_();
+      this.heightChanged_();
+    },
+
+    /**
+     * Called when the height of |this| has changed: update the size of
+     * tileGrid.
+     */
+    heightChanged_: function() {
+      // The tile grid will expand to the bottom footer, or enough to hold all
+      // the tiles, whichever is greater. It would be nicer if tilePage were
+      // a flex box, and the tile grid could be box-flex: 1, but this exposes a
+      // bug where repositioning tiles will cause the scroll position to reset.
+      this.tileGrid_.style.minHeight = (this.clientHeight -
+          this.tileGrid_.offsetTop) + 'px';
+    },
+
+    /**
+     * Scrolls the page by the given amount, vertically.
+     * @param {number} y The scroll amount, in pixels, where positive is down
+     *     and negative is up.
+     */
+    scrollBy: function(y) {
+      this.content_.scrollTop += y;
+    },
+
+    /**
+     * Handler for the 'scroll' event on |content_|.
+     * @param {Event} e The scroll event.
+     */
+    onScroll_: function(e) {
+      this.queueUpdateScrollbars_();
+    },
+
+    /**
+     * ID of scrollbar update timer. If 0, there's no scrollbar re-calc queued.
+     */
+    scrollbarUpdate_: 0,
+
+    /**
+     * Queues an update on the custom scrollbar. Used for two reasons: first,
+     * coalescing of multiple updates, and second, because action like
+     * repositioning a tile can require a delay before they affect values
+     * like clientHeight.
+     */
+    queueUpdateScrollbars_: function() {
+      if (this.scrollbarUpdate_)
+        return;
+
+      this.scrollbarUpdate_ = window.setTimeout(
+          this.doUpdateScrollbars_.bind(this), 0);
+    },
+
+    /**
+     * Does the work of calculating the visibility, height and position of the
+     * scrollbar thumb (there is no track or buttons).
+     */
+    doUpdateScrollbars_: function() {
+      this.scrollbarUpdate_ = 0;
+
+      var content = this.content_;
+      if (content.scrollHeight == content.clientHeight) {
+        this.scrollbar_.hidden = true;
+        return;
+      } else {
+        this.scrollbar_.hidden = false;
+      }
+
+      var thumbTop = content.scrollTop / content.scrollHeight *
+          this.clientHeight;
+      var thumbHeight = content.clientHeight / content.scrollHeight *
+          this.clientHeight;
+
+      this.scrollbar_.style.top = thumbTop + 'px';
+      this.scrollbar_.style.height = thumbHeight + 'px';
+    },
+
+    /**
      * Get the height for a tile of a certain width. Override this function to
      * get non-square tiles.
      * @param {number} width The pixel width of a tile.
@@ -590,57 +808,8 @@ cr.define('ntp4', function() {
 
     /** Dragging **/
 
-    /**
-     * The number of un-paired dragenter events that have fired on |this|. This
-     * is incremented by |onDragEnter_| and decremented by |onDragLeave_|. This
-     * is necessary because dragging over child widgets will fire additional
-     * enter and leave events on |this|. A non-zero value does not necessarily
-     * indicate that |isCurrentDragTarget_| is true.
-     * @type {number}
-     * @private
-     */
-    dragEnters_: 0,
-
-    /**
-     * Whether the tile page is currently being dragged over with data it can
-     * accept.
-     * @type {boolean}
-     * @private
-     */
-    isCurrentDragTarget_: false,
-
-    /**
-     * Handler for dragenter events fired on |tileGrid_|.
-     * @param {Event} e A MouseEvent for the drag.
-     * @private
-     */
-    onDragEnter_: function(e) {
-      if (++this.dragEnters_ > 1)
-        return;
-      this.doDragEnter_(e);
-    },
-
-    /**
-     * Thunk for dragover events fired on |tileGrid_|.
-     * @param {Event} e A MouseEvent for the drag.
-     * @private
-     */
-    onDragOver_: function(e) {
-      if (!this.isCurrentDragTarget_)
-        return;
-      this.doDragOver_(e);
-    },
-
-    /**
-     * Thunk for drop events fired on |tileGrid_|.
-     * @param {Event} e A MouseEvent for the drag.
-     * @private
-     */
-    onDrop_: function(e) {
-      this.dragEnters_ = 0;
-      if (!this.isCurrentDragTarget_)
-        return;
-      this.doDrop_(e);
+    get isCurrentDragTarget() {
+      return this.dragWrapper_.isCurrentDragTarget;
     },
 
     /**
@@ -648,12 +817,8 @@ cr.define('ntp4', function() {
      * @param {Event} e A MouseEvent for the drag.
      * @private
      */
-    onDragLeave_: function(e) {
-      if (--this.dragEnters_ > 0)
-        return;
-
-      this.isCurrentDragTarget_ = false;
-      this.cleanUpDrag_();
+    doDragLeave: function(e) {
+      this.cleanupDrag();
     },
 
     /**
@@ -661,12 +826,7 @@ cr.define('ntp4', function() {
      * @param {Event} e A mouseover event for the drag enter.
      * @private
      */
-    doDragEnter_: function(e) {
-      if (!this.shouldAcceptDrag(e.dataTransfer)) {
-        return;
-      }
-
-      this.isCurrentDragTarget_ = true;
+    doDragEnter: function(e) {
 
       // Applies the mask so doppleganger tiles disappear into the fog.
       this.updateMask_();
@@ -676,6 +836,13 @@ cr.define('ntp4', function() {
       this.dragItemIndex_ = this.withinPageDrag_ ?
           currentlyDraggingTile.index : this.tileElements_.length;
       this.currentDropIndex_ = this.dragItemIndex_;
+
+      // The new tile may change the number of rows, hence the top margin
+      // will change.
+      if (!this.withinPageDrag_)
+        this.updateTopMargin_();
+
+      this.doDragOver(e);
     },
 
     /**
@@ -684,7 +851,7 @@ cr.define('ntp4', function() {
      * @param {Event} e A mouseover event for the drag over.
      * @private
      */
-    doDragOver_: function(e) {
+    doDragOver: function(e) {
       e.preventDefault();
 
       if (currentlyDraggingTile)
@@ -692,7 +859,7 @@ cr.define('ntp4', function() {
       else
         e.dataTransfer.dropEffect = 'copy';
 
-      var newDragIndex = this.getWouldBeIndexForPoint_(e.clientX, e.clientY);
+      var newDragIndex = this.getWouldBeIndexForPoint_(e.pageX, e.pageY);
       if (newDragIndex < 0 || newDragIndex >= this.tileElements_.length)
         newDragIndex = this.dragItemIndex_;
       this.updateDropIndicator_(newDragIndex);
@@ -703,9 +870,8 @@ cr.define('ntp4', function() {
      * @param {Event} e A mouseover event for the drag drop.
      * @private
      */
-    doDrop_: function(e) {
+    doDrop: function(e) {
       e.stopPropagation();
-      this.isCurrentDragTarget_ = false;
 
       var index = this.currentDropIndex_;
       // Only change data if this was not a 'null drag'.
@@ -713,9 +879,13 @@ cr.define('ntp4', function() {
         var adjustedIndex = this.currentDropIndex_ +
             (index > this.dragItemIndex_ ? 1 : 0);
         if (currentlyDraggingTile) {
+          var originalPage = currentlyDraggingTile.tilePage;
           this.tileGrid_.insertBefore(
               currentlyDraggingTile,
               this.tileElements_[adjustedIndex]);
+
+          if (originalPage != this)
+            originalPage.cleanupDrag();
           this.tileMoved(currentlyDraggingTile);
         } else {
           this.addOutsideData(e.dataTransfer, adjustedIndex);
@@ -723,14 +893,28 @@ cr.define('ntp4', function() {
       }
 
       this.classList.remove('animating-tile-page');
-      this.cleanUpDrag_();
+      this.cleanupDrag();
+    },
+
+    /**
+     * Appends the currently dragged tile to the end of the page. Called
+     * from outside the page, e.g. when dropping on a nav dot.
+     */
+    appendDraggingTile: function() {
+      var originalPage = currentlyDraggingTile.tilePage;
+      if (originalPage == this)
+        return;
+
+      this.tileGrid_.appendChild(currentlyDraggingTile);
+      originalPage.cleanupDrag();
+      this.tileMoved(currentlyDraggingTile);
     },
 
     /**
      * Makes sure all the tiles are in the right place after a drag is over.
      * @private
      */
-    cleanUpDrag_: function() {
+    cleanupDrag: function() {
       for (var i = 0; i < this.tileElements_.length; i++) {
         // The current drag tile will be positioned in its dragend handler.
         if (this.tileElements_[i] == currentlyDraggingTile)
@@ -770,11 +954,11 @@ cr.define('ntp4', function() {
 
     /**
      * Checks if a page can accept a drag with the given data.
-     * @param {Object} dataTransfer The dataTransfer object, if the drag object
-     *     is not a tile (e.g. it is a link).
+     * @param {Event} e The drag event if the drag object. Implementations will
+     *     likely want to check |e.dataTransfer|.
      * @return {boolean} True if this page can handle the drag.
      */
-    shouldAcceptDrag: function(dataTransfer) {
+    shouldAcceptDrag: function(e) {
       return false;
     },
 

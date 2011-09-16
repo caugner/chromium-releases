@@ -25,50 +25,25 @@ class BackgroundContents;
 struct BookmarkNodeData;
 class BookmarkNode;
 struct ContextMenuParams;
-class FilePath;
 class GURL;
-class ListValue;
 struct NativeWebKeyboardEvent;
-class NavigationEntry;
 class Profile;
 struct RendererPreferences;
 class RenderProcessHost;
 class RenderViewHost;
-class ResourceRedirectDetails;
-class ResourceRequestDetails;
 class SkBitmap;
 class TabContents;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_FrameNavigate_Params;
-struct WebApplicationInfo;
 struct WebDropData;
 struct WebMenuItem;
 class WebKeyboardEvent;
 struct WebPreferences;
 
-namespace base {
-class WaitableEvent;
-}
-
 namespace gfx {
 class Point;
 class Rect;
 class Size;
-}
-
-namespace IPC {
-class Message;
-}
-
-namespace net {
-class CookieList;
-class CookieOptions;
-}
-
-namespace webkit_glue {
-struct FormData;
-struct FormField;
-struct PasswordForm;
 }
 
 //
@@ -87,7 +62,6 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
  public:
   // View ----------------------------------------------------------------------
   // Functions that can be routed directly to a view-specific class.
-
   class View {
    public:
     // The page is trying to open a new page (e.g. a popup window). The window
@@ -171,35 +145,6 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
     // retrieved by doing a Shift-Tab.
     virtual void TakeFocus(bool reverse) = 0;
 
-    // Notification that the view has lost capture.
-    virtual void LostCapture() = 0;
-
-    // The page wants the hosting window to activate/deactivate itself (it
-    // called the JavaScript window.focus()/blur() method).
-    virtual void Activate() = 0;
-    virtual void Deactivate() = 0;
-
-    // Callback to give the browser a chance to handle the specified keyboard
-    // event before sending it to the renderer.
-    // Returns true if the |event| was handled. Otherwise, if the |event| would
-    // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
-    // |*is_keyboard_shortcut| should be set to true.
-    virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                        bool* is_keyboard_shortcut) = 0;
-
-    // Callback to inform the browser that the renderer did not process the
-    // specified events. This gives an opportunity to the browser to process the
-    // event (used for keyboard shortcuts).
-    virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) = 0;
-
-    // Notifications about mouse events in this view.  This is useful for
-    // implementing global 'on hover' features external to the view.
-    virtual void HandleMouseMove() = 0;
-    virtual void HandleMouseDown() = 0;
-    virtual void HandleMouseLeave() = 0;
-    virtual void HandleMouseUp() = 0;
-    virtual void HandleMouseActivate() = 0;
-
     // The contents' preferred size changed.
     virtual void UpdatePreferredSize(const gfx::Size& pref_size) = 0;
 
@@ -235,28 +180,12 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
     virtual ~RendererManagement() {}
   };
 
-  // BookmarkDrag --------------------------------------------------------------
-  // Interface for forwarding bookmark drag and drop to extenstions.
-
-  class BookmarkDrag {
-   public:
-    virtual void OnDragEnter(const BookmarkNodeData& data) = 0;
-    virtual void OnDragOver(const BookmarkNodeData& data) = 0;
-    virtual void OnDragLeave(const BookmarkNodeData& data) = 0;
-    virtual void OnDrop(const BookmarkNodeData& data) = 0;
-
-   protected:
-    virtual ~BookmarkDrag() {}
-  };
-
   // ---------------------------------------------------------------------------
 
   // Returns the current delegate associated with a feature. May return NULL if
   // there is no corresponding delegate.
   virtual View* GetViewDelegate();
   virtual RendererManagement* GetRendererManagementDelegate();
-
-  virtual BookmarkDrag* GetBookmarkDragDelegate();
 
   // IPC::Channel::Listener implementation.
   // This is used to give the delegate a chance to filter IPC messages.
@@ -273,10 +202,6 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   // Return this object cast to a BackgroundContents, if it is one. If the
   // object is not a BackgroundContents, returns NULL.
   virtual BackgroundContents* GetAsBackgroundContents();
-
-  // Return id number of browser window which this object is attached to. If no
-  // browser window is attached to, just return -1.
-  virtual int GetBrowserWindowID() const = 0;
 
   // Return type of RenderView which is attached with this object.
   virtual ViewType::Type GetRenderViewType() const = 0;
@@ -318,12 +243,6 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // The destination URL has changed should be updated
   virtual void UpdateTargetURL(int32 page_id, const GURL& url) {}
-
-  // Inspector setting was changed and should be persisted.
-  virtual void UpdateInspectorSetting(const std::string& key,
-                                      const std::string& value) = 0;
-
-  virtual void ClearInspectorSettings() = 0;
 
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
@@ -407,17 +326,37 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   virtual void LoadStateChanged(const GURL& url, net::LoadState load_state,
                                 uint64 upload_position, uint64 upload_size) {}
 
-  // Returns true if this view is used to host an external tab container.
-  virtual bool IsExternalTabContainer() const;
-
   // Notification that a worker process has crashed.
-  void WorkerCrashed() {}
+  virtual void WorkerCrashed() {}
 
-  // Ask the user if they want to allow the view to show desktop notifications.
-  // Returns true if the delegate will take care of asking the user, otherwise
-  // the caller will do the default behavior.
-  bool RequestDesktopNotificationPermission(const GURL& source_origin,
-                                            int callback_context);
+  // The page wants the hosting window to activate/deactivate itself (it
+  // called the JavaScript window.focus()/blur() method).
+  virtual void Activate() {}
+  virtual void Deactivate() {}
+
+  // Notification that the view has lost capture.
+  virtual void LostCapture() {}
+
+  // Callback to give the browser a chance to handle the specified keyboard
+  // event before sending it to the renderer.
+  // Returns true if the |event| was handled. Otherwise, if the |event| would
+  // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
+  // |*is_keyboard_shortcut| should be set to true.
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut);
+
+  // Callback to inform the browser that the renderer did not process the
+  // specified events. This gives an opportunity to the browser to process the
+  // event (used for keyboard shortcuts).
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
+
+  // Notifications about mouse events in this view.  This is useful for
+  // implementing global 'on hover' features external to the view.
+  virtual void HandleMouseMove() {}
+  virtual void HandleMouseDown() {}
+  virtual void HandleMouseLeave() {}
+  virtual void HandleMouseUp() {}
+  virtual void HandleMouseActivate() {}
 
  protected:
   virtual ~RenderViewHostDelegate() {}

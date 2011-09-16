@@ -10,6 +10,7 @@
 #include "base/string_number_conversions.h"
 #include "base/task.h"
 #include "base/time.h"
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/profiles/profile.h"
@@ -48,8 +49,7 @@ AutofillModelAssociator::AutofillModelAssociator(
       web_database_(web_database),
       personal_data_(personal_data),
       autofill_node_id_(sync_api::kInvalidId),
-      abort_association_pending_(false),
-      number_of_entries_created_(0) {
+      abort_association_pending_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   DCHECK(sync_service_);
   DCHECK(web_database_);
@@ -113,7 +113,6 @@ bool AutofillModelAssociator::TraverseAndAssociateChromeAutofillEntries(
       node.SetTitle(UTF8ToWide(tag));
       AutofillChangeProcessor::WriteAutofillEntry(*ix, &node);
       Associate(&tag, node.GetId());
-      number_of_entries_created_++;
     }
 
     current_entries->insert(ix->key());
@@ -156,7 +155,7 @@ bool AutofillModelAssociator::AssociateModels() {
 
   DataBundle bundle;
   {
-    sync_api::WriteTransaction trans(sync_service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
 
     sync_api::ReadNode autofill_root(&trans);
     if (!autofill_root.InitByTagLookup(kAutofillTag)) {
@@ -187,16 +186,6 @@ bool AutofillModelAssociator::AssociateModels() {
   if (!SaveChangesToWebData(bundle)) {
     LOG(ERROR) << "Failed to update autofill entries.";
     return false;
-  }
-
-  if (sync_service_->GetAutofillMigrationState() !=
-      syncable::MIGRATED) {
-    syncable::AutofillMigrationDebugInfo debug_info;
-    debug_info.autofill_entries_added_during_migration =
-        number_of_entries_created_;
-    sync_service_->SetAutofillMigrationDebugInfo(
-        syncable::AutofillMigrationDebugInfo::ENTRIES_ADDED,
-        debug_info);
   }
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -241,27 +230,8 @@ bool AutofillModelAssociator::TraverseAndAssociateAllSyncNodes(
     const std::vector<AutofillProfile*>& all_profiles_from_db) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
 
-  bool autofill_profile_not_migrated = HasNotMigratedYet(write_trans);
-
-  if (VLOG_IS_ON(2) && autofill_profile_not_migrated) {
-    VLOG(2) << "[AUTOFILL MIGRATION]"
-            << "Printing profiles from web db";
-
-    for (std::vector<AutofillProfile*>::const_iterator ix =
-        all_profiles_from_db.begin(); ix != all_profiles_from_db.end(); ++ix) {
-      AutofillProfile* p = *ix;
-      VLOG(2) << "[AUTOFILL MIGRATION]  "
-              << p->GetInfo(NAME_FIRST)
-              << p->GetInfo(NAME_LAST);
-    }
-  }
-
-  if (autofill_profile_not_migrated) {
-    VLOG(1) << "[AUTOFILL MIGRATION]"
-            << "Iterating over sync db";
-  }
-
   int64 sync_child_id = autofill_root.GetFirstChildId();
+  int num_old_style_autofill_profiles_detected = 0;
   while (sync_child_id != sync_api::kInvalidId) {
     sync_api::ReadNode sync_child(write_trans);
     if (!sync_child.InitByIdLookup(sync_child_id)) {
@@ -274,23 +244,19 @@ bool AutofillModelAssociator::TraverseAndAssociateAllSyncNodes(
     if (autofill.has_value()) {
       AddNativeEntryIfNeeded(autofill, bundle, sync_child);
     } else if (autofill.has_profile()) {
-      // Ignore autofill profiles if we are not upgrading.
-      if (autofill_profile_not_migrated) {
-        VLOG(2) << "[AUTOFILL MIGRATION] Looking for "
-                << autofill.profile().name_first()
-                << autofill.profile().name_last();
-        AddNativeProfileIfNeeded(
-            autofill.profile(),
-            bundle,
-            sync_child,
-            all_profiles_from_db);
-      }
+      num_old_style_autofill_profiles_detected++;
+      VLOG(1) << "Detected old style autofill profile during association.";
     } else {
       NOTREACHED() << "AutofillSpecifics has no autofill data!";
     }
 
     sync_child_id = sync_child.GetSuccessorId();
   }
+
+  LOG_IF(WARNING, num_old_style_autofill_profiles_detected > 0) <<
+      num_old_style_autofill_profiles_detected << " old style autofill "
+      << "profiles found! These are now unreachable.";
+
   return true;
 }
 
@@ -394,7 +360,7 @@ bool AutofillModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
                << "might be running against an out-of-date server.";
     return false;
   }
-  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
+  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
 
   sync_api::ReadNode autofill_node(&trans);
   if (!autofill_node.InitByIdLookup(autofill_sync_id)) {
@@ -454,7 +420,7 @@ void AutofillModelAssociator::Disassociate(int64 sync_id) {
 
 bool AutofillModelAssociator::GetSyncIdForTaggedNode(const std::string& tag,
                                                      int64* sync_id) {
-  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
+  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
   sync_api::ReadNode sync_node(&trans);
   if (!sync_node.InitByTagLookup(tag.c_str()))
     return false;
@@ -537,57 +503,11 @@ bool AutofillModelAssociator::FillProfileWithServerData(
   return diff;
 }
 
-bool AutofillModelAssociator::HasNotMigratedYet(
-    const sync_api::BaseTransaction* trans) {
-
-  // Now read the current value from the directory.
-  syncable::AutofillMigrationState autofill_migration_state =
-      sync_service_->GetAutofillMigrationState();
-
-  DCHECK_NE(autofill_migration_state, syncable::NOT_DETERMINED);
-
-  if (autofill_migration_state== syncable::NOT_DETERMINED) {
-    VLOG(1) << "Autofill migration state is not determined inside "
-            << " model associator";
-  }
-
-  if (autofill_migration_state == syncable::NOT_MIGRATED) {
-    return true;
-  }
-
-  if (autofill_migration_state == syncable::INSUFFICIENT_INFO_TO_DETERMINE) {
-      VLOG(1) << "[AUTOFILL MIGRATION]"
-              << "current autofill migration state is insufficient info to"
-              << "determine.";
-      sync_api::ReadNode autofill_profile_root_node(trans);
-      if (!autofill_profile_root_node.InitByTagLookup(
-          browser_sync::kAutofillProfileTag) ||
-          autofill_profile_root_node.GetFirstChildId()==
-            static_cast<int64>(0)) {
-        sync_service_->SetAutofillMigrationState(
-            syncable::NOT_MIGRATED);
-
-        VLOG(1) << "[AUTOFILL MIGRATION]"
-                << "Current autofill migration state is NOT Migrated because"
-                << "legacy autofill root node is present whereas new "
-                << "Autofill profile root node is absent.";
-        return true;
-      }
-
-      sync_service_->SetAutofillMigrationState(syncable::MIGRATED);
-
-      VLOG(1) << "[AUTOFILL MIGRATION]"
-              << "Current autofill migration state is migrated.";
-  }
-
-  return false;
-}
-
 bool AutofillModelAssociator::CryptoReadyIfNecessary() {
   // We only access the cryptographer while holding a transaction.
-  sync_api::ReadTransaction trans(sync_service_->GetUserShare());
+  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
   syncable::ModelTypeSet encrypted_types;
-  sync_service_->GetEncryptedDataTypes(&encrypted_types);
+  encrypted_types = sync_api::GetEncryptedTypes(&trans);
   return encrypted_types.count(syncable::AUTOFILL) == 0 ||
          sync_service_->IsCryptographerReady(&trans);
 }

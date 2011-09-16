@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
@@ -26,12 +27,14 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_factory.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browsing_instance.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -41,10 +44,12 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/bindings_policy.h"
+#include "content/common/content_client.h"
 #include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_service.h"
 #include "content/common/view_messages.h"
 #include "grit/browser_resources.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -134,8 +139,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(profile_, this)),
       extension_host_type_(host_type),
-      associated_tab_contents_(NULL),
-      suppress_javascript_messages_(false) {
+      associated_tab_contents_(NULL) {
   render_view_host_ = new RenderViewHost(site_instance, this, MSG_ROUTING_NONE,
                                          NULL);
   if (enable_dom_automation_)
@@ -143,20 +147,21 @@ ExtensionHost::ExtensionHost(const Extension* extension,
 
   // Listen for when the render process' handle is available so we can add it
   // to the task manager then.
-  registrar_.Add(this, NotificationType::RENDERER_PROCESS_CREATED,
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                  Source<RenderProcessHost>(render_process_host()));
   // Listen for when an extension is unloaded from the same profile, as it may
   // be the same extension that this points to.
-  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  Source<Profile>(profile_));
 }
 
 ExtensionHost::~ExtensionHost() {
   NotificationService::current()->Notify(
-      NotificationType::EXTENSION_HOST_DESTROYED,
+      chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
       Source<Profile>(profile_),
       Details<ExtensionHost>(this));
   ProcessCreationQueue::GetInstance()->Remove(this);
+  GetJavaScriptDialogCreatorInstance()->ResetJavaScriptState(this);
   render_view_host_->Shutdown();  // deletes render_view_host
 }
 
@@ -195,7 +200,7 @@ bool ExtensionHost::IsRenderViewLive() const {
 }
 
 void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
-  render_view_host_->set_view(host_view);
+  render_view_host_->SetView(host_view);
   if (render_view_host_->process()->HasConnection()) {
     // If the process is already started, go ahead and initialize the RenderView
     // synchronously. The process creation is the real meaty part that we want
@@ -208,6 +213,19 @@ void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
 
 void ExtensionHost::CreateRenderViewNow() {
   render_view_host_->CreateRenderView(string16());
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
+      extension_host_type_ == ViewType::EXTENSION_DIALOG ||
+      extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
+    // If the host is bound to a browser, then extract its window id.
+    // Extensions hosted in ExternalTabContainer objects may not have
+    // an associated browser.
+    const Browser* browser = GetBrowser();
+    if (browser && render_view_host_) {
+      render_view_host_->Send(new ExtensionMsg_UpdateBrowserWindowId(
+          render_view_host_->routing_id(),
+          ExtensionTabUtil::GetWindowId(browser)));
+    }
+  }
   NavigateToURL(url_);
   DCHECK(IsRenderViewLive());
   if (is_background_page())
@@ -241,7 +259,7 @@ void ExtensionHost::NavigateToURL(const GURL& url) {
   if (!is_background_page() &&
       !profile_->GetExtensionService()->IsBackgroundPageReady(extension_)) {
     // Make sure the background page loads before any others.
-    registrar_.Add(this, NotificationType::EXTENSION_BACKGROUND_PAGE_READY,
+    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY,
                    Source<Extension>(extension_));
     return;
   }
@@ -249,22 +267,22 @@ void ExtensionHost::NavigateToURL(const GURL& url) {
   render_view_host_->NavigateToURL(url_);
 }
 
-void ExtensionHost::Observe(NotificationType type,
+void ExtensionHost::Observe(int type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::EXTENSION_BACKGROUND_PAGE_READY:
+  switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY:
       DCHECK(profile_->GetExtensionService()->
           IsBackgroundPageReady(extension_));
       NavigateToURL(url_);
       break;
-    case NotificationType::RENDERER_PROCESS_CREATED:
+    case content::NOTIFICATION_RENDERER_PROCESS_CREATED:
       NotificationService::current()->Notify(
-          NotificationType::EXTENSION_PROCESS_CREATED,
+          chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED,
           Source<Profile>(profile_),
           Details<ExtensionHost>(this));
       break;
-    case NotificationType::EXTENSION_UNLOADED:
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
       // The extension object will be deleted after this notification has been
       // sent. NULL it out so that dirty pointer issues don't arise in cases
       // when multiple ExtensionHost objects pointing to the same Extension are
@@ -281,15 +299,6 @@ void ExtensionHost::Observe(NotificationType type,
 void ExtensionHost::UpdatePreferredSize(const gfx::Size& new_size) {
   if (view_.get())
     view_->UpdatePreferredSize(new_size);
-}
-
-void ExtensionHost::UpdateInspectorSetting(const std::string& key,
-                                         const std::string& value) {
-  RenderViewHostDelegateHelper::UpdateInspectorSetting(profile(), key, value);
-}
-
-void ExtensionHost::ClearInspectorSettings() {
-  RenderViewHostDelegateHelper::ClearInspectorSettings(profile());
 }
 
 void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host,
@@ -315,7 +324,7 @@ void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host,
   // more central, like EPM maybe.
   DCHECK_EQ(render_view_host_, render_view_host);
   NotificationService::current()->Notify(
-      NotificationType::EXTENSION_PROCESS_TERMINATED,
+      chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
       Source<Profile>(profile_),
       Details<ExtensionHost>(this));
 }
@@ -360,7 +369,7 @@ void ExtensionHost::DidStopLoading() {
   }
   if (notify) {
     NotificationService::current()->Notify(
-        NotificationType::EXTENSION_HOST_DID_STOP_LOADING,
+        chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
         Source<Profile>(profile_),
         Details<ExtensionHost>(this));
     if (extension_host_type_ == ViewType::EXTENSION_BACKGROUND_PAGE) {
@@ -403,7 +412,7 @@ void ExtensionHost::DocumentOnLoadCompletedInMainFrame(RenderViewHost* rvh,
                                                        int32 page_id) {
   if (ViewType::EXTENSION_POPUP == GetRenderViewType()) {
     NotificationService::current()->Notify(
-        NotificationType::EXTENSION_POPUP_VIEW_READY,
+        chrome::NOTIFICATION_EXTENSION_POPUP_VIEW_READY,
         Source<Profile>(profile_),
         Details<ExtensionHost>(this));
   }
@@ -416,38 +425,34 @@ void ExtensionHost::RunJavaScriptMessage(const RenderViewHost* rvh,
                                          const int flags,
                                          IPC::Message* reply_msg,
                                          bool* did_suppress_message) {
-  base::TimeDelta time_since_last_message(
-      base::TimeTicks::Now() - last_javascript_message_dismissal_);
+  bool suppress_this_message = false;
 
-  *did_suppress_message = suppress_javascript_messages_;
-  if (!suppress_javascript_messages_) {
-    bool show_suppress_checkbox = false;
-    // Show a checkbox offering to suppress further messages if this message is
-    // being displayed within kJavascriptMessageExpectedDelay of the last one.
-    if (time_since_last_message <
-        base::TimeDelta::FromMilliseconds(
-            chrome::kJavascriptMessageExpectedDelay))
-      show_suppress_checkbox = true;
+  string16 title;
+  if (extension_->location() == Extension::COMPONENT)
+    title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+  else
+    title = UTF8ToUTF16(extension_->name());
 
-    // Unlike for page alerts, navigations aren't a good signal for when to
-    // resume showing alerts, so we can't reasonably stop showing them even if
-    // the extension is spammy.
-    RunJavascriptMessageBox(profile_,
-                            this,
-                            frame_url,
-                            flags,
-                            UTF16ToWideHack(message),
-                            UTF16ToWideHack(default_prompt),
-                            show_suppress_checkbox,
-                            reply_msg);
-  } else {
-    // If we are suppressing messages, just reply as is if the user immediately
+  GetJavaScriptDialogCreatorInstance()->RunJavaScriptDialog(
+      this,
+      content::JavaScriptDialogCreator::DIALOG_TITLE_PLAIN_STRING,
+      title,
+      flags,
+      message,
+      default_prompt,
+      reply_msg,
+      &suppress_this_message);
+
+  if (suppress_this_message) {
+    // If we are suppressing messages, just reply as if the user immediately
     // pressed "Cancel".
-    OnMessageBoxClosed(reply_msg, false, std::wstring());
+    OnDialogClosed(reply_msg, false, string16());
   }
+
+  *did_suppress_message = suppress_this_message;
 }
 
-gfx::NativeWindow ExtensionHost::GetMessageBoxRootWindow() {
+gfx::NativeWindow ExtensionHost::GetDialogRootWindow() {
   // If we have a view, use that.
   gfx::NativeView native_view = GetNativeViewOfHost();
   if (native_view)
@@ -465,25 +470,12 @@ gfx::NativeWindow ExtensionHost::GetMessageBoxRootWindow() {
   return NULL;
 }
 
-TabContents* ExtensionHost::AsTabContents() {
-  return NULL;
-}
-
-ExtensionHost* ExtensionHost::AsExtensionHost() {
-  return this;
-}
-
-void ExtensionHost::OnMessageBoxClosed(IPC::Message* reply_msg,
-                                       bool success,
-                                       const std::wstring& user_input) {
-  last_javascript_message_dismissal_ = base::TimeTicks::Now();
+void ExtensionHost::OnDialogClosed(IPC::Message* reply_msg,
+                                   bool success,
+                                   const string16& user_input) {
   render_view_host()->JavaScriptDialogClosed(reply_msg,
                                              success,
-                                             WideToUTF16Hack(user_input));
-}
-
-void ExtensionHost::SetSuppressMessageBoxes(bool suppress_message_boxes) {
-  suppress_javascript_messages_ = suppress_message_boxes;
+                                             user_input);
 }
 
 void ExtensionHost::Close(RenderViewHost* render_view_host) {
@@ -491,7 +483,7 @@ void ExtensionHost::Close(RenderViewHost* render_view_host) {
       extension_host_type_ == ViewType::EXTENSION_DIALOG ||
       extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
     NotificationService::current()->Notify(
-        NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE,
+        chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
         Source<Profile>(profile_),
         Details<ExtensionHost>(this));
   }
@@ -538,6 +530,54 @@ WebPreferences ExtensionHost::GetWebkitPrefs() {
 
 RenderViewHostDelegate::View* ExtensionHost::GetViewDelegate() {
   return this;
+}
+
+bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                           bool* is_keyboard_shortcut) {
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP &&
+      event.type == NativeWebKeyboardEvent::RawKeyDown &&
+      event.windowsKeyCode == ui::VKEY_ESCAPE) {
+    DCHECK(is_keyboard_shortcut != NULL);
+    *is_keyboard_shortcut = true;
+  }
+  return false;
+}
+
+void ExtensionHost::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
+    if (event.type == NativeWebKeyboardEvent::RawKeyDown &&
+        event.windowsKeyCode == ui::VKEY_ESCAPE) {
+      NotificationService::current()->Notify(
+          chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
+          Source<Profile>(profile_),
+          Details<ExtensionHost>(this));
+      return;
+    }
+  }
+  UnhandledKeyboardEvent(event);
+}
+
+void ExtensionHost::HandleMouseMove() {
+#if defined(OS_WIN)
+  if (view_.get())
+    view_->HandleMouseMove();
+#endif
+}
+
+void ExtensionHost::HandleMouseDown() {
+}
+
+void ExtensionHost::HandleMouseLeave() {
+#if defined(OS_WIN)
+  if (view_.get())
+    view_->HandleMouseLeave();
+#endif
+}
+
+void ExtensionHost::HandleMouseUp() {
+}
+
+void ExtensionHost::HandleMouseActivate() {
 }
 
 void ExtensionHost::CreateNewWindow(
@@ -712,63 +752,6 @@ void ExtensionHost::GotFocus() {
 void ExtensionHost::TakeFocus(bool reverse) {
 }
 
-void ExtensionHost::LostCapture() {
-}
-
-void ExtensionHost::Activate() {
-}
-
-void ExtensionHost::Deactivate() {
-}
-
-bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                           bool* is_keyboard_shortcut) {
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP &&
-      event.type == NativeWebKeyboardEvent::RawKeyDown &&
-      event.windowsKeyCode == ui::VKEY_ESCAPE) {
-    DCHECK(is_keyboard_shortcut != NULL);
-    *is_keyboard_shortcut = true;
-  }
-  return false;
-}
-
-void ExtensionHost::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
-    if (event.type == NativeWebKeyboardEvent::RawKeyDown &&
-        event.windowsKeyCode == ui::VKEY_ESCAPE) {
-      NotificationService::current()->Notify(
-          NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-          Source<Profile>(profile_),
-          Details<ExtensionHost>(this));
-      return;
-    }
-  }
-  UnhandledKeyboardEvent(event);
-}
-
-void ExtensionHost::HandleMouseMove() {
-#if defined(OS_WIN)
-  if (view_.get())
-    view_->HandleMouseMove();
-#endif
-}
-
-void ExtensionHost::HandleMouseDown() {
-}
-
-void ExtensionHost::HandleMouseLeave() {
-#if defined(OS_WIN)
-  if (view_.get())
-    view_->HandleMouseLeave();
-#endif
-}
-
-void ExtensionHost::HandleMouseUp() {
-}
-
-void ExtensionHost::HandleMouseActivate() {
-}
-
 ViewType::Type ExtensionHost::GetRenderViewType() const {
   return extension_host_type_;
 }
@@ -801,25 +784,6 @@ void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
         render_view_host->routing_id(),
         kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow));
   }
-}
-
-int ExtensionHost::GetBrowserWindowID() const {
-  // Hosts not attached to any browser window have an id of -1.  This includes
-  // those mentioned below, and background pages.
-  int window_id = extension_misc::kUnknownWindowId;
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
-      extension_host_type_ == ViewType::EXTENSION_DIALOG ||
-      extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
-    // If the host is bound to a browser, then extract its window id.
-    // Extensions hosted in ExternalTabContainer objects may not have
-    // an associated browser.
-    const Browser* browser = GetBrowser();
-    if (browser)
-      window_id = ExtensionTabUtil::GetWindowId(browser);
-  } else if (extension_host_type_ != ViewType::EXTENSION_BACKGROUND_PAGE) {
-    NOTREACHED();
-  }
-  return window_id;
 }
 
 void ExtensionHost::OnRunFileChooser(

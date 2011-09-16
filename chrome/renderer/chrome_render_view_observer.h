@@ -6,13 +6,13 @@
 #define CHROME_RENDERER_CHROME_RENDER_VIEW_OBSERVER_H_
 #pragma once
 
+#include <string>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/task.h"
-#include "base/scoped_ptr.h"
 #include "content/renderer/render_view.h"
 #include "content/renderer/render_view_observer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializerClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
 
 class ContentSettingsObserver;
@@ -37,16 +37,14 @@ class ImageResourceFetcher;
 // This class holds the Chrome specific parts of RenderView, and has the same
 // lifetime.
 class ChromeRenderViewObserver : public RenderViewObserver,
-                                 public WebKit::WebPageSerializerClient,
                                  public WebKit::WebPermissionClient {
  public:
-  // translate_helper and/or phishing_classifier can be NULL.
+  // translate_helper can be NULL.
   ChromeRenderViewObserver(
       RenderView* render_view,
       ContentSettingsObserver* content_settings,
       ExtensionDispatcher* extension_dispatcher,
-      TranslateHelper* translate_helper,
-      safe_browsing::PhishingClassifierDelegate* phishing_classifier);
+      TranslateHelper* translate_helper);
   virtual ~ChromeRenderViewObserver();
 
  private:
@@ -58,12 +56,6 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
                                         bool is_new_navigation) OVERRIDE;
   virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
-
-  // WebKit::WebPageSerializerClient implementation.
-  virtual void didSerializeDataForFrame(
-      const WebKit::WebURL& frame_url,
-      const WebKit::WebCString& data,
-      PageSerializationStatus status) OVERRIDE;
 
   // WebKit::WebPermissionClient implementation.
   virtual bool allowDatabase(WebKit::WebFrame* frame,
@@ -90,21 +82,29 @@ class ChromeRenderViewObserver : public RenderViewObserver,
                                      bool default_value) OVERRIDE;
   virtual void didNotAllowPlugins(WebKit::WebFrame* frame) OVERRIDE;
   virtual void didNotAllowScript(WebKit::WebFrame* frame) OVERRIDE;
+  virtual bool allowDisplayingInsecureContent(
+      WebKit::WebFrame* frame,
+      bool allowed_per_settings,
+      const WebKit::WebSecurityOrigin& context,
+      const WebKit::WebURL& url) OVERRIDE;
+  virtual bool allowRunningInsecureContent(
+      WebKit::WebFrame* frame,
+      bool allowed_per_settings,
+      const WebKit::WebSecurityOrigin& context,
+      const WebKit::WebURL& url) OVERRIDE;
 
   void OnCaptureSnapshot();
   void OnHandleMessageFromExternalHost(const std::string& message,
                                        const std::string& origin,
                                        const std::string& target);
   void OnJavaScriptStressTestControl(int cmd, int param);
-  void OnGetAllSavableResourceLinksForCurrentPage(const GURL& page_url);
-  void OnGetSerializedHtmlDataForCurrentPageWithLocalLinks(
-      const std::vector<GURL>& links,
-      const std::vector<FilePath>& local_paths,
-      const FilePath& local_directory_name);
   void OnDownloadFavicon(int id, const GURL& image_url, int image_size);
   void OnEnableViewSourceMode();
   void OnNavigate(const ViewMsg_Navigate_Params& params);
   void OnSetIsPrerendering(bool is_prerendering);
+  void OnSetAllowDisplayingInsecureContent(bool allow);
+  void OnSetAllowRunningInsecureContent(bool allow);
+  void OnSetClientSidePhishingDetection(bool enable_phishing_detection);
 
   // Captures the thumbnail and text contents for indexing for the given load
   // ID. If the view's load ID is different than the parameter, this call is
@@ -161,6 +161,10 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   // Page_id from the last page we indexed. This prevents us from indexing the
   // same page twice in a row.
   int32 last_indexed_page_id_;
+
+  // Insecure content may be permitted for the duration of this render view.
+  bool allow_displaying_insecure_content_;
+  bool allow_running_insecure_content_;
 
   // Allows JS to access DOM automation. The JS object is only exposed when the
   // DOM automation bindings are enabled.

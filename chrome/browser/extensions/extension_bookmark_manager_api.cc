@@ -17,8 +17,11 @@
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
@@ -85,7 +88,7 @@ void AddNodeToList(ListValue* list, const BookmarkNode& node) {
   dict->SetString(keys::kParentIdKey, parent_id_string);
 
   if (node.is_url())
-    dict->SetString(keys::kUrlKey, node.GetURL().spec());
+    dict->SetString(keys::kUrlKey, node.url().spec());
 
   dict->SetString(keys::kTitleKey, node.GetTitle());
 
@@ -143,15 +146,15 @@ void BookmarkNodeDataToJSON(Profile* profile, const BookmarkNodeData& data,
 }  // namespace
 
 ExtensionBookmarkManagerEventRouter::ExtensionBookmarkManagerEventRouter(
-    Profile* profile, TabContents* tab_contents)
+    Profile* profile, TabContentsWrapper* tab)
     : profile_(profile),
-    tab_contents_(tab_contents) {
-  tab_contents_->SetBookmarkDragDelegate(this);
+    tab_(tab) {
+  tab_->bookmark_tab_helper()->SetBookmarkDragDelegate(this);
 }
 
 ExtensionBookmarkManagerEventRouter::~ExtensionBookmarkManagerEventRouter() {
-  if (tab_contents_->GetBookmarkDragDelegate() == this)
-    tab_contents_->SetBookmarkDragDelegate(NULL);
+  if (tab_->bookmark_tab_helper()->GetBookmarkDragDelegate() == this)
+    tab_->bookmark_tab_helper()->SetBookmarkDragDelegate(NULL);
 }
 
 void ExtensionBookmarkManagerEventRouter::DispatchEvent(const char* event_name,
@@ -468,5 +471,11 @@ bool GetSubtreeBookmarkManagerFunction::RunImpl() {
     extension_bookmark_helpers::AddNode(node, json.get(), true);
   }
   result_.reset(json.release());
+  return true;
+}
+
+bool CanEditBookmarkManagerFunction::RunImpl() {
+  result_.reset(Value::CreateBooleanValue(
+      profile_->GetPrefs()->GetBoolean(prefs::kEditBookmarksEnabled)));
   return true;
 }

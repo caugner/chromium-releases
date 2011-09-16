@@ -12,13 +12,13 @@
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
 #include "base/string_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
@@ -1181,12 +1181,16 @@ const PrepopulatedEngine google = {
   NULL,
   "http://www.google.com/favicon.ico",
   L"{google:baseURL}search?{google:RLZ}{google:acceptedSuggestion}"
-      L"{google:originalQueryForSuggestion}sourceid=chrome&ie={inputEncoding}&"
-      L"q={searchTerms}",
+      L"{google:originalQueryForSuggestion}{google:searchFieldtrialParameter}"
+      L"{google:instantFieldTrialGroupParameter}"
+      L"sourceid=chrome&ie={inputEncoding}&q={searchTerms}",
   "UTF-8",
-  L"{google:baseSuggestURL}search?client=chrome&hl={language}&q={searchTerms}",
-  L"{google:baseURL}webhp?{google:RLZ}sourceid=chrome-instant"
-      L"&ie={inputEncoding}&ion=1{searchTerms}&nord=1",
+  L"{google:baseSuggestURL}search?{google:searchFieldtrialParameter}"
+      L"{google:instantFieldTrialGroupParameter}"
+      L"client=chrome&hl={language}&q={searchTerms}",
+  L"{google:baseURL}webhp?{google:RLZ}sourceid=chrome-instant&"
+      L"{google:instantFieldTrialGroupParameter}"
+      L"ie={inputEncoding}&ion=1{searchTerms}&nord=1",
   SEARCH_ENGINE_GOOGLE,
   IDR_SEARCH_ENGINE_LOGO_GOOGLE,
   1,
@@ -1315,7 +1319,7 @@ const PrepopulatedEngine mail_ru = {
   "http://img.go.mail.ru/favicon.ico",
   L"http://go.mail.ru/search?q={searchTerms}",
   "windows-1251",
-  NULL,
+  L"http://suggests.go.mail.ru/chrome?q={searchTerms}",
   NULL,
   SEARCH_ENGINE_MAILRU,
   IDR_SEARCH_ENGINE_LOGO_MAILRU,
@@ -3358,7 +3362,7 @@ void RegisterUserPrefs(PrefService* prefs) {
 int GetDataVersion(PrefService* prefs) {
   // Increment this if you change the above data in ways that mean users with
   // existing data should get a new version.
-  const int kCurrentDataVersion = 33;
+  const int kCurrentDataVersion = 36;
   if (!prefs)
     return kCurrentDataVersion;
   // If a version number exist in the preferences file, it overrides the
@@ -3394,12 +3398,13 @@ TemplateURL* MakePrepopulatedTemplateURL(const wchar_t* name,
   new_turl->set_show_in_default_list(true);
   new_turl->set_safe_for_autoreplace(true);
   new_turl->set_date_created(Time());
+  new_turl->set_last_modified(Time());
   std::vector<std::string> turl_encodings;
   turl_encodings.push_back(encoding);
   new_turl->set_input_encodings(turl_encodings);
   new_turl->set_search_engine_type(search_engine_type);
   new_turl->set_logo_id(logo_id);
-  new_turl->set_prepopulate_id(id);
+  new_turl->SetPrepopulateId(id);
   return new_turl;
 }
 
@@ -3428,8 +3433,8 @@ void GetPrepopulatedTemplateFromPrefs(PrefService* prefs,
   for (size_t i = 0; i != num_engines; ++i) {
     Value* val;
     DictionaryValue* engine;
-    list->GetDictionary(i, &engine);
-    if (engine->Get("name", &val) && val->GetAsString(&name) &&
+    if (list->GetDictionary(i, &engine) &&
+        engine->Get("name", &val) && val->GetAsString(&name) &&
         engine->Get("keyword", &val) && val->GetAsString(&keyword) &&
         engine->Get("search_url", &val) && val->GetAsString(&search_url) &&
         engine->Get("suggest_url", &val) && val->GetAsString(&suggest_url) &&
@@ -3532,7 +3537,7 @@ static GURL GetOriginForSearchURL(const STR& url_string) {
     turl.SetURL(url_utf8_string, 0, 0);
 
     UIThreadSearchTermsData search_terms_data;
-    url = TemplateURLModel::GenerateSearchURLUsingTermsData(
+    url = TemplateURLService::GenerateSearchURLUsingTermsData(
         &turl, search_terms_data);
   }
   return url.GetOrigin();

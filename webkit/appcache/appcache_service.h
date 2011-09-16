@@ -35,6 +35,7 @@ class SpecialStoragePolicy;
 namespace appcache {
 
 class AppCacheBackendImpl;
+class AppCacheQuotaClient;
 class AppCachePolicy;
 
 // Refcounted container to avoid copying the collection in callbacks.
@@ -84,6 +85,17 @@ class AppCacheService {
   void DeleteAppCacheGroup(const GURL& manifest_url,
                            net::CompletionCallback* callback);
 
+  // Deletes all appcaches for the origin, 'callback' is invoked upon
+  // completion. This method always completes asynchronously.
+  // (virtual for unittesting)
+  virtual void DeleteAppCachesForOrigin(const GURL& origin,
+                                        net::CompletionCallback* callback);
+
+  // Checks the integrity of 'response_id' by reading the headers and data.
+  // If it cannot be read, the cache group for 'manifest_url' is deleted.
+  void CheckAppCacheResponse(const GURL& manifest_url_, int64 cache_id,
+                             int64 response_id);
+
   // Context for use during cache updates, should only be accessed
   // on the IO thread. We do NOT add a reference to the request context,
   // it is the callers responsibility to ensure that the pointer
@@ -110,6 +122,10 @@ class AppCacheService {
     return quota_manager_proxy_.get();
   }
 
+  AppCacheQuotaClient* quota_client() const {
+    return quota_client_;
+  }
+
   // Each child process in chrome uses a distinct backend instance.
   // See chrome/browser/AppCacheDispatcherHost.
   void RegisterBackend(AppCacheBackendImpl* backend_impl);
@@ -121,16 +137,26 @@ class AppCacheService {
 
   AppCacheStorage* storage() const { return storage_.get(); }
 
+  bool clear_local_state_on_exit() const { return clear_local_state_on_exit_; }
+  void set_clear_local_state_on_exit(bool clear_local_state_on_exit) {
+    clear_local_state_on_exit_ = clear_local_state_on_exit; }
+
  protected:
+  friend class AppCacheStorageImplTest;
+  friend class AppCacheServiceTest;
+
   class AsyncHelper;
   class CanHandleOfflineHelper;
   class DeleteHelper;
+  class DeleteOriginHelper;
   class GetInfoHelper;
+  class CheckResponseHelper;
 
   typedef std::set<AsyncHelper*> PendingAsyncHelpers;
   typedef std::map<int, AppCacheBackendImpl*> BackendMap;
 
   AppCachePolicy* appcache_policy_;
+  AppCacheQuotaClient* quota_client_;
   scoped_ptr<AppCacheStorage> storage_;
   scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<quota::QuotaManagerProxy> quota_manager_proxy_;
@@ -138,6 +164,7 @@ class AppCacheService {
   BackendMap backends_;  // One 'backend' per child process.
   // Context for use during cache updates.
   net::URLRequestContext* request_context_;
+  bool clear_local_state_on_exit_;
 
   DISALLOW_COPY_AND_ASSIGN(AppCacheService);
 };

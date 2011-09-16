@@ -25,10 +25,15 @@
 #include "webkit/quota/quota_types.h"
 #include "webkit/quota/special_storage_policy.h"
 
+class FilePath;
+
 namespace base {
 class MessageLoopProxy;
 }
-class FilePath;
+
+namespace quota_internals {
+class QuotaInternalsProxy;
+}
 
 namespace quota {
 
@@ -38,6 +43,7 @@ class QuotaDatabase;
 class QuotaManagerProxy;
 class QuotaTemporaryStorageEvictor;
 class UsageTracker;
+class MockQuotaManager;
 
 // An interface called by QuotaTemporaryStorageEvictor.
 class QuotaEvictionHandler {
@@ -45,7 +51,7 @@ class QuotaEvictionHandler {
   virtual ~QuotaEvictionHandler() {}
 
   typedef Callback1<const GURL&>::Type GetLRUOriginCallback;
-  typedef Callback1<QuotaStatusCode>::Type EvictOriginDataCallback;
+  typedef StatusCallback EvictOriginDataCallback;
   typedef Callback5<QuotaStatusCode,
                     int64 /* usage */,
                     int64 /* unlimited_usage */,
@@ -102,7 +108,7 @@ class QuotaManager : public QuotaTaskObserver,
   // Used to maintain LRU ordering.
   void NotifyStorageAccessed(QuotaClient::ID client_id,
                              const GURL& origin,
-                             StorageType typea);
+                             StorageType type);
 
   // Called by clients via proxy.
   // Client storage must call this method whenever they have made any
@@ -120,6 +126,11 @@ class QuotaManager : public QuotaTaskObserver,
   bool IsOriginInUse(const GURL& origin) const {
     return origins_in_use_.find(origin) != origins_in_use_.end();
   }
+
+  // Called by UI.
+  virtual void DeleteOriginData(const GURL& origin,
+                                StorageType type,
+                                StatusCallback* callback);
 
   // Called by UI and internal modules.
   void GetAvailableSpace(AvailableSpaceCallback* callback);
@@ -141,6 +152,12 @@ class QuotaManager : public QuotaTaskObserver,
            special_storage_policy_->IsStorageUnlimited(origin);
   }
 
+  virtual void GetOriginsModifiedSince(StorageType type,
+                                       base::Time modified_since,
+                                       GetOriginsCallback* callback);
+
+  bool ResetUsageTracker(StorageType type);
+
   // Used to determine the total size of the temp pool.
   static const int64 kTemporaryStorageQuotaDefaultSize;
   static const int64 kTemporaryStorageQuotaMaxSize;
@@ -155,41 +172,43 @@ class QuotaManager : public QuotaTaskObserver,
   static const int kThresholdOfErrorsToBeBlacklisted;
 
   static const int kEvictionIntervalInMilliSeconds;
+  static const base::TimeDelta kReportHistogramInterval;
 
  private:
   class DatabaseTaskBase;
   class InitializeTask;
-  class TemporaryGlobalQuotaUpdateTask;
-  class PersistentHostQuotaQueryTask;
-  class PersistentHostQuotaUpdateTask;
+  class UpdateTemporaryGlobalQuotaTask;
+  class GetPersistentHostQuotaTask;
+  class UpdatePersistentHostQuotaTask;
   class GetLRUOriginTask;
-  class OriginDeletionDatabaseTask;
-  class TemporaryOriginsRegistrationTask;
-  class OriginAccessRecordDatabaseTask;
+  class DeleteOriginInfo;
+  class InitializeTemporaryOriginsInfoTask;
+  class UpdateAccessTimeTask;
+  class UpdateModifiedTimeTask;
+  class GetModifiedSinceTask;
 
   class UsageAndQuotaDispatcherTask;
   class UsageAndQuotaDispatcherTaskForTemporary;
   class UsageAndQuotaDispatcherTaskForPersistent;
 
+  class OriginDataDeleter;
+
   class AvailableSpaceQueryTask;
   class DumpQuotaTableTask;
-  class DumpLastAccessTimeTableTask;
+  class DumpOriginInfoTableTask;
 
   typedef QuotaDatabase::QuotaTableEntry QuotaTableEntry;
-  typedef QuotaDatabase::LastAccessTimeTableEntry LastAccessTimeTableEntry;
+  typedef QuotaDatabase::OriginInfoTableEntry OriginInfoTableEntry;
   typedef std::vector<QuotaTableEntry> QuotaTableEntries;
-  typedef std::vector<LastAccessTimeTableEntry> LastAccessTimeTableEntries;
+  typedef std::vector<OriginInfoTableEntry> OriginInfoTableEntries;
 
   typedef Callback1<const QuotaTableEntries&>::Type DumpQuotaTableCallback;
-  typedef Callback1<const LastAccessTimeTableEntries&>::Type
-      DumpLastAccessTimeTableCallback;
+  typedef Callback1<const OriginInfoTableEntries&>::Type
+      DumpOriginInfoTableCallback;
 
   struct EvictionContext {
     EvictionContext()
         : evicted_type(kStorageTypeUnknown),
-          num_eviction_requested_clients(0),
-          num_evicted_clients(0),
-          num_eviction_error(0),
           usage(0),
           unlimited_usage(0),
           quota(0) {}
@@ -199,9 +218,6 @@ class QuotaManager : public QuotaTaskObserver,
     StorageType evicted_type;
 
     scoped_ptr<EvictOriginDataCallback> evict_origin_data_callback;
-    int num_eviction_requested_clients;
-    int num_evicted_clients;
-    int num_eviction_error;
 
     scoped_ptr<GetUsageAndQuotaForEvictionCallback>
         get_usage_and_quota_callback;
@@ -214,10 +230,13 @@ class QuotaManager : public QuotaTaskObserver,
   typedef std::map<HostAndType, UsageAndQuotaDispatcherTask*>
       UsageAndQuotaDispatcherTaskMap;
 
+  friend class quota_internals::QuotaInternalsProxy;
   friend struct QuotaManagerDeleter;
+  friend class MockStorageClient;
   friend class QuotaManagerProxy;
   friend class QuotaManagerTest;
   friend class QuotaTemporaryStorageEvictor;
+  friend class MockQuotaManager;
 
   // This initialization method is lazily called on the IO thread
   // when the first quota manager API is called.
@@ -236,8 +255,21 @@ class QuotaManager : public QuotaTaskObserver,
   // (Might return empty list if no origin is tracked by the tracker.)
   void GetCachedOrigins(StorageType type, std::set<GURL>* origins);
 
+  // These internal methods are separately defined mainly for testing.
+  void NotifyStorageAccessedInternal(
+      QuotaClient::ID client_id,
+      const GURL& origin,
+      StorageType type,
+      base::Time accessed_time);
+  void NotifyStorageModifiedInternal(
+      QuotaClient::ID client_id,
+      const GURL& origin,
+      StorageType type,
+      int64 delta,
+      base::Time modified_time);
+
   void DumpQuotaTable(DumpQuotaTableCallback* callback);
-  void DumpLastAccessTimeTable(DumpLastAccessTimeTableCallback* callback);
+  void DumpOriginInfoTable(DumpOriginInfoTableCallback* callback);
 
   // Methods for eviction logic.
   void StartEviction();
@@ -251,8 +283,17 @@ class QuotaManager : public QuotaTaskObserver,
       QuotaStatusCode status,
       StorageType type,
       int64 quota);
-  void DidGetGlobalUsageForEviction(StorageType type, int64 usage,
+  void DidGetGlobalUsageForEviction(StorageType type,
+                                    int64 usage,
                                     int64 unlimited_usage);
+
+  void ReportHistogram();
+  void DidGetTemporaryGlobalUsageForHistogram(StorageType type,
+                                              int64 usage,
+                                              int64 unlimited_usage);
+  void DidGetPersistentGlobalUsageForHistogram(StorageType type,
+                                               int64 usage,
+                                               int64 unlimited_usage);
 
   // QuotaEvictionHandler.
   virtual void GetLRUOrigin(
@@ -309,6 +350,7 @@ class QuotaManager : public QuotaTaskObserver,
   scoped_refptr<SpecialStoragePolicy> special_storage_policy_;
 
   base::ScopedCallbackFactory<QuotaManager> callback_factory_;
+  base::RepeatingTimer<QuotaManager> histogram_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(QuotaManager);
 };

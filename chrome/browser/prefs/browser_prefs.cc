@@ -6,13 +6,14 @@
 
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/autofill/autofill_manager.h"
-#include "chrome/browser/background_contents_service.h"
-#include "chrome/browser/background_mode_manager.h"
+#include "chrome/browser/background/background_contents_service.h"
+#include "chrome/browser/background/background_mode_manager.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
-#include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -27,8 +28,10 @@
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/net_pref_observer.h"
+#include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
+#include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/page_info_model.h"
@@ -38,16 +41,18 @@
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/profiles/profile_impl.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/remoting/firewall_traversal_tab_helper.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
-#include "chrome/browser/ssl/ssl_manager.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/tabs/pinned_tab_codec.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
+#include "chrome/browser/ui/autologin_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -59,6 +64,11 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/host_zoom_map.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
+#include "content/browser/ssl/ssl_manager.h"
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/ui/cocoa/presentation_mode_prefs.h"
+#endif
 
 #if defined(TOOLKIT_VIEWS)  // TODO(port): whittle this down as we port
 #include "chrome/browser/ui/views/browser_actions_container.h"
@@ -97,7 +107,9 @@ void RegisterLocalState(PrefService* local_state) {
   MetricsService::RegisterPrefs(local_state);
   printing::PrintJobManager::RegisterPrefs(local_state);
   PromoResourceService::RegisterPrefs(local_state);
+#if defined(ENABLE_SAFE_BROWSING)
   SafeBrowsingService::RegisterPrefs(local_state);
+#endif
   browser_shutdown::RegisterPrefs(local_state);
 #if defined(TOOLKIT_VIEWS)
   BrowserView::RegisterBrowserViewPrefs(local_state);
@@ -109,7 +121,11 @@ void RegisterLocalState(PrefService* local_state) {
   BackgroundModeManager::RegisterPrefs(local_state);
   NotificationUIManager::RegisterPrefs(local_state);
   PrefProxyConfigService::RegisterPrefs(local_state);
+  SSLConfigServiceManager::RegisterPrefs(local_state);
+#if defined(ENABLE_CONFIGURATION_POLICY)
   policy::CloudPolicySubsystem::RegisterPrefs(local_state);
+#endif
+  ProfileInfoCache::RegisterPrefs(local_state);
   ProfileManager::RegisterPrefs(local_state);
 #if defined(OS_CHROMEOS)
   chromeos::AudioMixerAlsa::RegisterPrefs(local_state);
@@ -127,7 +143,9 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   // User prefs
   AppsPromo::RegisterUserPrefs(user_prefs);
   AutofillManager::RegisterUserPrefs(user_prefs);
+  AutoLoginInfoBarDelegate::RegisterUserPrefs(user_prefs);
   SessionStartupPref::RegisterUserPrefs(user_prefs);
+  BookmarkModel::RegisterUserPrefs(user_prefs);
   Browser::RegisterUserPrefs(user_prefs);
   PasswordManager::RegisterUserPrefs(user_prefs);
   chrome_browser_net::RegisterUserPrefs(user_prefs);
@@ -143,7 +161,7 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   ProfileImpl::RegisterUserPrefs(user_prefs);
   PromoResourceService::RegisterUserPrefs(user_prefs);
   HostContentSettingsMap::RegisterUserPrefs(user_prefs);
-  DevToolsManager::RegisterUserPrefs(user_prefs);
+  DevToolsWindow::RegisterUserPrefs(user_prefs);
   PinnedTabCodec::RegisterUserPrefs(user_prefs);
   ExtensionPrefs::RegisterUserPrefs(user_prefs);
   GeolocationContentSettingsMap::RegisterUserPrefs(user_prefs);
@@ -160,11 +178,14 @@ void RegisterUserPrefs(PrefService* user_prefs) {
 #endif
   BackgroundContentsService::RegisterUserPrefs(user_prefs);
   SigninManager::RegisterUserPrefs(user_prefs);
-  TemplateURLModel::RegisterUserPrefs(user_prefs);
+  TemplateURLService::RegisterUserPrefs(user_prefs);
   InstantController::RegisterUserPrefs(user_prefs);
   NetPrefObserver::RegisterPrefs(user_prefs);
-  policy::CloudPolicySubsystem::RegisterPrefs(user_prefs);
   ProtocolHandlerRegistry::RegisterPrefs(user_prefs);
+  FirewallTraversalTabHelper::RegisterUserPrefs(user_prefs);
+#if defined(OS_MACOSX)
+  PresentationModePrefs::RegisterUserPrefs(user_prefs);
+#endif
 }
 
 void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {

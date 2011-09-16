@@ -15,16 +15,19 @@
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/browser/ui/views/autocomplete/touch_autocomplete_popup_contents_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/render_text.h"
 #include "views/border.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/layout/fill_layout.h"
@@ -102,9 +105,34 @@ PropertyAccessor<AutocompleteEditState>* GetStateAccessor() {
   return &state;
 }
 
+// A convenience method for applying URL styles.
+void ApplyURLStyle(views::Textfield* textfield,
+                   size_t start,
+                   size_t end,
+                   SkColor color,
+                   bool strike) {
+  gfx::StyleRange style;
+  style.foreground = color;
+  style.range = ui::Range(start, end);
+  style.strike = strike;
+  textfield->ApplyStyleRange(style);
+}
+
 const int kAutocompleteVerticalMargin = 4;
 
+// TODO(oshima): I'm currently using slightly different color than
+// gtk/win omnibox so that I can tell which one is used from its color.
+// Fix this once we finish all features.
+const SkColor kFadedTextColor = SK_ColorGRAY;
+const SkColor kNormalTextColor = SK_ColorBLACK;
+const SkColor kSecureSchemeColor = SK_ColorGREEN;
+const SkColor kSecurityErrorSchemeColor = SK_ColorRED;
+
 }  // namespace
+
+// static
+const char OmniboxViewViews::kViewClassName[] =
+    "browser/ui/views/omnibox/OmniboxViewViews";
 
 OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
                                    ToolbarModel* toolbar_model,
@@ -126,9 +154,9 @@ OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
 }
 
 OmniboxViewViews::~OmniboxViewViews() {
-  NotificationService::current()->Notify(NotificationType::OMNIBOX_DESTROYED,
-                                         Source<OmniboxViewViews>(this),
-                                         NotificationService::NoDetails());
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_OMNIBOX_DESTROYED, Source<OmniboxViewViews>(this),
+      NotificationService::NoDetails());
   // Explicitly teardown members which have a reference to us.  Just to be safe
   // we want them to be destroyed before destroying any other internal state.
   popup_view_.reset();
@@ -159,7 +187,7 @@ void OmniboxViewViews::Init() {
 }
 
 void OmniboxViewViews::SetBaseColor() {
-  // TODO(oshima): Implment style change.
+  // TODO(oshima): Implement style change.
   NOTIMPLEMENTED();
 }
 
@@ -262,6 +290,10 @@ void OmniboxViewViews::GetAccessibleState(ui::AccessibleViewState* state) {
   state->name = l10n_util::GetStringUTF16(IDS_ACCNAME_LOCATION);
 }
 
+std::string OmniboxViewViews::GetClassName() const {
+  return kViewClassName;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxViewViews, AutocopmleteEditView implementation:
 
@@ -289,7 +321,6 @@ void OmniboxViewViews::Update(const TabContents* contents) {
   // NOTE: We're getting the URL text here from the ToolbarModel.
   bool visibly_changed_permanent_text =
       model_->UpdatePermanentText(WideToUTF16Hack(toolbar_model_->GetText()));
-
   ToolbarModel::SecurityLevel security_level =
         toolbar_model_->GetSecurityLevel();
   bool changed_security_level = (security_level != security_level_);
@@ -308,6 +339,9 @@ void OmniboxViewViews::Update(const TabContents* contents) {
       // Move the marks for the cursor and the other end of the selection to
       // the previously-saved offsets (but preserve PRIMARY).
       textfield_->SelectRange(state->view_state.selection_range);
+      // We do not carry over the current edit history to another tab.
+      // TODO(oshima): consider saving/restoring edit history.
+      textfield_->ClearEditHistory();
     }
   } else if (visibly_changed_permanent_text) {
     RevertAll();
@@ -540,10 +574,10 @@ int OmniboxViewViews::OnPerformDrop(const views::DropTargetEvent& event) {
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxViewViews, NotificationObserver implementation:
 
-void OmniboxViewViews::Observe(NotificationType type,
+void OmniboxViewViews::Observe(int type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
-  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
   SetBaseColor();
 }
 
@@ -598,8 +632,40 @@ size_t OmniboxViewViews::GetTextLength() const {
 }
 
 void OmniboxViewViews::EmphasizeURLComponents() {
-  // TODO(oshima): Update URL visual style
-  NOTIMPLEMENTED();
+  // See whether the contents are a URL with a non-empty host portion, which we
+  // should emphasize.  To check for a URL, rather than using the type returned
+  // by Parse(), ask the model, which will check the desired page transition for
+  // this input.  This can tell us whether an UNKNOWN input string is going to
+  // be treated as a search or a navigation, and is the same method the Paste
+  // And Go system uses.
+  string16 text = GetText();
+  url_parse::Component scheme, host;
+  AutocompleteInput::ParseForEmphasizeComponents(
+      text, model_->GetDesiredTLD(), &scheme, &host);
+  const bool emphasize = model_->CurrentTextIsURL() && (host.len > 0);
+  SkColor base_color = emphasize ? kFadedTextColor : kNormalTextColor;
+  ApplyURLStyle(textfield_, 0, text.length(), base_color, false);
+  if (emphasize)
+    ApplyURLStyle(textfield_, host.begin, host.end(), kNormalTextColor, false);
+  // Emphasize the scheme for security UI display purposes (if necessary).
+  if (!model_->user_input_in_progress() && scheme.is_nonempty() &&
+      (security_level_ != ToolbarModel::NONE)) {
+    const size_t start = scheme.begin, end = scheme.end();
+    switch (security_level_) {
+      case ToolbarModel::SECURITY_ERROR:
+        ApplyURLStyle(textfield_, start, end, kSecurityErrorSchemeColor, true);
+        break;
+      case ToolbarModel::SECURITY_WARNING:
+        ApplyURLStyle(textfield_, start, end, kFadedTextColor, false);
+        break;
+      case ToolbarModel::EV_SECURE:
+      case ToolbarModel::SECURE:
+        ApplyURLStyle(textfield_, start, end, kSecureSchemeColor, false);
+        break;
+      default:
+        NOTREACHED() << "Unknown SecurityLevel:" << security_level_;
+    }
+  }
 }
 
 void OmniboxViewViews::TextChanged() {
@@ -628,9 +694,10 @@ AutocompletePopupView* OmniboxViewViews::CreatePopupView(
     Profile* profile,
     const View* location_bar) {
 #if defined(TOUCH_UI)
-  return new TouchAutocompletePopupContentsView(
+  typedef TouchAutocompletePopupContentsView AutocompleteContentsView;
 #else
-  return new AutocompletePopupContentsView(
+  typedef AutocompletePopupContentsView AutocompleteContentsView;
 #endif
+  return new AutocompleteContentsView(
       gfx::Font(), this, model_.get(), profile, location_bar);
 }

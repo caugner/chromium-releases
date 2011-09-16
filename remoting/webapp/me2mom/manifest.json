@@ -1,16 +1,25 @@
 {
-  "name": "Remoting Me2Mom",
-  "version": "1.0",
-  "description": "Me2Mom-style remote support in Chrome.",
+  "name": "Remoting IT2Me NAME_SUFFIX",
+  "version": "1.0.UNIQUE_VERSION",
+  "description": "IT2Me-style remote support in Chrome.",
   "app": {
     "launch": {
       "local_path": "choice.html"
     }
   },
-  "background_page": "background.html",
   "icons": {
-    "128": "chromoting128.png"
+    "128": "chromoting128.png",
+    "16": "chromoting16.png"
   },
+  "content_scripts": [
+    {
+      "matches": [
+      "https://chromoting-httpxmpp-oauth2-dev.corp.google.com/oauth2_trampoline",
+      "https://chromoting-httpxmpp-oauth2-dev.corp.google.com/oauth2_trampoline?*"
+      ],
+      "js": ["cs_oauth2_trampoline.js"]
+    }
+  ],
   "permissions": [
     "tabs",
     "https://accounts.google.com/o/oauth2/*",

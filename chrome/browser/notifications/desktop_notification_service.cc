@@ -21,6 +21,7 @@
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_child_process_host.h"
@@ -31,13 +32,11 @@
 #include "content/browser/worker_host/worker_process_host.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -60,8 +59,8 @@ void GetOriginsWithSettingFromContentSettingsRules(
        rule != content_setting_rules.end();
        ++rule) {
     if (setting == rule->content_setting) {
-      std::string url_str = rule->requesting_url_pattern.ToString();
-      if (!rule->requesting_url_pattern.IsValid()) {
+      std::string url_str = rule->primary_pattern.ToString();
+      if (!rule->primary_pattern.IsValid()) {
         // TODO(markusheintz): This will be removed in one of the next
         // refactoring steps as this entire function will disapear.
         LOG(DFATAL) << "Ignoring invalid content settings pattern: "
@@ -77,7 +76,7 @@ void GetOriginsWithSettingFromContentSettingsRules(
       } else {
         origins->push_back(
             content_settings::NotificationProvider::ToGURL(
-                rule->requesting_url_pattern));
+                rule->primary_pattern));
       }
     }
   }
@@ -154,15 +153,13 @@ NotificationPermissionInfoBarDelegate::
     UMA_HISTOGRAM_COUNTS("NotificationPermissionRequest.Ignored", 1);
 
   RenderViewHost* host = RenderViewHost::FromID(process_id_, route_id_);
-  if (host) {
-    host->Send(new DesktopNotificationMsg_PermissionRequestDone(
-        route_id_, callback_context_));
-  }
+  if (host)
+    host->DesktopNotificationPermissionRequestDone(callback_context_);
 }
 
 gfx::Image* NotificationPermissionInfoBarDelegate::GetIcon() const {
   return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-     IDR_PRODUCT_ICON_32);
+     IDR_PRODUCT_LOGO_32);
 }
 
 InfoBarDelegate::Type
@@ -296,15 +293,14 @@ void DesktopNotificationService::StartObserving() {
   if (!profile_->IsOffTheRecord()) {
     prefs_registrar_.Add(prefs::kDesktopNotificationAllowedOrigins, this);
     prefs_registrar_.Add(prefs::kDesktopNotificationDeniedOrigins, this);
-    notification_registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+    notification_registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                                 NotificationService::AllSources());
     notification_registrar_.Add(
         this,
-        NotificationType::CONTENT_SETTINGS_CHANGED,
-        // TODO(markusheintz): Remember to change to HostContentSettingsMap.
-        NotificationService::AllSources());
+        chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
+        Source<HostContentSettingsMap>(profile_->GetHostContentSettingsMap()));
   }
-  notification_registrar_.Add(this, NotificationType::PROFILE_DESTROYED,
+  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                               Source<Profile>(profile_));
 }
 
@@ -354,13 +350,13 @@ void DesktopNotificationService::DenyPermission(const GURL& origin) {
           origin));
 }
 
-void DesktopNotificationService::Observe(NotificationType type,
+void DesktopNotificationService::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  if (NotificationType::PREF_CHANGED == type) {
+  if (chrome::NOTIFICATION_PREF_CHANGED == type) {
     const std::string& name = *Details<std::string>(details).ptr();
     OnPrefsChanged(name);
-  } else if (NotificationType::CONTENT_SETTINGS_CHANGED == type) {
+  } else if (chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED == type) {
     // TODO(markusheintz): Check if content settings type default was changed;
     const ContentSetting default_content_setting =
         profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
@@ -372,14 +368,14 @@ void DesktopNotificationService::Observe(NotificationType type,
             prefs_cache_.get(),
             &NotificationsPrefsCache::SetCacheDefaultContentSetting,
             default_content_setting));
-  } else if (NotificationType::EXTENSION_UNLOADED == type) {
+  } else if (chrome::NOTIFICATION_EXTENSION_UNLOADED == type) {
     // Remove all notifications currently shown or queued by the extension
     // which was unloaded.
     const Extension* extension =
         Details<UnloadedExtensionInfo>(details)->extension;
     if (extension)
       ui_manager_->CancelAllBySourceOrigin(extension->url());
-  } else if (NotificationType::PROFILE_DESTROYED == type) {
+  } else if (chrome::NOTIFICATION_PROFILE_DESTROYED == type) {
     StopObserving();
   }
 }
@@ -525,10 +521,8 @@ void DesktopNotificationService::RequestPermission(
   } else {
     // Notify renderer immediately.
     RenderViewHost* host = RenderViewHost::FromID(process_id, route_id);
-    if (host) {
-      host->Send(new DesktopNotificationMsg_PermissionRequestDone(
-          route_id, callback_context));
-    }
+    if (host)
+      host->DesktopNotificationPermissionRequestDone(callback_context);
   }
 }
 
@@ -587,7 +581,13 @@ string16 DesktopNotificationService::DisplayNameForOrigin(
 
 void DesktopNotificationService::NotifySettingsChange() {
   NotificationService::current()->Notify(
-      NotificationType::DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
+      chrome::NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
       Source<DesktopNotificationService>(this),
       NotificationService::NoDetails());
+}
+
+WebKit::WebNotificationPresenter::Permission
+    DesktopNotificationService::HasPermission(const GURL& origin) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  return prefs_cache()->HasPermission(origin.GetOrigin());
 }

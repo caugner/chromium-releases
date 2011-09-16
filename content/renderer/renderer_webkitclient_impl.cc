@@ -21,6 +21,7 @@
 #include "content/plugin/npobject_util.h"
 #include "content/renderer/content_renderer_client.h"
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
+#include "content/renderer/media/audio_device.h"
 #include "content/renderer/render_thread.h"
 #include "content/renderer/render_view.h"
 #include "content/renderer/renderer_webaudiodevice_impl.h"
@@ -29,7 +30,6 @@
 #include "content/renderer/websharedworkerrepository_impl.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "media/audio/audio_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBlobRegistry.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
@@ -110,11 +110,11 @@ class RendererWebKitClientImpl::FileUtilities
 class RendererWebKitClientImpl::SandboxSupport
     : public WebKit::WebSandboxSupport {
  public:
+  virtual ~SandboxSupport() {}
+
 #if defined(OS_WIN)
   virtual bool ensureFontLoaded(HFONT);
 #elif defined(OS_MACOSX)
-  // TODO(jeremy): Remove once WebKit side of patch lands - crbug.com/72727 .
-  virtual bool loadFont(NSFont* srcFont, ATSFontContainerRef* out);
   virtual bool loadFont(
       NSFont* srcFont, ATSFontContainerRef* container, uint32* fontID);
 #elif defined(OS_POSIX)
@@ -438,13 +438,6 @@ bool RendererWebKitClientImpl::SandboxSupport::ensureFontLoaded(HFONT font) {
 
 #elif defined(OS_MACOSX)
 
-// TODO(jeremy): Remove once WebKit side of patch lands - crbug.com/72727 .
-bool RendererWebKitClientImpl::SandboxSupport::loadFont(
-    NSFont* srcFont, ATSFontContainerRef* out) {
-  uint32 temp;
-  return loadFont(srcFont, out, &temp);
-}
-
 bool RendererWebKitClientImpl::SandboxSupport::loadFont(
     NSFont* srcFont, ATSFontContainerRef* container, uint32* fontID) {
   DCHECK(srcFont);
@@ -563,7 +556,7 @@ RendererWebKitClientImpl::createGraphicsContext3D() {
 }
 
 double RendererWebKitClientImpl::audioHardwareSampleRate() {
-    return media::GetAudioHardwareSampleRate();
+  return AudioDevice::GetAudioHardwareSampleRate();
 }
 
 WebAudioDevice*

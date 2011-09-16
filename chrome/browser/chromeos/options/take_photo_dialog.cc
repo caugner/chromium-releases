@@ -7,9 +7,8 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
-#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -27,15 +26,19 @@ const int kFrameHeight = 480;
 
 }  // namespace
 
-TakePhotoDialog::TakePhotoDialog()
+TakePhotoDialog::TakePhotoDialog(Delegate* delegate)
     : take_photo_view_(NULL),
-      camera_controller_(this) {
+      camera_controller_(this),
+      delegate_(delegate) {
   camera_controller_.set_frame_width(kFrameWidth);
   camera_controller_.set_frame_height(kFrameHeight);
   registrar_.Add(
       this,
-      NotificationType::SCREEN_LOCK_STATE_CHANGED,
+      chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       NotificationService::AllSources());
+}
+
+TakePhotoDialog::~TakePhotoDialog() {
 }
 
 bool TakePhotoDialog::IsDialogButtonEnabled(
@@ -56,15 +59,8 @@ bool TakePhotoDialog::Cancel() {
 bool TakePhotoDialog::Accept() {
   camera_controller_.Stop();
 
-  UserManager* user_manager = UserManager::Get();
-  DCHECK(user_manager);
-
-  const UserManager::User& user = user_manager->logged_in_user();
-  DCHECK(!user.email().empty());
-
-  const SkBitmap& image = take_photo_view_->GetImage();
-  user_manager->SetLoggedInUserImage(image);
-  user_manager->SaveUserImage(user.email(), image);
+  if (delegate_)
+    delegate_->OnPhotoAccepted(take_photo_view_->GetImage());
   return true;
 }
 
@@ -109,10 +105,10 @@ void TakePhotoDialog::OnCaptureFailure() {
   take_photo_view_->ShowCameraError();
 }
 
-void TakePhotoDialog::Observe(NotificationType type,
+void TakePhotoDialog::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  if (type != NotificationType::SCREEN_LOCK_STATE_CHANGED)
+  if (type != chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED)
     return;
 
   bool is_screen_locked = *Details<bool>(details).ptr();

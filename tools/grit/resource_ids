@@ -41,7 +41,7 @@
   "webkit/tools/test_shell/test_shell_resources.grd": {
     "includes": [5000],
   },
-  "app/resources/app_resources.grd": {
+  "ui/resources/ui_resources.grd": {
     "includes": [5500],
   },
   "chrome/app/theme/theme_resources.grd": {
@@ -81,7 +81,7 @@
     "messages": [9000],
   },
 
-  "ui/base/strings/app_strings.grd": {
+  "ui/base/strings/ui_strings.grd": {
     "messages": [9500],
   },
   # Chromium strings and Google Chrome strings must start at the same id.
@@ -139,7 +139,7 @@
     "includes": [21000],
   },
   # This file is generated during the build.
-  "chrome/browser/debugger/frontend/devtools_frontend_resources.grd": {
+  "content/browser/debugger/frontend/devtools_frontend_resources.grd": {
     "includes": [21500],
   },
   "chrome/browser/resources/options_resources.grd": {
@@ -147,5 +147,11 @@
   },
   "cloud_print/virtual_driver/win/install/virtual_driver_setup_resources.grd": {
     "messages": [22500],
+  },
+  "chrome/browser/resources/quota_internals_resources.grd": {
+    "includes": [23000],
+  },
+  "chrome/browser/resources/workers_resources.grd": {
+    "includes": [23500],
   },
 }

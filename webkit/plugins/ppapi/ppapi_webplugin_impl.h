@@ -35,12 +35,13 @@ class WebPluginImpl : public WebKit::WebPlugin {
  private:
   friend class DeleteTask<WebPluginImpl>;
 
-  ~WebPluginImpl();
+  virtual ~WebPluginImpl();
 
   // WebKit::WebPlugin implementation.
   virtual bool initialize(WebKit::WebPluginContainer* container);
   virtual void destroy();
   virtual NPObject* scriptableObject();
+  virtual bool getFormValue(WebKit::WebString* value);
   virtual void paint(WebKit::WebCanvas* canvas, const WebKit::WebRect& rect);
   virtual void updateGeometry(
       const WebKit::WebRect& frame_rect,

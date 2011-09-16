@@ -20,9 +20,10 @@
 #include "base/string_util.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/cros/input_method_library.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
@@ -41,6 +42,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
@@ -52,7 +54,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/x11_util.h"
-#include "views/screen.h"
+#include "ui/gfx/screen.h"
 #include "views/widget/native_widget_gtk.h"
 
 namespace {
@@ -74,15 +76,15 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
                            public NotificationObserver {
  public:
   ScreenLockObserver() {
-    registrar_.Add(this, NotificationType::LOGIN_USER_CHANGED,
+    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_USER_CHANGED,
                    NotificationService::AllSources());
   }
 
   // NotificationObserver overrides:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE {
-    if (type == NotificationType::LOGIN_USER_CHANGED) {
+    if (type == chrome::NOTIFICATION_LOGIN_USER_CHANGED) {
       // Register Screen Lock after login screen to make sure
       // we don't show the screen lock on top of the login screen by accident.
       if (chromeos::CrosLibrary::Get()->EnsureLoaded())
@@ -111,17 +113,16 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
   // able to use/switch active keyboard layouts (e.g. US qwerty, US dvorak,
   // French).
   void SetupInputMethodsForScreenLocker() {
-    if (chromeos::CrosLibrary::Get()->EnsureLoaded() &&
-        // The LockScreen function is also called when the OS is suspended, and
+    if (// The LockScreen function is also called when the OS is suspended, and
         // in that case |saved_active_input_method_list_| might be non-empty.
         saved_active_input_method_list_.empty()) {
-      chromeos::InputMethodLibrary* library =
-          chromeos::CrosLibrary::Get()->GetInputMethodLibrary();
+      chromeos::input_method::InputMethodManager* manager =
+          chromeos::input_method::InputMethodManager::GetInstance();
 
-      saved_previous_input_method_id_ = library->previous_input_method().id;
-      saved_current_input_method_id_ = library->current_input_method().id;
-      scoped_ptr<chromeos::InputMethodDescriptors> active_input_method_list(
-          library->GetActiveInputMethods());
+      saved_previous_input_method_id_ = manager->previous_input_method().id();
+      saved_current_input_method_id_ = manager->current_input_method().id();
+      scoped_ptr<chromeos::input_method::InputMethodDescriptors>
+          active_input_method_list(manager->GetActiveInputMethods());
 
       const std::string hardware_keyboard_id =
           chromeos::input_method::GetHardwareInputMethodId();
@@ -130,10 +131,11 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
       // keyboard on the screen locker.
       bool should_add_hardware_keyboard = true;
 
-      chromeos::ImeConfigValue value;
-      value.type = chromeos::ImeConfigValue::kValueTypeStringList;
+      chromeos::input_method::ImeConfigValue value;
+      value.type = chromeos::input_method::ImeConfigValue::kValueTypeStringList;
       for (size_t i = 0; i < active_input_method_list->size(); ++i) {
-        const std::string& input_method_id = active_input_method_list->at(i).id;
+        const std::string& input_method_id =
+            active_input_method_list->at(i).id();
         saved_active_input_method_list_.push_back(input_method_id);
         // Skip if it's not a keyboard layout.
         if (!chromeos::input_method::IsKeyboardLayout(input_method_id))
@@ -148,8 +150,8 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
       }
       // We don't want to shut down the IME, even if the hardware layout is the
       // only IME left.
-      library->SetEnableAutoImeShutdown(false);
-      library->SetImeConfig(
+      manager->SetEnableAutoImeShutdown(false);
+      manager->SetImeConfig(
           chromeos::language_prefs::kGeneralSectionName,
           chromeos::language_prefs::kPreloadEnginesConfigName,
           value);
@@ -157,24 +159,23 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
   }
 
   void RestoreInputMethods() {
-    if (chromeos::CrosLibrary::Get()->EnsureLoaded() &&
-        !saved_active_input_method_list_.empty()) {
-      chromeos::InputMethodLibrary* library =
-          chromeos::CrosLibrary::Get()->GetInputMethodLibrary();
+    if (!saved_active_input_method_list_.empty()) {
+      chromeos::input_method::InputMethodManager* manager =
+          chromeos::input_method::InputMethodManager::GetInstance();
 
-      chromeos::ImeConfigValue value;
-      value.type = chromeos::ImeConfigValue::kValueTypeStringList;
+      chromeos::input_method::ImeConfigValue value;
+      value.type = chromeos::input_method::ImeConfigValue::kValueTypeStringList;
       value.string_list_value = saved_active_input_method_list_;
-      library->SetEnableAutoImeShutdown(true);
-      library->SetImeConfig(
+      manager->SetEnableAutoImeShutdown(true);
+      manager->SetImeConfig(
           chromeos::language_prefs::kGeneralSectionName,
           chromeos::language_prefs::kPreloadEnginesConfigName,
           value);
       // Send previous input method id first so Ctrl+space would work fine.
       if (!saved_previous_input_method_id_.empty())
-        library->ChangeInputMethod(saved_previous_input_method_id_);
+        manager->ChangeInputMethod(saved_previous_input_method_id_);
       if (!saved_current_input_method_id_.empty())
-        library->ChangeInputMethod(saved_current_input_method_id_);
+        manager->ChangeInputMethod(saved_current_input_method_id_);
 
       saved_previous_input_method_id_.clear();
       saved_current_input_method_id_.clear();
@@ -230,7 +231,7 @@ class LockWindow : public views::NativeWidgetGtk {
   // Sets the widget to move the focus to when clearning the native
   // widget's focus.
   void set_toplevel_focus_widget(GtkWidget* widget) {
-    GTK_WIDGET_SET_FLAGS(widget, GTK_CAN_FOCUS);
+    gtk_widget_set_can_focus(widget, TRUE);
     toplevel_focus_widget_ = widget;
   }
 
@@ -650,6 +651,7 @@ class InputEventObserver : public MessageLoopForUI::Observer {
       screen_locker_->OnLoginSuccess(not_used_string,
                                      not_used_string,
                                      not_used,
+                                     false,
                                      false);
     }
   }
@@ -730,11 +732,12 @@ void ScreenLocker::Init() {
   authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
 
   gfx::Point left_top(1, 1);
-  gfx::Rect init_bounds(views::Screen::GetMonitorAreaNearestPoint(left_top));
+  gfx::Rect init_bounds(gfx::Screen::GetMonitorAreaNearestPoint(left_top));
 
   LockWindow* lock_window = new LockWindow();
   lock_window_ = lock_window->GetWidget();
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.bounds = init_bounds;
   params.native_widget = lock_window;
   lock_window_->Init(params);
@@ -840,9 +843,9 @@ void ScreenLocker::OnLoginFailure(const LoginFailure& error) {
   if (!error_text.empty())
     msg += ASCIIToUTF16("\n") + ASCIIToUTF16(error_text);
 
-  InputMethodLibrary* input_method_library =
-      CrosLibrary::Get()->GetInputMethodLibrary();
-  if (input_method_library->GetNumActiveInputMethods() > 1)
+  input_method::InputMethodManager* input_method_manager =
+      input_method::InputMethodManager::GetInstance();
+  if (input_method_manager->GetNumActiveInputMethods() > 1)
     msg += ASCIIToUTF16("\n") +
         l10n_util::GetStringUTF16(IDS_LOGIN_ERROR_KEYBOARD_SWITCH_HINT);
 
@@ -856,7 +859,8 @@ void ScreenLocker::OnLoginSuccess(
     const std::string& username,
     const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& unused,
-    bool pending_requests) {
+    bool pending_requests,
+    bool using_oauth) {
   VLOG(1) << "OnLoginSuccess: Sending Unlock request.";
   if (authentication_start_time_.is_null()) {
     if (!username.empty())
@@ -881,7 +885,8 @@ void ScreenLocker::OnLoginSuccess(
 
   if (login_status_consumer_)
     login_status_consumer_->OnLoginSuccess(username, password,
-                                           unused, pending_requests);
+                                           unused, pending_requests,
+                                           using_oauth);
 }
 
 void ScreenLocker::BubbleClosing(Bubble* bubble, bool closed_by_escape) {
@@ -1112,7 +1117,7 @@ ScreenLocker::~ScreenLocker() {
   screen_locker_ = NULL;
   bool state = false;
   NotificationService::current()->Notify(
-      NotificationType::SCREEN_LOCK_STATE_CHANGED,
+      chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       Source<ScreenLocker>(this),
       Details<bool>(&state));
   if (CrosLibrary::Get()->EnsureLoaded())
@@ -1143,7 +1148,7 @@ void ScreenLocker::ScreenLockReady() {
 
   bool state = true;
   NotificationService::current()->Notify(
-      NotificationType::SCREEN_LOCK_STATE_CHANGED,
+      chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       Source<ScreenLocker>(this),
       Details<bool>(&state));
   if (CrosLibrary::Get()->EnsureLoaded())
@@ -1194,11 +1199,14 @@ void ScreenLocker::ShowErrorBubble(const std::wstring& message,
 void ScreenLocker::StopScreenSaver() {
   if (background_view_->IsScreenSaverVisible()) {
     VLOG(1) << "StopScreenSaver";
-    background_view_->HideScreenSaver();
     if (screen_lock_view_) {
       screen_lock_view_->SetVisible(true);
+      // Place the screen_lock_view_ to the center of the screen.
+      // Must be called when the view is visible: crosbug.com/15213.
+      background_view_->Layout();
       screen_lock_view_->RequestFocus();
     }
+    background_view_->HideScreenSaver();
     EnableInput();
   }
 }

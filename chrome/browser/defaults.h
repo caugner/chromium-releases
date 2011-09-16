@@ -10,6 +10,7 @@
 
 #include "build/build_config.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace browser_defaults {
 
@@ -67,6 +68,17 @@ extern const bool kAlwaysOpenIncognitoWindow;
 
 // Should the close button be shown in the Task Manager dialog?
 extern const bool kShowCancelButtonInTaskManager;
+
+// Preferred height of the bookmarks bar when shown on every page and
+// when shown only on the new tab page.
+extern const int kBookmarkBarHeight;
+extern const int kNewtabBookmarkBarHeight;
+
+// ChromiumOS network menu font
+extern const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle;
+
+// Preferred infobar border padding in pixels.
+extern const int kInfoBarBorderPaddingVertical;
 
 //=============================================================================
 // Runtime "const" - set only once after parsing command line option and should

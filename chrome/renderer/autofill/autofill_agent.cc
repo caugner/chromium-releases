@@ -20,6 +20,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/form_data.h"
+#include "webkit/glue/form_data_predictions.h"
 #include "webkit/glue/form_field.h"
 #include "webkit/glue/password_form.h"
 
@@ -31,6 +32,7 @@ using WebKit::WebKeyboardEvent;
 using WebKit::WebNode;
 using WebKit::WebString;
 using webkit_glue::FormData;
+using webkit_glue::FormDataPredictions;
 
 namespace {
 
@@ -54,7 +56,7 @@ AutofillAgent::AutofillAgent(
       suggestions_clear_index_(-1),
       suggestions_options_index_(-1),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
-  render_view->webview()->setAutoFillClient(this);
+  render_view->webview()->setAutofillClient(this);
 }
 
 AutofillAgent::~AutofillAgent() {}
@@ -64,23 +66,28 @@ bool AutofillAgent::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(AutofillAgent, message)
     IPC_MESSAGE_HANDLER(AutofillMsg_SuggestionsReturned, OnSuggestionsReturned)
     IPC_MESSAGE_HANDLER(AutofillMsg_FormDataFilled, OnFormDataFilled)
+    IPC_MESSAGE_HANDLER(AutofillMsg_FieldTypePredictionsAvailable,
+                        OnFieldTypePredictionsAvailable)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
-void AutofillAgent::DidFinishDocumentLoad(WebKit::WebFrame* frame) {
+void AutofillAgent::DidFinishDocumentLoad(WebFrame* frame) {
   // The document has now been fully loaded.  Scan for forms to be sent up to
   // the browser.
-  form_manager_.ExtractForms(frame);
-  SendForms(frame);
+  std::vector<webkit_glue::FormData> forms;
+  form_manager_.ExtractForms(frame, &forms);
+
+  if (!forms.empty())
+    Send(new AutofillHostMsg_FormsSeen(routing_id(), forms));
 }
 
-void AutofillAgent::FrameDetached(WebKit::WebFrame* frame) {
+void AutofillAgent::FrameDetached(WebFrame* frame) {
   form_manager_.ResetFrame(frame);
 }
 
-void AutofillAgent::FrameWillClose(WebKit::WebFrame* frame) {
+void AutofillAgent::FrameWillClose(WebFrame* frame) {
   form_manager_.ResetFrame(frame);
 }
 
@@ -97,7 +104,7 @@ void AutofillAgent::WillSubmitForm(WebFrame* frame,
   }
 }
 
-void AutofillAgent::FrameTranslated(WebKit::WebFrame* frame) {
+void AutofillAgent::FrameTranslated(WebFrame* frame) {
   // The page is translated, so try to extract the form data again.
   DidFinishDocumentLoad(frame);
 }
@@ -107,12 +114,13 @@ bool AutofillAgent::InputElementClicked(const WebInputElement& element,
                                         bool is_focused) {
   if (was_focused)
     ShowSuggestions(element, true, false, true);
+
   return false;
 }
 
-void AutofillAgent::didAcceptAutoFillSuggestion(const WebKit::WebNode& node,
-                                                const WebKit::WebString& value,
-                                                const WebKit::WebString& label,
+void AutofillAgent::didAcceptAutofillSuggestion(const WebNode& node,
+                                                const WebString& value,
+                                                const WebString& label,
                                                 int unique_id,
                                                 unsigned index) {
   if (password_autofill_manager_->DidAcceptAutofillSuggestion(node, value))
@@ -146,25 +154,24 @@ void AutofillAgent::didAcceptAutoFillSuggestion(const WebKit::WebNode& node,
   suggestions_options_index_ = -1;
 }
 
-void AutofillAgent::didSelectAutoFillSuggestion(const WebKit::WebNode& node,
-                                                const WebKit::WebString& value,
-                                                const WebKit::WebString& label,
+void AutofillAgent::didSelectAutofillSuggestion(const WebNode& node,
+                                                const WebString& value,
+                                                const WebString& label,
                                                 int unique_id) {
   DCHECK_GE(unique_id, 0);
   if (password_autofill_manager_->DidSelectAutofillSuggestion(node))
     return;
 
-  didClearAutoFillSelection(node);
+  didClearAutofillSelection(node);
   FillAutofillFormData(node, unique_id, AUTOFILL_PREVIEW);
 }
 
-void AutofillAgent::didClearAutoFillSelection(const WebKit::WebNode& node) {
+void AutofillAgent::didClearAutofillSelection(const WebNode& node) {
   form_manager_.ClearPreviewedFormWithNode(node, was_query_node_autofilled_);
 }
 
-void AutofillAgent::removeAutocompleteSuggestion(
-    const WebKit::WebString& name,
-    const WebKit::WebString& value) {
+void AutofillAgent::removeAutocompleteSuggestion(const WebString& name,
+                                                 const WebString& value) {
   // The index of clear & options will have shifted down.
   if (suggestions_clear_index_ != -1)
     suggestions_clear_index_--;
@@ -174,12 +181,11 @@ void AutofillAgent::removeAutocompleteSuggestion(
   Send(new AutofillHostMsg_RemoveAutocompleteEntry(routing_id(), name, value));
 }
 
-void AutofillAgent::textFieldDidEndEditing(
-    const WebKit::WebInputElement& element) {
+void AutofillAgent::textFieldDidEndEditing(const WebInputElement& element) {
   password_autofill_manager_->TextFieldDidEndEditing(element);
 }
 
-void AutofillAgent::textFieldDidChange(const WebKit::WebInputElement& element) {
+void AutofillAgent::textFieldDidChange(const WebInputElement& element) {
   // We post a task for doing the Autofill as the caret position is not set
   // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
   // it is needed to trigger autofill.
@@ -190,17 +196,15 @@ void AutofillAgent::textFieldDidChange(const WebKit::WebInputElement& element) {
             &AutofillAgent::TextFieldDidChangeImpl, element));
 }
 
-void AutofillAgent::TextFieldDidChangeImpl(
-    const WebKit::WebInputElement& element) {
+void AutofillAgent::TextFieldDidChangeImpl(const WebInputElement& element) {
   if (password_autofill_manager_->TextDidChangeInTextField(element))
     return;
 
   ShowSuggestions(element, false, true, false);
 }
 
-void AutofillAgent::textFieldDidReceiveKeyDown(
-    const WebKit::WebInputElement& element,
-    const WebKit::WebKeyboardEvent& event) {
+void AutofillAgent::textFieldDidReceiveKeyDown(const WebInputElement& element,
+                                               const WebKeyboardEvent& event) {
   if (password_autofill_manager_->TextFieldHandlingKeyDown(element, event))
     return;
 
@@ -279,7 +283,7 @@ void AutofillAgent::OnSuggestionsReturned(int query_id,
   // Send to WebKit for display.
   if (!v.empty() && !autofill_query_node_.isNull() &&
       autofill_query_node_.isFocusable()) {
-    web_view->applyAutoFillSuggestions(
+    web_view->applyAutofillSuggestions(
         autofill_query_node_, v, l, i, ids, separator_index);
   }
 
@@ -303,6 +307,13 @@ void AutofillAgent::OnFormDataFilled(int query_id,
   }
   autofill_action_ = AUTOFILL_NONE;
   Send(new AutofillHostMsg_DidFillAutofillFormData(routing_id()));
+}
+
+void AutofillAgent::OnFieldTypePredictionsAvailable(
+    const std::vector<FormDataPredictions>& forms) {
+  for (size_t i = 0; i < forms.size(); ++i) {
+    form_manager_.ShowPredictions(forms[i]);
+  }
 }
 
 void AutofillAgent::ShowSuggestions(const WebInputElement& element,
@@ -372,21 +383,11 @@ void AutofillAgent::FillAutofillFormData(const WebNode& node,
       routing_id(), autofill_query_id_, form, field, unique_id));
 }
 
-void AutofillAgent::SendForms(WebFrame* frame) {
-  std::vector<webkit_glue::FormData> forms;
-  form_manager_.GetFormsInFrame(frame, FormManager::REQUIRE_NONE, &forms);
-
-  if (!forms.empty())
-    Send(new AutofillHostMsg_FormsSeen(routing_id(), forms));
-}
-
 bool AutofillAgent::FindFormAndFieldForNode(const WebNode& node,
                                             webkit_glue::FormData* form,
                                             webkit_glue::FormField* field) {
   const WebInputElement& element = node.toConst<WebInputElement>();
-  if (!form_manager_.FindFormWithFormControlElement(element,
-                                                    FormManager::REQUIRE_NONE,
-                                                    form))
+  if (!form_manager_.FindFormWithFormControlElement(element, form))
     return false;
 
   FormManager::WebFormControlElementToFormField(element,
@@ -395,7 +396,7 @@ bool AutofillAgent::FindFormAndFieldForNode(const WebNode& node,
 
   // WebFormControlElementToFormField does not scrape the DOM for the field
   // label, so find the label here.
-  // TODO(jhawkins): Add form and field identities so we can use the cached form
+  // TODO(isherman): Add form and field identities so we can use the cached form
   // data in FormManager.
   field->label = FormManager::LabelForElement(element);
 

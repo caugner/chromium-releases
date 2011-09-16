@@ -7,11 +7,16 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "base/eintr_wrapper.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
+
+#if defined(OS_ANDROID)
+#include "base/os_compat_android.h"
+#endif
 
 namespace base {
 
@@ -54,7 +59,8 @@ PlatformFile CreatePlatformFile(const FilePath& name, int flags,
       !(flags & PLATFORM_FILE_OPEN_ALWAYS)) {
     NOTREACHED();
     errno = EOPNOTSUPP;
-    *error_code = error_code ? PLATFORM_FILE_ERROR_FAILED : PLATFORM_FILE_OK;
+    if (error_code)
+      *error_code = PLATFORM_FILE_ERROR_FAILED;
     return kInvalidPlatformFileValue;
   }
 

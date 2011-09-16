@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,20 @@
 #include "media/base/video_frame.h"
 #include "media/base/yuv_convert.h"
 
-X11VideoRenderer* X11VideoRenderer::instance_ = NULL;
+// Creates a 32-bit XImage.
+static XImage* CreateImage(Display* display, int width, int height) {
+  LOG(INFO) << "Allocating XImage " << width << "x" << height;
+  return  XCreateImage(display,
+                       DefaultVisual(display, DefaultScreen(display)),
+                       DefaultDepth(display, DefaultScreen(display)),
+                       ZPixmap,
+                       0,
+                       static_cast<char*>(malloc(width * height * 4)),
+                       width,
+                       height,
+                       32,
+                       width * 4);
+}
 
 // Returns the picture format for ARGB.
 // This method is originally from chrome/common/x11_util.cc.
@@ -44,28 +57,27 @@ static XRenderPictFormat* GetRenderARGB32Format(Display* dpy) {
   pictformat = XRenderFindFormat(dpy, kMask, &templ, 0 /* first result */);
 
   if (!pictformat) {
-    // Not all X servers support xRGB32 formats. However, the XRENDER spec
+    // Not all X servers support xRGB32 formats. However, the XRender spec
     // says that they must support an ARGB32 format, so we can always return
     // that.
     pictformat = XRenderFindStandardFormat(dpy, PictStandardARGB32);
-    CHECK(pictformat) << "XRENDER ARGB32 not supported.";
+    CHECK(pictformat) << "XRender ARGB32 not supported.";
   }
 
   return pictformat;
 }
 
 X11VideoRenderer::X11VideoRenderer(Display* display, Window window,
-                                   MessageLoop* message_loop)
+                                   MessageLoop* main_message_loop)
     : display_(display),
       window_(window),
       image_(NULL),
       picture_(0),
       use_render_(false),
-      glx_thread_message_loop_(message_loop) {
+      main_message_loop_(main_message_loop) {
 }
 
-X11VideoRenderer::~X11VideoRenderer() {
-}
+X11VideoRenderer::~X11VideoRenderer() {}
 
 void X11VideoRenderer::OnStop(media::FilterCallback* callback) {
   if (image_) {
@@ -82,7 +94,12 @@ bool X11VideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
   LOG(INFO) << "Initializing X11 Renderer...";
 
   // Resize the window to fit that of the video.
-  XResizeWindow(display_, window_, width(), height());
+  int width = decoder->width();
+  int height = decoder->height();
+  XResizeWindow(display_, window_, width, height);
+
+  // Allocate an XImage for caching RGB result.
+  image_ = CreateImage(display_, width, height);
 
   // Testing XRender support. We'll use the very basic of XRender
   // so if it presents it is already good enough. We don't need
@@ -91,6 +108,8 @@ bool X11VideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
   use_render_ = XRenderQueryExtension(display_, &dummy, &dummy);
 
   if (use_render_) {
+    LOG(INFO) << "Using XRender extension.";
+
     // If we are using XRender, we'll create a picture representing the
     // window.
     XWindowAttributes attr;
@@ -99,45 +118,41 @@ bool X11VideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
     XRenderPictFormat* pictformat = XRenderFindVisualFormat(
         display_,
         attr.visual);
-    CHECK(pictformat) << "XRENDER does not support default visual";
+    CHECK(pictformat) << "XRender does not support default visual";
 
     picture_ = XRenderCreatePicture(display_, window_, pictformat, 0, NULL);
     CHECK(picture_) << "Backing picture not created";
   }
 
-  // Initialize the XImage to store the output of YUV -> RGB conversion.
-  image_ = XCreateImage(display_,
-                        DefaultVisual(display_, DefaultScreen(display_)),
-                        DefaultDepth(display_, DefaultScreen(display_)),
-                        ZPixmap,
-                        0,
-                        static_cast<char*>(malloc(width() * height() * 4)),
-                        width(),
-                        height(),
-                        32,
-                        width() * 4);
-  DCHECK(image_);
-
-  // Save this instance.
-  DCHECK(!instance_);
-  instance_ = this;
   return true;
 }
 
 void X11VideoRenderer::OnFrameAvailable() {
-  if (glx_thread_message_loop()) {
-    glx_thread_message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &X11VideoRenderer::Paint));
-  }
+  main_message_loop_->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &X11VideoRenderer::PaintOnMainThread));
 }
 
-void X11VideoRenderer::Paint() {
+void X11VideoRenderer::PaintOnMainThread() {
+  DCHECK_EQ(main_message_loop_, MessageLoop::current());
+
   scoped_refptr<media::VideoFrame> video_frame;
   GetCurrentFrame(&video_frame);
-  if (!image_ || !video_frame) {
+  if (!video_frame) {
     // TODO(jiesun): Use color fill rather than create black frame then scale.
     PutCurrentFrame(video_frame);
     return;
+  }
+
+  int width = video_frame->width();
+  int height = video_frame->height();
+
+  // Check if we need to re-allocate our XImage.
+  if (image_->width != width || image_->height != height) {
+    LOG(INFO) << "Detection resolution change: "
+              << image_->width << "x" << image_->height << " -> "
+              << width << "x" << height;
+    XDestroyImage(image_);
+    image_ = CreateImage(display_, width, height);
   }
 
   // Convert YUV frame to RGB.
@@ -171,8 +186,8 @@ void X11VideoRenderer::Paint() {
     // Creates a XImage.
     XImage image;
     memset(&image, 0, sizeof(image));
-    image.width = width();
-    image.height = height();
+    image.width = width;
+    image.height = height;
     image.depth = 32;
     image.bits_per_pixel = 32;
     image.format = ZPixmap;
@@ -188,13 +203,13 @@ void X11VideoRenderer::Paint() {
     // Creates a pixmap and uploads from the XImage.
     unsigned long pixmap = XCreatePixmap(display_,
                                          window_,
-                                         width(),
-                                         height(),
+                                         width,
+                                         height,
                                          32);
     GC gc = XCreateGC(display_, pixmap, 0, NULL);
     XPutImage(display_, pixmap, gc, &image,
               0, 0, 0, 0,
-              width(), height());
+              width, height);
     XFreeGC(display_, gc);
 
     // Creates the picture representing the pixmap.
@@ -204,7 +219,7 @@ void X11VideoRenderer::Paint() {
     // Composite the picture over the picture representing the window.
     XRenderComposite(display_, PictOpSrc, picture, 0,
                      picture_, 0, 0, 0, 0, 0, 0,
-                     width(), height());
+                     width, height);
 
     XRenderFreePicture(display_, picture);
     XFreePixmap(display_, pixmap);
@@ -217,7 +232,7 @@ void X11VideoRenderer::Paint() {
   // to the window.
   GC gc = XCreateGC(display_, window_, 0, NULL);
   XPutImage(display_, window_, gc, image_,
-            0, 0, 0, 0, width(), height());
+            0, 0, 0, 0, width, height);
   XFlush(display_);
   XFreeGC(display_, gc);
 }

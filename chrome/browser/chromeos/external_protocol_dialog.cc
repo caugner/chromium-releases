@@ -19,7 +19,7 @@
 #include "ui/base/message_box_flags.h"
 #include "ui/base/text/text_elider.h"
 #include "views/controls/message_box_view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -79,12 +79,16 @@ views::View* ExternalProtocolDialog::GetContentsView() {
   return message_box_view_;
 }
 
-bool ExternalProtocolDialog::IsAlwaysOnTop() const {
+bool ExternalProtocolDialog::IsModal() const {
   return false;
 }
 
-bool ExternalProtocolDialog::IsModal() const {
-  return false;
+const views::Widget* ExternalProtocolDialog::GetWidget() const {
+  return message_box_view_->GetWidget();
+}
+
+views::Widget* ExternalProtocolDialog::GetWidget() {
+  return message_box_view_->GetWidget();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

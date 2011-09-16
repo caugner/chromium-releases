@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,6 +102,8 @@ var MostVisited = (function() {
       }
       this.data[destinationIndex] = sourceData;
       this.data[sourceIndex] = destinationData;
+
+      chrome.send('recordAction', ['MostVisitedReordered']);
     },
 
     updateSettingsLink: function(hasBlacklistedUrls) {
@@ -134,7 +136,7 @@ var MostVisited = (function() {
       // Send 'getMostVisitedPages' with a callback since we want to find the
       // new page and add that in the place of the removed page.
       chromeSend('getMostVisited', [], 'setMostVisitedPages',
-                 function(data, firstRun, hasBlacklistedUrls) {
+                 function(data, hasBlacklistedUrls) {
         // Update settings link.
         self.updateSettingsLink(hasBlacklistedUrls);
 
@@ -254,6 +256,8 @@ var MostVisited = (function() {
       var children = this.element.children;
       for (var i = 0; i < 8; i++) {
         children[i].id = 't' + i;
+        children[i].onmouseover = this.handleMouseOver_.bind(this);
+        children[i].onmouseout = this.handleMouseOut_.bind(this);
       }
     },
 
@@ -380,12 +384,17 @@ var MostVisited = (function() {
     startScreenX_: 0,
     startScreenY_: 0,
     dragEndTimer_: null,
+    hoverStartTime_: null,
 
     isDragging: function() {
       return !!this.dragItem_;
     },
 
     handleDragStart_: function(e) {
+      // For the purpose of recording histograms, treat this as the end of
+      // hovering over the thumbnail.
+      this.RecordHoverTime_(false);
+
       var thumbnail = getItem(e.target);
       if (thumbnail) {
         // Don't set data since HTML5 does not allow setting the name for
@@ -515,6 +524,46 @@ var MostVisited = (function() {
           !el.classList.contains('filler');
     },
 
+    // Thumbnail hovering
+
+    // TODO(mmenke):  Either implement preconnect/prerendering based on
+    //                hovering, or remove this code.
+
+    /**
+     * Record the time the mouse has been hovering over a thumbnail.
+     * |clicked| must be true if the thumbnail was clicked, or false if
+     * the cursor was moved off of the thumbnail.
+     */
+    RecordHoverTime_: function(clicked) {
+      if (!this.hoverStartTime_)
+        return;
+      var hoverDuration = (new Date()).getTime() - this.hoverStartTime_;
+      if (hoverDuration > 500)
+        hoverDuration = 500;
+      chrome.send('recordInHistogram',
+                  [clicked ? 'NewTabPage.HoverTimeClicked'
+                           : 'NewTabPage.HoverTimeNotClicked',
+                   hoverDuration,
+                   500]);
+      this.hoverStartTime_ = null;
+    },
+
+    /**
+     * Record the time the cursor started hovering over a thumbnail.
+     * Do nothing if currently dragging the thumbnail.
+     */
+    handleMouseOver_: function() {
+      if (!this.isDragging())
+        this.hoverStartTime_ = (new Date()).getTime();
+    },
+
+    /**
+     * Record the time the cursor spend hovering over the thumbnail.
+     */
+    handleMouseOut_: function() {
+      this.RecordHoverTime_(false);
+    },
+
 
     /// data
 
@@ -641,8 +690,10 @@ var MostVisited = (function() {
         if (item) {
           var index = Array.prototype.indexOf.call(item.parentNode.children,
                                                    item);
+          this.RecordHoverTime_(true);
           if (index != -1)
-            chrome.send('metrics', ['NTP_MostVisited' + index]);
+            chrome.send('recordInHistogram',
+                        ['NewTabPage.MostVisited', index, 8]);
         }
       }
     },

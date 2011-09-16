@@ -21,16 +21,14 @@
 #include "base/hash_tables.h"
 #include "base/linux_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/path_service.h"
 #include "base/pickle.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/sys_info.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "content/common/chrome_descriptors.h"
+#include "content/common/content_switches.h"
 #include "content/common/font_config_ipc_linux.h"
 #include "content/common/main_function_params.h"
 #include "content/common/pepper_plugin_registry.h"
@@ -39,10 +37,11 @@
 #include "content/common/sandbox_methods_linux.h"
 #include "content/common/set_process_title.h"
 #include "content/common/unix_domain_socket_posix.h"
-#include "media/base/media.h"
+#include "content/common/zygote_fork_delegate_linux.h"
 #include "seccompsandbox/sandbox.h"
 #include "skia/ext/SkFontHost_fontconfig_control.h"
 #include "unicode/timezone.h"
+#include "ipc/ipc_switches.h"
 
 #if defined(OS_LINUX)
 #include <sys/epoll.h>
@@ -100,8 +99,9 @@ static void SELinuxTransitionToTypeOrDie(const char* type) {
 // runs it.
 class Zygote {
  public:
-  explicit Zygote(int sandbox_flags)
-      : sandbox_flags_(sandbox_flags) {
+  explicit Zygote(int sandbox_flags, ZygoteForkDelegate* helper)
+    : sandbox_flags_(sandbox_flags),
+      helper_(helper) {
   }
 
   bool ProcessRequests() {
@@ -123,7 +123,16 @@ class Zygote {
       std::vector<int> empty;
       bool r = UnixDomainSocket::SendMsg(kBrowserDescriptor, kZygoteMagic,
                                          sizeof(kZygoteMagic), empty);
+#if defined(OS_CHROMEOS)
+      LOG_IF(WARNING, r) << "Sending zygote magic failed";
+      // Exit normally on chromeos because session manager may send SIGTERM
+      // right after the process starts and it may fail to send zygote magic
+      // number to browser process.
+      if (!r)
+        _exit(content::RESULT_CODE_NORMAL_EXIT);
+#else
       CHECK(r) << "Sending zygote magic failed";
+#endif
     }
 
     for (;;) {
@@ -168,6 +177,7 @@ class Zygote {
         case ZygoteHost::kCmdFork:
           // This function call can return multiple times, once per fork().
           return HandleForkRequest(fd, pickle, iter, fds);
+
         case ZygoteHost::kCmdReap:
           if (!fds.empty())
             break;
@@ -234,7 +244,7 @@ class Zygote {
       // Assume that if we can't find the child in the sandbox, then
       // it terminated normally.
       status = base::TERMINATION_STATUS_NORMAL_TERMINATION;
-      exit_code = ResultCodes::NORMAL_EXIT;
+      exit_code = content::RESULT_CODE_NORMAL_EXIT;
     }
 
     Pickle write_pickle;
@@ -250,9 +260,12 @@ class Zygote {
   // sandbox, it returns the real PID of the child process as it
   // appears outside the sandbox, rather than returning the PID inside
   // the sandbox.
-  int ForkWithRealPid() {
-    if (!g_suid_sandbox_active)
+  int ForkWithRealPid(const std::string& process_type, std::vector<int>& fds,
+                      const std::string& channel_switch) {
+    const bool use_helper = (helper_ && helper_->CanHelp(process_type));
+    if (!(use_helper || g_suid_sandbox_active)) {
       return fork();
+    }
 
     int dummy_fd;
     ino_t dummy_inode;
@@ -273,7 +286,13 @@ class Zygote {
       goto error;
     }
 
-    pid = fork();
+    if (use_helper) {
+      fds.push_back(dummy_fd);
+      fds.push_back(pipe_fds[0]);
+      pid = helper_->Fork(fds);
+    } else {
+      pid = fork();
+    }
     if (pid < 0) {
       goto error;
     } else if (pid == 0) {
@@ -297,33 +316,43 @@ class Zygote {
       dummy_fd = -1;
       close(pipe_fds[0]);
       pipe_fds[0] = -1;
-      uint8_t reply_buf[512];
-      Pickle request;
-      request.WriteInt(LinuxSandbox::METHOD_GET_CHILD_WITH_INODE);
-      request.WriteUInt64(dummy_inode);
-
-      const ssize_t r = UnixDomainSocket::SendRecvMsg(
-          kMagicSandboxIPCDescriptor, reply_buf, sizeof(reply_buf), NULL,
-          request);
-      if (r == -1) {
-        LOG(ERROR) << "Failed to get child process's real PID";
-        goto error;
-      }
-
       base::ProcessId real_pid;
-      Pickle reply(reinterpret_cast<char*>(reply_buf), r);
-      void* iter2 = NULL;
-      if (!reply.ReadInt(&iter2, &real_pid))
-        goto error;
-      if (real_pid <= 0) {
-        // METHOD_GET_CHILD_WITH_INODE failed. Did the child die already?
-        LOG(ERROR) << "METHOD_GET_CHILD_WITH_INODE failed";
-        goto error;
+      if (g_suid_sandbox_active) {
+        uint8_t reply_buf[512];
+        Pickle request;
+        request.WriteInt(LinuxSandbox::METHOD_GET_CHILD_WITH_INODE);
+        request.WriteUInt64(dummy_inode);
+
+        const ssize_t r = UnixDomainSocket::SendRecvMsg(
+            kMagicSandboxIPCDescriptor, reply_buf, sizeof(reply_buf), NULL,
+            request);
+        if (r == -1) {
+          LOG(ERROR) << "Failed to get child process's real PID";
+          goto error;
+        }
+
+        Pickle reply(reinterpret_cast<char*>(reply_buf), r);
+        void* iter = NULL;
+        if (!reply.ReadInt(&iter, &real_pid))
+          goto error;
+        if (real_pid <= 0) {
+          // METHOD_GET_CHILD_WITH_INODE failed. Did the child die already?
+          LOG(ERROR) << "METHOD_GET_CHILD_WITH_INODE failed";
+          goto error;
+        }
+        real_pids_to_sandbox_pids[real_pid] = pid;
       }
-      real_pids_to_sandbox_pids[real_pid] = pid;
-      if (HANDLE_EINTR(write(pipe_fds[1], "x", 1)) != 1) {
-        LOG(ERROR) << "Failed to synchronise with child process";
-        goto error;
+      if (use_helper) {
+        real_pid = pid;
+        if (!helper_->AckChild(pipe_fds[1], channel_switch)) {
+          LOG(ERROR) << "Failed to synchronise with zygote fork helper";
+          goto error;
+        }
+      } else {
+        if (HANDLE_EINTR(write(pipe_fds[1], "x", 1)) != 1) {
+          LOG(ERROR) << "Failed to synchronise with child process";
+          goto error;
+        }
       }
       close(pipe_fds[1]);
       return real_pid;
@@ -345,12 +374,19 @@ class Zygote {
 
   // Handle a 'fork' request from the browser: this means that the browser
   // wishes to start a new renderer.
-  bool HandleForkRequest(int fd, const Pickle& pickle, void* iter,
-                         std::vector<int>& fds) {
+  bool HandleForkRequest(int fd, const Pickle& pickle,
+                         void* iter, std::vector<int>& fds) {
     std::vector<std::string> args;
     int argc, numfds;
     base::GlobalDescriptors::Mapping mapping;
     base::ProcessId child;
+    std::string process_type;
+    std::string channel_id;
+    const std::string channel_id_prefix = std::string("--")
+        + switches::kProcessChannelID + std::string("=");
+
+    if (!pickle.ReadString(&iter, &process_type))
+      goto error;
 
     if (!pickle.ReadInt(&iter, &argc))
       goto error;
@@ -360,6 +396,8 @@ class Zygote {
       if (!pickle.ReadString(&iter, &arg))
         goto error;
       args.push_back(arg);
+      if (arg.compare(0, channel_id_prefix.length(), channel_id_prefix) == 0)
+        channel_id = arg;
     }
 
     if (!pickle.ReadInt(&iter, &numfds))
@@ -377,7 +415,7 @@ class Zygote {
     mapping.push_back(std::make_pair(
         static_cast<uint32_t>(kSandboxIPCChannel), kMagicSandboxIPCDescriptor));
 
-    child = ForkWithRealPid();
+    child = ForkWithRealPid(process_type, fds, channel_id);
 
     if (!child) {
 #if defined(SECCOMP_SANDBOX)
@@ -450,6 +488,7 @@ class Zygote {
   ProcessMap real_pids_to_sandbox_pids;
 
   const int sandbox_flags_;
+  ZygoteForkDelegate* helper_;
 };
 
 // With SELinux we can carve out a precise sandbox, so we don't have to play
@@ -603,12 +642,6 @@ static void PreSandboxInit() {
   // cached and there's no more need to access the file system.
   scoped_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
 
-  // Each Renderer we spawn will re-attempt initialization of the media
-  // libraries, at which point failure will be detected and handled, so
-  // we do not need to cope with initialization failures here.
-  FilePath media_path;
-  if (PathService::Get(chrome::DIR_MEDIA_LIBS, &media_path))
-    media::InitializeMediaLibrary(media_path);
 #if defined(USE_NSS)
   // NSS libraries are loaded before sandbox is activated. This is to allow
   // successful initialization of NSS which tries to load extra library files.
@@ -714,7 +747,8 @@ static bool EnterSandbox() {
 
 #endif  // CHROMIUM_SELINUX
 
-bool ZygoteMain(const MainFunctionParams& params) {
+bool ZygoteMain(const MainFunctionParams& params,
+                ZygoteForkDelegate* forkdelegate) {
 #if !defined(CHROMIUM_SELINUX)
   g_am_zygote_or_renderer = true;
 #endif
@@ -732,6 +766,15 @@ bool ZygoteMain(const MainFunctionParams& params) {
     }
   }
 #endif  // SECCOMP_SANDBOX
+
+  if (forkdelegate != NULL) {
+    VLOG(1) << "ZygoteMain: initializing fork delegate";
+    forkdelegate->Init(getenv("SBX_D") != NULL, // g_suid_sandbox_active,
+                       kBrowserDescriptor,
+                       kMagicSandboxIPCDescriptor);
+  } else {
+    VLOG(1) << "ZygoteMain: fork delegate is NULL";
+  }
 
   // Turn on the SELinux or SUID sandbox
   if (!EnterSandbox()) {
@@ -769,7 +812,7 @@ bool ZygoteMain(const MainFunctionParams& params) {
   }
 #endif  // SECCOMP_SANDBOX
 
-  Zygote zygote(sandbox_flags);
+  Zygote zygote(sandbox_flags, forkdelegate);
   // This function call can return multiple times, once per fork().
   return zygote.ProcessRequests();
 }

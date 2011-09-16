@@ -4,6 +4,7 @@
 
 #include "net/spdy/spdy_session.h"
 
+#include "net/base/ip_endpoint.h"
 #include "net/spdy/spdy_io_buffer.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/spdy/spdy_stream.h"
@@ -159,7 +160,7 @@ TEST_F(SpdySessionTest, OnSettings) {
   session_deps.host_resolver->set_synchronous_mode(true);
 
   spdy::SpdySettings new_settings;
-  spdy::SettingsFlagsAndId id(spdy::SETTINGS_MAX_CONCURRENT_STREAMS);
+  spdy::SettingsFlagsAndId id(0);
   id.set_id(spdy::SETTINGS_MAX_CONCURRENT_STREAMS);
   const size_t max_concurrent_streams = 2;
   new_settings.push_back(spdy::SpdySetting(id, max_concurrent_streams));
@@ -276,7 +277,7 @@ TEST_F(SpdySessionTest, CancelPendingCreateStream) {
   // Initialize the SpdySettingsStorage with 1 max concurrent streams.
   SpdySessionPool* spdy_session_pool(http_session->spdy_session_pool());
   spdy::SpdySettings settings;
-  spdy::SettingsFlagsAndId id(spdy::SETTINGS_MAX_CONCURRENT_STREAMS);
+  spdy::SettingsFlagsAndId id(0);
   id.set_id(spdy::SETTINGS_MAX_CONCURRENT_STREAMS);
   id.set_flags(spdy::SETTINGS_FLAG_PLEASE_PERSIST);
   settings.push_back(spdy::SpdySetting(id, 1));
@@ -351,7 +352,7 @@ TEST_F(SpdySessionTest, SendSettingsOnNewSession) {
   spdy::SpdySettings settings;
   const uint32 kBogusSettingId = 0xABAB;
   const uint32 kBogusSettingValue = 0xCDCD;
-  spdy::SettingsFlagsAndId id(kBogusSettingId);
+  spdy::SettingsFlagsAndId id(0);
   id.set_id(kBogusSettingId);
   id.set_flags(spdy::SETTINGS_FLAG_PERSISTED);
   settings.push_back(spdy::SpdySetting(id, kBogusSettingValue));
@@ -416,9 +417,10 @@ void IPPoolingTest(bool clean_via_close_current_sessions) {
     std::string name;
     std::string iplist;
     HostPortProxyPair pair;
+    AddressList addresses;
   } test_hosts[] = {
-    { "www.foo.com",    "192.168.0.1,192.168.0.5" },
-    { "images.foo.com", "192.168.0.2,192.168.0.3,192.168.0.5" },
+    { "www.foo.com",    "192.0.2.33,192.168.0.1,192.168.0.5" },
+    { "images.foo.com", "192.168.0.2,192.168.0.3,192.168.0.5,192.0.2.33" },
     { "js.foo.com",     "192.168.0.4,192.168.0.3" },
   };
 
@@ -431,9 +433,8 @@ void IPPoolingTest(bool clean_via_close_current_sessions) {
     // This test requires that the HostResolver cache be populated.  Normal
     // code would have done this already, but we do it manually.
     HostResolver::RequestInfo info(HostPortPair(test_hosts[i].name, kTestPort));
-    AddressList result;
     session_deps.host_resolver->Resolve(
-        info, &result, NULL, NULL, BoundNetLog());
+        info, &test_hosts[i].addresses, NULL, NULL, BoundNetLog());
 
     // Setup a HostPortProxyPair
     test_hosts[i].pair = HostPortProxyPair(
@@ -476,6 +477,12 @@ void IPPoolingTest(bool clean_via_close_current_sessions) {
                              NULL, http_session->transport_socket_pool(),
                              BoundNetLog()));
   EXPECT_EQ(OK, session->InitializeWithSocket(connection.release(), false, OK));
+
+  // TODO(rtenneti): MockClientSocket::GetPeerAddress return's 0 as the port
+  // number. Fix it to return port 80 and then use GetPeerAddress to AddAlias.
+  const addrinfo* address = test_hosts[0].addresses.head();
+  SpdySessionPoolPeer pool_peer(spdy_session_pool);
+  pool_peer.AddAlias(address, test_hosts[0].pair);
 
   // Flush the SpdySession::OnReadComplete() task.
   MessageLoop::current()->RunAllPending();

@@ -18,7 +18,7 @@ const SessionStartupPref::Type kDefaultSessionStartupType =
     SessionStartupPref::LAST;
 const int kMiniTabWidth = 64;
 const bool kCanToggleSystemTitleBar = false;
-const bool kRestorePopups = true;
+const bool kRestorePopups = false;
 const bool kShowImportOnBookmarkBar = false;
 const bool kShowExitMenuItem = true;
 const bool kOSSupportsOtherBrowsers = false;
@@ -72,6 +72,28 @@ const bool kShowCancelButtonInTaskManager = false;
 const bool kBrowserAliveWithNoWindows = true;
 #else
 const bool kBrowserAliveWithNoWindows = false;
+#endif
+
+#ifdef TOUCH_UI
+const int kBookmarkBarHeight = 50;
+const int kNewtabBookmarkBarHeight = 72;
+#else
+const int kBookmarkBarHeight = 28;
+const int kNewtabBookmarkBarHeight = 57;
+#endif
+
+#ifdef TOUCH_UI
+const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle =
+    ui::ResourceBundle::LargeBoldFont;
+#else
+const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle =
+    ui::ResourceBundle::BoldFont;
+#endif
+
+#ifdef TOUCH_UI
+const int kInfoBarBorderPaddingVertical = 12;
+#else
+const int kInfoBarBorderPaddingVertical = 5;
 #endif
 
 bool bookmarks_enabled = true;

@@ -10,7 +10,6 @@
 
 #include "chrome/browser/history/history_types.h"
 #include "chrome/test/live_sync/live_sync_test.h"
-#include "content/browser/cancelable_request.h"
 
 namespace base {
 class Time;
@@ -45,6 +44,13 @@ class LiveTypedUrlsSyncTest : public LiveSyncTest {
   void AssertURLRowsAreEqual(const history::URLRow& left,
                              const history::URLRow& right);
 
+  // Returns a unique timestamp to use when generating page visits
+  // (HistoryService does not like having identical timestamps and will modify
+  // the timestamps behind the scenes if it encounters them, which leads to
+  // spurious test failures when the resulting timestamps aren't what we
+  // expect).
+  base::Time GetTimestamp();
+
  private:
   // Waits for the history DB thread to finish executing its current set of
   // tasks.
@@ -58,10 +64,7 @@ class LiveTypedUrlsSyncTest : public LiveSyncTest {
   std::vector<history::URLRow> GetTypedUrlsFromHistoryService(
       HistoryService* service);
 
-
-  // Helper object to make sure we don't leave tasks running on the history
-  // thread.
-  CancelableRequestConsumerT<int, 0> cancelable_consumer_;
+  base::Time timestamp_;
   DISALLOW_COPY_AND_ASSIGN(LiveTypedUrlsSyncTest);
 };
 

@@ -53,7 +53,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
 
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) {}
-  virtual void InitAsFullscreen() {}
+  virtual void InitAsFullscreen(RenderWidgetHostView* reference_host_view) {}
   virtual RenderWidgetHost* GetRenderWidgetHost() const;
   virtual void DidBecomeSelected() {}
   virtual void WasHidden() {}
@@ -136,6 +136,13 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
 #endif
   virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate) { }
 
+#if defined(TOUCH_UI)
+  virtual void AcceleratedSurfaceSetIOSurface(
+      int32 width, int32 height, uint64 surface_id) { }
+  virtual void AcceleratedSurfaceBuffersSwapped(uint64 surface_id) { }
+  virtual void AcceleratedSurfaceRelease(uint64 surface_id) { }
+#endif
+
 #if defined(TOOLKIT_USES_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) { }
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) { }
@@ -143,8 +150,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
 #endif
 
   virtual gfx::PluginWindowHandle GetCompositingSurface();
-
-  virtual bool ContainsNativeView(gfx::NativeView native_view) const;
 
   bool is_showing() const { return is_showing_; }
 
@@ -204,6 +209,12 @@ class TestRenderViewHost : public RenderViewHost {
   // of a before unload handler from the renderer.
   bool is_waiting_for_beforeunload_ack() const {
     return is_waiting_for_beforeunload_ack_;
+  }
+
+  // Sets whether the RenderViewHost is currently swapped out, and thus
+  // filtering messages from the renderer.
+  void set_is_swapped_out(bool is_swapped_out) {
+    is_swapped_out_ = is_swapped_out;
   }
 
   // If set, navigations will appear to have loaded through a proxy
@@ -291,7 +302,7 @@ class RenderViewHostTestHarness : public testing::Test {
 
   // Sets the current tab contents for tests that want to alter it. Takes
   // ownership of the TestTabContents passed.
-  void SetContents(TestTabContents* contents);
+  virtual void SetContents(TestTabContents* contents);
 
   // Creates a new TestTabContents. Ownership passes to the caller.
   TestTabContents* CreateTestTabContents();

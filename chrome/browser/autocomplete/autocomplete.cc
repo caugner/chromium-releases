@@ -22,13 +22,16 @@
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/autocomplete/search_provider.h"
+#include "chrome/browser/autocomplete/shortcuts_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
+#include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/ui/webui/history_ui.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -44,6 +47,14 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using base::TimeDelta;
+
+static bool AreTemplateURLsEqual(const TemplateURL* a,
+                                 const TemplateURL* b) {
+  // We can't use equality of the pointers because SearchProvider copies the
+  // TemplateURLs. Instead we compare based on ID.
+  // a may be NULL, but never b, so we don't handle the case of a==b==NULL.
+  return a && b && (a->id() == b->id());
+}
 
 // AutocompleteInput ----------------------------------------------------------
 
@@ -549,6 +560,7 @@ string16 AutocompleteProvider::StringForURLDisplay(const GURL& url,
 
 // static
 const size_t AutocompleteResult::kMaxMatches = 6;
+const int AutocompleteResult::kLowestDefaultScore = 1200;
 
 void AutocompleteResult::Selection::Clear() {
   destination_url = GURL();
@@ -782,7 +794,8 @@ AutocompleteController::AutocompleteController(
     AutocompleteControllerDelegate* delegate)
     : delegate_(delegate),
       done_(true),
-      in_start_(false) {
+      in_start_(false),
+      profile_(profile) {
   search_provider_ = new SearchProvider(this, profile);
   providers_.push_back(search_provider_);
   // TODO(mrossetti): Remove the following and permanently modify the
@@ -791,10 +804,14 @@ AutocompleteController::AutocompleteController(
                          switches::kDisableHistoryQuickProvider);
   if (hqp_enabled)
     providers_.push_back(new HistoryQuickProvider(this, profile));
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableShortcutsProvider))
+    providers_.push_back(new ShortcutsProvider(this, profile));
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableHistoryURLProvider))
     providers_.push_back(new HistoryURLProvider(this, profile));
-  providers_.push_back(new KeywordProvider(this, profile));
+  keyword_provider_ = new KeywordProvider(this, profile);
+  providers_.push_back(keyword_provider_);
   providers_.push_back(new HistoryContentsProvider(this, profile, hqp_enabled));
   providers_.push_back(new BuiltinProvider(this, profile));
   providers_.push_back(new ExtensionAppProvider(this, profile));
@@ -824,6 +841,7 @@ void AutocompleteController::SetProfile(Profile* profile) {
     (*i)->SetProfile(profile);
   input_.Clear();  // Ensure we don't try to do a "minimal_changes" query on a
                    // different profile.
+  profile_ = profile;
 }
 
 void AutocompleteController::Start(
@@ -865,7 +883,9 @@ void AutocompleteController::Start(
   if (matches_requested == AutocompleteInput::ALL_MATCHES &&
       (text.length() < 6)) {
     base::TimeTicks end_time = base::TimeTicks::Now();
-    std::string name = "Omnibox.QueryTime." + base::IntToString(text.length());
+    std::string name = "Omnibox.QueryTime." +
+                       InstantFieldTrial::GetGroupName(profile_) + "." +
+                       base::IntToString(text.length());
     base::Histogram* counter = base::Histogram::FactoryGet(
         name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
     counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
@@ -945,6 +965,8 @@ void AutocompleteController::UpdateResult(bool is_synchronous_pass) {
     result_.CopyOldMatches(input_, last_result);
   }
 
+  UpdateKeywordDescriptions(&result_);
+
   bool notify_default_match = is_synchronous_pass;
   if (!is_synchronous_pass) {
     const bool last_default_was_valid =
@@ -964,12 +986,39 @@ void AutocompleteController::UpdateResult(bool is_synchronous_pass) {
   NotifyChanged(notify_default_match);
 }
 
+void AutocompleteController::UpdateKeywordDescriptions(
+    AutocompleteResult* result) {
+  const TemplateURL* last_template_url = NULL;
+  for (AutocompleteResult::iterator i = result->begin(); i != result->end();
+       ++i) {
+    if (((i->provider == keyword_provider_) && i->template_url) ||
+        ((i->provider == search_provider_) &&
+         (i->type == AutocompleteMatch::SEARCH_WHAT_YOU_TYPED ||
+          i->type == AutocompleteMatch::SEARCH_HISTORY ||
+          i->type == AutocompleteMatch::SEARCH_SUGGEST))) {
+      i->description.clear();
+      i->description_class.clear();
+      DCHECK(i->template_url);
+      if (!AreTemplateURLsEqual(last_template_url, i->template_url)) {
+        i->description = l10n_util::GetStringFUTF16(
+            IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
+            i->template_url->AdjustedShortNameForLocaleDirection());
+        i->description_class.push_back(
+            ACMatchClassification(0, ACMatchClassification::DIM));
+      }
+      last_template_url = i->template_url;
+    } else {
+      last_template_url = NULL;
+    }
+  }
+}
+
 void AutocompleteController::NotifyChanged(bool notify_default_match) {
   if (delegate_)
     delegate_->OnResultChanged(notify_default_match);
   if (done_) {
     NotificationService::current()->Notify(
-        NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_READY,
+        chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
         Source<AutocompleteController>(this),
         NotificationService::NoDetails());
   }

@@ -12,9 +12,12 @@
 
 class AutomationProvider;
 class Browser;
-class DictionaryValue;
 class GURL;
 class TabContents;
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace IPC {
 class Message;
@@ -54,20 +57,25 @@ void DeleteCookie(const GURL& url,
 // Gets the cookies for the given URL. Uses the JSON interface.
 // See |TestingAutomationProvider| for example input.
 void GetCookiesJSON(AutomationProvider* provider,
-                    DictionaryValue* args,
+                    base::DictionaryValue* args,
                     IPC::Message* reply_message);
 
 // Deletes the cookie with the given name for the URL. Uses the JSON interface.
 // See |TestingAutomationProvider| for example input.
 void DeleteCookieJSON(AutomationProvider* provider,
-                      DictionaryValue* args,
+                      base::DictionaryValue* args,
                       IPC::Message* reply_message);
 
 // Sets a cookie for the given URL. Uses the JSON interface.
 // See |TestingAutomationProvider| for example input.
 void SetCookieJSON(AutomationProvider* provider,
-                   DictionaryValue* args,
+                   base::DictionaryValue* args,
                    IPC::Message* reply_message);
+
+// Sends a JSON error reply if an app modal dialog is active. Returns whether
+// an error reply was sent.
+bool SendErrorIfModalDialogActive(AutomationProvider* provider,
+                                  IPC::Message* message);
 
 }  // namespace automation_util
 

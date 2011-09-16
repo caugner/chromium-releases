@@ -25,7 +25,7 @@
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 @interface PageInfoBubbleController (Private)
 - (PageInfoModel*)model;
@@ -220,9 +220,13 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
   // Keep the new subviews in an array that gets replaced at the end.
   NSMutableArray* subviews = [NSMutableArray array];
 
+  // Whether to include the help button at the bottom of the page info bubble.
+  const int sectionCount = model_->GetSectionCount();
+  BOOL showHelpButton = !(sectionCount == 1 && model_->GetSectionInfo(0).type ==
+      PageInfoModel::SECTION_INFO_INTERNAL_PAGE);
+
   // The subviews will be attached to the PageInfoContentView, which has a
   // flipped origin. This allows the code to build top-to-bottom.
-  const int sectionCount = model_->GetSectionCount();
   for (int i = 0; i < sectionCount; ++i) {
     PageInfoModel::SectionInfo info = model_->GetSectionInfo(i);
 
@@ -261,12 +265,19 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
       offset += imageBaselineDelta;
 
     // Add the separators.
-    offset += kVerticalSpacing;
-    offset += [self addSeparatorToSubviews:subviews atOffset:offset];
+    int testSectionCount = sectionCount - 1;
+    if (i != testSectionCount || (i == testSectionCount && showHelpButton)) {
+      offset += kVerticalSpacing;
+      offset += [self addSeparatorToSubviews:subviews atOffset:offset];
+    }
   }
 
-  // The last item at the bottom of the window is the help center link.
-  offset += [self addHelpButtonToSubviews:subviews atOffset:offset];
+  // The last item at the bottom of the window is the help center link. Do not
+  // show this for the internal pages, which have one section.
+  if (showHelpButton)
+    offset += [self addHelpButtonToSubviews:subviews atOffset:offset];
+
+  // Add the bottom padding.
   offset += kVerticalSpacing;
 
   // Create the dummy view that uses flipped coordinates.

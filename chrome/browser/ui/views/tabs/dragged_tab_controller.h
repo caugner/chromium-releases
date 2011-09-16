@@ -128,11 +128,11 @@ class DraggedTabController : public TabContentsDelegate,
   void InitTabDragData(BaseTab* tab, TabDragData* drag_data);
 
   // Overridden from TabContentsDelegate:
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url,
-                              const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const GURL& url,
+                                      const GURL& referrer,
+                                      WindowOpenDisposition disposition,
+                                      PageTransition::Type transition) OVERRIDE;
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) OVERRIDE;
   virtual void AddNewContents(TabContents* source,
@@ -140,17 +140,13 @@ class DraggedTabController : public TabContentsDelegate,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture) OVERRIDE;
-  virtual void ActivateContents(TabContents* contents) OVERRIDE;
-  virtual void DeactivateContents(TabContents* contents) OVERRIDE;
   virtual void LoadingStateChanged(TabContents* source) OVERRIDE;
-  virtual void CloseContents(TabContents* source) OVERRIDE;
-  virtual void MoveContents(TabContents* source,
-                            const gfx::Rect& pos) OVERRIDE;
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
+  virtual content::JavaScriptDialogCreator*
+      GetJavaScriptDialogCreator() OVERRIDE;
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
@@ -158,6 +154,8 @@ class DraggedTabController : public TabContentsDelegate,
 #if defined(OS_WIN)
   virtual void WillProcessMessage(const MSG& msg) OVERRIDE;
   virtual void DidProcessMessage(const MSG& msg) OVERRIDE;
+#elif defined(TOUCH_UI)
+  virtual EventStatus WillProcessXEvent(XEvent* xevent) OVERRIDE;
 #elif defined(TOOLKIT_USES_GTK)
   virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
   virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;

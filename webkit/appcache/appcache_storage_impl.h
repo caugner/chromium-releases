@@ -80,6 +80,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   typedef std::map<int64, CacheLoadTask*> PendingCacheLoads;
   typedef std::map<GURL, GroupLoadTask*> PendingGroupLoads;
   typedef std::deque<std::pair<GURL, int64> > PendingForeignMarkings;
+  typedef std::set<StoreGroupAndCacheTask*> PendingQuotaQueries;
 
   bool IsInitTaskComplete() {
     return last_cache_id_ != AppCacheStorage::kUnitializedId;
@@ -105,8 +106,10 @@ class AppCacheStorageImpl : public AppCacheStorage {
   bool FindResponseForMainRequestInGroup(
       AppCacheGroup* group,  const GURL& url, Delegate* delegate);
   void DeliverShortCircuitedFindMainResponse(
-      const GURL& url, AppCacheEntry found_entry,
-      scoped_refptr<AppCacheGroup> group, scoped_refptr<AppCache> newest_cache,
+      const GURL& url,
+      const AppCacheEntry& found_entry,
+      scoped_refptr<AppCacheGroup> group,
+      scoped_refptr<AppCache> newest_cache,
       scoped_refptr<DelegateReference> delegate_ref);
 
   void CheckPolicyAndCallOnMainResponseFound(
@@ -127,6 +130,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   PendingCacheLoads pending_cache_loads_;
   PendingGroupLoads pending_group_loads_;
   PendingForeignMarkings pending_foreign_markings_;
+  PendingQuotaQueries pending_quota_queries_;
 
   // Structures to keep track of lazy response deletion.
   std::deque<int64> deletable_response_ids_;
@@ -151,12 +155,10 @@ class AppCacheStorageImpl : public AppCacheStorage {
 
   // Used to short-circuit certain operations without having to schedule
   // any tasks on the background database thread.
-  std::set<GURL> origins_with_groups_;
   std::deque<Task*> pending_simple_tasks_;
   ScopedRunnableMethodFactory<AppCacheStorageImpl> method_factory_;
 
-  FRIEND_TEST_ALL_PREFIXES(ChromeAppCacheServiceTest, KeepOnDestruction);
-  FRIEND_TEST_ALL_PREFIXES(ChromeAppCacheServiceTest, RemoveOnDestruction);
+  friend class ChromeAppCacheServiceTest;
 };
 
 }  // namespace appcache

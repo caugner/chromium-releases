@@ -6,17 +6,47 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/memory/scoped_ptr.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/browser_test_helper.h"
+#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#import "chrome/browser/ui/panels/panel_titlebar_view_cocoa.h"
+#import "chrome/browser/ui/panels/panel_window_controller_cocoa.h"
+#include "chrome/common/chrome_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Main test class.
 class PanelBrowserWindowCocoaTest : public CocoaTest {
- protected:
+ public:
+  virtual void SetUp() {
+    CocoaTest::SetUp();
+    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePanels);
+    [PanelWindowControllerCocoa enableMockTabContentsView];
+  }
+
+  Panel* CreateTestPanel(const std::string& panel_name) {
+    Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
+                                                   panel_name,
+                                                   gfx::Rect(),
+                                                   browser_helper_.profile());
+    return static_cast<Panel*>(panel_browser->window());
+  }
+
+  void VerifyTitlebarLocation(NSView* contentView, NSView* titlebar) {
+    NSRect content_frame = [contentView frame];
+    NSRect titlebar_frame = [titlebar frame];
+    // Since contentView and titlebar are both children of window's root view,
+    // we can compare their frames since they are in the same coordinate system.
+    EXPECT_EQ(NSMinX(content_frame), NSMinX(titlebar_frame));
+    EXPECT_EQ(NSWidth(content_frame), NSWidth(titlebar_frame));
+    EXPECT_EQ(NSMaxY(content_frame), NSMinY(titlebar_frame));
+    EXPECT_EQ(NSHeight([[titlebar superview] bounds]), NSMaxY(titlebar_frame));
+  }
+
+ private:
   BrowserTestHelper browser_helper_;
 };
 
@@ -24,17 +54,14 @@ TEST_F(PanelBrowserWindowCocoaTest, CreateClose) {
   PanelManager* manager = PanelManager::GetInstance();
   EXPECT_EQ(0, manager->active_count());  // No panels initially.
 
-  scoped_ptr<Panel> panel(manager->CreatePanel(browser_helper_.browser()));
-  EXPECT_TRUE(panel.get());
-  EXPECT_TRUE(panel->browser_window());  // Native panel is created right away.
+  Panel* panel = CreateTestPanel("Test Panel");
+  EXPECT_TRUE(panel);
+  EXPECT_TRUE(panel->native_panel());  // Native panel is created right away.
   PanelBrowserWindowCocoa* native_window =
-      static_cast<PanelBrowserWindowCocoa*>(panel->browser_window());
+      static_cast<PanelBrowserWindowCocoa*>(panel->native_panel());
 
   EXPECT_EQ(panel, native_window->panel_);  // Back pointer initialized.
   EXPECT_EQ(1, manager->active_count());
-  // BrowserTestHelper provides a browser w/o window_ set.
-  // Use Browser::set_window() if needed.
-  EXPECT_EQ(NULL, browser_helper_.browser()->window());
 
   // Window should not load before Show()
   EXPECT_FALSE([native_window->controller_ isWindowLoaded]);
@@ -59,9 +86,11 @@ TEST_F(PanelBrowserWindowCocoaTest, CreateClose) {
 
 TEST_F(PanelBrowserWindowCocoaTest, AssignedBounds) {
   PanelManager* manager = PanelManager::GetInstance();
-  scoped_ptr<Panel> panel1(manager->CreatePanel(browser_helper_.browser()));
-  scoped_ptr<Panel> panel2(manager->CreatePanel(browser_helper_.browser()));
-  scoped_ptr<Panel> panel3(manager->CreatePanel(browser_helper_.browser()));
+  Panel* panel1 = CreateTestPanel("Test Panel 1");
+  Panel* panel2 = CreateTestPanel("Test Panel 2");
+  Panel* panel3 = CreateTestPanel("Test Panel 3");
+  EXPECT_EQ(3, manager->active_count());
+
   panel1->Show();
   panel2->Show();
   panel3->Show();
@@ -77,28 +106,39 @@ TEST_F(PanelBrowserWindowCocoaTest, AssignedBounds) {
   EXPECT_EQ(bounds1.y(), bounds2.y());
   EXPECT_EQ(bounds2.y(), bounds3.y());
 
+  // After panel2 is closed, panel3 should take its place.
   panel2->Close();
   bounds3 = panel3->GetBounds();
-  // After panel2 is closed, panel3 should take its place.
   EXPECT_EQ(bounds2, bounds3);
+  EXPECT_EQ(2, manager->active_count());
+
+  // After panel1 is closed, panel3 should take its place.
+  panel1->Close();
+  EXPECT_EQ(bounds1, panel3->GetBounds());
+  EXPECT_EQ(1, manager->active_count());
+
+  panel3->Close();
+  EXPECT_EQ(0, manager->active_count());
 }
 
 // Same test as AssignedBounds, but checks actual bounds on native OS windows.
 TEST_F(PanelBrowserWindowCocoaTest, NativeBounds) {
   PanelManager* manager = PanelManager::GetInstance();
-  scoped_ptr<Panel> panel1(manager->CreatePanel(browser_helper_.browser()));
-  scoped_ptr<Panel> panel2(manager->CreatePanel(browser_helper_.browser()));
-  scoped_ptr<Panel> panel3(manager->CreatePanel(browser_helper_.browser()));
+  Panel* panel1 = CreateTestPanel("Test Panel 1");
+  Panel* panel2 = CreateTestPanel("Test Panel 2");
+  Panel* panel3 = CreateTestPanel("Test Panel 3");
+  EXPECT_EQ(3, manager->active_count());
+
   panel1->Show();
   panel2->Show();
   panel3->Show();
 
   PanelBrowserWindowCocoa* native_window1 =
-      static_cast<PanelBrowserWindowCocoa*>(panel1->browser_window());
+      static_cast<PanelBrowserWindowCocoa*>(panel1->native_panel());
   PanelBrowserWindowCocoa* native_window2 =
-      static_cast<PanelBrowserWindowCocoa*>(panel2->browser_window());
+      static_cast<PanelBrowserWindowCocoa*>(panel2->native_panel());
   PanelBrowserWindowCocoa* native_window3 =
-      static_cast<PanelBrowserWindowCocoa*>(panel3->browser_window());
+      static_cast<PanelBrowserWindowCocoa*>(panel3->native_panel());
 
   NSRect bounds1 = [[native_window1->controller_ window] frame];
   NSRect bounds2 = [[native_window2->controller_ window] frame];
@@ -109,12 +149,95 @@ TEST_F(PanelBrowserWindowCocoaTest, NativeBounds) {
   EXPECT_EQ(bounds1.origin.y, bounds2.origin.y);
   EXPECT_EQ(bounds2.origin.y, bounds3.origin.y);
 
+  // After panel2 is closed, panel3 should take its place.
   panel2->Close();
   bounds3 = [[native_window3->controller_ window] frame];
-  // After panel2 is closed, panel3 should take its place.
   EXPECT_EQ(bounds2.origin.x, bounds3.origin.x);
   EXPECT_EQ(bounds2.origin.y, bounds3.origin.y);
   EXPECT_EQ(bounds2.size.width, bounds3.size.width);
   EXPECT_EQ(bounds2.size.height, bounds3.size.height);
+  EXPECT_EQ(2, manager->active_count());
+
+  // After panel1 is closed, panel3 should take its place.
+  panel1->Close();
+  bounds3 = [[native_window3->controller_ window] frame];
+  EXPECT_EQ(bounds1.origin.x, bounds3.origin.x);
+  EXPECT_EQ(bounds1.origin.y, bounds3.origin.y);
+  EXPECT_EQ(bounds1.size.width, bounds3.size.width);
+  EXPECT_EQ(bounds1.size.height, bounds3.size.height);
+  EXPECT_EQ(1, manager->active_count());
+
+  panel3->Close();
+  EXPECT_EQ(0, manager->active_count());
+}
+
+// Verify the titlebar is being created.
+TEST_F(PanelBrowserWindowCocoaTest, TitlebarViewCreate) {
+  Panel* panel = CreateTestPanel("Test Panel");
+  panel->Show();
+
+  PanelBrowserWindowCocoa* native_window =
+      static_cast<PanelBrowserWindowCocoa*>(panel->native_panel());
+
+  PanelTitlebarViewCocoa* titlebar = [native_window->controller_ titlebarView];
+  EXPECT_TRUE(titlebar);
+  EXPECT_EQ(native_window->controller_, [titlebar controller]);
+
+  panel->Close();
+}
+
+// Verify the sizing of titlebar - should be affixed on top of regular titlebar.
+TEST_F(PanelBrowserWindowCocoaTest, TitlebarViewSizing) {
+  Panel* panel = CreateTestPanel("Test Panel");
+  panel->Show();
+
+  PanelBrowserWindowCocoa* native_window =
+      static_cast<PanelBrowserWindowCocoa*>(panel->native_panel());
+  PanelTitlebarViewCocoa* titlebar = [native_window->controller_ titlebarView];
+
+  NSView* contentView = [[native_window->controller_ window] contentView];
+  VerifyTitlebarLocation(contentView, titlebar);
+
+  // In local coordinate system, width of titlebar should match width of
+  // content view of the window. They both use the same scale factor.
+  EXPECT_EQ(NSWidth([contentView bounds]), NSWidth([titlebar bounds]));
+
+  // Now resize the Panel, see that titlebar follows.
+  const int kDelta = 153; // random number
+  gfx::Rect bounds = panel->GetBounds();
+  // Grow panel in a way so that its titlebar moves and grows.
+  bounds.set_x(bounds.x() - kDelta);
+  bounds.set_y(bounds.y() - kDelta);
+  bounds.set_width(bounds.width() + kDelta);
+  bounds.set_height(bounds.height() + kDelta);
+  native_window->SetPanelBounds(bounds);
+
+  // Verify the panel resized.
+  NSRect window_frame = [[native_window->controller_ window] frame];
+  EXPECT_EQ(NSWidth(window_frame), bounds.width());
+  EXPECT_EQ(NSHeight(window_frame), bounds.height());
+
+  // Verify the titlebar is still on top of regular titlebar.
+  VerifyTitlebarLocation(contentView, titlebar);
+
+  panel->Close();
+}
+
+// Verify closing behavior of titlebar close button.
+TEST_F(PanelBrowserWindowCocoaTest, TitlebarViewClose) {
+  PanelManager* manager = PanelManager::GetInstance();
+  Panel* panel = CreateTestPanel("Test Panel");
+  panel->Show();
+
+  PanelBrowserWindowCocoa* native_window =
+      static_cast<PanelBrowserWindowCocoa*>(panel->native_panel());
+
+  PanelTitlebarViewCocoa* titlebar = [native_window->controller_ titlebarView];
+  EXPECT_TRUE(titlebar);
+
+  EXPECT_EQ(1, manager->active_count());
+  // Simulate clicking Close Button. This should close the Panel as well.
+  [titlebar simulateCloseButtonClick];
+  EXPECT_EQ(0, manager->active_count());
 }
 

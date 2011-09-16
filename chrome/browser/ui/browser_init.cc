@@ -31,7 +31,6 @@
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
@@ -39,7 +38,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -54,6 +54,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -64,7 +65,6 @@
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -98,7 +98,7 @@
 #include "chrome/browser/chromeos/wm_message_listener.h"
 #endif
 
-#if defined(HAVE_XINPUT2)
+#if defined(TOUCH_UI)
 #include "views/focus/accelerator_handler.h"
 #endif
 
@@ -186,12 +186,12 @@ DefaultBrowserInfoBarDelegate::~DefaultBrowserInfoBarDelegate() {
 
 bool DefaultBrowserInfoBarDelegate::ShouldExpire(
     const content::LoadCommittedDetails& details) const {
-  return details.is_user_initiated_main_frame_load() && should_expire_;
+  return details.is_navigation_to_different_page() && should_expire_;
 }
 
 gfx::Image* DefaultBrowserInfoBarDelegate::GetIcon() const {
   return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-     IDR_PRODUCT_ICON_32);
+     IDR_PRODUCT_LOGO_32);
 }
 
 string16 DefaultBrowserInfoBarDelegate::GetMessageText() const {
@@ -280,7 +280,7 @@ CheckDefaultBrowserTask::~CheckDefaultBrowserTask() {
 
 void CheckDefaultBrowserTask::Run() {
   if (ShellIntegration::IsDefaultBrowser() ||
-      !platform_util::CanSetAsDefaultBrowser()) {
+      !ShellIntegration::CanSetAsDefaultBrowser()) {
     return;
   }
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -293,7 +293,7 @@ void CheckDefaultBrowserTask::Run() {
 // A delegate for the InfoBar shown when the previous session has crashed.
 class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  explicit SessionCrashedInfoBarDelegate(TabContents* contents);
+  SessionCrashedInfoBarDelegate(Browser* browser, TabContents* contents);
 
  private:
   virtual ~SessionCrashedInfoBarDelegate();
@@ -305,6 +305,8 @@ class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
 
+  Browser* browser_;
+
   // The Profile that we restore sessions from.
   Profile* profile_;
 
@@ -312,8 +314,10 @@ class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
 };
 
 SessionCrashedInfoBarDelegate::SessionCrashedInfoBarDelegate(
+    Browser* browser,
     TabContents* contents)
     : ConfirmInfoBarDelegate(contents),
+      browser_(browser),
       profile_(contents->profile()) {
 }
 
@@ -340,8 +344,15 @@ string16 SessionCrashedInfoBarDelegate::GetButtonLabel(
 }
 
 bool SessionCrashedInfoBarDelegate::Accept() {
-  SessionRestore::RestoreSession(profile_, NULL, true, false,
-                                 std::vector<GURL>());
+  uint32 behavior = 0;
+  if (browser_->tab_count() == 1 && browser_->GetTabContentsAt(0)->GetURL() ==
+      GURL(chrome::kChromeUINewTabURL)) {
+    // There is only one tab and its the new tab page, make session restore
+    // clobber it.
+    behavior = SessionRestore::CLOBBER_CURRENT_TAB;
+  }
+  SessionRestore::RestoreSession(
+      profile_, browser_, behavior, std::vector<GURL>());
   return true;
 }
 
@@ -353,7 +364,8 @@ SessionStartupPref GetSessionStartupPref(const CommandLine& command_line,
   SessionStartupPref pref = SessionStartupPref::GetStartupPref(profile);
   if (command_line.HasSwitch(switches::kRestoreLastSession))
     pref.type = SessionStartupPref::LAST;
-  if (command_line.HasSwitch(switches::kIncognito) &&
+  if ((command_line.HasSwitch(switches::kIncognito) ||
+       profile->GetPrefs()->GetBoolean(prefs::kIncognitoForced)) &&
       pref.type == SessionStartupPref::LAST &&
       profile->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled)) {
     // We don't store session information when incognito. If the user has
@@ -525,7 +537,8 @@ bool BrowserInit::LaunchBrowser(const CommandLine& command_line,
 #endif
 
   // Continue with the incognito profile from here on if --incognito
-  if (command_line.HasSwitch(switches::kIncognito) &&
+  if ((command_line.HasSwitch(switches::kIncognito) ||
+       profile->GetPrefs()->GetBoolean(prefs::kIncognitoForced)) &&
       profile->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled)) {
     profile = profile->GetOffTheRecordProfile();
   }
@@ -539,7 +552,7 @@ bool BrowserInit::LaunchBrowser(const CommandLine& command_line,
   if (!launched) {
     LOG(ERROR) << "launch error";
     if (return_code)
-      *return_code = ResultCodes::INVALID_CMDLINE_URL;
+      *return_code = chrome::RESULT_CODE_INVALID_CMDLINE_URL;
     return false;
   }
 
@@ -887,8 +900,10 @@ bool BrowserInit::LaunchWithProfile::ProcessStartupURLs(
       // infobar.
       return false;
     }
-    Browser* browser =
-        SessionRestore::RestoreSessionSynchronously(profile_, urls_to_open);
+    Browser* browser = SessionRestore::RestoreSession(
+        profile_, NULL,
+        (SessionRestore::SYNCHRONOUS |
+         SessionRestore::ALWAYS_CREATE_TABBED_BROWSER), urls_to_open);
     AddInfoBarsIfNecessary(browser);
     return true;
   }
@@ -1020,13 +1035,14 @@ void BrowserInit::LaunchWithProfile::AddInfoBarsIfNecessary(Browser* browser) {
     return;
 
   TabContentsWrapper* tab_contents = browser->GetSelectedTabContentsWrapper();
-  AddCrashedInfoBarIfNecessary(tab_contents);
+  AddCrashedInfoBarIfNecessary(browser, tab_contents);
   AddBadFlagsInfoBarIfNecessary(tab_contents);
   AddDNSCertProvenanceCheckingWarningInfoBarIfNecessary(tab_contents);
   AddObsoleteSystemInfoBarIfNecessary(tab_contents);
 }
 
 void BrowserInit::LaunchWithProfile::AddCrashedInfoBarIfNecessary(
+    Browser* browser,
     TabContentsWrapper* tab) {
   // Assume that if the user is launching incognito they were previously
   // running incognito so that we have nothing to restore from.
@@ -1035,7 +1051,8 @@ void BrowserInit::LaunchWithProfile::AddCrashedInfoBarIfNecessary(
     // The last session didn't exit cleanly. Show an infobar to the user
     // so that they can restore if they want. The delegate deletes itself when
     // it is closed.
-    tab->AddInfoBar(new SessionCrashedInfoBarDelegate(tab->tab_contents()));
+    tab->AddInfoBar(
+        new SessionCrashedInfoBarDelegate(browser, tab->tab_contents()));
   }
 }
 
@@ -1228,7 +1245,7 @@ std::vector<GURL> BrowserInit::GetURLsFromCommandLine(
     const FilePath& cur_dir,
     Profile* profile) {
   std::vector<GURL> urls;
-  CommandLine::StringVector params = command_line.args();
+  const CommandLine::StringVector& params = command_line.GetArgs();
 
   for (size_t i = 0; i < params.size(); ++i) {
     FilePath param = FilePath(params[i]);
@@ -1236,15 +1253,15 @@ std::vector<GURL> BrowserInit::GetURLsFromCommandLine(
     if (param.value().size() > 2 &&
         param.value()[0] == '?' && param.value()[1] == ' ') {
       const TemplateURL* default_provider =
-          profile->GetTemplateURLModel()->GetDefaultSearchProvider();
+          TemplateURLServiceFactory::GetForProfile(profile)->
+          GetDefaultSearchProvider();
       if (default_provider && default_provider->url()) {
         const TemplateURLRef* search_url = default_provider->url();
         DCHECK(search_url->SupportsReplacement());
         string16 search_term = param.LossyDisplayName().substr(2);
-        urls.push_back(GURL(search_url->ReplaceSearchTerms(
-                                *default_provider, search_term,
-                                TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-                                string16())));
+        urls.push_back(GURL(search_url->ReplaceSearchTermsUsingProfile(
+            profile, *default_provider, search_term,
+            TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())));
         continue;
       }
     }
@@ -1377,7 +1394,7 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
   }
 #endif
 
-#if defined(HAVE_XINPUT2) && defined(TOUCH_UI)
+#if defined(TOUCH_UI)
   // Get a list of pointer-devices that should be treated as touch-devices.
   // TODO(sad): Instead of/in addition to getting the list from the
   // command-line, query X for a list of touch devices.

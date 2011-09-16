@@ -19,13 +19,13 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/image_button.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/events/event.h"
 #include "views/focus/focus_manager.h"
 #include "views/layout/layout_constants.h"
 #include "views/widget/native_widget_win.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -43,6 +43,15 @@ const int kStringSeparationPadding = 2;
 
 // Margin around close button.
 const int kMarginRightOfCloseButton = 7;
+
+// The bubble's HWND is actually owned by the border widget, and it's the border
+// widget that's owned by the frame window the bubble is anchored to. This
+// function makes the two leaps necessary to go from the bubble contents HWND
+// to the frame HWND.
+HWND GetLogicalBubbleOwner(HWND bubble_hwnd) {
+  HWND border_widget_hwnd = GetWindow(bubble_hwnd, GW_OWNER);
+  return GetWindow(border_widget_hwnd, GW_OWNER);
+}
 
 }  // namespace
 
@@ -81,8 +90,8 @@ class FirstRunBubbleView : public FirstRunBubbleViewBase {
   views::Label* label1_;
   views::Label* label2_;
   views::Label* label3_;
-  views::NativeButton* change_button_;
-  views::NativeButton* keep_button_;
+  views::NativeTextButton* change_button_;
+  views::NativeTextButton* keep_button_;
   Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(FirstRunBubbleView);
@@ -129,13 +138,13 @@ FirstRunBubbleView::FirstRunBubbleView(FirstRunBubble* bubble_window,
   std::wstring keep_str = UTF16ToWide(l10n_util::GetStringFUTF16(
       IDS_FR_BUBBLE_OK,
       GetDefaultSearchEngineName(profile)));
-  keep_button_ = new views::NativeButton(this, keep_str);
+  keep_button_ = new views::NativeTextButton(this, keep_str);
   keep_button_->SetIsDefault(true);
   AddChildView(keep_button_);
 
   std::wstring change_str =
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_FR_BUBBLE_CHANGE));
-  change_button_ = new views::NativeButton(this, change_str);
+  change_button_ = new views::NativeTextButton(this, change_str);
   AddChildView(change_button_);
 }
 
@@ -152,7 +161,7 @@ void FirstRunBubbleView::ButtonPressed(views::Button* sender,
     UserMetrics::RecordAction(
                     UserMetricsAction("FirstRunBubbleView_ChangeButton"));
 
-    Browser* browser = BrowserList::GetLastActive();
+    Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
     if (browser) {
       browser->OpenSearchEngineOptionsDialog();
     }
@@ -201,7 +210,7 @@ void FirstRunBubbleView::Layout() {
 }
 
 gfx::Size FirstRunBubbleView::GetPreferredSize() {
-  return gfx::Size(views::Window::GetLocalizedContentsSize(
+  return gfx::Size(views::Widget::GetLocalizedContentsSize(
       IDS_FIRSTRUNBUBBLE_DIALOG_WIDTH_CHARS,
       IDS_FIRSTRUNBUBBLE_DIALOG_HEIGHT_LINES));
 }
@@ -209,14 +218,17 @@ gfx::Size FirstRunBubbleView::GetPreferredSize() {
 void FirstRunBubbleView::FocusWillChange(View* focused_before,
                                          View* focused_now) {
   if (focused_before &&
-      (focused_before->GetClassName() == views::NativeButton::kViewClassName)) {
-    views::NativeButton* before =
-        static_cast<views::NativeButton*>(focused_before);
+      (focused_before->GetClassName() ==
+          views::NativeTextButton::kViewClassName)) {
+    views::NativeTextButton* before =
+        static_cast<views::NativeTextButton*>(focused_before);
     before->SetIsDefault(false);
   }
   if (focused_now &&
-      (focused_now->GetClassName() == views::NativeButton::kViewClassName)) {
-    views::NativeButton* after = static_cast<views::NativeButton*>(focused_now);
+      (focused_now->GetClassName() ==
+          views::NativeTextButton::kViewClassName)) {
+    views::NativeTextButton* after =
+        static_cast<views::NativeTextButton*>(focused_now);
     after->SetIsDefault(true);
   }
 }
@@ -453,7 +465,7 @@ void FirstRunMinimalBubbleView::Layout() {
 }
 
 gfx::Size FirstRunMinimalBubbleView::GetPreferredSize() {
-  return gfx::Size(views::Window::GetLocalizedContentsSize(
+  return gfx::Size(views::Widget::GetLocalizedContentsSize(
       IDS_FIRSTRUN_MINIMAL_BUBBLE_DIALOG_WIDTH_CHARS,
       IDS_FIRSTRUN_MINIMAL_BUBBLE_DIALOG_HEIGHT_LINES));
 }
@@ -514,10 +526,10 @@ void FirstRunBubble::EnableParent() {
   // have to call it again before activating the bubble to prevent the parent
   // window from rendering inactive.
   // TODO(beng): this only works in custom-frame mode, not glass-frame mode.
-  views::NativeWidget* parent =
-      views::NativeWidget::GetNativeWidgetForNativeView(GetParent());
+  HWND bubble_owner = GetLogicalBubbleOwner(GetNativeView());
+  views::Widget* parent = views::Widget::GetWidgetForNativeView(bubble_owner);
   if (parent)
-    parent->GetWidget()->GetContainingWindow()->DisableInactiveRendering();
+    parent->DisableInactiveRendering();
   // Reactivate the FirstRunBubble so it responds to OnActivate messages.
   SetWindowPos(GetParent(), 0, 0, 0, 0,
                SWP_NOSIZE | SWP_NOMOVE | SWP_NOREDRAW | SWP_SHOWWINDOW);

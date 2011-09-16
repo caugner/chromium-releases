@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/time.h"
 #include "chrome/browser/sessions/session_id.h"
@@ -81,6 +81,13 @@ class TabNavigation {
   // by BaseSessionService and SessionService.
   void set_index(int index) { index_ = index; }
   int index() const { return index_; }
+
+  // Converts a set of TabNavigations into a set of NavigationEntrys. The
+  // caller owns the NavigationEntrys.
+  static void CreateNavigationEntriesFromTabNavigations(
+      Profile* profile,
+      const std::vector<TabNavigation>& navigations,
+      std::vector<NavigationEntry*>* entries);
 
  private:
   friend class BaseSessionService;
@@ -189,14 +196,14 @@ struct SessionWindow {
   DISALLOW_COPY_AND_ASSIGN(SessionWindow);
 };
 
-// Defines a foreign session for session sync.  A foreign session is a session
-// on a remote chrome instance.
-struct ForeignSession {
-  ForeignSession();
-  ~ForeignSession();
+// Defines a synced session for use by session sync. A synced session is a
+// list of windows along with a unique session identifer (tag).
+struct SyncedSession {
+  SyncedSession();
+  ~SyncedSession();
 
   // Unique tag for each session.
-  std::string foreign_session_tag;
+  std::string session_tag;
   std::vector<SessionWindow*> windows;
 };
 

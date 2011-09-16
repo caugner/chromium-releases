@@ -390,8 +390,8 @@ TEST_F(PasswordAutofillManagerTest, SuggestionAccept) {
 
   // To simulate accepting an item in the suggestion drop-down we just mimic
   // what the WebView does: it sets the element value then calls
-  // didAcceptAutoFillSuggestion on the renderer.
-  autofill_agent_->didAcceptAutoFillSuggestion(username_element_,
+  // didAcceptAutofillSuggestion on the renderer.
+  autofill_agent_->didAcceptAutofillSuggestion(username_element_,
                                                ASCIIToUTF16(kAliceUsername),
                                                WebKit::WebString(),
                                                0,
@@ -410,8 +410,8 @@ TEST_F(PasswordAutofillManagerTest, SuggestionSelect) {
 
   // To simulate accepting an item in the suggestion drop-down we just mimic
   // what the WebView does: it sets the element value then calls
-  // didSelectAutoFillSuggestion on the renderer.
-  autofill_agent_->didSelectAutoFillSuggestion(username_element_,
+  // didSelectAutofillSuggestion on the renderer.
+  autofill_agent_->didSelectAutofillSuggestion(username_element_,
                                                ASCIIToUTF16(kAliceUsername),
                                                WebKit::WebString(),
                                                0);

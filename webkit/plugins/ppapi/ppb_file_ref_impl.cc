@@ -8,6 +8,7 @@
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/shared_impl/time_conversion.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_file_system_api.h"
 #include "webkit/plugins/ppapi/common.h"
@@ -19,6 +20,7 @@
 #include "webkit/plugins/ppapi/ppb_file_system_impl.h"
 #include "webkit/plugins/ppapi/var.h"
 
+using ppapi::PPTimeToTime;
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_FileRef_API;
 using ppapi::thunk::PPB_FileSystem_API;
@@ -85,6 +87,10 @@ PP_Resource PPB_FileRef_Impl::Create(PP_Resource pp_file_system,
   if (!file_system->instance())
     return 0;
 
+  if (file_system->type() != PP_FILESYSTEMTYPE_LOCALPERSISTENT &&
+      file_system->type() != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
+    return 0;
+
   std::string validated_path(path);
   if (!IsValidLocalPath(validated_path))
     return 0;
@@ -104,7 +110,7 @@ PPB_FileRef_Impl* PPB_FileRef_Impl::AsPPB_FileRef_Impl() {
   return this;
 }
 
-PP_FileSystemType_Dev PPB_FileRef_Impl::GetFileSystemType() const {
+PP_FileSystemType PPB_FileRef_Impl::GetFileSystemType() const {
   // When the file ref exists but there's no explicit filesystem object
   // associated with it, that means it's an "external" filesystem.
   if (!file_system_)
@@ -134,13 +140,14 @@ PP_Var PPB_FileRef_Impl::GetName() const {
     result = virtual_path_.substr(pos + 1);
   }
 
-  return StringVar::StringToPPVar(instance()->module(), result);
+  return StringVar::StringToPPVar(instance()->module()->pp_module(), result);
 }
 
 PP_Var PPB_FileRef_Impl::GetPath() const {
   if (GetFileSystemType() == PP_FILESYSTEMTYPE_EXTERNAL)
     return PP_MakeUndefined();
-  return StringVar::StringToPPVar(instance()->module(), virtual_path_);
+  return StringVar::StringToPPVar(instance()->module()->pp_module(),
+                                  virtual_path_);
 }
 
 PP_Resource PPB_FileRef_Impl::GetParent() {
@@ -181,8 +188,8 @@ int32_t PPB_FileRef_Impl::Touch(PP_Time last_access_time,
     return PP_ERROR_NOACCESS;
   if (!instance()->delegate()->Touch(
           GetFileSystemURL(),
-          base::Time::FromDoubleT(last_access_time),
-          base::Time::FromDoubleT(last_modified_time),
+          PPTimeToTime(last_access_time),
+          PPTimeToTime(last_modified_time),
           new FileCallbacks(instance()->module()->AsWeakPtr(),
                             GetReferenceNoAddRef(), callback,
                             NULL, NULL, NULL)))

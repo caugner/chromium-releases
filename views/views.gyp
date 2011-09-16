@@ -7,52 +7,19 @@
     'chromium_code': 1,
   },
 
-  'conditions': [
-    ['os_posix == 1 and OS != "mac"', {
-      'conditions': [
-        ['sysroot!=""', {
-          'variables': {
-            'pkg-config': './pkg-config-wrapper "<(sysroot)"',
-          },
-        }, {
-          'variables': {
-            'pkg-config': 'pkg-config'
-          },
-        }],]
-    }],
-  ],
-
   'target_defaults': {
-    'sources/': [
-      ['exclude', '/(cocoa|gtk|win)/'],
-      ['exclude', '_(cocoa|gtk|linux|mac|posix|skia|win|x)\\.(cc|mm?)$'],
-      ['exclude', '/(gtk|win|x11)_[^/]*\\.cc$'],
-    ],
     'conditions': [
-      ['toolkit_uses_gtk == 1', {'sources/': [
-        ['include', '/gtk/'],
-        ['include', '_(gtk|linux|posix|skia|x)\\.cc$'],
-        ['include', '/(gtk|x11)_[^/]*\\.cc$'],
-      ]}],
-      ['OS=="mac"', {'sources/': [
-        ['include', '/cocoa/'],
-        ['include', '_(cocoa|mac|posix)\\.(cc|mm?)$'],
-      ]}, { # else: OS != "mac"
-        'sources/': [
-          ['exclude', '\\.mm?$'],
-        ],
-      }],
       ['OS=="win"', {'sources/': [
         ['include', '_(win)\\.cc$'],
         ['include', '/win/'],
         ['include', '/win_[^/]*\\.cc$'],
+        ['exclude', 'touchui/touch_factory.cc'],
       ]}],
       ['touchui==0', {'sources/': [
-        ['exclude', 'events/event_x.cc$'],
         ['exclude', 'native_menu_x.cc$'],
         ['exclude', 'native_menu_x.h$'],
-        ['exclude', 'touchui/'],
         ['exclude', '_(touch)\\.cc$'],
+        ['exclude', 'widget/tooltip_manager_views.cc$'],
       ]}],
     ],
   },
@@ -60,17 +27,19 @@
     {
       'target_name': 'views',
       'type': 'static_library',
-      'msvs_guid': '6F9258E5-294F-47B2-919D-17FFE7A8B751',
       'dependencies': [
-        '../app/app.gyp:app_base',
-        '../app/app.gyp:app_resources',
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../ui/base/strings/ui_strings.gyp:ui_strings',
         '../ui/gfx/compositor/compositor.gyp:compositor',
-        '../ui/ui.gyp:ui_base',
+        '../ui/ui.gyp:ui',
+        '../ui/ui.gyp:ui_resources',
       ],
       'sources': [
         # All .cc, .h under views, except unittests
@@ -84,6 +53,7 @@
         'background.h',
         'border.cc',
         'border.h',
+        'context_menu_controller.h',
         'controls/button/button.cc',
         'controls/button/button.h',
         'controls/button/button_dropdown.cc',
@@ -143,16 +113,14 @@
         'controls/menu/menu_host.h',
         'controls/menu/menu_host_root_view.cc',
         'controls/menu/menu_host_root_view.h',
-        'controls/menu/menu_host_win.cc',
-        'controls/menu/menu_host_win.h',
-        'controls/menu/menu_host_gtk.cc',
-        'controls/menu/menu_host_gtk.h',
         'controls/menu/menu_item_view.cc',
         'controls/menu/menu_item_view.h',
         'controls/menu/menu_item_view_gtk.cc',
         'controls/menu/menu_item_view_win.cc',
         'controls/menu/menu_model_adapter.cc',
         'controls/menu/menu_model_adapter.h',
+        'controls/menu/menu_runner.cc',
+        'controls/menu/menu_runner.h',
         'controls/menu/menu_scroll_view_container.cc',
         'controls/menu/menu_scroll_view_container.h',
         'controls/menu/menu_separator.h',
@@ -256,6 +224,7 @@
         'controls/tree/tree_view.h',
         #'debug_utils.cc',
         #'debug_utils.h',
+        'drag_controller.h',
         'drag_utils.cc',
         'drag_utils.h',
         'drag_utils_gtk.cc',
@@ -273,8 +242,6 @@
         'focus/accelerator_handler_win.cc',
         'focus/external_focus_tracker.cc',
         'focus/external_focus_tracker.h',
-        'focus/focus_manager_gtk.cc',
-        'focus/focus_manager_win.cc',
         'focus/focus_manager.cc',
         'focus/focus_manager.h',
         'focus/focus_search.cc',
@@ -283,6 +250,8 @@
         'focus/focus_util_win.h',
         'focus/view_storage.cc',
         'focus/view_storage.h',
+        'ime/character_composer.cc',
+        'ime/character_composer.h',
         'ime/input_method.h',
         'ime/input_method_delegate.h',
         'ime/input_method_base.cc',
@@ -293,7 +262,15 @@
         'ime/input_method_ibus.h',
         'ime/input_method_win.cc',
         'ime/input_method_win.h',
+        'ime/mock_input_method.cc',
+        'ime/mock_input_method.h',
         'ime/text_input_client.h',
+        'ime/text_input_type_tracker.h',
+        'ime/text_input_type_tracker.cc',
+        'layer_helper.cc',
+        'layer_helper.h',
+        'layer_property_setter.cc',
+        'layer_property_setter.h',
         'layout/box_layout.cc',
         'layout/box_layout.h',
         'layout/fill_layout.cc',
@@ -316,9 +293,6 @@
         'painter.h',
         'repeat_controller.cc',
         'repeat_controller.h',
-        'screen.h',
-        'screen_gtk.cc',
-        'screen_win.cc',
         'touchui/gesture_manager.cc',
         'touchui/gesture_manager.h',
         'touchui/touch_factory.cc',
@@ -352,6 +326,8 @@
         'widget/root_view.h',
         'widget/tooltip_manager_gtk.cc',
         'widget/tooltip_manager_gtk.h',
+        'widget/tooltip_manager_views.cc',
+        'widget/tooltip_manager_views.h',
         'widget/tooltip_manager_win.cc',
         'widget/tooltip_manager_win.h',
         'widget/tooltip_manager.cc',
@@ -362,6 +338,7 @@
         'widget/monitor_win.h',
         'widget/native_widget.h',
         'widget/native_widget_delegate.h',
+        'widget/native_widget_private.h',
         'widget/native_widget_gtk.cc',
         'widget/native_widget_gtk.h',
         'widget/native_widget_view.cc',
@@ -384,20 +361,8 @@
         'window/dialog_delegate.h',
         'window/native_frame_view.cc',
         'window/native_frame_view.h',
-        'window/native_window.h',
-        'window/native_window_delegate.h',
-        'window/native_window_gtk.cc',
-        'window/native_window_gtk.h',
-        'window/native_window_views.cc',
-        'window/native_window_views.h',
-        'window/native_window_win.cc',
-        'window/native_window_win.h',
         'window/non_client_view.cc',
         'window/non_client_view.h',
-        'window/window.cc',
-        'window/window.h',
-        'window/window_delegate.h',
-        'window/window_delegate.cc',
         'window/window_resources.h',
         'window/window_shape.cc',
         'window/window_shape.h',
@@ -425,7 +390,6 @@
             'widget/child_window_message_processor.cc',
             'widget/child_window_message_processor.h',
             'widget/native_widget_win.cc',
-            'window/native_frame_view.cc',
           ],
         }],
         ['touchui==1', {
@@ -433,23 +397,21 @@
           'sources/': [
             ['exclude', 'focus/accelerator_handler_gtk.cc'],
             ['exclude', 'controls/menu/native_menu_gtk.cc'],
-          ],
-          'conditions': [
-            ['"<!@(<(pkg-config) --atleast-version=2.0 inputproto || echo $?)"!=""', {
-              # Exclude TouchFactory if XInput2 is not available.
-              'sources/': [
-                ['exclude', 'touchui/touch_factory.cc'],
-                ['exclude', 'touchui/touch_factory.h'],
-              ],
-            }],
+            ['exclude', 'widget/tooltip_manager_gtk.cc'],
           ],
         }],
         ['use_ibus==1', {
           'dependencies': [
             '../build/linux/system.gyp:ibus',
           ],
+          'sources/': [
+            ['exclude', 'ime/mock_input_method.cc'],
+            ['exclude', 'ime/mock_input_method.h'],
+          ],
         }, { # else: use_ibus != 1
           'sources/': [
+            ['exclude', 'ime/character_composer.cc'],
+            ['exclude', 'ime/character_composer.h'],
             ['exclude', 'ime/input_method_ibus.cc'],
             ['exclude', 'ime/input_method_ibus.h'],
           ],
@@ -465,7 +427,6 @@
       'target_name': 'views_unittests',
       'type': 'executable',
       'dependencies': [
-        '../app/app.gyp:app_resources',
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
         '../skia/skia.gyp:skia',
@@ -474,6 +435,7 @@
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../ui/base/strings/ui_strings.gyp:ui_strings',
+        '../ui/ui.gyp:ui_resources',
         'views',
       ],
       'include_dirs': [
@@ -493,8 +455,7 @@
         'events/event_unittest.cc',
         'focus/accelerator_handler_gtk_unittest.cc',
         'focus/focus_manager_unittest.cc',
-        'ime/mock_input_method.cc',
-        'ime/mock_input_method.h',
+        'ime/character_composer_unittest.cc',
         'layout/grid_layout_unittest.cc',
         'layout/box_layout_unittest.cc',
         'test/views_test_base.cc',
@@ -508,9 +469,9 @@
         'widget/native_widget_test_utils_win.cc',
         'widget/native_widget_unittest.cc',
         'widget/native_widget_win_unittest.cc',
-        'window/native_window_win_unittest.cc',
+        'widget/widget_unittest.cc',
 
-        '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
       ],
       'conditions': [
         ['toolkit_uses_gtk == 1', {
@@ -523,6 +484,9 @@
                'dependencies': [
                  '../base/allocator/allocator.gyp:allocator',
                ],
+            }],
+            [ 'touchui==1', {
+              'sources!': [ 'focus/accelerator_handler_gtk_unittest.cc' ],
             }],
           ],
         },
@@ -544,17 +508,24 @@
             '<(DEPTH)/third_party/wtl/include',
           ],
         }],
+        ['use_ibus!=1', {
+          'sources/': [
+            ['exclude', 'ime/character_composer_unittest.cc'],
+          ],
+        }],
       ],
     },
     {
       'target_name': 'views_examples',
       'type': 'executable',
       'dependencies': [
-        '../app/app.gyp:app_resources',
         '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
+        '../ui/ui.gyp:ui',
+        '../ui/ui.gyp:gfx_resources',
+        '../ui/ui.gyp:ui_resources',
         'views',
       ],
       'include_dirs': [
@@ -581,8 +552,6 @@
         'examples/native_theme_checkbox_example.h',
         'examples/native_widget_views_example.cc',
         'examples/native_widget_views_example.h',
-        'examples/native_window_views_example.cc',
-        'examples/native_window_views_example.h',
         'examples/radio_button_example.cc',
         'examples/radio_button_example.h',
         'examples/scroll_view_example.cc',
@@ -601,8 +570,64 @@
         'examples/widget_example.h',
         'test/test_views_delegate.cc',
         'test/test_views_delegate.h',
-        '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
+      ],
+      'conditions': [
+        ['toolkit_uses_gtk == 1', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+            '../chrome/chrome.gyp:packed_resources',
+          ],
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+               'dependencies': [
+                 '../base/allocator/allocator.gyp:allocator',
+               ],
+            }],
+          ],
+        },
+        ],
+        ['OS=="win"', {
+          'link_settings': {
+            'libraries': [
+              '-limm32.lib',
+              '-loleacc.lib',
+            ]
+          },
+          'include_dirs': [
+            '<(DEPTH)/third_party/wtl/include',
+          ],
+          'sources': [
+            'examples/table_example.cc',
+            'examples/table_example.h',
+          ],
+        }],
+      ],
+    },
+    {
+      'target_name': 'views_desktop_lib',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../skia/skia.gyp:skia',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
+        '../ui/ui.gyp:gfx_resources',
+        '../ui/ui.gyp:ui',
+        '../ui/ui.gyp:ui_resources',
+        'views',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'desktop/desktop_background.cc',
+        'desktop/desktop_background.h',
+        'desktop/desktop_window_root_view.cc',
+        'desktop/desktop_window_root_view.h',
+        'desktop/desktop_window_view.cc',
+        'desktop/desktop_window_view.h',
       ],
       'conditions': [
         ['toolkit_uses_gtk == 1', {
@@ -636,28 +661,25 @@
       'target_name': 'views_desktop',
       'type': 'executable',
       'dependencies': [
-        '../app/app.gyp:app_resources',
         '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
+        '../ui/ui.gyp:gfx_resources',
+        '../ui/ui.gyp:ui',
+        '../ui/ui.gyp:ui_resources',
         'views',
+        'views_desktop_lib',
       ],
       'include_dirs': [
         '..',
       ],
       'sources': [
-        'desktop/desktop_background.cc',
-        'desktop/desktop_background.h',
         'desktop/desktop_main.cc',
         'desktop/desktop_views_delegate.cc',
         'desktop/desktop_views_delegate.h',
-        'desktop/desktop_window.cc',
-        'desktop/desktop_window.h',
-        'desktop/desktop_window_root_view.cc',
-        'desktop/desktop_window_root_view.h',
-        '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
       ],
       'conditions': [
         ['toolkit_uses_gtk == 1', {
@@ -691,9 +713,3 @@
 
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -14,17 +14,34 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+namespace {
+
+DictionaryValue* CreateValueForPref(const PrefService::Preference* pref) {
+  DictionaryValue* dict = new DictionaryValue;
+  dict->Set("value", pref->GetValue()->DeepCopy());
+  if (pref->IsManaged()) {
+    dict->SetString("controlledBy", "policy");
+  } else if (pref->IsExtensionControlled()) {
+    dict->SetString("controlledBy", "extension");
+  }
+  dict->SetBoolean("disabled", !pref->IsUserModifiable());
+  return dict;
+}
+
+}  // namespace
 
 CoreOptionsHandler::CoreOptionsHandler()
     : handlers_host_(NULL) {
@@ -47,8 +64,12 @@ void CoreOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
 
   // Managed prefs
-  localized_strings->SetString("managedPrefsBannerText",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_MANAGED_PREFS));
+  localized_strings->SetString("policyManagedPrefsBannerText",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_POLICY_MANAGED_PREFS));
+  localized_strings->SetString("extensionManagedPrefsBannerText",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_EXTENSION_MANAGED_PREFS));
+  localized_strings->SetString("policyAndExtensionManagedPrefsBannerText",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_POLICY_EXTENSION_MANAGED_PREFS));
 
   // Search
   RegisterTitle(localized_strings, "searchPage", IDS_OPTIONS_SEARCH_PAGE_TITLE);
@@ -95,10 +116,10 @@ WebUIMessageHandler* CoreOptionsHandler::Attach(WebUI* web_ui) {
   return result;
 }
 
-void CoreOptionsHandler::Observe(NotificationType type,
+void CoreOptionsHandler::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
-  if (type == NotificationType::PREF_CHANGED)
+  if (type == chrome::NOTIFICATION_PREF_CHANGED)
     NotifyPrefChanged(Details<std::string>(details).ptr());
 }
 
@@ -135,17 +156,10 @@ Value* CoreOptionsHandler::FetchPref(const std::string& pref_name) {
 
   const PrefService::Preference* pref =
       pref_service->FindPreference(pref_name.c_str());
+  if (!pref)
+    return Value::CreateNullValue();
 
-  Value* return_value;
-  if (pref) {
-    DictionaryValue* dict = new DictionaryValue;
-    dict->Set("value", pref->GetValue()->DeepCopy());
-    dict->SetBoolean("managed", pref->IsManaged());
-    return_value = dict;
-  } else {
-    return_value = Value::CreateNullValue();
-  }
-  return return_value;
+  return CreateValueForPref(pref);
 }
 
 void CoreOptionsHandler::ObservePref(const std::string& pref_name) {
@@ -324,9 +338,8 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args,
   CHECK_EQ(type, value->GetType());
 
   std::string metric;
-  if (args->GetSize() > 2)
-    args->GetString(2, &metric);
-
+  if (args->GetSize() > 2 && !args->GetString(2, &metric))
+    LOG(WARNING) << "Invalid metric parameter: " << pref_name;
   SetPref(pref_name, value, metric);
 }
 
@@ -367,21 +380,21 @@ void CoreOptionsHandler::NotifyPrefChanged(const std::string* pref_name) {
   PrefService* pref_service = web_ui_->GetProfile()->GetPrefs();
   const PrefService::Preference* pref =
       pref_service->FindPreference(pref_name->c_str());
-  if (pref) {
-    for (PreferenceCallbackMap::const_iterator iter =
-        pref_callback_map_.find(*pref_name);
-        iter != pref_callback_map_.end(); ++iter) {
-      const std::wstring& callback_function = iter->second;
-      ListValue result_value;
-      result_value.Append(Value::CreateStringValue(pref_name->c_str()));
+  if (!pref)
+    return;
 
-      DictionaryValue* dict = new DictionaryValue;
-      dict->Set("value", pref->GetValue()->DeepCopy());
-      dict->SetBoolean("managed", pref->IsManaged());
-      result_value.Append(dict);
+  std::pair<PreferenceCallbackMap::const_iterator,
+            PreferenceCallbackMap::const_iterator> range;
+  range = pref_callback_map_.equal_range(*pref_name);
+  for (PreferenceCallbackMap::const_iterator iter = range.first;
+       iter != range.second; ++iter) {
+    const std::wstring& callback_function = iter->second;
+    ListValue result_value;
+    result_value.Append(Value::CreateStringValue(pref_name->c_str()));
 
-      web_ui_->CallJavascriptFunction(WideToASCII(callback_function),
-                                      result_value);
-    }
+    result_value.Append(CreateValueForPref(pref));
+
+    web_ui_->CallJavascriptFunction(WideToASCII(callback_function),
+                                    result_value);
   }
 }

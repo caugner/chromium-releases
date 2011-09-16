@@ -7,8 +7,8 @@
 #pragma once
 
 #include "base/string16.h"
-#include "chrome/browser/custom_handlers/protocol_handler.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/common/custom_handlers/protocol_handler.h"
 
 class ProtocolHandlerRegistry;
 class TabContents;
@@ -19,7 +19,7 @@ class RegisterProtocolHandlerInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   RegisterProtocolHandlerInfoBarDelegate(TabContents* tab_contents,
                                          ProtocolHandlerRegistry* registry,
-                                         ProtocolHandler handler);
+                                         const ProtocolHandler& handler);
 
   // ConfirmInfoBarDelegate:
   virtual bool ShouldExpire(const content::LoadCommittedDetails&
@@ -29,10 +29,12 @@ class RegisterProtocolHandlerInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
-  virtual string16 GetLinkText() OVERRIDE;
+  virtual string16 GetLinkText() const OVERRIDE;
   virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
 
  private:
+  // Returns a user-friendly name for the protocol of this protocol handler.
+  string16 GetProtocolName(const ProtocolHandler& handler) const;
   TabContents* tab_contents_;
   ProtocolHandlerRegistry* registry_;
   ProtocolHandler handler_;

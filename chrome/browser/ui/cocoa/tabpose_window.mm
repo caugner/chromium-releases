@@ -8,19 +8,20 @@
 
 #include <algorithm>
 
-#include "app/mac/nsimage_cache.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_callback_factory.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
-#import "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
+#include "chrome/browser/ui/cocoa/animation_utils.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
@@ -32,12 +33,12 @@
 #include "content/browser/renderer_host/backing_store_mac.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "grit/app_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/utils/mac/SkCGUtils.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/scoped_cg_context_save_gstate_mac.h"
 
 // Height of the bottom gradient, in pixels.
@@ -237,8 +238,8 @@ void ThumbnailLoader::LoadThumbnail() {
   bool always_show_bookmark_bar =
       contents_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
   bool has_detached_bookmark_bar =
-      contents_->tab_contents()->ShouldShowBookmarkBar() &&
-          !always_show_bookmark_bar;
+      contents_->bookmark_tab_helper()->ShouldShowBookmarkBar() &&
+      !always_show_bookmark_bar;
   if (has_detached_bookmark_bar)
     topOffset += bookmarks::kNTPBookmarkBarHeight;
 
@@ -350,36 +351,6 @@ void ThumbnailLoader::LoadThumbnail() {
 }
 
 @end
-
-namespace {
-
-class ScopedCAActionDisabler {
- public:
-  ScopedCAActionDisabler() {
-    [CATransaction begin];
-    [CATransaction setValue:[NSNumber numberWithBool:YES]
-                     forKey:kCATransactionDisableActions];
-  }
-
-  ~ScopedCAActionDisabler() {
-    [CATransaction commit];
-  }
-};
-
-class ScopedCAActionSetDuration {
- public:
-  explicit ScopedCAActionSetDuration(CGFloat duration) {
-    [CATransaction begin];
-    [CATransaction setValue:[NSNumber numberWithFloat:duration]
-                     forKey:kCATransactionAnimationDuration];
-  }
-
-  ~ScopedCAActionSetDuration() {
-    [CATransaction commit];
-  }
-};
-
-}  // namespace
 
 // Given the number |n| of tiles with a desired aspect ratio of |a| and a
 // desired distance |dx|, |dy| between tiles, returns how many tiles fit

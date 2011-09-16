@@ -34,6 +34,7 @@
 #include "content/renderer/render_view_visitor.h"
 #include "grit/common_resources.h"
 #include "grit/renderer_resources.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -52,7 +53,6 @@ namespace {
 
 const char kExtensionName[] = "chrome/ExtensionProcessBindings";
 const char* kExtensionDeps[] = {
-  BaseJsV8Extension::kName,
   EventBindings::kName,
   JsonSchemaJsV8Extension::kName,
   RendererExtensionBindings::kName,
@@ -82,7 +82,7 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
     if (!ViewTypeMatches(helper->view_type(), view_type_))
       return true;
 
-    GURL url = render_view->webview()->mainFrame()->url();
+    GURL url = render_view->webview()->mainFrame()->document().url();
     if (!url.SchemeIs(chrome::kExtensionScheme))
       return true;
     const std::string& extension_id = url.host();
@@ -162,6 +162,8 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(OpenChannelToTab);
     } else if (name->Equals(v8::String::New("GetNextContextMenuId"))) {
       return v8::FunctionTemplate::New(GetNextContextMenuId);
+    } else if (name->Equals(v8::String::New("GetNextTtsEventId"))) {
+      return v8::FunctionTemplate::New(GetNextTtsEventId);
     } else if (name->Equals(v8::String::New("GetCurrentPageActions"))) {
       return v8::FunctionTemplate::New(GetCurrentPageActions,
                                        v8::External::New(this));
@@ -375,6 +377,13 @@ class ExtensionImpl : public ExtensionBase {
     return v8::Integer::New(next_context_menu_id++);
   }
 
+  static v8::Handle<v8::Value> GetNextTtsEventId(const v8::Arguments& args) {
+    // Note: this works because the TTS API only works in the
+    // extension process, not content scripts.
+    static int next_tts_event_id = 1;
+    return v8::Integer::New(next_tts_event_id++);
+  }
+
   static v8::Handle<v8::Value> GetCurrentPageActions(
       const v8::Arguments& args) {
     ExtensionImpl* v8_extension = GetFromArguments<ExtensionImpl>(args);
@@ -421,10 +430,11 @@ class ExtensionImpl : public ExtensionBase {
     GURL source_url;
     WebFrame* webframe = WebFrame::frameForCurrentContext();
     if (webframe)
-      source_url = webframe->url();
+      source_url = webframe->document().url();
 
     int request_id = args[2]->Int32Value();
     bool has_callback = args[3]->BooleanValue();
+    bool for_io_thread = args[4]->BooleanValue();
 
     v8::Persistent<v8::Context> current_context =
         v8::Persistent<v8::Context>::New(v8::Context::GetCurrent());
@@ -438,9 +448,15 @@ class ExtensionImpl : public ExtensionBase {
     params.source_url = source_url;
     params.request_id = request_id;
     params.has_callback = has_callback;
-    params.user_gesture = webframe->isProcessingUserGesture();
-    renderview->Send(new ExtensionHostMsg_Request(
-        renderview->routing_id(), params));
+    params.user_gesture =
+        webframe ? webframe->isProcessingUserGesture() : false;
+    if (for_io_thread) {
+      renderview->Send(new ExtensionHostMsg_RequestForIOThread(
+          renderview->routing_id(), params));
+    } else {
+      renderview->Send(new ExtensionHostMsg_Request(
+          renderview->routing_id(), params));
+    }
 
     return v8::Undefined();
   }

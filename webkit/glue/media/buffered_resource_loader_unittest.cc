@@ -3,14 +3,17 @@
 // found in the LICENSE file.
 
 #include <algorithm>
+#include <string>
 
 #include "base/format_macros.h"
 #include "base/stringprintf.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
 #include "net/http/http_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/media/buffered_resource_loader.h"
@@ -30,6 +33,7 @@ using ::testing::Return;
 using ::testing::ReturnRef;
 using ::testing::SetArgumentPointee;
 using ::testing::StrictMock;
+using ::testing::Truly;
 using ::testing::NiceMock;
 using ::testing::WithArgs;
 
@@ -65,6 +69,14 @@ ACTION_P(RequestCanceled, loader) {
   loader->didFail(NULL, error);
 }
 
+// Predicate that tests that request disallows compressed data.
+static bool CorrectAcceptEncoding(const WebKit::WebURLRequest &request) {
+  std::string value = request.httpHeaderField(
+      WebString::fromUTF8(net::HttpRequestHeaders::kAcceptEncoding)).utf8();
+  return (value.find("identity;q=1") != std::string::npos) &&
+         (value.find("*;q=0") != std::string::npos);
+}
+
 class BufferedResourceLoaderTest : public testing::Test {
  public:
   BufferedResourceLoaderTest()
@@ -98,7 +110,8 @@ class BufferedResourceLoaderTest : public testing::Test {
 
   void Start() {
     InSequence s;
-    EXPECT_CALL(*url_loader_, loadAsynchronously(_, loader_.get()));
+    EXPECT_CALL(*url_loader_, loadAsynchronously(Truly(CorrectAcceptEncoding),
+                                                 loader_.get()));
     loader_->Start(
         NewCallback(this, &BufferedResourceLoaderTest::StartCallback),
         NewCallback(this, &BufferedResourceLoaderTest::NetworkCallback),
@@ -214,9 +227,13 @@ class BufferedResourceLoaderTest : public testing::Test {
                   NewCallback(this, &BufferedResourceLoaderTest::ReadCallback));
   }
 
-  // Verifis that data in buffer[0...size] is equal to data_[pos...pos+size].
+  // Verifies that data in buffer[0...size] is equal to data_[pos...pos+size].
   void VerifyBuffer(uint8* buffer, int pos, int size) {
     EXPECT_EQ(0, memcmp(buffer, data_ + pos, size));
+  }
+
+  void ConfirmLoaderBufferForwardCapacity(size_t expected_forward_capacity) {
+    EXPECT_EQ(loader_->buffer_->forward_capacity(), expected_forward_capacity);
   }
 
   void ConfirmLoaderDeferredState(bool expectedVal) {
@@ -379,6 +396,59 @@ TEST_F(BufferedResourceLoaderTest, BufferAndRead) {
   ReadLoader(30, 10, buffer);
 }
 
+// Tests the logic of expanding the data buffer for large reads.
+TEST_F(BufferedResourceLoaderTest, ReadExtendBuffer) {
+  Initialize(kHttpUrl, 10, 0x014FFFFFF);
+  SetLoaderBuffer(10, 20);
+  Start();
+  PartialResponse(10, 0x014FFFFFF, 0x01500000);
+
+  uint8 buffer[20];
+  InSequence s;
+
+  // Write more than forward capacity and read it back. Ensure forward capacity
+  // gets reset.
+  EXPECT_CALL(*this, NetworkCallback());
+  WriteLoader(10, 20);
+  EXPECT_CALL(*this, ReadCallback(20));
+  ReadLoader(10, 20, buffer);
+
+  VerifyBuffer(buffer, 10, 20);
+  ConfirmLoaderBufferForwardCapacity(10);
+
+  // Make and outstanding read request larger than forward capacity. Ensure
+  // forward capacity gets extended.
+  EXPECT_CALL(*this, NetworkCallback());
+  ReadLoader(30, 20, buffer);
+
+  ConfirmLoaderBufferForwardCapacity(20);
+
+  // Fulfill outstanding request. Ensure forward capacity gets reset.
+  EXPECT_CALL(*this, ReadCallback(20));
+  EXPECT_CALL(*this, NetworkCallback());
+  WriteLoader(30, 20);
+
+  VerifyBuffer(buffer, 30, 20);
+  ConfirmLoaderBufferForwardCapacity(10);
+
+  // Try to read further ahead than kForwardWaitThreshold allows. Ensure
+  // forward capacity is not changed.
+  EXPECT_CALL(*this, NetworkCallback());
+  EXPECT_CALL(*this, ReadCallback(net::ERR_CACHE_MISS));
+  ReadLoader(0x00300000, 1, buffer);
+
+  ConfirmLoaderBufferForwardCapacity(10);
+
+  // Try to read more than maximum forward capacity. Ensure forward capacity is
+  // not changed.
+  EXPECT_CALL(*this, ReadCallback(net::ERR_FAILED));
+  ReadLoader(30, 0x01400001, buffer);
+
+  ConfirmLoaderBufferForwardCapacity(10);
+
+  StopWhenLoad();
+}
+
 TEST_F(BufferedResourceLoaderTest, ReadOutsideBuffer) {
   Initialize(kHttpUrl, 10, 0x00FFFFFF);
   loader_->UpdateDeferStrategy(BufferedResourceLoader::kThresholdDefer);
@@ -388,7 +458,7 @@ TEST_F(BufferedResourceLoaderTest, ReadOutsideBuffer) {
   uint8 buffer[10];
   InSequence s;
 
-  // Read very far aheard will get a cache miss.
+  // Read very far ahead will get a cache miss.
   EXPECT_CALL(*this, ReadCallback(net::ERR_CACHE_MISS));
   ReadLoader(0x00FFFFFF, 1, buffer);
 

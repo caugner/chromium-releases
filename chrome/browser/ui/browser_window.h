@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #pragma once
 
+#include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/common/content_settings_types.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "ui/gfx/native_widget_types.h"
@@ -24,7 +25,7 @@ class StatusBubble;
 class TabContents;
 class TabContentsWrapper;
 class TemplateURL;
-class TemplateURLModel;
+class TemplateURLService;
 #if !defined(OS_MACOSX)
 class ToolbarView;
 #endif
@@ -32,10 +33,6 @@ struct NativeWebKeyboardEvent;
 
 namespace gfx {
 class Rect;
-}
-
-namespace views {
-class Window;
 }
 
 class Extension;
@@ -103,13 +100,10 @@ class BrowserWindow {
   // frames may need to refresh their title bar.
   virtual void UpdateTitleBar() = 0;
 
-  // Invoked when the visibility of the bookmark bar.
-  // NOTE: this is NOT sent when the user toggles the visibility of this,
-  // but rather when the user transitions from a page that forces
-  // it to be visibile to one that doesn't have it visible (or
-  // vice-versa).
-  // TODO(sky): see about routing visibility pref changing through here too.
-  virtual void ShelfVisibilityChanged() = 0;
+  // Invoked when the state of the bookmark bar changes. This is only invoked if
+  // the state changes for the current tab, it is not sent when switching tabs.
+  virtual void BookmarkBarStateChanged(
+      BookmarkBar::AnimateChangeType change_type) = 0;
 
   // Inform the frame that the dev tools window for the selected tab has
   // changed.
@@ -198,7 +192,7 @@ class BrowserWindow {
   virtual void ConfirmSetDefaultSearchProvider(
       TabContents* tab_contents,
       TemplateURL* template_url,
-      TemplateURLModel* template_url_model) {
+      TemplateURLService* template_url_service) {
     // TODO(levin): Implement this for non-Windows platforms and make it pure.
     // http://crbug.com/38475
   }
@@ -313,6 +307,11 @@ class BrowserWindow {
 #if defined(OS_MACOSX)
   // Opens the tabpose view.
   virtual void OpenTabpose() = 0;
+
+  // Sets the presentation mode for the window.  If the window is not already in
+  // fullscreen, also enters fullscreen mode.
+  virtual void SetPresentationMode(bool presentation_mode) = 0;
+  virtual bool InPresentationMode() = 0;
 #endif
 
   // See InstantDelegate for details.

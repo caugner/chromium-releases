@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include "remoting/base/constants.h"
 #include "remoting/host/host_config.h"
 #include "remoting/jingle_glue/iq_request.h"
-#include "remoting/jingle_glue/jingle_client.h"
 #include "remoting/jingle_glue/jingle_thread.h"
+#include "remoting/jingle_glue/signal_strategy.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 #include "third_party/libjingle/source/talk/xmpp/constants.h"
 
@@ -81,13 +81,15 @@ void HeartbeatSender::OnSignallingConnected(SignalStrategy* signal_strategy,
 
 void HeartbeatSender::OnSignallingDisconnected() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
-  DCHECK_EQ(state_, STARTED);
   state_ = STOPPED;
   request_.reset(NULL);
 }
 
-void HeartbeatSender::OnShutdown() {
-}
+// Ignore any notifications other than signalling
+// connected/disconnected events.
+void HeartbeatSender::OnAccessDenied() { }
+void HeartbeatSender::OnAuthenticatedClientsChanged(int clients) { }
+void HeartbeatSender::OnShutdown() { }
 
 void HeartbeatSender::DoSendStanza() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);

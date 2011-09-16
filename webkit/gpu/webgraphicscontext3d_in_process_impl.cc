@@ -110,7 +110,7 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
   gfx::BindSkiaToInProcessGL();
 
   render_directly_to_web_view_ = render_directly_to_web_view;
-  gfx::GLContext* share_context = 0;
+  gfx::GLShareGroup* share_group = 0;
 
   if (!render_directly_to_web_view) {
     // Pick up the compositor's context to share resources with.
@@ -118,7 +118,7 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
     if (view_context) {
       WebGraphicsContext3DInProcessImpl* contextImpl =
           static_cast<WebGraphicsContext3DInProcessImpl*>(view_context);
-      share_context = contextImpl->gl_context_.get();
+      share_group = contextImpl->gl_context_->share_group();
     } else {
       // The compositor's context didn't get created
       // successfully, so conceptually there is no way we can
@@ -135,7 +135,8 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
   // and from there to the window, and WebViewImpl::paint already
   // correctly handles the case where the compositor is active but
   // the output needs to go to a WebCanvas.
-  gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size(1, 1));
+  gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
+                                                         gfx::Size(1, 1));
   if (!gl_surface_.get()) {
     if (!is_gles2_)
       return false;
@@ -149,12 +150,13 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
     // necessary.
     webView->mainFrame()->collectGarbage();
 
-    gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size(1, 1));
+    gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
+                                                           gfx::Size(1, 1));
     if (!gl_surface_.get())
       return false;
   }
 
-  gl_context_ = gfx::GLContext::CreateGLContext(share_context,
+  gl_context_ = gfx::GLContext::CreateGLContext(share_group,
                                                 gl_surface_.get());
   if (!gl_context_.get()) {
     if (!is_gles2_)
@@ -169,7 +171,7 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
     // necessary.
     webView->mainFrame()->collectGarbage();
 
-    gl_context_ = gfx::GLContext::CreateGLContext(share_context,
+    gl_context_ = gfx::GLContext::CreateGLContext(share_group,
                                                   gl_surface_.get());
     if (!gl_context_.get())
       return false;
@@ -296,6 +298,11 @@ int WebGraphicsContext3DInProcessImpl::height() {
 
 bool WebGraphicsContext3DInProcessImpl::isGLES2Compliant() {
   return is_gles2_;
+}
+
+bool WebGraphicsContext3DInProcessImpl::setParentContext(
+    WebGraphicsContext3D* parent_context) {
+  return false;
 }
 
 WebGLId WebGraphicsContext3DInProcessImpl::getPlatformTextureId() {
@@ -581,8 +588,9 @@ void WebGraphicsContext3DInProcessImpl::FlipVertically(
 #endif
 
 bool WebGraphicsContext3DInProcessImpl::readBackFramebuffer(
-    unsigned char* pixels, size_t bufferSize) {
-  if (bufferSize != static_cast<size_t>(4 * width() * height()))
+    unsigned char* pixels, size_t bufferSize, WebGLId framebuffer,
+    int width, int height) {
+  if (bufferSize != static_cast<size_t>(4 * width * height))
     return false;
 
   makeContextCurrent();
@@ -594,8 +602,14 @@ bool WebGraphicsContext3DInProcessImpl::readBackFramebuffer(
   // vertical flip is only a temporary solution anyway until Chrome
   // is fully GPU composited, it wasn't worth the complexity.
 
-  ResolveMultisampledFramebuffer(0, 0, cached_width_, cached_height_);
-  glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo_);
+  // In this implementation fbo_, not 0, is the drawing buffer, so
+  // special-case that.
+  if (framebuffer == 0)
+    framebuffer = fbo_;
+
+  if (framebuffer == fbo_)
+    ResolveMultisampledFramebuffer(0, 0, width, height);
+  glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, framebuffer);
 
   GLint pack_alignment = 4;
   bool must_restore_pack_alignment = false;
@@ -609,13 +623,13 @@ bool WebGraphicsContext3DInProcessImpl::readBackFramebuffer(
     // FIXME: consider testing for presence of GL_OES_read_format
     // and GL_EXT_read_format_bgra, and using GL_BGRA_EXT here
     // directly.
-    glReadPixels(0, 0, cached_width_, cached_height_,
+    glReadPixels(0, 0, width, height,
                  GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     for (size_t i = 0; i < bufferSize; i += 4) {
       std::swap(pixels[i], pixels[i + 2]);
     }
   } else {
-    glReadPixels(0, 0, cached_width_, cached_height_,
+    glReadPixels(0, 0, width, height,
                  GL_BGRA, GL_UNSIGNED_BYTE, pixels);
   }
 
@@ -626,10 +640,15 @@ bool WebGraphicsContext3DInProcessImpl::readBackFramebuffer(
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   if (pixels)
-    FlipVertically(pixels, cached_width_, cached_height_);
+    FlipVertically(pixels, width, height);
 #endif
 
   return true;
+}
+
+bool WebGraphicsContext3DInProcessImpl::readBackFramebuffer(
+    unsigned char* pixels, size_t bufferSize) {
+  return readBackFramebuffer(pixels, bufferSize, fbo_, width(), height());
 }
 
 void WebGraphicsContext3DInProcessImpl::synthesizeGLError(WGC3Denum error) {
@@ -705,6 +724,7 @@ void WebGraphicsContext3DInProcessImpl::waitLatchCHROMIUM(
 void WebGraphicsContext3DInProcessImpl::setLatchCHROMIUM(
     WGC3Duint latch_id)
 {
+  glFlush();
 }
 
 WebString WebGraphicsContext3DInProcessImpl::
@@ -1370,7 +1390,10 @@ void WebGraphicsContext3DInProcessImpl::shaderSource(
     ShaderSourceEntry* entry = result->second;
     DCHECK(entry);
     entry->source.reset(new char[length + 1]);
-    memcpy(entry->source.get(), source, (length + 1) * sizeof(char));
+    if (source)
+      memcpy(entry->source.get(), source, (length + 1) * sizeof(char));
+    else
+      entry->source[0] = '\0';
   } else {
     glShaderSource(shader, 1, &source, &length);
   }
@@ -1570,6 +1593,11 @@ void WebGraphicsContext3DInProcessImpl::deleteTexture(WebGLId texture) {
   glDeleteTextures(1, &texture);
 }
 
+WGC3Denum WebGraphicsContext3DInProcessImpl::getGraphicsResetStatusARB() {
+  // TODO(kbr): this implementation doesn't support lost contexts yet.
+  return GL_NO_ERROR;
+}
+
 bool WebGraphicsContext3DInProcessImpl::AngleCreateCompilers() {
   if (!ShInitialize())
     return false;
@@ -1590,9 +1618,11 @@ bool WebGraphicsContext3DInProcessImpl::AngleCreateCompilers() {
   resources.MaxDrawBuffers = 1;
 
   fragment_compiler_ = ShConstructCompiler(
-      SH_FRAGMENT_SHADER, SH_WEBGL_SPEC, &resources);
+      SH_FRAGMENT_SHADER, SH_WEBGL_SPEC,
+      is_gles2_ ? SH_ESSL_OUTPUT : SH_GLSL_OUTPUT, &resources);
   vertex_compiler_ = ShConstructCompiler(
-      SH_VERTEX_SHADER, SH_WEBGL_SPEC, &resources);
+      SH_VERTEX_SHADER, SH_WEBGL_SPEC,
+      is_gles2_ ? SH_ESSL_OUTPUT : SH_GLSL_OUTPUT, &resources);
   return (fragment_compiler_ && vertex_compiler_);
 }
 
@@ -1637,21 +1667,10 @@ bool WebGraphicsContext3DInProcessImpl::AngleValidateShaderSource(
   }
 
   int length = 0;
-  if (is_gles2_) {
-    // ANGLE does not yet have a GLSL ES backend. Therefore if the
-    // compile succeeds we send the original source down.
-    length = strlen(entry->source.get());
-    if (length > 0)
-      ++length;  // Add null terminator
-  } else {
-    ShGetInfo(compiler, SH_OBJECT_CODE_LENGTH, &length);
-  }
+  ShGetInfo(compiler, SH_OBJECT_CODE_LENGTH, &length);
   if (length > 1) {
     entry->translated_source.reset(new char[length]);
-    if (is_gles2_)
-      strncpy(entry->translated_source.get(), entry->source.get(), length);
-    else
-      ShGetObjectCode(compiler, entry->translated_source.get());
+    ShGetObjectCode(compiler, entry->translated_source.get());
   }
   entry->is_valid = true;
   return true;

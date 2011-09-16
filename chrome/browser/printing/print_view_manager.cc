@@ -11,8 +11,10 @@
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/printing/printer_query.h"
+#include "chrome/browser/printing/print_view_manager_observer.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/print_preview_ui.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/print_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_entry.h"
@@ -37,6 +39,24 @@ string16 GenerateRenderSourceName(TabContents* tab_contents) {
   return name;
 }
 
+// Release the PrinterQuery identified by |cookie|.
+void ReleasePrinterQuery(int cookie) {
+  printing::PrintJobManager* print_job_manager =
+      g_browser_process->print_job_manager();
+  // May be NULL in tests.
+  if (!print_job_manager)
+    return;
+
+  scoped_refptr<printing::PrinterQuery> printer_query;
+  print_job_manager->PopPrinterQuery(cookie, &printer_query);
+  if (printer_query.get()) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        NewRunnableMethod(printer_query.get(),
+                          &printing::PrinterQuery::StopWorker));
+  }
+}
+
 }  // namespace
 
 namespace printing {
@@ -47,30 +67,41 @@ PrintViewManager::PrintViewManager(TabContentsWrapper* tab)
       number_pages_(0),
       printing_succeeded_(false),
       inside_inner_message_loop_(false),
-      is_title_overridden_(false) {
+      is_title_overridden_(false),
+      observer_(NULL),
+      cookie_(0) {
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   expecting_first_page_ = true;
 #endif
 }
 
 PrintViewManager::~PrintViewManager() {
+  ReleasePrinterQuery(cookie_);
   DisconnectFromCurrentPrintJob();
 }
 
 bool PrintViewManager::PrintNow() {
-  // Don't print interstitials.
-  if (tab_contents()->showing_interstitial_page())
-    return false;
+  return PrintNowInternal(new PrintMsg_PrintPages(routing_id()));
+}
 
-  return Send(new PrintMsg_PrintPages(routing_id()));
+bool PrintViewManager::PrintForSystemDialogNow() {
+  return PrintNowInternal(new PrintMsg_PrintForSystemDialog(routing_id()));
 }
 
 bool PrintViewManager::PrintPreviewNow() {
-  // Don't print preview interstitials.
-  if (tab_contents()->showing_interstitial_page())
-    return false;
+  return PrintNowInternal(new PrintMsg_InitiatePrintPreview(routing_id()));
+}
 
-  return Send(new PrintMsg_InitiatePrintPreview(routing_id()));
+void PrintViewManager::PreviewPrintingRequestCancelled() {
+  if (!tab_contents())
+    return;
+  RenderViewHost* rvh = tab_contents()->render_view_host();
+  rvh->Send(new PrintMsg_PreviewPrintingRequestCancelled(rvh->routing_id()));
+}
+
+void PrintViewManager::set_observer(PrintViewManagerObserver* observer) {
+  DCHECK(!observer || !observer_);
+  observer_ = observer;
 }
 
 void PrintViewManager::StopNavigation() {
@@ -114,6 +145,15 @@ void PrintViewManager::OnDidGetPrintedPagesCount(int cookie, int number_pages) {
   DCHECK_GT(number_pages, 0);
   number_pages_ = number_pages;
   OpportunisticallyCreatePrintJob(cookie);
+}
+
+void PrintViewManager::OnDidGetDocumentCookie(int cookie) {
+  cookie_ = cookie;
+}
+
+void PrintViewManager::OnDidShowPrintDialog() {
+  if (observer_)
+    observer_->OnPrintDialogShown();
 }
 
 void PrintViewManager::OnDidPrintPage(
@@ -177,18 +217,10 @@ void PrintViewManager::OnDidPrintPage(
 }
 
 void PrintViewManager::OnPrintingFailed(int cookie) {
-  scoped_refptr<PrinterQuery> printer_query;
-  g_browser_process->print_job_manager()->PopPrinterQuery(cookie,
-                                                          &printer_query);
-  if (printer_query.get()) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(printer_query.get(),
-                          &printing::PrinterQuery::StopWorker));
-  }
+  ReleasePrinterQuery(cookie);
 
   NotificationService::current()->Notify(
-      NotificationType::PRINT_JOB_RELEASED,
+      chrome::NOTIFICATION_PRINT_JOB_RELEASED,
       Source<TabContents>(tab_contents()),
       NotificationService::NoDetails());
 }
@@ -198,6 +230,9 @@ bool PrintViewManager::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(PrintViewManager, message)
     IPC_MESSAGE_HANDLER(PrintHostMsg_DidGetPrintedPagesCount,
                         OnDidGetPrintedPagesCount)
+    IPC_MESSAGE_HANDLER(PrintHostMsg_DidGetDocumentCookie,
+                        OnDidGetDocumentCookie)
+    IPC_MESSAGE_HANDLER(PrintHostMsg_DidShowPrintDialog, OnDidShowPrintDialog)
     IPC_MESSAGE_HANDLER(PrintHostMsg_DidPrintPage, OnDidPrintPage)
     IPC_MESSAGE_HANDLER(PrintHostMsg_PrintingFailed, OnPrintingFailed)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -205,11 +240,11 @@ bool PrintViewManager::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void PrintViewManager::Observe(NotificationType type,
+void PrintViewManager::Observe(int type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::PRINT_JOB_EVENT: {
+  switch (type) {
+    case chrome::NOTIFICATION_PRINT_JOB_EVENT: {
       OnNotifyPrintJobEvent(*Details<JobEventDetails>(details).ptr());
       break;
     }
@@ -227,7 +262,7 @@ void PrintViewManager::OnNotifyPrintJobEvent(
       TerminatePrintJob(true);
 
       NotificationService::current()->Notify(
-          NotificationType::PRINT_JOB_RELEASED,
+          chrome::NOTIFICATION_PRINT_JOB_RELEASED,
           Source<TabContentsWrapper>(tab_),
           NotificationService::NoDetails());
       break;
@@ -257,7 +292,7 @@ void PrintViewManager::OnNotifyPrintJobEvent(
       ReleasePrintJob();
 
       NotificationService::current()->Notify(
-          NotificationType::PRINT_JOB_RELEASED,
+          chrome::NOTIFICATION_PRINT_JOB_RELEASED,
           Source<TabContentsWrapper>(tab_),
           NotificationService::NoDetails());
       break;
@@ -339,7 +374,7 @@ bool PrintViewManager::CreateNewPrintJob(PrintJobWorkerOwner* job) {
 
   print_job_ = new PrintJob();
   print_job_->Initialize(job, this, number_pages_);
-  registrar_.Add(this, NotificationType::PRINT_JOB_EVENT,
+  registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
                  Source<PrintJob>(print_job_.get()));
   printing_succeeded_ = false;
   return true;
@@ -399,7 +434,7 @@ void PrintViewManager::ReleasePrintJob() {
 
   PrintingDone(printing_succeeded_);
 
-  registrar_.Remove(this, NotificationType::PRINT_JOB_EVENT,
+  registrar_.Remove(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
                     Source<PrintJob>(print_job_.get()));
   print_job_->DisconnectSource();
   // Don't close the worker thread.
@@ -409,14 +444,14 @@ void PrintViewManager::ReleasePrintJob() {
 bool PrintViewManager::RunInnerMessageLoop() {
   // This value may actually be too low:
   //
-  // - If we're looping because of printer settings initializaton, the premise
-  // here is that some poor users have their print server away on a VPN over
-  // dialup. In this situation, the simple fact of opening the printer can be
-  // dead slow. On the other side, we don't want to die infinitely for a real
-  // network error. Give the printer 60 seconds to comply.
+  // - If we're looping because of printer settings initialization, the premise
+  // here is that some poor users have their print server away on a VPN over a
+  // slow connection. In this situation, the simple fact of opening the printer
+  // can be dead slow. On the other side, we don't want to die infinitely for a
+  // real network error. Give the printer 60 seconds to comply.
   //
   // - If we're looping because of renderer page generation, the renderer could
-  // be cpu bound, the page overly complex/large or the system just
+  // be CPU bound, the page overly complex/large or the system just
   // memory-bound.
   static const int kPrinterSettingsTimeout = 60000;
   base::OneShotTimer<MessageLoop> quit_timer;
@@ -470,6 +505,13 @@ bool PrintViewManager::OpportunisticallyCreatePrintJob(int cookie) {
   // print_job_->is_job_pending() to true.
   print_job_->StartPrinting();
   return true;
+}
+
+bool PrintViewManager::PrintNowInternal(IPC::Message* message) {
+  // Don't print / print preview interstitials.
+  if (tab_contents()->showing_interstitial_page())
+    return false;
+  return Send(message);
 }
 
 }  // namespace printing

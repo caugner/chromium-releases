@@ -31,15 +31,10 @@
 @end
 
 
-// Calls to removeDelegate: normally start an animation, which removes the
-// infobar completely when finished.  For unittesting purposes, we create a mock
-// container which calls close: immediately, rather than kicking off an
-// animation.
 @interface InfoBarContainerTest : NSObject<InfoBarContainer> {
   InfoBarController* controller_;
 }
 - (id)initWithController:(InfoBarController*)controller;
-- (void)removeDelegate:(InfoBarDelegate*)delegate;
 - (void)willRemoveController:(InfoBarController*)controller;
 - (void)removeController:(InfoBarController*)controller;
 @end
@@ -52,16 +47,35 @@
   return self;
 }
 
-- (void)removeDelegate:(InfoBarDelegate*)delegate {
-  [controller_ close];
-}
-
 - (void)willRemoveController:(InfoBarController*)controller {
 }
 
 - (void)removeController:(InfoBarController*)controller {
   DCHECK(controller_ == controller);
   controller_ = nil;
+}
+@end
+
+// Calls to removeSelf normally start an animation, which removes the infobar
+// completely when finished.  For testing purposes, we create a mock controller
+// which calls close: immediately, rather than kicking off an animation.
+@interface TestLinkInfoBarController : LinkInfoBarController
+- (void)removeSelf;
+@end
+
+@implementation TestLinkInfoBarController
+- (void)removeSelf {
+  [self close];
+}
+@end
+
+@interface TestConfirmInfoBarController : ConfirmInfoBarController
+- (void)removeSelf;
+@end
+
+@implementation TestConfirmInfoBarController
+- (void)removeSelf {
+  [self close];
 }
 @end
 
@@ -78,7 +92,8 @@ class LinkInfoBarControllerTest : public CocoaTest,
 
     delegate_ = new MockLinkInfoBarDelegate(this);
     controller_.reset(
-        [[LinkInfoBarController alloc] initWithDelegate:delegate_]);
+        [[TestLinkInfoBarController alloc] initWithDelegate:delegate_
+                                                      owner:NULL]);
     container_.reset(
         [[InfoBarContainerTest alloc] initWithController:controller_]);
     [controller_ setContainerController:container_];
@@ -116,7 +131,8 @@ class ConfirmInfoBarControllerTest : public CocoaTest,
 
     delegate_ = new MockConfirmInfoBarDelegate(this);
     controller_.reset(
-        [[ConfirmInfoBarController alloc] initWithDelegate:delegate_]);
+        [[TestConfirmInfoBarController alloc] initWithDelegate:delegate_
+                                                         owner:NULL]);
     container_.reset(
         [[InfoBarContainerTest alloc] initWithController:controller_]);
     [controller_ setContainerController:container_];
@@ -174,6 +190,12 @@ TEST_F(LinkInfoBarControllerTest, ShowAndClickLink) {
   // Check that clicking on the link calls LinkClicked() on the
   // delegate.  It should also close the infobar.
   [controller_ linkClicked];
+
+  // Spin the runloop because the invocation for closing the infobar is done on
+  // a 0-timer delayed selector.
+  [[NSRunLoop currentRunLoop] runUntilDate:
+      [NSDate dateWithTimeIntervalSinceNow:0.1]];
+
   ASSERT_TRUE(delegate_closed());
   EXPECT_TRUE(closed_delegate_link_clicked_);
 }

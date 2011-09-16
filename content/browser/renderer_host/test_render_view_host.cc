@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/browser_url_handler.h"
 #include "chrome/test/testing_profile.h"
+#include "content/browser/browser_url_handler.h"
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance.h"
@@ -51,7 +51,7 @@ TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
   // For normal RenderViewHosts, this is freed when |Shutdown()| is called.
   // For TestRenderViewHost, the view is explicitly deleted in the destructor
   // below, because TestRenderWidgetHostView::Destroy() doesn't |delete this|.
-  set_view(new TestRenderWidgetHostView(this));
+  SetView(new TestRenderWidgetHostView(this));
 }
 
 TestRenderViewHost::~TestRenderViewHost() {
@@ -252,11 +252,6 @@ void TestRenderWidgetHostView::ShowCompositorHostWindow(bool show) {
 
 gfx::PluginWindowHandle TestRenderWidgetHostView::GetCompositingSurface() {
   return gfx::kNullPluginWindow;
-}
-
-bool TestRenderWidgetHostView::ContainsNativeView(
-    gfx::NativeView native_view) const {
-  return false;
 }
 
 TestRenderViewHostFactory::TestRenderViewHostFactory(

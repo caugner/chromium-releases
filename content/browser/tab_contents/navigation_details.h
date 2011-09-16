@@ -11,6 +11,7 @@
 #include "googleurl/src/gurl.h"
 
 class NavigationEntry;
+class TabContents;
 
 namespace content {
 
@@ -37,16 +38,8 @@ struct LoadCommittedDetails {
   // The previous URL that the user was on. This may be empty if none.
   GURL previous_url;
 
-  // True when this load was non-user initated. This corresponds to a
-  // a NavigationGestureAuto call from WebKit (see webview_delegate.h).
-  // We also count reloads and meta-refreshes as "auto" to account for the
-  // fact that WebKit doesn't always set the user gesture properly in these
-  // cases (see bug 1051891).
-  bool is_auto;
-
   // True if the committed entry has replaced the exisiting one.
   // A non-user initiated redirect causes such replacement.
-  // This is somewhat similiar to is_auto, but not exactly the same.
   bool did_replace_entry;
 
   // True if the navigation was in-page. This means that the active entry's
@@ -63,12 +56,11 @@ struct LoadCommittedDetails {
   // Use SSLManager::DeserializeSecurityInfo to decode it.
   std::string serialized_security_info;
 
-  // Returns whether the user probably felt like they navigated somewhere new.
-  // We often need this logic for showing or hiding something, and this
-  // returns true only for main frame loads that the user initiated, that go
-  // to a new page.
-  bool is_user_initiated_main_frame_load() const {
-    return !is_auto && !is_in_page && is_main_frame;
+  // Returns whether the main frame navigated to a different page (e.g., not
+  // scrolling to a fragment inside the current page). We often need this logic
+  // for showing or hiding something.
+  bool is_navigation_to_different_page() const {
+    return is_main_frame && !is_in_page;
   }
 
   // The HTTP status code for this entry..
@@ -92,6 +84,21 @@ struct PrunedDetails {
 
   // Number of items removed.
   int count;
+};
+
+// Details sent for NOTIFY_NAV_RETARGETING.
+struct RetargetingDetails {
+  // The source tab contents.
+  TabContents* source_tab_contents;
+
+  // The frame ID of the source tab from which the retargeting was triggered.
+  int64 source_frame_id;
+
+  // The target URL.
+  GURL target_url;
+
+  // The target tab contents.
+  TabContents* target_tab_contents;
 };
 
 }  // namespace content

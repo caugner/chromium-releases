@@ -147,14 +147,8 @@ DWORD UnPackArchive(const FilePath& archive,
 void AddExistingMultiInstalls(const InstallationState& original_state,
                               InstallerState* installer_state) {
   if (installer_state->is_multi_install()) {
-    // TODO(grt): Find all occurrences of such arrays and generalize/centralize.
-    static const BrowserDistribution::Type product_checks[] = {
-      BrowserDistribution::CHROME_BROWSER,
-      BrowserDistribution::CHROME_FRAME
-    };
-
-    for (size_t i = 0; i < arraysize(product_checks); ++i) {
-      BrowserDistribution::Type type = product_checks[i];
+    for (size_t i = 0; i < BrowserDistribution::kNumProductTypes; ++i) {
+      BrowserDistribution::Type type = BrowserDistribution::kProductTypes[i];
       if (!installer_state->FindProduct(type)) {
         const ProductState* state =
             original_state.GetProductState(installer_state->system_install(),
@@ -347,7 +341,6 @@ bool CheckMultiInstallConditions(const InstallationState& original_state,
   const Products& products = installer_state->products();
   DCHECK(products.size());
 
-  bool is_first_install = true;
   const bool system_level = installer_state->system_install();
 
   if (installer_state->is_multi_install()) {
@@ -511,7 +504,7 @@ bool CheckPreInstallConditions(const InstallationState& original_state,
           cmd.AppendSwitch(switches::kFirstRun);
           installer_state->WriteInstallerResult(*status, 0, NULL);
           VLOG(1) << "Launching existing system-level chrome instead.";
-          base::LaunchApp(cmd, false, false, NULL);
+          base::LaunchProcess(cmd, base::LaunchOptions(), NULL);
         }
         return false;
       }
@@ -664,6 +657,8 @@ installer::InstallStatus InstallProductsHelper(
             install_msg_base = 0;
           }
         }
+
+        installer_state.UpdateStage(installer::FINISHING);
 
         // Only do Chrome-specific stuff (like launching the browser) if
         // Chrome was specifically requested (rather than being upgraded as
@@ -888,6 +883,8 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       installer_state->WriteInstallerResult(status, IDS_SETUP_PATCH_FAILED_BASE,
           NULL);
     }
+    // We will be exiting normally, so clear the stage indicator.
+    installer_state->UpdateStage(installer::NO_STAGE);
   } else if (cmd_line.HasSwitch(installer::switches::kShowEula)) {
     // Check if we need to show the EULA. If it is passed as a command line
     // then the dialog is shown and regardless of the outcome setup exits here.
@@ -895,7 +892,7 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
         cmd_line.GetSwitchValueNative(installer::switches::kShowEula);
     *exit_code = ShowEULADialog(inner_frame);
     if (installer::EULA_REJECTED != *exit_code)
-      GoogleUpdateSettings::SetEULAConsent(*installer_state, true);
+      GoogleUpdateSettings::SetEULAConsent(original_state, true);
   } else if (cmd_line.HasSwitch(
       installer::switches::kRegisterChromeBrowser)) {
     installer::InstallStatus status = installer::UNKNOWN_STATUS;
@@ -917,6 +914,7 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       // ShellUtil::kPotentialProtocolAssociations.
       // These options should only be used when setup.exe is launched with admin
       // rights. We do not make any user specific changes with this option.
+      DCHECK(IsUserAnAdmin());
       std::wstring chrome_exe(cmd_line.GetSwitchValueNative(
           installer::switches::kRegisterChromeBrowser));
       std::wstring suffix;
@@ -1161,7 +1159,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   installer::InitInstallerLogging(prefs);
 
   const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
-  VLOG(1) << "Command Line: " << cmd_line.command_line_string();
+  VLOG(1) << "Command Line: " << cmd_line.GetCommandLineString();
 
   VLOG(1) << "multi install is " << prefs.is_multi_install();
   bool system_install = false;
@@ -1224,6 +1222,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
       // Append --run-as-admin flag to let the new instance of setup.exe know
       // that we already tried to launch ourselves as admin.
       new_cmd.AppendSwitch(installer::switches::kRunAsAdmin);
+      // If system_install became true due to an environment variable, append
+      // it to the command line here since env vars may not propagate past the
+      // elevation.
+      if (!new_cmd.HasSwitch(installer::switches::kSystemLevel))
+        new_cmd.AppendSwitch(installer::switches::kSystemLevel);
       DWORD exit_code = installer::UNKNOWN_STATUS;
       InstallUtil::ExecuteExeAsAdmin(new_cmd, &exit_code);
       return exit_code;

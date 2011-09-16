@@ -29,8 +29,9 @@ class WebMediaPlayerDelegateImpl;
 
 namespace webkit_glue {
 
-class SimpleDataSource : public WebDataSource,
-                         public WebKit::WebURLLoaderClient {
+class SimpleDataSource
+    : public WebDataSource,
+      public WebKit::WebURLLoaderClient {
  public:
   // Creates a DataSourceFactory for building SimpleDataSource objects.
   static media::DataSourceFactory* CreateFactory(
@@ -46,7 +47,6 @@ class SimpleDataSource : public WebDataSource,
   virtual void Stop(media::FilterCallback* callback);
 
   // media::DataSource implementation.
-  virtual const media::MediaFormat& media_format();
   virtual void Read(int64 position, size_t size,
                     uint8* data, ReadCallback* read_callback);
   virtual bool GetSize(int64* size_out);
@@ -94,9 +94,6 @@ class SimpleDataSource : public WebDataSource,
   virtual void Abort();
 
  private:
-  // Updates |url_| and |media_format_| with the given URL.
-  void SetURL(const GURL& url);
-
   // Creates and starts the resource loading on the render thread.
   void StartTask();
 
@@ -118,7 +115,6 @@ class SimpleDataSource : public WebDataSource,
   // Does the work of loading and sends data back to this client.
   scoped_ptr<WebKit::WebURLLoader> url_loader_;
 
-  media::MediaFormat media_format_;
   GURL url_;
   std::string data_;
   int64 size_;

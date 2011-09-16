@@ -4,14 +4,17 @@
 
 #include "chrome/browser/profiles/profile_impl_io_data.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
+#include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -46,7 +49,7 @@ ProfileImplIOData::Handle::~Handle() {
     iter->second->CleanupOnUIThread();
   }
 
-  io_data_->ShutdownOnUIThread();
+  io_data_.release()->ShutdownOnUIThread();
 }
 
 void ProfileImplIOData::Handle::Init(const FilePath& cookie_path,
@@ -71,6 +74,14 @@ void ProfileImplIOData::Handle::Init(const FilePath& cookie_path,
 
   // Keep track of isolated app path separately so we can use it on demand.
   io_data_->app_path_ = app_path;
+}
+
+base::Callback<ChromeURLDataManagerBackend*(void)>
+ProfileImplIOData::Handle::GetChromeURLDataManagerBackendGetter() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  LazyInitialize();
+  return base::Bind(&ProfileIOData::GetChromeURLDataManagerBackend,
+                    base::Unretained(io_data_.get()));
 }
 
 const content::ResourceContext&
@@ -131,6 +142,7 @@ ProfileImplIOData::Handle::GetIsolatedAppRequestContextGetter(
   if (iter != app_request_context_getter_map_.end())
     return iter->second;
 
+
   ChromeURLRequestContextGetter* context =
       ChromeURLRequestContextGetter::CreateOriginalForIsolatedApp(
           profile_, io_data_, app_id);
@@ -144,6 +156,14 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
     io_data_->InitializeProfileParams(profile_);
     ChromeNetworkDelegate::InitializeReferrersEnabled(
         io_data_->enable_referrers(), profile_->GetPrefs());
+    io_data_->clear_local_state_on_exit()->Init(
+        prefs::kClearSiteDataOnExit, profile_->GetPrefs(), NULL);
+    io_data_->clear_local_state_on_exit()->MoveToThread(BrowserThread::IO);
+#if defined(ENABLE_SAFE_BROWSING)
+    io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
+        profile_->GetPrefs(), NULL);
+    io_data_->safe_browsing_enabled()->MoveToThread(BrowserThread::IO);
+#endif
     initialized_ = true;
   }
 }
@@ -156,9 +176,7 @@ ProfileImplIOData::LazyParams::~LazyParams() {}
 ProfileImplIOData::ProfileImplIOData()
     : ProfileIOData(false),
       clear_local_state_on_exit_(false) {}
-ProfileImplIOData::~ProfileImplIOData() {
-  STLDeleteValues(&app_http_factory_map_);
-}
+ProfileImplIOData::~ProfileImplIOData() {}
 
 void ProfileImplIOData::LazyInitializeInternal(
     ProfileParams* profile_params) const {
@@ -296,7 +314,7 @@ scoped_refptr<ProfileIOData::RequestContext>
 ProfileImplIOData::InitializeAppRequestContext(
     scoped_refptr<ChromeURLRequestContext> main_context,
     const std::string& app_id) const {
-  scoped_refptr<ProfileIOData::RequestContext> context = new RequestContext;
+  ProfileIOData::AppRequestContext* context = new AppRequestContext(app_id);
 
   // Copy most state from the main context.
   context->CopyFrom(main_context);
@@ -348,12 +366,8 @@ ProfileImplIOData::InitializeAppRequestContext(
     cookie_store = new net::CookieMonster(cookie_db.get(), NULL);
   }
 
-  context->set_cookie_store(cookie_store);
-
-  // Keep track of app_http_cache to delete it when we go away.
-  DCHECK(!app_http_factory_map_[app_id]);
-  app_http_factory_map_[app_id] = app_http_cache;
-  context->set_http_transaction_factory(app_http_cache);
+  context->SetCookieStore(cookie_store);
+  context->SetHttpTransactionFactory(app_http_cache);
 
   return context;
 }
@@ -362,12 +376,13 @@ scoped_refptr<ChromeURLRequestContext>
 ProfileImplIOData::AcquireMediaRequestContext() const {
   DCHECK(media_request_context_);
   scoped_refptr<ChromeURLRequestContext> context = media_request_context_;
-  media_request_context_->set_profile_io_data(this);
+  media_request_context_->set_profile_io_data(
+      const_cast<ProfileImplIOData*>(this));
   media_request_context_ = NULL;
   return context;
 }
 
-scoped_refptr<ChromeURLRequestContext>
+scoped_refptr<ProfileIOData::RequestContext>
 ProfileImplIOData::AcquireIsolatedAppRequestContext(
     scoped_refptr<ChromeURLRequestContext> main_context,
     const std::string& app_id) const {
@@ -375,6 +390,5 @@ ProfileImplIOData::AcquireIsolatedAppRequestContext(
   scoped_refptr<RequestContext> app_request_context =
       InitializeAppRequestContext(main_context, app_id);
   DCHECK(app_request_context);
-  app_request_context->set_profile_io_data(this);
   return app_request_context;
 }

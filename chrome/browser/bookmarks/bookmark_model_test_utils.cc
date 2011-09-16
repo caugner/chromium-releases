@@ -18,8 +18,8 @@ void BookmarkModelTestUtils::AssertNodesEqual(const BookmarkNode* expected,
   EXPECT_EQ(expected->GetTitle(), actual->GetTitle());
   EXPECT_EQ(expected->type(), actual->type());
   EXPECT_TRUE(expected->date_added() == actual->date_added());
-  if (expected->type() == BookmarkNode::URL) {
-    EXPECT_EQ(expected->GetURL(), actual->GetURL());
+  if (expected->is_url()) {
+    EXPECT_EQ(expected->url(), actual->url());
   } else {
     EXPECT_TRUE(expected->date_folder_modified() ==
                 actual->date_folder_modified());
@@ -33,8 +33,8 @@ void BookmarkModelTestUtils::AssertNodesEqual(const BookmarkNode* expected,
 void BookmarkModelTestUtils::AssertModelsEqual(BookmarkModel* expected,
                                                BookmarkModel* actual,
                                                bool check_ids) {
-  AssertNodesEqual(expected->GetBookmarkBarNode(),
-                   actual->GetBookmarkBarNode(),
+  AssertNodesEqual(expected->bookmark_bar_node(),
+                   actual->bookmark_bar_node(),
                    check_ids);
   AssertNodesEqual(expected->other_node(),
                    actual->other_node(),

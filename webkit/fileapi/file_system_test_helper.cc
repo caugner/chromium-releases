@@ -13,8 +13,6 @@
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/local_file_system_file_util.h"
-#include "webkit/fileapi/quota_file_util.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/quota/special_storage_policy.h"
 
@@ -93,7 +91,7 @@ void FileSystemTestOriginHelper::SetUp(
     bool unlimited_quota,
     quota::QuotaManagerProxy* quota_manager_proxy,
     FileSystemFileUtil* file_util) {
-  file_util_ = file_util ? file_util : LocalFileSystemFileUtil::GetInstance();
+  file_util_ = file_util;
   DCHECK(file_util_);
   file_system_context_ = new FileSystemContext(
       base::MessageLoopProxy::CreateForCurrentThread(),
@@ -125,6 +123,8 @@ void FileSystemTestOriginHelper::SetUp(
   // how much the size of the origin directory has grown.
   initial_usage_size_ = file_util::ComputeDirectorySize(
       GetOriginRootPath());
+
+  FileSystemUsageCache::UpdateUsage(usage_cache_path, initial_usage_size_);
 }
 
 void FileSystemTestOriginHelper::TearDown() {
@@ -163,6 +163,10 @@ FilePath FileSystemTestOriginHelper::GetUsageCachePath() const {
 
 int64 FileSystemTestOriginHelper::GetCachedOriginUsage() const {
   return FileSystemUsageCache::GetUsage(GetUsageCachePath());
+}
+
+bool FileSystemTestOriginHelper::RevokeUsageCache() const {
+  return file_util::Delete(GetUsageCachePath(), false);
 }
 
 int64 FileSystemTestOriginHelper::ComputeCurrentOriginUsage() const {

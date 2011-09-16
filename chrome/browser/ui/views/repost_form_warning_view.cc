@@ -14,7 +14,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
 #include "views/controls/message_box_view.h"
-#include "views/window/window.h"
 
 namespace browser {
 
@@ -62,6 +61,14 @@ std::wstring RepostFormWarningView::GetDialogButtonLabel(
 
 views::View* RepostFormWarningView::GetContentsView() {
   return message_box_view_;
+}
+
+views::Widget* RepostFormWarningView::GetWidget() {
+  return message_box_view_->GetWidget();
+}
+
+const views::Widget* RepostFormWarningView::GetWidget() const {
+  return message_box_view_->GetWidget();
 }
 
 bool RepostFormWarningView::Cancel() {

@@ -33,7 +33,7 @@ BookmarkBarInstructionsView::BookmarkBarInstructionsView(Delegate* delegate)
     import_link_ = new views::Link(
         UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_IMPORT_LINK)));
     // We don't want the link to alter tab navigation.
-    import_link_->SetFocusable(false);
+    import_link_->set_focusable(false);
     import_link_->set_listener(this);
     AddChildView(import_link_);
   }
@@ -42,7 +42,7 @@ BookmarkBarInstructionsView::BookmarkBarInstructionsView(Delegate* delegate)
 gfx::Size BookmarkBarInstructionsView::GetPreferredSize() {
   int ascent = 0, descent = 0, height = 0, width = 0;
   for (int i = 0; i < child_count(); ++i) {
-    views::View* view = GetChildViewAt(i);
+    views::View* view = child_at(i);
     gfx::Size pref = view->GetPreferredSize();
     int baseline = view->GetBaseline();
     if (baseline != -1) {
@@ -63,7 +63,7 @@ void BookmarkBarInstructionsView::Layout() {
   int remaining_width = width();
   int x = 0;
   for (int i = 0; i < child_count(); ++i) {
-    views::View* view = GetChildViewAt(i);
+    views::View* view = child_at(i);
     gfx::Size pref = view->GetPreferredSize();
     int baseline = view->GetBaseline();
     int y;

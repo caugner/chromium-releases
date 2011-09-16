@@ -27,16 +27,20 @@ namespace protocol {
 
 class BufferedSocketWriter;
 
+// Implementation of HostStub that sends commands on a socket. Must be
+// created and closed on the network thread, but can be used on any
+// other thread.
 class HostControlSender : public HostStub {
  public:
-  // Create a stub using a socket.
   explicit HostControlSender(net::Socket* socket);
   virtual ~HostControlSender();
 
-  virtual void SuggestResolution(
-      const SuggestResolutionRequest* msg, Task* done);
   virtual void BeginSessionRequest(
       const LocalLoginCredentials* credentials, Task* done);
+
+  // Stop writing. Must be called on the network thread when the
+  // underlying socket is being destroyed.
+  void Close();
 
  private:
   // Buffered socket writer holds the serialized message and send it on the

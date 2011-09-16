@@ -22,7 +22,6 @@
   'targets': [
     {
       'target_name': 'ssl',
-      'product_name': 'ssl',
       'type': 'static_library',
       'sources': [
         'ssl/authcert.c',
@@ -34,7 +33,6 @@
         'ssl/os2_err.h',
         'ssl/preenc.h',
         'ssl/prelib.c',
-        'ssl/snapstart.c',
         'ssl/ssl.h',
         'ssl/ssl3con.c',
         'ssl/ssl3ecc.c',
@@ -136,6 +134,7 @@
           ],
           'dependencies': [
             '../../../third_party/zlib/zlib.gyp:zlib',
+            '../../../third_party/nss/nss.gyp:nspr',
             '../../../third_party/nss/nss.gyp:nss',
           ],
           'direct_dependent_settings': {
@@ -158,9 +157,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

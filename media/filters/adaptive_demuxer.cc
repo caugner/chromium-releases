@@ -165,7 +165,6 @@ void AdaptiveDemuxerStream::DCheckSanity() {
 
   bool non_null_stream_seen = false;
   Type type = DemuxerStream::UNKNOWN;
-  const MediaFormat* media_format = NULL;
   for (size_t i = 0; i < streams_.size(); ++i) {
     if (!streams_[i])
       continue;
@@ -173,10 +172,8 @@ void AdaptiveDemuxerStream::DCheckSanity() {
     if (!non_null_stream_seen) {
       non_null_stream_seen = true;
       type = streams_[i]->type();
-      media_format = &streams_[i]->media_format();
     } else {
       DCHECK_EQ(streams_[i]->type(), type);
-      DCHECK(streams_[i]->media_format() == *media_format);
     }
   }
 }
@@ -221,10 +218,6 @@ AVStream* AdaptiveDemuxerStream::GetAVStream() {
 
 DemuxerStream::Type AdaptiveDemuxerStream::type() {
   return current_stream()->type();
-}
-
-const MediaFormat& AdaptiveDemuxerStream::media_format() {
-  return current_stream()->media_format();
 }
 
 void AdaptiveDemuxerStream::EnableBitstreamConverter() {
@@ -457,7 +450,8 @@ AdaptiveDemuxer::AdaptiveDemuxer(DemuxerVector const& demuxers,
       current_audio_demuxer_index_(initial_audio_demuxer_index),
       current_video_demuxer_index_(initial_video_demuxer_index),
       playback_rate_(0),
-      switch_pending_(false) {
+      switch_pending_(false),
+      start_time_(kNoTimestamp) {
   DCHECK(!demuxers_.empty());
   DCHECK_GE(current_audio_demuxer_index_, -1);
   DCHECK_GE(current_video_demuxer_index_, -1);
@@ -473,7 +467,14 @@ AdaptiveDemuxer::AdaptiveDemuxer(DemuxerVector const& demuxers,
     video_streams.push_back(video);
     if (video)
       video_ids.push_back(i);
+    if (start_time_ == kNoTimestamp ||
+        demuxers_[i]->GetStartTime() < start_time_) {
+      start_time_ = demuxers_[i]->GetStartTime();
+    }
   }
+  DCHECK(start_time_ != kNoTimestamp);
+  // TODO(fgalligan): Add a check to make sure |demuxers_| start time are
+  // within an acceptable range, once the range is defined.
   if (current_audio_demuxer_index_ >= 0) {
     audio_stream_ = new AdaptiveDemuxerStream(
         audio_streams, current_audio_demuxer_index_);
@@ -753,6 +754,10 @@ scoped_refptr<DemuxerStream> AdaptiveDemuxer::GetStream(
       LOG(DFATAL) << "Unexpected type " << type;
       return NULL;
   }
+}
+
+base::TimeDelta AdaptiveDemuxer::GetStartTime() const {
+  return start_time_;
 }
 
 void AdaptiveDemuxer::StartStreamSwitchSeek(

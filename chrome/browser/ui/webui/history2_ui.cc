@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/webui/history2_ui.h"
 
-#include <algorithm>
 #include <set>
 
 #include "base/callback.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
@@ -31,11 +31,13 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/notification_source.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -98,14 +100,10 @@ void HistoryUIHTMLSource2::StartDataRequest(const std::string& path,
   static const base::StringPiece history_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_HISTORY2_HTML));
-  const std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
+  std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
       history_html, &localized_strings);
 
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
+  SendResponse(request_id, base::RefCountedString::TakeString(&full_html));
 }
 
 std::string HistoryUIHTMLSource2::GetMimeType(const std::string&) const {
@@ -132,6 +130,9 @@ WebUIMessageHandler* BrowsingHistoryHandler2::Attach(WebUI* web_ui) {
   profile->GetChromeURLDataManager()->AddDataSource(
       new FaviconSource(profile, FaviconSource::FAVICON));
 
+  // Get notifications when history is cleared.
+  registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
+      Source<Profile>(web_ui->GetProfile()->GetOriginalProfile()));
   return WebUIMessageHandler::Attach(web_ui);
 }
 
@@ -321,8 +322,8 @@ void BrowsingHistoryHandler2::ExtractSearchHistoryArguments(
     const StringValue* string_value =
       static_cast<const StringValue*>(list_member);
     string16 string16_value;
-    string_value->GetAsString(&string16_value);
-    base::StringToInt(string16_value, month);
+    if (string_value->GetAsString(&string16_value))
+      base::StringToInt(string16_value, month);
   }
 }
 
@@ -369,13 +370,25 @@ history::QueryOptions BrowsingHistoryHandler2::CreateMonthQueryOptions(
   return options;
 }
 
+void BrowsingHistoryHandler2::Observe(int type,
+                                     const NotificationSource& source,
+                                     const NotificationDetails& details) {
+  if (type != chrome::NOTIFICATION_HISTORY_URLS_DELETED) {
+    NOTREACHED();
+    return;
+  }
+
+  // Some URLs were deleted from history. Reload the list.
+  web_ui_->CallJavascriptFunction("historyDeleted");
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // HistoryUIContents
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-HistoryUI2::HistoryUI2(TabContents* contents) : WebUI(contents) {
+HistoryUI2::HistoryUI2(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new BrowsingHistoryHandler2())->Attach(this));
 
   HistoryUIHTMLSource2* html_source = new HistoryUIHTMLSource2();

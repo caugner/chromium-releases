@@ -6,19 +6,14 @@
 
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
-#if defined(HAVE_XINPUT2)
 #include <X11/extensions/XInput2.h>
-#endif
 #include <X11/Xlib.h>
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
-#include "views/widget/root_view.h"
-
-#if defined(HAVE_XINPUT2)
 #include "views/touchui/touch_factory.h"
-#endif
+#include "views/widget/root_view.h"
 
 namespace views {
 
@@ -69,7 +64,6 @@ int GetEventFlagsForButton(int button) {
   return 0;
 }
 
-#if defined(HAVE_XINPUT2)
 int GetButtonMaskForX2Event(XIDeviceEvent* xievent) {
   int buttonflags = 0;
 
@@ -121,8 +115,6 @@ int GetTouchIDFromXEvent(XEvent* xev) {
   return slot;
 }
 
-#endif  // HAVE_XINPUT2
-
 ui::EventType EventTypeFromNative(NativeEvent2 native_event) {
   switch (native_event->type) {
     case KeyPress:
@@ -144,7 +136,6 @@ ui::EventType EventTypeFromNative(NativeEvent2 native_event) {
           (Button1Mask | Button2Mask | Button3Mask))
         return ui::ET_MOUSE_DRAGGED;
       return ui::ET_MOUSE_MOVED;
-#if defined(HAVE_XINPUT2)
     case GenericEvent: {
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
@@ -162,7 +153,6 @@ ui::EventType EventTypeFromNative(NativeEvent2 native_event) {
               ui::ET_MOUSE_MOVED;
       }
     }
-#endif
     default:
       NOTREACHED();
       break;
@@ -171,12 +161,10 @@ ui::EventType EventTypeFromNative(NativeEvent2 native_event) {
 }
 
 int GetMouseWheelOffset(XEvent* xev) {
-#if defined(HAVE_XINPUT2)
   if (xev->type == GenericEvent) {
     XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev->xcookie.data);
     return xiev->detail == 4 ? kWheelScrollAmount : -kWheelScrollAmount;
   }
-#endif
   return xev->xbutton.button == 4 ? kWheelScrollAmount : -kWheelScrollAmount;
 }
 
@@ -189,14 +177,12 @@ gfx::Point GetEventLocation(XEvent* xev) {
     case MotionNotify:
       return gfx::Point(xev->xmotion.x, xev->xmotion.y);
 
-#if defined(HAVE_XINPUT2)
     case GenericEvent: {
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(xev->xcookie.data);
       return gfx::Point(static_cast<int>(xievent->event_x),
                         static_cast<int>(xievent->event_y));
     }
-#endif
   }
 
   return gfx::Point();
@@ -212,7 +198,6 @@ int GetLocatedEventFlags(XEvent* xev) {
     case MotionNotify:
       return GetEventFlagsFromXState(xev->xmotion.state);
 
-#if defined(HAVE_XINPUT2)
     case GenericEvent: {
       XIDeviceEvent* xievent = static_cast<XIDeviceEvent*>(xev->xcookie.data);
       bool touch =
@@ -229,7 +214,6 @@ int GetLocatedEventFlags(XEvent* xev) {
                   GetEventFlagsFromXState(xievent->mods.effective);
       }
     }
-#endif
   }
 
   return 0;
@@ -245,53 +229,38 @@ uint16 GetCharacterFromXKeyEvent(XKeyEvent* key) {
           result.length() == 1) ? result[0] : 0;
 }
 
-float GetTouchRadiusFromXEvent(XEvent* xev) {
-  float diameter = 0.0;
-
-#if defined(HAVE_XINPUT2)
-  TouchFactory* touch_factory = TouchFactory::GetInstance();
-  touch_factory->ExtractTouchParam(*xev, TouchFactory::TP_TOUCH_MAJOR,
-                                   &diameter);
-#endif
-
-  return diameter / 2.0;
+float GetTouchParamFromXEvent(XEvent* xev,
+                              TouchFactory::TouchParam tp,
+                              float default_value) {
+  TouchFactory::GetInstance()->ExtractTouchParam(*xev, tp, &default_value);
+  return default_value;
 }
 
-float GetTouchAngleFromXEvent(XEvent* xev) {
-  float angle = 0.0;
-
-#if defined(HAVE_XINPUT2)
-  TouchFactory* touch_factory = TouchFactory::GetInstance();
-  touch_factory->ExtractTouchParam(*xev, TouchFactory::TP_ORIENTATION,
-                                   &angle);
-#endif
-
-  return angle;
+float GetTouchForceFromXEvent(XEvent* xev) {
+  float force = 0.0;
+  force = GetTouchParamFromXEvent(xev, TouchFactory::TP_PRESSURE, 0.0);
+  unsigned int deviceid =
+      static_cast<XIDeviceEvent*>(xev->xcookie.data)->sourceid;
+  // Force is normalized to fall into [0, 1]
+  if (!TouchFactory::GetInstance()->NormalizeTouchParam(
+      deviceid, TouchFactory::TP_PRESSURE, &force))
+    force = 0.0;
+  return force;
 }
 
+// The following two functions are copied from event_gtk.cc. These will be
+// removed when GTK dependency is removed.
+uint16 GetCharacterFromGdkKeyval(guint keyval) {
+  guint32 ch = gdk_keyval_to_unicode(keyval);
 
-float GetTouchRatioFromXEvent(XEvent* xev) {
-  float ratio = 1.0;
+  // We only support BMP characters.
+  return ch < 0xFFFE ? static_cast<uint16>(ch) : 0;
+}
 
-#if defined(HAVE_XINPUT2)
-  TouchFactory* touch_factory = TouchFactory::GetInstance();
-  float major_v = -1.0;
-  float minor_v = -1.0;
-
-  if (!touch_factory->ExtractTouchParam(*xev,
-                                        TouchFactory::TP_TOUCH_MAJOR,
-                                        &major_v) ||
-      !touch_factory->ExtractTouchParam(*xev,
-                                        TouchFactory::TP_TOUCH_MINOR,
-                                        &minor_v))
-    return ratio;
-
-  // In case minor axis exists but is zero.
-  if (minor_v > 0.0)
-    ratio = major_v / minor_v;
-#endif
-
-  return ratio;
+GdkEventKey* GetGdkEventKeyFromNative(NativeEvent native_event) {
+  DCHECK(native_event->type == GDK_KEY_PRESS ||
+         native_event->type == GDK_KEY_RELEASE);
+  return &native_event->key;
 }
 
 }  // namespace
@@ -330,8 +299,15 @@ KeyEvent::KeyEvent(NativeEvent2 native_event_2, FromNativeEvent2 from_native)
 }
 
 uint16 KeyEvent::GetCharacter() const {
-  if (!native_event_2())
-    return GetCharacterFromKeyCode(key_code_, flags());
+  if (!native_event_2()) {
+    // This event may have been created from a Gdk event.
+    if (IsControlDown() || !native_event())
+      return GetCharacterFromKeyCode(key_code_, flags());
+
+    uint16 ch = GetCharacterFromGdkKeyval(
+        GetGdkEventKeyFromNative(native_event())->keyval);
+    return ch ? ch : GetCharacterFromKeyCode(key_code_, flags());
+  }
 
   DCHECK(native_event_2()->type == KeyPress ||
          native_event_2()->type == KeyRelease);
@@ -341,8 +317,33 @@ uint16 KeyEvent::GetCharacter() const {
 }
 
 uint16 KeyEvent::GetUnmodifiedCharacter() const {
-  if (!native_event_2())
-    return GetCharacterFromKeyCode(key_code_, flags() & ui::EF_SHIFT_DOWN);
+  if (!native_event_2()) {
+    // This event may have been created from a Gdk event.
+    if (!native_event())
+      return GetCharacterFromKeyCode(key_code_, flags() & ui::EF_SHIFT_DOWN);
+
+    GdkEventKey* key = GetGdkEventKeyFromNative(native_event());
+
+    static const guint kIgnoredModifiers =
+      GDK_CONTROL_MASK | GDK_LOCK_MASK | GDK_MOD1_MASK | GDK_MOD2_MASK |
+      GDK_MOD3_MASK | GDK_MOD4_MASK | GDK_MOD5_MASK | GDK_SUPER_MASK |
+      GDK_HYPER_MASK | GDK_META_MASK;
+
+    // We can't use things like (key->state & GDK_SHIFT_MASK), as it may mask
+    // out bits used by X11 or Gtk internally.
+    GdkModifierType modifiers =
+      static_cast<GdkModifierType>(key->state & ~kIgnoredModifiers);
+    guint keyval = 0;
+    uint16 ch = 0;
+    if (gdk_keymap_translate_keyboard_state(NULL, key->hardware_keycode,
+          modifiers, key->group, &keyval,
+          NULL, NULL, NULL)) {
+      ch = GetCharacterFromGdkKeyval(keyval);
+    }
+
+    return ch ? ch :
+      GetCharacterFromKeyCode(key_code_, flags() & ui::EF_SHIFT_DOWN);
+  }
 
   DCHECK(native_event_2()->type == KeyPress ||
          native_event_2()->type == KeyRelease);
@@ -368,42 +369,6 @@ MouseEvent::MouseEvent(NativeEvent2 native_event_2,
     : LocatedEvent(native_event_2, from_native) {
 }
 
-MouseEvent::MouseEvent(const TouchEvent& touch,
-                       FromNativeEvent2 from_native)
-    : LocatedEvent(touch.native_event_2(), from_native) {
-  // The location of the event is correctly extracted from the native event. But
-  // it is necessary to update the event type.
-  ui::EventType mtype = ui::ET_UNKNOWN;
-  switch (touch.type()) {
-    case ui::ET_TOUCH_RELEASED:
-      mtype = ui::ET_MOUSE_RELEASED;
-      break;
-    case ui::ET_TOUCH_PRESSED:
-      mtype = ui::ET_MOUSE_PRESSED;
-      break;
-    case ui::ET_TOUCH_MOVED:
-      mtype = ui::ET_MOUSE_MOVED;
-      break;
-    default:
-      NOTREACHED() << "Invalid mouse event.";
-  }
-  set_type(mtype);
-
-  // It may not be possible to extract the button-information necessary for a
-  // MouseEvent from the native event for a TouchEvent, so the flags are
-  // explicitly updated as well. The button is approximated from the touchpoint
-  // identity.
-  int new_flags = flags() & ~(ui::EF_LEFT_BUTTON_DOWN |
-                              ui::EF_RIGHT_BUTTON_DOWN |
-                              ui::EF_MIDDLE_BUTTON_DOWN);
-  int button = ui::EF_LEFT_BUTTON_DOWN;
-  if (touch.identity() == 1)
-    button = ui::EF_RIGHT_BUTTON_DOWN;
-  else if (touch.identity() == 2)
-    button = ui::EF_MIDDLE_BUTTON_DOWN;
-  set_flags(new_flags | button);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // MouseWheelEvent, public:
 
@@ -416,14 +381,20 @@ MouseWheelEvent::MouseWheelEvent(NativeEvent2 native_event_2,
 ////////////////////////////////////////////////////////////////////////////////
 // TouchEvent, public:
 
-#if defined(HAVE_XINPUT2)
 TouchEvent::TouchEvent(NativeEvent2 native_event_2,
                        FromNativeEvent2 from_native)
     : LocatedEvent(native_event_2, from_native),
       touch_id_(GetTouchIDFromXEvent(native_event_2)),
-      radius_(GetTouchRadiusFromXEvent(native_event_2)),
-      angle_(GetTouchAngleFromXEvent(native_event_2)),
-      ratio_(GetTouchRatioFromXEvent(native_event_2)) {
+      radius_x_(GetTouchParamFromXEvent(native_event_2,
+                                        TouchFactory::TP_TOUCH_MAJOR,
+                                        2.0) / 2.0),
+      radius_y_(GetTouchParamFromXEvent(native_event_2,
+                                        TouchFactory::TP_TOUCH_MINOR,
+                                        2.0) / 2.0),
+      rotation_angle_(GetTouchParamFromXEvent(native_event_2,
+                                              TouchFactory::TP_ORIENTATION,
+                                              0.0)),
+      force_(GetTouchForceFromXEvent(native_event_2)) {
   if (type() == ui::ET_TOUCH_PRESSED || type() == ui::ET_TOUCH_RELEASED) {
     TouchFactory* factory = TouchFactory::GetInstance();
     float slot;
@@ -433,6 +404,5 @@ TouchEvent::TouchEvent(NativeEvent2 native_event_2,
     }
   }
 }
-#endif
 
 }  // namespace views

@@ -10,20 +10,24 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
-#include "remoting/jingle_glue/jingle_client.h"
+#include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/connection_to_host.h"
-#include "remoting/protocol/host_stub.h"
-#include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/message_reader.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_manager.h"
 
 class MessageLoop;
 
+namespace talk_base {
+class NetworkManager;
+class PacketSocketFactory;
+}  // namespace talk_base
+
 namespace remoting {
 
 class JingleThread;
+class HostResolverFactory;
 class PortAllocatorSessionFactory;
 class XmppProxy;
 class VideoPacket;
@@ -31,12 +35,18 @@ class VideoPacket;
 namespace protocol {
 
 class ClientMessageDispatcher;
+class ClientControlSender;
 class ClientStub;
+class HostControlSender;
+class HostStub;
+class InputSender;
+class InputStub;
 class SessionConfig;
 class VideoReader;
 class VideoStub;
 
-class ConnectionToHost : public JingleClient::Callback {
+class ConnectionToHost : public SignalStrategy::StatusObserver,
+                         public SessionManager::Listener {
  public:
   enum State {
     STATE_EMPTY,
@@ -64,29 +74,24 @@ class ConnectionToHost : public JingleClient::Callback {
   // |network_manager| and |socket_factory| may be set to NULL.
   //
   // TODO(sergeyu): Constructor shouldn't need thread here.
-  ConnectionToHost(JingleThread* thread,
+  ConnectionToHost(MessageLoop* network_message_loop,
                    talk_base::NetworkManager* network_manager,
                    talk_base::PacketSocketFactory* socket_factory,
-                   PortAllocatorSessionFactory* session_factory);
+                   HostResolverFactory* host_resolver_factory,
+                   PortAllocatorSessionFactory* session_factory,
+                   bool allow_nat_traversal);
   virtual ~ConnectionToHost();
 
-  // TODO(ajwong): We need to generalize this API.
-  virtual void Connect(const std::string& username,
-                       const std::string& auth_token,
-                       const std::string& auth_service,
+  virtual void Connect(scoped_refptr<XmppProxy> xmpp_proxy,
+                       const std::string& your_jid,
                        const std::string& host_jid,
+                       const std::string& host_public_key,
                        const std::string& access_code,
                        HostEventCallback* event_callback,
                        ClientStub* client_stub,
                        VideoStub* video_stub);
-  virtual void ConnectSandboxed(scoped_refptr<XmppProxy> xmpp_proxy,
-                                const std::string& your_jid,
-                                const std::string& host_jid,
-                                const std::string& access_code,
-                                HostEventCallback* event_callback,
-                                ClientStub* client_stub,
-                                VideoStub* video_stub);
-  virtual void Disconnect();
+
+  virtual void Disconnect(const base::Closure& shutdown_task);
 
   virtual const SessionConfig* config();
 
@@ -94,16 +99,16 @@ class ConnectionToHost : public JingleClient::Callback {
 
   virtual HostStub* host_stub();
 
-  // JingleClient::Callback interface.
-  virtual void OnStateChange(JingleClient* client, JingleClient::State state);
+  // SignalStrategy::StatusObserver interface.
+  virtual void OnStateChange(
+      SignalStrategy::StatusObserver::State state) OVERRIDE;
+  virtual void OnJidChange(const std::string& full_jid) OVERRIDE;
 
-  // Callback for chromotocol SessionManager.
-  void OnNewSession(
-      Session* connection,
-      SessionManager::IncomingSessionResponse* response);
-
-  // Callback for chromotocol Session.
-  void OnSessionStateChange(Session::State state);
+  // SessionManager::Listener interface.
+  virtual void OnSessionManagerInitialized() OVERRIDE;
+  virtual void OnIncomingSession(
+      Session* session,
+      SessionManager::IncomingSessionResponse* response) OVERRIDE;
 
   // Called when the host accepts the client authentication.
   void OnClientAuthenticated();
@@ -112,40 +117,40 @@ class ConnectionToHost : public JingleClient::Callback {
   State state() const;
 
  private:
-  // The message loop for the jingle thread this object works on.
-  MessageLoop* message_loop();
-
   // Called on the jingle thread after we've successfully to XMPP server. Starts
   // P2P connection to the host.
   void InitSession();
 
+  // Callback for |session_|.
+  void OnSessionStateChange(Session::State state);
+
   // Callback for |video_reader_|.
   void OnVideoPacket(VideoPacket* packet);
 
-  // Used by Disconnect() to disconnect chromoting connection, stop chromoting
-  // server, and then disconnect XMPP connection.
-  void OnDisconnected();
-  void OnServerClosed();
+  // Stops writing in the channels.
+  void CloseChannels();
+
+  MessageLoop* message_loop_;
+  scoped_ptr<talk_base::NetworkManager> network_manager_;
+  scoped_ptr<talk_base::PacketSocketFactory> socket_factory_;
+  scoped_ptr<HostResolverFactory> host_resolver_factory_;
+  scoped_ptr<PortAllocatorSessionFactory> port_allocator_session_factory_;
+  bool allow_nat_traversal_;
 
   // Internal state of the connection.
   State state_;
 
-  JingleThread* thread_;
-
-  scoped_ptr<talk_base::NetworkManager> network_manager_;
-  scoped_ptr<talk_base::PacketSocketFactory> socket_factory_;
-  scoped_ptr<PortAllocatorSessionFactory> port_allocator_session_factory_;
-
   scoped_ptr<SignalStrategy> signal_strategy_;
-  scoped_refptr<JingleClient> jingle_client_;
-  scoped_refptr<SessionManager> session_manager_;
-  scoped_refptr<Session> session_;
+  std::string local_jid_;
+  scoped_ptr<SessionManager> session_manager_;
+  scoped_ptr<Session> session_;
 
   scoped_ptr<VideoReader> video_reader_;
 
   HostEventCallback* event_callback_;
 
   std::string host_jid_;
+  std::string host_public_key_;
   std::string access_code_;
 
   scoped_ptr<ClientMessageDispatcher> dispatcher_;
@@ -154,13 +159,13 @@ class ConnectionToHost : public JingleClient::Callback {
   // User input event channel interface
 
   // Stub for sending input event messages to the host.
-  scoped_ptr<InputStub> input_stub_;
+  scoped_ptr<InputSender> input_sender_;
 
   ////////////////////////////////////////////////////////////////////////////
   // Protocol control channel interface
 
   // Stub for sending control messages to the host.
-  scoped_ptr<HostStub> host_stub_;
+  scoped_ptr<HostControlSender> host_control_sender_;
 
   // Stub for receiving control messages from the host.
   ClientStub* client_stub_;

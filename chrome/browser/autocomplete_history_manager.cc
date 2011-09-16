@@ -19,6 +19,7 @@
 #include "webkit/glue/form_data.h"
 
 using webkit_glue::FormData;
+using webkit_glue::FormField;
 
 namespace {
 
@@ -35,12 +36,28 @@ bool IsSSN(const string16& text) {
 
   // A SSN is of the form AAA-GG-SSSS (A = area number, G = group number, S =
   // serial number). The validation we do here is simply checking if the area,
-  // group, and serial numbers are valid. It is possible to check if the group
-  // number is valid for the given area, but that data changes all the time.
+  // group, and serial numbers are valid.
   //
-  // See: http://www.socialsecurity.gov/history/ssn/geocard.html
-  //      http://www.socialsecurity.gov/employer/stateweb.htm
-  //      http://www.socialsecurity.gov/employer/ssnvhighgroup.htm
+  // Historically, the area number was assigned per state, with the group number
+  // ascending in an alternating even/odd sequence. With that scheme it was
+  // possible to check for validity by referencing a table that had the highest
+  // group number assigned for a given area number. (This was something that
+  // Chromium never did though, because the "high group" values were constantly
+  // changing.)
+  //
+  // However, starting on 25 June 2011 the SSA began issuing SSNs randomly from
+  // all areas and groups. Group numbers and serial numbers of zero remain
+  // invalid, and areas 000, 666, and 900-999 remain invalid.
+  //
+  // References for current practices:
+  //   http://www.socialsecurity.gov/employer/randomization.html
+  //   http://www.socialsecurity.gov/employer/randomizationfaqs.html
+  //
+  // References for historic practices:
+  //   http://www.socialsecurity.gov/history/ssn/geocard.html
+  //   http://www.socialsecurity.gov/employer/stateweb.htm
+  //   http://www.socialsecurity.gov/employer/ssnvhighgroup.htm
+
   if (number_string.length() != 9 || !IsStringASCII(number_string))
     return false;
 
@@ -51,8 +68,7 @@ bool IsSSN(const string16& text) {
     return false;
   if (area < 1 ||
       area == 666 ||
-      (area > 733 && area < 750) ||
-      area > 772)
+      area >= 900)
     return false;
 
   int group;
@@ -68,6 +84,16 @@ bool IsSSN(const string16& text) {
     return false;
 
   return true;
+}
+
+bool IsTextField(const FormField& field) {
+  return
+      field.form_control_type == ASCIIToUTF16("text") ||
+      field.form_control_type == ASCIIToUTF16("search") ||
+      field.form_control_type == ASCIIToUTF16("tel") ||
+      field.form_control_type == ASCIIToUTF16("url") ||
+      field.form_control_type == ASCIIToUTF16("email") ||
+      field.form_control_type == ASCIIToUTF16("text");
 }
 
 }  // namespace
@@ -115,13 +141,13 @@ void AutocompleteHistoryManager::OnFormSubmitted(const FormData& form) {
   //  - text field
   //  - value is not a credit card number
   //  - value is not a SSN
-  std::vector<webkit_glue::FormField> values;
-  for (std::vector<webkit_glue::FormField>::const_iterator iter =
+  std::vector<FormField> values;
+  for (std::vector<FormField>::const_iterator iter =
            form.fields.begin();
        iter != form.fields.end(); ++iter) {
     if (!iter->value.empty() &&
         !iter->name.empty() &&
-        iter->form_control_type == ASCIIToUTF16("text") &&
+        IsTextField(*iter) &&
         !CreditCard::IsValidCreditCardNumber(iter->value) &&
         !IsSSN(iter->value)) {
       values.push_back(*iter);

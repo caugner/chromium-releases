@@ -25,6 +25,7 @@
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/controls/resize_area.h"
+#include "views/drag_controller.h"
 #include "views/view.h"
 
 class Browser;
@@ -45,7 +46,7 @@ class SlideAnimation;
 }
 
 namespace views {
-class Menu2;
+class MenuItemView;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -88,7 +89,7 @@ class BrowserActionButton : public views::MenuButton,
                              int index) OVERRIDE;
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
@@ -130,9 +131,6 @@ class BrowserActionButton : public views::MenuButton,
   // asynchronously.
   ImageLoadingTracker tracker_;
 
-  // Whether we are currently showing/just finished showing a context menu.
-  bool showing_context_menu_;
-
   // The default icon for our browser action. This might be non-empty if the
   // browser action had a value for default_icon in the manifest.
   SkBitmap default_icon_;
@@ -140,8 +138,8 @@ class BrowserActionButton : public views::MenuButton,
   // The browser action shelf.
   BrowserActionsContainer* panel_;
 
-  scoped_refptr<ExtensionContextMenuModel> context_menu_contents_;
-  scoped_ptr<views::Menu2> context_menu_menu_;
+  // The context menu.  This member is non-NULL only when the menu is shown.
+  views::MenuItemView* context_menu_;
 
   NotificationRegistrar registrar_;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,20 @@
 #if defined(OS_LINUX)
 #include "views/window/hit_test.h"
 #endif
-#include "views/window/window.h"
-#include "views/window/window_delegate.h"
+#include "views/widget/widget.h"
+#include "views/widget/widget_delegate.h"
 
 namespace views {
+
+// static
+const char ClientView::kViewClassName[] =
+    "views/window/ClientView";
 
 ///////////////////////////////////////////////////////////////////////////////
 // ClientView, public:
 
-ClientView::ClientView(Window* window, View* contents_view)
-    : window_(window),
+ClientView::ClientView(Widget* widget, View* contents_view)
+    : widget_(widget),
       contents_view_(contents_view) {
 }
 
@@ -29,11 +33,15 @@ DialogClientView* ClientView::AsDialogClientView() {
   return NULL;
 }
 
+const DialogClientView* ClientView::AsDialogClientView() const {
+  return NULL;
+}
+
 bool ClientView::CanClose() {
   return true;
 }
 
-void ClientView::WindowClosing() {
+void ClientView::WidgetClosing() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -52,6 +60,10 @@ void ClientView::Layout() {
   // is attached to a Container.
   if (contents_view_)
     contents_view_->SetBounds(0, 0, width(), height());
+}
+
+std::string ClientView::GetClassName() const {
+  return kViewClassName;
 }
 
 void ClientView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {

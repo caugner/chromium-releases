@@ -13,7 +13,6 @@
 #include "ui/gfx/point.h"
 #include "views/controls/menu/menu_wrapper.h"
 #include "views/view.h"
-#include "views/widget/native_widget.h"
 #include "views/widget/widget.h"
 
 namespace {
@@ -37,7 +36,7 @@ class ViewFocusChangeWaiter : public views::FocusChangeListener {
     FocusWillChange(NULL, focus_manager_->GetFocusedView());
   }
 
-  ~ViewFocusChangeWaiter() {
+  virtual ~ViewFocusChangeWaiter() {
     focus_manager_->RemoveFocusChangeListener(this);
   }
 
@@ -57,9 +56,9 @@ class ViewFocusChangeWaiter : public views::FocusChangeListener {
  private:
   void FocusChanged(views::View* focused_before,
                     views::View* focused_now) {
-    if (focused_now && focused_now->GetID() != previous_view_id_) {
+    if (focused_now && focused_now->id() != previous_view_id_) {
       AutomationMsg_WaitForFocusedViewIDToChange::WriteReplyParams(
-          reply_message_, true, focused_now->GetID());
+          reply_message_, true, focused_now->id());
 
       automation_->Send(reply_message_);
       delete this;
@@ -86,6 +85,8 @@ class TestingAutomationProvider::PopupMenuWaiter : public views::MenuListener {
         reply_message_(NULL) {
     toolbar_view_->AddMenuListener(this);
   }
+
+  virtual ~PopupMenuWaiter() {}
 
   // Implementation of views::MenuListener
   virtual void OnMenuOpened() {
@@ -121,10 +122,9 @@ void TestingAutomationProvider::WindowGetViewBounds(int handle,
 
   if (window_tracker_->ContainsHandle(handle)) {
     gfx::NativeWindow window = window_tracker_->GetResource(handle);
-    views::NativeWidget* native_widget =
-        views::NativeWidget::GetNativeWidgetForNativeWindow(window);
-    if (native_widget) {
-      views::View* root_view = native_widget->GetWidget()->GetRootView();
+    views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
+    if (widget) {
+      views::View* root_view = widget->GetRootView();
       views::View* view = root_view->GetViewByID(view_id);
       if (view) {
         *success = true;
@@ -149,7 +149,7 @@ void TestingAutomationProvider::GetFocusedViewID(int handle, int* view_id) {
     DCHECK(focus_manager);
     views::View* focused_view = focus_manager->GetFocusedView();
     if (focused_view)
-      *view_id = focused_view->GetID();
+      *view_id = focused_view->id();
   }
 }
 

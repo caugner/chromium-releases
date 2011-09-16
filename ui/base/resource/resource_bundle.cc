@@ -5,7 +5,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_piece.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
@@ -13,7 +13,7 @@
 #include "ui/base/resource/data_pack.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 namespace ui {
 
@@ -117,6 +117,7 @@ gfx::Image& ResourceBundle::GetImageNamed(int resource_id) {
       return *found->second;
   }
 
+  DCHECK(resources_data_) << "Missing call to SetResourcesDataDLL?";
   scoped_ptr<SkBitmap> bitmap(LoadBitmap(resources_data_, resource_id));
   if (bitmap.get()) {
     // Check if there's a large version of the image as well.
@@ -177,6 +178,8 @@ const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
       return *medium_bold_font_;
     case LargeFont:
       return *large_font_;
+    case LargeBoldFont:
+      return *large_bold_font_;
     default:
       return *base_font_;
   }
@@ -223,6 +226,11 @@ void ResourceBundle::LoadFontsIfNecessary() {
 
     large_font_.reset(new gfx::Font());
     *large_font_ = base_font_->DeriveFont(kLargeFontSizeDelta);
+
+    large_bold_font_.reset(new gfx::Font());
+    *large_bold_font_ =
+        base_font_->DeriveFont(kLargeFontSizeDelta,
+                               base_font_->GetStyle() | gfx::Font::BOLD);
   }
 }
 

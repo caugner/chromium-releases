@@ -6,11 +6,13 @@
 #define NET_BASE_NET_API_H_
 #pragma once
 
-// Defines NET_API so that funtionality implemented by the net module can be
+// Defines NET_API so that functionality implemented by the net module can be
 // exported to consumers, and NET_TEST that allows unit tests to access features
 // not intended to be used directly by real consumers.
 
-#if defined(WIN32) && defined(NET_DLL)
+#if defined(COMPONENT_BUILD)
+#if defined(WIN32)
+
 #if defined(NET_IMPLEMENTATION)
 #define NET_API __declspec(dllexport)
 #define NET_TEST __declspec(dllexport)
@@ -18,7 +20,13 @@
 #define NET_API __declspec(dllimport)
 #define NET_TEST __declspec(dllimport)
 #endif  // defined(NET_IMPLEMENTATION)
-#else
+
+#else  // defined(WIN32)
+#define NET_API __attribute__((visibility("default")))
+#define NET_TEST __attribute__((visibility("default")))
+#endif
+
+#else  /// defined(COMPONENT_BUILD)
 #define NET_API
 #define NET_TEST
 #endif

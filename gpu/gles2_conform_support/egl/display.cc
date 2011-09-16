@@ -109,10 +109,12 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
   using gpu::GpuScheduler;
   std::vector<int32> attribs;
   scoped_ptr<GpuScheduler> gpu_scheduler(
-      new GpuScheduler(command_buffer_.get(), NULL, NULL));
+      GpuScheduler::Create(command_buffer_.get(),
+                           NULL,
+                           NULL));
   if (!gpu_scheduler->Initialize(
-      win, gfx::Size(), gpu::gles2::DisallowedExtensions(), NULL,
-      attribs, NULL, 0))
+      win, gfx::Size(), false, gpu::gles2::DisallowedExtensions(), NULL,
+      attribs, NULL))
     return EGL_NO_SURFACE;
 
   command_buffer_->SetPutOffsetChangeCallback(

@@ -15,10 +15,6 @@
 
 namespace {
 
-// TODO(phajdan.jr): remove this flag and fix its users.
-// We should use base/test/test_timeouts and not custom flags.
-static const char kTestTerminateTimeoutFlag[] = "test-terminate-timeout";
-
 // A multiplier for slow tests. We generally avoid multiplying
 // test timeouts by any constants. Here it is used as last resort
 // to implement the SLOW_ test prefix.
@@ -58,6 +54,13 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   if (!command_line->HasSwitch(switches::kPasswordStore))
     command_line->AppendSwitchASCII(switches::kPasswordStore, "basic");
 #endif
+
+#if defined(OS_MACOSX)
+  // Use mock keychain on mac to prevent blocking permissions dialogs.
+  // TODO(sync): Re-enable when mock keyring works with sync integration tests.
+  // See crbug.com/89808.
+  // command_line->AppendSwitch(switches::kUseMockKeychain);
+#endif
 }
 
 bool OverrideUserDataDir(const FilePath& user_data_dir) {
@@ -67,7 +70,7 @@ bool OverrideUserDataDir(const FilePath& user_data_dir) {
   // This matches what is done in ChromeMain().
   success = PathService::Override(chrome::DIR_USER_DATA, user_data_dir);
 
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Make sure the cache directory is inside our clear profile. Otherwise
   // the cache may contain data from earlier tests that could break the
   // current test.
@@ -94,18 +97,6 @@ bool OverrideGLImplementation(CommandLine* command_line,
 int GetTestTerminationTimeout(const std::string& test_name,
                               int default_timeout_ms) {
   int timeout_ms = default_timeout_ms;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(kTestTerminateTimeoutFlag)) {
-    std::string timeout_str =
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            kTestTerminateTimeoutFlag);
-    int timeout;
-    if (base::StringToInt(timeout_str, &timeout)) {
-      timeout_ms = std::max(timeout_ms, timeout);
-    } else {
-      LOG(ERROR) << "Invalid timeout (" << kTestTerminateTimeoutFlag << "): "
-                 << timeout_str;
-    }
-  }
 
   // Make it possible for selected tests to request a longer timeout.
   // Generally tests should really avoid doing too much, and splitting

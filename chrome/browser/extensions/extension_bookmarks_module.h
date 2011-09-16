@@ -12,7 +12,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/singleton.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/ui/shell_dialogs.h"
@@ -21,20 +20,22 @@
 
 class FilePath;
 
+namespace base {
+class ListValue;
+}
+
 // Observes BookmarkModel and then routes the notifications as events to
 // the extension system.
 class ExtensionBookmarkEventRouter : public BookmarkModelObserver {
  public:
-  static ExtensionBookmarkEventRouter* GetInstance();
+  explicit ExtensionBookmarkEventRouter(BookmarkModel* model);
   virtual ~ExtensionBookmarkEventRouter();
 
-  // Call this for each model to observe.  Safe to call multiple times per
-  // model.
-  void Observe(BookmarkModel* model);
+  void Init();
 
   // BookmarkModelObserver:
-  virtual void Loaded(BookmarkModel* model) OVERRIDE;
-  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE {}
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
+  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
                                  int old_index,
@@ -57,18 +58,12 @@ class ExtensionBookmarkEventRouter : public BookmarkModelObserver {
   virtual void BookmarkImportEnding(BookmarkModel* model) OVERRIDE;
 
  private:
-  ExtensionBookmarkEventRouter();
-  friend struct DefaultSingletonTraits<ExtensionBookmarkEventRouter>;
-
   // Helper to actually dispatch an event to extension listeners.
   void DispatchEvent(Profile* profile,
                      const char* event_name,
                      const std::string& json_args);
 
-  // These are stored so that Observe can be called multiple times safely.
-  // This way the caller doesn't have to know whether it's already observing
-  // a particular model or not.  The pointers are not owned by this object.
-  std::set<BookmarkModel*> models_;
+  BookmarkModel* model_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionBookmarkEventRouter);
 };
@@ -93,7 +88,7 @@ class BookmarksFunction : public AsyncExtensionFunction,
 
  private:
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
@@ -132,6 +127,14 @@ class GetBookmarkTreeFunction : public BookmarksFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.getTree")
 };
 
+class GetBookmarkSubTreeFunction : public BookmarksFunction {
+ public:
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.getSubTree")
+};
+
 class SearchBookmarksFunction : public BookmarksFunction {
  public:
   virtual bool RunImpl() OVERRIDE;
@@ -144,7 +147,7 @@ class RemoveBookmarkFunction : public BookmarksFunction {
  public:
   // Returns true on successful parse and sets invalid_id to true if conversion
   // from id string to int64 failed.
-  static bool ExtractIds(const ListValue* args, std::list<int64>* ids,
+  static bool ExtractIds(const base::ListValue* args, std::list<int64>* ids,
                          bool* invalid_id);
   // BookmarksFunction:
   virtual bool RunImpl() OVERRIDE;
@@ -172,7 +175,7 @@ class CreateBookmarkFunction : public BookmarksFunction {
 
 class MoveBookmarkFunction : public BookmarksFunction {
  public:
-  static bool ExtractIds(const ListValue* args, std::list<int64>* ids,
+  static bool ExtractIds(const base::ListValue* args, std::list<int64>* ids,
                          bool* invalid_id);
   virtual void GetQuotaLimitHeuristics(
       std::list<QuotaLimitHeuristic*>* heuristics) const;
@@ -185,7 +188,7 @@ class MoveBookmarkFunction : public BookmarksFunction {
 
 class UpdateBookmarkFunction : public BookmarksFunction {
  public:
-  static bool ExtractIds(const ListValue* args, std::list<int64>* ids,
+  static bool ExtractIds(const base::ListValue* args, std::list<int64>* ids,
                          bool* invalid_id);
   virtual void GetQuotaLimitHeuristics(
       std::list<QuotaLimitHeuristic*>* heuristics) const;

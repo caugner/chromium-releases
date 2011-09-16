@@ -9,8 +9,9 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,9 +27,9 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/webui/web_ui.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "content/common/view_messages.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webpreferences.h"
@@ -54,7 +55,7 @@
 // The constructor for PrintDialogCloud creates a
 // CloudPrintHtmlDialogDelegate and asks the current active browser to
 // show an HTML dialog using that class as the delegate. That class
-// hands in the kCloudPrintResourcesURL as the URL to visit.  That is
+// hands in the kChromeUICloudPrintResourcesURL as the URL to visit.  That is
 // recognized by the GetWebUIFactoryFunction as a signal to create an
 // ExternalHtmlDialogUI.
 
@@ -261,19 +262,6 @@ void CloudPrintFlowHandler::RegisterMessages() {
       NewCallback(this, &CloudPrintFlowHandler::HandleSetPageParameters));
 
   if (web_ui_->tab_contents()) {
-    // Also, take the opportunity to set some (minimal) additional
-    // script permissions required for the web UI.
-
-    // TODO(scottbyer): learn how to make sure we're talking to the
-    // right web site first.
-    RenderViewHost* rvh = web_ui_->tab_contents()->render_view_host();
-    if (rvh && rvh->delegate()) {
-      WebPreferences webkit_prefs = rvh->delegate()->GetWebkitPrefs();
-      webkit_prefs.allow_scripts_to_close_windows = true;
-      rvh->Send(new ViewMsg_UpdateWebPreferences(
-          rvh->routing_id(), webkit_prefs));
-    }
-
     // Register for appropriate notifications, and re-direct the URL
     // to the real server URL, now that we've gotten an HTML dialog
     // going.
@@ -282,15 +270,34 @@ void CloudPrintFlowHandler::RegisterMessages() {
     if (pending_entry)
       pending_entry->set_url(CloudPrintURL(
           web_ui_->GetProfile()).GetCloudPrintServiceDialogURL());
-    registrar_.Add(this, NotificationType::LOAD_STOP,
+    registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                    Source<NavigationController>(controller));
   }
 }
 
-void CloudPrintFlowHandler::Observe(NotificationType type,
+void CloudPrintFlowHandler::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
-  if (type == NotificationType::LOAD_STOP) {
+  if (type == content::NOTIFICATION_LOAD_STOP) {
+    // Take the opportunity to set some (minimal) additional
+    // script permissions required for the web UI.
+    GURL url = web_ui_->tab_contents()->GetURL();
+    GURL dialog_url = CloudPrintURL(
+        web_ui_->GetProfile()).GetCloudPrintServiceDialogURL();
+    if (url.host() == dialog_url.host() &&
+        url.path() == dialog_url.path() &&
+        url.scheme() == dialog_url.scheme()) {
+      RenderViewHost* rvh = web_ui_->tab_contents()->render_view_host();
+      if (rvh && rvh->delegate()) {
+        WebPreferences webkit_prefs = rvh->delegate()->GetWebkitPrefs();
+        webkit_prefs.allow_scripts_to_close_windows = true;
+        rvh->Send(new ViewMsg_UpdateWebPreferences(
+            rvh->routing_id(), webkit_prefs));
+      } else {
+        DCHECK(false);
+      }
+    }
+
     // Choose one or the other.  If you need to debug, bring up the
     // debugger.  You can then use the various chrome.send()
     // registrations above to kick of the various function calls,
@@ -309,7 +316,7 @@ void CloudPrintFlowHandler::ShowDebugger() {
   if (web_ui_) {
     RenderViewHost* rvh = web_ui_->tab_contents()->render_view_host();
     if (rvh)
-      DevToolsManager::GetInstance()->OpenDevToolsWindow(rvh);
+      DevToolsWindow::OpenDevToolsWindow(rvh);
   }
 }
 
@@ -341,8 +348,8 @@ void CloudPrintFlowHandler::HandleSendPrintData(const ListValue* args) {
 
 void CloudPrintFlowHandler::HandleSetPageParameters(const ListValue* args) {
   std::string json;
-  args->GetString(0, &json);
-  if (json.empty()) {
+  bool ret = args->GetString(0, &json);
+  if (!ret || json.empty()) {
     NOTREACHED() << "Empty json string";
     return;
   }
@@ -424,7 +431,7 @@ void CloudPrintHtmlDialogDelegate::Init(int width, int height,
                                         const std::string& json_arguments) {
   // This information is needed to show the dialog HTML content.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  params_.url = GURL(chrome::kCloudPrintResourcesURL);
+  params_.url = GURL(chrome::kChromeUICloudPrintResourcesURL);
   params_.height = height;
   params_.width = width;
   params_.json_input = json_arguments;
@@ -604,8 +611,12 @@ bool CreatePrintDialogFromCommandLine(const CommandLine& command_line) {
             switches::kCloudPrintJobTitle);
         print_job_title = string16(native_job_title);
 #elif defined(OS_POSIX)
-        // TODO(abodenha@chromium.org) Implement this for OS_POSIX
-        // Command line string types are different
+        // POSIX Command line string types are different.
+        CommandLine::StringType native_job_title;
+        native_job_title = command_line.GetSwitchValueASCII(
+            switches::kCloudPrintJobTitle);
+        // Convert the ASCII string to UTF16 to prepare to pass.
+        print_job_title = string16(ASCIIToUTF16(native_job_title));
 #endif
       }
       std::string file_type = "application/pdf";

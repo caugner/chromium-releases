@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/string_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
@@ -66,7 +67,7 @@ void TokenService::Initialize(const char* const source,
 #endif
 
   registrar_.Add(this,
-                 NotificationType::TOKEN_UPDATED,
+                 chrome::NOTIFICATION_TOKEN_UPDATED,
                  NotificationService::AllSources());
 }
 
@@ -93,6 +94,9 @@ void TokenService::UpdateCredentials(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   credentials_ = credentials;
 
+  SaveAuthTokenToDB(GaiaConstants::kGaiaLsid, credentials.lsid);
+  SaveAuthTokenToDB(GaiaConstants::kGaiaSid, credentials.sid);
+
   // Cancels any currently running requests.
   for (int i = 0; i < kNumServices; i++) {
     fetchers_[i].reset(new GaiaAuthFetcher(this, source_, getter_));
@@ -101,18 +105,21 @@ void TokenService::UpdateCredentials(
 
 void TokenService::LoadTokensFromDB() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  token_loading_query_ = web_data_service_->GetAllTokens(this);
+  if (web_data_service_.get())
+    token_loading_query_ = web_data_service_->GetAllTokens(this);
 }
 
 void TokenService::SaveAuthTokenToDB(const std::string& service,
                                      const std::string& auth_token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  web_data_service_->SetTokenForService(service, auth_token);
+  if (web_data_service_.get())
+    web_data_service_->SetTokenForService(service, auth_token);
 }
 
 void TokenService::EraseTokensFromDB() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  web_data_service_->RemoveAllTokens();
+  if (web_data_service_.get())
+    web_data_service_->RemoveAllTokens();
 }
 
 bool TokenService::AreCredentialsValid() const {
@@ -164,7 +171,7 @@ void TokenService::FireTokenAvailableNotification(
 
   TokenAvailableDetails details(service, auth_token);
   NotificationService::current()->Notify(
-      NotificationType::TOKEN_AVAILABLE,
+      chrome::NOTIFICATION_TOKEN_AVAILABLE,
       Source<TokenService>(this),
       Details<const TokenAvailableDetails>(&details));
 }
@@ -175,7 +182,7 @@ void TokenService::FireTokenRequestFailedNotification(
 
   TokenRequestFailedDetails details(service, error);
   NotificationService::current()->Notify(
-      NotificationType::TOKEN_REQUEST_FAILED,
+      chrome::NOTIFICATION_TOKEN_REQUEST_FAILED,
       Source<TokenService>(this),
       Details<const TokenRequestFailedDetails>(&details));
 }
@@ -219,7 +226,7 @@ void TokenService::OnWebDataServiceRequestDone(WebDataService::Handle h,
   }
 
   NotificationService::current()->Notify(
-      NotificationType::TOKEN_LOADING_FINISHED,
+      chrome::NOTIFICATION_TOKEN_LOADING_FINISHED,
       Source<TokenService>(this),
       NotificationService::NoDetails());
 }
@@ -249,12 +256,32 @@ void TokenService::LoadTokensIntoMemory(
       }
     }
   }
+
+  if (credentials_.lsid.empty() && credentials_.sid.empty()) {
+    // Look for GAIA SID and LSID tokens.  If we have both, and the current
+    // crendentials are empty, update the credentials.
+    std::string lsid;
+    std::string sid;
+
+    if (db_tokens.count(GaiaConstants::kGaiaLsid) > 0)
+      lsid = db_tokens.find(GaiaConstants::kGaiaLsid)->second;
+
+    if (db_tokens.count(GaiaConstants::kGaiaSid) > 0)
+      sid = db_tokens.find(GaiaConstants::kGaiaSid)->second;
+
+    if (!lsid.empty() && !sid.empty()) {
+      UpdateCredentials(GaiaAuthConsumer::ClientLoginResult(sid,
+                                                            lsid,
+                                                            std::string(),
+                                                            std::string()));
+    }
+  }
 }
 
-void TokenService::Observe(NotificationType type,
+void TokenService::Observe(int type,
                            const NotificationSource& source,
                            const NotificationDetails& details) {
-  DCHECK(type == NotificationType::TOKEN_UPDATED);
+  DCHECK(type == chrome::NOTIFICATION_TOKEN_UPDATED);
   TokenAvailableDetails* tok_details =
       Details<TokenAvailableDetails>(details).ptr();
   OnIssueAuthTokenSuccess(tok_details->service(), tok_details->token());

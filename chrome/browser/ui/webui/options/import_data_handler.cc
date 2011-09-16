@@ -33,8 +33,7 @@ ImportDataHandler::~ImportDataHandler() {
     importer_host_->SetObserver(NULL);
 }
 
-void ImportDataHandler::GetLocalizedValues(
-    DictionaryValue* localized_strings) {
+void ImportDataHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
 
   static OptionsStringResource resources[] = {
@@ -47,6 +46,8 @@ void ImportDataHandler::GetLocalizedValues(
     { "importPasswords", IDS_IMPORT_PASSWORDS_CHKBOX },
     { "importCommit", IDS_IMPORT_COMMIT },
     { "noProfileFound", IDS_IMPORT_NO_PROFILE_FOUND },
+    { "importSucceeded", IDS_IMPORT_SUCCEEDED },
+    { "findYourImportedBookmarks", IDS_IMPORT_FIND_YOUR_BOOKMARKS },
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -97,6 +98,7 @@ void ImportDataHandler::ImportData(const ListValue* args) {
     FundamentalValue state(true);
     web_ui_->CallJavascriptFunction("ImportDataOverlay.setImportingState",
                                     state);
+    import_did_succeed_ = false;
 
     // TODO(csilv): Out-of-process import has only been qualified on MacOS X,
     // so we will only use it on that platform since it is required. Remove this
@@ -140,8 +142,8 @@ void ImportDataHandler::OnSourceProfilesLoaded() {
     browser_profiles.Append(browser_profile);
   }
 
-  web_ui_->CallJavascriptFunction(
-      "options.ImportDataOverlay.updateSupportedBrowsers", browser_profiles);
+  web_ui_->CallJavascriptFunction("ImportDataOverlay.updateSupportedBrowsers",
+                                  browser_profiles);
 }
 
 void ImportDataHandler::ImportStarted() {
@@ -153,11 +155,19 @@ void ImportDataHandler::ImportItemStarted(importer::ImportItem item) {
 
 void ImportDataHandler::ImportItemEnded(importer::ImportItem item) {
   // TODO(csilv): show progress detail in the web view.
+  import_did_succeed_ = true;
 }
 
 void ImportDataHandler::ImportEnded() {
   importer_host_->SetObserver(NULL);
   importer_host_ = NULL;
 
-  web_ui_->CallJavascriptFunction("ImportDataOverlay.dismiss");
+  if (import_did_succeed_) {
+    web_ui_->CallJavascriptFunction("ImportDataOverlay.confirmSuccess");
+  } else {
+    FundamentalValue state(false);
+    web_ui_->CallJavascriptFunction("ImportDataOverlay.setImportingState",
+                                    state);
+    web_ui_->CallJavascriptFunction("ImportDataOverlay.dismiss");
+  }
 }

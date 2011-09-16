@@ -12,6 +12,7 @@
 #pragma once
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/net_api.h"
 #include "net/base/net_log.h"
@@ -29,6 +30,7 @@ class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpTransactionFactory;
 class NetworkDelegate;
+class OriginBoundCertService;
 class ProxyService;
 class URLRequest;
 class URLRequestJobFactory;
@@ -68,6 +70,14 @@ class NET_API URLRequestContext
 
   void set_cert_verifier(CertVerifier* cert_verifier) {
     cert_verifier_ = cert_verifier;
+  }
+
+  OriginBoundCertService* origin_bound_cert_service() const {
+    return origin_bound_cert_service_;
+  }
+  void set_origin_bound_cert_service(
+      OriginBoundCertService* origin_bound_cert_service) {
+    origin_bound_cert_service_ = origin_bound_cert_service;
   }
 
   DnsRRResolver* dnsrr_resolver() const {
@@ -115,7 +125,7 @@ class NET_API URLRequestContext
   }
 
   // Gets the ftp transaction factory for this context.
-  FtpTransactionFactory* ftp_transaction_factory() {
+  FtpTransactionFactory* ftp_transaction_factory() const {
     return ftp_transaction_factory_;
   }
   void set_ftp_transaction_factory(FtpTransactionFactory* factory) {
@@ -141,7 +151,7 @@ class NET_API URLRequestContext
   }
 
   // Gets the FTP authentication cache for this context.
-  FtpAuthCache* ftp_auth_cache() { return &ftp_auth_cache_; }
+  FtpAuthCache* ftp_auth_cache() const { return ftp_auth_cache_.get(); }
 
   // Gets the value of 'Accept-Charset' header field.
   const std::string& accept_charset() const { return accept_charset_; }
@@ -188,6 +198,7 @@ class NET_API URLRequestContext
   NetLog* net_log_;
   HostResolver* host_resolver_;
   CertVerifier* cert_verifier_;
+  OriginBoundCertService* origin_bound_cert_service_;
   DnsRRResolver* dnsrr_resolver_;
   DnsCertProvenanceChecker* dns_cert_checker_;
   HttpAuthHandlerFactory* http_auth_handler_factory_;
@@ -196,7 +207,7 @@ class NET_API URLRequestContext
   NetworkDelegate* network_delegate_;
   scoped_refptr<CookieStore> cookie_store_;
   scoped_refptr<TransportSecurityState> transport_security_state_;
-  FtpAuthCache ftp_auth_cache_;
+  scoped_ptr<FtpAuthCache> ftp_auth_cache_;
   std::string accept_language_;
   std::string accept_charset_;
   // The charset of the referrer where this request comes from. It's not

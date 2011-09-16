@@ -239,6 +239,10 @@ class VisitRow {
 // We pass around vectors of visits a lot
 typedef std::vector<VisitRow> VisitVector;
 
+// The basic information associated with a visit (timestamp, type of visit),
+// used by HistoryBackend::AddVisits() to create new visits for a URL.
+typedef std::pair<base::Time, PageTransition::Type> VisitInfo;
+
 // Favicons -------------------------------------------------------------------
 
 // Used by the importer to set favicons for imported bookmarks.
@@ -524,11 +528,9 @@ struct KeywordSearchTermVisit {
   KeywordSearchTermVisit();
   ~KeywordSearchTermVisit();
 
-  // The time of the visit.
-  base::Time time;
-
-  // The search term that was used.
-  string16 term;
+  string16 term;    // The search term that was used.
+  int visits;       // The visit count.
+  base::Time time;  // The time of the most recent visit.
 };
 
 // KeywordSearchTermRow --------------------------------------------------------
@@ -538,14 +540,9 @@ struct KeywordSearchTermRow {
   KeywordSearchTermRow();
   ~KeywordSearchTermRow();
 
-  // ID of the keyword.
-  TemplateURLID keyword_id;
-
-  // ID of the url.
-  URLID url_id;
-
-  // The search term that was used.
-  string16 term;
+  TemplateURLID keyword_id;  // ID of the keyword.
+  URLID url_id;              // ID of the url.
+  string16 term;             // The search term that was used.
 };
 
 // MostVisitedURL --------------------------------------------------------------

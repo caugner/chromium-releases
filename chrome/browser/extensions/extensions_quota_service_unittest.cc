@@ -1,8 +1,8 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
@@ -59,6 +59,7 @@ class MockFunction : public ExtensionFunction {
   virtual void Destruct() const { delete this; }
   virtual bool RunImpl() { return true; }
   virtual void SendResponse(bool) { }
+  virtual void SendNonFinalResponse() { }
   virtual void HandleBadMessage() { }
 };
 

@@ -18,7 +18,7 @@
 
 namespace views {
 
-NativeButtonGtk::NativeButtonGtk(NativeButtonBase* native_button)
+NativeButtonGtk::NativeButtonGtk(NativeButton* native_button)
     : native_button_(native_button),
       deliver_click_event_(true) {
   // Associates the actual GtkWidget with the native_button so the native_button
@@ -135,7 +135,7 @@ void NativeButtonGtk::OnClicked() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeCheckboxGtk
-NativeCheckboxGtk::NativeCheckboxGtk(Checkbox* checkbox)
+NativeCheckboxGtk::NativeCheckboxGtk(NativeCheckbox* checkbox)
     : NativeButtonGtk(checkbox) {
 }
 
@@ -144,8 +144,8 @@ void NativeCheckboxGtk::SyncCheckState() {
       gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(native_view())));
 }
 
-Checkbox* NativeCheckboxGtk::checkbox() {
-  return static_cast<Checkbox*>(native_button_);
+NativeCheckbox* NativeCheckboxGtk::checkbox() {
+  return static_cast<NativeCheckbox*>(native_button_);
 }
 
 void NativeCheckboxGtk::CreateNativeControl() {
@@ -250,11 +250,9 @@ void NativeRadioButtonGtk::ViewHierarchyChanged(bool is_add,
     while (container && container->parent())
       container = container->parent();
     if (container) {
-      std::vector<View*> other;
-      container->GetViewsWithGroup(native_button_->GetGroup(), &other);
-      for (std::vector<View*>::iterator i = other.begin();
-           i != other.end();
-           ++i) {
+      Views other;
+      container->GetViewsInGroup(native_button_->GetGroup(), &other);
+      for (Views::iterator i(other.begin()); i != other.end(); ++i) {
         if (*i != native_button_) {
           if ((*i)->GetClassName() != NativeRadioButton::kViewClassName) {
             NOTREACHED() << "radio-button has same group as other non "
@@ -291,13 +289,13 @@ int NativeButtonWrapper::GetFixedWidth() {
 
 // static
 NativeButtonWrapper* NativeButtonWrapper::CreateNativeButtonWrapper(
-    NativeButtonBase* native_button) {
+    NativeButton* native_button) {
   return new NativeButtonGtk(native_button);
 }
 
 // static
 NativeButtonWrapper* NativeButtonWrapper::CreateCheckboxWrapper(
-    Checkbox* checkbox) {
+    NativeCheckbox* checkbox) {
   return new NativeCheckboxGtk(checkbox);
 }
 

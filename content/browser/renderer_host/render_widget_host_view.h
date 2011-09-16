@@ -83,7 +83,9 @@ class RenderWidgetHostView {
 
   // Perform all the initialization steps necessary for this object to represent
   // a full screen window.
-  virtual void InitAsFullscreen() = 0;
+  // |reference_host_view| is the view associated with the creating page that
+  // helps to position the full screen widget on the correct monitor.
+  virtual void InitAsFullscreen(RenderWidgetHostView* reference_host_view) = 0;
 
   // Returns the associated RenderWidgetHost.
   virtual RenderWidgetHost* GetRenderWidgetHost() const = 0;
@@ -169,9 +171,6 @@ class RenderWidgetHostView {
   // Notifies the View that the renderer has ceased to exist.
   virtual void RenderViewGone(base::TerminationStatus status,
                               int error_code) = 0;
-
-  // Notifies the View that the renderer will be delete soon.
-  virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) = 0;
 
   // Tells the View to destroy itself.
   virtual void Destroy() = 0;
@@ -265,6 +264,13 @@ class RenderWidgetHostView {
   virtual void GpuRenderingStateDidChange() = 0;
 #endif
 
+#if defined(TOUCH_UI)
+  virtual void AcceleratedSurfaceSetIOSurface(
+      int32 width, int32 height, uint64 surface_id) = 0;
+  virtual void AcceleratedSurfaceBuffersSwapped(uint64 surface_id) = 0;
+  virtual void AcceleratedSurfaceRelease(uint64 surface_id) = 0;
+#endif
+
 #if defined(TOOLKIT_USES_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) = 0;
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) = 0;
@@ -296,12 +302,6 @@ class RenderWidgetHostView {
   virtual void SetBackground(const SkBitmap& background);
   const SkBitmap& background() const { return background_; }
 
-  // Returns true if the native view, |native_view|, is contained within in the
-  // widget associated with this RenderWidgetHostView.
-  virtual bool ContainsNativeView(gfx::NativeView native_view) const = 0;
-
-  virtual void UpdateAccessibilityTree(
-      const webkit_glue::WebAccessibility& tree) { }
   virtual void OnAccessibilityNotifications(
       const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
   }

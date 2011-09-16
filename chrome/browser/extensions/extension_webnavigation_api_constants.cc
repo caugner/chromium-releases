@@ -8,9 +8,8 @@ namespace extension_webnavigation_api_constants {
 
 const char kErrorKey[] = "error";
 const char kFrameIdKey[] = "frameId";
-const char kRequestIdKey[] = "requestId";
 const char kSourceTabIdKey[] = "sourceTabId";
-const char kSourceUrlKey[] = "sourceUrl";
+const char kSourceFrameIdKey[] = "sourceFrameId";
 const char kTabIdKey[] = "tabId";
 const char kTimeStampKey[] = "timeStamp";
 const char kTransitionTypeKey[] = "transitionType";

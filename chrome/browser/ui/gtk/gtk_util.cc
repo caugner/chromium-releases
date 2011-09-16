@@ -39,12 +39,11 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/frame/browser_view.h"
 #include "chrome/browser/chromeos/native_dialog_window.h"
-#include "views/window/window.h"
 #else
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #endif
@@ -81,7 +80,7 @@ gboolean OnMouseButtonPressed(GtkWidget* widget, GdkEventButton* event,
                               gpointer userdata) {
   if (event->type == GDK_BUTTON_PRESS) {
     if (gtk_button_get_focus_on_click(GTK_BUTTON(widget)) &&
-        !GTK_WIDGET_HAS_FOCUS(widget)) {
+        !gtk_widget_has_focus(widget)) {
       gtk_widget_grab_focus(widget);
     }
 
@@ -135,7 +134,7 @@ GList* GetIconList() {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   GList* icon_list = NULL;
   icon_list = g_list_append(icon_list,
-                            rb.GetNativeImageNamed(IDR_PRODUCT_ICON_32));
+                            rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_32));
   icon_list = g_list_append(icon_list,
                             rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16));
   return icon_list;
@@ -777,7 +776,7 @@ GdkPoint MakeBidiGdkPoint(gint x, gint y, gint width, bool ltr) {
   return point;
 }
 
-std::string BuildTooltipTitleFor(string16 title, GURL url) {
+std::string BuildTooltipTitleFor(string16 title, const GURL& url) {
   const std::string& url_str = url.possibly_invalid_spec();
   const std::string& title_str = UTF16ToUTF8(title);
 
@@ -934,7 +933,7 @@ WindowOpenDisposition DispositionForCurrentButtonPressEvent() {
 bool GrabAllInput(GtkWidget* widget) {
   guint time = gtk_get_current_event_time();
 
-  if (!GTK_WIDGET_VISIBLE(widget))
+  if (!gtk_widget_get_visible(widget))
     return false;
 
   if (!gdk_pointer_grab(widget->window, TRUE,
@@ -1082,9 +1081,9 @@ void ShowDialogWithLocalizedSize(GtkWidget* dialog,
                                  int height_id,
                                  bool resizeable) {
   int width = (width_id == -1) ? 0 :
-      views::Window::GetLocalizedContentsWidth(width_id);
+      views::Widget::GetLocalizedContentsWidth(width_id);
   int height = (height_id == -1) ? 0 :
-      views::Window::GetLocalizedContentsHeight(height_id);
+      views::Widget::GetLocalizedContentsHeight(height_id);
 
   chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
       dialog,
@@ -1097,7 +1096,7 @@ void ShowDialogWithLocalizedSize(GtkWidget* dialog,
 void ShowDialogWithMinLocalizedWidth(GtkWidget* dialog,
                                      int width_id) {
   int width = (width_id == -1) ? 0 :
-      views::Window::GetLocalizedContentsWidth(width_id);
+      views::Widget::GetLocalizedContentsWidth(width_id);
 
   chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
       dialog,
@@ -1188,7 +1187,7 @@ string16 GetStockPreferencesMenuLabel() {
 
 bool IsWidgetAncestryVisible(GtkWidget* widget) {
   GtkWidget* parent = widget;
-  while (parent && GTK_WIDGET_VISIBLE(parent))
+  while (parent && gtk_widget_get_visible(parent))
     parent = parent->parent;
   return !parent;
 }

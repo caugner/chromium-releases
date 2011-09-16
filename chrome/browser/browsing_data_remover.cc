@@ -9,6 +9,7 @@
 
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/platform_file.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/browser_process.h"
@@ -21,14 +22,17 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/plugin_data_remover.h"
+#include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
@@ -41,11 +45,8 @@
 #include "net/http/http_cache.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "webkit/database/database_tracker.h"
-#include "webkit/database/database_util.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/sandbox_mount_point_provider.h"
+#include "webkit/quota/quota_manager.h"
+#include "webkit/quota/quota_types.h"
 
 // Done so that we can use PostTask on BrowsingDataRemovers and not have
 // BrowsingDataRemover implement RefCounted.
@@ -57,29 +58,21 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
                                          base::Time delete_begin,
                                          base::Time delete_end)
     : profile_(profile),
+      quota_manager_(NULL),
       special_storage_policy_(profile->GetExtensionSpecialStoragePolicy()),
       delete_begin_(delete_begin),
       delete_end_(delete_end),
-      ALLOW_THIS_IN_INITIALIZER_LIST(database_cleared_callback_(
-          this, &BrowsingDataRemover::OnClearedDatabases)),
       ALLOW_THIS_IN_INITIALIZER_LIST(cache_callback_(
           this, &BrowsingDataRemover::DoClearCache)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(appcache_got_info_callback_(
-          this, &BrowsingDataRemover::OnGotAppCacheInfo)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(appcache_deleted_callback_(
-          this, &BrowsingDataRemover::OnAppCacheDeleted)),
-      appcaches_to_be_deleted_count_(0),
       next_cache_state_(STATE_NONE),
       cache_(NULL),
       main_context_getter_(profile->GetRequestContext()),
       media_context_getter_(profile->GetRequestContextForMedia()),
-      waiting_for_clear_databases_(false),
       waiting_for_clear_history_(false),
+      waiting_for_clear_quota_managed_data_(false),
       waiting_for_clear_networking_history_(false),
       waiting_for_clear_cache_(false),
-      waiting_for_clear_appcache_(false),
-      waiting_for_clear_gears_data_(false),
-      waiting_for_clear_file_systems_(false) {
+      waiting_for_clear_lso_data_(false) {
   DCHECK(profile);
 }
 
@@ -87,30 +80,21 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
                                          TimePeriod time_period,
                                          base::Time delete_end)
     : profile_(profile),
+      quota_manager_(NULL),
       special_storage_policy_(profile->GetExtensionSpecialStoragePolicy()),
       delete_begin_(CalculateBeginDeleteTime(time_period)),
       delete_end_(delete_end),
-      ALLOW_THIS_IN_INITIALIZER_LIST(database_cleared_callback_(
-          this, &BrowsingDataRemover::OnClearedDatabases)),
       ALLOW_THIS_IN_INITIALIZER_LIST(cache_callback_(
           this, &BrowsingDataRemover::DoClearCache)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(appcache_got_info_callback_(
-          this, &BrowsingDataRemover::OnGotAppCacheInfo)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(appcache_deleted_callback_(
-          this, &BrowsingDataRemover::OnAppCacheDeleted)),
-      appcaches_to_be_deleted_count_(0),
       next_cache_state_(STATE_NONE),
       cache_(NULL),
       main_context_getter_(profile->GetRequestContext()),
       media_context_getter_(profile->GetRequestContextForMedia()),
-      waiting_for_clear_databases_(false),
       waiting_for_clear_history_(false),
+      waiting_for_clear_quota_managed_data_(false),
       waiting_for_clear_networking_history_(false),
       waiting_for_clear_cache_(false),
-      waiting_for_clear_appcache_(false),
-      waiting_for_clear_lso_data_(false),
-      waiting_for_clear_gears_data_(false),
-      waiting_for_clear_file_systems_(false) {
+      waiting_for_clear_lso_data_(false) {
   DCHECK(profile);
 }
 
@@ -148,10 +132,11 @@ void BrowsingDataRemover::Remove(int remove_mask) {
     }
 
     // As part of history deletion we also delete the auto-generated keywords.
-    TemplateURLModel* keywords_model = profile_->GetTemplateURLModel();
+    TemplateURLService* keywords_model =
+        TemplateURLServiceFactory::GetForProfile(profile_);
     if (keywords_model && !keywords_model->loaded()) {
-      registrar_.Add(this, NotificationType::TEMPLATE_URL_MODEL_LOADED,
-                     Source<TemplateURLModel>(keywords_model));
+      registrar_.Add(this, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
+                     Source<TemplateURLService>(keywords_model));
       keywords_model->Load();
     } else if (keywords_model) {
       keywords_model->RemoveAutoGeneratedBetween(delete_begin_, delete_end_);
@@ -171,6 +156,17 @@ void BrowsingDataRemover::Remove(int remove_mask) {
         SessionServiceFactory::GetForProfile(profile_);
     if (session_service)
       session_service->DeleteLastSession();
+
+    // The PrerenderManager keeps history of prerendered pages, so clear that.
+    // It also may have a prerendered page. If so, the page could be considered
+    // to have a small amount of historical information, so delete it, too.
+    prerender::PrerenderManager* prerender_manager =
+        profile_->GetPrerenderManager();
+    if (prerender_manager) {
+      prerender_manager->ClearData(
+          prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS |
+          prerender::PrerenderManager::CLEAR_PRERENDER_HISTORY);
+    }
   }
 
   if (remove_mask & REMOVE_DOWNLOADS) {
@@ -200,37 +196,17 @@ void BrowsingDataRemover::Remove(int remove_mask) {
       profile_->GetWebKitContext()->DeleteDataModifiedSince(delete_begin_);
     }
 
-    database_tracker_ = profile_->GetDatabaseTracker();
-    if (database_tracker_.get()) {
-      waiting_for_clear_databases_ = true;
+    // We'll start by using the quota system to clear out AppCaches, WebSQL DBs,
+    // and File Systems.
+    quota_manager_ = profile_->GetQuotaManager();
+    if (quota_manager_) {
+      waiting_for_clear_quota_managed_data_ = true;
       BrowserThread::PostTask(
-          BrowserThread::FILE, FROM_HERE,
+          BrowserThread::IO, FROM_HERE,
           NewRunnableMethod(
               this,
-              &BrowsingDataRemover::ClearDatabasesOnFILEThread));
+              &BrowsingDataRemover::ClearQuotaManagedDataOnIOThread));
     }
-
-    waiting_for_clear_appcache_ = true;
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &BrowsingDataRemover::ClearAppCacheOnIOThread));
-
-    waiting_for_clear_gears_data_ = true;
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &BrowsingDataRemover::ClearGearsDataOnFILEThread,
-            profile_->GetPath()));
-
-    waiting_for_clear_file_systems_ = true;
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &BrowsingDataRemover::ClearFileSystemsOnFILEThread));
 
     if (profile_->GetTransportSecurityState()) {
       BrowserThread::PostTask(
@@ -279,6 +255,15 @@ void BrowsingDataRemover::Remove(int remove_mask) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(this, &BrowsingDataRemover::ClearCacheOnIOThread));
+
+    // The PrerenderManager may have a page actively being prerendered, which
+    // is essentially a preemptively cached page.
+    prerender::PrerenderManager* prerender_manager =
+        profile_->GetPrerenderManager();
+    if (prerender_manager) {
+      prerender_manager->ClearData(
+          prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS);
+    }
   }
 
   if (remove_mask & REMOVE_LSO_DATA) {
@@ -335,14 +320,14 @@ base::Time BrowsingDataRemover::CalculateBeginDeleteTime(
   return delete_begin_time - diff;
 }
 
-void BrowsingDataRemover::Observe(NotificationType type,
+void BrowsingDataRemover::Observe(int type,
                                   const NotificationSource& source,
                                   const NotificationDetails& details) {
   // TODO(brettw) bug 1139736: This should also observe session
   // clearing (what about other things such as passwords, etc.?) and wait for
   // them to complete before continuing.
-  DCHECK(type == NotificationType::TEMPLATE_URL_MODEL_LOADED);
-  TemplateURLModel* model = Source<TemplateURLModel>(source).ptr();
+  DCHECK(type == chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED);
+  TemplateURLService* model = Source<TemplateURLService>(source).ptr();
   if (model->profile() == profile_->GetOriginalProfile()) {
     registrar_.RemoveAll();
     model->RemoveAutoGeneratedBetween(delete_begin_, delete_end_);
@@ -463,157 +448,104 @@ void BrowsingDataRemover::DoClearCache(int rv) {
   }
 }
 
-void BrowsingDataRemover::OnClearedDatabases(int rv) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    bool result = BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &BrowsingDataRemover::OnClearedDatabases, rv));
-    DCHECK(result);
-    return;
-  }
-  // Notify the UI thread that we are done.
-  database_tracker_ = NULL;
-  waiting_for_clear_databases_ = false;
-
-  NotifyAndDeleteIfDone();
-}
-
-void BrowsingDataRemover::ClearDatabasesOnFILEThread() {
-  // This function should be called on the FILE thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  int rv = database_tracker_->DeleteDataModifiedSince(
-      delete_begin_, &database_cleared_callback_);
-  if (rv != net::ERR_IO_PENDING)
-    OnClearedDatabases(rv);
-}
-
-void BrowsingDataRemover::OnClearedAppCache() {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    bool result = BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &BrowsingDataRemover::OnClearedAppCache));
-    DCHECK(result);
-    return;
-  }
-  waiting_for_clear_appcache_ = false;
-  NotifyAndDeleteIfDone();
-}
-
-void BrowsingDataRemover::ClearAppCacheOnIOThread() {
+void BrowsingDataRemover::ClearQuotaManagedDataOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(waiting_for_clear_appcache_);
-  appcache_info_ = new appcache::AppCacheInfoCollection;
-  if (GetAppCacheService()) {
-    GetAppCacheService()->GetAllAppCacheInfo(
-        appcache_info_, &appcache_got_info_callback_);
-    // continues in OnGotAppCacheInfo
+  DCHECK(waiting_for_clear_quota_managed_data_);
+
+  // Ask the QuotaManager for all origins with temporary quota modified within
+  // the user-specified timeframe, and deal with the resulting set in
+  // OnGotQuotaManagedOrigins().
+  quota_managed_origins_to_delete_count_ = 0;
+  quota_managed_storage_types_to_delete_count_ = 2;
+
+  if (delete_begin_ == base::Time()) {
+    // If we're deleting since the beginning of time, ask the QuotaManager for
+    // all origins with persistent quota modified within the user-specified
+    // timeframe, and deal with the resulting set in
+    // OnGotPersistentQuotaManagedOrigins.
+    profile_->GetQuotaManager()->GetOriginsModifiedSince(
+        quota::kStorageTypePersistent, delete_begin_, NewCallback(this,
+            &BrowsingDataRemover::OnGotPersistentQuotaManagedOrigins));
   } else {
-    // Couldn't get app cache service, nothing to clear.
-    OnClearedAppCache();
+    // Otherwise, we don't need to deal with persistent storage.
+    --quota_managed_storage_types_to_delete_count_;
   }
+
+  // Do the same for temporary quota, regardless, passing the resulting set into
+  // OnGotTemporaryQuotaManagedOrigins.
+  profile_->GetQuotaManager()->GetOriginsModifiedSince(
+      quota::kStorageTypeTemporary, delete_begin_, NewCallback(this,
+          &BrowsingDataRemover::OnGotTemporaryQuotaManagedOrigins));
 }
 
-void BrowsingDataRemover::OnGotAppCacheInfo(int rv) {
-  using appcache::AppCacheInfoVector;
-  typedef std::map<GURL, AppCacheInfoVector> InfoByOrigin;
-
-  for (InfoByOrigin::const_iterator origin =
-           appcache_info_->infos_by_origin.begin();
-       origin != appcache_info_->infos_by_origin.end(); ++origin) {
-    if (special_storage_policy_->IsStorageProtected(origin->first))
+void BrowsingDataRemover::OnGotTemporaryQuotaManagedOrigins(
+    const std::set<GURL>& origins) {
+  DCHECK_GT(quota_managed_storage_types_to_delete_count_, 0);
+  // Walk through the origins passed in, delete temporary quota from each that
+  // isn't protected.
+  std::set<GURL>::const_iterator origin;
+  for (origin = origins.begin(); origin != origins.end(); ++origin) {
+    if (special_storage_policy_->IsStorageProtected(origin->GetOrigin()))
       continue;
-    for (AppCacheInfoVector::const_iterator info = origin->second.begin();
-         info != origin->second.end(); ++info) {
-      if (info->creation_time > delete_begin_) {
-        ++appcaches_to_be_deleted_count_;
-        GetAppCacheService()->DeleteAppCacheGroup(
-            info->manifest_url, &appcache_deleted_callback_);
-      }
-    }
+    ++quota_managed_origins_to_delete_count_;
+    quota_manager_->DeleteOriginData(origin->GetOrigin(),
+        quota::kStorageTypeTemporary, NewCallback(this,
+            &BrowsingDataRemover::OnQuotaManagedOriginDeletion));
   }
 
-  if (!appcaches_to_be_deleted_count_)
-    OnClearedAppCache();
-  // else continues in OnAppCacheDeleted
+  --quota_managed_storage_types_to_delete_count_;
+  if (quota_managed_storage_types_to_delete_count_ == 0 &&
+      quota_managed_origins_to_delete_count_ == 0)
+    CheckQuotaManagedDataDeletionStatus();
 }
 
-void BrowsingDataRemover::OnAppCacheDeleted(int rv) {
-  --appcaches_to_be_deleted_count_;
-  if (!appcaches_to_be_deleted_count_)
-    OnClearedAppCache();
-}
-
-ChromeAppCacheService* BrowsingDataRemover::GetAppCacheService() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  ChromeURLRequestContext* request_context = NULL;
-  if (main_context_getter_)
-    request_context = reinterpret_cast<ChromeURLRequestContext*>(
-        main_context_getter_->GetURLRequestContext());
-  return request_context ? request_context->appcache_service()
-                         : NULL;
-}
-
-void BrowsingDataRemover::ClearFileSystemsOnFILEThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  DCHECK(waiting_for_clear_file_systems_);
-  scoped_refptr<fileapi::FileSystemContext>
-      fs_context(profile_->GetFileSystemContext());
-  scoped_ptr<fileapi::SandboxMountPointProvider::OriginEnumerator>
-      origin_enumerator(fs_context->path_manager()->sandbox_provider()->
-          CreateOriginEnumerator());
-
-  GURL origin;
-  while (!(origin = origin_enumerator->Next()).is_empty()) {
-    if (special_storage_policy_->IsStorageProtected(origin))
+void BrowsingDataRemover::OnGotPersistentQuotaManagedOrigins(
+    const std::set<GURL>& origins) {
+  DCHECK_GT(quota_managed_storage_types_to_delete_count_, 0);
+  // Walk through the origins passed in, delete persistent quota from each that
+  // isn't protected.
+  std::set<GURL>::const_iterator origin;
+  for (origin = origins.begin(); origin != origins.end(); ++origin) {
+    if (special_storage_policy_->IsStorageProtected(origin->GetOrigin()))
       continue;
-    if (delete_begin_ == base::Time()) {
-      // If the user chooses to delete browsing data "since the beginning of
-      // time" remove both temporary and persistent file systems entirely.
-      fs_context->DeleteDataForOriginAndTypeOnFileThread(origin,
-          fileapi::kFileSystemTypeTemporary);
-      fs_context->DeleteDataForOriginAndTypeOnFileThread(origin,
-          fileapi::kFileSystemTypePersistent);
-    }
-    // TODO(mkwst): Else? Decide what to do for time-based deletion: crbug/63700
+    ++quota_managed_origins_to_delete_count_;
+    quota_manager_->DeleteOriginData(origin->GetOrigin(),
+        quota::kStorageTypePersistent, NewCallback(this,
+            &BrowsingDataRemover::OnQuotaManagedOriginDeletion));
   }
 
+  --quota_managed_storage_types_to_delete_count_;
+  if (quota_managed_storage_types_to_delete_count_ == 0 &&
+      quota_managed_origins_to_delete_count_ == 0)
+    CheckQuotaManagedDataDeletionStatus();
+}
+
+void BrowsingDataRemover::OnQuotaManagedOriginDeletion(
+    quota::QuotaStatusCode status) {
+  DCHECK_GT(quota_managed_origins_to_delete_count_, 0);
+  if (status != quota::kQuotaStatusOk) {
+    // TODO(mkwst): We should add the GURL to StatusCallback; this is a pretty
+    // worthless error message otherwise.
+    DLOG(ERROR) << "Couldn't remove origin. Status: " << status;
+  }
+
+  --quota_managed_origins_to_delete_count_;
+  if (quota_managed_storage_types_to_delete_count_ == 0 &&
+      quota_managed_origins_to_delete_count_ == 0)
+    CheckQuotaManagedDataDeletionStatus();
+}
+
+void BrowsingDataRemover::CheckQuotaManagedDataDeletionStatus() {
+  DCHECK_EQ(quota_managed_origins_to_delete_count_, 0);
+  DCHECK_EQ(quota_managed_storage_types_to_delete_count_, 0);
+  DCHECK(waiting_for_clear_quota_managed_data_);
+
+  waiting_for_clear_quota_managed_data_ = false;
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &BrowsingDataRemover::OnClearedFileSystems));
-}
-
-void BrowsingDataRemover::OnClearedFileSystems() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  waiting_for_clear_file_systems_ = false;
-  NotifyAndDeleteIfDone();
-}
-
-// static
-void BrowsingDataRemover::ClearGearsData(const FilePath& profile_dir) {
-  FilePath plugin_data = profile_dir.AppendASCII("Plugin Data");
-  if (file_util::DirectoryExists(plugin_data))
-    file_util::Delete(plugin_data, true);
-}
-
-void BrowsingDataRemover::OnClearedGearsData() {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    bool result = BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &BrowsingDataRemover::OnClearedGearsData));
-    DCHECK(result);
-    return;
-  }
-  waiting_for_clear_gears_data_ = false;
-  NotifyAndDeleteIfDone();
-}
-
-void BrowsingDataRemover::ClearGearsDataOnFILEThread(
-    const FilePath& profile_dir) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  DCHECK(waiting_for_clear_gears_data_);
-
-  ClearGearsData(profile_dir);
-  OnClearedGearsData();
+      NewRunnableMethod(
+          this,
+          &BrowsingDataRemover::NotifyAndDeleteIfDone));
 }
 
 void BrowsingDataRemover::OnWaitableEventSignaled(

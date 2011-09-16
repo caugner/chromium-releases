@@ -630,6 +630,10 @@ void StorePropertyOp::SetInPolicy(const std::string& prop,
     bool success = pol.mutable_device_proxy_settings()->ParseFromString(value);
     DCHECK(success);
 
+  } else if (prop == kReleaseChannel) {
+    em::ReleaseChannelProto* release_channel = pol.mutable_release_channel();
+    release_channel->set_release_channel(value);
+
   } else {
     NOTREACHED();
   }
@@ -752,6 +756,12 @@ std::string RetrievePropertyOp::LookUpInPolicy(const std::string& prop) {
       return "";           // Default to invalid proxy config (will be ignored).
     return serialized;
 
+  } else if (prop == kReleaseChannel) {
+    if (!pol.has_release_channel() ||
+        !pol.release_channel().has_release_channel())
+      return "";           // Default to an invalid channel (will be ignored).
+    return pol.release_channel().release_channel();
+
   }
   return std::string();
 }
@@ -833,7 +843,8 @@ void StorePolicyOp::OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
 
 void StorePolicyOp::RequestStorePolicy() {
   std::string serialized;
-  if (policy_->SerializeToString(&serialized)) {
+  if (policy_->SerializeToString(&serialized) &&
+      CrosLibrary::Get()->EnsureLoaded()) {
     CrosLibrary::Get()->GetLoginLibrary()->RequestStorePolicy(
         serialized,
         &StorePolicyOp::OnBoolComplete,
@@ -856,8 +867,12 @@ RetrievePolicyOp::RetrievePolicyOp(
 RetrievePolicyOp::~RetrievePolicyOp() {}
 
 void RetrievePolicyOp::Execute() {
-  CrosLibrary::Get()->GetLoginLibrary()->RequestRetrievePolicy(
-      &RetrievePolicyOp::OnStringComplete, this);
+  if (CrosLibrary::Get()->EnsureLoaded()) {
+    CrosLibrary::Get()->GetLoginLibrary()->RequestRetrievePolicy(
+        &RetrievePolicyOp::OnStringComplete, this);
+  } else {
+    Fail(OPERATION_FAILED);
+  }
 }
 
 void RetrievePolicyOp::Fail(SignedSettings::ReturnCode code) {

@@ -4,13 +4,14 @@
 
 #include "base/file_util.h"
 #include "base/test/test_timeouts.h"
-#include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "content/browser/net/url_request_mock_http_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "ui/base/events.h"
 #include "ui/base/message_box_flags.h"
@@ -361,6 +362,10 @@ TEST_F(UnloadTest, BrowserCloseInfiniteUnload) {
 // Flakily fails, times out: http://crbug.com/78803
 #define MAYBE_BrowserCloseInfiniteBeforeUnload \
     DISABLED_BrowserCloseInfiniteBeforeUnload
+#elif defined(OS_CHROMEOS)
+// Flakily fails: http://crbug.com/86469
+#define MAYBE_BrowserCloseInfiniteBeforeUnload \
+    FLAKY_BrowserCloseInfiniteBeforeUnload
 #else
 #define MAYBE_BrowserCloseInfiniteBeforeUnload BrowserCloseInfiniteBeforeUnload
 #endif
@@ -423,6 +428,10 @@ TEST_F(UnloadTest, BrowserCloseTwoSecondBeforeUnloadAlert) {
 // http://crbug.com/45281
 #define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
     DISABLED_BrowserCloseTabWhenOtherTabHasListener
+#elif defined(OS_CHROMEOS)
+// http://crbug.com/86769
+#define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
+    FLAKY_BrowserCloseTabWhenOtherTabHasListener
 #else
 #define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
     BrowserCloseTabWhenOtherTabHasListener

@@ -60,3 +60,35 @@ TEST(URLPatternSetTest, OverlapsWith) {
   EXPECT_TRUE(extent1.OverlapsWith(extent3));
   EXPECT_TRUE(extent3.OverlapsWith(extent1));
 }
+
+TEST(URLPatternSetTest, CreateUnion) {
+  URLPatternSet empty_extent;
+
+  URLPatternSet extent1;
+  extent1.AddPattern(URLPattern(kAllSchemes, "http://www.google.com/f*"));
+  extent1.AddPattern(URLPattern(kAllSchemes, "http://www.yahoo.com/b*"));
+
+  URLPatternSet expected;
+  expected.AddPattern(URLPattern(kAllSchemes, "http://www.google.com/f*"));
+  expected.AddPattern(URLPattern(kAllSchemes, "http://www.yahoo.com/b*"));
+
+  // Union with an empty set.
+  URLPatternSet result;
+  URLPatternSet::CreateUnion(extent1, empty_extent, &result);
+  EXPECT_EQ(expected, result);
+
+  // Union with a real set (including a duplicate).
+  URLPatternSet extent2;
+  extent2.AddPattern(URLPattern(kAllSchemes, "http://www.reddit.com/f*"));
+  extent2.AddPattern(URLPattern(kAllSchemes, "http://www.yahoo.com/z*"));
+  extent2.AddPattern(URLPattern(kAllSchemes, "http://www.google.com/f*"));
+
+  expected.AddPattern(URLPattern(kAllSchemes, "http://www.reddit.com/f*"));
+  expected.AddPattern(URLPattern(kAllSchemes, "http://www.yahoo.com/z*"));
+  // CreateUnion does not filter out duplicates right now.
+  expected.AddPattern(URLPattern(kAllSchemes, "http://www.google.com/f*"));
+
+  result.ClearPatterns();
+  URLPatternSet::CreateUnion(extent1, extent2, &result);
+  EXPECT_EQ(expected, result);
+}

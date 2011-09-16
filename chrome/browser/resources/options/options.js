@@ -23,6 +23,7 @@ var OptionsPage = options.OptionsPage;
 var PasswordManager = options.PasswordManager;
 var PersonalOptions = options.PersonalOptions;
 var Preferences = options.Preferences;
+var ManageProfileOverlay = options.ManageProfileOverlay;
 var ProxyOptions = options.ProxyOptions;
 var SearchEngineManager = options.SearchEngineManager;
 var SearchPage = options.SearchPage;
@@ -40,6 +41,7 @@ function load() {
   cr.ui.decorate('select[pref]', options.PrefSelect);
   cr.ui.decorate('input[pref][type=text]', options.PrefTextField);
   cr.ui.decorate('input[pref][type=url]', options.PrefTextField);
+  cr.ui.decorate('button[pref]', options.PrefButton);
   cr.ui.decorate('#content-settings-page input[type=radio]:not(.handler-radio)',
       options.ContentSettingsRadio);
   cr.ui.decorate('#content-settings-page input[type=radio].handler-radio',
@@ -124,7 +126,7 @@ function load() {
   if (!cr.isWindows && !cr.isMac) {
     OptionsPage.registerSubPage(CertificateManager.getInstance(),
                                 AdvancedOptions.getInstance(),
-                                [$('show-cookies-button')]);
+                                [$('certificatesManageButton')]);
     OptionsPage.registerOverlay(CertificateRestoreOverlay.getInstance(),
                                 CertificateManager.getInstance());
     OptionsPage.registerOverlay(CertificateBackupOverlay.getInstance(),
@@ -150,12 +152,13 @@ function load() {
                               BrowserOptions.getInstance());
   OptionsPage.registerOverlay(SyncSetupOverlay.getInstance(),
                               PersonalOptions.getInstance());
+  OptionsPage.registerOverlay(ManageProfileOverlay.getInstance(),
+                              PersonalOptions.getInstance());
 
   if (cr.isChromeOS) {
     OptionsPage.register(AccountsOptions.getInstance());
     OptionsPage.registerSubPage(ProxyOptions.getInstance(),
-                                AdvancedOptions.getInstance(),
-                                [$('proxiesConfigureButton')]);
+                                InternetOptions.getInstance());
     OptionsPage.registerSubPage(ChangePictureOptions.getInstance(),
                                 PersonalOptions.getInstance(),
                                 [$('change-picture-button')]);
@@ -183,8 +186,11 @@ function load() {
   if (path.length > 1) {
     // Skip starting slash and remove trailing slash (if any).
     var pageName = path.slice(1).replace(/\/$/, '');
-    // Show page, but don't update history (there's already an entry for it).
-    OptionsPage.showPageByName(pageName, false);
+    // Proxy page is now per network and only reachable from internet details.
+    if (pageName != 'proxy') {
+      // Show page, but don't update history (there's already an entry for it).
+      OptionsPage.showPageByName(pageName, false);
+    }
   } else {
     OptionsPage.showDefaultPage();
   }
@@ -197,23 +203,13 @@ function load() {
   }
 
   // Allow platform specific CSS rules.
-  if (cr.isMac)
-    document.documentElement.setAttribute('os', 'mac');
-  if (cr.isWindows)
-    document.documentElement.setAttribute('os', 'windows');
-  if (cr.isChromeOS)
-    document.documentElement.setAttribute('os', 'chromeos');
-  if (cr.isLinux) {
-    document.documentElement.setAttribute('os', 'linux');
-    document.documentElement.setAttribute('toolkit', 'gtk');
-  }
-  if (cr.isViews)
-    document.documentElement.setAttribute('toolkit', 'views');
+  cr.enablePlatformSpecificCSSRules();
+
   if (navigator.plugins['Shockwave Flash'])
     document.documentElement.setAttribute('hasFlashPlugin', '');
 
   // Clicking on the Settings title brings up the 'Basics' page.
-  $('settings-title').onclick = function() {
+  $('navbar-content-title').onclick = function() {
     OptionsPage.navigateToPage(BrowserOptions.getInstance().name);
   };
 }

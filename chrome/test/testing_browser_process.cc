@@ -5,13 +5,9 @@
 #include "chrome/test/testing_browser_process.h"
 
 #include "base/string_util.h"
-#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/configuration_policy_pref_store.h"
-#include "chrome/browser/policy/configuration_policy_provider.h"
-#include "chrome/browser/policy/dummy_configuration_policy_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/printing/background_printing_manager.h"
@@ -21,10 +17,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 TestingBrowserProcess::TestingBrowserProcess()
-    : shutdown_event_(new base::WaitableEvent(true, false)),
-      module_ref_count_(0),
+    : module_ref_count_(0),
       app_locale_("en"),
-      local_state_(NULL) {
+      local_state_(NULL),
+      io_thread_(NULL) {
 }
 
 TestingBrowserProcess::~TestingBrowserProcess() {
@@ -43,14 +39,8 @@ MetricsService* TestingBrowserProcess::metrics_service() {
 }
 
 IOThread* TestingBrowserProcess::io_thread() {
-  return NULL;
+  return io_thread_;
 }
-
-#if defined(OS_LINUX)
-base::Thread* TestingBrowserProcess::background_x11_thread() {
-  return NULL;
-}
-#endif
 
 base::Thread* TestingBrowserProcess::file_thread() {
   return NULL;
@@ -88,15 +78,12 @@ PrefService* TestingBrowserProcess::local_state() {
 
 policy::BrowserPolicyConnector*
     TestingBrowserProcess::browser_policy_connector() {
+#if defined(ENABLE_CONFIGURATION_POLICY)
   if (!browser_policy_connector_.get()) {
-    const policy::ConfigurationPolicyProvider::PolicyDefinitionList*
-        policy_list = policy::ConfigurationPolicyPrefStore::
-        GetChromePolicyDefinitionList();
     browser_policy_connector_.reset(
-        new policy::BrowserPolicyConnector(
-            new policy::DummyConfigurationPolicyProvider(policy_list),
-            new policy::DummyConfigurationPolicyProvider(policy_list)));
+        policy::BrowserPolicyConnector::CreateForTests());
   }
+#endif
   return browser_policy_connector_.get();
 }
 
@@ -125,6 +112,10 @@ BackgroundModeManager* TestingBrowserProcess::background_mode_manager() {
 }
 
 StatusTray* TestingBrowserProcess::status_tray() {
+  return NULL;
+}
+
+SafeBrowsingService* TestingBrowserProcess::safe_browsing_service() {
   return NULL;
 }
 
@@ -229,10 +220,6 @@ DownloadStatusUpdater* TestingBrowserProcess::download_status_updater() {
   return NULL;
 }
 
-base::WaitableEvent* TestingBrowserProcess::shutdown_event() {
-  return shutdown_event_.get();
-}
-
 bool TestingBrowserProcess::plugin_finder_disabled() const {
   return false;
 }
@@ -247,13 +234,23 @@ prerender::PrerenderTracker* TestingBrowserProcess::prerender_tracker() {
   return prerender_tracker_.get();
 }
 
+MHTMLGenerationManager* TestingBrowserProcess::mhtml_generation_manager() {
+  return NULL;
+}
+
 void TestingBrowserProcess::SetLocalState(PrefService* local_state) {
+  if (!local_state && notification_ui_manager_.get())
+    notification_ui_manager_.reset();  // Used local_state_.
   local_state_ = local_state;
 }
 
 void TestingBrowserProcess::SetGoogleURLTracker(
     GoogleURLTracker* google_url_tracker) {
   google_url_tracker_.reset(google_url_tracker);
+}
+
+void TestingBrowserProcess::SetIOThread(IOThread* io_thread) {
+  io_thread_ = io_thread;
 }
 
 ScopedTestingBrowserProcess::ScopedTestingBrowserProcess() {

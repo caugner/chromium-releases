@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,27 +8,26 @@
 
 #include <vector>
 
-#include "chrome/browser/search_engines/template_url_model_observer.h"
+#include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "ui/gfx/size.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/view.h"
-#include "views/window/window_delegate.h"
+#include "views/widget/widget_delegate.h"
 
 namespace views {
 class ButtonListener;
 class ImageView;
 class Label;
 class Separator;
-class Window;
 }
 
 class Profile;
 class TemplateURL;
-class TemplateURLModel;
+class TemplateURLService;
 
 // This class holds the logo and TemplateURL for a search engine and serves
 // as its button in the search engine selection view.
-class SearchEngineChoice : public views::NativeButton {
+class SearchEngineChoice : public views::NativeTextButton {
  public:
   // |listener| is the FirstRunView that waits for the search engine selection
   // to complete; |search_engine| holds the data for the particular search
@@ -77,10 +76,9 @@ class SearchEngineChoice : public views::NativeButton {
 // This class displays a large search engine choice dialog view during
 // initial first run import.
 class FirstRunSearchEngineView
-    : public views::View,
-      public views::ButtonListener,
-      public views::WindowDelegate,
-      public TemplateURLModelObserver {
+    : public views::ButtonListener,
+      public views::WidgetDelegateView,
+      public TemplateURLServiceObserver {
  public:
   // |profile| allows us to get the set of imported search engines.
   // |randomize| is true if logos are to be displayed in random order.
@@ -96,7 +94,7 @@ class FirstRunSearchEngineView
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // Overridden from views::WindowDelegate:
+  // Overridden from views::WidgetDelegate:
   virtual std::wstring GetWindowTitle() const OVERRIDE;
   views::View* GetContentsView() OVERRIDE { return this; }
   bool CanResize() const OVERRIDE{ return false; }
@@ -109,17 +107,17 @@ class FirstRunSearchEngineView
   // Override from View so we can draw the gray background at dialog top.
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
-  // Overridden from TemplateURLModelObserver. When the search engines have
+  // Overridden from TemplateURLServiceObserver. When the search engines have
   // loaded from the profile, we can populate the logos in the dialog box
   // to present to the user.
-  virtual void OnTemplateURLModelChanged() OVERRIDE;
+  virtual void OnTemplateURLServiceChanged() OVERRIDE;
 
  private:
   // Initializes the labels and controls in the view.
   void SetupControls();
 
   // Owned by the profile_.
-  TemplateURLModel* search_engines_model_;
+  TemplateURLService* search_engines_model_;
 
   // One for each search engine choice offered, either three or four.
   std::vector<SearchEngineChoice*> search_engine_choices_;

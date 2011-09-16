@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
 #include "chrome/browser/ui/cocoa/infobars/infobar.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -135,8 +136,9 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
 @implementation ExtensionInfoBarController
 
 - (id)initWithDelegate:(InfoBarDelegate*)delegate
+                 owner:(TabContentsWrapper*)owner
                 window:(NSWindow*)window {
-  if ((self = [super initWithDelegate:delegate])) {
+  if ((self = [super initWithDelegate:delegate owner:owner])) {
     window_ = window;
     dropdownButton_.reset([[MenuButton alloc] init]);
     [dropdownButton_ setOpenMenuOnClick:YES];
@@ -260,9 +262,11 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
 @end
 
 InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
-  NSWindow* window = [(NSView*)tab_contents_->GetContentNativeView() window];
+  NSWindow* window =
+      [(NSView*)owner->tab_contents()->GetContentNativeView() window];
   ExtensionInfoBarController* controller =
       [[ExtensionInfoBarController alloc] initWithDelegate:this
+                                                     owner:owner
                                                     window:window];
-  return new InfoBar(controller);
+  return new InfoBar(controller, this);
 }

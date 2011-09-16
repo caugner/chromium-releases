@@ -9,10 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
-#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "content/browser/javascript_dialogs.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/window_container_type.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -32,7 +33,7 @@ class Rect;
 class BackgroundContents : public RenderViewHostDelegate,
                            public RenderViewHostDelegate::View,
                            public NotificationObserver,
-                           public JavaScriptAppModalDialogDelegate {
+                           public content::JavaScriptDialogDelegate {
  public:
   class Delegate {
    public:
@@ -58,26 +59,26 @@ class BackgroundContents : public RenderViewHostDelegate,
   RenderViewHost* render_view_host() { return render_view_host_; }
 
   // RenderViewHostDelegate implementation.
-  virtual BackgroundContents* GetAsBackgroundContents();
-  virtual RenderViewHostDelegate::View* GetViewDelegate();
-  virtual const GURL& GetURL() const;
-  virtual ViewType::Type GetRenderViewType() const;
-  virtual int GetBrowserWindowID() const;
-  virtual void DidNavigate(RenderViewHost* render_view_host,
-                           const ViewHostMsg_FrameNavigate_Params& params);
-  virtual WebPreferences GetWebkitPrefs();
+  virtual BackgroundContents* GetAsBackgroundContents() OVERRIDE;
+  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
+  virtual const GURL& GetURL() const OVERRIDE;
+  virtual ViewType::Type GetRenderViewType() const OVERRIDE;
+  virtual void DidNavigate(
+      RenderViewHost* render_view_host,
+      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
   virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
                                     const string16& message,
                                     const string16& default_prompt,
                                     const GURL& frame_url,
                                     const int flags,
                                     IPC::Message* reply_msg,
-                                    bool* did_suppress_message);
-  virtual void Close(RenderViewHost* render_view_host);
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
+                                    bool* did_suppress_message) OVERRIDE;
+  virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
+  virtual RendererPreferences GetRendererPrefs(Profile* profile) const OVERRIDE;
   virtual void RenderViewGone(RenderViewHost* rvh,
                               base::TerminationStatus status,
-                              int error_code);
+                              int error_code) OVERRIDE;
 
   // RenderViewHostDelegate::View
   virtual void CreateNewWindow(
@@ -106,36 +107,18 @@ class BackgroundContents : public RenderViewHostDelegate,
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) {}
   virtual void GotFocus() {}
   virtual void TakeFocus(bool reverse) {}
-  virtual void LostCapture() {}
-  virtual void Activate() {}
-  virtual void Deactivate() {}
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
-  virtual void HandleMouseMove() {}
-  virtual void HandleMouseDown() {}
-  virtual void HandleMouseLeave() {}
-  virtual void HandleMouseUp() {}
-  virtual void HandleMouseActivate() {}
   virtual void UpdatePreferredSize(const gfx::Size& new_size) {}
 
   // NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Overridden from JavaScriptAppModalDialogDelegate:
-  virtual void OnMessageBoxClosed(IPC::Message* reply_msg,
-                                  bool success,
-                                  const std::wstring& user_input);
-  virtual void SetSuppressMessageBoxes(bool suppress_message_boxes) {}
-  virtual gfx::NativeWindow GetMessageBoxRootWindow();
-  virtual TabContents* AsTabContents();
-  virtual ExtensionHost* AsExtensionHost();
-
-  virtual void UpdateInspectorSetting(const std::string& key,
-                                      const std::string& value);
-  virtual void ClearInspectorSettings();
+  // Overridden from JavaScriptDialogDelegate:
+  virtual void OnDialogClosed(IPC::Message* reply_msg,
+                              bool success,
+                              const string16& user_input) OVERRIDE;
+  virtual gfx::NativeWindow GetDialogRootWindow() OVERRIDE;
 
   // Helper to find the BackgroundContents that originated the given request.
   // Can be NULL if the page has been closed or some other error occurs.

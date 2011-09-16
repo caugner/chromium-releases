@@ -249,7 +249,11 @@ gfx::Size NativeThemeChromeos::GetPartSize(Part part,
   // This function might be called from Worker process during html layout
   // without calling GfxModule::SetResourceProvider. So using dimension
   // constants instead of getting it from resource images.
+#if defined(TOUCH_UI)
+  static const int kScrollbarWidth = 0;
+#else
   static const int kScrollbarWidth = 13;
+#endif
   static const int kScrollbarArrowUpHeight = 12;
   static const int kScrollbarArrowDownHeight = 12;
 
@@ -295,6 +299,14 @@ gfx::Size NativeThemeChromeos::GetPartSize(Part part,
       return NativeThemeLinux::GetPartSize(part, state, extra);
   }
   return gfx::Size(width, height);
+}
+
+int NativeThemeChromeos::GetPopupListBoxMinimumRowHeight() const {
+#if defined(TOUCH_UI)
+  return 60;
+#else
+  return 0;
+#endif
 }
 
 void NativeThemeChromeos::PaintScrollbarTrack(

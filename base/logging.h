@@ -6,6 +6,7 @@
 #define BASE_LOGGING_H_
 #pragma once
 
+#include <cassert>
 #include <string>
 #include <cstring>
 #include <sstream>
@@ -468,7 +469,7 @@ std::string* MakeCheckOpString(const t1& v1, const t2& v2, const char* names) {
 }
 
 // MSVC doesn't like complex extern templates and DLLs.
-#if !defined(COMPILER_MSVC) && defined(BASE_DLL)
+#if !defined(COMPILER_MSVC) && !defined(COMPONENT_BUILD)
 // Commonly used instantiations of MakeCheckOpString<>. Explicitly instantiated
 // in logging.cc.
 extern template std::string* MakeCheckOpString<int, int>(
@@ -702,7 +703,12 @@ const LogSeverity LOG_DCHECK = LOG_INFO;
 #define DCHECK_GE(val1, val2) DCHECK_OP(GE, >=, val1, val2)
 #define DCHECK_GT(val1, val2) DCHECK_OP(GT, > , val1, val2)
 
+#if defined(OS_ANDROID) && !defined(OFFICIAL_BUILD)
+// TODO(port): fix once "enough" works
+#define NOTREACHED() LOG(ERROR) <<  "NOTREACHED()"
+#else
 #define NOTREACHED() DCHECK(false)
+#endif
 
 // Redefine the standard assert to use our nice log files
 #undef assert

@@ -6,8 +6,9 @@
 
 #include <string.h>  // For memcpy
 
-#include "ppapi/c/dev/pp_file_info_dev.h"
+#include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/c/private/ppb_flash_tcp_socket.h"
 #include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -77,7 +78,7 @@ void WriteVectorWithoutCopy(Message* m, const std::vector<T>& p) {
 
 // static
 void ParamTraits<PP_Bool>::Write(Message* m, const param_type& p) {
-  ParamTraits<bool>::Write(m, pp::proxy::PPBoolToBool(p));
+  ParamTraits<bool>::Write(m, PP_ToBool(p));
 }
 
 // static
@@ -88,7 +89,7 @@ bool ParamTraits<PP_Bool>::Read(const Message* m, void** iter, param_type* r) {
   bool result = false;
   if (!ParamTraits<bool>::Read(m, iter, &result))
     return false;
-  *r = pp::proxy::BoolToPPBool(result);
+  *r = PP_FromBool(result);
   return true;
 }
 
@@ -96,10 +97,10 @@ bool ParamTraits<PP_Bool>::Read(const Message* m, void** iter, param_type* r) {
 void ParamTraits<PP_Bool>::Log(const param_type& p, std::string* l) {
 }
 
-// PP_FileInfo_Dev -------------------------------------------------------------
+// PP_FileInfo -------------------------------------------------------------
 
 // static
-void ParamTraits<PP_FileInfo_Dev>::Write(Message* m, const param_type& p) {
+void ParamTraits<PP_FileInfo>::Write(Message* m, const param_type& p) {
   ParamTraits<int64_t>::Write(m, p.size);
   ParamTraits<int>::Write(m, static_cast<int>(p.type));
   ParamTraits<int>::Write(m, static_cast<int>(p.system_type));
@@ -109,7 +110,7 @@ void ParamTraits<PP_FileInfo_Dev>::Write(Message* m, const param_type& p) {
 }
 
 // static
-bool ParamTraits<PP_FileInfo_Dev>::Read(const Message* m, void** iter,
+bool ParamTraits<PP_FileInfo>::Read(const Message* m, void** iter,
                                         param_type* r) {
   int type, system_type;
   if (!ParamTraits<int64_t>::Read(m, iter, &r->size) ||
@@ -123,41 +124,51 @@ bool ParamTraits<PP_FileInfo_Dev>::Read(const Message* m, void** iter,
       type != PP_FILETYPE_DIRECTORY &&
       type != PP_FILETYPE_OTHER)
     return false;
-  r->type = static_cast<PP_FileType_Dev>(type);
+  r->type = static_cast<PP_FileType>(type);
   if (system_type != PP_FILESYSTEMTYPE_EXTERNAL &&
       system_type != PP_FILESYSTEMTYPE_LOCALPERSISTENT &&
       system_type != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
     return false;
-  r->system_type = static_cast<PP_FileSystemType_Dev>(system_type);
+  r->system_type = static_cast<PP_FileSystemType>(system_type);
   return true;
 }
 
 // static
-void ParamTraits<PP_FileInfo_Dev>::Log(const param_type& p, std::string* l) {
+void ParamTraits<PP_FileInfo>::Log(const param_type& p, std::string* l) {
 }
 
-// PP_InputEvent ---------------------------------------------------------------
+// PP_Flash_NetAddress ---------------------------------------------------------
 
 // static
-void ParamTraits<PP_InputEvent>::Write(Message* m, const param_type& p) {
-  // PP_InputEvent is just POD so we can just memcpy it.
-  m->WriteData(reinterpret_cast<const char*>(&p), sizeof(PP_InputEvent));
+void ParamTraits<PP_Flash_NetAddress>::Write(Message* m, const param_type& p) {
+  WriteParam(m, p.size);
+  m->WriteBytes(p.data, static_cast<int>(p.size));
 }
 
 // static
-bool ParamTraits<PP_InputEvent>::Read(const Message* m,
-                                      void** iter,
-                                      param_type* r) {
-  const char* data;
-  int data_size;
-  if (!m->ReadData(iter, &data, &data_size))
+bool ParamTraits<PP_Flash_NetAddress>::Read(const Message* m,
+                                            void** iter,
+                                            param_type* p) {
+  uint16 size;
+  if (!ReadParam(m, iter, &size))
     return false;
-  memcpy(r, data, sizeof(PP_InputEvent));
+  if (size > sizeof(p->data))
+    return false;
+  p->size = size;
+
+  const char* data;
+  if (!m->ReadBytes(iter, &data, size))
+    return false;
+  memcpy(p->data, data, size);
   return true;
 }
 
 // static
-void ParamTraits<PP_InputEvent>::Log(const param_type& p, std::string* l) {
+void ParamTraits<PP_Flash_NetAddress>::Log(const param_type& p,
+                                           std::string* l) {
+  l->append("<PP_Flash_NetAddress (");
+  LogParam(p.size, l);
+  l->append(" bytes)>");
 }
 
 // PP_ObjectProperty -----------------------------------------------------------

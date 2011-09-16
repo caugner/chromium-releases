@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "ui/gfx/canvas.h"
 #include "views/controls/native/native_view_host_wrapper.h"
 #include "views/controls/native/native_view_host_views.h"
-#include "views/widget/native_widget.h"
 #include "views/widget/widget.h"
 
 namespace views {
@@ -114,11 +113,8 @@ void NativeViewHost::Layout() {
     // positioned in the coordinate system of the Widget, not the current
     // view.  Also, they should be positioned respecting the border insets
     // of the native view.
-    gfx::Insets insets = GetInsets();
-    gfx::Point top_left(insets.left(), insets.top());
-    ConvertPointToWidget(this, &top_left);
-    gfx::Rect local_bounds = GetContentsBounds();
-    native_wrapper_->ShowWidget(top_left.x(), top_left.y(),
+    gfx::Rect local_bounds = ConvertRectToWidget(GetContentsBounds());
+    native_wrapper_->ShowWidget(local_bounds.x(), local_bounds.y(),
                                 local_bounds.width(),
                                 local_bounds.height());
   } else {
@@ -184,20 +180,15 @@ void NativeViewHost::OnFocus() {
       this, ui::AccessibilityTypes::EVENT_FOCUS, true);
 }
 
-bool NativeViewHost::ContainsNativeView(gfx::NativeView native_view) const {
-  if (native_view == native_view_)
-    return true;
-  if (!native_view_)
-    return false;
-
-  views::NativeWidget* native_widget =
-      views::NativeWidget::GetNativeWidgetForNativeView(native_view_);
-  if (native_widget &&
-      native_widget->GetWidget()->ContainsNativeView(native_view)) {
-    return true;
+gfx::NativeViewAccessible NativeViewHost::GetNativeViewAccessible() {
+  if (native_wrapper_.get()) {
+    gfx::NativeViewAccessible accessible_view =
+        native_wrapper_->GetNativeViewAccessible();
+    if (accessible_view)
+      return accessible_view;
   }
 
-  return View::ContainsNativeView(native_view);
+  return View::GetNativeViewAccessible();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

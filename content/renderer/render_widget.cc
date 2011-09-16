@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/common/content_switches.h"
 #include "content/common/swapped_out_messages.h"
@@ -27,9 +28,11 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/surface/transport_dib.h"
+#include "ui/gfx/gl/gl_switches.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
@@ -85,12 +88,13 @@ RenderWidget::RenderWidget(RenderThreadBase* render_thread,
       pending_window_rect_count_(0),
       suppress_next_char_events_(false),
       is_accelerated_compositing_active_(false),
-      compositing_surface_(gfx::kNullPluginWindow),
       animation_update_pending_(false),
       animation_task_posted_(false),
       invalidation_task_posted_(false) {
   RenderProcess::current()->AddRefProcess();
   DCHECK(render_thread_);
+  has_disable_gpu_vsync_switch_ = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableGpuVsync);
 }
 
 RenderWidget::~RenderWidget() {
@@ -159,12 +163,10 @@ void RenderWidget::DoInit(int32 opener_id,
 // This is used to complete pending inits and non-pending inits. For non-
 // pending cases, the parent will be the same as the current parent. This
 // indicates we do not need to reparent or anything.
-void RenderWidget::CompleteInit(gfx::NativeViewId parent_hwnd,
-                                gfx::PluginWindowHandle compositing_surface) {
+void RenderWidget::CompleteInit(gfx::NativeViewId parent_hwnd) {
   DCHECK(routing_id_ != MSG_ROUTING_NONE);
 
   host_window_ = parent_hwnd;
-  compositing_surface_ = compositing_surface;
 
   Send(new ViewHostMsg_RenderViewReady(routing_id_));
 }
@@ -229,11 +231,10 @@ bool RenderWidget::Send(IPC::Message* message) {
 // Got a response from the browser after the renderer decided to create a new
 // view.
 void RenderWidget::OnCreatingNewAck(
-    gfx::NativeViewId parent,
-    gfx::PluginWindowHandle compositing_surface) {
+    gfx::NativeViewId parent) {
   DCHECK(routing_id_ != MSG_ROUTING_NONE);
 
-  CompleteInit(parent, compositing_surface);
+  CompleteInit(parent);
 }
 
 void RenderWidget::OnClose() {
@@ -596,10 +597,13 @@ void RenderWidget::PaintDebugBorder(const gfx::Rect& rect,
 }
 
 void RenderWidget::AnimationCallback() {
+  TRACE_EVENT0("renderer", "RenderWidget::AnimationCallback");
   animation_task_posted_ = false;
-  if (!animation_update_pending_)
+  if (!animation_update_pending_) {
+    TRACE_EVENT0("renderer", "EarlyOut_NoAnimationUpdatePending");
     return;
-  if (!animation_floor_time_.is_null()) {
+  }
+  if (!animation_floor_time_.is_null() && IsRenderingVSynced()) {
     // Record when we fired (according to base::Time::Now()) relative to when
     // we posted the task to quantify how much the base::Time/base::TimeTicks
     // skew is affecting animations.
@@ -617,14 +621,20 @@ void RenderWidget::AnimationCallback() {
 void RenderWidget::AnimateIfNeeded() {
   if (!animation_update_pending_)
     return;
+
+  // Target 60FPS if vsync is on. Go as fast as we can if vsync is off.
+  int animationInterval = IsRenderingVSynced() ? 16 : 0;
+
   base::Time now = base::Time::Now();
   if (now >= animation_floor_time_) {
-    animation_floor_time_ = now + base::TimeDelta::FromMilliseconds(16);
-    // Set a timer to call us back after 16ms (targetting 60FPS) before
+    TRACE_EVENT0("renderer", "RenderWidget::AnimateIfNeeded")
+    animation_floor_time_ = now +
+        base::TimeDelta::FromMilliseconds(animationInterval);
+    // Set a timer to call us back after animationInterval before
     // running animation callbacks so that if a callback requests another
     // we'll be sure to run it at the proper time.
     MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
-        this, &RenderWidget::AnimationCallback), 16);
+        this, &RenderWidget::AnimationCallback), animationInterval);
     animation_task_posted_ = true;
     animation_update_pending_ = false;
 #ifdef WEBWIDGET_HAS_ANIMATE_CHANGES
@@ -634,6 +644,7 @@ void RenderWidget::AnimateIfNeeded() {
 #endif
     return;
   }
+  TRACE_EVENT0("renderer", "EarlyOut_AnimatedTooRecently");
   if (animation_task_posted_)
     return;
   // This code uses base::Time::Now() to calculate the floor and next fire
@@ -648,6 +659,14 @@ void RenderWidget::AnimateIfNeeded() {
   animation_task_posted_ = true;
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
       NewRunnableMethod(this, &RenderWidget::AnimationCallback), delay);
+}
+
+bool RenderWidget::IsRenderingVSynced() {
+  // TODO(nduca): Forcing a driver to disable vsync (e.g. in a control panel) is
+  // not caught by this check. This will lead to artificially low frame rates
+  // for people who force vsync off at a driver level and expect Chrome to speed
+  // up.
+  return !has_disable_gpu_vsync_switch_;
 }
 
 void RenderWidget::InvalidationCallback() {
@@ -898,6 +917,8 @@ void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
 }
 
 void RenderWidget::didActivateAcceleratedCompositing(bool active) {
+  TRACE_EVENT1("gpu", "RenderWidget::didActivateAcceleratedCompositing",
+               "active", active);
   is_accelerated_compositing_active_ = active;
   Send(new ViewHostMsg_DidActivateAcceleratedCompositing(
       routing_id_, is_accelerated_compositing_active_));
@@ -923,6 +944,7 @@ void RenderWidget::scheduleComposite() {
 }
 
 void RenderWidget::scheduleAnimation() {
+  TRACE_EVENT0("gpu", "RenderWidget::scheduleAnimation");
   if (!animation_update_pending_) {
     animation_update_pending_ = true;
     if (!animation_task_posted_) {
@@ -1004,6 +1026,12 @@ WebRect RenderWidget::windowRect() {
   gfx::Rect rect;
   Send(new ViewHostMsg_GetWindowRect(routing_id_, host_window_, &rect));
   return rect;
+}
+
+void RenderWidget::setToolTipText(const WebKit::WebString& text,
+                                  WebTextDirection hint) {
+  Send(new ViewHostMsg_SetTooltipText(routing_id_, UTF16ToWideHack(text),
+                                      hint));
 }
 
 void RenderWidget::setWindowRect(const WebRect& pos) {

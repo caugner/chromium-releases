@@ -4,11 +4,12 @@
 
 #include "chrome/browser/tab_contents/background_contents.h"
 
-#include "chrome/browser/background_contents_service.h"
+#include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_factory.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browsing_instance.h"
@@ -31,13 +32,13 @@ BackgroundContents::BackgroundContents(SiteInstance* site_instance,
   render_view_host_ = new RenderViewHost(site_instance, this, routing_id, NULL);
 
   // Close ourselves when the application is shutting down.
-  registrar_.Add(this, NotificationType::APP_TERMINATING,
+  registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                  NotificationService::AllSources());
 
   // Register for our parent profile to shutdown, so we can shut ourselves down
   // as well (should only be called for OTR profiles, as we should receive
   // APP_TERMINATING before non-OTR profiles are destroyed).
-  registrar_.Add(this, NotificationType::PROFILE_DESTROYED,
+  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                  Source<Profile>(profile));
 }
 
@@ -52,7 +53,7 @@ BackgroundContents::~BackgroundContents() {
     return;
   Profile* profile = render_view_host_->process()->profile();
   NotificationService::current()->Notify(
-      NotificationType::BACKGROUND_CONTENTS_DELETED,
+      chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
       Source<Profile>(profile),
       Details<BackgroundContents>(this));
   render_view_host_->Shutdown();  // deletes render_view_host
@@ -74,10 +75,6 @@ ViewType::Type BackgroundContents::GetRenderViewType() const {
   return ViewType::BACKGROUND_CONTENTS;
 }
 
-int BackgroundContents::GetBrowserWindowID() const {
-  return extension_misc::kUnknownWindowId;
-}
-
 void BackgroundContents::DidNavigate(
     RenderViewHost* render_view_host,
     const ViewHostMsg_FrameNavigate_Params& params) {
@@ -96,7 +93,7 @@ void BackgroundContents::DidNavigate(
 
   Profile* profile = render_view_host->process()->profile();
   NotificationService::current()->Notify(
-      NotificationType::BACKGROUND_CONTENTS_NAVIGATED,
+      chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
       Source<Profile>(profile),
       Details<BackgroundContents>(this));
 }
@@ -109,25 +106,23 @@ void BackgroundContents::RunJavaScriptMessage(
     const int flags,
     IPC::Message* reply_msg,
     bool* did_suppress_message) {
-  // TODO(rafaelw): Implement, The JavaScriptModalDialog needs to learn about
-  // BackgroundContents.
+  // TODO(rafaelw): Implement.
+
+  // Since we are suppressing messages, just reply as if the user immediately
+  // pressed "Cancel".
+  OnDialogClosed(reply_msg, false, string16());
+
   *did_suppress_message = true;
 }
 
-bool BackgroundContents::PreHandleKeyboardEvent(
-    const NativeWebKeyboardEvent& event,
-    bool* is_keyboard_shortcut) {
-  return false;
-}
-
-void BackgroundContents::Observe(NotificationType type,
+void BackgroundContents::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
   // TODO(rafaelw): Implement pagegroup ref-counting so that non-persistent
   // background pages are closed when the last referencing frame is closed.
-  switch (type.value) {
-    case NotificationType::PROFILE_DESTROYED:
-    case NotificationType::APP_TERMINATING: {
+  switch (type) {
+    case chrome::NOTIFICATION_PROFILE_DESTROYED:
+    case content::NOTIFICATION_APP_TERMINATING: {
       delete this;
       break;
     }
@@ -137,42 +132,23 @@ void BackgroundContents::Observe(NotificationType type,
   }
 }
 
-void BackgroundContents::OnMessageBoxClosed(IPC::Message* reply_msg,
-                                            bool success,
-                                            const std::wstring& user_input) {
+void BackgroundContents::OnDialogClosed(IPC::Message* reply_msg,
+                                        bool success,
+                                        const string16& user_input) {
   render_view_host()->JavaScriptDialogClosed(reply_msg,
                                              success,
-                                             WideToUTF16Hack(user_input));
+                                             user_input);
 }
 
-gfx::NativeWindow BackgroundContents::GetMessageBoxRootWindow() {
+gfx::NativeWindow BackgroundContents::GetDialogRootWindow() {
   NOTIMPLEMENTED();
   return NULL;
-}
-
-TabContents* BackgroundContents::AsTabContents() {
-  return NULL;
-}
-
-ExtensionHost* BackgroundContents::AsExtensionHost() {
-  return NULL;
-}
-
-void BackgroundContents::UpdateInspectorSetting(const std::string& key,
-                                         const std::string& value) {
-  Profile* profile = render_view_host_->process()->profile();
-  RenderViewHostDelegateHelper::UpdateInspectorSetting(profile, key, value);
-}
-
-void BackgroundContents::ClearInspectorSettings() {
-  Profile* profile = render_view_host_->process()->profile();
-  RenderViewHostDelegateHelper::ClearInspectorSettings(profile);
 }
 
 void BackgroundContents::Close(RenderViewHost* render_view_host) {
   Profile* profile = render_view_host->process()->profile();
   NotificationService::current()->Notify(
-      NotificationType::BACKGROUND_CONTENTS_CLOSED,
+      chrome::NOTIFICATION_BACKGROUND_CONTENTS_CLOSED,
       Source<Profile>(profile),
       Details<BackgroundContents>(this));
   delete this;
@@ -183,7 +159,7 @@ void BackgroundContents::RenderViewGone(RenderViewHost* rvh,
                                         int error_code) {
   Profile* profile = rvh->process()->profile();
   NotificationService::current()->Notify(
-      NotificationType::BACKGROUND_CONTENTS_TERMINATED,
+      chrome::NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED,
       Source<Profile>(profile),
       Details<BackgroundContents>(this));
 

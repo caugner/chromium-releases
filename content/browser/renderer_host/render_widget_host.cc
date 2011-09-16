@@ -7,10 +7,11 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
+#include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/accessibility/browser_accessibility_state.h"
-#include "chrome/common/chrome_switches.h"
+#include "base/utf_string_conversions.h"
+#include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
@@ -18,6 +19,7 @@
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_service.h"
@@ -27,10 +29,6 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/plugins/npapi/webplugin.h"
-
-#if defined(TOOLKIT_VIEWS)
-#include "views/view.h"
-#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -73,6 +71,8 @@ RenderWidgetHost::RenderWidgetHost(RenderProcessHost* process,
       resize_ack_pending_(false),
       mouse_move_pending_(false),
       mouse_wheel_pending_(false),
+      touch_move_pending_(false),
+      touch_event_is_queued_(false),
       needs_repainting_on_restore_(false),
       is_unresponsive_(false),
       in_get_backing_store_(false),
@@ -92,16 +92,25 @@ RenderWidgetHost::RenderWidgetHost(RenderProcessHost* process,
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kForceRendererAccessibility) ||
-          BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser()) {
+      BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser()) {
     EnableRendererAccessibility();
   }
 }
 
 RenderWidgetHost::~RenderWidgetHost() {
+  SetView(NULL);
+
   // Clear our current or cached backing store if either remains.
   BackingStoreManager::RemoveBackingStore(this);
 
   process_->Release(routing_id_);
+}
+
+void RenderWidgetHost::SetView(RenderWidgetHostView* view) {
+  view_ = view;
+
+  if (!view_)
+    process_->SetCompositingSurface(routing_id_, gfx::kNullPluginWindow);
 }
 
 gfx::NativeViewId RenderWidgetHost::GetNativeViewId() {
@@ -127,9 +136,11 @@ void RenderWidgetHost::Init() {
 
   renderer_initialized_ = true;
 
+  process_->SetCompositingSurface(routing_id_,
+                                  GetCompositingSurface());
+
   // Send the ack along with the information on placement.
-  Send(new ViewMsg_CreatingNew_ACK(
-      routing_id_, GetNativeViewId(), GetCompositingSurface()));
+  Send(new ViewMsg_CreatingNew_ACK(routing_id_, GetNativeViewId()));
   WasResized();
 }
 
@@ -156,6 +167,7 @@ bool RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_RenderViewGone, OnMsgRenderViewGone)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Close, OnMsgClose)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RequestMove, OnMsgRequestMove)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_SetTooltipText, OnMsgSetTooltipText)
     IPC_MESSAGE_HANDLER(ViewHostMsg_PaintAtSize_ACK, OnMsgPaintAtSizeAck)
     IPC_MESSAGE_HANDLER(ViewHostMsg_UpdateRect, OnMsgUpdateRect)
     IPC_MESSAGE_HANDLER(ViewHostMsg_HandleInputEvent_ACK, OnMsgInputEventAck)
@@ -237,7 +249,7 @@ void RenderWidgetHost::WasHidden() {
 
   bool is_visible = false;
   NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED,
+      content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
       Source<RenderWidgetHost>(this),
       Details<bool>(&is_visible));
 }
@@ -272,7 +284,7 @@ void RenderWidgetHost::WasRestored() {
 
   bool is_visible = true;
   NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED,
+      content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
       Source<RenderWidgetHost>(this),
       Details<bool>(&is_visible));
 
@@ -362,7 +374,7 @@ void RenderWidgetHost::LostCapture() {
 void RenderWidgetHost::ViewDestroyed() {
   // TODO(evanm): tracking this may no longer be necessary;
   // eliminate this function if so.
-  view_ = NULL;
+  SetView(NULL);
 }
 
 void RenderWidgetHost::SetIsLoading(bool is_loading) {
@@ -640,13 +652,25 @@ void RenderWidgetHost::ForwardInputEvent(const WebInputEvent& input_event,
   StartHangMonitorTimeout(TimeDelta::FromMilliseconds(kHungRendererDelayMs));
 }
 
-#if defined(TOUCH_UI)
 void RenderWidgetHost::ForwardTouchEvent(
     const WebKit::WebTouchEvent& touch_event) {
   TRACE_EVENT0("renderer_host", "RenderWidgetHost::ForwardTouchEvent");
+  if (ignore_input_events_ || process_->ignore_input_events())
+    return;
+
+  if (touch_event.type == WebInputEvent::TouchMove &&
+      touch_move_pending_) {
+    touch_event_is_queued_ = true;
+    queued_touch_event_ = touch_event;
+    return;
+  }
+
+  if (touch_event.type == WebInputEvent::TouchMove)
+    touch_move_pending_ = true;
+  else
+    touch_move_pending_ = false;
   ForwardInputEvent(touch_event, sizeof(WebKit::WebTouchEvent), false);
 }
-#endif
 
 void RenderWidgetHost::RendererExited(base::TerminationStatus status,
                                       int exit_code) {
@@ -660,6 +684,8 @@ void RenderWidgetHost::RendererExited(base::TerminationStatus status,
   next_mouse_move_.reset();
   mouse_wheel_pending_ = false;
   coalesced_mouse_wheel_events_.clear();
+  touch_move_pending_ = false;
+  touch_event_is_queued_ = false;
 
   // Must reset these to ensure that keyboard events work with a new renderer.
   key_queue_.clear();
@@ -731,7 +757,7 @@ void RenderWidgetHost::ImeCancelComposition() {
 
 void RenderWidgetHost::Destroy() {
   NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_HOST_DESTROYED,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
       Source<RenderWidgetHost>(this),
       NotificationService::NoDetails());
 
@@ -759,7 +785,7 @@ void RenderWidgetHost::CheckRendererIsUnresponsive() {
 
   // OK, looks like we have a hung renderer!
   NotificationService::current()->Notify(
-      NotificationType::RENDERER_PROCESS_HANG,
+      content::NOTIFICATION_RENDERER_PROCESS_HANG,
       Source<RenderWidgetHost>(this),
       NotificationService::NoDetails());
   is_unresponsive_ = true;
@@ -788,6 +814,38 @@ void RenderWidgetHost::OnMsgClose() {
   Shutdown();
 }
 
+void RenderWidgetHost::OnMsgSetTooltipText(
+    const std::wstring& tooltip_text,
+    WebTextDirection text_direction_hint) {
+  // First, add directionality marks around tooltip text if necessary.
+  // A naive solution would be to simply always wrap the text. However, on
+  // windows, Unicode directional embedding characters can't be displayed on
+  // systems that lack RTL fonts and are instead displayed as empty squares.
+  //
+  // To get around this we only wrap the string when we deem it necessary i.e.
+  // when the locale direction is different than the tooltip direction hint.
+  //
+  // Currently, we use element's directionality as the tooltip direction hint.
+  // An alternate solution would be to set the overall directionality based on
+  // trying to detect the directionality from the tooltip text rather than the
+  // element direction.  One could argue that would be a preferable solution
+  // but we use the current approach to match Fx & IE's behavior.
+  string16 wrapped_tooltip_text = WideToUTF16(tooltip_text);
+  if (!tooltip_text.empty()) {
+    if (text_direction_hint == WebKit::WebTextDirectionLeftToRight) {
+      // Force the tooltip to have LTR directionality.
+      wrapped_tooltip_text =
+          base::i18n::GetDisplayStringInLTRDirectionality(wrapped_tooltip_text);
+    } else if (text_direction_hint == WebKit::WebTextDirectionRightToLeft &&
+               !base::i18n::IsRTL()) {
+      // Force the tooltip to have RTL directionality.
+      base::i18n::WrapStringWithRTLFormatting(&wrapped_tooltip_text);
+    }
+  }
+  if (view())
+    view()->SetTooltipText(UTF16ToWide(wrapped_tooltip_text));
+}
+
 void RenderWidgetHost::OnMsgRequestMove(const gfx::Rect& pos) {
   // Note that we ignore the position.
   if (view_) {
@@ -800,7 +858,7 @@ void RenderWidgetHost::OnMsgPaintAtSizeAck(int tag, const gfx::Size& size) {
   PaintAtSizeAckDetails details = {tag, size};
   gfx::Size size_details = size;
   NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
       Source<RenderWidgetHost>(this),
       Details<PaintAtSizeAckDetails>(&details));
 }
@@ -811,7 +869,7 @@ void RenderWidgetHost::OnMsgUpdateRect(
   TimeTicks paint_start = TimeTicks::Now();
 
   NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_HOST_WILL_PAINT,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_WILL_PAINT,
       Source<RenderWidgetHost>(this),
       NotificationService::NoDetails());
 
@@ -886,6 +944,14 @@ void RenderWidgetHost::OnMsgUpdateRect(
   // be re-used, so the bitmap may be invalid after this call.
   Send(new ViewMsg_UpdateRect_ACK(routing_id_));
 
+  // Move the plugins if the view hasn't already been destroyed.  Plugin moves
+  // will not be re-issued, so must move them now, regardless of whether we
+  // paint or not.  MovePluginWindows attempts to move the plugin windows and
+  // in the process could dispatch other window messages which could cause the
+  // view to be destroyed.
+  if (view_)
+    view_->MovePluginWindows(params.plugin_window_moves);
+
   // We don't need to update the view if the view is hidden. We must do this
   // early return after the ACK is sent, however, or the renderer will not send
   // us more data.
@@ -893,22 +959,15 @@ void RenderWidgetHost::OnMsgUpdateRect(
     return;
 
   // Now paint the view. Watch out: it might be destroyed already.
-  if (view_) {
-    view_->MovePluginWindows(params.plugin_window_moves);
-    // The view_ pointer could be destroyed in the context of MovePluginWindows
-    // which attempts to move the plugin windows and in the process could
-    // dispatch other window messages which could cause the view to be
-    // destroyed.
-    if (view_ && !is_accelerated_compositing_active_) {
-      view_being_painted_ = true;
-      view_->DidUpdateBackingStore(params.scroll_rect, params.dx, params.dy,
-                                   params.copy_rects);
-      view_being_painted_ = false;
-    }
+  if (view_ && !is_accelerated_compositing_active_) {
+    view_being_painted_ = true;
+    view_->DidUpdateBackingStore(params.scroll_rect, params.dx, params.dy,
+                                 params.copy_rects);
+    view_being_painted_ = false;
   }
 
   NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_HOST_DID_PAINT,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
       Source<RenderWidgetHost>(this),
       NotificationService::NoDetails());
 
@@ -957,10 +1016,16 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
     }
 
     ProcessKeyboardEventAck(type, processed);
+  } else if (type == WebInputEvent::TouchMove) {
+    touch_move_pending_ = false;
+    if (touch_event_is_queued_) {
+      touch_event_is_queued_ = false;
+      ForwardTouchEvent(queued_touch_event_);
+    }
   }
   // This is used only for testing.
   NotificationService::current()->Notify(
-      NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_INPUT_EVENT_ACK,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_INPUT_EVENT_ACK,
       Source<RenderWidgetHost>(this),
       Details<int>(&type));
 }

@@ -25,6 +25,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
@@ -32,11 +33,13 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/notification_source.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -75,7 +78,6 @@ HistoryUIHTMLSource::HistoryUIHTMLSource()
     : ChromeWebUIDataSource(chrome::kChromeUIHistoryHost) {
   AddLocalizedString("loading", IDS_HISTORY_LOADING);
   AddLocalizedString("title", IDS_HISTORY_TITLE);
-  AddLocalizedString("loading", IDS_HISTORY_LOADING);
   AddLocalizedString("newest", IDS_HISTORY_NEWEST);
   AddLocalizedString("newer",  IDS_HISTORY_NEWER);
   AddLocalizedString("older", IDS_HISTORY_OLDER);
@@ -135,6 +137,9 @@ WebUIMessageHandler* BrowsingHistoryHandler::Attach(WebUI* web_ui) {
   profile->GetChromeURLDataManager()->AddDataSource(
       new FaviconSource(profile, FaviconSource::FAVICON));
 
+  // Get notifications when history is cleared.
+  registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
+      Source<Profile>(profile->GetOriginalProfile()));
   return WebUIMessageHandler::Attach(web_ui);
 }
 
@@ -360,13 +365,25 @@ history::QueryOptions BrowsingHistoryHandler::CreateMonthQueryOptions(
   return options;
 }
 
+void BrowsingHistoryHandler::Observe(int type,
+                                     const NotificationSource& source,
+                                     const NotificationDetails& details) {
+  if (type != chrome::NOTIFICATION_HISTORY_URLS_DELETED) {
+    NOTREACHED();
+    return;
+  }
+
+  // Some URLs were deleted from history. Reload the list.
+  web_ui_->CallJavascriptFunction("historyDeleted");
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // HistoryUI
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-HistoryUI::HistoryUI(TabContents* contents) : WebUI(contents) {
+HistoryUI::HistoryUI(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new BrowsingHistoryHandler())->Attach(this));
 
   HistoryUIHTMLSource* html_source = new HistoryUIHTMLSource();

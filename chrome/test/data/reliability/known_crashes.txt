@@ -123,10 +123,6 @@ PREFIX : resourcemessagefilter::ongotplugininfo
 # 63659
 PREFIX : hungwindowdetector::checkchildwindow___hungwindowdetector::childwndenumproc___hungwindowdetector::ontick___workerthreadticker::timertask::run
 
-# 66795
-PREFIX : webkit_glue::resourcefetcher::didfail___webkit_glue::weburlloaderimpl::context::oncompletedrequest___resourcedispatcher::onrequestcomplete___ipc::messagewithtuple<tuple4<int,urlrequeststatus,std::basic_string<char,std::char_traits<char>,std::allocator<char> >,base::time> >::dispatch<resourcedispatcher,void (__thiscall resourcedispatcher::*)(int,urlrequeststatus const &,std::basic_string<char,std::char_traits<char>,std::allocator<char> > const &,base::time const &)>___resourcedispatcher::dispatchmessagew___resourcedispatcher::onmessagereceived___childthread::onmessagereceived___runnablemethod<selectfiledialogimpl,void (__thiscall selectfiledialogimpl::*)(selectfiledialogimpl::executeselectparams const &),tuple1<selectfiledialogimpl::executeselectparams> >::run___messageloop::runtask___messageloop::dowork___base::messagepumpdefault::run___messageloop::runinternal___messageloop::run___renderermain
-PREFIX : webkit_glue::resourcefetcher::didfail___webkit_glue::weburlloaderimpl::context::oncompletedrequest___resourcedispatcher::onrequestcomplete___ipc::messagewithtuple<tuple4<int,urlrequeststatus,std::basic_string<char,std::char_traits<char>,std::allocator<char> >,base::time> >::dispatch<resourcedispatcher,resourcedispatcher,void (__thiscall resourcedispatcher::*)(int,urlrequeststatus const &,std::basic_string<char,std::char_traits<char>,std::allocator<char> > const &,base::time const &)>___resourcedispatcher::dispatchmessagew___resourcedispatcher::onmessagereceived___childthread::onmessagereceived___runnablemethod<profilewriter,void (__thiscall profilewriter::*)(gurl const &),tuple1<gurl> >::run___messageloop::runtask___messageloop::dowork___base::messagepumpdefault::run___messageloop::runinternal___messageloop::run___renderermain
-
 # 72796
 PREFIX : webcore::timerbase::timerbase___webcore::suspendabletimer::suspendabletimer___webcore::domtimer::domtimer___webcore::domtimer::install___webcore::windowsettimeoutimpl___webcore::v8domwindow::settimeoutcallback___v8::internal::handleapicallhelper<0>___v8::internal::builtin_handleapicall___v8::internal::invoke___v8::internal::execution::call___v8::function::call___webcore::v8proxy::callfunction___webcore::scheduledaction::execute___webcore::scheduledaction::execute___webcore::domtimer::fired___webcore::threadtimers::sharedtimerfiredinternal___messageloop::runtask___messageloop::dowork___base::messagepumpdefault::run___messageloop::runinternal___messageloop::run___renderermain___`anonymous namespace'::runnamedprocesstypemain___chromemain___maindllloader::launch___wwinmain_____tmaincrtstartup
 
@@ -181,8 +177,20 @@ PREFIX: webcore::cssstyleselector::loadpendingimages___webcore::cssstyleselector
 # 83676
 PREFIX: webcore::renderstyle::haspseudostyle___webcore::cssstyleselector::styleforelement___webcore::node::styleforrenderer
 
-# 84048
-PREFIX: webcore::element::getattribute___webcore::floatwidthofsubstringusingsvgfont___webcore::svgtextrunrenderingcontext::floatwidthusingsvgfont___webcore::font::width
-
 # 84178
 PREFIX: `anonymous namespace'::establishchannelcallback::send___`anonymous namespace'::establishchannelcallback::runwithparams___gpuprocesshost::sendoutstandingreplies
+
+# 87593
+PREFIX: webcore::cachedresource::stoploading___webcore::cachedresourcerequest::didfail___webcore::subresourceloader::didfail___webcore::resourceloader::didfail___webcore::resourcehandleinternal::didfail___webkit_glue::weburlloaderimpl::context::oncompletedrequest___resourcedispatcher::onrequestcomplete
+
+# 88061
+PREFIX: `anonymous namespace'::invalidparameter____purecall___windowdragresponsetask::run___`anonymous namespace'::taskclosureadapter::run___messageloop::runtask
+
+# 89570
+REGEX: base::internal::invokerstorage1.*___browsermainparts::~browsermainparts
+
+# 89679
+PREFIX: `anonymous namespace'::invalidparameter____purecall___browserrenderprocesshost::onchannelerror___`anonymous namespace'::taskclosureadapter::run___messageloop::runtask___messageloop::dowork___base::messagepumpforui::dorunloop___base::messagepumpwin::runwithdispatcher___messageloop::runinternal___messageloopforui::run___`anonymous namespace'::runuimessageloop___browsermain___`anonymous namespace'::runnamedprocesstypemain___chromemain___maindllloader::launch___wwinmain_____tmaincrtstartup
+
+# 89697
+PREFIX: `anonymous namespace'::purecall____purecall___renderviewhost::onmessagereceived___browserrenderprocesshost::onchannelerror___`anonymous namespace'::taskclosureadapter::run___messageloop::runtask

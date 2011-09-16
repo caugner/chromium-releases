@@ -4,13 +4,15 @@
 
 #include "chrome/browser/sync/syncable/syncable_mock.h"
 
+#include "base/tracked.h"
+
 MockDirectory::MockDirectory() {
-  init_kernel("myk");
+  InitKernel("myk", &delegate_);
 }
 
 MockDirectory::~MockDirectory() {}
 
 MockSyncableWriteTransaction::MockSyncableWriteTransaction(
-    Directory *directory)
-    : WriteTransaction(directory, syncable::UNITTEST, "dontcare.cpp", 25) {
+    const tracked_objects::Location& from_here, Directory *directory)
+    : WriteTransaction(from_here, syncable::UNITTEST, directory) {
 }

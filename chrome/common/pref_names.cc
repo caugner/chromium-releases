@@ -137,6 +137,10 @@ const char kWebKitAllowRunningInsecureContent[] =
 // Boolean which specifies whether the bookmark bar is visible on all tabs.
 const char kShowBookmarkBar[] = "bookmark_bar.show_on_all_tabs";
 
+// Boolean which specifies the ids of the bookmark nodes that are expanded in
+// the bookmark editor.
+const char kBookmarkEditorExpandedNodes[] = "bookmark_editor.expanded_nodes";
+
 // Boolean that is true if the password manager is on (will record new
 // passwords and fill in known passwords).
 const char kPasswordManagerEnabled[] = "profile.password_manager_enabled";
@@ -145,6 +149,9 @@ const char kPasswordManagerEnabled[] = "profile.password_manager_enabled";
 // in clear text.
 const char kPasswordManagerAllowShowPasswords[] =
     "profile.password_manager_allow_show_passwords";
+
+// Boolean that identifies if the auto-login feature is enabled or not.
+const char kAutologinEnabled[] = "autologin.enabled";
 
 // Boolean that is true when SafeBrowsing is enabled.
 const char kSafeBrowsingEnabled[] = "safebrowsing.enabled";
@@ -155,6 +162,9 @@ const char kSafeBrowsingReportingEnabled[] =
 
 // Boolean that is true when Incognito support is enabled.
 const char kIncognitoEnabled[] = "incognito.enabled";
+
+// Boolean that specifies if all user sessions should be forced into Incognito.
+const char kIncognitoForced[] = "incognito.forced";
 
 // Boolean that is true when Suggest support is enabled.
 const char kSearchSuggestEnabled[] = "search.suggest_enabled";
@@ -485,6 +495,15 @@ const char kShow3gPromoNotification[] =
 // Map of timestamps of the last used file browser tasks.
 const char kLastUsedFileBrowserHandlers[] =
     "filebrowser.handler.lastused";
+
+// A boolean pref that uses shared proxies.
+const char kUseSharedProxies[] = "settings.use_shared_proxies";
+
+// A string prefs for OAuth1 token.
+const char kOAuth1Token[] = "settings.account.oauth1_token";
+
+// A string prefs for OAuth1 secret.
+const char kOAuth1Secret[] = "settings.account.oauth1_secret";
 #endif  // defined(OS_CHROMEOS)
 
 // The disabled messages in IPC logging.
@@ -522,13 +541,6 @@ const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
 // Boolean controlling whether printing is enabled.
 const char kPrintingEnabled[] = "printing.enabled";
 
-// String pref to define the default values for print overlays.
-const char kPrintingPageHeaderLeft[] = "printing.page.header.left";
-const char kPrintingPageHeaderCenter[] = "printing.page.header.center";
-const char kPrintingPageHeaderRight[] = "printing.page.header.right";
-const char kPrintingPageFooterLeft[] = "printing.page.footer.left";
-const char kPrintingPageFooterCenter[] = "printing.page.footer.center";
-const char kPrintingPageFooterRight[] = "printing.page.footer.right";
 #if defined(TOOLKIT_USES_GTK)
 // GTK specific preference on whether we should match the system GTK theme.
 const char kUsesSystemTheme[] = "extensions.theme.use_system";
@@ -635,6 +647,9 @@ const char kContentSettingsVersion[] = "profile.content_settings.pref_version";
 // kContentSettingsVersion.
 const char kContentSettingsPatterns[] = "profile.content_settings.patterns";
 
+const char kContentSettingsPatternPairs[] =
+    "profile.content_settings.pattern_pairs";
+
 // Boolean that is true if we should unconditionally block third-party cookies,
 // regardless of other content settings.
 const char kBlockThirdPartyCookies[] = "profile.block_third_party_cookies";
@@ -691,10 +706,11 @@ const char kPinnedTabs[] = "pinned_tabs";
 // Boolean that is true when HTTP throttling is enabled.
 const char kHttpThrottlingEnabled[] = "http_throttling.enabled";
 
-// Integer that specifies the policy refresh rate for policy in milliseconds.
-// Not all values are meaningful, so it is clamped to a sane range by the cloud
-// policy subsystem.
-const char kPolicyRefreshRate[] = "policy.refresh_rate";
+// Boolean that is true until the user changes the setting of the check-box
+// that controls whether HTTP throttling is enabled. When this is false,
+// we do not allow FieldTrial experiments to modify whether the feature
+// is enabled or not.
+const char kHttpThrottlingMayExperiment[] = "http_throttling.may_experiment";
 
 // Integer containing the default Geolocation content setting.
 const char kGeolocationDefaultContentSetting[] =
@@ -712,6 +728,21 @@ const char kEnableHyperlinkAuditing[] = "enable_a_ping";
 // Whether to enable sending referrers.
 const char kEnableReferrers[] = "enable_referrers";
 
+#if defined(OS_MACOSX)
+// Whether presentation mode is enabled for fullscreen (used on Lion only).
+const char kPresentationModeEnabled[] = "presentation_mode_enabled";
+#endif
+
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
+// The local profile id for this profile.
+const char kLocalProfileId[] = "profile.local_profile_id";
+
+// Whether passwords in external services (e.g. GNOME Keyring) have been tagged
+// with the local profile id yet. (Used for migrating to tagged passwords.)
+const char kPasswordsUseLocalProfileId[] =
+    "profile.passwords_use_local_profile_id";
+#endif
+
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
 
@@ -725,10 +756,16 @@ const char kProfileDirectoryMap[] = "profile.directory_map";
 // directories.
 const char kProfilesNumCreated[] = "profile.profiles_created";
 
+// A map of profile data directory to cached information. This cache can be
+// used to display information about profiles without actually having to load
+// them.
+const char kProfileInfoCache[] = "profile.info_cache";
+
 // Prefs for SSLConfigServicePref.
 const char kCertRevocationCheckingEnabled[] = "ssl.rev_checking.enabled";
 const char kSSL3Enabled[] = "ssl.ssl3.enabled";
 const char kTLS1Enabled[] = "ssl.tls1.enabled";
+const char kCipherSuiteBlacklist[] = "ssl.cipher_suites.blacklist";
 
 // The metrics client GUID and session ID.
 const char kMetricsClientID[] = "user_experience_metrics.client_id";
@@ -1093,6 +1130,9 @@ const char kNTPTipsResourceServer[] = "ntp.tips_resource_server";
 // Serves dates to determine display of elements on the NTP.
 const char kNTPDateResourceServer[] = "ntp.date_resource_server";
 
+// Which page should be visible on the new tab page v4
+const char kNTPShownPage[] = "ntp.shown_page";
+
 // Which sections should be visible on the new tab page
 // 1 - Show the most visited sites in a grid
 // 2 - Show the most visited sites as a list
@@ -1163,6 +1203,9 @@ const char kNTPWebStorePromoExpire[] = "ntp.webstorepromo.expire";
 
 // Specifies what users should maximize the NTP web store promo.
 const char kNTPWebStorePromoUserGroup[] = "ntp.webstorepromo.usergroup";
+
+// Customized app page names that appear on the New Tab Page.
+const char kNTPAppPageNames[] = "ntp.app_page_names";
 
 // The most up-to-date GPU blacklist downloaded from the web, which replaces
 // the one that's installed with chrome.
@@ -1240,6 +1283,13 @@ const char kGeolocationAccessToken[] = "geolocation.access_token";
 // LoginDatabase.
 const char kLoginDatabaseMigrated[] = "login_database.migrated";
 
+// Boolean that indicates whether to allow firewall traversal while trying to
+// establish the initial connection from the client or host.
+const char kRemoteAccessClientFirewallTraversal[] =
+    "remote_access.client_firewall_traversal";
+const char kRemoteAccessHostFirewallTraversal[] =
+    "remote_access.host_firewall_traversal";
+
 // The root URL of the cloud print service.
 const char kCloudPrintServiceURL[] = "cloud_print.service_url";
 
@@ -1295,6 +1345,14 @@ const char kClearPluginLSODataEnabled[] = "browser.clear_lso_data_enabled";
 // String which specifies where to store the disk cache.
 const char kDiskCacheDir[] = "browser.disk_cache_dir";
 
+// Specifies the release channel that the device should be locked to.
+// Possible values: "stable-channel", "beta-channel", "dev-channel", or an
+// empty string, in which case the value will be ignored.
+// TODO(dubroy): This preference may not be necessary once
+// http://crosbug.com/17015 is implemented and the update engine can just
+// fetch the correct value from the policy.
+const char kChromeOsReleaseChannel[] = "cros.system.releaseChannel";
+
 // *************** SERVICE PREFS ***************
 // These are attached to the service process.
 
@@ -1318,10 +1376,11 @@ const char kCloudPrintEnableJobPoll[] = "cloud_print.enable_job_poll";
 const char kCloudPrintRobotRefreshToken[] = "cloud_print.robot_refresh_token";
 const char kCloudPrintRobotEmail[] = "cloud_print.robot_email";
 
-// Preference to story proxy settings.
+// Preference to store proxy settings.
 const char kProxy[] = "proxy";
+const char kMaxConnectionsPerProxy[] = "net.max_connections_per_proxy";
 
-// Preferences that are exclusivly used to store managed values for default
+// Preferences that are exclusively used to store managed values for default
 // content settings.
 const char kManagedDefaultCookiesSetting[] =
     "profile.managed_default_content_settings.cookies";
@@ -1333,8 +1392,10 @@ const char kManagedDefaultPluginsSetting[] =
     "profile.managed_default_content_settings.plugins";
 const char kManagedDefaultPopupsSetting[] =
     "profile.managed_default_content_settings.popups";
+const char kManagedDefaultGeolocationSetting[] =
+    "profile.managed_default_content_settings.geolocation";
 
-// Preferences that are exclusivly used to store managed
+// Preferences that are exclusively used to store managed
 // content settings patterns.
 const char kManagedCookiesAllowedForUrls[] =
     "profile.managed_cookies_allowed_for_urls";
@@ -1377,4 +1438,10 @@ const char kIgnoredProtocolHandlers[] =
 // Whether user-specified handlers for protocols and content types can be
 // specified.
 const char kCustomHandlersEnabled[] = "custom_handlers.enabled";
+
+// Integers that specify the policy refresh rate for device- and user-policy in
+// milliseconds. Not all values are meaningful, so it is clamped to a sane range
+// by the cloud policy subsystem.
+const char kDevicePolicyRefreshRate[] = "policy.device_refresh_rate";
+const char kUserPolicyRefreshRate[] = "policy.user_refresh_rate";
 }  // namespace prefs

@@ -2,51 +2,82 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(TOOLKIT_VIEWS)  // TODO(pkasting): Port non-views to use this.
-
 #include "chrome/browser/tab_contents/infobar.h"
 
 #include <cmath>
 
+#include "build/build_config.h"
 #include "base/logging.h"
 #include "chrome/browser/tab_contents/infobar_container.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "ui/base/animation/slide_animation.h"
+
+SkColor GetInfoBarTopColor(InfoBarDelegate::Type infobar_type) {
+  // Yellow
+  static const SkColor kWarningBackgroundColorTop =
+      SkColorSetRGB(255, 242, 183);
+  // Gray
+  static const SkColor kPageActionBackgroundColorTop =
+      SkColorSetRGB(237, 237, 237);
+
+  return (infobar_type == InfoBarDelegate::WARNING_TYPE) ?
+      kWarningBackgroundColorTop : kPageActionBackgroundColorTop;
+}
+
+SkColor GetInfoBarBottomColor(InfoBarDelegate::Type infobar_type) {
+  // Yellow
+  static const SkColor kWarningBackgroundColorBottom =
+      SkColorSetRGB(250, 230, 145);
+  // Gray
+  static const SkColor kPageActionBackgroundColorBottom =
+      SkColorSetRGB(217, 217, 217);
+
+  return (infobar_type == InfoBarDelegate::WARNING_TYPE) ?
+      kWarningBackgroundColorBottom : kPageActionBackgroundColorBottom;
+}
+
+// TODO(pkasting): Port Mac to use this.
+#if defined(TOOLKIT_VIEWS) || defined(TOOLKIT_GTK)
 
 InfoBar::InfoBar(TabContentsWrapper* owner, InfoBarDelegate* delegate)
     : owner_(owner),
       delegate_(delegate),
       container_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(animation_(new ui::SlideAnimation(this))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(animation_(this)),
       arrow_height_(0),
       arrow_target_height_(kDefaultArrowTargetHeight),
       arrow_half_width_(0),
       bar_height_(0),
       bar_target_height_(kDefaultBarTargetHeight) {
-  DCHECK(owner != NULL);
-  DCHECK(delegate != NULL);
-  animation_->SetTweenType(ui::Tween::LINEAR);
+  DCHECK(owner_ != NULL);
+  DCHECK(delegate_ != NULL);
+  animation_.SetTweenType(ui::Tween::LINEAR);
 }
 
 InfoBar::~InfoBar() {
 }
 
 void InfoBar::Show(bool animate) {
+  PlatformSpecificShow(animate);
   if (animate) {
-    animation_->Show();
+    animation_.Show();
   } else {
-    animation_->Reset(1.0);
-    AnimationEnded(NULL);
+    animation_.Reset(1.0);
+    RecalculateHeights(true);
   }
 }
 
 void InfoBar::Hide(bool animate) {
   PlatformSpecificHide(animate);
   if (animate) {
-    animation_->Hide();
+    animation_.Hide();
   } else {
-    animation_->Reset(0.0);
-    AnimationEnded(NULL);
+    animation_.Reset(0.0);
+    // We want to remove ourselves from the container immediately even if we
+    // still have an owner, which MaybeDelete() won't do.
+    DCHECK(container_);
+    container_->RemoveInfoBar(this);
+    MaybeDelete();  // Necessary if the infobar was already closing.
   }
 }
 
@@ -54,19 +85,26 @@ void InfoBar::SetArrowTargetHeight(int height) {
   DCHECK_LE(height, kMaximumArrowTargetHeight);
   // Once the closing animation starts, we ignore further requests to change the
   // target height.
-  if ((arrow_target_height_ != height) && !animation()->IsClosing()) {
+  if ((arrow_target_height_ != height) && !animation_.IsClosing()) {
     arrow_target_height_ = height;
     RecalculateHeights(false);
   }
+}
+
+void InfoBar::CloseSoon() {
+  owner_ = NULL;
+  MaybeDelete();
 }
 
 void InfoBar::AnimationProgressed(const ui::Animation* animation) {
   RecalculateHeights(false);
 }
 
-void InfoBar::RemoveInfoBar() {
-  if (container_)
-    container_->RemoveDelegate(delegate_);
+void InfoBar::RemoveSelf() {
+  // |owner_| can be NULL here, e.g. because the user clicks the close button
+  // when the infobar is already closing.
+  if (delegate_ && owner_)
+    owner_->RemoveInfoBar(delegate_);
 }
 
 void InfoBar::SetBarTargetHeight(int height) {
@@ -100,9 +138,9 @@ void InfoBar::RecalculateHeights(bool force_notify) {
   // scaling each of these with the square root of the animation value causes a
   // linear animation of the area, which matches the perception of the animation
   // of the bar portion.
-  double scale_factor = sqrt(animation_->GetCurrentValue());
+  double scale_factor = sqrt(animation_.GetCurrentValue());
   arrow_height_ = static_cast<int>(arrow_target_height_ * scale_factor);
-  if (animation_->is_animating()) {
+  if (animation_.is_animating()) {
     arrow_half_width_ = static_cast<int>(std::min(arrow_target_height_,
         kMaximumArrowTargetHalfWidth) * scale_factor);
   } else {
@@ -121,7 +159,7 @@ void InfoBar::RecalculateHeights(bool force_notify) {
   if (arrow_height_)
     arrow_height_ += kSeparatorLineHeight;
 
-  bar_height_ = animation_->CurrentValueBetween(0, bar_target_height_);
+  bar_height_ = animation_.CurrentValueBetween(0, bar_target_height_);
 
   // Don't re-layout if nothing has changed, e.g. because the animation step was
   // not large enough to actually change the heights by at least a pixel.
@@ -131,19 +169,16 @@ void InfoBar::RecalculateHeights(bool force_notify) {
     PlatformSpecificOnHeightsRecalculated();
 
   if (container_ && (heights_differ || force_notify))
-    container_->OnInfoBarStateChanged(animation_->is_animating());
+    container_->OnInfoBarStateChanged(animation_.is_animating());
 }
 
 void InfoBar::MaybeDelete() {
-  if (delegate_ && (animation_->GetCurrentValue() == 0.0)) {
+  if (!owner_ && delegate_ && (animation_.GetCurrentValue() == 0.0)) {
     if (container_)
       container_->RemoveInfoBar(this);
-    // Note that we only tell the delegate we're closed here, and not when we're
-    // simply destroyed (by virtue of a tab switch or being moved from window to
-    // window), since this action can cause the delegate to destroy itself.
     delegate_->InfoBarClosed();
     delegate_ = NULL;
   }
 }
 
-#endif  // TOOLKIT_VIEWS
+#endif  // TOOLKIT_VIEWS || TOOLKIT_GTK

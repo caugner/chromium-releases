@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "base/time.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
@@ -20,6 +20,13 @@
 #include "views/ime/text_input_client.h"
 #include "views/view.h"
 #include "webkit/glue/webcursor.h"
+
+#if defined(TOUCH_UI)
+namespace ui {
+enum TouchStatus;
+}
+class AcceleratedSurfaceContainerTouch;
+#endif
 
 class RenderWidgetHost;
 struct NativeWebKeyboardEvent;
@@ -43,7 +50,8 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   // RenderWidgetHostView implementation.
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) OVERRIDE;
-  virtual void InitAsFullscreen() OVERRIDE;
+  virtual void InitAsFullscreen(
+      RenderWidgetHostView* reference_host_view) OVERRIDE;
   virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
   virtual void DidBecomeSelected() OVERRIDE;
   virtual void WasHidden() OVERRIDE;
@@ -69,25 +77,26 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual void RenderViewGone(base::TerminationStatus status,
                               int error_code) OVERRIDE;
   virtual void Destroy() OVERRIDE;
-  virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) OVERRIDE {}
   virtual void SetTooltipText(const std::wstring& tooltip_text) OVERRIDE;
   virtual void SelectionChanged(const std::string& text,
                                 const ui::Range& range) OVERRIDE;
   virtual void ShowingContextMenu(bool showing) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
+#if defined(TOOLKIT_USES_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
+#endif
   virtual void SetVisuallyDeemphasized(const SkColor* color,
                                        bool animate) OVERRIDE;
-  virtual bool ContainsNativeView(gfx::NativeView native_view) const OVERRIDE;
+#if defined(TOOLKIT_USES_GTK)
   virtual void AcceleratedCompositingActivated(bool activated) OVERRIDE;
+#endif
+#if defined(OS_WIN)
+  virtual void WillWmDestroy() OVERRIDE;
+  virtual void ShowCompositorHostWindow(bool show) OVERRIDE;
+#endif
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
-
-  // On some systems, there can be two native views, where an outer native view
-  // contains the inner native view (e.g. when using GTK+). This returns the
-  // inner view. This can return NULL when it's not attached to a view.
-  gfx::NativeView GetInnerNativeView() const;
 
   // Overridden from views::View.
   virtual std::string GetClassName() const OVERRIDE;
@@ -98,12 +107,15 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
-  virtual View::TouchStatus OnTouchEvent(
-      const views::TouchEvent& event) OVERRIDE;
+#if defined(TOUCH_UI)
+  virtual ui::TouchStatus OnTouchEvent(const views::TouchEvent& event) OVERRIDE;
+#endif
   virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
   virtual bool OnKeyReleased(const views::KeyEvent& event) OVERRIDE;
   virtual bool OnMouseWheel(const views::MouseWheelEvent& event) OVERRIDE;
   virtual views::TextInputClient* GetTextInputClient() OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip)
+      OVERRIDE;
 
   // Overridden from TextInputClient:
   virtual void SetCompositionText(
@@ -127,6 +139,13 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) OVERRIDE;
   virtual views::View* GetOwnerViewOfTextInputClient() OVERRIDE;
+
+#if defined(TOUCH_UI)
+  virtual void AcceleratedSurfaceSetIOSurface(
+      int32 width, int32 height, uint64 surface_id) OVERRIDE;
+  virtual void AcceleratedSurfaceBuffersSwapped(uint64 surface_id) OVERRIDE;
+  virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE;
+#endif
 
  protected:
   // Overridden from RenderWidgetHostView / views::View.
@@ -158,6 +177,13 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   // to cancel its ongoing composition sesstion.
   void FinishImeCompositionSession();
 
+#if defined(TOOLKIT_USES_GTK)
+  // On some systems, there can be two native views, where an outer native view
+  // contains the inner native view (e.g. when using GTK+). This returns the
+  // inner view. This can return NULL when it's not attached to a view.
+  gfx::NativeView GetInnerNativeView() const;
+#endif
+
   // The model object.
   RenderWidgetHost* host_;
 
@@ -181,8 +207,8 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   // The native cursor.
   gfx::NativeCursor native_cursor_;
 
-  // Whether we are showing a popup menu.
-  bool is_showing_popup_menu_;
+  // Whether we are showing a context menu.
+  bool is_showing_context_menu_;
 
   // The time at which this view started displaying white pixels as a result of
   // not having anything to paint (empty backing store from renderer). This
@@ -211,6 +237,13 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
 
   // Indicates if there is onging composition text.
   bool has_composition_text_;
+
+  string16 tooltip_text_;
+
+#if defined(TOUCH_UI)
+  std::map<uint64, scoped_refptr<AcceleratedSurfaceContainerTouch> >
+      accelerated_surface_containers_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewViews);
 };

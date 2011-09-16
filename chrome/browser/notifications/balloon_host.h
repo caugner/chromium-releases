@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -50,21 +50,19 @@ class BalloonHost : public RenderViewHostDelegate,
   const string16& GetSource() const;
 
   // RenderViewHostDelegate overrides.
-  virtual WebPreferences GetWebkitPrefs();
-  virtual SiteInstance* GetSiteInstance() const;
-  virtual Profile* GetProfile() const;
-  virtual const GURL& GetURL() const;
-  virtual void Close(RenderViewHost* render_view_host);
-  virtual void RenderViewCreated(RenderViewHost* render_view_host);
-  virtual void RenderViewReady(RenderViewHost* render_view_host);
+  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
+  virtual const GURL& GetURL() const OVERRIDE;
+  virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewReady(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGone(RenderViewHost* render_view_host,
                               base::TerminationStatus status,
-                              int error_code);
+                              int error_code) OVERRIDE;
   virtual void UpdateTitle(RenderViewHost* render_view_host,
-                           int32 page_id, const std::wstring& title) {}
-  virtual int GetBrowserWindowID() const;
-  virtual ViewType::Type GetRenderViewType() const;
-  virtual RenderViewHostDelegate::View* GetViewDelegate();
+                           int32 page_id, const std::wstring& title) OVERRIDE {}
+  virtual ViewType::Type GetRenderViewType() const OVERRIDE;
+  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
+  virtual void HandleMouseDown() OVERRIDE;
 
   // RenderViewHostDelegate::View methods. Only the ones for opening new
   // windows are currently implemented.
@@ -96,26 +94,11 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) {}
   virtual void GotFocus() {}
   virtual void TakeFocus(bool reverse) {}
-  virtual void LostCapture() {}
-  virtual void Activate() {}
-  virtual void Deactivate() {}
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
-  virtual void HandleMouseMove() {}
-  virtual void HandleMouseDown();
-  virtual void HandleMouseLeave() {}
-  virtual void HandleMouseUp() {}
-  virtual void HandleMouseActivate() {}
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
 
   // Enable Web UI. This has to be called before renderer is created.
   void EnableWebUI();
-
-  virtual void UpdateInspectorSetting(const std::string& key,
-                                      const std::string& value);
-  virtual void ClearInspectorSettings();
 
   // Returns whether the associated render view is ready. Used only for testing.
   bool IsRenderViewReady() const;

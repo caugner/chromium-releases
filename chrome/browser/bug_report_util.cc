@@ -167,11 +167,7 @@ void BugReportUtil::SetOSVersion(std::string* os_version) {
   if (service_pack > 0)
     os_version->append(StringPrintf("Service Pack %d", service_pack));
 #elif defined(OS_MACOSX)
-  int32 major;
-  int32 minor;
-  int32 bugFix;
-  base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugFix);
-  *os_version = StringPrintf("%d.%d.%d", major, minor, bugFix);
+  *os_version = base::SysInfo::OperatingSystemVersion();
 #else
   *os_version = "unknown";
 #endif
@@ -264,7 +260,7 @@ void BugReportUtil::SendReport(Profile* profile,
     const std::string& user_email_text,
     const char* zipped_logs_data,
     int zipped_logs_length,
-    const chromeos::LogDictionaryType* const sys_info) {
+    const chromeos::system::LogDictionaryType* const sys_info) {
 #else
     int png_height) {
 #endif
@@ -330,8 +326,8 @@ void BugReportUtil::SendReport(Profile* profile,
 #if defined(OS_CHROMEOS)
   if (sys_info) {
     // Add the product specific data
-    for (chromeos::LogDictionaryType::const_iterator i = sys_info->begin();
-         i != sys_info->end(); ++i)
+    for (chromeos::system::LogDictionaryType::const_iterator i =
+             sys_info->begin(); i != sys_info->end(); ++i)
       if (!CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kCompressSystemFeedback) || ValidFeedbackSize(i->second)) {
         AddFeedbackData(&feedback_data, i->first, i->second);
@@ -377,6 +373,7 @@ void BugReportUtil::SendReport(Profile* profile,
   DispatchFeedback(profile, post_body, 0);
 }
 
+#if defined(ENABLE_SAFE_BROWSING)
 // static
 void BugReportUtil::ReportPhishing(TabContents* currentTab,
                                    const std::string& phishing_url) {
@@ -387,3 +384,4 @@ void BugReportUtil::ReportPhishing(TabContents* currentTab,
       GURL(),
       PageTransition::LINK);
 }
+#endif

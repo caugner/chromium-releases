@@ -12,7 +12,9 @@
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/testing_browser_process.h"
 #include "chrome/test/testing_browser_process_test.h"
 #include "chrome/test/testing_profile.h"
@@ -121,7 +123,7 @@ class AutocompleteProviderTest : public testing::Test,
 
  private:
   // NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -151,25 +153,28 @@ void AutocompleteProviderTest::ResetControllerWithTestProviders(
   providers_.push_back(providerB);
 
   // Reset the controller to contain our new providers.
-  AutocompleteController* controller = new AutocompleteController(providers_);
+  AutocompleteController* controller =
+      new AutocompleteController(providers_, &profile_);
   controller_.reset(controller);
   providerA->set_listener(controller);
   providerB->set_listener(controller);
 
   // The providers don't complete synchronously, so listen for "result updated"
   // notifications.
-  registrar_.Add(this, NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_READY,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
                  NotificationService::AllSources());
 }
 
 void AutocompleteProviderTest::
     ResetControllerWithTestProvidersWithKeywordAndSearchProviders() {
-  profile_.CreateTemplateURLModel();
+  profile_.CreateTemplateURLService();
 
   // Reset the default TemplateURL.
   TemplateURL* default_t_url = new TemplateURL();
   default_t_url->SetURL("http://defaultturl/{searchTerms}", 0, 0);
-  TemplateURLModel* turl_model = profile_.GetTemplateURLModel();
+  TemplateURLService* turl_model =
+      TemplateURLServiceFactory::GetForProfile(&profile_);
   turl_model->Add(default_t_url);
   turl_model->SetDefaultSearchProvider(default_t_url);
   TemplateURLID default_provider_id = default_t_url->id();
@@ -180,7 +185,7 @@ void AutocompleteProviderTest::
   keyword_t_url->set_short_name(ASCIIToUTF16("k"));
   keyword_t_url->set_keyword(ASCIIToUTF16("k"));
   keyword_t_url->SetURL("http://keyword/{searchTerms}", 0, 0);
-  profile_.GetTemplateURLModel()->Add(keyword_t_url);
+  turl_model->Add(keyword_t_url);
   ASSERT_NE(0, keyword_t_url->id());
 
   // Forget about any existing providers.  The controller owns them and will
@@ -197,7 +202,8 @@ void AutocompleteProviderTest::
   search_provider->AddRef();
   providers_.push_back(search_provider);
 
-  AutocompleteController* controller = new AutocompleteController(providers_);
+  AutocompleteController* controller =
+      new AutocompleteController(providers_, &profile_);
   controller_.reset(controller);
 }
 
@@ -228,7 +234,7 @@ void AutocompleteProviderTest::RunExactKeymatchTest(
       controller_->result().default_match()->provider);
 }
 
-void AutocompleteProviderTest::Observe(NotificationType type,
+void AutocompleteProviderTest::Observe(int type,
                                        const NotificationSource& source,
                                        const NotificationDetails& details) {
   if (controller_->done()) {
@@ -282,7 +288,9 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("foo"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo.c"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo.com"), AutocompleteInput::URL },
-    { ASCIIToUTF16("-.com"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("-foo.com"), AutocompleteInput::URL },
+    { ASCIIToUTF16("foo-.com"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("foo.-com"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo/bar"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo;bar"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo/bar baz"), AutocompleteInput::UNKNOWN },
@@ -331,7 +339,9 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("http://foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://foo_bar.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://foo/bar baz"), AutocompleteInput::URL },
-    { ASCIIToUTF16("http://-.com"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("http://-foo.com"), AutocompleteInput::URL },
+    { ASCIIToUTF16("http://foo-.com"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("http://foo.-com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("http://_foo_.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("http://foo.com:abc"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("http://foo.com:123456"), AutocompleteInput::QUERY },

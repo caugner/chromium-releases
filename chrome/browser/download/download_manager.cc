@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "base/task.h"
@@ -23,7 +23,7 @@
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/download/download_process_handle.h"
+#include "chrome/browser/download/download_request_handle.h"
 #include "chrome/browser/download/download_safe_browsing_client.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/download/download_util.h"
@@ -34,15 +34,14 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/download/download_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_type.h"
+#include "content/common/content_notification_types.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -114,14 +113,19 @@ void DownloadManager::Shutdown() {
   // At this point, all dangerous downloads have had their files removed
   // and all in progress downloads have been cancelled.  We can now delete
   // anything left.
-  STLDeleteElements(&downloads_);
 
-  // And clear all non-owning containers.
+  // Copy downloads_ to separate container so as not to set off checks
+  // in DownloadItem destruction.
+  DownloadSet downloads_to_delete;
+  downloads_to_delete.swap(downloads_);
+
   in_progress_.clear();
   active_downloads_.clear();
+  history_downloads_.clear();
 #if !defined(NDEBUG)
   save_page_as_downloads_.clear();
 #endif
+  STLDeleteElements(&downloads_to_delete);
 
   file_manager_ = NULL;
 
@@ -261,12 +265,59 @@ void DownloadManager::StartDownload(int32 download_id) {
   if (!download)
     return;
 
+#if defined(ENABLE_SAFE_BROWSING)
   // Create a client to verify download URL with safebrowsing.
   // It deletes itself after the callback.
   scoped_refptr<DownloadSBClient> sb_client = new DownloadSBClient(
-      download_id, download->url_chain(), download->referrer_url());
+      download_id, download->url_chain(), download->referrer_url(),
+          profile_->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled));
   sb_client->CheckDownloadUrl(
       NewCallback(this, &DownloadManager::CheckDownloadUrlDone));
+#else
+  CheckDownloadUrlDone(download_id, false);
+#endif
+}
+
+void DownloadManager::CheckForHistoryFilesRemoval() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  for (DownloadMap::iterator it = history_downloads_.begin();
+       it != history_downloads_.end(); ++it) {
+    CheckForFileRemoval(it->second);
+  }
+}
+
+void DownloadManager::CheckForFileRemoval(DownloadItem* download_item) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (download_item->IsComplete() &&
+      !download_item->file_externally_removed()) {
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        NewRunnableMethod(this,
+                          &DownloadManager::CheckForFileRemovalOnFileThread,
+                          download_item->db_handle(),
+                          download_item->GetTargetFilePath()));
+  }
+}
+
+void DownloadManager::CheckForFileRemovalOnFileThread(
+    int64 db_handle, const FilePath& path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  if (!file_util::PathExists(path)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        NewRunnableMethod(this,
+                          &DownloadManager::OnFileRemovalDetected,
+                          db_handle));
+  }
+}
+
+void DownloadManager::OnFileRemovalDetected(int64 db_handle) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DownloadMap::iterator it = history_downloads_.find(db_handle);
+  if (it != history_downloads_.end()) {
+    DownloadItem* download_item = it->second;
+    download_item->OnDownloadedFileRemoved();
+  }
 }
 
 void DownloadManager::CheckDownloadUrlDone(int32 download_id,
@@ -307,10 +358,7 @@ void DownloadManager::CheckVisitedReferrerBeforeDone(
 
   if (state.force_file_name.empty()) {
     FilePath generated_name;
-    download_util::GenerateFileNameFromRequest(download->GetURL(),
-                                               download->content_disposition(),
-                                               download->referrer_charset(),
-                                               download->mime_type(),
+    download_util::GenerateFileNameFromRequest(*download,
                                                &generated_name);
 
     // Freeze the user's preference for showing a Save As dialog.  We're going
@@ -452,8 +500,8 @@ void DownloadManager::CheckIfSuggestedPathExists(int32 download_id,
                         state));
 }
 
-void DownloadManager::OnPathExistenceAvailable(int32 download_id,
-                                               DownloadStateInfo new_state) {
+void DownloadManager::OnPathExistenceAvailable(
+    int32 download_id, const DownloadStateInfo& new_state) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DownloadItem* download = GetActiveDownloadItem(download_id);
@@ -472,12 +520,12 @@ void DownloadManager::OnPathExistenceAvailable(int32 download_id,
     if (!select_file_dialog_.get())
       select_file_dialog_ = SelectFileDialog::Create(this);
 
-    DownloadProcessHandle process_handle = download->process_handle();
-    TabContents* contents = process_handle.GetTabContents();
+    DownloadRequestHandle request_handle = download->request_handle();
+    TabContents* contents = request_handle.GetTabContents();
     SelectFileDialog::FileTypeInfo file_type_info;
     FilePath::StringType extension = suggested_path.Extension();
     if (!extension.empty()) {
-      extension.erase(extension.begin()); // drop the .
+      extension.erase(extension.begin());  // drop the .
       file_type_info.extensions.resize(1);
       file_type_info.extensions[0].push_back(extension);
     }
@@ -530,7 +578,6 @@ void DownloadManager::ContinueDownloadWithPath(DownloadItem* download,
   // Make sure the initial file name is set only once.
   DCHECK(download->full_path().empty());
   download->OnPathDetermined(chosen_file);
-  download->UpdateTarget();
 
   VLOG(20) << __FUNCTION__ << "()"
            << " download = " << download->DebugString(true);
@@ -616,12 +663,18 @@ void DownloadManager::OnAllDataSaved(int32 download_id,
   // or there is error while it is calculated. We will skip the download hash
   // check in that case.
   if (!hash.empty()) {
+#if defined(ENABLE_SAFE_BROWSING)
     scoped_refptr<DownloadSBClient> sb_client =
         new DownloadSBClient(download_id,
                              download->url_chain(),
-                             download->referrer_url());
+                             download->referrer_url(),
+                             profile_->GetPrefs()->GetBoolean(
+                                 prefs::kSafeBrowsingEnabled));
     sb_client->CheckDownloadHash(
         hash, NewCallback(this, &DownloadManager::CheckDownloadHashDone));
+#else
+    CheckDownloadHashDone(download_id, false);
+#endif
   }
   MaybeCompleteDownload(download);
 }
@@ -644,6 +697,37 @@ void DownloadManager::CheckDownloadHashDone(int32 download_id,
            << active_downloads_[download_id]->GetURL().spec();
 }
 
+void DownloadManager::AssertQueueStateConsistent(DownloadItem* download) {
+  // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
+  if (download->state() == DownloadItem::REMOVING) {
+    CHECK(!ContainsKey(downloads_, download));
+    CHECK(!ContainsKey(active_downloads_, download->id()));
+    CHECK(!ContainsKey(in_progress_, download->id()));
+    CHECK(!ContainsKey(history_downloads_, download->db_handle()));
+    return;
+  }
+
+  // Should be in downloads_ if we're not REMOVING.
+  CHECK(ContainsKey(downloads_, download));
+
+  // Check history_downloads_ consistency.
+  if (download->db_handle() != DownloadHistory::kUninitializedHandle) {
+    CHECK(ContainsKey(history_downloads_, download->db_handle()));
+  } else {
+    // TODO(rdsmith): Somewhat painful; make sure to disable in
+    // release builds after resolution of http://crbug.com/85408.
+    for (DownloadMap::iterator it = history_downloads_.begin();
+         it != history_downloads_.end(); ++it) {
+      CHECK(it->second != download);
+    }
+  }
+
+  CHECK(ContainsKey(active_downloads_, download->id()) ==
+        (download->state() == DownloadItem::IN_PROGRESS));
+  CHECK(ContainsKey(in_progress_, download->id()) ==
+        (download->state() == DownloadItem::IN_PROGRESS));
+}
+
 bool DownloadManager::IsDownloadReadyForCompletion(DownloadItem* download) {
   // If we don't have all the data, the download is not ready for
   // completion.
@@ -663,7 +747,10 @@ bool DownloadManager::IsDownloadReadyForCompletion(DownloadItem* download) {
   // If the download hasn't been inserted into the history system
   // (which occurs strictly after file name determination, intermediate
   // file rename, and UI display) then it's not ready for completion.
-  return (download->db_handle() != DownloadHistory::kUninitializedHandle);
+  if (download->db_handle() == DownloadHistory::kUninitializedHandle)
+    return false;
+
+  return true;
 }
 
 void DownloadManager::MaybeCompleteDownload(DownloadItem* download) {
@@ -754,15 +841,13 @@ void DownloadManager::DownloadCancelled(int32 download_id) {
     download_history_->UpdateEntry(download);
   }
 
-  DownloadCancelledInternal(download_id, download->process_handle());
+  DownloadCancelledInternal(download_id, download->request_handle());
 }
 
 void DownloadManager::DownloadCancelledInternal(
-    int download_id, DownloadProcessHandle process_handle) {
+    int download_id, const DownloadRequestHandle& request_handle) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Cancel the network request.  RDH is guaranteed to outlive the IO thread.
-  download_util::CancelDownloadRequest(
-      g_browser_process->resource_dispatcher_host(), process_handle);
+  request_handle.CancelRequest();
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
@@ -806,36 +891,9 @@ void DownloadManager::OnDownloadError(int32 download_id,
           file_manager_, &DownloadFileManager::CancelDownload, download_id));
 }
 
-void DownloadManager::PauseDownload(int32 download_id, bool pause) {
-  DownloadMap::iterator it = in_progress_.find(download_id);
-  if (it == in_progress_.end())
-    return;
-
-  DownloadItem* download = it->second;
-  if (pause == download->is_paused())
-    return;
-
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this,
-                        &DownloadManager::PauseDownloadRequest,
-                        g_browser_process->resource_dispatcher_host(),
-                        download->process_handle(),
-                        pause));
-}
-
 void DownloadManager::UpdateAppIcon() {
   if (status_updater_)
     status_updater_->Update();
-}
-
-void DownloadManager::PauseDownloadRequest(ResourceDispatcherHost* rdh,
-                                           DownloadProcessHandle process_handle,
-                                           bool pause) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  rdh->PauseRequest(process_handle.child_id(),
-                    process_handle.request_id(),
-                    pause);
 }
 
 void DownloadManager::RemoveDownload(int64 download_handle) {
@@ -873,6 +931,8 @@ int DownloadManager::RemoveDownloadsBetween(const base::Time remove_begin,
         (download->IsComplete() ||
          download->IsCancelled() ||
          download->IsInterrupted())) {
+      AssertQueueStateConsistent(download);
+
       // Remove from the map and move to the next in the list.
       history_downloads_.erase(it++);
 
@@ -921,11 +981,14 @@ int DownloadManager::RemoveAllDownloads() {
   return RemoveDownloadsBetween(base::Time(), base::Time());
 }
 
-void DownloadManager::SavePageAsDownloadStarted(DownloadItem* download_item) {
+void DownloadManager::SavePageAsDownloadStarted(DownloadItem* download) {
 #if !defined(NDEBUG)
-  save_page_as_downloads_.insert(download_item);
+  save_page_as_downloads_.insert(download);
 #endif
-  downloads_.insert(download_item);
+  downloads_.insert(download);
+  // Add to history and notify observers.
+  AddDownloadItemToHistory(download, DownloadHistory::kUninitializedHandle);
+  NotifyModelChanged();
 }
 
 // Initiate a download of a specific URL. We send the request to the
@@ -1052,7 +1115,7 @@ void DownloadManager::FileSelectionCanceled(void* params) {
   VLOG(20) << __FUNCTION__ << "()"
            << " download = " << download->DebugString(true);
 
-  DownloadCancelledInternal(download_id, download->process_handle());
+  DownloadCancelledInternal(download_id, download->request_handle());
 }
 
 // TODO(phajdan.jr): This is apparently not being exercised in tests.
@@ -1082,15 +1145,6 @@ bool DownloadManager::IsDangerous(const DownloadItem& download,
   return false;
 }
 
-void DownloadManager::DangerousDownloadValidated(DownloadItem* download) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_EQ(DownloadItem::DANGEROUS, download->safety_state());
-  download->set_safety_state(DownloadItem::DANGEROUS_BUT_VALIDATED);
-  download->UpdateObservers();
-
-  MaybeCompleteDownload(download);
-}
-
 // Operations posted to us from the history service ----------------------------
 
 // The history service has retrieved all download entries. 'entries' contains
@@ -1106,6 +1160,30 @@ void DownloadManager::OnQueryDownloadEntriesComplete(
              << " download = " << download->DebugString(true);
   }
   NotifyModelChanged();
+  CheckForHistoryFilesRemoval();
+}
+
+void DownloadManager::AddDownloadItemToHistory(DownloadItem* download,
+                                               int64 db_handle) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // It's not immediately obvious, but HistoryBackend::CreateDownload() can
+  // call this function with an invalid |db_handle|. For instance, this can
+  // happen when the history database is offline. We cannot have multiple
+  // DownloadItems with the same invalid db_handle, so we need to assign a
+  // unique |db_handle| here.
+  if (db_handle == DownloadHistory::kUninitializedHandle)
+    db_handle = download_history_->GetNextFakeDbHandle();
+
+  // TODO(rdsmith): Convert to DCHECK() when http://crbug.com/84508
+  // is fixed.
+  CHECK_NE(DownloadHistory::kUninitializedHandle, db_handle);
+
+  DCHECK(download->db_handle() == DownloadHistory::kUninitializedHandle);
+  download->set_db_handle(db_handle);
+
+  DCHECK(!ContainsKey(history_downloads_, download->db_handle()));
+  history_downloads_[download->db_handle()] = download;
 }
 
 // Once the new DownloadItem's creation info has been committed to the history
@@ -1122,19 +1200,7 @@ void DownloadManager::OnCreateDownloadEntryComplete(int32 download_id,
            << " download_id = " << download_id
            << " download = " << download->DebugString(true);
 
-  // It's not immediately obvious, but HistoryBackend::CreateDownload() can
-  // call this function with an invalid |db_handle|. For instance, this can
-  // happen when the history database is offline. We cannot have multiple
-  // DownloadItems with the same invalid db_handle, so we need to assign a
-  // unique |db_handle| here.
-  if (db_handle == DownloadHistory::kUninitializedHandle)
-    db_handle = download_history_->GetNextFakeDbHandle();
-
-  DCHECK(download->db_handle() == DownloadHistory::kUninitializedHandle);
-  download->set_db_handle(db_handle);
-
-  DCHECK(!ContainsKey(history_downloads_, download->db_handle()));
-  history_downloads_[download->db_handle()] = download;
+  AddDownloadItemToHistory(download, db_handle);
 
   // Show in the appropriate browser UI.
   // This includes buttons to save or cancel, for a dangerous download.
@@ -1163,29 +1229,24 @@ void DownloadManager::OnCreateDownloadEntryComplete(int32 download_id,
 }
 
 void DownloadManager::ShowDownloadInBrowser(DownloadItem* download) {
-
   // The 'contents' may no longer exist if the user closed the tab before we
   // get this start completion event. If it does, tell the origin TabContents
   // to display its download shelf.
-  DownloadProcessHandle process_handle = download->process_handle();
-  TabContents* contents = process_handle.GetTabContents();
-  TabContentsWrapper* wrapper = NULL;
-  if (contents)
-      wrapper = TabContentsWrapper::GetCurrentWrapperForContents(contents);
-
+  DownloadRequestHandle request_handle = download->request_handle();
+  TabContents* content = request_handle.GetTabContents();
   // If the contents no longer exists, we start the download in the last active
   // browser. This is not ideal but better than fully hiding the download from
   // the user.
-  if (!wrapper) {
-    Browser* last_active = BrowserList::GetLastActive();
+  if (!content) {
+    Browser* last_active = BrowserList::GetLastActiveWithProfile(profile_);
     if (last_active)
-      wrapper = last_active->GetSelectedTabContentsWrapper();
+      content = last_active->GetSelectedTabContents();
   }
 
-  if (!wrapper)
+  if (!content)
     return;
 
-  wrapper->download_tab_helper()->OnStartDownload(download);
+  content->OnStartDownload(download);
 }
 
 // Clears the last download path, used to initialize "save as" dialogs.

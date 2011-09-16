@@ -45,7 +45,9 @@ MockPluginDelegate::PlatformContext3D* MockPluginDelegate::CreateContext3D() {
 
 MockPluginDelegate::PlatformVideoDecoder*
 MockPluginDelegate::CreateVideoDecoder(
-    media::VideoDecodeAccelerator::Client* client) {
+    media::VideoDecodeAccelerator::Client* client,
+    int32 command_buffer_route_id,
+    gpu::CommandBufferHelper* cmd_buffer_helper) {
   return NULL;
 }
 
@@ -134,6 +136,17 @@ bool MockPluginDelegate::ReadDirectory(
   return false;
 }
 
+void MockPluginDelegate::QueryAvailableSpace(
+    const GURL& origin, quota::StorageType type,
+    AvailableSpaceCallback* callback) {
+}
+
+void MockPluginDelegate::WillUpdateFile(const GURL& file_path) {
+}
+
+void MockPluginDelegate::DidUpdateFile(const GURL& file_path, int64_t delta) {
+}
+
 base::PlatformFileError MockPluginDelegate::OpenFile(
     const PepperFilePath& path,
     int flags,
@@ -168,6 +181,9 @@ base::PlatformFileError MockPluginDelegate::GetDirContents(
     const PepperFilePath& path,
     DirContents* contents) {
   return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+void MockPluginDelegate::PublishPolicy(const std::string& policy_json) {
 }
 
 scoped_refptr<base::MessageLoopProxy>
@@ -210,6 +226,9 @@ std::string MockPluginDelegate::GetDefaultEncoding() {
 
 void MockPluginDelegate::ZoomLimitsChanged(double minimum_factor,
                                            double maximum_factor) {
+}
+
+void MockPluginDelegate::SubscribeToPolicyUpdates(PluginInstance* instance) {
 }
 
 std::string MockPluginDelegate::ResolveProxy(const GURL& url) {

@@ -18,11 +18,13 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
@@ -41,6 +43,7 @@
 #if defined(TOOLKIT_VIEWS)
 #include "views/controls/textfield/native_textfield_views.h"
 #include "views/events/event.h"
+#include "views/widget/widget.h"
 #endif
 
 using base::Time;
@@ -142,7 +145,7 @@ const int kCtrlOrCmdMask = ui::EF_CONTROL_DOWN;
 }  // namespace
 
 class OmniboxViewTest : public InProcessBrowserTest,
-                                 public NotificationObserver {
+                        public NotificationObserver {
  protected:
   OmniboxViewTest() {
     set_show_window(true);
@@ -153,7 +156,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_NO_FATAL_FAILURE(SetupComponents());
     browser()->FocusLocationBar();
 #if defined(TOOLKIT_VIEWS)
-    if (views::NativeTextfieldViews::IsTextfieldViewsEnabled())
+    if (views::Widget::IsPureViews())
       return;
 #endif
     ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(),
@@ -198,7 +201,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   bool SendKeyAndWait(const Browser* browser,
                       ui::KeyboardCode key,
                       int modifiers,
-                      NotificationType type,
+                      int type,
                       const NotificationSource& source) WARN_UNUSED_RESULT {
     return ui_test_utils::SendKeyPressAndWait(
         browser, key,
@@ -218,8 +221,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
     NotificationRegistrar registrar;
     registrar.Add(this,
                   (tab_count < expected_tab_count ?
-                   NotificationType::TAB_PARENTED :
-                   NotificationType::TAB_CLOSED),
+                   content::NOTIFICATION_TAB_PARENTED :
+                   content::NOTIFICATION_TAB_CLOSED),
                    NotificationService::AllSources());
 
     while (!HasFailure() && browser->tab_count() != expected_tab_count)
@@ -245,7 +248,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
     NotificationRegistrar registrar;
     registrar.Add(this,
-                  NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_READY,
+                  chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
                   Source<AutocompleteController>(controller));
 
     while (!HasFailure() && !controller->done())
@@ -255,13 +258,14 @@ class OmniboxViewTest : public InProcessBrowserTest,
   }
 
   void SetupSearchEngine() {
-    TemplateURLModel* model = browser()->profile()->GetTemplateURLModel();
+    TemplateURLService* model =
+        TemplateURLServiceFactory::GetForProfile(browser()->profile());
     ASSERT_TRUE(model);
 
     if (!model->loaded()) {
       NotificationRegistrar registrar;
-      registrar.Add(this, NotificationType::TEMPLATE_URL_MODEL_LOADED,
-                    Source<TemplateURLModel>(model));
+      registrar.Add(this, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
+                    Source<TemplateURLService>(model));
       model->Load();
       ui_test_utils::RunMessageLoop();
     }
@@ -270,8 +274,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // Remove built-in template urls, like google.com, bing.com etc., as they
     // may appear as autocomplete suggests and interfere with our tests.
     model->SetDefaultSearchProvider(NULL);
-    TemplateURLModel::TemplateURLVector builtins = model->GetTemplateURLs();
-    for (TemplateURLModel::TemplateURLVector::const_iterator
+    TemplateURLService::TemplateURLVector builtins = model->GetTemplateURLs();
+    for (TemplateURLService::TemplateURLVector::const_iterator
          i = builtins.begin(); i != builtins.end(); ++i)
       model->Remove(*i);
 
@@ -292,7 +296,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
     if (!history_service->BackendLoaded()) {
       NotificationRegistrar registrar;
-      registrar.Add(this, NotificationType::HISTORY_LOADED,
+      registrar.Add(this, chrome::NOTIFICATION_HISTORY_LOADED,
                     Source<Profile>(profile));
       ui_test_utils::RunMessageLoop();
     }
@@ -302,7 +306,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
     if (!bookmark_model->IsLoaded()) {
       NotificationRegistrar registrar;
-      registrar.Add(this, NotificationType::BOOKMARK_MODEL_LOADED,
+      registrar.Add(this, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
                     Source<Profile>(profile));
       ui_test_utils::RunMessageLoop();
     }
@@ -341,16 +345,16 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_NO_FATAL_FAILURE(SetupHistory());
   }
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    switch (type.value) {
-      case NotificationType::TAB_PARENTED:
-      case NotificationType::TAB_CLOSED:
-      case NotificationType::TEMPLATE_URL_MODEL_LOADED:
-      case NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_READY:
-      case NotificationType::HISTORY_LOADED:
-      case NotificationType::BOOKMARK_MODEL_LOADED:
+    switch (type) {
+      case content::NOTIFICATION_TAB_PARENTED:
+      case content::NOTIFICATION_TAB_CLOSED:
+      case chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED:
+      case chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY:
+      case chrome::NOTIFICATION_HISTORY_LOADED:
+      case chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED:
         break;
       default:
         FAIL() << "Unexpected notification type";
@@ -413,7 +417,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // Try alt-f4 to close the browser.
     ASSERT_TRUE(SendKeyAndWait(
         browser(), ui::VKEY_F4, ui::EF_ALT_DOWN,
-        NotificationType::BROWSER_CLOSED, Source<Browser>(browser())));
+        chrome::NOTIFICATION_BROWSER_CLOSED, Source<Browser>(browser())));
 #endif
   }
 
@@ -434,7 +438,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // No BROWSER_CLOSED notification will be sent.
     ASSERT_TRUE(SendKeyAndWait(
         popup, ui::VKEY_W, ui::EF_CONTROL_DOWN,
-        NotificationType::BROWSER_CLOSED, Source<Browser>(popup)));
+        chrome::NOTIFICATION_BROWSER_CLOSED, Source<Browser>(popup)));
 
     // Create another popup.
     popup = CreateBrowserForPopup(browser()->profile());
@@ -462,7 +466,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // Try alt-f4 to close the popup.
     ASSERT_TRUE(SendKeyAndWait(
         popup, ui::VKEY_F4, ui::EF_ALT_DOWN,
-        NotificationType::BROWSER_CLOSED, Source<Browser>(popup)));
+        chrome::NOTIFICATION_BROWSER_CLOSED, Source<Browser>(popup)));
 #endif
   }
 
@@ -862,15 +866,15 @@ class OmniboxViewTest : public InProcessBrowserTest,
     AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
-    TemplateURLModel* template_url_model =
-        browser()->profile()->GetTemplateURLModel();
+    TemplateURLService* template_url_service =
+        TemplateURLServiceFactory::GetForProfile(browser()->profile());
 
     // Add a non-default substituting keyword.
     TemplateURL* template_url = new TemplateURL();
     template_url->SetURL("http://abc.com/{searchTerms}", 0, 0);
     template_url->set_keyword(UTF8ToUTF16(kSearchText));
     template_url->set_short_name(UTF8ToUTF16("Search abc"));
-    template_url_model->Add(template_url);
+    template_url_service->Add(template_url);
 
     omnibox_view->SetUserText(string16());
 
@@ -890,12 +894,12 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_FALSE(popup_model->IsOpen());
 
     // Try a non-substituting keyword.
-    template_url_model->Remove(template_url);
+    template_url_service->Remove(template_url);
     template_url = new TemplateURL();
     template_url->SetURL("http://abc.com/", 0, 0);
     template_url->set_keyword(UTF8ToUTF16(kSearchText));
     template_url->set_short_name(UTF8ToUTF16("abc"));
-    template_url_model->Add(template_url);
+    template_url_service->Add(template_url);
 
     // We always allow exact matches for non-substituting keywords.
     ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
@@ -910,7 +914,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
   void DeleteItemTest() {
     // Disable the search provider, to make sure the popup contains only history
     // items.
-    TemplateURLModel* model = browser()->profile()->GetTemplateURLModel();
+    TemplateURLService* model =
+        TemplateURLServiceFactory::GetForProfile(browser()->profile());
     model->SetDefaultSearchProvider(NULL);
 
     ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
@@ -1173,8 +1178,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
   NonSubstitutingKeywordTest();
 }
 
-#if defined(OS_MACOSX)
-// Flaky on Mac 10.6 http://crbug.com/84420
+#if defined(OS_POSIX)
+// Flaky on Mac 10.6, Linux http://crbug.com/84420
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, FLAKY_DeleteItem) {
 #else
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DeleteItem) {
@@ -1326,11 +1331,12 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, FLAKY_PasteReplacingAll) {
 }
 #endif
 
-#if defined(TOOLKIT_VIEWS)
+// TODO(beng): enable on windows once it actually works.
+#if defined(TOOLKIT_VIEWS) && !defined(OS_WIN)
 class OmniboxViewViewsTest : public OmniboxViewTest {
  public:
   OmniboxViewViewsTest() {
-    views::NativeTextfieldViews::SetEnableTextfieldViews(true);
+    views::Widget::IsPureViews();
   }
 };
 

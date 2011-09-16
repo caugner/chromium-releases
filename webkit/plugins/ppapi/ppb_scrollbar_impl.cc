@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "ppapi/c/dev/ppp_scrollbar_dev.h"
+#include "ppapi/thunk/thunk.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
@@ -23,6 +24,7 @@
 #include "base/win/windows_version.h"
 #endif
 
+using ppapi::thunk::PPB_Scrollbar_API;
 using WebKit::WebInputEvent;
 using WebKit::WebRect;
 using WebKit::WebScrollbar;
@@ -32,18 +34,18 @@ namespace ppapi {
 
 namespace {
 
-PP_Resource Create(PP_Instance instance_id, PP_Bool vertical) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
-  if (!instance)
-    return 0;
+// Version 0.3 implementation --------------------------------------------------
+//
+// TODO(brettw) remove this when we remove support for version 0.3 interface.
+// This just forwards everything to the new version of the interface except for
+// the GetThickness call which has no parameters.
 
-  scoped_refptr<PPB_Scrollbar_Impl> scrollbar(
-      new PPB_Scrollbar_Impl(instance, PPBoolToBool(vertical)));
-  return scrollbar->GetReference();
+PP_Resource Create(PP_Instance instance, PP_Bool vertical) {
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->Create(instance, vertical);
 }
 
 PP_Bool IsScrollbar(PP_Resource resource) {
-  return BoolToPPBool(!!Resource::GetAs<PPB_Scrollbar_Impl>(resource));
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->IsScrollbar(resource);
 }
 
 uint32_t GetThickness() {
@@ -51,44 +53,33 @@ uint32_t GetThickness() {
 }
 
 uint32_t GetValue(PP_Resource resource) {
-  scoped_refptr<PPB_Scrollbar_Impl> scrollbar(
-      Resource::GetAs<PPB_Scrollbar_Impl>(resource));
-  if (!scrollbar)
-    return 0;
-  return scrollbar->GetValue();
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->GetValue(resource);
 }
 
 void SetValue(PP_Resource resource, uint32_t value) {
-  scoped_refptr<PPB_Scrollbar_Impl> scrollbar(
-      Resource::GetAs<PPB_Scrollbar_Impl>(resource));
-  if (scrollbar)
-    scrollbar->SetValue(value);
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->SetValue(resource, value);
 }
 
 void SetDocumentSize(PP_Resource resource, uint32_t size) {
-  scoped_refptr<PPB_Scrollbar_Impl> scrollbar(
-      Resource::GetAs<PPB_Scrollbar_Impl>(resource));
-  if (scrollbar)
-    scrollbar->SetDocumentSize(size);
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->SetDocumentSize(resource,
+                                                                   size);
 }
 
 void SetTickMarks(PP_Resource resource,
                   const PP_Rect* tick_marks,
                   uint32_t count) {
-  scoped_refptr<PPB_Scrollbar_Impl> scrollbar(
-      Resource::GetAs<PPB_Scrollbar_Impl>(resource));
-  if (scrollbar)
-    scrollbar->SetTickMarks(tick_marks, count);
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->SetTickMarks(resource,
+                                                                tick_marks,
+                                                                count);
 }
 
 void ScrollBy(PP_Resource resource, PP_ScrollBy_Dev unit, int32_t multiplier) {
-  scoped_refptr<PPB_Scrollbar_Impl> scrollbar(
-      Resource::GetAs<PPB_Scrollbar_Impl>(resource));
-  if (scrollbar)
-    scrollbar->ScrollBy(unit, multiplier);
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->ScrollBy(resource,
+                                                            unit,
+                                                            multiplier);
 }
 
-const PPB_Scrollbar_Dev ppb_scrollbar = {
+const PPB_Scrollbar_0_3_Dev ppb_scrollbar_0_3 = {
   &Create,
   &IsScrollbar,
   &GetThickness,
@@ -111,13 +102,17 @@ PPB_Scrollbar_Impl::PPB_Scrollbar_Impl(PluginInstance* instance, bool vertical)
 PPB_Scrollbar_Impl::~PPB_Scrollbar_Impl() {
 }
 
-// static
-const PPB_Scrollbar_Dev* PPB_Scrollbar_Impl::GetInterface() {
-  return &ppb_scrollbar;
+PPB_Scrollbar_API* PPB_Scrollbar_Impl::AsPPB_Scrollbar_API() {
+  return this;
 }
 
-PPB_Scrollbar_Impl* PPB_Scrollbar_Impl::AsPPB_Scrollbar_Impl() {
-  return this;
+// static
+const PPB_Scrollbar_0_3_Dev* PPB_Scrollbar_Impl::Get0_3Interface() {
+  return &ppb_scrollbar_0_3;
+}
+
+uint32_t PPB_Scrollbar_Impl::GetThickness() {
+  return WebScrollbar::defaultThickness();
 }
 
 uint32_t PPB_Scrollbar_Impl::GetValue() {
@@ -166,32 +161,29 @@ void PPB_Scrollbar_Impl::ScrollBy(PP_ScrollBy_Dev unit, int32_t multiplier) {
   scrollbar_->scroll(direction, granularity, fmultiplier);
 }
 
-bool PPB_Scrollbar_Impl::Paint(const PP_Rect* rect, PPB_ImageData_Impl* image) {
-  gfx::Rect gfx_rect(rect->point.x,
-                     rect->point.y,
-                     rect->size.width,
-                     rect->size.height);
+PP_Bool PPB_Scrollbar_Impl::PaintInternal(const gfx::Rect& rect,
+                                          PPB_ImageData_Impl* image) {
+  ImageDataAutoMapper mapper(image);
   skia::PlatformCanvas* canvas = image->mapped_canvas();
   if (!canvas)
-    return false;
-  scrollbar_->paint(webkit_glue::ToWebCanvas(canvas), gfx_rect);
+    return PP_FALSE;
+  scrollbar_->paint(webkit_glue::ToWebCanvas(canvas), rect);
 
 #if defined(OS_WIN)
-  if (base::win::GetVersion() == base::win::VERSION_XP) {
-    skia::MakeOpaque(canvas, gfx_rect.x(), gfx_rect.y(),
-                     gfx_rect.width(), gfx_rect.height());
-  }
+  if (base::win::GetVersion() == base::win::VERSION_XP)
+    skia::MakeOpaque(canvas, rect.x(), rect.y(), rect.width(), rect.height());
 #endif
 
-  return true;
+  return PP_TRUE;
 }
 
-bool PPB_Scrollbar_Impl::HandleEvent(const PP_InputEvent* event) {
-  scoped_ptr<WebInputEvent> web_input_event(CreateWebInputEvent(*event));
+PP_Bool PPB_Scrollbar_Impl::HandleEventInternal(
+    const ::ppapi::InputEventData& data) {
+  scoped_ptr<WebInputEvent> web_input_event(CreateWebInputEvent(data));
   if (!web_input_event.get())
-    return false;
+    return PP_FALSE;
 
-  return scrollbar_->handleInputEvent(*web_input_event.get());
+  return PP_FromBool(scrollbar_->handleInputEvent(*web_input_event.get()));
 }
 
 void PPB_Scrollbar_Impl::SetLocationInternal(const PP_Rect* location) {

@@ -26,7 +26,9 @@ class FileThreadDeserializer
  public:
   explicit FileThreadDeserializer(JsonPrefStore* delegate,
                                   base::MessageLoopProxy* file_loop_proxy)
-      : delegate_(delegate),
+      : no_dir_(false),
+        error_(PersistentPrefStore::PREF_READ_ERROR_NONE),
+        delegate_(delegate),
         file_loop_proxy_(file_loop_proxy),
         origin_loop_proxy_(base::MessageLoopProxy::CreateForCurrentThread()) {
   }
@@ -153,7 +155,8 @@ PrefStore::ReadResult JsonPrefStore::GetValue(const std::string& key,
                                               const Value** result) const {
   Value* tmp = NULL;
   if (prefs_->Get(key, &tmp)) {
-    *result = tmp;
+    if (result)
+      *result = tmp;
     return READ_OK;
   }
   return READ_NO_VALUE;

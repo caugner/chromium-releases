@@ -11,7 +11,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
-#include "grit/app_strings.h"
+#include "grit/ui_strings.h"
 #include "skia/ext/skia_utils_win.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -99,17 +99,13 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
   if (!did_load_library_)
     did_load_library_ = !!LoadLibrary(L"riched20.dll");
 
-  DWORD style = kDefaultEditStyle;
+  DWORD style = kDefaultEditStyle | ES_AUTOHSCROLL;
   if (textfield_->style() & Textfield::STYLE_PASSWORD)
     style |= ES_PASSWORD;
 
   if (textfield_->read_only())
     style |= ES_READONLY;
 
-  if (textfield_->style() & Textfield::STYLE_MULTILINE)
-    style |= ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL;
-  else
-    style |= ES_AUTOHSCROLL;
   // Make sure we apply RTL related extended window styles if necessary.
   DWORD ex_style = l10n_util::GetExtendedStyles();
 
@@ -371,6 +367,18 @@ TextInputClient* NativeTextfieldWin::GetTextInputClient() {
   return NULL;
 }
 
+void NativeTextfieldWin::ApplyStyleRange(const gfx::StyleRange& style) {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::ApplyDefaultStyle() {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::ClearEditHistory() {
+  NOTREACHED();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTextfieldWin, ui::SimpleMenuModel::Delegate implementation:
 
@@ -448,7 +456,7 @@ void NativeTextfieldWin::InitializeAccessibilityInfo() {
     // Try to find the name of this text field.
     // We expect it to be a Label preceeding this view (if it exists).
     string16 name;
-    View* label_view = parent->GetChildViewAt(label_index);
+    View* label_view = parent->child_at(label_index);
     if (label_view->GetClassName() == Label::kViewClassName) {
       ui::AccessibleViewState state;
       label_view->GetAccessibleState(&state);
@@ -616,13 +624,11 @@ void NativeTextfieldWin::OnKeyDown(TCHAR key, UINT repeat_count, UINT flags) {
   // in this function even with a WM_SYSKEYDOWN handler.
 
   switch (key) {
+
+    // Ignore Return
     case VK_RETURN:
-      // If we are multi-line, we want to let returns through so they start a
-      // new line.
-      if (textfield_->IsMultiLine())
-        break;
-      else
-        return;
+      return;
+
     // Hijacking Editing Commands
     //
     // We hijack the keyboard short-cuts for Cut, Copy, and Paste here so that
@@ -1144,11 +1150,9 @@ void NativeTextfieldWin::BuildContextMenu() {
 // static
 NativeTextfieldWrapper* NativeTextfieldWrapper::CreateWrapper(
     Textfield* field) {
-  if (NativeTextfieldViews::IsTextfieldViewsEnabled()) {
+  if (views::Widget::IsPureViews())
     return new NativeTextfieldViews(field);
-  } else {
-    return new NativeTextfieldWin(field);
-  }
+  return new NativeTextfieldWin(field);
 }
 
 }  // namespace views

@@ -10,10 +10,13 @@
 #include "base/scoped_temp_dir.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/extension_event_router_forwarder.h"
+#include "chrome/browser/io_thread.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -34,10 +37,18 @@ Profile* g_created_profile;
 class ProfileManagerTest : public TestingBrowserProcessTest {
  protected:
   ProfileManagerTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
+      : local_state_(testing_browser_process_.get()),
+        extension_event_router_forwarder_(new ExtensionEventRouterForwarder),
+        ui_thread_(BrowserThread::UI, &message_loop_),
+        db_thread_(BrowserThread::DB, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_),
-        profile_manager_(new ProfileManagerWithoutInit),
-        local_state_(testing_browser_process_.get()) {
+        io_thread_(local_state_.Get(), NULL, extension_event_router_forwarder_),
+        profile_manager_(new ProfileManagerWithoutInit) {
+#if defined(OS_MACOSX)
+    base::SystemMonitor::AllocateSystemIOPorts();
+#endif
+    system_monitor_dummy_.reset(new base::SystemMonitor);
+    testing_browser_process_.get()->SetIOThread(&io_thread_);
   }
 
   virtual void SetUp() {
@@ -47,26 +58,30 @@ class ProfileManagerTest : public TestingBrowserProcessTest {
 
   virtual void TearDown() {
     profile_manager_.reset();
+    message_loop_.RunAllPending();
   }
 
   class MockObserver : public ProfileManagerObserver {
    public:
-    MOCK_METHOD1(OnProfileCreated, void(Profile* profile));
+    MOCK_METHOD2(OnProfileCreated, void(Profile* profile, Status status));
   };
 
   // The path to temporary directory used to contain the test operations.
   ScopedTempDir temp_dir_;
+  ScopedTestingLocalState local_state_;
+  scoped_refptr<ExtensionEventRouterForwarder>
+      extension_event_router_forwarder_;
 
   MessageLoopForUI message_loop_;
   BrowserThread ui_thread_;
+  BrowserThread db_thread_;
   BrowserThread file_thread_;
+  IOThread io_thread_;
 
-  base::SystemMonitor system_monitor_dummy_;
+  scoped_ptr<base::SystemMonitor> system_monitor_dummy_;
 
   // Also will test profile deletion.
   scoped_ptr<ProfileManager> profile_manager_;
-
-  ScopedTestingLocalState local_state_;
 };
 
 TEST_F(ProfileManagerTest, GetProfile) {
@@ -109,7 +124,7 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
   EXPECT_EQ(expected_default.value(),
             profile_manager_->GetCurrentProfileDir().value());
 
-  profile_manager_->Observe(NotificationType::LOGIN_USER_CHANGED,
+  profile_manager_->Observe(chrome::NOTIFICATION_LOGIN_USER_CHANGED,
                            NotificationService::AllSources(),
                            NotificationService::NoDetails());
   FilePath expected_logged_in(profile_dir);
@@ -176,23 +191,29 @@ TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
   message_loop_.RunAllPending();
 }
 
+MATCHER(NotFail, "Profile creation failure status is not reported.") {
+  return arg == ProfileManagerObserver::STATUS_CREATED ||
+      arg == ProfileManagerObserver::STATUS_INITIALIZED;
+}
+
 // Tests asynchronous profile creation mechanism.
-TEST_F(ProfileManagerTest, CreateProfileAsync) {
+TEST_F(ProfileManagerTest, DISABLED_CreateProfileAsync) {
   FilePath dest_path =
       temp_dir_.path().Append(FILE_PATH_LITERAL("New Profile"));
 
   MockObserver mock_observer;
-  EXPECT_CALL(mock_observer, OnProfileCreated(testing::NotNull())).Times(1);
+  EXPECT_CALL(mock_observer, OnProfileCreated(
+      testing::NotNull(), NotFail())).Times(testing::AtLeast(1));
 
   profile_manager_->CreateProfileAsync(dest_path, &mock_observer);
 
   message_loop_.RunAllPending();
 }
 
-MATCHER(SameNotNull, "The same non-NULL value for all cals.") {
+MATCHER(SameNotNull, "The same non-NULL value for all calls.") {
   if (!g_created_profile)
     g_created_profile = arg;
-  return g_created_profile == arg;
+  return arg != NULL && arg == g_created_profile;
 }
 
 TEST_F(ProfileManagerTest, CreateProfileAsyncMultipleRequests) {
@@ -202,11 +223,14 @@ TEST_F(ProfileManagerTest, CreateProfileAsyncMultipleRequests) {
   g_created_profile = NULL;
 
   MockObserver mock_observer1;
-  EXPECT_CALL(mock_observer1, OnProfileCreated(SameNotNull())).Times(1);
+  EXPECT_CALL(mock_observer1, OnProfileCreated(
+      SameNotNull(), NotFail())).Times(testing::AtLeast(1));
   MockObserver mock_observer2;
-  EXPECT_CALL(mock_observer2, OnProfileCreated(SameNotNull())).Times(1);
+  EXPECT_CALL(mock_observer2, OnProfileCreated(
+      SameNotNull(), NotFail())).Times(testing::AtLeast(1));
   MockObserver mock_observer3;
-  EXPECT_CALL(mock_observer3, OnProfileCreated(SameNotNull())).Times(1);
+  EXPECT_CALL(mock_observer3, OnProfileCreated(
+      SameNotNull(), NotFail())).Times(testing::AtLeast(1));
 
   profile_manager_->CreateProfileAsync(dest_path, &mock_observer1);
   profile_manager_->CreateProfileAsync(dest_path, &mock_observer2);
@@ -222,7 +246,8 @@ TEST_F(ProfileManagerTest, CreateProfilesAsync) {
       temp_dir_.path().Append(FILE_PATH_LITERAL("New Profile 2"));
 
   MockObserver mock_observer;
-  EXPECT_CALL(mock_observer, OnProfileCreated(testing::NotNull())).Times(2);
+  EXPECT_CALL(mock_observer, OnProfileCreated(
+      testing::NotNull(), NotFail())).Times(testing::AtLeast(3));
 
   profile_manager_->CreateProfileAsync(dest_path1, &mock_observer);
   profile_manager_->CreateProfileAsync(dest_path2, &mock_observer);

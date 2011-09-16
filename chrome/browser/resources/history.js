@@ -386,11 +386,15 @@ HistoryModel.prototype.updateSearch_ = function(finished) {
     this.complete_ = true;
     this.view_.onModelReady();
     this.changed = false;
+    chrome.send('setIsLoading', ['false']);
   } else {
     // If we can't fill the requested page, ask for more data unless a request
     // is still in-flight.
-    if (!this.canFillPage_(this.requestedPage_) && !this.inFlight_) {
-      this.getSearchResults_(this.searchDepth_ + 1);
+    if (!this.inFlight_) {
+      if (!this.canFillPage_(this.requestedPage_))
+        this.getSearchResults_(this.searchDepth_ + 1);
+      else
+        chrome.send('setIsLoading', ['false']);
     }
 
     // If we have any data for the requested page, show it.
@@ -423,6 +427,7 @@ HistoryModel.prototype.getSearchResults_ = function(depth) {
   }
 
   this.inFlight_ = true;
+  chrome.send('setIsLoading', ['true']);
 };
 
 /**
@@ -509,6 +514,14 @@ HistoryView.prototype.toggleEditMode = function() {
   var editMode = !this.model_.getEditMode();
   this.setEditMode(editMode);
   this.updateEditControls_();
+};
+
+/**
+ * @return {boolean} Whether we are in edit mode where history items can be
+ *    deleted
+ */
+HistoryView.prototype.getEditMode = function() {
+  return this.model_.getEditMode();
 };
 
 /**
@@ -879,6 +892,16 @@ function load() {
     historyView.toggleEditMode();
   }
   historyView.setSearch(hashData.q, hashData.p);
+
+  // Add handlers to HTML elements.
+  $('history-section').onclick = function () {
+    setSearch('');
+    return false;
+  };
+  $('search-form').onsubmit = function () {
+    setSearch(this.term.value);
+    return false;
+  };
 }
 
 /**
@@ -1022,7 +1045,6 @@ function deleteComplete() {
     deleteNextInQueue();
   } else {
     deleteQueue = [];
-    historyView.reload();
   }
 }
 
@@ -1037,14 +1059,15 @@ function deleteFailed() {
   setTimeout(deleteNextInQueue, 500);
 }
 
-// Add handlers to HTML elements.
-document.body.onload = load;
-$('history-section').onclick = function () {
-  setSearch('');
-  return false;
-};
-$('search-form').onsubmit = function () {
-  setSearch(this.term.value);
-  return false;
+/**
+ * We're called when something is deleted (either by us or by someone
+ * else).
+ */
+function historyDeleted() {
+  window.console.log('History deleted');
+  var anyChecked = document.querySelector('.entry input:checked') != null;
+  if (!(historyView.getEditMode() && anyChecked))
+    historyView.reload();
 }
 
+document.addEventListener('DOMContentLoaded', load);

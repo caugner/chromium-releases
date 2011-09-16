@@ -7,6 +7,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/options/chromeos/core_chromeos_options_handler.h"
@@ -52,21 +53,20 @@ void ProxySettingsHTMLSource::StartDataRequest(const std::string& path,
   static const base::StringPiece html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_PROXY_SETTINGS_HTML));
-  const std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
+  std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
       html, localized_strings_.get());
 
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
+  SendResponse(request_id, base::RefCountedString::TakeString(&full_html));
 }
 
 }  // namespace
 
 namespace chromeos {
 
-ProxySettingsUI::ProxySettingsUI(TabContents* contents) : WebUI(contents) {
+ProxySettingsUI::ProxySettingsUI(TabContents* contents)
+    : ChromeWebUI(contents),
+      proxy_settings_(NULL),
+      proxy_handler_(new ProxyHandler) {
   // |localized_strings| will be owned by ProxySettingsHTMLSource.
   DictionaryValue* localized_strings = new DictionaryValue();
 
@@ -75,9 +75,8 @@ ProxySettingsUI::ProxySettingsUI(TabContents* contents) : WebUI(contents) {
   core_handler->GetLocalizedValues(localized_strings);
   AddMessageHandler(core_handler->Attach(this));
 
-  OptionsPageUIHandler* proxy_handler = new ProxyHandler();
-  proxy_handler->GetLocalizedValues(localized_strings);
-  AddMessageHandler(proxy_handler->Attach(this));
+  proxy_handler_->GetLocalizedValues(localized_strings);
+  AddMessageHandler(proxy_handler_->Attach(this));
 
   ProxySettingsHTMLSource* source =
       new ProxySettingsHTMLSource(localized_strings);
@@ -92,6 +91,7 @@ ProxySettingsUI::~ProxySettingsUI() {
        ++iter) {
     static_cast<OptionsPageUIHandler*>(*iter)->Uninitialize();
   }
+  proxy_handler_ = NULL;  // Weak ptr that is owned by base class, nullify it.
 }
 
 void ProxySettingsUI::InitializeHandlers() {
@@ -100,6 +100,22 @@ void ProxySettingsUI::InitializeHandlers() {
   for (iter = handlers_.begin() + 1; iter != handlers_.end(); ++iter) {
     (static_cast<OptionsPageUIHandler*>(*iter))->Initialize();
   }
+  if (proxy_settings()) {
+    proxy_settings()->MakeActiveNetworkCurrent();
+    std::string network = proxy_settings()->GetCurrentNetworkName();
+    if (!network.empty())
+      proxy_handler_->SetNetworkName(network);
+  }
+}
+
+chromeos::ProxyCrosSettingsProvider* ProxySettingsUI::proxy_settings() {
+  if (!proxy_settings_) {
+    proxy_settings_ = static_cast<chromeos::ProxyCrosSettingsProvider*>(
+      chromeos::CrosSettings::Get()->GetProvider("cros.session.proxy"));
+    if (!proxy_settings_)
+      NOTREACHED() << "Error getting access to proxy cros settings provider";
+  }
+  return proxy_settings_;
 }
 
 }  // namespace chromeos

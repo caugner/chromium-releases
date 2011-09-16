@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/gtk/gtk_chrome_shrinkable_hbox.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -30,8 +31,8 @@ BookmarkBarInstructionsGtk::BookmarkBarInstructionsGtk(Delegate* delegate,
                    G_CALLBACK(gtk_util::InitLabelSizeRequestAndEllipsizeMode),
                    NULL);
 
-  instructions_link_ = gtk_chrome_link_button_new(
-      l10n_util::GetStringUTF8(IDS_BOOKMARK_BAR_IMPORT_LINK).c_str());
+  instructions_link_ = theme_service_->BuildChromeLinkButton(
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_BAR_IMPORT_LINK));
   gtk_misc_set_alignment(
       GTK_MISC(GTK_CHROME_LINK_BUTTON(instructions_link_)->label), 0, 0.5);
   g_signal_connect(instructions_link_, "clicked",
@@ -47,15 +48,15 @@ BookmarkBarInstructionsGtk::BookmarkBarInstructionsGtk(Delegate* delegate,
                    G_CALLBACK(gtk_util::InitLabelSizeRequestAndEllipsizeMode),
                    NULL);
 
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 }
 
-void BookmarkBarInstructionsGtk::Observe(NotificationType type,
+void BookmarkBarInstructionsGtk::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  if (type == NotificationType::BROWSER_THEME_CHANGED)
+  if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED)
     UpdateColors();
 }
 
@@ -64,10 +65,6 @@ void BookmarkBarInstructionsGtk::OnButtonClick(GtkWidget* button) {
 }
 
 void BookmarkBarInstructionsGtk::UpdateColors() {
-  gtk_chrome_link_button_set_use_gtk_theme(
-      GTK_CHROME_LINK_BUTTON(instructions_link_),
-      theme_service_->UsingNativeTheme());
-
   GdkColor bookmark_color = theme_service_->GetGdkColor(
       ThemeService::COLOR_BOOKMARK_TEXT);
   if (theme_service_->UsingNativeTheme()) {

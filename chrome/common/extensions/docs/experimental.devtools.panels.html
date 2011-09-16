@@ -354,7 +354,8 @@ and labeled as <em>Font Picker</em>:</p>
 
 <pre>chrome.experimental.devtools.panels.create("Font Picker",
                                            "FontPicker.png",
-                                           "Panel.html");
+                                           "Panel.html"
+                                           function(panel) { ... });
 </pre>
 <p>The following code adds a sidebar pane contained in
 <code>Sidebar.html</code> and titled <em>Font Properties</em> to the Elements
@@ -591,7 +592,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>An URL of the toolbar icon.</dd>
+          <dd>A URL of the toolbar icon.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -659,7 +660,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>An URL of the page that represents this panel.</dd>
+          <dd>A URL of the page that represents this panel.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -2490,7 +2491,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>An URL of an extension page to display within the sidebar.</dd>
+          <dd>A URL of an extension page to display within the sidebar.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.

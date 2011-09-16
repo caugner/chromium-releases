@@ -32,7 +32,7 @@ class Profile;
 class TabContents;
 
 namespace views {
-class NativeButton;
+class TextButton;
 class RadioButton;
 }
 
@@ -67,7 +67,7 @@ class ContentSettingBubbleContents : public views::View,
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -96,7 +96,7 @@ class ContentSettingBubbleContents : public views::View,
   RadioGroup radio_group_;
   views::Link* custom_link_;
   views::Link* manage_link_;
-  views::NativeButton* close_button_;
+  views::TextButton* close_button_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ContentSettingBubbleContents);
 };

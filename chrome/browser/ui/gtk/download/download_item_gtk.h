@@ -55,7 +55,7 @@ class DownloadItemGtk : public DownloadItem::Observer,
   virtual void AnimationProgressed(const ui::Animation* animation);
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -159,6 +159,9 @@ class DownloadItemGtk : public DownloadItem::Observer,
   // The widget that contains the name of the download and the progress
   // animation.
   OwnedWidgetGtk body_;
+
+  // The widget that contains the texts of |name_label_| and |status_label_|.
+  GtkWidget* text_stack_;
 
   // The GtkLabel that holds the download title text.
   GtkWidget* name_label_;

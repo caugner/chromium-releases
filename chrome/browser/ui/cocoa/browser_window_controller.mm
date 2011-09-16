@@ -6,8 +6,10 @@
 
 #include <Carbon/Carbon.h>
 
-#include "app/mac/scoped_nsdisable_screen_updates.h"
-#include "app/mac/nsimage_cache.h"
+#include <cmath>
+#include <numeric>
+
+#include "base/command_line.h"
 #include "base/mac/mac_util.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
@@ -16,6 +18,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util_mac.h"
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
@@ -27,6 +30,7 @@
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_controller.h"
+#import "chrome/browser/ui/cocoa/browser/avatar_button.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/ui/cocoa/dev_tools_controller.h"
@@ -35,27 +39,29 @@
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
-#import "chrome/browser/ui/cocoa/focus_tracker.h"
-#import "chrome/browser/ui/cocoa/fullscreen_controller.h"
+#import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
+#import "chrome/browser/ui/cocoa/gesture_utils.h"
 #import "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
+#import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #import "chrome/browser/ui/cocoa/sidebar_controller.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/previewable_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tabpose_window.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
-#import "chrome/browser/ui/cocoa/tabpose_window.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/window_sizer.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -63,8 +69,7 @@
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
-
+#include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
 
 // ORGANIZATION: This is a big file. It is (in principle) organized as follows
 // (in order):
@@ -140,7 +145,6 @@
 // longer indicate that the window is shrinking from an apparent zoomed state)
 // and if it's set we continue to constrain the resize.
 
-
 @interface NSWindow (NSPrivateApis)
 // Note: These functions are private, use -[NSObject respondsToSelector:]
 // before calling them.
@@ -151,57 +155,62 @@
 
 @end
 
+// Forward-declare symbols that are part of the 10.6 SDK.
+#if !defined(MAC_OS_X_VERSION_10_6) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
+
+enum {
+    NSTouchPhaseBegan           = 1U << 0,
+    NSTouchPhaseMoved           = 1U << 1,
+    NSTouchPhaseStationary      = 1U << 2,
+    NSTouchPhaseEnded           = 1U << 3,
+    NSTouchPhaseCancelled       = 1U << 4,
+    NSTouchPhaseTouching        = NSTouchPhaseBegan | NSTouchPhaseMoved |
+                                  NSTouchPhaseStationary,
+    NSTouchPhaseAny             = NSUIntegerMax
+};
+typedef NSUInteger NSTouchPhase;
+
+@interface NSEvent (SnowLeopardDeclarations)
+- (NSSet*)touchesMatchingPhase:(NSTouchPhase)phase inView:(NSView*)view;
+@end
+
+@interface NSTouch : NSObject
+- (NSPoint)normalizedPosition;
+- (id<NSObject, NSCopying>)identity;
+@end
+
+#endif  // MAC_OS_X_VERSION_10_6
+
 // Provide the forward-declarations of new 10.7 SDK symbols so they can be
 // called when building with the 10.5 SDK.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
     MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
 
+enum {
+  NSWindowAnimationBehaviorDefault = 0,
+  NSWindowAnimationBehaviorNone = 2,
+  NSWindowAnimationBehaviorDocumentWindow = 3,
+  NSWindowAnimationBehaviorUtilityWindow = 4,
+  NSWindowAnimationBehaviorAlertPanel = 5
+};
+typedef NSInteger NSWindowAnimationBehavior;
+
+enum {
+  NSWindowCollectionBehaviorFullScreenPrimary = 1 << 7,
+  NSWindowCollectionBehaviorFullScreenAuxiliary = 1 << 8
+};
+
+enum {
+  NSFullScreenWindowMask = 1 << 14
+};
+
 @interface NSWindow (LionSDKDeclarations)
 - (void)setRestorable:(BOOL)flag;
+- (void)setAnimationBehavior:(NSWindowAnimationBehavior)newAnimationBehavior;
 @end
 
 #endif  // MAC_OS_X_VERSION_10_7
-
-// IncognitoImageView subclasses NSView to allow mouse events to pass through it
-// so you can drag the window by dragging on the spy guy.
-@interface IncognitoImageView : NSView {
- @private
-  scoped_nsobject<NSImage> image_;
-}
-
-- (void)setImage:(NSImage*)image;
-
-@end
-
-@implementation IncognitoImageView
-
-- (BOOL)mouseDownCanMoveWindow {
-  return YES;
-}
-
-- (void)drawRect:(NSRect)rect {
-  gfx::ScopedNSGraphicsContextSaveGState scopedGState;
-
-  scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
-  [shadow.get() setShadowColor:[NSColor colorWithCalibratedWhite:0.0
-                                                           alpha:0.75]];
-  [shadow.get() setShadowOffset:NSMakeSize(0, 0)];
-  [shadow.get() setShadowBlurRadius:3.0];
-  [shadow.get() set];
-
-  [image_.get() drawInRect:[self bounds]
-                  fromRect:NSZeroRect
-                 operation:NSCompositeSourceOver
-                  fraction:1.0
-              neverFlipped:YES];
-}
-
-- (void)setImage:(NSImage*)image {
-  image_.reset([image retain]);
-}
-
-@end
-
 
 @implementation BrowserWindowController
 
@@ -258,19 +267,29 @@
     if ([window respondsToSelector:@selector(setRestorable:)])
       [window setRestorable:NO];
 
+    // Get the windows to swish in on Lion.
+    if ([window respondsToSelector:@selector(setAnimationBehavior:)])
+      [window setAnimationBehavior:NSWindowAnimationBehaviorDocumentWindow];
+
+    // Set the window to participate in Lion Fullscreen mode.  Setting this flag
+    // has no effect on Snow Leopard or earlier.  Popups and the devtools panel
+    // can share a fullscreen space with a tabbed window, but they can not be
+    // primary fullscreen windows.
+    NSUInteger collectionBehavior = [window collectionBehavior];
+    collectionBehavior |= browser_->type() == Browser::TYPE_TABBED ?
+                          NSWindowCollectionBehaviorFullScreenPrimary :
+                          NSWindowCollectionBehaviorFullScreenAuxiliary;
+    [window setCollectionBehavior:collectionBehavior];
+
     // Get the most appropriate size for the window, then enforce the
     // minimum width and height. The window shim will handle flipping
     // the coordinates for us so we can use it to save some code.
     // Note that this may leave a significant portion of the window
     // offscreen, but there will always be enough window onscreen to
     // drag the whole window back into view.
-    NSSize minSize = [[self window] minSize];
     gfx::Rect desiredContentRect = browser_->GetSavedWindowBounds();
     gfx::Rect windowRect = desiredContentRect;
-    if (windowRect.width() < minSize.width)
-      windowRect.set_width(minSize.width);
-    if (windowRect.height() < minSize.height)
-      windowRect.set_height(minSize.height);
+    windowRect = [self enforceMinWindowSize:windowRect];
 
     // When we are given x/y coordinates of 0 on a created popup window, assume
     // none were given by the window.open() command.
@@ -286,7 +305,7 @@
     windowShim_->SetBounds(windowRect);
 
     // Puts the incognito badge on the window frame, if necessary.
-    [self installIncognitoBadge];
+    [self installAvatar];
 
     // Create a sub-controller for the docked devTools and add its view to the
     // hierarchy.  This must happen before the sidebar controller is
@@ -407,23 +426,28 @@
     if ([self hasToolbar])  // Do not create the buttons in popups.
       [toolbarController_ createBrowserActionButtons];
 
-    [self setUpOSFullScreenButton];
-
     // We are done initializing now.
     initializing_ = NO;
   }
   return self;
 }
 
+- (void)awakeFromNib {
+  // Set different minimum sizes on tabbed windows vs non-tabbed, e.g. popups.
+  NSSize minSize = [self isTabbedWindow] ?
+      NSMakeSize(400, 272) : NSMakeSize(100, 122);
+  [[self window] setMinSize:minSize];
+}
+
 - (void)dealloc {
   browser_->CloseAllTabs();
   [downloadShelfController_ exiting];
 
-  // Explicitly release |fullscreenController_| here, as it may call back to
-  // this BWC in |-dealloc|.  We are required to call |-exitFullscreen| before
-  // releasing the controller.
-  [fullscreenController_ exitFullscreen];
-  fullscreenController_.reset();
+  // Explicitly release |presentationModeController_| here, as it may call back
+  // to this BWC in |-dealloc|.  We are required to call |-exitPresentationMode|
+  // before releasing the controller.
+  [presentationModeController_ exitPresentationMode];
+  presentationModeController_.reset();
 
   // Under certain testing configurations we may not actually own the browser.
   if (ownsBrowser_ == NO)
@@ -432,6 +456,18 @@
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 
   [super dealloc];
+}
+
+- (gfx::Rect)enforceMinWindowSize:(gfx::Rect)bounds {
+  gfx::Rect checkedBounds = bounds;
+
+  NSSize minSize = [[self window] minSize];
+  if (bounds.width() < minSize.width)
+      checkedBounds.set_width(minSize.width);
+  if (bounds.height() < minSize.height)
+      checkedBounds.set_height(minSize.height);
+
+  return checkedBounds;
 }
 
 - (BrowserWindow*)browserWindow {
@@ -456,6 +492,10 @@
 
 - (LocationBarViewMac*)locationBarBridge {
   return [toolbarController_ locationBarBridge];
+}
+
+- (Profile*)profile {
+  return browser_->profile();
 }
 
 - (void)destroyBrowser {
@@ -523,7 +563,7 @@
 // going away) will again call to close the window when it's finally ready.
 - (BOOL)windowShouldClose:(id)sender {
   // Disable updates while closing all tabs to avoid flickering.
-  app::mac::ScopedNSDisableScreenUpdates disabler;
+  gfx::ScopedNSDisableScreenUpdates disabler;
   // Give beforeunload handlers the chance to cancel the close before we hide
   // the window below.
   if (!browser_->ShouldCloseWindow())
@@ -986,7 +1026,7 @@
         case IDC_CLOSE_TAB:
           // Disable "close tab" if we're not the key window or if there's only
           // one tab.
-          enable &= [self numberOfTabs] > 1 && [[self window] isKeyWindow];
+          enable &= [[self window] isKeyWindow];
           break;
         case IDC_FULLSCREEN: {
           enable &= [self supportsFullscreen];
@@ -995,13 +1035,29 @@
                 [self isFullscreen] ? IDS_EXIT_FULLSCREEN_MAC :
                                       IDS_ENTER_FULLSCREEN_MAC);
             [static_cast<NSMenuItem*>(item) setTitle:menuTitle];
+
+            if (base::mac::IsOSSnowLeopardOrEarlier())
+              [static_cast<NSMenuItem*>(item) setHidden:YES];
           }
           break;
         }
-        case IDC_SYNC_BOOKMARKS:
-          enable &= browser_->profile()->IsSyncAccessible();
-          sync_ui_util::UpdateSyncItem(item, enable, browser_->profile());
+        case IDC_PRESENTATION_MODE: {
+          enable &= [self supportsFullscreen];
+          if ([static_cast<NSObject*>(item) isKindOfClass:[NSMenuItem class]]) {
+            NSString* menuTitle = l10n_util::GetNSString(
+                [self inPresentationMode] ? IDS_EXIT_PRESENTATION_MAC :
+                                            IDS_ENTER_PRESENTATION_MAC);
+            [static_cast<NSMenuItem*>(item) setTitle:menuTitle];
+          }
           break;
+        }
+        case IDC_SYNC_BOOKMARKS: {
+          Profile* original_profile =
+              browser_->profile()->GetOriginalProfile();
+          enable &= original_profile->IsSyncAccessible();
+          sync_ui_util::UpdateSyncItem(item, enable, original_profile);
+          break;
+        }
         default:
           // Special handling for the contents of the Text Encoding submenu. On
           // Mac OS, instead of enabling/disabling the top-level menu item, we
@@ -1225,7 +1281,7 @@
 
 - (TabWindowController*)detachTabToNewWindow:(TabView*)tabView {
   // Disable screen updates so that this appears as a single visual change.
-  app::mac::ScopedNSDisableScreenUpdates disabler;
+  gfx::ScopedNSDisableScreenUpdates disabler;
 
   // Fetch the tab contents for the tab being dragged.
   int index = [tabStripController_ modelIndexForTabView:tabView];
@@ -1329,6 +1385,11 @@
   [tabStripController_ showNewTabButton:show];
 }
 
+- (BOOL)shouldShowAvatar {
+  return [self hasTabStrip] && (browser_->profile()->IsOffTheRecord() ||
+                                ProfileManager::IsMultipleProfilesEnabled());
+}
+
 - (BOOL)isBookmarkBarVisible {
   return [bookmarkBarController_ isVisible];
 }
@@ -1365,13 +1426,17 @@
 
   // Create a controller for the findbar.
   findBarCocoaController_.reset([findBarCocoaController retain]);
-  NSView *contentView = [[self window] contentView];
+  NSView* contentView = [[self window] contentView];
+  NSView* relativeView =
+      [self inPresentationMode] ? [toolbarController_ view] :
+                                  [infoBarContainerController_ view];
   [contentView addSubview:[findBarCocoaController_ view]
                positioned:NSWindowAbove
-               relativeTo:[infoBarContainerController_ view]];
+               relativeTo:relativeView];
 
   // Place the find bar immediately below the toolbar/attached bookmark bar. In
-  // fullscreen mode, it hangs off the top of the screen when the bar is hidden.
+  // presentation mode, it hangs off the top of the screen when the bar is
+  // hidden.
   CGFloat maxY = [self placeBookmarkBarBelowInfoBar] ?
       NSMinY([[toolbarController_ view] frame]) :
       NSMinY([[bookmarkBarController_ view] frame]);
@@ -1403,7 +1468,7 @@
 }
 
 - (NSRect)regularWindowFrame {
-  return [self isFullscreen] ? [savedRegularWindow_ frame] :
+  return [self isFullscreen] ? savedRegularWindowFrame_ :
                                [[self window] frame];
 }
 
@@ -1544,17 +1609,30 @@
   // To line up the background pattern with the pattern in the browser window
   // the background pattern for the tabs needs to be moved left by 5 pixels.
   const CGFloat kPatternHorizontalOffset = -5;
-  NSView* tabStripView = [self tabStripView];
-  NSRect tabStripViewWindowBounds = [tabStripView bounds];
+  // To match Windows and CrOS, have to offset vertically by 2 pixels.
+  // Without tab strip, offset an extra pixel (determined by experimentation).
+  const CGFloat kPatternVerticalOffset = 2;
+  const CGFloat kPatternVerticalOffsetNoTabStrip = 3;
+
+  // When we have a tab strip, line up with the top of the tab, otherwise,
+  // line up with the top of the window.
   NSView* windowChromeView = [[[self window] contentView] superview];
-  tabStripViewWindowBounds =
-      [tabStripView convertRect:tabStripViewWindowBounds
-                         toView:windowChromeView];
-  NSPoint phase = NSMakePoint(NSMinX(tabStripViewWindowBounds)
-                                  + kPatternHorizontalOffset,
-                              NSMinY(tabStripViewWindowBounds)
-                                  + [TabStripController defaultTabHeight]);
-  return phase;
+  if ([self hasTabStrip]) {
+    NSView* tabStripView = [self tabStripView];
+    NSRect tabStripViewWindowBounds = [tabStripView bounds];
+    tabStripViewWindowBounds =
+        [tabStripView convertRect:tabStripViewWindowBounds
+                           toView:windowChromeView];
+    return NSMakePoint(NSMinX(tabStripViewWindowBounds)
+                           + kPatternHorizontalOffset,
+                       NSMinY(tabStripViewWindowBounds)
+                           + [TabStripController defaultTabHeight]
+                           + kPatternVerticalOffset);
+  } else {
+    return NSMakePoint(kPatternHorizontalOffset,
+                       NSHeight([windowChromeView bounds])
+                       + kPatternVerticalOffsetNoTabStrip);
+  }
 }
 
 - (NSPoint)bookmarkBubblePoint {
@@ -1611,39 +1689,42 @@
   }
 }
 
-// If the browser is in incognito mode, install the image view to decorate
-// the window at the upper right. Use the same base y coordinate as the
-// tab strip.
-- (void)installIncognitoBadge {
+// If the browser is in incognito mode or has multi-profiles, install the image
+// view to decorate the window at the upper right. Use the same base y
+// coordinate as the tab strip.
+- (void)installAvatar {
   // Only install if this browser window is OTR and has a tab strip.
-  if (!browser_->profile()->IsOffTheRecord() || ![self hasTabStrip])
+  if (![self shouldShowAvatar])
     return;
 
-  // Install the image into the badge view and size the view appropriately.
-  // Hide it for now; positioning and showing will be done by the layout code.
-  NSImage* image = app::mac::GetCachedImageWithName(@"otr_icon.pdf");
-  incognitoBadge_.reset([[IncognitoImageView alloc] init]);
-  [incognitoBadge_ setImage:image];
-  [incognitoBadge_ setFrameSize:[image size]];
-  [incognitoBadge_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
-  [incognitoBadge_ setHidden:YES];
+  // Install the image into the badge view. Hide it for now; positioning,
+  // sizing, and showing will be done by the layout code. The AvatarButton will
+  // choose which image to display based on the browser.
+  avatarButton_.reset([[AvatarButton alloc] initWithBrowser:browser_.get()]);
+  [avatarButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [avatarButton_ setHidden:YES];
+  // The button shouldn't do anything in incognito.
+  [avatarButton_ setOpenMenuOnClick:!browser_->profile()->IsOffTheRecord()];
 
   // Install the view.
-  [[[[self window] contentView] superview] addSubview:incognitoBadge_];
+  [[[[self window] contentView] superview] addSubview:avatarButton_];
 }
 
 // Documented in 10.6+, but present starting in 10.5. Called when we get a
 // three-finger swipe.
 - (void)swipeWithEvent:(NSEvent*)event {
+  CGFloat deltaX = [event deltaX];
+  CGFloat deltaY = [event deltaY];
+
   // Map forwards and backwards to history; left is positive, right is negative.
   unsigned int command = 0;
-  if ([event deltaX] > 0.5) {
+  if (deltaX > 0.5) {
     command = IDC_BACK;
-  } else if ([event deltaX] < -0.5) {
+  } else if (deltaX < -0.5) {
     command = IDC_FORWARD;
-  } else if ([event deltaY] > 0.5) {
+  } else if (deltaY > 0.5) {
     // TODO(pinkerton): figure out page-up, http://crbug.com/16305
-  } else if ([event deltaY] < -0.5) {
+  } else if (deltaY < -0.5) {
     // TODO(pinkerton): figure out page-down, http://crbug.com/16305
     browser_->ExecuteCommand(IDC_TABPOSE);
   }
@@ -1694,6 +1775,89 @@
 - (void)beginGestureWithEvent:(NSEvent*)event {
   totalMagnifyGestureAmount_ = 0;
   currentZoomStepDelta_ = 0;
+
+  // On Lion, there's support controlled by a System Preference for two- and
+  // three-finger navigational gestures. If set to allow three-finger gestures,
+  // the system gesture recognizer will automatically call |-swipeWithEvent:|
+  // and that will be handled as it would be on Snow Leopard. The two-finger
+  // gesture does not do this, so it must be manually recognized. See the note
+  // inside RecognizeTwoFingerGestures() for detailed information on the
+  // interaction of the different preferences.
+  if (!gesture_utils::RecognizeTwoFingerGestures())
+    return;
+  NSSet* touches = [event touchesMatchingPhase:NSTouchPhaseAny
+                                        inView:nil];
+  if ([touches count] >= 2) {
+    twoFingerGestureTouches_.reset([[NSMutableDictionary alloc] init]);
+    for (NSTouch* touch in touches) {
+      [twoFingerGestureTouches_ setObject:touch forKey:touch.identity];
+    }
+  }
+}
+
+- (void)endGestureWithEvent:(NSEvent*)event {
+  // This method only needs to process gesture events for two-finger navigation.
+  if (!twoFingerGestureTouches_.get())
+    return;
+
+  // When a multi-touch gesture ends, only one touch will be in the "End" phase.
+  // Other touches will be in "Moved" or "Unknown" phases. So long as one is
+  // ended, which it is by virtue of this method being called, the gesture can
+  // be committed so long as the magnitude is great enough.
+  NSSet* touches = [event touchesMatchingPhase:NSTouchPhaseAny
+                                        inView:nil];
+
+  // Store the touch data locally and reset the ivar so that new gestures can
+  // begin.
+  scoped_nsobject<NSDictionary> beginTouches(
+      twoFingerGestureTouches_.release());
+
+  // Construct a vector of magnitudes. Since gesture events do not have the
+  // |-deltaX| property set, this creates the X/Y magnitudes for each finger.
+  std::vector<CGFloat> deltasX;
+  std::vector<CGFloat> deltasY;
+  for (NSTouch* touch in touches) {
+    NSTouch* beginTouch = [beginTouches objectForKey:touch.identity];
+    if (!beginTouch)
+      continue;
+
+    // The |normalizedPosition| is scaled from (0, 1).
+    NSPoint beginPoint = beginTouch.normalizedPosition;
+    NSPoint endPoint = touch.normalizedPosition;
+
+    deltasX.push_back(endPoint.x - beginPoint.x);
+    deltasY.push_back(endPoint.y - beginPoint.y);
+  }
+
+  // Need at least two points to gesture.
+  if (deltasX.size() < 2)
+    return;
+
+  CGFloat sumX = std::accumulate(deltasX.begin(), deltasX.end(), 0.0f);
+  CGFloat sumY = std::accumulate(deltasY.begin(), deltasY.end(), 0.0f);
+
+  // If the Y magnitude is greater than the X, then don't treat this as a
+  // gesture. It was likely a vertical scroll instead.
+  if (std::abs(sumY) > std::abs(sumX))
+    return;
+
+  // On Lion, the user can choose to use a "natural" scroll direction with
+  // inverted axes.
+  if (gesture_utils::IsScrollDirectionInverted())
+    sumX *= -1;
+
+  int command_id = 0;
+  if (sumX > 0.3)
+    command_id = IDC_FORWARD;
+  else if (sumX < -0.3)
+    command_id = IDC_BACK;
+  else
+    return;
+
+  if (browser_->command_updater()->IsCommandEnabled(command_id)) {
+    browser_->ExecuteCommandWithDisposition(command_id,
+        event_utils::WindowOpenDispositionFromNSEvent(event));
+  }
 }
 
 // Delegate method called when window is resized.
@@ -1887,171 +2051,108 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
 @implementation BrowserWindowController(Fullscreen)
 
-- (IBAction)enterFullscreen:(id)sender {
+- (void)handleLionToggleFullscreen {
+  DCHECK(base::mac::IsOSLionOrLater());
   browser_->ExecuteCommand(IDC_FULLSCREEN);
 }
 
+// On Lion, this method is called by either the Lion fullscreen button or the
+// "Enter Full Screen" menu item.  On Snow Leopard, this function is never
+// called by the UI directly, but it provides the implementation for
+// |-setPresentationMode:|.
 - (void)setFullscreen:(BOOL)fullscreen {
-  // The logic in this function is a bit complicated and very carefully
-  // arranged.  See the below comments for more details.
-
   if (fullscreen == [self isFullscreen])
     return;
 
   if (![self supportsFullscreen])
     return;
 
-  // Fade to black.
-  const CGDisplayReservationInterval kFadeDurationSeconds = 0.6;
-  Boolean didFadeOut = NO;
-  CGDisplayFadeReservationToken token;
-  if (CGAcquireDisplayFadeReservation(kFadeDurationSeconds, &token)
-      == kCGErrorSuccess) {
-    didFadeOut = YES;
-    CGDisplayFade(token, kFadeDurationSeconds / 2, kCGDisplayBlendNormal,
-        kCGDisplayBlendSolidColor, 0.0, 0.0, 0.0, /*synchronous=*/true);
+  if (base::mac::IsOSLionOrLater()) {
+    enteredPresentationModeFromFullscreen_ = YES;
+    if ([[self window] isKindOfClass:[FramedBrowserWindow class]])
+      [static_cast<FramedBrowserWindow*>([self window]) toggleSystemFullScreen];
+    return;
   }
 
-  // Close the bookmark bubble, if it's open.  We use |-ok:| instead of
-  // |-cancel:| or |-close| because that matches the behavior when the bubble
-  // loses key status.
-  [bookmarkBubbleController_ ok:self];
-
-  // Save the current first responder so we can restore after views are moved.
-  NSWindow* window = [self window];
-  scoped_nsobject<FocusTracker> focusTracker(
-      [[FocusTracker alloc] initWithWindow:window]);
-  BOOL showDropdown = [self floatingBarHasFocus];
-
-  // While we move views (and focus) around, disable any bar visibility changes.
-  [self disableBarVisibilityUpdates];
-
-  // If we're entering fullscreen, create the fullscreen controller.  If we're
-  // exiting fullscreen, kill the controller.
-  if (fullscreen) {
-    fullscreenController_.reset([[FullscreenController alloc]
-                                  initWithBrowserController:self]);
-  } else {
-    [fullscreenController_ exitFullscreen];
-    fullscreenController_.reset();
-  }
-
-  // Destroy the tab strip's sheet controller.  We will recreate it in the new
-  // window when needed.
-  [tabStripController_ destroySheetController];
-
-  // Retain the tab strip view while we remove it from its superview.
-  scoped_nsobject<NSView> tabStripView;
-  if ([self hasTabStrip] && ![self useVerticalTabs]) {
-    tabStripView.reset([[self tabStripView] retain]);
-    [tabStripView removeFromSuperview];
-  }
-
-  // Ditto for the content view.
-  scoped_nsobject<NSView> contentView([[window contentView] retain]);
-  // Disable autoresizing of subviews while we move views around. This prevents
-  // spurious renderer resizes.
-  [contentView setAutoresizesSubviews:NO];
-  [contentView removeFromSuperview];
-
-  NSWindow* destWindow = nil;
-  if (fullscreen) {
-    DCHECK(!savedRegularWindow_);
-    savedRegularWindow_ = [window retain];
-    destWindow = [self createFullscreenWindow];
-  } else {
-    DCHECK(savedRegularWindow_);
-    destWindow = [savedRegularWindow_ autorelease];
-    savedRegularWindow_ = nil;
-  }
-  DCHECK(destWindow);
-
-  // Have to do this here, otherwise later calls can crash because the window
-  // has no delegate.
-  [window setDelegate:nil];
-  [destWindow setDelegate:self];
-
-  // With this call, valgrind complains that a "Conditional jump or move depends
-  // on uninitialised value(s)".  The error happens in -[NSThemeFrame
-  // drawOverlayRect:].  I'm pretty convinced this is an Apple bug, but there is
-  // no visual impact.  I have been unable to tickle it away with other window
-  // or view manipulation Cocoa calls.  Stack added to suppressions_mac.txt.
-  [contentView setAutoresizesSubviews:YES];
-  [destWindow setContentView:contentView];
-
-  // Move the incognito badge if present.
-  if (incognitoBadge_.get()) {
-    [incognitoBadge_ removeFromSuperview];
-    [incognitoBadge_ setHidden:YES];  // Will be shown in layout.
-    [[[destWindow contentView] superview] addSubview:incognitoBadge_];
-  }
-
-  // Add the tab strip after setting the content view and moving the incognito
-  // badge (if any), so that the tab strip will be on top (in the z-order).
-  if ([self hasTabStrip] && ![self useVerticalTabs])
-    [[[destWindow contentView] superview] addSubview:tabStripView];
-
-  [window setWindowController:nil];
-  [self setWindow:destWindow];
-  [destWindow setWindowController:self];
-  [self adjustUIForFullscreen:fullscreen];
-
-  // Adjust the infobar container. In fullscreen, it needs to be below all
-  // top chrome elements so it only sits atop the web contents. When in normal
-  // mode, it needs to draw over the bookmark bar and part of the toolbar.
-  [[infoBarContainerController_ view] removeFromSuperview];
-  NSView* infoBarDest = [[destWindow contentView] superview];
-  [infoBarDest addSubview:[infoBarContainerController_ view]
-               positioned:fullscreen ? NSWindowBelow : NSWindowAbove
-               relativeTo:fullscreen ? floatingBarBackingView_
-                                     : [bookmarkBarController_ view]];
-
-  // When entering fullscreen mode, the controller forces a layout for us.  When
-  // exiting, we need to call layoutSubviews manually.
-  if (fullscreen) {
-    [fullscreenController_ enterFullscreenForContentView:contentView
-                                            showDropdown:showDropdown];
-  } else {
-    [self layoutSubviews];
-  }
-
-  // Move the status bubble over, if we have one.
-  if (statusBubble_)
-    statusBubble_->SwitchParentWindow(destWindow);
-
-  // Move the title over.
-  [destWindow setTitle:[window title]];
-
-  // The window needs to be onscreen before we can set its first responder.
-  // Ordering the window to the front can change the active Space (either to
-  // the window's old Space or to the application's assigned Space). To prevent
-  // this by temporarily change the collectionBehavior.
-  NSWindowCollectionBehavior behavior = [window collectionBehavior];
-  [destWindow setCollectionBehavior:
-      NSWindowCollectionBehaviorMoveToActiveSpace];
-  [destWindow makeKeyAndOrderFront:self];
-  [destWindow setCollectionBehavior:behavior];
-
-  [focusTracker restoreFocusInWindow:destWindow];
-  [window orderOut:self];
-
-  // We're done moving focus, so re-enable bar visibility changes.
-  [self enableBarVisibilityUpdates];
-
-  // This needs to be done when leaving full-screen mode to ensure that the
-  // button's action is set properly.
-  [self setUpOSFullScreenButton];
-
-  // Fade back in.
-  if (didFadeOut) {
-    CGDisplayFade(token, kFadeDurationSeconds / 2, kCGDisplayBlendSolidColor,
-        kCGDisplayBlendNormal, 0.0, 0.0, 0.0, /*synchronous=*/false);
-    CGReleaseDisplayFadeReservation(token);
-  }
+  if (fullscreen)
+    [self enterFullscreenForSnowLeopardOrEarlier];
+  else
+    [self exitFullscreenForSnowLeopardOrEarlier];
 }
 
 - (BOOL)isFullscreen {
-  return fullscreenController_.get() && [fullscreenController_ isFullscreen];
+  return (fullscreenWindow_.get() != nil) ||
+         ([[self window] styleMask] & NSFullScreenWindowMask);
+}
+
+- (void)togglePresentationModeForLionOrLater:(id)sender {
+  // Called only by the presentation mode toggle button.
+  DCHECK(base::mac::IsOSLionOrLater());
+  enteredPresentationModeFromFullscreen_ = YES;
+  browser_->ExecuteCommand(IDC_PRESENTATION_MODE);
+}
+
+// On Lion, this function is called by either the presentation mode toggle
+// button or the "Enter Presentation Mode" menu item.  In the latter case, this
+// function also triggers the Lion machinery to enter fullscreen mode as well as
+// set presentation mode.  On Snow Leopard, this function is called by the
+// "Enter Presentation Mode" menu item, and triggering presentation mode always
+// moves the user into fullscreen mode.
+- (void)setPresentationMode:(BOOL)presentationMode {
+  // Presentation mode on Leopard and Snow Leopard maps directly to fullscreen
+  // mode.
+  if (base::mac::IsOSSnowLeopardOrEarlier()) {
+    [self setFullscreen:presentationMode];
+    return;
+  }
+
+  if (presentationMode) {
+    BOOL fullscreen = [self isFullscreen];
+    [self setShouldUsePresentationModeWhenEnteringFullscreen:YES];
+    enteredPresentationModeFromFullscreen_ = fullscreen;
+
+    if (fullscreen) {
+      // If already in fullscreen mode, just toggle the presentation mode
+      // setting.  Go through an elaborate dance to force the overlay to show,
+      // then animate out once the mouse moves away.  This helps draw attention
+      // to the fact that the UI is in an overlay.  Focus the tab contents
+      // because the omnibox is the most likely source of bar visibility locks,
+      // and taking focus away from the omnibox releases its lock.
+      [self lockBarVisibilityForOwner:self withAnimation:NO delay:NO];
+      [self focusTabContents];
+      [self setPresentationModeInternal:YES forceDropdown:YES];
+      [self releaseBarVisibilityForOwner:self withAnimation:YES delay:YES];
+    } else {
+      // If not in fullscreen mode, trigger the Lion fullscreen mode machinery.
+      // Presentation mode will automatically be enabled in
+      // |-windowWillEnterFullScreen:|.
+      NSWindow* window = [self window];
+      if ([window isKindOfClass:[FramedBrowserWindow class]])
+        [static_cast<FramedBrowserWindow*>(window) toggleSystemFullScreen];
+    }
+  } else {
+    if (enteredPresentationModeFromFullscreen_) {
+      // The window is currently in fullscreen mode, but the user is choosing to
+      // turn presentation mode off (choosing to always show the UI).  Set the
+      // preference to ensure that presentation mode will stay off for the next
+      // window that goes fullscreen.
+      [self setShouldUsePresentationModeWhenEnteringFullscreen:NO];
+      [self setPresentationModeInternal:NO forceDropdown:NO];
+    } else {
+      // The user entered presentation mode directly from non-fullscreen mode
+      // using the "Enter Presentation Mode" menu item and is using that same
+      // menu item to exit presentation mode.  In this case, exit fullscreen
+      // mode as well (using the Lion machinery).
+      NSWindow* window = [self window];
+      if ([window isKindOfClass:[FramedBrowserWindow class]])
+        [static_cast<FramedBrowserWindow*>(window) toggleSystemFullScreen];
+    }
+  }
+}
+
+- (BOOL)inPresentationMode {
+  return presentationModeController_.get() &&
+      [presentationModeController_ inPresentationMode];
 }
 
 - (void)resizeFullscreenWindow {
@@ -2085,10 +2186,10 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   if (![self isBarVisibilityLockedForOwner:owner]) {
     [barVisibilityLocks_ addObject:owner];
 
-    // If enabled, show the overlay if necessary (and if in fullscreen mode).
+    // If enabled, show the overlay if necessary (and if in presentation mode).
     if (barVisibilityUpdatesEnabled_) {
-      [fullscreenController_ ensureOverlayShownWithAnimation:animate
-                                                       delay:delay];
+      [presentationModeController_ ensureOverlayShownWithAnimation:animate
+                                                             delay:delay];
     }
   }
 }
@@ -2099,11 +2200,11 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   if ([self isBarVisibilityLockedForOwner:owner]) {
     [barVisibilityLocks_ removeObject:owner];
 
-    // If enabled, hide the overlay if necessary (and if in fullscreen mode).
+    // If enabled, hide the overlay if necessary (and if in presentation mode).
     if (barVisibilityUpdatesEnabled_ &&
         ![barVisibilityLocks_ count]) {
-      [fullscreenController_ ensureOverlayHiddenWithAnimation:animate
-                                                        delay:delay];
+      [presentationModeController_ ensureOverlayHiddenWithAnimation:animate
+                                                              delay:delay];
     }
   }
 }

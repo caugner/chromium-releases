@@ -16,15 +16,15 @@
 
 #include <vector>
 
-#include "app/win/scoped_com_initializer.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_com_initializer.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/importer/importer_data_types.h"
@@ -32,6 +32,7 @@
 #include "chrome/browser/importer/importer_progress_observer.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/test/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/password_form.h"
@@ -54,7 +55,13 @@ class ImporterTest : public testing::Test {
  public:
   ImporterTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
-        file_thread_(BrowserThread::FILE, &message_loop_) {}
+        file_thread_(BrowserThread::FILE, &message_loop_),
+        profile_(new TestingProfile()) {
+  }
+
+  ~ImporterTest() {
+    profile_.reset(NULL);
+  }
 
  protected:
   virtual void SetUp() {
@@ -97,7 +104,7 @@ class ImporterTest : public testing::Test {
 
     MessageLoop* loop = MessageLoop::current();
     importer::SourceProfile source_profile;
-    source_profile.importer_type = importer::FIREFOX3;
+    source_profile.importer_type = importer::TYPE_FIREFOX3;
     source_profile.app_path = app_path_;
     source_profile.source_path = profile_path_;
     scoped_refptr<ImporterHost> host(new ImporterHost);
@@ -107,7 +114,7 @@ class ImporterTest : public testing::Test {
       items = items | importer::SEARCH_ENGINES;
     loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
         &ImporterHost::StartImportSettings, source_profile,
-        static_cast<Profile*>(NULL), items, make_scoped_refptr(writer), true));
+        profile_.get(), items, make_scoped_refptr(writer), true));
     loop->Run();
   }
 
@@ -117,6 +124,7 @@ class ImporterTest : public testing::Test {
   BrowserThread file_thread_;
   FilePath profile_path_;
   FilePath app_path_;
+  scoped_ptr<TestingProfile> profile_;
 };
 
 const int kMaxPathSize = 5;
@@ -211,7 +219,7 @@ class TestObserver : public ProfileWriter,
     return true;
   }
 
-  virtual bool TemplateURLModelIsLoaded() const {
+  virtual bool TemplateURLServiceIsLoaded() const {
     return true;
   }
 
@@ -325,7 +333,7 @@ void WritePStore(IPStore* pstore, const GUID* type, const GUID* subtype) {
 
 TEST_F(ImporterTest, IEImporter) {
   // Sets up a favorites folder.
-  app::win::ScopedCOMInitializer com_init;
+  base::win::ScopedCOMInitializer com_init;
   std::wstring path = temp_dir_.path().AppendASCII("Favorites").value();
   CreateDirectory(path.c_str(), NULL);
   CreateDirectory((path + L"\\SubFolder").c_str(), NULL);
@@ -389,13 +397,13 @@ TEST_F(ImporterTest, IEImporter) {
   TestObserver* observer = new TestObserver();
   host->SetObserver(observer);
   importer::SourceProfile source_profile;
-  source_profile.importer_type = importer::MS_IE;
+  source_profile.importer_type = importer::TYPE_IE;
   source_profile.source_path = temp_dir_.path();
 
   loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
       &ImporterHost::StartImportSettings,
       source_profile,
-      static_cast<Profile*>(NULL),
+      profile_.get(),
       importer::HISTORY | importer::PASSWORDS | importer::FAVORITES,
       observer,
       true));
@@ -577,7 +585,7 @@ class FirefoxObserver : public ProfileWriter,
     return true;
   }
 
-  virtual bool TemplateURLModelIsLoaded() const {
+  virtual bool TemplateURLServiceIsLoaded() const {
     return true;
   }
 
@@ -682,7 +690,7 @@ TEST_F(ImporterTest, MAYBE(Firefox2Importer)) {
   FirefoxObserver* observer = new FirefoxObserver();
   host->SetObserver(observer);
   importer::SourceProfile source_profile;
-  source_profile.importer_type = importer::FIREFOX2;
+  source_profile.importer_type = importer::TYPE_FIREFOX2;
   source_profile.app_path = app_path_;
   source_profile.source_path = profile_path_;
 
@@ -690,7 +698,7 @@ TEST_F(ImporterTest, MAYBE(Firefox2Importer)) {
       host.get(),
       &ImporterHost::StartImportSettings,
       source_profile,
-      static_cast<Profile*>(NULL),
+      profile_.get(),
       importer::HISTORY | importer::PASSWORDS |
       importer::FAVORITES | importer::SEARCH_ENGINES,
       make_scoped_refptr(observer),
@@ -781,7 +789,7 @@ class Firefox3Observer : public ProfileWriter,
     return true;
   }
 
-  virtual bool TemplateURLModelIsLoaded() const {
+  virtual bool TemplateURLServiceIsLoaded() const {
     return true;
   }
 

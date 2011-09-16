@@ -6,7 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "chrome/browser/content_settings/stub_settings_observer.h"
+#include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -17,6 +17,8 @@
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "googleurl/src/gurl.h"
+
+using ::testing::_;
 
 namespace content_settings {
 
@@ -33,8 +35,8 @@ class PolicyDefaultProviderTest : public TestingBrowserProcessTest {
 
 TEST_F(PolicyDefaultProviderTest, DefaultValues) {
   TestingProfile profile;
-  PolicyDefaultProvider provider(&profile);
   TestingPrefService* prefs = profile.GetTestingPrefService();
+  PolicyDefaultProvider provider(prefs);
 
   // By default, policies should be off.
   ASSERT_FALSE(
@@ -52,6 +54,46 @@ TEST_F(PolicyDefaultProviderTest, DefaultValues) {
   prefs->RemoveManagedPref(prefs::kManagedDefaultCookiesSetting);
   ASSERT_FALSE(
       provider.DefaultSettingIsManaged(CONTENT_SETTINGS_TYPE_COOKIES));
+
+  provider.ShutdownOnUIThread();
+}
+
+TEST_F(PolicyDefaultProviderTest, DefaultGeolocationContentSetting) {
+  TestingProfile profile;
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+  PolicyDefaultProvider provider(prefs);
+
+  // By default, policies should be off.
+  EXPECT_FALSE(
+      provider.DefaultSettingIsManaged(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
+            provider.ProvideDefaultSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+
+  prefs->SetInteger(prefs::kGeolocationDefaultContentSetting,
+                    CONTENT_SETTING_ALLOW);
+  EXPECT_FALSE(
+      provider.DefaultSettingIsManaged(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
+            provider.ProvideDefaultSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+
+  //
+  prefs->SetManagedPref(prefs::kGeolocationDefaultContentSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+  EXPECT_FALSE(
+      provider.DefaultSettingIsManaged(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
+            provider.ProvideDefaultSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+
+  // Change the managed value of the default geolocation setting
+  prefs->SetManagedPref(prefs::kManagedDefaultGeolocationSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+
+  EXPECT_TRUE(
+      provider.DefaultSettingIsManaged(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            provider.ProvideDefaultSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION));
+
+  provider.ShutdownOnUIThread();
 }
 
 // When a default-content-setting is set to a managed setting a
@@ -59,27 +101,30 @@ TEST_F(PolicyDefaultProviderTest, DefaultValues) {
 // if the managed setting is removed.
 TEST_F(PolicyDefaultProviderTest, ObserveManagedSettingsChange) {
   TestingProfile profile;
-  StubSettingsObserver observer;
-  // Make sure the content settings map exists.
-  profile.GetHostContentSettingsMap();
   TestingPrefService* prefs = profile.GetTestingPrefService();
+  PolicyDefaultProvider provider(prefs);
+
+  MockObserver mock_observer;
+  EXPECT_CALL(mock_observer,
+              OnContentSettingChanged(_,
+                                      _,
+                                      CONTENT_SETTINGS_TYPE_DEFAULT,
+                                      ""));
+  provider.AddObserver(&mock_observer);
 
   // Set the managed default-content-setting.
   prefs->SetManagedPref(prefs::kManagedDefaultImagesSetting,
                         Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
-  EXPECT_EQ(profile.GetHostContentSettingsMap(), observer.last_notifier);
-  EXPECT_EQ(CONTENT_SETTINGS_TYPE_DEFAULT, observer.last_type);
-  EXPECT_TRUE(observer.last_update_all);
-  EXPECT_TRUE(observer.last_update_all_types);
-  EXPECT_EQ(1, observer.counter);
+  ::testing::Mock::VerifyAndClearExpectations(&mock_observer);
 
+  EXPECT_CALL(mock_observer,
+              OnContentSettingChanged(_,
+                                      _,
+                                      CONTENT_SETTINGS_TYPE_DEFAULT,
+                                      ""));
   // Remove the managed default-content-setting.
   prefs->RemoveManagedPref(prefs::kManagedDefaultImagesSetting);
-  EXPECT_EQ(profile.GetHostContentSettingsMap(), observer.last_notifier);
-  EXPECT_EQ(CONTENT_SETTINGS_TYPE_DEFAULT, observer.last_type);
-  EXPECT_TRUE(observer.last_update_all);
-  EXPECT_TRUE(observer.last_update_all_types);
-  EXPECT_EQ(2, observer.counter);
+  provider.ShutdownOnUIThread();
 }
 
 class PolicyProviderTest : public testing::Test {
@@ -106,7 +151,7 @@ TEST_F(PolicyProviderTest, Default) {
   prefs->SetManagedPref(prefs::kManagedImagesBlockedForUrls,
                         value);
 
-  PolicyProvider provider(&profile, NULL);
+  PolicyProvider provider(prefs, NULL);
 
   ContentSettingsPattern yt_url_pattern =
       ContentSettingsPattern::FromString("www.youtube.com");
@@ -129,6 +174,8 @@ TEST_F(PolicyProviderTest, Default) {
   EXPECT_EQ(CONTENT_SETTING_DEFAULT,
             provider.GetContentSetting(
                 youtube_url, youtube_url, CONTENT_SETTINGS_TYPE_COOKIES, ""));
+
+  provider.ShutdownOnUIThread();
 }
 
 TEST_F(PolicyProviderTest, ResourceIdentifier) {
@@ -144,7 +191,7 @@ TEST_F(PolicyProviderTest, ResourceIdentifier) {
   prefs->SetManagedPref(prefs::kManagedPluginsAllowedForUrls,
                         value);
 
-  PolicyProvider provider(&profile, NULL);
+  PolicyProvider provider(prefs, NULL);
 
   GURL youtube_url("http://www.youtube.com");
   GURL google_url("http://mail.google.com");
@@ -166,19 +213,14 @@ TEST_F(PolicyProviderTest, ResourceIdentifier) {
                 CONTENT_SETTINGS_TYPE_PLUGINS,
                 ""));
 
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
             provider.GetContentSetting(
                 google_url,
                 google_url,
                 CONTENT_SETTINGS_TYPE_PLUGINS,
                 "someplugin"));
 
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            provider.GetContentSetting(
-                google_url,
-                google_url,
-                CONTENT_SETTINGS_TYPE_PLUGINS,
-                "anotherplugin"));
+  provider.ShutdownOnUIThread();
 }
 
 }  // namespace content_settings

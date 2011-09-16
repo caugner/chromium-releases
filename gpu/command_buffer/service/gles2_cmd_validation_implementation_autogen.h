@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file is auto-generated. DO NOT EDIT!
+// This file is auto-generated from
+// gpu/command_buffer/build_gles2_cmd_buffer.py
+// DO NOT EDIT!
 
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_VALIDATION_IMPLEMENTATION_AUTOGEN_H_  // NOLINT
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_VALIDATION_IMPLEMENTATION_AUTOGEN_H_  // NOLINT
@@ -508,6 +510,7 @@ Validators::Validators()
       render_buffer_target(
           valid_render_buffer_target_table, arraysize(
               valid_render_buffer_target_table)),
+      shader_binary_format(),
       shader_parameter(
           valid_shader_parameter_table, arraysize(
               valid_shader_parameter_table)),

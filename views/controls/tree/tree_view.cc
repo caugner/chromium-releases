@@ -8,15 +8,15 @@
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/win/win_util.h"
-#include "grit/app_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/hwnd_util.h"
-#include "ui/base/l10n/l10n_util_win.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/favicon_size.h"
@@ -166,11 +166,6 @@ void TreeView::Expand(TreeModelNode* node) {
   TreeView_Expand(tree_view_, GetNodeDetails(node)->tree_item, TVE_EXPAND);
 }
 
-void TreeView::ExpandAll() {
-  DCHECK(model_);
-  ExpandAll(model_->GetRoot());
-}
-
 void TreeView::ExpandAll(TreeModelNode* node) {
   DCHECK(node);
   // Expand the node.
@@ -184,6 +179,8 @@ void TreeView::ExpandAll(TreeModelNode* node) {
 }
 
 bool TreeView::IsExpanded(TreeModelNode* node) {
+  if (!tree_view_)
+    return false;
   TreeModelNode* parent = model_->GetParent(node);
   if (!parent)
     return true;
@@ -488,7 +485,7 @@ bool TreeView::OnKeyDown(ui::KeyboardCode virtual_key_code) {
 }
 
 void TreeView::OnContextMenu(const POINT& location) {
-  if (!GetContextMenuController())
+  if (!context_menu_controller())
     return;
 
   if (location.x == -1 && location.y == -1) {

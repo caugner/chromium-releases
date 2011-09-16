@@ -45,13 +45,6 @@
         },
         'conditions': [
           ['OS=="win"', {
-            'sources': [
-              'app/chrome_exe.rc',
-              'app/chrome_exe_version.rc.version',
-            ],
-            'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)/chrome',
-            ],
             # TODO(scottbyer): This is a temporary workaround.  The right fix
             # is to change the output file to be in $(IntDir) for this project
             # and the .dll project and use the hardlink script to link it back
@@ -83,41 +76,6 @@
             },
             'actions': [
               {
-                'action_name': 'version',
-                'variables': {
-                  'template_input_path': 'app/chrome_exe_version.rc.version',
-                },
-                'conditions': [
-                  [ 'branding == "Chrome"', {
-                    'variables': {
-                       'branding_path': 'app/theme/google_chrome/BRANDING',
-                    },
-                  }, { # else branding!="Chrome"
-                    'variables': {
-                       'branding_path': 'app/theme/chromium/BRANDING',
-                    },
-                  }],
-                ],
-                'inputs': [
-                  '<(template_input_path)',
-                  '<(version_path)',
-                  '<(branding_path)',
-                ],
-                'outputs': [
-                  '<(SHARED_INTERMEDIATE_DIR)/chrome/chrome_exe_version.rc',
-                ],
-                'action': [
-                  'python',
-                  '<(version_py_path)',
-                  '-f', '<(version_path)',
-                  '-f', '<(branding_path)',
-                  '<(template_input_path)',
-                  '<@(_outputs)',
-                ],
-                'process_outputs_as_sources': 1,
-                'message': 'Generating version information in <(_outputs)'
-              },
-              {
                 'action_name': 'first_run',
                 'inputs': [
                     'app/FirstRun',
@@ -143,7 +101,6 @@
       'target_name': 'chrome',
       'type': 'executable',
       'mac_bundle': 1,
-      'msvs_guid': '7B219FAA-E360-43C8-B341-804A94EEFFAC',
       'variables': {
         'chrome_exe_target': 1,
         'use_system_xdg_utils%': 0,
@@ -194,11 +151,20 @@
                 ],
               },
             ],
-            # TODO(rkc): Remove this once we have a fix for remote gdb
-            # and are able to correctly get section header offsets for
-            # pie executables. Currently -pie breaks remote debugging.
+            # TODO(rkc): Remove disable_pie (and instead always use
+            # -pie) once we have a fix for remote gdb and are able to
+            # correctly get section header offsets for pie
+            # executables. Currently -pie breaks remote debugging.
             ['disable_pie==1', {
-              'ldflags' : ['-nopie'],
+              'ldflags': ['-nopie'],
+            }, {
+              # Building with -pie needs investigating on ARM.
+              # For now, at least use it on Linux Intel.
+              'conditions': [
+                ['target_arch=="x64" or target_arch=="ia32"', {
+                  'ldflags': ['-pie'],
+                }],
+              ],
             }],
             ['use_system_xdg_utils==0', {
               'copies': [
@@ -260,6 +226,11 @@
               'variables': {
                 # A real .dSYM is needed for dump_syms to operate on.
                 'mac_real_dsym': 1,
+              },
+              'xcode_settings': {
+                # With mac_real_dsym set, strip_from_xcode won't be used.
+                # Specify CHROMIUM_STRIP_SAVE_FILE directly to Xcode.
+                'STRIPFLAGS': '-s $(CHROMIUM_STRIP_SAVE_FILE)',
               },
               'dependencies': [
                 '../breakpad/breakpad.gyp:dump_syms',
@@ -420,18 +391,14 @@
         }],
         ['OS != "mac"', {
           'conditions': [
-            ['branding=="Chrome"', {
-              'product_name': 'chrome'
-            }, {  # else: Branding!="Chrome"
-              # TODO:  change to:
-              #   'product_name': 'chromium'
-              # whenever we convert the rest of the infrastructure
-              # (buildbots etc.) to use "gyp -Dbranding=Chrome".
-              # NOTE: chrome/app/theme/chromium/BRANDING and
-              # chrome/app/theme/google_chrome/BRANDING have the short names,
-              # etc.; should we try to extract from there instead?
-              'product_name': 'chrome'
-            }],
+            # TODO:  add a:
+            #   'product_name': 'chromium'
+            # whenever we convert the rest of the infrastructure
+            # (buildbots etc.) to understand the branding gyp define.
+            # NOTE: chrome/app/theme/chromium/BRANDING and
+            # chrome/app/theme/google_chrome/BRANDING have the short name
+            # "chrome" etc.; should we try to extract from there instead?
+
             # On Mac, this is done in chrome_dll.gypi.
             ['internal_pdf', {
               'dependencies': [
@@ -456,6 +423,7 @@
         }],
         ['OS=="win"', {
           'dependencies': [
+            'chrome_version_resources',
             'installer_util',
             'installer_util_strings',
             '../base/base.gyp:base',
@@ -464,6 +432,10 @@
             '../sandbox/sandbox.gyp:sandbox',
             'app/locales/locales.gyp:*',
             'app/policy/cloud_policy_codegen.gyp:policy',
+          ],
+          'sources': [
+            'app/chrome_exe.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_exe_version.rc',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
@@ -482,7 +454,6 @@
           'target_name': 'chrome_nacl_win64',
           'type': 'executable',
           'product_name': 'nacl64',
-          'msvs_guid': 'BB1AE956-038B-4092-96A2-951D2B418548',
           'variables': {
             'chrome_exe_target': 1,
           },
@@ -490,6 +461,7 @@
             # On Windows make sure we've built Win64 version of chrome_dll,
             # which contains all of the library code with Chromium
             # functionality.
+            'chrome_version_resources',
             'chrome_dll_nacl_win64',
             'common_constants_win64',
             'installer_util_nacl_win64',
@@ -497,6 +469,7 @@
             '../breakpad/breakpad.gyp:breakpad_handler_win64',
             '../breakpad/breakpad.gyp:breakpad_sender_win64',
             '../base/base.gyp:base_nacl_win64',
+            '../base/base.gyp:base_static_win64',
             '../sandbox/sandbox.gyp:sandbox_win64',
           ],
           'defines': [
@@ -504,6 +477,9 @@
           ],
           'include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)/chrome',
+          ],
+          'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/nacl64_exe_version.rc',
           ],
           'msvs_settings': {
             'VCLinkerTool': {

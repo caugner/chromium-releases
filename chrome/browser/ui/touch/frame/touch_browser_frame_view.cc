@@ -12,12 +12,13 @@
 #include "chrome/browser/ui/touch/frame/keyboard_container_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_touch.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "content/common/view_messages.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/gfx/rect.h"
@@ -26,10 +27,14 @@
 #include "views/controls/textfield/textfield.h"
 #include "views/focus/focus_manager.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/input_method/virtual_keyboard_selector.h"
+#endif
+
 namespace {
 
-const int kKeyboardHeight = 360;
-const int kKeyboardSlideDuration = 500;  // In milliseconds
+const int kDefaultKeyboardHeight = 300;
+const int kKeyboardSlideDuration = 300;  // In milliseconds
 
 PropertyAccessor<bool>* GetFocusedStateAccessor() {
   static PropertyAccessor<bool> state;
@@ -54,19 +59,26 @@ TouchBrowserFrameView::TouchBrowserFrameView(BrowserFrame* frame,
                                              BrowserView* browser_view)
     : OpaqueBrowserFrameView(frame, browser_view),
       keyboard_showing_(false),
+      keyboard_height_(kDefaultKeyboardHeight),
       focus_listener_added_(false),
       keyboard_(NULL) {
   registrar_.Add(this,
-                 NotificationType::NAV_ENTRY_COMMITTED,
+                 content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                  NotificationService::AllSources());
   registrar_.Add(this,
-                 NotificationType::FOCUS_CHANGED_IN_PAGE,
+                 content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
                  NotificationService::AllSources());
   registrar_.Add(this,
-                 NotificationType::TAB_CONTENTS_DESTROYED,
+                 content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  NotificationService::AllSources());
   registrar_.Add(this,
-                 NotificationType::HIDE_KEYBOARD_INVOKED,
+                 chrome::NOTIFICATION_HIDE_KEYBOARD_INVOKED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_SET_KEYBOARD_HEIGHT_INVOKED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EDITABLE_ELEMENT_TOUCHED,
                  NotificationService::AllSources());
 
   browser_view->browser()->tabstrip_model()->AddObserver(this);
@@ -74,6 +86,12 @@ TouchBrowserFrameView::TouchBrowserFrameView(BrowserFrame* frame,
   animation_.reset(new ui::SlideAnimation(this));
   animation_->SetTweenType(ui::Tween::LINEAR);
   animation_->SetSlideDuration(kKeyboardSlideDuration);
+
+#if defined(OS_CHROMEOS)
+  chromeos::input_method::InputMethodManager* manager =
+      chromeos::input_method::InputMethodManager::GetInstance();
+  manager->AddVirtualKeyboardObserver(this);
+#endif
 }
 
 TouchBrowserFrameView::~TouchBrowserFrameView() {
@@ -97,8 +115,8 @@ void TouchBrowserFrameView::Layout() {
     // same bounds as when the keyboard is visible. But
     // |GetBoundsForReservedArea| should not take this into account so that the
     // render view gets the entire area to relayout itself.
-    bounds.set_y(bounds.y() - kKeyboardHeight);
-    bounds.set_height(kKeyboardHeight);
+    bounds.set_y(bounds.y() - keyboard_height_);
+    bounds.set_height(keyboard_height_);
   }
   keyboard_->SetBoundsRect(bounds);
 }
@@ -115,8 +133,9 @@ void TouchBrowserFrameView::FocusWillChange(views::View* focused_before,
 
 ///////////////////////////////////////////////////////////////////////////////
 // TouchBrowserFrameView, protected:
+
 int TouchBrowserFrameView::GetReservedHeight() const {
-  return keyboard_showing_ ? kKeyboardHeight : 0;
+  return keyboard_showing_ ? keyboard_height_ : 0;
 }
 
 void TouchBrowserFrameView::ViewHierarchyChanged(bool is_add,
@@ -164,17 +183,21 @@ void TouchBrowserFrameView::UpdateKeyboardAndLayout(bool should_show_keyboard) {
 
   keyboard_showing_ = should_show_keyboard;
   if (keyboard_showing_) {
-    animation_->Show();
-
     // We don't re-layout the client view until the animation ends (see
     // AnimationEnded below) because we want the client view to occupy the
-    // entire height during the animation.
+    // entire height during the animation. It is necessary to reset the
+    // transform for the keyboard first so that the contents are sized properly
+    // when layout, and then start the animation.
+    ui::Transform reset;
+    keyboard_->SetTransform(reset);
     Layout();
+
+    animation_->Show();
   } else {
     animation_->Hide();
 
     browser_view()->set_clip_y(ui::Tween::ValueBetween(
-          animation_->GetCurrentValue(), 0, kKeyboardHeight));
+          animation_->GetCurrentValue(), 0, keyboard_height_));
     parent()->Layout();
   }
 }
@@ -221,9 +244,6 @@ void TouchBrowserFrameView::ActiveTabChanged(TabContentsWrapper* old_contents,
                                              TabContentsWrapper* new_contents,
                                              int index,
                                              bool user_gesture) {
-  if (new_contents == old_contents)
-    return;
-
   TabContents* contents = new_contents->tab_contents();
   if (!TabContentsHasFocus(contents))
     return;
@@ -233,12 +253,19 @@ void TouchBrowserFrameView::ActiveTabChanged(TabContentsWrapper* old_contents,
   UpdateKeyboardAndLayout(editable ? *editable : false);
 }
 
+void TouchBrowserFrameView::TabStripEmpty() {
+  if (animation_->is_animating()) {
+    // Reset the delegate so the AnimationEnded callback doesn't trigger.
+    animation_->set_delegate(NULL);
+    animation_->Stop();
+  }
+}
 
-void TouchBrowserFrameView::Observe(NotificationType type,
+void TouchBrowserFrameView::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
   Browser* browser = browser_view()->browser();
-  if (type == NotificationType::FOCUS_CHANGED_IN_PAGE) {
+  if (type == content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE) {
     // Only modify the keyboard state if the currently active tab sent the
     // notification.
     const TabContents* current_tab = browser->GetSelectedTabContents();
@@ -252,7 +279,7 @@ void TouchBrowserFrameView::Observe(NotificationType type,
     // can be determined after tab switching.
     GetFocusedStateAccessor()->SetProperty(
         source_tab->property_bag(), editable);
-  } else if (type == NotificationType::NAV_ENTRY_COMMITTED) {
+  } else if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
     NavigationController* controller =
         Source<NavigationController>(source).ptr();
     Browser* source_browser = Browser::GetBrowserForController(
@@ -273,12 +300,12 @@ void TouchBrowserFrameView::Observe(NotificationType type,
     }
     if (source_browser == browser)
       UpdateKeyboardAndLayout(keyboard_type == GENERIC);
-  } else if (type == NotificationType::TAB_CONTENTS_DESTROYED) {
+  } else if (type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED) {
     GetFocusedStateAccessor()->DeleteProperty(
         Source<TabContents>(source).ptr()->property_bag());
-  } else if (type == NotificationType::PREF_CHANGED) {
+  } else if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     OpaqueBrowserFrameView::Observe(type, source, details);
-  } else if (type == NotificationType::HIDE_KEYBOARD_INVOKED) {
+  } else if (type == chrome::NOTIFICATION_HIDE_KEYBOARD_INVOKED) {
     TabContents* tab_contents =
         browser_view()->browser()->GetSelectedTabContents();
     if (tab_contents) {
@@ -286,6 +313,19 @@ void TouchBrowserFrameView::Observe(NotificationType type,
                                              false);
     }
     UpdateKeyboardAndLayout(false);
+  } else if (type == chrome::NOTIFICATION_SET_KEYBOARD_HEIGHT_INVOKED) {
+    // TODO(penghuang) Allow extension conrtol the virtual keyboard directly
+    // instead of using Notification.
+    int height = *reinterpret_cast<int*>(details.map_key());
+    if (height != keyboard_height_) {
+      DCHECK_GE(height, 0) << "Height of the keyboard is less than 0.";
+      DCHECK_LE(height, View::height()) << "Height of the keyboard is greater "
+        "than the height of frame view.";
+      keyboard_height_ = height;
+      parent()->Layout();
+    }
+  } else if (type == chrome::NOTIFICATION_EDITABLE_ELEMENT_TOUCHED) {
+    UpdateKeyboardAndLayout(true);
   }
 }
 
@@ -294,10 +334,10 @@ void TouchBrowserFrameView::Observe(NotificationType type,
 void TouchBrowserFrameView::AnimationProgressed(const ui::Animation* anim) {
   ui::Transform transform;
   transform.SetTranslateY(
-      ui::Tween::ValueBetween(anim->GetCurrentValue(), kKeyboardHeight, 0));
+      ui::Tween::ValueBetween(anim->GetCurrentValue(), keyboard_height_, 0));
   keyboard_->SetTransform(transform);
   browser_view()->set_clip_y(
-      ui::Tween::ValueBetween(anim->GetCurrentValue(), 0, kKeyboardHeight));
+      ui::Tween::ValueBetween(anim->GetCurrentValue(), 0, keyboard_height_));
   SchedulePaint();
 }
 
@@ -314,6 +354,23 @@ void TouchBrowserFrameView::AnimationEnded(const ui::Animation* animation) {
         browser_view()->browser()->GetSelectedTabContents()->render_view_host();
     host->Send(new ViewMsg_ScrollFocusedEditableNodeIntoView(
         host->routing_id()));
+  } else {
+    // Notify the keyboard that it is hidden now.
+    keyboard_->SetVisible(false);
   }
   SchedulePaint();
 }
+
+#if defined(OS_CHROMEOS)
+void TouchBrowserFrameView::VirtualKeyboardChanged(
+    chromeos::input_method::InputMethodManager* manager,
+    const chromeos::input_method::VirtualKeyboard& virtual_keyboard,
+    const std::string& virtual_keyboard_layout) {
+  if (!keyboard_)
+    return;
+
+  const GURL& url = virtual_keyboard.GetURLForLayout(virtual_keyboard_layout);
+  keyboard_->LoadURL(url);
+  VLOG(1) << "VirtualKeyboardChanged: Switched to " << url.spec();
+}
+#endif

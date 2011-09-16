@@ -1,39 +1,20 @@
 <!DOCTYPE HTML>
-<head i18n-values="dir:textdirection;">
+<html>
 <!--
 Copyright (c) 2011 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
-  <head>
+  <head i18n-values="dir:textdirection;">
+    <include src="../content_security_policy.html"/>
     <link rel="stylesheet" href="main.css">
     <link rel="stylesheet" href="tabswitcherview.css">
-    <script src="util.js"></script>
-    <script src="view.js"></script>
-    <script src="tabswitcherview.js"></script>
-    <script src="dataview.js"></script>
-    <script src="httpcacheview.js"></script>
-    <script src="testview.js"></script>
-    <script src="hstsview.js"></script>
-    <script src="main.js"></script>
-    <script src="dnsview.js"></script>
-    <script src="eventsview.js"></script>
-    <script src="detailsview.js"></script>
-    <script src="sourceentry.js"></script>
-    <script src="resizableverticalsplitview.js"></script>
-    <script src="topmidbottomview.js"></script>
-    <script src="timelineviewpainter.js"></script>
-    <script src="logviewpainter.js"></script>
-    <script src="loggrouper.js"></script>
-    <script src="proxyview.js"></script>
-    <script src="socketpoolwrapper.js"></script>
-    <script src="socketsview.js"></script>
-    <script src="spdyview.js"></script>
-    <script src="serviceprovidersview.js"></script>
-    <script src="httpthrottlingview.js"></script>
-    <script src="logsview.js"></script>
+    <script src="chrome://resources/js/util.js"></script>
+    <script src="chrome://net-internals/index.js"></script>
+    <script src="chrome://net-internals/strings.js"></script>
   </head>
-  <body onload="onLoaded()">
+  <body id=dataViewDropTarget>
+
     <!-- Tab switcher for main categories. -->
     <div id=categoryTabHandles>
       <ul>
@@ -50,6 +31,7 @@ found in the LICENSE file.
         <li><a href="#tests" id=testTab>Tests</a></li>
         <li><a href="#hsts" id=hstsTab>HSTS</a></li>
         <li><a href="#logs" id=logsTab style="display: none;">Logs</a></li>
+        <li><a href="#prerender" id=prerenderTab>Prerender</a></li>
       </ul>
       <div style="clear: both;"></div>
     </div>
@@ -57,7 +39,7 @@ found in the LICENSE file.
     <div id=proxyTabContent>
       <h4>
         Current proxy settings
-        <input type=button value="Re-apply settings" id=proxyReloadSettings />
+        <input type=button value="Re-apply settings" id=proxyReloadSettings class="hideOnLoadLog"/>
       </h4>
 
       <table><tr>
@@ -90,7 +72,7 @@ found in the LICENSE file.
 
       <h4>
         Proxies which have failed recently, and are marked as bad
-        <input type=button value="Clear bad proxies" id=clearBadProxies />
+        <input type=button value="Clear bad proxies" id=clearBadProxies class="hideOnLoadLog" />
       </h4>
       <table class="styledTable">
         <thead>
@@ -117,7 +99,7 @@ found in the LICENSE file.
 
       <h4>
         Host resolver cache
-        <input type=button value="Clear host cache" id=clearHostResolverCache />
+        <input type=button value="Clear host cache" id=clearHostResolverCache class="hideOnLoadLog" />
       </h4>
       <ul>
         <li>Capacity: <span id=hostResolverCacheCapacity></span></li>
@@ -143,9 +125,11 @@ found in the LICENSE file.
     <div id=socketsTabContent>
       <h4>Socket pools</h4>
       <ul>
-        <li><input type=button value="Close idle sockets" id=socketPoolCloseIdleButton />
+        <li class="hideOnLoadLog">
+          <input type=button value="Close idle sockets" id=socketPoolCloseIdleButton />
         </li>
-        <li><input type=button value="Flush socket pools" id=socketPoolFlushButton />
+        <li class="hideOnLoadLog">
+          <input type=button value="Flush socket pools" id=socketPoolFlushButton />
           <span class=warningText >May break pages with active connections</span>
         </li>
         <li><a href='#events&q=type:SOCKET%20is:active'>View live sockets</a>
@@ -187,8 +171,10 @@ found in the LICENSE file.
         </div>
     </div>
     <div id=httpCacheTabContent>
-      <h4>Entries</h4>
-      <a href="chrome://view-http-cache" target=_blank>Explore cache entries</a>
+      <div class="hideOnLoadLog">
+        <h4>Entries</h4>
+        <a href="chrome://view-http-cache" target=_blank>Explore cache entries</a>
+      </div>
 
       <h4>Statistics</h4>
       <div id=httpCacheStats>Nothing loaded yet.</div>
@@ -209,6 +195,22 @@ found in the LICENSE file.
       </p>
       <p><input id=enableHttpThrottlingCheckbox type=checkbox />
         Throttle HTTP requests if the server has been overloaded or encountered an error.
+      </p>
+    </div>
+    <div id=prerenderTabContent>
+      <h4>Prerender</h4>
+      <ul>
+        <li>Prerender Enabled: <span id=prerenderEnabledSpan></span></li>
+      </ul>
+      <p>
+        Active Prerender Pages
+        <div id=prerenderActiveDiv>
+        </div>
+      </p>
+      <p>
+        Prerender History
+        <div id=prerenderHistoryDiv>
+        </div>
       </p>
     </div>
     <!-- Only shown on Windows -->
@@ -255,23 +257,34 @@ found in the LICENSE file.
              Strip private information (cookies and credentials).
           </p>
           <p>
-            <a href="javascript:displayHelpForBugDump()">
+            <a href="chrome://net-internals/help.html" target="_blank">
               Help: How to get data for bug reports?
             </a>
           </p>
-          <button id=exportToText class=bigButton>Dump to text</button>
+          <button id=dataViewSaveLogFile class=bigButton>Dump to file</button>
+          <pre id=dataViewSaveStatusText></pre>
         </div>
       </div>
-      <div id=dataViewLoadDataDiv>
+      <div id=dataViewLoadedDiv style="display: none">
+        <h2>Data Loaded</h2>
+        <p id=dataViewLoadedClientInfoText></p>
+      </div>
+      <div>
         <h2>Load data</h2>
+        <p><input type=file value="Load log from file" id=dataViewLoadLogFile /></p>
+        <pre id=dataViewLoadStatusText></pre>
         <div style="margin: 8px">
-          <p><input type=button value="Load log from file" id=dataViewLoadLogFile /></p>
-          <p>Only works with log files created with "--log-net-log=file_name".
-             "--net-log-level=#" will set the default log level used.
+          <p>Either press the button above and select a file or drag a file onto
+             this window to load it.
+          </p>
+          <p>Works for both log dumps generated from this page with Chrome 14
+             and later, and with log files created with
+              "--log-net-log=file_name".  "--net-log-level=#" will set the
+              default log level used.
           </p>
           <p>Once a log is loaded, this page will stop collecting data, and will
-             only start gathering data again when the page is
-             <a href="javascript:history.go(0);">reloaded</a>.<BR>
+             only start gathering data again when
+             <a id="reloaded-link" href="#">reloaded</a>.
           </p>
         </div>
       </div>
@@ -287,7 +300,7 @@ found in the LICENSE file.
         </span>
         <table style="margin: 8px">
           <tr>
-            <td>Passively captured:</td>
+            <td>Passively&nbsp;captured:</td>
             <td align=right id=passivelyCapturedCount></td>
           </tr>
           <tr>
@@ -295,8 +308,10 @@ found in the LICENSE file.
             <td align=right id=activelyCapturedCount></td>
           </tr>
         </table>
-        <p><input type=button value="Delete all" id=dataViewDeleteAll /></p>
-        <p><input id=byteLoggingCheckbox type=checkbox>
+        <p class="hideOnLoadLog">
+          <input type=button value="Delete all" id=dataViewDeleteAll />
+        </p>
+        <p class="hideOnLoadLog"><input id=byteLoggingCheckbox type=checkbox />
             Log actual bytes sent/received.
         </p>
       </div>
@@ -305,72 +320,9 @@ found in the LICENSE file.
     </tr>
     </table>
 
-    <pre id=exportedDataText></pre>
+    <iframe style="display: none" id=dataViewDownloadIframe></iframe>
+
     </div>
-
-<!-- START OF HELP TEXT -->
-<script>
-function displayHelpForBugDump() {
-  // We can't access the popups loaded from WebUI pages, so we instead populate
-  // its contents using a data:URL. YUCK!
-  // TODO(eroman): do something less hacky, like exposing a new URL.
-  var helpContents =
-      document.getElementById('howtoDumpForBugsHelpContent').innerHTML;
-  window.open('data:text/html,' + encodeURIComponent(helpContents));
-}
-</script>
-<div id=howtoDumpForBugsHelpContent style="display: none">
-<h2>How to get data for bug reports</h2>
-
-<ol>
-<li>Reproduce the network problem.</li>
-<li>Click the <i>Dump to text</i> button in the <i>Data</i> tab.</li>
-
-<li>Copy-paste the resulting selected text to a file.</li>
-
-<li>Email the text file to the bug investigator,
-  <b>along with an explanation of what went wrong.</b>
-</li>
-
-</ol>
-
-
-<ul>
-<li>The network log <b>may contain personally identifying information</b> like
-  IP addresses, URLs, and cookies.</li>
-<ul>
-<li>You can edit the log to obscure information if you like, but sometimes it
-  is relevant to the bug.</li>
-<li>If you choose not to have cookies removed from the log, you must toggle
-  the checkbox before clicking the button.</li>
-</ul>
-<li>Ideally you would have the tool running <b>before</b> you reproduce the
-  bug.
-  If that isn't possible (perhaps the bug happens unpredictably), then the
-  next best thing is to load chrome://net-internals/ <b>as soon as you can
-  after</b> the problem has occurred.</li>
-</ul>
-
-<h2>How it works</h2>
-
-<ul>
-  <li>While the net-internals page is open, it will capture the network events
-  that are happening in Chrome. You can view that in real-time by going to
-  the <i>Events</i> tab.</li>
-  <li>Once you close the net-internals window, the data it had captured will be
-  discarded.</li>
-<li>Chrome keeps around a small buffer of the most recent network events
-  even when the net-internals window is not open. That way if you open
-  chrome://net-internals/ <b>shortly after</b> encountering a problem,
-  you may still find the relevant data.
-  These <i>passively captured</i> events are less accurate however, and will
-  be prefixed in the log with <span style="font-family: monospace;">(P)</span>.
-</li>
-</ul>
-
-<button onclick='window.close()'>Close this popup</button>
-<!-- END OF HELP TEXT -->
-</div>
 
     <!-- Connection tests -->
     <div id=testTabContent>
@@ -475,7 +427,7 @@ function displayHelpForBugDump() {
     </div>
     <div id=detailsLogBox></div>
     <div id=detailsTimelineBox></div>
-    
+
     <!-- ============================ Logs View ============================ -->
     <div id=logsTabContent style="display: none;">
       <h4>Network Log Data</h4>
@@ -495,5 +447,8 @@ function displayHelpForBugDump() {
         </tbody>
       </table>
     </div>
+    <script src="chrome://resources/js/i18n_template.js"></script>
+    <script src="chrome://resources/js/i18n_process.js"></script>
+    <script src="chrome://resources/js/jstemplate_compiled.js"></script>
   </body>
 </html>

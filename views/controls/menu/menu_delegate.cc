@@ -7,6 +7,8 @@
 
 namespace views {
 
+MenuDelegate::~MenuDelegate() {}
+
 bool MenuDelegate::IsItemChecked(int id) const {
   return false;
 }
@@ -117,6 +119,9 @@ int MenuDelegate::GetMaxWidthForMenu(MenuItemView* menu) {
 }
 
 void MenuDelegate::WillShowMenu(MenuItemView* menu) {
+}
+
+void MenuDelegate::WillHideMenu(MenuItemView* menu) {
 }
 
 }  // namespace views

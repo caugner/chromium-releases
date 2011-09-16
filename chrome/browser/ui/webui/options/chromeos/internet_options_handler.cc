@@ -22,10 +22,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
-#include "chrome/browser/chromeos/status/network_menu.h"
+#include "chrome/browser/chromeos/status/network_menu_icon.h"
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser.h"
@@ -33,10 +35,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -44,16 +46,16 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 static const char kOtherNetworksFakePath[] = "?";
 
 InternetOptionsHandler::InternetOptionsHandler()
-    : chromeos::CrosOptionsPageUIHandler(
-          new chromeos::UserCrosSettingsProvider) {
-  registrar_.Add(this, NotificationType::REQUIRE_PIN_SETTING_CHANGE_ENDED,
+    : chromeos::CrosOptionsPageUIHandler(NULL),
+      proxy_settings_(NULL) {
+  registrar_.Add(this, chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED,
       NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::ENTER_PIN_ENDED,
+  registrar_.Add(this, chrome::NOTIFICATION_ENTER_PIN_ENDED,
       NotificationService::AllSources());
   cros_ = chromeos::CrosLibrary::Get()->GetNetworkLibrary();
   if (cros_) {
@@ -109,6 +111,13 @@ void InternetOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("buyplan_button",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_BUY_PLAN));
+
+  localized_strings->SetString("changeProxyButton",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CHANGE_PROXY_BUTTON));
+  localized_strings->SetString("enableSharedProxiesHint",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ENABLE_SHARED_PROXIES_HINT));
 
   localized_strings->SetString("wifiNetworkTabLabel",
       l10n_util::GetStringUTF16(
@@ -167,12 +176,15 @@ void InternetOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("inetPassProtected",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NET_PROTECTED));
+  localized_strings->SetString("inetNetworkShared",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_SHARED));
+  localized_strings->SetString("inetPreferredNetwork",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PREFER_NETWORK));
   localized_strings->SetString("inetAutoConnectNetwork",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_AUTO_CONNECT));
-  localized_strings->SetString("inetSharedNetwork",
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SHARE_NETWORK));
   localized_strings->SetString("inetLogin",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_LOGIN));
@@ -249,18 +261,24 @@ void InternetOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("cellularApnLabel",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_APN));
+  localized_strings->SetString("cellularApnOther",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_APN_OTHER));
   localized_strings->SetString("cellularApnUsername",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_APN_USERNAME));
   localized_strings->SetString("cellularApnPassword",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_APN_PASSWORD));
-  localized_strings->SetString("cellularApnClear",
+  localized_strings->SetString("cellularApnUseDefault",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_APN_CLEAR));
   localized_strings->SetString("cellularApnSet",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_APN_SET));
+  localized_strings->SetString("cellularApnCancel",
+      l10n_util::GetStringUTF16(
+          IDS_CANCEL));
 
   localized_strings->SetString("accessSecurityTabLink",
       l10n_util::GetStringUTF16(
@@ -316,6 +334,8 @@ void InternetOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringFUTF16(
           IDS_STATUSBAR_NETWORK_DEVICE_DISABLE,
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR)));
+  localized_strings->SetString("useSharedProxies",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_USE_SHARED_PROXIES));
   localized_strings->SetString("enableDataRoaming",
       l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_ENABLE_DATA_ROAMING));
   localized_strings->SetString("generalNetworkingTitle",
@@ -342,10 +362,10 @@ void InternetOptionsHandler::RegisterMessages() {
       NewCallback(this, &InternetOptionsHandler::ButtonClickCallback));
   web_ui_->RegisterMessageCallback("refreshCellularPlan",
       NewCallback(this, &InternetOptionsHandler::RefreshCellularPlanCallback));
+  web_ui_->RegisterMessageCallback("setPreferNetwork",
+      NewCallback(this, &InternetOptionsHandler::SetPreferNetworkCallback));
   web_ui_->RegisterMessageCallback("setAutoConnect",
       NewCallback(this, &InternetOptionsHandler::SetAutoConnectCallback));
-  web_ui_->RegisterMessageCallback("setShared",
-      NewCallback(this, &InternetOptionsHandler::SetSharedCallback));
   web_ui_->RegisterMessageCallback("setIPConfig",
       NewCallback(this, &InternetOptionsHandler::SetIPConfigCallback));
   web_ui_->RegisterMessageCallback("enableWifi",
@@ -420,7 +440,7 @@ void InternetOptionsHandler::SetApnCallback(const ListValue* args) {
   chromeos::CellularNetwork* network =
         cros_->FindCellularNetworkByPath(service_path);
   if (network) {
-    network->SetApn(chromeos::CellularNetwork::Apn(
+    network->SetApn(chromeos::CellularApn(
         apn, network->apn().network_id, username, password));
   }
 }
@@ -526,17 +546,17 @@ void InternetOptionsHandler::OnCellularDataPlanChanged(
 }
 
 
-void InternetOptionsHandler::Observe(NotificationType type,
+void InternetOptionsHandler::Observe(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
   chromeos::CrosOptionsPageUIHandler::Observe(type, source, details);
-  if (type == NotificationType::REQUIRE_PIN_SETTING_CHANGE_ENDED) {
+  if (type == chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED) {
     bool require_pin = *Details<bool>(details).ptr();
     DictionaryValue dictionary;
     dictionary.SetBoolean("requirePin", require_pin);
     web_ui_->CallJavascriptFunction(
         "options.InternetOptions.updateSecurityTab", dictionary);
-  } else if (type == NotificationType::ENTER_PIN_ENDED) {
+  } else if (type == chrome::NOTIFICATION_ENTER_PIN_ENDED) {
     // We make an assumption (which is valid for now) that the SIM
     // unlock dialog is put up only when the user is trying to enable
     // mobile data.
@@ -564,6 +584,26 @@ DictionaryValue* InternetOptionsHandler::CellularDataPlanToDictionary(
   return plan_dict;
 }
 
+void InternetOptionsHandler::SetPreferNetworkCallback(const ListValue* args) {
+  std::string service_path;
+  std::string prefer_network_str;
+
+  if (args->GetSize() < 2 ||
+      !args->GetString(0, &service_path) ||
+      !args->GetString(1, &prefer_network_str)) {
+    NOTREACHED();
+    return;
+  }
+
+  chromeos::Network* network = cros_->FindNetworkByPath(service_path);
+  if (!network)
+    return;
+
+  bool prefer_network = prefer_network_str == "true";
+  if (prefer_network != network->preferred())
+    network->SetPreferred(prefer_network);
+}
+
 void InternetOptionsHandler::SetAutoConnectCallback(const ListValue* args) {
   std::string service_path;
   std::string auto_connect_str;
@@ -582,30 +622,6 @@ void InternetOptionsHandler::SetAutoConnectCallback(const ListValue* args) {
   bool auto_connect = auto_connect_str == "true";
   if (auto_connect != network->auto_connect())
     network->SetAutoConnect(auto_connect);
-}
-
-void InternetOptionsHandler::SetSharedCallback(const ListValue* args) {
-  std::string service_path;
-  std::string shared_str;
-
-  if (args->GetSize() < 2 ||
-      !args->GetString(0, &service_path) ||
-      !args->GetString(1, &shared_str)) {
-    NOTREACHED();
-    return;
-  }
-
-  chromeos::Network* network = cros_->FindNetworkByPath(service_path);
-  if (!network)
-    return;
-
-  if (cros_->HasProfileType(chromeos::PROFILE_USER)) {
-    bool shared = shared_str == "true";
-    if (network->profile_type() == chromeos::PROFILE_SHARED && !shared)
-      cros_->SetNetworkProfile(service_path, chromeos::PROFILE_USER);
-    else if (network->profile_type() == chromeos::PROFILE_USER && shared)
-      cros_->SetNetworkProfile(service_path, chromeos::PROFILE_SHARED);
-  }
 }
 
 void InternetOptionsHandler::SetIPConfigCallback(const ListValue* args) {
@@ -640,6 +656,11 @@ void InternetOptionsHandler::SetIPConfigCallback(const ListValue* args) {
 void InternetOptionsHandler::PopulateDictionaryDetails(
     const chromeos::Network* network) {
   DCHECK(network);
+  bool use_shared_proxies = false;
+  if (proxy_settings()) {
+    proxy_settings()->SetCurrentNetwork(network->service_path());
+    use_shared_proxies = proxy_settings()->IsUsingSharedProxies();
+  }
   DictionaryValue dictionary;
   std::string hardware_address;
   chromeos::NetworkIPConfigVector ipconfigs = cros_->GetIPConfigs(
@@ -667,12 +688,24 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
   dictionary.SetBoolean("connecting", network->connecting());
   dictionary.SetBoolean("connected", network->connected());
   dictionary.SetString("connectionState", network->GetStateString());
+  bool remembered = (network->profile_type() != chromeos::PROFILE_NONE);
+  bool proxy_configurable =
+      (remembered && (network->profile_type() == chromeos::PROFILE_USER ||
+                      use_shared_proxies)) ||
+      (type == chromeos::TYPE_ETHERNET && use_shared_proxies);
+  dictionary.SetBoolean("proxyConfigurable", proxy_configurable);
+  dictionary.SetBoolean("showSharedProxiesHint",
+      !proxy_configurable && !use_shared_proxies &&
+      (remembered || type == chromeos::TYPE_ETHERNET));
 
   // Hide the dhcp/static radio if not ethernet or wifi (or if not enabled)
   bool staticIPConfig = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableStaticIPConfig);
   dictionary.SetBoolean("showStaticIPConfig", staticIPConfig &&
       (type == chromeos::TYPE_WIFI || type == chromeos::TYPE_ETHERNET));
+
+  dictionary.SetBoolean("preferred", network->preferred());
+  dictionary.SetBoolean("autoConnect", network->auto_connect());
 
   if (type == chromeos::TYPE_WIFI) {
     dictionary.SetBoolean("deviceConnected", cros_->wifi_connected());
@@ -710,20 +743,38 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
       "options.InternetOptions.showDetailedInfo", dictionary);
 }
 
+chromeos::ProxyCrosSettingsProvider* InternetOptionsHandler::proxy_settings() {
+  if (!proxy_settings_) {
+    proxy_settings_ = static_cast<chromeos::ProxyCrosSettingsProvider*>(
+      chromeos::CrosSettings::Get()->GetProvider("cros.session.proxy"));
+    if (!proxy_settings_)
+      NOTREACHED() << "Error getting access to proxy cros settings provider";
+  }
+  return proxy_settings_;
+}
+
 void InternetOptionsHandler::PopulateWifiDetails(
     const chromeos::WifiNetwork* wifi,
     DictionaryValue* dictionary) {
   dictionary->SetString("ssid", wifi->name());
   bool remembered = (wifi->profile_type() != chromeos::PROFILE_NONE);
   dictionary->SetBoolean("remembered", remembered);
-  dictionary->SetBoolean("autoConnect", wifi->auto_connect());
   dictionary->SetBoolean("encrypted", wifi->encrypted());
   bool shared = wifi->profile_type() == chromeos::PROFILE_SHARED;
   dictionary->SetBoolean("shared", shared);
-  bool shareable =
-      cros_->HasProfileType(chromeos::PROFILE_USER) &&
-      !wifi->RequiresUserProfile();
-  dictionary->SetBoolean("shareable", shareable);
+}
+
+DictionaryValue* InternetOptionsHandler::CreateDictionaryFromCellularApn(
+    const chromeos::CellularApn& apn) {
+  DictionaryValue* dictionary = new DictionaryValue();
+  dictionary->SetString("apn", apn.apn);
+  dictionary->SetString("networkId", apn.network_id);
+  dictionary->SetString("username", apn.username);
+  dictionary->SetString("password", apn.password);
+  dictionary->SetString("name", apn.name);
+  dictionary->SetString("localizedName", apn.localized_name);
+  dictionary->SetString("language", apn.language);
+  return dictionary;
 }
 
 void InternetOptionsHandler::PopulateCellularDetails(
@@ -749,21 +800,9 @@ void InternetOptionsHandler::PopulateCellularDetails(
   dictionary->SetString("supportUrl", cellular->payment_url());
   dictionary->SetBoolean("needsPlan", cellular->needs_new_plan());
 
-  dictionary->SetBoolean("gsm", cellular->is_gsm());
-  const chromeos::CellularNetwork::Apn& apn = cellular->apn();
-  dictionary->SetString("apn", apn.apn);
-  dictionary->SetString("apn_network_id", apn.network_id);
-  dictionary->SetString("apn_username", apn.username);
-  dictionary->SetString("apn_password", apn.password);
-
-  const chromeos::CellularNetwork::Apn& last_good_apn =
-      cellular->last_good_apn();
-  dictionary->SetString("last_good_apn", last_good_apn.apn);
-  dictionary->SetString("last_good_apn_network_id", last_good_apn.network_id);
-  dictionary->SetString("last_good_apn_username", last_good_apn.username);
-  dictionary->SetString("last_good_apn_password", last_good_apn.password);
-
-  dictionary->SetBoolean("autoConnect", cellular->auto_connect());
+  dictionary->Set("apn", CreateDictionaryFromCellularApn(cellular->apn()));
+  dictionary->Set("lastGoodApn",
+                  CreateDictionaryFromCellularApn(cellular->last_good_apn()));
 
   // Device settings.
   const chromeos::NetworkDevice* device =
@@ -781,6 +820,8 @@ void InternetOptionsHandler::PopulateCellularDetails(
     dictionary->SetString("imsi", device->imsi());
     dictionary->SetString("esn", device->esn());
     dictionary->SetString("min", device->min());
+    dictionary->SetBoolean("gsm",
+        device->technology_family() == chromeos::TECHNOLOGY_FAMILY_GSM);
     dictionary->SetBoolean("simCardLockEnabled",
         device->sim_pin_required() == chromeos::SIM_PIN_REQUIRED);
 
@@ -793,6 +834,14 @@ void InternetOptionsHandler::PopulateCellularDetails(
       if (deal && !deal->top_up_url().empty())
         dictionary->SetString("carrierUrl", deal->top_up_url());
     }
+
+    const chromeos::CellularApnList& apn_list = device->provider_apn_list();
+    ListValue* apn_list_value = new ListValue();
+    for (chromeos::CellularApnList::const_iterator it = apn_list.begin();
+         it != apn_list.end(); ++it) {
+      apn_list_value->Append(CreateDictionaryFromCellularApn(*it));
+    }
+    dictionary->Set("providerApnList", apn_list_value);
   }
 
   SetActivationButtonVisibility(cellular, dictionary);
@@ -822,8 +871,8 @@ void InternetOptionsHandler::SetActivationButtonVisibility(
   }
 }
 
-void InternetOptionsHandler::CreateModalPopup(views::WindowDelegate* view) {
-  views::Window* window = browser::CreateViewsWindow(GetNativeWindow(),
+void InternetOptionsHandler::CreateModalPopup(views::WidgetDelegate* view) {
+  views::Widget* window = browser::CreateViewsWindow(GetNativeWindow(),
                                                      gfx::Rect(),
                                                      view);
   window->SetAlwaysOnTop(true);
@@ -935,6 +984,7 @@ void InternetOptionsHandler::HandleVPNButtonClick(
     }
   }
 }
+
 void InternetOptionsHandler::RefreshCellularPlanCallback(
     const ListValue* args) {
   std::string service_path;
@@ -1029,9 +1079,11 @@ ListValue* InternetOptionsHandler::GetWiredList() {
     const chromeos::EthernetNetwork* ethernet_network =
         cros_->ethernet_network();
     if (ethernet_network) {
+      const SkBitmap* icon =
+          chromeos::NetworkMenuIcon::GetBitmap(ethernet_network);
       list->Append(GetNetwork(
           ethernet_network->service_path(),
-          chromeos::NetworkMenu::IconForNetwork(ethernet_network),
+          *icon,
           l10n_util::GetStringUTF8(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
           ethernet_network->connecting(),
           ethernet_network->connected(),
@@ -1053,9 +1105,10 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
   const chromeos::WifiNetworkVector& wifi_networks = cros_->wifi_networks();
   for (chromeos::WifiNetworkVector::const_iterator it =
       wifi_networks.begin(); it != wifi_networks.end(); ++it) {
+    const SkBitmap* icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
     list->Append(GetNetwork(
         (*it)->service_path(),
-        chromeos::NetworkMenu::IconForNetwork(*it),
+        *icon,
         (*it)->name(),
         (*it)->connecting(),
         (*it)->connected(),
@@ -1087,9 +1140,10 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
       cros_->cellular_networks();
   for (chromeos::CellularNetworkVector::const_iterator it =
       cellular_networks.begin(); it != cellular_networks.end(); ++it) {
+    const SkBitmap* icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
     list->Append(GetNetwork(
         (*it)->service_path(),
-        chromeos::NetworkMenu::IconForNetwork(*it),
+        *icon,
         (*it)->name(),
         (*it)->connecting(),
         (*it)->connected(),
@@ -1128,9 +1182,10 @@ ListValue* InternetOptionsHandler::GetVPNList() {
       cros_->virtual_networks();
   for (chromeos::VirtualNetworkVector::const_iterator it =
       virtual_networks.begin(); it != virtual_networks.end(); ++it) {
+    const SkBitmap* icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
     list->Append(GetNetwork(
         (*it)->service_path(),
-        chromeos::NetworkMenu::IconForNetwork(*it),
+        *icon,
         (*it)->name(),
         (*it)->connecting(),
         (*it)->connected(),
@@ -1158,9 +1213,11 @@ ListValue* InternetOptionsHandler::GetRememberedList() {
     // Set in_active_profile.
     bool shared =
         remembered->profile_type() == chromeos::PROFILE_SHARED;
+    const SkBitmap* icon =
+        chromeos::NetworkMenuIcon::GetBitmap(wifi ? wifi : remembered);
     list->Append(GetNetwork(
         remembered->service_path(),
-        chromeos::NetworkMenu::IconForNetwork(wifi ? wifi : remembered),
+        *icon,
         remembered->name(),
         wifi ? wifi->connecting() : false,
         wifi ? wifi->connected() : false,
@@ -1182,9 +1239,11 @@ ListValue* InternetOptionsHandler::GetRememberedList() {
     // Set in_active_profile.
     bool shared =
         remembered->profile_type() == chromeos::PROFILE_SHARED;
+    const SkBitmap* icon =
+        chromeos::NetworkMenuIcon::GetBitmap(vpn ? vpn : remembered);
     list->Append(GetNetwork(
         remembered->service_path(),
-        chromeos::NetworkMenu::IconForNetwork(vpn ? vpn : remembered),
+        *icon,
         remembered->name(),
         vpn ? vpn->connecting() : false,
         vpn ? vpn->connected() : false,

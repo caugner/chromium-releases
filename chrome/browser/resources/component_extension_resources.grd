@@ -26,10 +26,21 @@
         <include name="IDR_FILE_MANAGER_SLIDESHOW" file="file_manager/slideshow.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_MEDIAPLAYER" file="file_manager/mediaplayer.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_PLAYLIST" file="file_manager/playlist.html" flattenhtml="true" type="BINDATA" />
-        <include name="IDR_FILE_MANAGER_EXIF_READER" file="file_manager/js/exif_reader.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_METADATA_DISPATCHER" file="file_manager/js/metadata_dispatcher.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_FILE_COPY_MANAGER" file="file_manager/js/file_copy_manager.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_METADATA_READER" file="file_manager/js/byte_reader.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_METADATA_PARSER" file="file_manager/js/metadata_parser.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_UTIL" file="file_manager/js/util.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_EXIF_PARSER" file="file_manager/js/exif_parser.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_MPEG_PARSER" file="file_manager/js/mpeg_parser.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_ID3_PARSER" file="file_manager/js/id3_parser.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_PARALLEL" file="file_manager/js/function_parallel.js" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_SEQUENCE" file="file_manager/js/function_sequence.js" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_PREVIEW_ICON" file="file_manager/images/icon_preview_16x16.png" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_MEDIA_PLAY_ICON" file="file_manager/images/icon_play_16x16.png" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_MEDIA_ENQUEUE_ICON" file="file_manager/images/icon_add_to_queue_16x16.png" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_ARCHIVE_MOUNT_ICON" file="file_manager/images/icon_mount_archive_16x16.png" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_ARCHIVE_UNMOUNT_ICON" file="file_manager/images/icon_unmount_archive_16x16.png" type="BINDATA" />
 
         <include name="IDR_FILE_MANAGER_IMG_FILETYPE_AUDIO" file="file_manager/images/filetype_audio.png" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_IMG_FILETYPE_DOC" file="file_manager/images/filetype_doc.png" type="BINDATA" />
@@ -51,6 +62,10 @@
 
         <include name="IDR_FILE_MANAGER_ICON_DETAIL_VIEW" file="file_manager/images/icon-detail-view.png" type="BINDATA" />
         <include name="IDR_FILE_MANAGER_ICON_THUMB_VIEW" file="file_manager/images/icon-thumb-view.png" type="BINDATA" />
+	<include name="IDR_FILE_MANAGER_WARNING_ICON" file="file_manager/images/warning_icon_square_26x26.png" type="BINDATA"/>
+
+        <include name="IDR_FILE_MANAGER_BUTTON_ICON_COPY" file="file_manager/images/button-icon-copy.png" type="BINDATA" />
+        <include name="IDR_FILE_MANAGER_BUTTON_ICON_PASTE" file="file_manager/images/button-icon-paste.png" type="BINDATA" />
       </if>
 
       <if expr="pp_ifdef('touchui')">

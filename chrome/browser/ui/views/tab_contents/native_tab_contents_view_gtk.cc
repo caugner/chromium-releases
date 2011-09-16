@@ -4,11 +4,13 @@
 
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_gtk.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "chrome/browser/tab_contents/web_drag_dest_gtk.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/tab_contents_drag_source.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
+#include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_views.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragData.h"
@@ -68,12 +70,11 @@ NativeTabContentsViewGtk::NativeTabContentsViewGtk(
       delegate_(delegate),
       ignore_next_char_event_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(drag_source_(
-          new TabContentsDragSource(delegate->GetTabContents()->view()))) {
+          new TabContentsDragSource(delegate->GetTabContents()))) {
 }
 
 NativeTabContentsViewGtk::~NativeTabContentsViewGtk() {
   delegate_ = NULL;
-  CloseNow();
 }
 
 void NativeTabContentsViewGtk::AttachConstrainedWindow(
@@ -260,6 +261,8 @@ void NativeTabContentsViewGtk::PositionConstrainedWindows(
 // static
 NativeTabContentsView* NativeTabContentsView::CreateNativeTabContentsView(
     internal::NativeTabContentsViewDelegate* delegate) {
+  if (views::Widget::IsPureViews())
+    return new NativeTabContentsViewViews(delegate);
   return new NativeTabContentsViewGtk(delegate);
 }
 

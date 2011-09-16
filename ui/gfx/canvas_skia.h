@@ -34,8 +34,7 @@ class Canvas;
 // source and destination colors are combined. Unless otherwise specified,
 // the variant that does not take a SkXfermode::Mode uses a transfer mode
 // of kSrcOver_Mode.
-class CanvasSkia : public skia::PlatformCanvas,
-                   public Canvas {
+class UI_API CanvasSkia : public skia::PlatformCanvas, public Canvas {
  public:
   enum TruncateFadeMode {
     TruncateFadeTail,
@@ -158,7 +157,9 @@ class CanvasSkia : public skia::PlatformCanvas,
                             int dest_x, int dest_y, int w, int h);
   virtual gfx::NativeDrawingContext BeginPlatformPaint();
   virtual void EndPlatformPaint();
+#if !defined(OS_MACOSX)
   virtual void Transform(const ui::Transform& transform);
+#endif
   virtual ui::TextureID GetTextureID();
   virtual CanvasSkia* AsCanvasSkia();
   virtual const CanvasSkia* AsCanvasSkia() const;

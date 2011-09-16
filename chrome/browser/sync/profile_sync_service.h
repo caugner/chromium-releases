@@ -24,13 +24,12 @@
 #include "chrome/browser/sync/js_event_handler_list.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_setup_wizard.h"
-#include "chrome/browser/sync/syncable/autofill_migration.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 
 class NotificationDetails;
@@ -38,7 +37,7 @@ class NotificationSource;
 class Profile;
 class ProfileSyncFactory;
 class SigninManager;
-class WebUI;
+struct ChromeCookieDetails;
 
 namespace browser_sync {
 class BackendMigrator;
@@ -142,8 +141,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Sync server URL for dev channel users
   static const char* kDevServerUrl;
 
-  ProfileSyncService(ProfileSyncFactory* factory_,
+  ProfileSyncService(ProfileSyncFactory* factory,
                      Profile* profile,
+                     SigninManager* signin,  // Service takes ownership.
                      const std::string& cros_user);
   virtual ~ProfileSyncService();
 
@@ -189,7 +189,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void SetSyncSetupCompleted();
 
   // SyncFrontend implementation.
-  virtual void OnBackendInitialized();
+  virtual void OnBackendInitialized(bool success);
   virtual void OnSyncCycleCompleted();
   virtual void OnAuthError();
   virtual void OnStopSyncingPermanently();
@@ -208,6 +208,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
                                    const std::string& password,
                                    const std::string& captcha,
                                    const std::string& access_code);
+
+  // Called when a cookie, e. g. oauth_token, changes
+  virtual void OnCookieChanged(Profile* profile,
+                               ChromeCookieDetails* cookie_details);
 
   // Update the last auth error and notify observers of error state.
   void UpdateAuthErrorState(const GoogleServiceAuthError& error);
@@ -244,27 +248,20 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   SyncSetupWizard& get_wizard() { return wizard_; }
 
-  // Shows the login screen of the Sync setup wizard.  |web_ui| is the WebUI
-  // object for a current settings tab, NULL if one doesn't exist or the calling
-  // code doesn't know.
-  virtual void ShowLoginDialog(WebUI* web_ui);
+  // Shows the login screen of the Sync setup wizard.
+  virtual void ShowLoginDialog();
 
   // This method handles clicks on "sync error" UI, showing the appropriate
-  // dialog for the error condition (relogin / enter passphrase).  |web_ui| is
-  // the WebUI object for a current settings tab, NULL if one doesn't exist or
-  // the calling code doesn't know.
-  virtual void ShowErrorUI(WebUI* web_ui);
+  // dialog for the error condition (relogin / enter passphrase).
+  virtual void ShowErrorUI();
 
   // Shows the configure screen of the Sync setup wizard. If |sync_everything|
   // is true, shows the corresponding page in the customize screen; otherwise,
   // displays the page that gives the user the ability to select which data
-  // types to sync.  |web_ui| is the WebUI object for a current settings tab,
-  // NULL if one doesn't exist or the calling code doesn't know.
-  void ShowConfigure(WebUI* web_ui, bool sync_everything);
+  // types to sync.
+  void ShowConfigure(bool sync_everything);
 
-  void PromptForExistingPassphrase(WebUI* web_ui);
-
-  void ShowSyncSetup(WebUI* web_ui, SyncSetupWizard::State state);
+  void ShowSyncSetup(SyncSetupWizard::State state);
 
   // Pretty-printed strings for a given StatusSummary.
   static std::string BuildSyncStatusSummaryText(
@@ -391,22 +388,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // remove this function.
   void GetModelSafeRoutingInfo(browser_sync::ModelSafeRoutingInfo* out);
 
-  // TODO(akalin): Remove these four functions once we're done with
-  // autofill migration.
-
-  syncable::AutofillMigrationState
-      GetAutofillMigrationState();
-
-  void SetAutofillMigrationState(
-      syncable::AutofillMigrationState state);
-
-  syncable::AutofillMigrationDebugInfo
-      GetAutofillMigrationDebugInfo();
-
-  void SetAutofillMigrationDebugInfo(
-      syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
-      const syncable::AutofillMigrationDebugInfo& info);
-
   // TODO(zea): Remove these and have the dtc's call directly into the SBH.
   virtual void ActivateDataType(
       browser_sync::DataTypeController* data_type_controller,
@@ -416,7 +397,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
       browser_sync::ChangeProcessor* change_processor);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -464,13 +445,12 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
                              bool is_explicit,
                              bool is_creation);
 
-  // Changes the set of datatypes that require encryption. This affects all
-  // machines synced to this account and all data belonging to the specified
-  // types.
-  // Note that this is an asynchronous operation (the encryption of data is
-  // performed on SyncBackendHost's core thread) and may not have an immediate
-  // effect.
-  virtual void EncryptDataTypes(
+  // Sets the set of datatypes that are waiting for encryption
+  // (pending_types_for_encryption_).
+  // Note that this does not trigger the actual encryption. The encryption call
+  // is kicked off automatically the next time the datatype manager is
+  // reconfigured.
+  virtual void set_pending_types_for_encryption(
       const syncable::ModelTypeSet& encrypted_types);
 
   // Get the currently encrypted data types.
@@ -478,6 +458,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // will always be in this list.
   virtual void GetEncryptedDataTypes(
       syncable::ModelTypeSet* encrypted_types) const;
+
+  // Returns true if the syncer is waiting for new datatypes to be encrypted.
+  virtual bool HasPendingEncryptedTypes() const;
 
   // Returns whether processing changes is allowed.  Check this before doing
   // any model-modifying operations.
@@ -541,6 +524,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
  private:
   friend class ProfileSyncServicePasswordTest;
   friend class TestProfileSyncService;
+  friend class ProfileSyncServiceForWizardTest;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
 
   // If |delete_sync_data_folder| is true, then this method will delete all
@@ -642,15 +626,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // TODO(lipalani): Bug 82221 unify this with the CachedPassphrase struct.
   std::string gaia_password_;
 
-  // TODO(tim): Remove this once new 'explicit passphrase' code flushes through
-  // dev channel. See bug 62103.
-  // To "migrate" early adopters of password sync on dev channel to the new
-  // model that stores their secondary passphrase preference in the cloud, we
-  // need some extra state since this cloud pref will be empty for all of them
-  // regardless of how they set up sync, and we can't trust
-  // kSyncUsingSecondaryPassphrase due to bugs in that implementation.
-  bool tried_implicit_gaia_remove_when_bug_62103_fixed_;
-
   // Keep track of where we are in a server clear operation
   ClearServerDataState clear_server_data_state_;
 
@@ -661,25 +636,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // is reworked to allow one-shot commands like clearing server data.
   base::OneShotTimer<ProfileSyncService> clear_server_data_timer_;
 
-  // We keep track of both the currently encrypted types and the types
-  // we will soon be attempting to encrypt.
-  struct EncryptedTypes {
-    // Always initialize current with syncable::PASSWORDS.
-    EncryptedTypes();
-    ~EncryptedTypes();
-
-    // The currently encrypted types. Updated by OnEncryptionComplete whenever
-    // datatypes finish encryption.
-    syncable::ModelTypeSet current;
-
-    // The most recently requested set of types to encrypt. Set by the user,
-    // and cached if the syncer was unable to encrypt new types (for example
-    // because we haven't finished initializing). Cleared when we successfully
-    // post a new encrypt task to the sync backend.
-    syncable::ModelTypeSet pending;
-  };
-
-  EncryptedTypes encrypted_types_;
+  // The most recently requested set of types to encrypt. Set by the user,
+  // and cached until the syncer either finishes encryption
+  // (OnEncryptionComplete) or the user cancels.
+  syncable::ModelTypeSet pending_types_for_encryption_;
 
   scoped_ptr<browser_sync::BackendMigrator> migrator_;
 

@@ -6,11 +6,13 @@
 #define CONTENT_COMMON_GPU_GPU_CHANNEL_H_
 #pragma once
 
+#include <queue>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/id_map.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "build/build_config.h"
@@ -19,6 +21,7 @@
 #include "content/common/gpu/gpu_surface_stub.h"
 #include "content/common/message_router.h"
 #include "ipc/ipc_sync_channel.h"
+#include "ui/gfx/gl/gl_share_group.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 
@@ -46,7 +49,8 @@ class GpuChannel : public IPC::Channel::Listener,
   // Takes ownership of the renderer process handle.
   GpuChannel(GpuChannelManager* gpu_channel_manager,
              GpuWatchdog* watchdog,
-             int renderer_id);
+             int renderer_id,
+             bool software);
   virtual ~GpuChannel();
 
   bool Init(base::MessageLoopProxy* io_message_loop,
@@ -76,6 +80,15 @@ class GpuChannel : public IPC::Channel::Listener,
   // IPC::Message::Sender implementation:
   virtual bool Send(IPC::Message* msg);
 
+  // Whether this channel is able to handle IPC messages.
+  bool IsScheduled();
+
+  // This is called when a command buffer transitions from the unscheduled
+  // state to the scheduled state, which potentially means the channel
+  // transitions from the unscheduled to the scheduled state. When this occurs
+  // deferred IPC messaged are handled.
+  void OnScheduled();
+
   void CreateViewCommandBuffer(
       gfx::PluginWindowHandle window,
       int32 render_view_id,
@@ -83,6 +96,10 @@ class GpuChannel : public IPC::Channel::Listener,
       int32* route_id);
 
   void ViewResized(int32 command_buffer_route_id);
+
+  gfx::GLShareGroup* share_group() const { return share_group_.get(); }
+
+  GpuCommandBufferStub* LookupCommandBuffer(int32 route_id);
 
 #if defined(OS_MACOSX)
   virtual void AcceleratedSurfaceBuffersSwapped(
@@ -115,25 +132,22 @@ class GpuChannel : public IPC::Channel::Listener,
 
   bool OnControlMessageReceived(const IPC::Message& msg);
 
+  void HandleDeferredMessages();
+
   int GenerateRouteID();
 
   // Message handlers.
   void OnInitialize(base::ProcessHandle renderer_process);
   void OnCreateOffscreenCommandBuffer(
-      int32 parent_route_id,
       const gfx::Size& size,
       const GPUCreateCommandBufferConfig& init_params,
-      uint32 parent_texture_id,
-      int32* route_id);
-  void OnDestroyCommandBuffer(int32 route_id);
+      IPC::Message* reply_message);
+  void OnDestroyCommandBuffer(int32 route_id, IPC::Message* reply_message);
 
   void OnCreateOffscreenSurface(const gfx::Size& size,
-                                int* route_id);
+                                IPC::Message* reply_message);
   void OnDestroySurface(int route_id);
 
-  void OnCreateVideoDecoder(int32 decoder_host_id,
-                            const std::vector<uint32>& configs);
-  void OnDestroyVideoDecoder(int32 decoder_id);
   void OnCreateTransportTexture(int32 context_route_id, int32 host_id);
 
   // The lifetime of objects of this class is managed by a GpuChannelManager.
@@ -142,6 +156,8 @@ class GpuChannel : public IPC::Channel::Listener,
   GpuChannelManager* gpu_channel_manager_;
 
   scoped_ptr<IPC::SyncChannel> channel_;
+
+  std::queue<IPC::Message*> deferred_messages_;
 
   // The id of the renderer who is on the other side of the channel.
   int renderer_id_;
@@ -154,6 +170,10 @@ class GpuChannel : public IPC::Channel::Listener,
 
   // Used to implement message routing functionality to CommandBuffer objects
   MessageRouter router_;
+
+  // The share group that all contexts associated with a particular renderer
+  // process use.
+  scoped_refptr<gfx::GLShareGroup> share_group_;
 
 #if defined(ENABLE_GPU)
   typedef IDMap<GpuCommandBufferStub, IDMapOwnPointer> StubMap;
@@ -172,6 +192,9 @@ class GpuChannel : public IPC::Channel::Listener,
   bool log_messages_;  // True if we should log sent and received messages.
   gpu::gles2::DisallowedExtensions disallowed_extensions_;
   GpuWatchdog* watchdog_;
+  bool software_;
+
+  ScopedRunnableMethodFactory<GpuChannel> task_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChannel);
 };

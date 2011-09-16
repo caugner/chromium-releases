@@ -28,6 +28,10 @@ class AudioHandler;
 class SystemKeyEventListener : public WmMessageListener::Observer,
                                public MessageLoopForUI::Observer {
  public:
+  class CapsLockObserver {
+   public:
+    virtual void OnCapsLockChange(bool enabled) = 0;
+  };
   static SystemKeyEventListener* GetInstance();
 
   // WmMessageListener::Observer:
@@ -35,6 +39,9 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
                                 GdkWindow* window);
 
   void Stop();
+
+  void AddCapsLockObserver(CapsLockObserver* observer);
+  void RemoveCapsLockObserver(CapsLockObserver* observer);
 
  private:
   // Defines the delete on exit Singleton traits we like.  Best to have this
@@ -44,6 +51,10 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
   SystemKeyEventListener();
   virtual ~SystemKeyEventListener();
 
+#if defined(TOUCH_UI)
+  // MessageLoopForUI::Observer overrides.
+  virtual EventStatus WillProcessXEvent(XEvent* xevent) OVERRIDE;
+#else
   // This event filter intercepts events before they reach GDK, allowing us to
   // check for system level keyboard events regardless of which window has
   // focus.
@@ -51,22 +62,22 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
                                         GdkEvent* gevent,
                                         gpointer data);
 
+  // MessageLoopForUI::Observer overrides.
+  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {}
+  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE {}
+#endif
+
   // Tell X we are interested in the specified key/mask combination.
-  // Capslock and Numlock are always ignored.
+  // CapsLock and Numlock are always ignored.
   void GrabKey(int32 key, uint32 mask);
 
   void OnVolumeMute();
   void OnVolumeDown();
   void OnVolumeUp();
+  void OnCapsLock(bool enabled);
 
-  // MessageLoopForUI::Observer overrides.
-  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {}
-  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE {}
-  virtual bool WillProcessXEvent(XEvent* xevent)
-#if defined(TOUCH_UI)
-    OVERRIDE
-#endif
-    ;
+  // Returns true if the event was processed, false otherwise.
+  virtual bool ProcessedXEvent(XEvent* xevent);
 
   int32 key_volume_mute_;
   int32 key_volume_down_;
@@ -74,8 +85,20 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
   int32 key_f8_;
   int32 key_f9_;
   int32 key_f10_;
+  int32 key_left_shift_;
+  int32 key_right_shift_;
 
   bool stopped_;
+
+  // Are we waiting for a Shift key press event to toggle Caps Lock (i.e. the
+  // last key press event was regarding the other Shift key)?
+  bool waiting_for_shift_for_caps_lock_;
+
+  bool caps_lock_is_on_;
+  ObserverList<CapsLockObserver> caps_lock_observers_;
+
+  // Base X ID for events from the XKB extension.
+  int xkb_event_base_;
 
   // AudioHandler is a Singleton class we are just caching a pointer to here,
   // and we do not own the pointer.
@@ -87,4 +110,3 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
 }  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_SYSTEM_KEY_EVENT_LISTENER_H_
-

@@ -36,6 +36,7 @@ extern const char kAcceptLanguages[];
 extern const char kStaticEncodings[];
 extern const char kPopupWhitelistedHosts[];
 extern const char kShowBookmarkBar[];
+extern const char kBookmarkEditorExpandedNodes[];
 extern const char kWebKitStandardFontFamily[];
 extern const char kWebKitFixedFontFamily[];
 extern const char kWebKitSerifFontFamily[];
@@ -62,9 +63,11 @@ extern const char kWebKitAllowDisplayingInsecureContent[];
 extern const char kWebKitAllowRunningInsecureContent[];
 extern const char kPasswordManagerEnabled[];
 extern const char kPasswordManagerAllowShowPasswords[];
+extern const char kAutologinEnabled[];
 extern const char kSafeBrowsingEnabled[];
 extern const char kSafeBrowsingReportingEnabled[];
 extern const char kIncognitoEnabled[];
+extern const char kIncognitoForced[];
 extern const char kSearchSuggestEnabled[];
 extern const char kConfirmToQuitEnabled[];
 extern const char kCookieBehavior[];  // OBSOLETE
@@ -167,6 +170,9 @@ extern const char kEnableScreenLock[];
 extern const char kShowPlanNotifications[];
 extern const char kShow3gPromoNotification[];
 extern const char kLastUsedFileBrowserHandlers[];
+extern const char kUseSharedProxies[];
+extern const char kOAuth1Token[];
+extern const char kOAuth1Secret[];
 #endif
 extern const char kIpcDisabledMessages[];
 extern const char kShowHomeButton[];
@@ -183,12 +189,6 @@ extern const char kEnableAutoSpellCorrect[];
 extern const char kSavingBrowserHistoryDisabled[];
 extern const char kDeleteTimePeriod[];
 extern const char kPrintingEnabled[];
-extern const char kPrintingPageHeaderLeft[];
-extern const char kPrintingPageHeaderCenter[];
-extern const char kPrintingPageHeaderRight[];
-extern const char kPrintingPageFooterLeft[];
-extern const char kPrintingPageFooterCenter[];
-extern const char kPrintingPageFooterRight[];
 #if defined(TOOLKIT_USES_GTK)
 extern const char kUsesSystemTheme[];
 #endif
@@ -224,7 +224,8 @@ extern const char kDesktopNotificationPosition[];
 extern const char kDefaultContentSettings[];
 extern const char kPerHostContentSettings[];  // OBSOLETE
 extern const char kContentSettingsVersion[];
-extern const char kContentSettingsPatterns[];
+extern const char kContentSettingsPatterns[];  // OBSOLETE
+extern const char kContentSettingsPatternPairs[];
 extern const char kBlockThirdPartyCookies[];
 extern const char kClearSiteDataOnExit[];
 extern const char kDefaultZoomLevel[];
@@ -243,17 +244,26 @@ extern const char kEnableTranslate[];
 extern const char kEnableBookmarkBar[];
 extern const char kPinnedTabs[];
 extern const char kHttpThrottlingEnabled[];
-
-extern const char kPolicyRefreshRate[];
+extern const char kHttpThrottlingMayExperiment[];
 
 extern const char kDisable3DAPIs[];
 extern const char kEnableHyperlinkAuditing[];
 extern const char kEnableReferrers[];
 
+#if defined(OS_MACOSX)
+extern const char kPresentationModeEnabled[];
+#endif
+
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
+extern const char kLocalProfileId[];
+extern const char kPasswordsUseLocalProfileId[];
+#endif
+
 // Local state prefs. Please add Profile prefs above instead.
 extern const char kCertRevocationCheckingEnabled[];
 extern const char kSSL3Enabled[];
 extern const char kTLS1Enabled[];
+extern const char kCipherSuiteBlacklist[];
 
 extern const char kMetricsClientID[];
 extern const char kMetricsSessionID[];
@@ -265,6 +275,7 @@ extern const char kMetricsOngoingLogs[];
 extern const char kProfileLastUsed[];
 extern const char kProfileDirectoryMap[];
 extern const char kProfilesNumCreated[];
+extern const char kProfileInfoCache[];
 
 extern const char kProfileMetrics[];
 extern const char kProfilePrefix[];
@@ -387,6 +398,7 @@ extern const char kNTPPromoResourceCache[];
 extern const char kNTPPromoResourceCacheUpdate[];
 extern const char kNTPPromoResourceServer[];
 extern const char kNTPDateResourceServer[];
+extern const char kNTPShownPage[];
 extern const char kNTPShownSections[];
 extern const char kNTPPrefVersion[];
 extern const char kNTPCustomLogoStart[];
@@ -409,6 +421,7 @@ extern const char kNTPWebStorePromoLink[];
 extern const char kNTPWebStorePromoLogo[];
 extern const char kNTPWebStorePromoExpire[];
 extern const char kNTPWebStorePromoUserGroup[];
+extern const char kNTPAppPageNames[];
 
 extern const char kGpuBlacklist[];
 extern const char kGpuBlacklistUpdate[];
@@ -447,6 +460,9 @@ extern const char kGeolocationContentSettings[];
 
 extern const char kLoginDatabaseMigrated[];
 
+extern const char kRemoteAccessClientFirewallTraversal[];
+extern const char kRemoteAccessHostFirewallTraversal[];
+
 extern const char kCloudPrintServiceURL[];
 extern const char kCloudPrintDialogWidth[];
 extern const char kCloudPrintDialogHeight[];
@@ -461,12 +477,14 @@ extern const char kCloudPrintRobotRefreshToken[];
 extern const char kCloudPrintRobotEmail[];
 
 extern const char kProxy[];
+extern const char kMaxConnectionsPerProxy[];
 
 extern const char kManagedDefaultCookiesSetting[];
 extern const char kManagedDefaultImagesSetting[];
 extern const char kManagedDefaultJavaScriptSetting[];
 extern const char kManagedDefaultPluginsSetting[];
 extern const char kManagedDefaultPopupsSetting[];
+extern const char kManagedDefaultGeolocationSetting[];
 
 extern const char kManagedCookiesAllowedForUrls[];
 extern const char kManagedCookiesBlockedForUrls[];
@@ -490,6 +508,8 @@ extern const char kClearPluginLSODataEnabled[];
 
 extern const char kDiskCacheDir[];
 
+extern const char kChromeOsReleaseChannel[];
+
 extern const char kRegisteredBackgroundContents[];
 
 extern const char kAuthSchemes[];
@@ -507,6 +527,8 @@ extern const char kCustomHandlersEnabled[];
 extern const char kUserCreatedLoginItem[];
 extern const char kBackgroundModeEnabled[];
 
+extern const char kDevicePolicyRefreshRate[];
+extern const char kUserPolicyRefreshRate[];
 }  // namespace prefs
 
 #endif  // CHROME_COMMON_PREF_NAMES_H_

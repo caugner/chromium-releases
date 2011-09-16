@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/browser_actions_container.h"
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
@@ -12,13 +12,16 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/detachable_toolbar_view.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
@@ -26,11 +29,10 @@
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -42,10 +44,10 @@
 #include "ui/gfx/canvas_skia.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/button/text_button.h"
-#include "views/controls/menu/menu_2.h"
+#include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_model_adapter.h"
 #include "views/drag_utils.h"
 #include "views/metrics.h"
-#include "views/window/window.h"
 
 // Horizontal spacing between most items in the container, as well as after the
 // last item or chevron (if visible).
@@ -66,21 +68,21 @@ BrowserActionButton::BrowserActionButton(const Extension* extension,
       browser_action_(extension->browser_action()),
       extension_(extension),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)),
-      showing_context_menu_(false),
-      panel_(panel) {
+      panel_(panel),
+      context_menu_(NULL) {
   set_border(NULL);
   set_alignment(TextButton::ALIGN_CENTER);
 
   // No UpdateState() here because View hierarchy not setup yet. Our parent
   // should call UpdateState() after creation.
 
-  registrar_.Add(this, NotificationType::EXTENSION_BROWSER_ACTION_UPDATED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
                  Source<ExtensionAction>(browser_action_));
 }
 
 void BrowserActionButton::Destroy() {
-  if (showing_context_menu_) {
-    context_menu_menu_->CancelMenu();
+  if (context_menu_) {
+    context_menu_->Cancel();
     MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   } else {
     delete this;
@@ -170,6 +172,7 @@ void BrowserActionButton::UpdateState() {
   if (name.empty())
     name = UTF8ToUTF16(extension()->name());
   SetTooltipText(UTF16ToWideHack(name));
+  SetAccessibleName(name);
   parent()->SchedulePaint();
 }
 
@@ -183,10 +186,10 @@ GURL BrowserActionButton::GetPopupUrl() {
   return (tab_id < 0) ? GURL() : browser_action_->GetPopupUrl(tab_id);
 }
 
-void BrowserActionButton::Observe(NotificationType type,
+void BrowserActionButton::Observe(int type,
                                   const NotificationSource& source,
                                   const NotificationDetails& details) {
-  DCHECK(type == NotificationType::EXTENSION_BROWSER_ACTION_UPDATED);
+  DCHECK(type == chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED);
   UpdateState();
   // The browser action may have become visible/hidden so we need to make
   // sure the state gets updated.
@@ -215,19 +218,12 @@ bool BrowserActionButton::OnMousePressed(const views::MouseEvent& event) {
         MenuButton::OnMousePressed(event) : TextButton::OnMousePressed(event);
   }
 
-  // Get the top left point of this button in screen coordinates.
-  gfx::Point point = gfx::Point(0, 0);
-  ConvertPointToScreen(this, &point);
-
-  // Make the menu appear below the button.
-  point.Offset(0, height());
-
-  ShowContextMenu(point, true);
+  ShowContextMenu(gfx::Point(), true);
   return false;
 }
 
 void BrowserActionButton::OnMouseReleased(const views::MouseEvent& event) {
-  if (IsPopup() || showing_context_menu_) {
+  if (IsPopup() || context_menu_) {
     // TODO(erikkay) this never actually gets called (probably because of the
     // loss of focus).
     MenuButton::OnMouseReleased(event);
@@ -237,7 +233,7 @@ void BrowserActionButton::OnMouseReleased(const views::MouseEvent& event) {
 }
 
 void BrowserActionButton::OnMouseExited(const views::MouseEvent& event) {
-  if (IsPopup() || showing_context_menu_)
+  if (IsPopup() || context_menu_)
     MenuButton::OnMouseExited(event);
   else
     TextButton::OnMouseExited(event);
@@ -253,17 +249,23 @@ void BrowserActionButton::ShowContextMenu(const gfx::Point& p,
   if (!extension()->ShowConfigureContextMenus())
     return;
 
-  showing_context_menu_ = true;
   SetButtonPushed();
 
   // Reconstructs the menu every time because the menu's contents are dynamic.
-  context_menu_contents_ =
-      new ExtensionContextMenuModel(extension(), panel_->browser(), panel_);
-  context_menu_menu_.reset(new views::Menu2(context_menu_contents_.get()));
-  context_menu_menu_->RunContextMenuAt(p);
+  scoped_refptr<ExtensionContextMenuModel> context_menu_contents_(
+      new ExtensionContextMenuModel(extension(), panel_->browser(), panel_));
+  views::MenuModelAdapter menu_model_adapter(context_menu_contents_.get());
+  views::MenuItemView menu(&menu_model_adapter);
+  menu_model_adapter.BuildMenu(&menu);
+
+  context_menu_ = &menu;
+  gfx::Point screen_loc;
+  views::View::ConvertPointToScreen(this, &screen_loc);
+  context_menu_->RunMenuAt(GetWidget()->GetNativeWindow(), NULL,
+      gfx::Rect(screen_loc, size()), views::MenuItemView::TOPLEFT, true);
 
   SetButtonNotPushed();
-  showing_context_menu_ = false;
+  context_menu_ = NULL;
 }
 
 void BrowserActionButton::SetButtonPushed() {
@@ -287,7 +289,7 @@ BrowserActionView::BrowserActionView(const Extension* extension,
                                      BrowserActionsContainer* panel)
     : panel_(panel) {
   button_ = new BrowserActionButton(extension, panel);
-  button_->SetDragController(panel_);
+  button_->set_drag_controller(panel_);
   AddChildView(button_);
   button_->UpdateState();
 }
@@ -361,7 +363,7 @@ BrowserActionsContainer::BrowserActionsContainer(Browser* browser,
       drop_indicator_position_(-1),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(show_menu_task_factory_(this)) {
-  SetID(VIEW_ID_BROWSER_ACTION_TOOLBAR);
+  set_id(VIEW_ID_BROWSER_ACTION_TOOLBAR);
 
   if (profile_->GetExtensionService()) {
     model_ = profile_->GetExtensionService()->toolbar_model();
@@ -415,8 +417,8 @@ void BrowserActionsContainer::Init() {
 }
 
 int BrowserActionsContainer::GetCurrentTabId() const {
-  TabContents* tab_contents = browser_->GetSelectedTabContents();
-  return tab_contents ? tab_contents->controller().session_id().id() : -1;
+  TabContentsWrapper* tab = browser_->GetSelectedTabContentsWrapper();
+  return tab ? tab->restore_tab_helper()->session_id().id() : -1;
 }
 
 BrowserActionView* BrowserActionsContainer::GetBrowserActionView(
@@ -710,7 +712,7 @@ void BrowserActionsContainer::RunMenu(View* source, const gfx::Point& pt) {
     overflow_menu_ = new BrowserActionOverflowMenuController(
         this, chevron_, browser_action_views_, VisibleBrowserActions());
     overflow_menu_->set_observer(this);
-    overflow_menu_->RunMenu(GetWindow()->GetNativeWindow(), false);
+    overflow_menu_->RunMenu(GetWidget()->GetNativeWindow(), false);
   }
 }
 
@@ -1023,7 +1025,7 @@ void BrowserActionsContainer::ShowDropFolder() {
   overflow_menu_ = new BrowserActionOverflowMenuController(
       this, chevron_, browser_action_views_, VisibleBrowserActions());
   overflow_menu_->set_observer(this);
-  overflow_menu_->RunMenu(GetWindow()->GetNativeWindow(), true);
+  overflow_menu_->RunMenu(GetWidget()->GetNativeWindow(), true);
 }
 
 void BrowserActionsContainer::SetDropIndicator(int x_pos) {

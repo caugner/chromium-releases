@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "app/sql/statement.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
@@ -25,6 +24,7 @@
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/common/guid.h"
+#include "sql/statement.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/form_field.h"
 
@@ -126,10 +126,8 @@ CreditCard* CreditCardFromStatement(const sql::Statement& s) {
   DCHECK(guid::IsValidGUID(credit_card->guid()));
 
   credit_card->SetInfo(CREDIT_CARD_NAME, s.ColumnString16(1));
-  credit_card->SetInfo(CREDIT_CARD_EXP_MONTH,
-                       s.ColumnString16(2));
-  credit_card->SetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                       s.ColumnString16(3));
+  credit_card->SetInfo(CREDIT_CARD_EXP_MONTH, s.ColumnString16(2));
+  credit_card->SetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, s.ColumnString16(3));
   int encrypted_number_len = s.ColumnByteLength(4);
   string16 credit_card_number;
   if (encrypted_number_len) {

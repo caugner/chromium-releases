@@ -12,11 +12,11 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/screen.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_scroll_view_container.h"
 #include "views/controls/menu/submenu_view.h"
 #include "views/drag_utils.h"
-#include "views/screen.h"
 #include "views/view_constants.h"
 #include "views/views_delegate.h"
 #include "views/widget/root_view.h"
@@ -82,7 +82,7 @@ static View* GetFirstHotTrackedView(View* view) {
     return view;
 
   for (int i = 0; i < view->child_count(); ++i) {
-    View* hot_view = GetFirstHotTrackedView(view->GetChildViewAt(i));
+    View* hot_view = GetFirstHotTrackedView(view->child_at(i));
     if (hot_view)
       return hot_view;
   }
@@ -97,15 +97,13 @@ static View* GetFirstHotTrackedView(View* view) {
 static View* GetFirstFocusableView(View* view, int start, bool forward) {
   if (forward) {
     for (int i = start == -1 ? 0 : start; i < view->child_count(); ++i) {
-      View* deepest = GetFirstFocusableView(view->GetChildViewAt(i), -1,
-                                            forward);
+      View* deepest = GetFirstFocusableView(view->child_at(i), -1, forward);
       if (deepest)
         return deepest;
     }
   } else {
     for (int i = start == -1 ? view->child_count() - 1 : start; i >= 0; --i) {
-      View* deepest = GetFirstFocusableView(view->GetChildViewAt(i), -1,
-                                            forward);
+      View* deepest = GetFirstFocusableView(view->child_at(i), -1, forward);
       if (deepest)
         return deepest;
     }
@@ -708,14 +706,14 @@ int MenuController::OnPerformDrop(SubmenuView* source,
   showing_ = false;
   exit_type_ = EXIT_ALL;
 
+  // If over an empty menu item, drop occurs on the parent.
+  if (drop_target->id() == MenuItemView::kEmptyMenuItemViewID)
+    drop_target = drop_target->GetParentMenuItem();
+
   if (!IsBlockingRun())
     item->GetRootMenuItem()->DropMenuClosed(false);
 
   // WARNING: the call to MenuClosed deletes us.
-
-  // If over an empty menu item, drop occurs on the parent.
-  if (drop_target->GetID() == MenuItemView::kEmptyMenuItemViewID)
-    drop_target = drop_target->GetParentMenuItem();
 
   return drop_target->GetDelegate()->OnPerformDrop(
       drop_target, drop_position, event);
@@ -758,8 +756,15 @@ void MenuController::SetSelection(MenuItemView* menu_item,
   }
 
   // Notify the old path it isn't selected.
-  for (size_t i = paths_differ_at; i < current_size; ++i)
+  MenuDelegate* current_delegate =
+      current_path.empty() ? NULL : current_path.front()->GetDelegate();
+  for (size_t i = paths_differ_at; i < current_size; ++i) {
+    if (current_delegate &&
+        current_path[i]->GetType() == MenuItemView::SUBMENU) {
+      current_delegate->WillHideMenu(current_path[i]);
+    }
     current_path[i]->SetSelected(false);
+  }
 
   // Notify the new path it is selected.
   for (size_t i = paths_differ_at; i < new_size; ++i)
@@ -851,7 +856,16 @@ bool MenuController::Dispatch(const MSG& msg) {
   DispatchMessage(&msg);
   return exit_type_ == EXIT_NONE;
 }
+#elif defined(TOUCH_UI)
+base::MessagePumpDispatcher::DispatchStatus
+    MenuController::Dispatch(XEvent* xev) {
+  if (!DispatchXEvent(xev))
+    return EVENT_IGNORED;
 
+  return exit_type_ != EXIT_NONE ?
+      base::MessagePumpDispatcher::EVENT_QUIT :
+      base::MessagePumpDispatcher::EVENT_PROCESSED;
+}
 #else
 bool MenuController::Dispatch(GdkEvent* event) {
   if (exit_type_ == EXIT_ALL || exit_type_ == EXIT_DESTROYED) {
@@ -890,19 +904,6 @@ bool MenuController::Dispatch(GdkEvent* event) {
   gtk_main_do_event(event);
   return exit_type_ == EXIT_NONE;
 }
-
-#if defined(TOUCH_UI)
-base::MessagePumpGlibXDispatcher::DispatchStatus
-    MenuController::DispatchX(XEvent* xev) {
-  if (!DispatchXEvent(xev))
-    return EVENT_IGNORED;
-
-  return exit_type_ != EXIT_NONE ?
-      base::MessagePumpGlibXDispatcher::EVENT_QUIT :
-      base::MessagePumpGlibXDispatcher::EVENT_PROCESSED;
-}
-#endif
-
 #endif
 
 bool MenuController::OnKeyDown(int key_code
@@ -1024,11 +1025,18 @@ void MenuController::UpdateInitialLocation(
     // nicely and menus close prematurely.
     pending_state_.initial_bounds.Inset(0, 1);
   }
-  pending_state_.anchor = position;
+
+  // Reverse anchor position for RTL languages.
+  if (base::i18n::IsRTL()) {
+    pending_state_.anchor = position == MenuItemView::TOPRIGHT ?
+        MenuItemView::TOPLEFT : MenuItemView::TOPRIGHT;
+  } else {
+    pending_state_.anchor = position;
+  }
 
   // Calculate the bounds of the monitor we'll show menus on. Do this once to
   // avoid repeated system queries for the info.
-  pending_state_.monitor_bounds = Screen::GetMonitorWorkAreaNearestPoint(
+  pending_state_.monitor_bounds = gfx::Screen::GetMonitorWorkAreaNearestPoint(
       bounds.origin());
 }
 
@@ -1056,7 +1064,8 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source,
     return false;
   }
 
-  gfx::NativeWindow window_under_mouse = Screen::GetWindowAtCursorScreenPoint();
+  gfx::NativeWindow window_under_mouse =
+      gfx::Screen::GetWindowAtCursorScreenPoint();
   if (window_under_mouse != owner_)
     return false;
 
@@ -1123,11 +1132,11 @@ MenuItemView* MenuController::GetMenuItemAt(View* source, int x, int y) {
   // Walk the view hierarchy until we find a menu item (or the root).
   View* child_under_mouse = source->GetEventHandlerForPoint(gfx::Point(x, y));
   while (child_under_mouse &&
-         child_under_mouse->GetID() != MenuItemView::kMenuItemViewID) {
+         child_under_mouse->id() != MenuItemView::kMenuItemViewID) {
     child_under_mouse = child_under_mouse->parent();
   }
   if (child_under_mouse && child_under_mouse->IsEnabled() &&
-      child_under_mouse->GetID() == MenuItemView::kMenuItemViewID) {
+      child_under_mouse->id() == MenuItemView::kMenuItemViewID) {
     return static_cast<MenuItemView*>(child_under_mouse);
   }
   return NULL;
@@ -1136,7 +1145,7 @@ MenuItemView* MenuController::GetMenuItemAt(View* source, int x, int y) {
 MenuItemView* MenuController::GetEmptyMenuItemAt(View* source, int x, int y) {
   View* child_under_mouse = source->GetEventHandlerForPoint(gfx::Point(x, y));
   if (child_under_mouse &&
-      child_under_mouse->GetID() == MenuItemView::kEmptyMenuItemViewID) {
+      child_under_mouse->id() == MenuItemView::kEmptyMenuItemViewID) {
     return static_cast<MenuItemView*>(child_under_mouse);
   }
   return NULL;
@@ -1672,7 +1681,7 @@ bool MenuController::AcceptOrSelect(MenuItemView* parent,
     // There's only one match, activate it (or open if it has a submenu).
     if (submenu->GetMenuItemAt(details.first_match)->HasSubmenu()) {
       SetSelection(submenu->GetMenuItemAt(details.first_match),
-                   SELECTION_OPEN_SUBMENU);
+                   SELECTION_OPEN_SUBMENU | SELECTION_UPDATE_IMMEDIATELY);
     } else {
       Accept(submenu->GetMenuItemAt(details.first_match), 0);
       return true;

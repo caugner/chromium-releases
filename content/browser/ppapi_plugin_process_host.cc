@@ -8,9 +8,9 @@
 #include "base/file_path.h"
 #include "base/process_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/common/chrome_switches.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/render_message_filter.h"
+#include "content/common/content_switches.h"
 #include "content/common/pepper_plugin_registry.h"
 #include "ipc/ipc_switches.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -19,9 +19,13 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(net::HostResolver* host_resolver)
     : BrowserChildProcessHost(ChildProcessInfo::PPAPI_PLUGIN_PROCESS),
       filter_(new PepperMessageFilter(host_resolver)) {
   AddFilter(filter_.get());
+  net::NetworkChangeNotifier::AddIPAddressObserver(this);
+  net::NetworkChangeNotifier::AddOnlineStateObserver(this);
 }
 
 PpapiPluginProcessHost::~PpapiPluginProcessHost() {
+  net::NetworkChangeNotifier::RemoveOnlineStateObserver(this);
+  net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
   CancelRequests();
 }
 
@@ -49,6 +53,7 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   // TODO(vtl): Stop passing flash args in the command line, on windows is
   // going to explode.
   static const char* kForwardSwitches[] = {
+    switches::kNoSandbox,
     switches::kPpapiFlashArgs,
     switches::kPpapiStartupDialog
   };
@@ -153,6 +158,20 @@ void PpapiPluginProcessHost::CancelRequests() {
                                             IPC::ChannelHandle());
     sent_requests_.pop();
   }
+}
+
+void PpapiPluginProcessHost::OnIPAddressChanged() {
+  // TODO(brettw) bug 90246: This doesn't seem correct. The online/offline
+  // notification seems like it should be sufficient, but I don't see that when
+  // I unplug and replug my network cable. Sending this notification when
+  // "something" changes seems to make Flash reasonably happy, but seems wrong.
+  // We should really be able to provide the real online state in
+  // OnOnlineStateChanged().
+  Send(new PpapiMsg_SetNetworkState(true));
+}
+
+void PpapiPluginProcessHost::OnOnlineStateChanged(bool online) {
+  Send(new PpapiMsg_SetNetworkState(online));
 }
 
 // Called when a new plugin <--> renderer channel has been created.

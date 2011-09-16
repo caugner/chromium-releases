@@ -9,153 +9,137 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "net/base/x509_certificate.h"
+#include "remoting/protocol/content_description.h"
 #include "remoting/protocol/jingle_session.h"
 #include "remoting/protocol/session_manager.h"
 #include "third_party/libjingle/source/talk/p2p/base/session.h"
 #include "third_party/libjingle/source/talk/p2p/base/sessionclient.h"
-#include "third_party/libjingle/source/talk/p2p/base/sessiondescription.h"
-
-class MessageLoop;
-
-namespace crypto {
-class RSAPrivateKey;
-}  // namespace base
 
 namespace cricket {
+class PortAllocator;
 class SessionManager;
 }  // namespace cricket
 
 namespace remoting {
 
-class JingleThread;
+class HostResolverFactory;
+class HttpPortAllocator;
+class JingleInfoRequest;
+class JingleSignalingConnector;
+class PortAllocatorSessionFactory;
 
 namespace protocol {
-
-// ContentDescription used for chromoting sessions. It contains the information
-// from the content description stanza in the session intialization handshake.
-//
-// This class also provides a type abstraction so that the Chromotocol Session
-// interface does not need to depend on libjingle.
-class ContentDescription : public cricket::ContentDescription {
- public:
-  explicit ContentDescription(const CandidateSessionConfig* config,
-                              const std::string& auth_token,
-                              scoped_refptr<net::X509Certificate> certificate);
-  virtual ~ContentDescription();
-
-  const CandidateSessionConfig* config() const {
-    return candidate_config_.get();
-  }
-
-  const std::string& auth_token() const { return auth_token_; }
-
-  scoped_refptr<net::X509Certificate> certificate() const {
-    return certificate_;
-  }
-
- private:
-  scoped_ptr<const CandidateSessionConfig> candidate_config_;
-
-  // This may contain the initiating, or the accepting token depending on
-  // context.
-  std::string auth_token_;
-
-  scoped_refptr<net::X509Certificate> certificate_;
-};
 
 // This class implements SessionClient for Chromoting sessions. It acts as a
 // server that accepts chromoting connections and can also make new connections
 // to other hosts.
 class JingleSessionManager
-    : public protocol::SessionManager,
+    : public SessionManager,
       public cricket::SessionClient {
  public:
-  explicit JingleSessionManager(remoting::JingleThread* jingle_thread);
+  virtual ~JingleSessionManager();
 
-  // Initializes the session client. Doesn't accept ownership of the
-  // |session_manager|. Close() must be called _before_ the |session_manager|
-  // is destroyed.
-  // If this object is used in server mode, then |private_key| and
-  // |certificate| are used to establish a secured communication with the
-  // client. It will also take ownership of these objects.
-  // In case this is used in client mode, pass in NULL for both private key and
-  // certificate.
-  virtual void Init(const std::string& local_jid,
-                    cricket::SessionManager* cricket_session_manager,
-                    IncomingSessionCallback* incoming_session_callback,
-                    crypto::RSAPrivateKey* private_key,
-                    scoped_refptr<net::X509Certificate> certificate);
+  static JingleSessionManager* CreateNotSandboxed();
+  static JingleSessionManager* CreateSandboxed(
+      talk_base::NetworkManager* network_manager,
+      talk_base::PacketSocketFactory* socket_factory,
+      HostResolverFactory* host_resolver_factory,
+      PortAllocatorSessionFactory* port_allocator_session_factory);
 
   // SessionManager interface.
-  virtual scoped_refptr<protocol::Session> Connect(
-      const std::string& jid,
+  virtual void Init(const std::string& local_jid,
+                    SignalStrategy* signal_strategy,
+                    Listener* listener,
+                    crypto::RSAPrivateKey* private_key,
+                    const std::string& certificate,
+                    bool allow_nat_traversal) OVERRIDE;
+  virtual Session* Connect(
+      const std::string& host_jid,
+      const std::string& host_public_key,
       const std::string& client_token,
-      CandidateSessionConfig* candidate_config,
-      protocol::Session::StateChangeCallback* state_change_callback);
-  virtual void Close(Task* closed_task);
+      CandidateSessionConfig* config,
+      Session::StateChangeCallback* state_change_callback) OVERRIDE;
+  virtual void Close() OVERRIDE;
 
   void set_allow_local_ips(bool allow_local_ips);
 
   // cricket::SessionClient interface.
   virtual void OnSessionCreate(cricket::Session* cricket_session,
-                               bool received_initiate);
-  virtual void OnSessionDestroy(cricket::Session* cricket_session);
+                               bool received_initiate) OVERRIDE;
+  virtual void OnSessionDestroy(cricket::Session* cricket_session) OVERRIDE;
 
   virtual bool ParseContent(cricket::SignalingProtocol protocol,
                             const buzz::XmlElement* elem,
                             const cricket::ContentDescription** content,
-                            cricket::ParseError* error);
+                            cricket::ParseError* error) OVERRIDE;
   virtual bool WriteContent(cricket::SignalingProtocol protocol,
                             const cricket::ContentDescription* content,
                             buzz::XmlElement** elem,
-                            cricket::WriteError* error);
-
- protected:
-  virtual ~JingleSessionManager();
+                            cricket::WriteError* error) OVERRIDE;
 
  private:
   friend class JingleSession;
 
-  // The jingle thread used by this object.
-  JingleThread* jingle_thread();
+  JingleSessionManager(
+      talk_base::NetworkManager* network_manager,
+      talk_base::PacketSocketFactory* socket_factory,
+      HostResolverFactory* host_resolver_factory,
+      PortAllocatorSessionFactory* port_allocator_session_factory);
 
-  // Message loop that corresponds to jingle_thread().
-  MessageLoop* message_loop();
-
-  // Called by JingleChromotocolConnection when a new connection is initiated.
-  void AcceptConnection(JingleSession* jingle_session,
+  // Called by JingleSession when a new connection is
+  // initiated. Returns true if session is accepted.
+  bool AcceptConnection(JingleSession* jingle_session,
                         cricket::Session* cricket_session);
 
-  void DoConnect(
-      scoped_refptr<JingleSession> jingle_session,
-      const std::string& host_jid,
-      const std::string& client_token,
-      protocol::Session::StateChangeCallback* state_change_callback);
+  // Called by JingleSession when it is being destroyed.
+  void SessionDestroyed(JingleSession* jingle_session);
 
-  // Creates outgoing session description for an incoming session.
-  cricket::SessionDescription* CreateSessionDescription(
+  // Callback for JingleInfoRequest.
+  void OnJingleInfo(
+      const std::string& token,
+      const std::vector<std::string>& relay_hosts,
+      const std::vector<talk_base::SocketAddress>& stun_hosts);
+
+  // Creates session description for outgoing session.
+  static cricket::SessionDescription* CreateClientSessionDescription(
       const CandidateSessionConfig* candidate_config,
       const std::string& auth_token,
-      scoped_refptr<net::X509Certificate> certificate);
+      const std::string& master_key);
+  // Creates session description for incoming session.
+  static cricket::SessionDescription* CreateHostSessionDescription(
+      const CandidateSessionConfig* candidate_config,
+      const std::string& certificate);
+
+  scoped_ptr<talk_base::NetworkManager> network_manager_;
+  scoped_ptr<talk_base::PacketSocketFactory> socket_factory_;
+  scoped_ptr<HostResolverFactory> host_resolver_factory_;
+  scoped_ptr<PortAllocatorSessionFactory> port_allocator_session_factory_;
 
   std::string local_jid_;  // Full jid for the local side of the session.
-  JingleThread* jingle_thread_;
-  cricket::SessionManager* cricket_session_manager_;
-  scoped_ptr<IncomingSessionCallback> incoming_session_callback_;
+  SignalStrategy* signal_strategy_;
+  Listener* listener_;
+  std::string certificate_;
+  scoped_ptr<crypto::RSAPrivateKey> private_key_;
+  bool allow_nat_traversal_;
+
   bool allow_local_ips_;
+
+  scoped_ptr<cricket::PortAllocator> port_allocator_;
+  remoting::HttpPortAllocator* http_port_allocator_;
+  scoped_ptr<cricket::SessionManager> cricket_session_manager_;
+  scoped_ptr<JingleInfoRequest> jingle_info_request_;
+  scoped_ptr<JingleSignalingConnector> jingle_signaling_connector_;
+
   bool closed_;
 
-  std::list<scoped_refptr<JingleSession> > sessions_;
+  std::list<JingleSession*> sessions_;
 
-  scoped_refptr<net::X509Certificate> certificate_;
-  scoped_ptr<crypto::RSAPrivateKey> private_key_;
+  ScopedRunnableMethodFactory<JingleSessionManager> task_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleSessionManager);
 };
 
 }  // namespace protocol
-
 }  // namespace remoting
 
 #endif  // REMOTING_PROTOCOL_JINGLE_SESSION_MANAGER_H_

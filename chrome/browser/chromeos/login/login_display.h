@@ -42,6 +42,11 @@ class LoginDisplay : public RemoveUserDelegate {
     // Users decides to sign in into captive portal.
     virtual void FixCaptivePortal() = 0;
 
+    // Complete sign process with specified |username| and |password|.
+    // Used for new users authenticated through an extension.
+    virtual void CompleteLogin(const std::string& username,
+                               const std::string& password) = 0;
+
     // Sign in using |username| and |password| specified.
     // Used for both known and new users.
     virtual void Login(const std::string& username,
@@ -83,8 +88,15 @@ class LoginDisplay : public RemoveUserDelegate {
   // (e.g. hide throbber, etc.).
   virtual void OnFadeOut() = 0;
 
+  // Called when user is successfully authenticated.
+  virtual void OnLoginSuccess(const std::string& username) = 0;
+
   // Changes enabled state of the UI.
   virtual void SetUIEnabled(bool is_enabled) = 0;
+
+  // Selects user entry with specified |index|.
+  // Does nothing if current user is already selected.
+  virtual void SelectPod(int index) = 0;
 
   // Displays error with |error_msg_id| specified.
   // |login_attempts| shows number of login attempts made by current user.

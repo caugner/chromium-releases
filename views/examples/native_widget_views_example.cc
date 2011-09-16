@@ -66,10 +66,10 @@ std::wstring NativeWidgetViewsExample::GetExampleTitle() {
 
 void NativeWidgetViewsExample::CreateExampleView(views::View* container) {
   views::Widget* widget = new views::Widget;
-  views::NativeWidgetViews* nwv =
-      new views::NativeWidgetViews(container, widget);
+  views::NativeWidgetViews* nwv = new views::NativeWidgetViews(widget);
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
   params.native_widget = nwv;
+  params.parent_widget = container->GetWidget();
   widget->Init(params);
   widget->SetContentsView(new TestContentView);
   widget->SetBounds(gfx::Rect(10, 10, 300, 150));

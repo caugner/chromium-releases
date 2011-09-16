@@ -43,11 +43,11 @@ class HtmlDialogGtk : public HtmlDialogTabContentsDelegate,
   virtual void GetDialogSize(gfx::Size* size) const;
   virtual std::string GetDialogArgs() const;
   virtual void OnDialogClosed(const std::string& json_retval);
-  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog) { }
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog);
+  virtual void CloseContents(TabContents* source);
   virtual bool ShouldShowDialogTitle() const;
 
   // Overridden from TabContentsDelegate:
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
  private:

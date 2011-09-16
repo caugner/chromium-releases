@@ -9,11 +9,8 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_about_handler.h"
-#include "chrome/browser/browser_url_handler.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_types.h"
-#include "chrome/common/chrome_constants.h"
+#include "content/browser/browser_url_handler.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
 #include "content/browser/site_instance.h"
@@ -22,11 +19,11 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/browser/user_metrics.h"
 #include "content/common/content_constants.h"
 #include "content/common/navigation_types.h"
 #include "content/common/notification_service.h"
 #include "content/common/view_messages.h"
-#include "grit/app_resources.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
@@ -34,8 +31,7 @@
 
 namespace {
 
-const int kInvalidateAllButShelves =
-    0xFFFFFFFF & ~TabContents::INVALIDATE_BOOKMARK_BAR;
+const int kInvalidateAll = 0xFFFFFFFF;
 
 // Invoked when entries have been pruned, or removed. For example, if the
 // current entries are [google, digg, yahoo], with the current entry google,
@@ -47,7 +43,7 @@ void NotifyPrunedEntries(NavigationController* nav_controller,
   details.from_front = from_front;
   details.count = count;
   NotificationService::current()->Notify(
-      NotificationType::NAV_LIST_PRUNED,
+      content::NOTIFICATION_NAV_LIST_PRUNED,
       Source<NavigationController>(nav_controller),
       Details<content::PrunedDetails>(&details));
 }
@@ -138,23 +134,24 @@ NavigationController::~NavigationController() {
   DiscardNonCommittedEntriesInternal();
 
   NotificationService::current()->Notify(
-      NotificationType::TAB_CLOSED,
+      content::NOTIFICATION_TAB_CLOSED,
       Source<NavigationController>(this),
       NotificationService::NoDetails());
 }
 
-void NavigationController::RestoreFromState(
-    const std::vector<TabNavigation>& navigations,
+void NavigationController::Restore(
     int selected_navigation,
-    bool from_last_session) {
+    bool from_last_session,
+    std::vector<NavigationEntry*>* entries) {
   // Verify that this controller is unused and that the input is valid.
   DCHECK(entry_count() == 0 && !pending_entry());
   DCHECK(selected_navigation >= 0 &&
-         selected_navigation < static_cast<int>(navigations.size()));
+         selected_navigation < static_cast<int>(entries->size()));
 
-  // Populate entries_ from the supplied TabNavigations.
   needs_reload_ = true;
-  CreateNavigationEntriesFromTabNavigations(navigations, &entries_);
+  for (size_t i = 0; i < entries->size(); ++i)
+    entries_.push_back(linked_ptr<NavigationEntry>((*entries)[i]));
+  entries->clear();
 
   // And finish the restore.
   FinishRestore(selected_navigation, from_last_session);
@@ -187,7 +184,7 @@ void NavigationController::ReloadInternal(bool check_for_repost,
     // they really want to do this. If they do, the dialog will call us back
     // with check_for_repost = false.
     NotificationService::current()->Notify(
-        NotificationType::REPOST_WARNING_SHOWN,
+        content::NOTIFICATION_REPOST_WARNING_SHOWN,
         Source<NavigationController>(this),
         NotificationService::NoDetails());
 
@@ -268,20 +265,13 @@ void NavigationController::LoadEntry(NavigationEntry* entry) {
     return;
   }
 
-  // Handle non-navigational URLs that popup dialogs and such, these should not
-  // actually navigate.
-  if (HandleNonNavigationAboutURL(entry->url())) {
-    delete entry;
-    return;
-  }
-
   // When navigating to a new page, we don't know for sure if we will actually
   // end up leaving the current page.  The new page load could for example
   // result in a download or a 'no content' response (e.g., a mailto: URL).
   DiscardNonCommittedEntriesInternal();
   pending_entry_ = entry;
   NotificationService::current()->Notify(
-      NotificationType::NAV_ENTRY_PENDING,
+      content::NOTIFICATION_NAV_ENTRY_PENDING,
       Source<NavigationController>(this),
       NotificationService::NoDetails());
   NavigateToPendingEntry(NO_RELOAD);
@@ -479,7 +469,7 @@ void NavigationController::AddTransientEntry(NavigationEntry* entry) {
   DiscardTransientEntry();
   entries_.insert(entries_.begin() + index, linked_ptr<NavigationEntry>(entry));
   transient_entry_index_ = index;
-  tab_contents_->NotifyNavigationStateChanged(kInvalidateAllButShelves);
+  tab_contents_->NotifyNavigationStateChanged(kInvalidateAll);
 }
 
 void NavigationController::LoadURL(const GURL& url, const GURL& referrer,
@@ -499,7 +489,6 @@ void NavigationController::DocumentLoadedInFrame() {
 
 bool NavigationController::RendererDidNavigate(
     const ViewHostMsg_FrameNavigate_Params& params,
-    int extra_invalidate_flags,
     content::LoadCommittedDetails* details) {
 
   // Save the previous state before we clobber it.
@@ -554,8 +543,8 @@ bool NavigationController::RendererDidNavigate(
       // the caller that nothing has happened.
       if (pending_entry_) {
         DiscardNonCommittedEntries();
-        extra_invalidate_flags |= TabContents::INVALIDATE_URL;
-        tab_contents_->NotifyNavigationStateChanged(extra_invalidate_flags);
+        tab_contents_->NotifyNavigationStateChanged(
+            TabContents::INVALIDATE_URL);
       }
       return false;
     default:
@@ -571,27 +560,12 @@ bool NavigationController::RendererDidNavigate(
   // The active entry's SiteInstance should match our SiteInstance.
   DCHECK(active_entry->site_instance() == tab_contents_->GetSiteInstance());
 
-  // WebKit doesn't set the "auto" transition on meta refreshes properly (bug
-  // 1051891) so we manually set it for redirects which we normally treat as
-  // "non-user-gestures" where we want to update stuff after navigations.
-  //
-  // Note that the redirect check also checks for a pending entry to
-  // differentiate real redirects from browser initiated navigations to a
-  // redirected entry. This happens when you hit back to go to a page that was
-  // the destination of a redirect, we don't want to treat it as a redirect
-  // even though that's what its transition will be. See bug 1117048.
-  //
-  // TODO(brettw) write a test for this complicated logic.
-  details->is_auto = (PageTransition::IsRedirect(params.transition) &&
-                      !pending_entry()) ||
-      params.gesture == NavigationGestureAuto;
-
   // Now prep the rest of the details for the notification and broadcast.
   details->entry = active_entry;
   details->is_main_frame = PageTransition::IsMainFrame(params.transition);
   details->serialized_security_info = params.security_info;
   details->http_status_code = params.http_status_code;
-  NotifyNavigationEntryCommitted(details, extra_invalidate_flags);
+  NotifyNavigationEntryCommitted(details);
 
   return true;
 }
@@ -648,6 +622,13 @@ NavigationType::Type NavigationController::ClassifyNavigation(
     // back/forward entries (not likely since we'll usually tell it to navigate
     // to such entries). It could also mean that the renderer is smoking crack.
     NOTREACHED();
+
+    // Because the unknown entry has committed, we risk showing the wrong URL in
+    // release builds. Instead, we'll kill the renderer process to be safe.
+    LOG(ERROR) << "terminating renderer for bad navigation: " << params.url;
+    UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_NC"));
+    if (tab_contents_->GetSiteInstance()->HasProcess())
+      tab_contents_->GetSiteInstance()->GetProcess()->ReceivedBadMessage();
     return NavigationType::NAV_IGNORE;
   }
   NavigationEntry* existing_entry = entries_[existing_entry_index].get();
@@ -696,18 +677,6 @@ bool NavigationController::IsRedirect(
     return PageTransition::IsRedirect(params.transition);
   }
   return params.redirects.size() > 1;
-}
-
-void NavigationController::CreateNavigationEntriesFromTabNavigations(
-    const std::vector<TabNavigation>& navigations,
-    std::vector<linked_ptr<NavigationEntry> >* entries) {
-  // Create a NavigationEntry for each of the navigations.
-  int page_id = 0;
-  for (std::vector<TabNavigation>::const_iterator i =
-           navigations.begin(); i != navigations.end(); ++i, ++page_id) {
-    linked_ptr<NavigationEntry> entry(i->ToNavigationEntry(page_id, profile_));
-    entries->push_back(entry);
-  }
 }
 
 void NavigationController::RendererDidNavigateToNewPage(
@@ -823,16 +792,22 @@ void NavigationController::RendererDidNavigateInPage(
 
   // Reference fragment navigation. We're guaranteed to have the last_committed
   // entry and it will be the same page as the new navigation (minus the
-  // reference fragments, of course).
-  NavigationEntry* new_entry = new NavigationEntry(*existing_entry);
-  new_entry->set_page_id(params.page_id);
-  if (new_entry->update_virtual_url_with_url())
-    UpdateVirtualURLToURL(new_entry, params.url);
-  new_entry->set_url(params.url);
+  // reference fragments, of course).  We'll update the URL of the existing
+  // entry without pruning the forward history.
+  existing_entry->set_url(params.url);
+  if (existing_entry->update_virtual_url_with_url())
+    UpdateVirtualURLToURL(existing_entry, params.url);
 
   // This replaces the existing entry since the page ID didn't change.
   *did_replace_entry = true;
-  InsertOrReplaceEntry(new_entry, true);
+
+  if (pending_entry_)
+    DiscardNonCommittedEntriesInternal();
+
+  // If a transient entry was removed, the indices might have changed, so we
+  // have to query the entry index again.
+  last_committed_entry_index_ =
+      GetEntryIndexWithPageID(tab_contents_->GetSiteInstance(), params.page_id);
 }
 
 void NavigationController::RendererDidNavigateNewSubframe(
@@ -913,6 +888,14 @@ void NavigationController::CopyStateFrom(const NavigationController& source) {
 
 void NavigationController::CopyStateFromAndPrune(NavigationController* source,
                                                  bool remove_first_entry) {
+  // The SiteInstance and page_id of the last committed entry needs to be
+  // remembered at this point, in case there is only one committed entry
+  // and it is pruned.
+  NavigationEntry* last_committed = GetLastCommittedEntry();
+  SiteInstance* site_instance =
+      last_committed ? last_committed->site_instance() : NULL;
+  int32 minimum_page_id = last_committed ? last_committed->page_id() : -1;
+
   // This code is intended for use when the last entry is the active entry.
   DCHECK((transient_entry_index_ != -1 &&
           transient_entry_index_ == entry_count() - 1) ||
@@ -921,6 +904,16 @@ void NavigationController::CopyStateFromAndPrune(NavigationController* source,
          (!pending_entry_ && last_committed_entry_index_ == entry_count() - 1));
 
   if (remove_first_entry && entry_count()) {
+    // If there is only one committed entry and |remove_first_entry| is true,
+    // it needs to be pruned. This is accomplished by specifying a larger
+    // |minimum_page_id| than the committed entry's page_id in the
+    // ViewMsg_SetHistoryLengthAndPrune message. However, any pages which are
+    // committed between now and when the RenderView handles the message will
+    // need to be retained. Both constraints can be met by incrementing the
+    // |minimum_page_id| by 1.
+    DCHECK(minimum_page_id >= 0);
+    if (entry_count() == 1)
+      ++minimum_page_id;
     // Save then restore the pending entry (RemoveEntryAtIndexInternal chucks
     // the pending entry).
     NavigationEntry* pending_entry = pending_entry_;
@@ -961,6 +954,10 @@ void NavigationController::CopyStateFromAndPrune(NavigationController* source,
     if (last_committed_entry_index_ != -1)
       last_committed_entry_index_--;
   }
+
+  tab_contents_->SetHistoryLengthAndPrune(site_instance,
+                                          max_source_index,
+                                          minimum_page_id);
 }
 
 void NavigationController::PruneAllButActive() {
@@ -1020,7 +1017,7 @@ void NavigationController::DiscardNonCommittedEntries() {
   // If there was a transient entry, invalidate everything so the new active
   // entry state is shown.
   if (transient) {
-    tab_contents_->NotifyNavigationStateChanged(kInvalidateAllButShelves);
+    tab_contents_->NotifyNavigationStateChanged(kInvalidateAll);
   }
 }
 
@@ -1070,13 +1067,6 @@ void NavigationController::InsertOrReplaceEntry(NavigationEntry* entry,
   tab_contents_->UpdateMaxPageID(entry->page_id());
 }
 
-void NavigationController::SetWindowID(const SessionID& id) {
-  window_id_ = id;
-  NotificationService::current()->Notify(NotificationType::TAB_PARENTED,
-                                         Source<NavigationController>(this),
-                                         NotificationService::NoDetails());
-}
-
 void NavigationController::NavigateToPendingEntry(ReloadType reload_type) {
   needs_reload_ = false;
 
@@ -1091,8 +1081,7 @@ void NavigationController::NavigateToPendingEntry(ReloadType reload_type) {
 }
 
 void NavigationController::NotifyNavigationEntryCommitted(
-    content::LoadCommittedDetails* details,
-    int extra_invalidate_flags) {
+    content::LoadCommittedDetails* details) {
   details->entry = GetActiveEntry();
   NotificationDetails notification_details =
       Details<content::LoadCommittedDetails>(details);
@@ -1105,11 +1094,10 @@ void NavigationController::NotifyNavigationEntryCommitted(
   // TODO(pkasting): http://b/1113079 Probably these explicit notification paths
   // should be removed, and interested parties should just listen for the
   // notification below instead.
-  tab_contents_->NotifyNavigationStateChanged(
-      kInvalidateAllButShelves | extra_invalidate_flags);
+  tab_contents_->NotifyNavigationStateChanged(kInvalidateAll);
 
   NotificationService::current()->Notify(
-      NotificationType::NAV_ENTRY_COMMITTED,
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       Source<NavigationController>(this),
       notification_details);
 }
@@ -1140,7 +1128,8 @@ void NavigationController::NotifyEntryChanged(const NavigationEntry* entry,
   content::EntryChangedDetails det;
   det.changed_entry = entry;
   det.index = index;
-  NotificationService::current()->Notify(NotificationType::NAV_ENTRY_CHANGED,
+  NotificationService::current()->Notify(
+      content::NOTIFICATION_NAV_ENTRY_CHANGED,
       Source<NavigationController>(this),
       Details<content::EntryChangedDetails>(&det));
 }

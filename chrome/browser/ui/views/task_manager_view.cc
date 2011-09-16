@@ -25,7 +25,8 @@
 #include "ui/base/models/table_model_observer.h"
 #include "views/accelerator.h"
 #include "views/background.h"
-#include "views/controls/button/native_button.h"
+#include "views/context_menu_controller.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/link.h"
 #include "views/controls/link_listener.h"
 #include "views/controls/menu/menu.h"
@@ -34,7 +35,6 @@
 #include "views/layout/layout_constants.h"
 #include "views/widget/widget.h"
 #include "views/window/dialog_delegate.h"
-#include "views/window/window.h"
 
 // The task manager window default size.
 static const int kDefaultWidth = 460;
@@ -257,9 +257,8 @@ class BackgroundColorGroupTableView : public views::GroupTableView {
 };
 
 // The Task manager UI container.
-class TaskManagerView : public views::View,
-                        public views::ButtonListener,
-                        public views::DialogDelegate,
+class TaskManagerView : public views::ButtonListener,
+                        public views::DialogDelegateView,
                         public views::TableViewObserver,
                         public views::LinkListener,
                         public views::ContextMenuController,
@@ -304,12 +303,14 @@ class TaskManagerView : public views::View,
   // may have appeared since last time.
   void UpdateStatsCounters();
 
-  // Menu::Delegate
+  // views::ContextMenuController
   virtual void ShowContextMenuForView(views::View* source,
                                       const gfx::Point& p,
-                                      bool is_mouse_gesture);
-  virtual bool IsItemChecked(int id) const;
-  virtual void ExecuteCommand(int id);
+                                      bool is_mouse_gesture) OVERRIDE;
+
+  // views::Menu::Delegate
+  virtual bool IsItemChecked(int id) const OVERRIDE;
+  virtual void ExecuteCommand(int id) OVERRIDE;
 
  private:
   // Creates the child controls.
@@ -327,8 +328,8 @@ class TaskManagerView : public views::View,
   // Restores saved always on top state from a previous session.
   bool GetSavedAlwaysOnTopState(bool* always_on_top) const;
 
-  views::NativeButton* purge_memory_button_;
-  views::NativeButton* kill_button_;
+  views::TextButton* purge_memory_button_;
+  views::TextButton* kill_button_;
   views::Link* about_memory_link_;
   views::GroupTableView* tab_table_;
 
@@ -444,15 +445,15 @@ void TaskManagerView::Init() {
 
   UpdateStatsCounters();
   tab_table_->SetObserver(this);
-  tab_table_->SetContextMenuController(this);
-  SetContextMenuController(this);
+  tab_table_->set_context_menu_controller(this);
+  set_context_menu_controller(this);
   // If we're running with --purge-memory-button, add a "Purge memory" button.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPurgeMemoryButton)) {
-    purge_memory_button_ = new views::NativeButton(this,
+    purge_memory_button_ = new views::NativeTextButton(this,
         UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_PURGE_MEMORY)));
   }
-  kill_button_ = new views::NativeButton(
+  kill_button_ = new views::NativeTextButton(
       this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL)));
   kill_button_->AddAccelerator(views::Accelerator(ui::VKEY_E,
                                                   false, false, false));
@@ -567,18 +568,18 @@ void TaskManagerView::Show(bool highlight_background_resources) {
   if (instance_) {
     if (instance_->highlight_background_resources_ !=
         highlight_background_resources) {
-      instance_->window()->Close();
+      instance_->GetWidget()->Close();
     } else {
       // If there's a Task manager window open already, just activate it.
-      instance_->window()->Activate();
+      instance_->GetWidget()->Activate();
       return;
     }
   }
   instance_ = new TaskManagerView(highlight_background_resources);
-  views::Window::CreateChromeWindow(NULL, gfx::Rect(), instance_);
+  views::Widget::CreateWindow(instance_);
   instance_->InitAlwaysOnTopState();
   instance_->model_->StartUpdating();
-  instance_->window()->Show();
+  instance_->GetWidget()->Show();
 
   // Set the initial focus to the list of tasks.
   views::FocusManager* focus_manager = instance_->GetFocusManager();
@@ -613,7 +614,7 @@ bool TaskManagerView::ExecuteWindowsCommand(int command_id) {
     is_always_on_top_ = !is_always_on_top_;
 
     // Change the menu check state.
-    HMENU system_menu = GetSystemMenu(GetWindow()->GetNativeWindow(), FALSE);
+    HMENU system_menu = GetSystemMenu(GetWidget()->GetNativeWindow(), FALSE);
     MENUITEMINFO menu_info;
     memset(&menu_info, 0, sizeof(MENUITEMINFO));
     menu_info.cbSize = sizeof(MENUITEMINFO);
@@ -626,7 +627,7 @@ bool TaskManagerView::ExecuteWindowsCommand(int command_id) {
     r = SetMenuItemInfo(system_menu, IDC_ALWAYS_ON_TOP, FALSE, &menu_info);
 
     // Now change the actual window's behavior.
-    window()->SetAlwaysOnTop(is_always_on_top_);
+    GetWidget()->SetAlwaysOnTop(is_always_on_top_);
 
     // Save the state.
     if (g_browser_process->local_state()) {
@@ -718,7 +719,7 @@ void TaskManagerView::ExecuteCommand(int id) {
 void TaskManagerView::InitAlwaysOnTopState() {
   is_always_on_top_ = false;
   if (GetSavedAlwaysOnTopState(&is_always_on_top_))
-    window()->SetAlwaysOnTop(is_always_on_top_);
+    GetWidget()->SetAlwaysOnTop(is_always_on_top_);
   AddAlwaysOnTopSystemMenuItem();
 }
 
@@ -738,7 +739,7 @@ void TaskManagerView::AddAlwaysOnTopSystemMenuItem() {
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_ALWAYS_ON_TOP));
 
   // Let's insert a menu to the window.
-  HMENU system_menu = ::GetSystemMenu(GetWindow()->GetNativeWindow(), FALSE);
+  HMENU system_menu = ::GetSystemMenu(GetWidget()->GetNativeWindow(), FALSE);
   int index = ::GetMenuItemCount(system_menu) - 1;
   if (index < 0) {
     // Paranoia check.

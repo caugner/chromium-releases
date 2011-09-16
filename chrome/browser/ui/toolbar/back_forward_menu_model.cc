@@ -18,6 +18,7 @@
 #include "content/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -163,7 +164,9 @@ void BackForwardMenuModel::ActivatedAtWithDisposition(
   // Execute the command for the last item: "Show Full History".
   if (index == GetItemCount() - 1) {
     UserMetrics::RecordComputedAction(BuildActionName("ShowFullHistory", -1));
-    browser_->ShowSingletonTab(GURL(chrome::kChromeUIHistoryURL));
+    browser_->ShowSingletonTabOverwritingNTP(
+        browser_->GetSingletonTabNavigateParams(
+            GURL(chrome::kChromeUIHistoryURL)));
     return;
   }
 

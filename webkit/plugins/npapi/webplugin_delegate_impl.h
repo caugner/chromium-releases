@@ -78,6 +78,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
     PLUGIN_QUIRK_WINDOWLESS_NO_RIGHT_CLICK = 32768,  // Linux
     PLUGIN_QUIRK_IGNORE_FIRST_SETWINDOW_CALL = 65536,  // Windows.
     PLUGIN_QUIRK_REPARENT_IN_BROWSER = 131072,  // Windows
+    PLUGIN_QUIRK_PATCH_GETKEYSTATE = 262144,  // Windows
   };
 
   static WebPluginDelegateImpl* Create(const FilePath& filename,
@@ -106,6 +107,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
                                 WebKit::WebCursorInfo* cursor_info);
   virtual NPObject* GetPluginScriptableObject();
+  virtual bool GetFormValue(string16* value);
   virtual void DidFinishLoadWithReason(
       const GURL& url, NPReason reason, int notify_id);
   virtual int GetProcessId();
@@ -184,6 +186,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   // and all callers will use the Paint defined above.
   void CGPaint(CGContextRef context, const gfx::Rect& rect);
 
+  bool AllowBufferFlipping();
 #endif  // OS_MACOSX
 
   gfx::PluginWindowHandle windowed_handle() const {
@@ -373,6 +376,9 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   // SetCursor interceptor for windowless plugins.
   static HCURSOR WINAPI SetCursorPatch(HCURSOR cursor);
 
+  // GetKeyStatePatch interceptor for UIPI Flash plugin.
+  static SHORT WINAPI GetKeyStatePatch(int vkey);
+
   // RegEnumKeyExW interceptor.
   static LONG WINAPI RegEnumKeyExWPatch(
       HKEY key, DWORD index, LPWSTR name, LPDWORD name_size, LPDWORD reserved,
@@ -403,9 +409,6 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // Uses a CARenderer to draw the plug-in's layer in our OpenGL surface.
   void DrawLayerInSurface();
-
-  // Returns true if plugin IME is supported.
-  bool IsImeSupported();
 
 #ifndef NP_NO_CARBON
   // Moves our dummy window to match the current screen location of the plugin.

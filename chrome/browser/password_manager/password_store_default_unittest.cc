@@ -4,7 +4,7 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
@@ -15,6 +15,7 @@
 #include "chrome/browser/password_manager/password_store_default.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/signaling_task.h"
 #include "chrome/test/testing_profile.h"
@@ -83,7 +84,7 @@ class DBThreadObserverHelper :
   void AddObserverTask(PasswordStore* password_store) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
     registrar_.Add(&observer_,
-                   NotificationType::LOGINS_CHANGED,
+                   chrome::NOTIFICATION_LOGINS_CHANGED,
                    Source<PasswordStore>(password_store));
     done_event_.Signal();
   }
@@ -150,7 +151,7 @@ MATCHER(EmptyWDResult, "") {
 }
 
 TEST_F(PasswordStoreDefaultTest, NonASCIIData) {
-  // Prentend that the migration has already taken place.
+  // Pretend that the migration has already taken place.
   profile_->GetPrefs()->RegisterBooleanPref(prefs::kLoginDatabaseMigrated,
                                             true,
                                             PrefService::UNSYNCABLE_PREF);
@@ -398,7 +399,7 @@ TEST_F(PasswordStoreDefaultTest, MigrationAlreadyDone) {
       new SignalingTask(&done));
   done.Wait();
 
-  // Prentend that the migration has already taken place.
+  // Pretend that the migration has already taken place.
   profile_->GetPrefs()->RegisterBooleanPref(prefs::kLoginDatabaseMigrated,
                                             true,
                                             PrefService::UNSYNCABLE_PREF);
@@ -430,7 +431,7 @@ TEST_F(PasswordStoreDefaultTest, MigrationAlreadyDone) {
 }
 
 TEST_F(PasswordStoreDefaultTest, Notifications) {
-  // Prentend that the migration has already taken place.
+  // Pretend that the migration has already taken place.
   profile_->GetPrefs()->RegisterBooleanPref(prefs::kLoginDatabaseMigrated,
                                             true,
                                             PrefService::UNSYNCABLE_PREF);
@@ -462,7 +463,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
   };
 
   EXPECT_CALL(helper->observer(),
-              Observe(NotificationType(NotificationType::LOGINS_CHANGED),
+              Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
                       Source<PasswordStore>(store),
                       Property(&Details<const PasswordStoreChangeList>::ptr,
                                Pointee(ElementsAreArray(
@@ -486,7 +487,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
   };
 
   EXPECT_CALL(helper->observer(),
-              Observe(NotificationType(NotificationType::LOGINS_CHANGED),
+              Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
                       Source<PasswordStore>(store),
                       Property(&Details<const PasswordStoreChangeList>::ptr,
                                Pointee(ElementsAreArray(
@@ -505,7 +506,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
   };
 
   EXPECT_CALL(helper->observer(),
-              Observe(NotificationType(NotificationType::LOGINS_CHANGED),
+              Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
                       Source<PasswordStore>(store),
                       Property(&Details<const PasswordStoreChangeList>::ptr,
                                Pointee(ElementsAreArray(

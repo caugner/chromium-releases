@@ -77,7 +77,7 @@ void ActivateWindow(gfx::NativeWindow window) {
 }
 
 bool IsVisible(gfx::NativeView view) {
-  return GTK_WIDGET_VISIBLE(view);
+  return gtk_widget_get_visible(view);
 }
 
 void SimpleErrorBox(gfx::NativeWindow parent,
@@ -88,6 +88,7 @@ void SimpleErrorBox(gfx::NativeWindow parent,
   gtk_util::ApplyMessageDialogQuirks(dialog);
   SetDialogTitle(dialog, title);
 
+  gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
   g_signal_connect(dialog, "response", G_CALLBACK(gtk_widget_destroy), NULL);
   gtk_util::ShowDialog(dialog);
 }
@@ -101,6 +102,7 @@ bool SimpleYesNoBox(gfx::NativeWindow parent,
   gtk_util::ApplyMessageDialogQuirks(dialog);
   SetDialogTitle(dialog, title);
 
+  gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_YES);
   g_signal_connect(dialog,
                    "response",
                    G_CALLBACK(HandleOnResponseDialog),
@@ -109,55 +111,6 @@ bool SimpleYesNoBox(gfx::NativeWindow parent,
   // Not gtk_dialog_run as it prevents timers from running in the unit tests.
   MessageLoop::current()->Run();
   return g_dialog_response == GTK_RESPONSE_YES;
-}
-
-// Warning: this may be either Linux or ChromeOS.
-std::string GetVersionStringModifier() {
-  char* env = getenv("CHROME_VERSION_EXTRA");
-  if (!env)
-    return std::string();
-  std::string modifier(env);
-
-#if defined(GOOGLE_CHROME_BUILD)
-  // Only ever return "", "unknown", "dev" or "beta" in a branded build.
-  if (modifier == "unstable")  // linux version of "dev"
-    modifier = "dev";
-  if (modifier == "stable") {
-    modifier = "";
-  } else if ((modifier == "dev") || (modifier == "beta")) {
-    // do nothing.
-  } else {
-    modifier = "unknown";
-  }
-#endif
-
-  return modifier;
-}
-
-// Warning: this may be either Linux or ChromeOS.
-Channel GetChannel() {
-#if defined(GOOGLE_CHROME_BUILD)
-  std::string channel = GetVersionStringModifier();
-  if (channel.empty()) {
-    return CHANNEL_STABLE;
-  } else if (channel == "beta") {
-    return CHANNEL_BETA;
-  } else if (channel == "dev") {
-    return CHANNEL_DEV;
-  } else if (channel == "canary") {
-    return CHANNEL_CANARY;
-  }
-#endif
-
-  return CHANNEL_UNKNOWN;
-}
-
-bool CanSetAsDefaultBrowser() {
-  return true;
-}
-
-bool CanSetAsDefaultProtocolClient(const std::string& protocol) {
-  return CanSetAsDefaultBrowser();
 }
 
 }  // namespace platform_util

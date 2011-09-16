@@ -84,6 +84,18 @@ void TabNavigation::SetFromNavigationEntry(const NavigationEntry& entry) {
   type_mask_ = entry.has_post_data() ? TabNavigation::HAS_POST_DATA : 0;
 }
 
+// static
+void TabNavigation::CreateNavigationEntriesFromTabNavigations(
+    Profile* profile,
+    const std::vector<TabNavigation>& navigations,
+    std::vector<NavigationEntry*>* entries) {
+  int page_id = 0;
+  for (std::vector<TabNavigation>::const_iterator i =
+           navigations.begin(); i != navigations.end(); ++i, ++page_id) {
+    entries->push_back(i->ToNavigationEntry(page_id, profile));
+  }
+}
+
 // SessionTab -----------------------------------------------------------------
 
 SessionTab::SessionTab()
@@ -108,12 +120,12 @@ SessionWindow::~SessionWindow() {
   STLDeleteElements(&tabs);
 }
 
-// ForeignSession --------------------------------------------------------------
+// SyncedSession --------------------------------------------------------------
 
-ForeignSession::ForeignSession() : foreign_session_tag("invalid") {
+SyncedSession::SyncedSession() : session_tag("invalid") {
 }
 
-ForeignSession::~ForeignSession() {
+SyncedSession::~SyncedSession() {
   STLDeleteElements(&windows);
 }
 

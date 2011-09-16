@@ -6,12 +6,10 @@
 
 #include <set>
 
-#include "app/sql/connection.h"
-#include "app/sql/statement.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -19,12 +17,15 @@
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
 #include "chrome/browser/importer/importer_bridge.h"
+#include "chrome/browser/importer/importer_util.h"
 #include "chrome/browser/importer/nss_decryptor.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/time_format.h"
 #include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
+#include "sql/connection.h"
+#include "sql/statement.h"
 #include "webkit/glue/password_form.h"
 
 namespace {
@@ -569,7 +570,7 @@ void Firefox3Importer::LoadFavicons(
       if (data.empty())
         continue;  // Data definitely invalid.
 
-      if (!ReencodeFavicon(&data[0], data.size(), &usage.png_data))
+      if (!importer::ReencodeFavicon(&data[0], data.size(), &usage.png_data))
         continue;  // Unable to decode.
 
       usage.urls = i->second;

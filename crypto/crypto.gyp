@@ -9,10 +9,14 @@
   'targets': [
     {
       'target_name': 'crypto',
+      'type': '<(component)',
       'product_name': 'crcrypto',  # Avoid colliding with OpenSSL's libcrypto
-      'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+      ],
+      'defines': [
+        'CRYPTO_IMPLEMENTATION',
       ],
       'msvs_disabled_warnings': [
         4018,
@@ -34,6 +38,9 @@
         }, {  # os_posix != 1 or OS == "mac"
             'sources/': [
               ['exclude', '_nss\.cc$'],
+            ],
+            'sources!': [
+              'openpgp_symmetric_encryption.cc',
             ],
         }],
         [ 'OS == "freebsd" or OS == "openbsd"', {
@@ -59,16 +66,17 @@
           ],
         }],
         [ 'OS == "mac" or OS == "win"', {
-            'dependencies': [
-              '../third_party/nss/nss.gyp:nss',
-            ],
-        },],
+          'dependencies': [
+            '../third_party/nss/nss.gyp:nspr',
+            '../third_party/nss/nss.gyp:nss',
+          ],
+        }],
         [ 'OS != "win"', {
-            'sources!': [
-              'capi_util.h',
-              'capi_util.cc',
-            ],
-        },],
+          'sources!': [
+            'capi_util.h',
+            'capi_util.cc',
+          ],
+        }],
         [ 'use_openssl==1', {
             # TODO(joth): Use a glob to match exclude patterns once the
             #             OpenSSL file set is complete.
@@ -77,6 +85,7 @@
               'hmac_nss.cc',
               'nss_util.cc',
               'nss_util.h',
+              'openpgp_symmetric_encryption.cc',
               'rsa_private_key_nss.cc',
               'secure_hash_default.cc',
               'signature_creator_nss.cc',
@@ -104,9 +113,11 @@
       'sources': [
         'capi_util.cc',
         'capi_util.h',
+        'crypto_api.h',
         'crypto_module_blocking_password_delegate.h',
         'cssm_init.cc',
         'cssm_init.h',
+        'encryptor.cc',
         'encryptor.h',
         'encryptor_mac.cc',
         'encryptor_nss.cc',
@@ -120,13 +131,15 @@
         'hmac_win.cc',
         'mac_security_services_lock.cc',
         'mac_security_services_lock.h',
-        'openssl_util.cc',
-        'openssl_util.h',
         'nss_util.cc',
         'nss_util.h',
         'nss_util_internal.h',
-        'rsa_private_key.h',
+        'openpgp_symmetric_encryption.cc',
+        'openpgp_symmetric_encryption.h',
+        'openssl_util.cc',
+        'openssl_util.h',
         'rsa_private_key.cc',
+        'rsa_private_key.h',
         'rsa_private_key_mac.cc',
         'rsa_private_key_nss.cc',
         'rsa_private_key_openssl.cc',
@@ -176,6 +189,7 @@
         'signature_creator_unittest.cc',
         'signature_verifier_unittest.cc',
         'symmetric_key_unittest.cc',
+        'openpgp_symmetric_encryption_unittest.cc',
       ],
       'dependencies': [
         'crypto',
@@ -200,6 +214,7 @@
         }, {  # os_posix != 1 or OS == "mac"
           'sources!': [
             'rsa_private_key_nss_unittest.cc',
+            'openpgp_symmetric_encryption_unittest.cc',
           ]
         }],
         [ 'OS == "mac" or OS == "win"', {
@@ -209,6 +224,7 @@
         }],
         [ 'use_openssl==1', {
           'sources!': [
+            'openpgp_symmetric_encryption_unittest.cc',
             'rsa_private_key_nss_unittest.cc',
           ],
         }],

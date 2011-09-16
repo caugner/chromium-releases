@@ -11,20 +11,29 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/profiles/profile.h"
+#include "base/memory/weak_ptr.h"
+#include "base/process.h"
+#include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "ipc/ipc_message.h"
 
 class Browser;
+class ChromeRenderMessageFilter;
 class ExtensionFunction;
 class ExtensionFunctionDispatcher;
 class UIThreadExtensionFunction;
-class ListValue;
+class IOThreadExtensionFunction;
+class Profile;
 class QuotaLimitHeuristic;
 class RenderViewHost;
+
+namespace base {
+class ListValue;
 class Value;
+}
 
 #define EXTENSION_FUNCTION_VALIDATE(test) do { \
     if (!(test)) { \
@@ -59,6 +68,7 @@ class ExtensionFunction
   ExtensionFunction();
 
   virtual UIThreadExtensionFunction* AsUIThreadExtensionFunction();
+  virtual IOThreadExtensionFunction* AsIOThreadExtensionFunction();
 
   // Execute the API. Clients should initialize the ExtensionFunction using
   // SetArgs(), set_request_id(), and the other setters before calling this
@@ -74,7 +84,7 @@ class ExtensionFunction
       std::list<QuotaLimitHeuristic*>* heuristics) const {}
 
   // Specifies the raw arguments to the function, as a JSON value.
-  virtual void SetArgs(const ListValue* args);
+  virtual void SetArgs(const base::ListValue* args);
 
   // Retrieves the results of the function as a JSON-encoded string (may
   // be empty).
@@ -87,8 +97,8 @@ class ExtensionFunction
   void set_name(const std::string& name) { name_ = name; }
   const std::string& name() const { return name_; }
 
-  void set_profile_id(ProfileId profile_id) { profile_id_ = profile_id; }
-  ProfileId profile_id() const { return profile_id_; }
+  void set_profile(void* profile) { profile_ = profile; }
+  void* profile() const { return profile_; }
 
   void set_extension(const Extension* extension) { extension_ = extension; }
   const Extension* GetExtension() const { return extension_.get(); }
@@ -124,11 +134,17 @@ class ExtensionFunction
   // Sends the result back to the extension.
   virtual void SendResponse(bool success) = 0;
 
+  // Common implementation for SenderResponse.
+  void SendResponseImpl(base::ProcessHandle process,
+                        IPC::Message::Sender* ipc_sender,
+                        int routing_id,
+                        bool success);
+
   // Called when we receive an extension api request that is invalid in a way
   // that JSON validation in the renderer should have caught. This should never
   // happen and could be an attacker trying to exploit the browser, so we crash
   // the renderer instead.
-  virtual void HandleBadMessage() = 0;
+  void HandleBadMessage(base::ProcessHandle process);
 
   // Return true if the argument to this function at |index| was provided and
   // is non-null.
@@ -137,8 +153,8 @@ class ExtensionFunction
   // Id of this request, used to map the response back to the caller.
   int request_id_;
 
-  // The ID of the Profile of this function's extension.
-  ProfileId profile_id_;
+  // The Profile of this function's extension.
+  void* profile_;
 
   // The extension that called this function.
   scoped_refptr<const Extension> extension_;
@@ -163,11 +179,11 @@ class ExtensionFunction
   bool user_gesture_;
 
   // The arguments to the API. Only non-null if argument were specified.
-  scoped_ptr<ListValue> args_;
+  scoped_ptr<base::ListValue> args_;
 
   // The result of the API. This should be populated by the derived class before
   // SendResponse() is called.
-  scoped_ptr<Value> result_;
+  scoped_ptr<base::Value> result_;
 
   // Any detailed error from the API. This should be populated by the derived
   // class before Run() returns.
@@ -250,19 +266,59 @@ class UIThreadExtensionFunction : public ExtensionFunction {
    public:
     explicit RenderViewHostTracker(UIThreadExtensionFunction* function);
    private:
-    virtual void Observe(NotificationType type,
+    virtual void Observe(int type,
                          const NotificationSource& source,
                          const NotificationDetails& details);
     UIThreadExtensionFunction* function_;
     NotificationRegistrar registrar_;
   };
 
-  virtual void HandleBadMessage();
-
   virtual void Destruct() const;
 
   scoped_ptr<RenderViewHostTracker> tracker_;
+};
 
+// Extension functions that run on the IO thread.
+class IOThreadExtensionFunction : public ExtensionFunction {
+ public:
+  IOThreadExtensionFunction();
+
+  virtual IOThreadExtensionFunction* AsIOThreadExtensionFunction() OVERRIDE;
+
+  void set_ipc_sender(base::WeakPtr<ChromeRenderMessageFilter> ipc_sender,
+                      int routing_id) {
+    ipc_sender_ = ipc_sender;
+    routing_id_ = routing_id;
+  }
+  ChromeRenderMessageFilter* ipc_sender() const { return ipc_sender_.get(); }
+  int routing_id() const { return routing_id_; }
+
+  base::WeakPtr<ChromeRenderMessageFilter> ipc_sender_weak() const {
+    return ipc_sender_;
+  }
+
+  void set_extension_info_map(const ExtensionInfoMap* extension_info_map) {
+    extension_info_map_ = extension_info_map;
+  }
+  const ExtensionInfoMap* extension_info_map() const {
+    return extension_info_map_.get();
+  }
+
+ protected:
+  friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
+  friend class DeleteTask<IOThreadExtensionFunction>;
+
+  virtual ~IOThreadExtensionFunction();
+
+  virtual void Destruct() const;
+
+  virtual void SendResponse(bool success);
+
+ private:
+  base::WeakPtr<ChromeRenderMessageFilter> ipc_sender_;
+  int routing_id_;
+
+  scoped_refptr<const ExtensionInfoMap> extension_info_map_;
 };
 
 // Base class for an extension function that runs asynchronously *relative to
@@ -290,9 +346,16 @@ class SyncExtensionFunction : public UIThreadExtensionFunction {
 
  protected:
   virtual ~SyncExtensionFunction();
+};
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(SyncExtensionFunction);
+class SyncIOThreadExtensionFunction : public IOThreadExtensionFunction {
+ public:
+  SyncIOThreadExtensionFunction();
+
+  virtual void Run() OVERRIDE;
+
+ protected:
+  virtual ~SyncIOThreadExtensionFunction();
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_FUNCTION_H_

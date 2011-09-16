@@ -12,7 +12,7 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -21,11 +21,8 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_path_parser.h"
-#include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/prefs/pref_value_map.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/pref_names.h"
@@ -196,6 +193,8 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
     prefs::kWebKitJavascriptEnabled },
   { Value::TYPE_BOOLEAN, kPolicyIncognitoEnabled,
     prefs::kIncognitoEnabled },
+  { Value::TYPE_BOOLEAN, kPolicyIncognitoForced,
+    prefs::kIncognitoForced },
   { Value::TYPE_BOOLEAN, kPolicySavingBrowserHistoryDisabled,
     prefs::kSavingBrowserHistoryDisabled },
   { Value::TYPE_BOOLEAN, kPolicyClearSiteDataOnExit,
@@ -239,7 +238,7 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
   { Value::TYPE_INTEGER, kPolicyDefaultNotificationSetting,
     prefs::kDesktopNotificationDefaultContentSetting },
   { Value::TYPE_INTEGER, kPolicyDefaultGeolocationSetting,
-    prefs::kGeolocationDefaultContentSetting },
+    prefs::kManagedDefaultGeolocationSetting },
   { Value::TYPE_STRING, kPolicyAuthSchemes,
     prefs::kAuthSchemes },
   { Value::TYPE_BOOLEAN, kPolicyDisableAuthNegotiateCnameLookup,
@@ -259,10 +258,16 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
   { Value::TYPE_BOOLEAN, kPolicyDisablePluginFinder,
     prefs::kDisablePluginFinder },
   { Value::TYPE_INTEGER, kPolicyPolicyRefreshRate,
-    prefs::kPolicyRefreshRate },
+    prefs::kUserPolicyRefreshRate },
+  { Value::TYPE_INTEGER, kPolicyDevicePolicyRefreshRate,
+    prefs::kDevicePolicyRefreshRate },
   { Value::TYPE_BOOLEAN, kPolicyInstantEnabled, prefs::kInstantEnabled },
   { Value::TYPE_BOOLEAN, kPolicyDefaultBrowserSettingEnabled,
     prefs::kDefaultBrowserSettingEnabled },
+  { Value::TYPE_BOOLEAN, kPolicyRemoteAccessClientFirewallTraversal,
+    prefs::kRemoteAccessClientFirewallTraversal },
+  { Value::TYPE_BOOLEAN, kPolicyRemoteAccessHostFirewallTraversal,
+    prefs::kRemoteAccessHostFirewallTraversal },
   { Value::TYPE_BOOLEAN, kPolicyCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled },
   { Value::TYPE_BOOLEAN, kPolicyTranslateEnabled, prefs::kEnableTranslate },
@@ -275,10 +280,14 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
     prefs::kEditBookmarksEnabled },
   { Value::TYPE_BOOLEAN, kPolicyAllowFileSelectionDialogs,
     prefs::kAllowFileSelectionDialogs },
+  { Value::TYPE_INTEGER, kPolicyMaxConnectionsPerProxy,
+    prefs::kMaxConnectionsPerProxy },
 
 #if defined(OS_CHROMEOS)
   { Value::TYPE_BOOLEAN, kPolicyChromeOsLockOnIdleSuspend,
     prefs::kEnableScreenLock },
+  { Value::TYPE_STRING, kPolicyChromeOsReleaseChannel,
+    prefs::kChromeOsReleaseChannel },
 #endif
 };
 
@@ -326,7 +335,8 @@ ConfigurationPolicyPrefKeeper::GetValue(const std::string& key,
   if (stored_value->IsType(Value::TYPE_NULL))
     return PrefStore::READ_USE_DEFAULT;
 
-  *result = stored_value;
+  if (result)
+    *result = stored_value;
   return PrefStore::READ_OK;
 }
 
@@ -402,11 +412,7 @@ bool ConfigurationPolicyPrefKeeper::ApplyProxyPolicy(
   // We only collect the values until we have sufficient information when
   // FinalizeProxyPolicySettings() is called to determine whether the presented
   // values were correct and apply them in that case.
-  if (policy == kPolicyProxyMode ||
-      policy == kPolicyProxyServerMode ||
-      policy == kPolicyProxyServer ||
-      policy == kPolicyProxyPacUrl ||
-      policy == kPolicyProxyBypassList) {
+  if (ConfigurationPolicyPrefStore::IsProxyPolicy(policy)) {
     delete proxy_policies_[policy];
     proxy_policies_[policy] = value;
     return true;
@@ -906,20 +912,9 @@ ConfigurationPolicyPrefStore::CreateManagedPlatformPolicyPrefStore() {
 
 // static
 ConfigurationPolicyPrefStore*
-ConfigurationPolicyPrefStore::CreateManagedCloudPolicyPrefStore(
-    Profile* profile) {
-  ConfigurationPolicyProvider* provider = NULL;
-  if (profile) {
-    // For user policy, return the profile's policy provider.
-    provider = policy::ProfilePolicyConnectorFactory::GetForProfile(profile)->
-        GetManagedCloudProvider();
-  } else {
-    // For device policy, return the provider of the browser process.
-    BrowserPolicyConnector* connector =
-        g_browser_process->browser_policy_connector();
-    provider = connector->GetManagedCloudProvider();
-  }
-  return new ConfigurationPolicyPrefStore(provider);
+ConfigurationPolicyPrefStore::CreateManagedCloudPolicyPrefStore() {
+  return new ConfigurationPolicyPrefStore(
+      g_browser_process->browser_policy_connector()->GetManagedCloudProvider());
 }
 
 // static
@@ -933,20 +928,10 @@ ConfigurationPolicyPrefStore::CreateRecommendedPlatformPolicyPrefStore() {
 
 // static
 ConfigurationPolicyPrefStore*
-ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore(
-    Profile* profile) {
-  ConfigurationPolicyProvider* provider = NULL;
-  if (profile) {
-    // For user policy, return the profile's policy provider.
-    provider = policy::ProfilePolicyConnectorFactory::GetForProfile(profile)->
-        GetRecommendedCloudProvider();
-  } else {
-    // For device policy, return the provider of the browser process.
-    BrowserPolicyConnector* connector =
-        g_browser_process->browser_policy_connector();
-    provider = connector->GetRecommendedCloudProvider();
-  }
-  return new ConfigurationPolicyPrefStore(provider);
+ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore() {
+  return new ConfigurationPolicyPrefStore(
+      g_browser_process->browser_policy_connector()->
+          GetRecommendedCloudProvider());
 }
 
 /* static */
@@ -1014,6 +999,7 @@ ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList() {
     { kPolicyPrintingEnabled, Value::TYPE_BOOLEAN, key::kPrintingEnabled },
     { kPolicyJavascriptEnabled, Value::TYPE_BOOLEAN, key::kJavascriptEnabled },
     { kPolicyIncognitoEnabled, Value::TYPE_BOOLEAN, key::kIncognitoEnabled },
+    { kPolicyIncognitoForced, Value::TYPE_BOOLEAN, key::kIncognitoForced },
     { kPolicySavingBrowserHistoryDisabled, Value::TYPE_BOOLEAN,
       key::kSavingBrowserHistoryDisabled },
     { kPolicyClearSiteDataOnExit, Value::TYPE_BOOLEAN,
@@ -1077,9 +1063,15 @@ ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList() {
       key::kDisablePluginFinder },
     { kPolicyPolicyRefreshRate, Value::TYPE_INTEGER,
       key::kPolicyRefreshRate },
+    { kPolicyDevicePolicyRefreshRate, Value::TYPE_INTEGER,
+      key::kDevicePolicyRefreshRate },
     { kPolicyInstantEnabled, Value::TYPE_BOOLEAN, key::kInstantEnabled },
     { kPolicyDefaultBrowserSettingEnabled, Value::TYPE_BOOLEAN,
       key::kDefaultBrowserSettingEnabled },
+    { kPolicyRemoteAccessClientFirewallTraversal, Value::TYPE_BOOLEAN,
+      key::kRemoteAccessClientFirewallTraversal },
+    { kPolicyRemoteAccessHostFirewallTraversal, Value::TYPE_BOOLEAN,
+      key::kRemoteAccessHostFirewallTraversal },
     { kPolicyCloudPrintProxyEnabled, Value::TYPE_BOOLEAN,
       key::kCloudPrintProxyEnabled },
     { kPolicyDownloadDirectory, Value::TYPE_STRING,
@@ -1097,10 +1089,14 @@ ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList() {
       key::kAllowFileSelectionDialogs },
     { kPolicyDiskCacheDir, Value::TYPE_STRING,
       key::kDiskCacheDir },
+    { kPolicyMaxConnectionsPerProxy, Value::TYPE_INTEGER,
+      key::kMaxConnectionsPerProxy },
 
 #if defined(OS_CHROMEOS)
     { kPolicyChromeOsLockOnIdleSuspend, Value::TYPE_BOOLEAN,
       key::kChromeOsLockOnIdleSuspend },
+    { kPolicyChromeOsReleaseChannel, Value::TYPE_STRING,
+      key::kChromeOsReleaseChannel },
 #endif
   };
 
@@ -1109,6 +1105,15 @@ ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList() {
     entries + arraysize(entries),
   };
   return &policy_list;
+}
+
+bool
+ConfigurationPolicyPrefStore::IsProxyPolicy(ConfigurationPolicyType policy) {
+  return policy == kPolicyProxyMode ||
+      policy == kPolicyProxyServerMode ||
+      policy == kPolicyProxyServer ||
+      policy == kPolicyProxyPacUrl ||
+      policy == kPolicyProxyBypassList;
 }
 
 void ConfigurationPolicyPrefStore::Refresh() {

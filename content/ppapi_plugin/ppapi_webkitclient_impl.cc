@@ -28,10 +28,13 @@ using WebKit::WebUChar;
 
 class PpapiWebKitClientImpl::SandboxSupport : public WebSandboxSupport {
  public:
+  virtual ~SandboxSupport() {}
+
 #if defined(OS_WIN)
   virtual bool ensureFontLoaded(HFONT);
 #elif defined(OS_MACOSX)
-  virtual bool loadFont(NSFont* srcFont, ATSFontContainerRef* out);
+  virtual bool loadFont(
+      NSFont* srcFont, ATSFontContainerRef* out, uint32_t* fontID);
 #elif defined(OS_POSIX)
   virtual WebString getFontFamilyForCharacters(
       const WebUChar* characters,
@@ -62,7 +65,7 @@ bool PpapiWebKitClientImpl::SandboxSupport::ensureFontLoaded(HFONT font) {
 #elif defined(OS_MACOSX)
 
 bool PpapiWebKitClientImpl::SandboxSupport::loadFont(NSFont* srcFont,
-    ATSFontContainerRef* out) {
+    ATSFontContainerRef* out, uint32_t* fontID) {
   // TODO(brettw) this should do the something similar to what
   // RendererWebKitClientImpl does and request that the browser load the font.
   NOTIMPLEMENTED();

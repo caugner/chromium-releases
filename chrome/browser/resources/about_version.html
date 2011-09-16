@@ -7,6 +7,7 @@ about:version template page
 <html id="t">
   <head>
     <title i18n-content="title"></title>
+    <include src="content_security_policy.html"/>
     <style>
       body {
         font-family:Helvetica,Arial,sans-serif;
@@ -61,6 +62,8 @@ about:version template page
         max-width: 430px;
       }
     </style>
+  <script src="chrome://version/version.js"></script>
+  <script src="chrome://version/strings.js"></script>
   </head>
 
   <body>
@@ -74,8 +77,14 @@ about:version template page
         <tr><td class="label" valign="top" id="name" i18n-content="name"></td>
           <td class="version" id="version"><span i18n-content="version"></span> (<span i18n-content="official"></span> <span i18n-content="cl"></span>) <span i18n-content="version_modifier"></span></td>
         </tr>
+<if expr="not pp_ifdef('chromeos')">
         <tr><td class="label" valign="top" i18n-content="os_name"></td>
           <td class="version" id="os_type"><span i18n-content="os_type"></span> <span i18n-content="os_version"></span></td>
+</if>
+<if expr="pp_ifdef('chromeos')">
+        <tr><td class="label" valign="top" i18n-content="platform"></td>
+          <td class="version" id="os_type"><span i18n-content="os_version"></span></td>
+</if>
         </tr>
         <tr><td class="label" valign="top">WebKit</td>
           <td class="version" id="webkit_version" i18n-content="webkit_version"></td>
@@ -100,6 +109,9 @@ about:version template page
         </tr>
       </table>
     </div>
+    <script src="chrome://resources/js/i18n_template.js"></script>
+    <script src="chrome://resources/js/i18n_process.js"></script>
+    <script src="chrome://resources/js/jstemplate_compiled.js"></script>
   </body>
 
 </html>

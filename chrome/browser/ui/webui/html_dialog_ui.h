@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "content/browser/webui/web_ui.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "content/common/property_bag.h"
 #include "googleurl/src/gurl.h"
 
@@ -18,6 +18,10 @@ class Size;
 }
 
 struct ContextMenuParams;
+
+namespace base {
+class ListValue;
+}
 
 // Implement this class to receive notifications.
 class HtmlDialogUIDelegate {
@@ -80,7 +84,7 @@ class HtmlDialogUIDelegate {
 // there and call it back. This is a bit of a hack to allow the dialog to pass
 // its delegate to the Web UI without having nasty accessors on the TabContents.
 // The correct design using RVH directly would avoid all of this.
-class HtmlDialogUI : public WebUI {
+class HtmlDialogUI : public ChromeWebUI {
  public:
   struct HtmlDialogParams {
     // The URL for the content that will be loaded in the dialog.
@@ -106,7 +110,7 @@ class HtmlDialogUI : public WebUI {
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
 
   // JS message handler.
-  void OnDialogClosed(const ListValue* args);
+  void OnDialogClosed(const base::ListValue* args);
 
   DISALLOW_COPY_AND_ASSIGN(HtmlDialogUI);
 };

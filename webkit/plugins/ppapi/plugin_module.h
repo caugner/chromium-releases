@@ -25,6 +25,7 @@
 class FilePath;
 class MessageLoop;
 struct PPB_Core;
+struct PPB_Memory_Dev;
 typedef void* NPIdentifier;
 
 namespace base {
@@ -100,6 +101,8 @@ class PluginModule : public base::RefCounted<PluginModule>,
 
   static const PPB_Core* GetCore();
 
+  static const PPB_Memory_Dev* GetMemoryDev();
+
   // Returns a pointer to the local GetInterface function for retrieving
   // PPB interfaces.
   static GetInterfaceFunc GetLocalGetInterfaceFunc();
@@ -160,7 +163,7 @@ class PluginModule : public base::RefCounted<PluginModule>,
   // Calls the InitializeModule entrypoint. The entrypoint must have been
   // set and the plugin must not be out of process (we don't maintain
   // entrypoints in that case).
-  bool InitializeModule();
+  bool InitializeModule(const EntryPoints& entry_points);
 
   PluginDelegate::ModuleLifetime* lifetime_delegate_;
 

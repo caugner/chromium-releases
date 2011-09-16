@@ -5,13 +5,13 @@
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 
 #include "base/compiler_specific.h"
+#include "base/metrics/histogram.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
-#include "chrome/browser/chromeos/login/user_image_view.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -25,58 +25,79 @@ const int kFrameHeight = 480;
 
 }  // namespace
 
-UserImageScreen::UserImageScreen(ViewScreenDelegate* delegate)
-    : ViewScreen<UserImageView>(delegate),
-      camera_controller_(this) {
+UserImageScreen::UserImageScreen(ScreenObserver* screen_observer,
+                                 UserImageScreenActor* actor)
+    : WizardScreen(screen_observer),
+      camera_controller_(this),
+      actor_(actor) {
+  actor_->SetDelegate(this);
   camera_controller_.set_frame_width(kFrameWidth);
   camera_controller_.set_frame_height(kFrameHeight);
   registrar_.Add(
       this,
-      NotificationType::SCREEN_LOCK_STATE_CHANGED,
+      chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       NotificationService::AllSources());
 }
 
 UserImageScreen::~UserImageScreen() {
+  if (actor_)
+    actor_->SetDelegate(NULL);
 }
 
-void UserImageScreen::Refresh() {
-  DCHECK(view());
+void UserImageScreen::PrepareToShow() {
+  if (actor_)
+    actor_->PrepareToShow();
+}
+
+void UserImageScreen::Show() {
+  if (!actor_)
+    return;
+
+  actor_->Show();
+
   UserManager* user_manager = UserManager::Get();
   std::string logged_in_user = user_manager->logged_in_user().email();
-  view()->OnImageSelected(
-      user_manager->GetUserDefaultImageIndex(logged_in_user));
+  int selected_image_index =
+      user_manager->GetUserDefaultImageIndex(logged_in_user);
+  // The image must have been assigned by UserManager on new user login but
+  // under some circumstances (i.e. the data is not written to Local State
+  // or the file was corrupt) -1 could still be returned.
+  if (selected_image_index == -1)
+    selected_image_index = 0;
+  actor_->SelectImage(selected_image_index);
 }
 
 void UserImageScreen::Hide() {
   camera_controller_.Stop();
-  ViewScreen<UserImageView>::Hide();
+  if (actor_)
+    actor_->Hide();
 }
 
-UserImageView* UserImageScreen::AllocateView() {
-  return new UserImageView(this);
+void UserImageScreen::OnCaptureSuccess() {
+  if (!actor_)
+    return;
+
+  SkBitmap frame;
+  camera_controller_.GetFrame(&frame);
+  if (!frame.isNull())
+    actor_->UpdateVideoFrame(frame);
+}
+
+void UserImageScreen::OnCaptureFailure() {
+  if (actor_)
+    actor_->ShowCameraError();
 }
 
 void UserImageScreen::StartCamera() {
-  DCHECK(view());
-  view()->ShowCameraInitializing();
+  if (!actor_)
+    return;
+
+  actor_->ShowCameraInitializing();
   camera_controller_.Start();
 }
 
 void UserImageScreen::StopCamera() {
   camera_controller_.Stop();
-}
-
-void UserImageScreen::OnCaptureSuccess() {
-  DCHECK(view());
-  SkBitmap frame;
-  camera_controller_.GetFrame(&frame);
-  if (!frame.isNull())
-    view()->UpdateVideoFrame(frame);
-}
-
-void UserImageScreen::OnCaptureFailure() {
-  DCHECK(view());
-  view()->ShowCameraError();
 }
 
 void UserImageScreen::OnPhotoTaken(const SkBitmap& image) {
@@ -90,8 +111,11 @@ void UserImageScreen::OnPhotoTaken(const SkBitmap& image) {
 
   user_manager->SetLoggedInUserImage(image);
   user_manager->SaveUserImage(user.email(), image);
-  if (delegate())
-    delegate()->GetObserver()->OnExit(ScreenObserver::USER_IMAGE_SELECTED);
+  get_screen_observer()->OnExit(ScreenObserver::USER_IMAGE_SELECTED);
+
+  UMA_HISTOGRAM_ENUMERATION("UserImage.FirstTimeChoice",
+                            kDefaultImagesCount,
+                            kDefaultImagesCount + 1);
 }
 
 void UserImageScreen::OnDefaultImageSelected(int index) {
@@ -109,20 +133,28 @@ void UserImageScreen::OnDefaultImageSelected(int index) {
   user_manager->SaveUserImagePath(
       user.email(),
       GetDefaultImagePath(static_cast<size_t>(index)));
-  if (delegate())
-    delegate()->GetObserver()->OnExit(ScreenObserver::USER_IMAGE_SELECTED);
+  get_screen_observer()->OnExit(ScreenObserver::USER_IMAGE_SELECTED);
+
+  UMA_HISTOGRAM_ENUMERATION("UserImage.FirstTimeChoice",
+                            index,
+                            kDefaultImagesCount + 1);
 }
 
-void UserImageScreen::Observe(NotificationType type,
+void UserImageScreen::OnActorDestroyed(UserImageScreenActor* actor) {
+  if (actor_ == actor)
+    actor_ = NULL;
+}
+
+void UserImageScreen::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  if (type != NotificationType::SCREEN_LOCK_STATE_CHANGED)
+  if (type != chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED)
     return;
 
   bool is_screen_locked = *Details<bool>(details).ptr();
   if (is_screen_locked)
     StopCamera();
-  else if (view()->IsCapturing())
+  else if (actor_ && actor_->IsCapturing())
     StartCamera();
 }
 

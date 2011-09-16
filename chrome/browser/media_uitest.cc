@@ -66,7 +66,7 @@ class MediaTest : public UITest {
 };
 
 #if defined(OS_MACOSX)
-// http://crbug.com/84170 - VideoBearTheora, VideoBearWav and VideoBearWebm
+// http://crbug.com/88834 - VideoBearTheora, VideoBearWav and VideoBearWebm
 // are flaky on Mac.
 #define MAYBE_VideoBearTheora FLAKY_VideoBearTheora
 #define MAYBE_VideoBearWav FLAKY_VideoBearWav
@@ -107,14 +107,7 @@ TEST_F(MediaTest, MAYBE_VideoBearWav) {
   PlayVideo("bear.wav");
 }
 
-#if defined(OS_MACOSX)
-// http://crbug.com/84463 - MediaUILayoutTest is flaky on Mac.
-#define MAYBE_MediaUILayoutTest FLAKY_MediaUILayoutTest
-#else
-#define MAYBE_MediaUILayoutTest MediaUILayoutTest
-#endif
-
-TEST_F(UILayoutTest, MAYBE_MediaUILayoutTest) {
+TEST_F(UILayoutTest, MediaUILayoutTest) {
   static const char* kResources[] = {
     "content",
     "media-file.js",

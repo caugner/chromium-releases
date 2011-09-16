@@ -9,6 +9,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "chrome/browser/chromeos/cros_settings.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
@@ -58,13 +59,13 @@ void CoreChromeOSOptionsHandler::StopObservingPref(const std::string& path) {
     ::CoreOptionsHandler::StopObservingPref(path);
 }
 
-void CoreChromeOSOptionsHandler::Observe(NotificationType type,
+void CoreChromeOSOptionsHandler::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
   // Ignore the notification if this instance had caused it.
   if (handling_change_)
     return;
-  if (type == NotificationType::SYSTEM_SETTING_CHANGED) {
+  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED) {
     NotifySettingsChanged(Details<std::string>(details).ptr());
     return;
   }

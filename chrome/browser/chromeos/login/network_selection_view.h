@@ -14,7 +14,6 @@
 #include "chrome/browser/chromeos/views/dropdown_button.h"
 #include "views/controls/link_listener.h"
 #include "views/view.h"
-#include "views/window/window_delegate.h"
 
 namespace gfx {
 class Size;
@@ -24,7 +23,7 @@ namespace views {
 class Combobox;
 class GridLayout;
 class Label;
-class NativeButton;
+class NativeTextButton;
 class Throbber;
 }  // namespace views
 
@@ -114,7 +113,7 @@ class NetworkSelectionView : public views::View,
   views::Label* select_network_label_;
   views::Label* connecting_network_label_;
   NetworkDropdownButton* network_dropdown_;
-  views::NativeButton* continue_button_;
+  views::NativeTextButton* continue_button_;
   views::Throbber* throbber_;
   views::Link* proxy_settings_link_;
   bool show_keyboard_button_;

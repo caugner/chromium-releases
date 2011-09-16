@@ -65,10 +65,6 @@ class GLES2Decoder : public CommonDecoder {
   //  allowed_extensions: A string in the same format as
   //      glGetString(GL_EXTENSIONS) that lists the extensions this context
   //      should allow. Passing NULL or "*" means allow all extensions.
-  //  parent: the GLES2 decoder that can access this decoder's front buffer
-  //      through a texture ID in its namespace.
-  //  parent_client_texture_id: the texture ID of the front buffer in the
-  //      parent's namespace.
   // Returns:
   //   true if successful.
   virtual bool Initialize(const scoped_refptr<gfx::GLSurface>& surface,
@@ -76,12 +72,13 @@ class GLES2Decoder : public CommonDecoder {
                           const gfx::Size& size,
                           const DisallowedExtensions& disallowed_extensions,
                           const char* allowed_extensions,
-                          const std::vector<int32>& attribs,
-                          GLES2Decoder* parent,
-                          uint32 parent_client_texture_id) = 0;
+                          const std::vector<int32>& attribs) = 0;
 
   // Destroys the graphics context.
   virtual void Destroy() = 0;
+
+  virtual bool SetParent(GLES2Decoder* parent_decoder,
+                         uint32 parent_texture_id) = 0;
 
   // Resize an offscreen frame buffer.
   virtual void ResizeOffscreenFrameBuffer(const gfx::Size& size) = 0;
@@ -113,15 +110,13 @@ class GLES2Decoder : public CommonDecoder {
   // Sets a callback which is called when a SwapBuffers command is processed.
   virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;
 
-  // Sets a callback which is called after a Set/WaitLatch command is processed.
-  // The bool parameter will be true for SetLatch, and false for a WaitLatch
-  // that is blocked. An unblocked WaitLatch will not trigger a callback.
-  virtual void SetLatchCallback(const base::Callback<void(bool)>& callback) = 0;
-
   // Get the service texture ID corresponding to a client texture ID.
   // If no such record is found then return false.
   virtual bool GetServiceTextureId(uint32 client_texture_id,
                                    uint32* service_texture_id);
+
+  // Provides detail about a lost context if one occurred.
+  virtual error::ContextLostReason GetContextLostReason() = 0;
 
  protected:
   GLES2Decoder();

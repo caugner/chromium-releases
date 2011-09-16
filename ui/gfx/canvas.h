@@ -12,6 +12,7 @@
 // TODO(beng): remove this include when we no longer depend on SkTypes.
 #include "skia/ext/platform_canvas.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ui_api.h"
 
 namespace ui {
 class Transform;
@@ -28,7 +29,7 @@ class Point;
 class Rect;
 
 // TODO(beng): documentation.
-class Canvas {
+class UI_API Canvas {
  public:
   // Specifies the alignment for text rendered with the DrawStringInt method.
   enum {
@@ -178,8 +179,8 @@ class Canvas {
   // Draws text with the specified color, font and location. The text is
   // aligned to the left, vertically centered, clipped to the region. If the
   // text is too big, it is truncated and '...' is added to the end.
-  virtual void DrawStringInt(const string16& text, const
-                             gfx::Font& font,
+  virtual void DrawStringInt(const string16& text,
+                             const gfx::Font& font,
                              const SkColor& color,
                              int x, int y, int w, int h) = 0;
   virtual void DrawStringInt(const string16& text,
@@ -214,8 +215,10 @@ class Canvas {
   // returned by BeginPlatformPaint().
   virtual void EndPlatformPaint() = 0;
 
+#if !defined(OS_MACOSX)
   // Apply transformation on the canvas.
   virtual void Transform(const ui::Transform& transform) = 0;
+#endif
 
   // Create a texture ID that can be used for accelerated drawing.
   virtual ui::TextureID GetTextureID() = 0;
@@ -227,7 +230,7 @@ class Canvas {
   virtual const CanvasSkia* AsCanvasSkia() const;
 };
 
-class CanvasPaint {
+class UI_API CanvasPaint {
  public:
   virtual ~CanvasPaint() {}
 

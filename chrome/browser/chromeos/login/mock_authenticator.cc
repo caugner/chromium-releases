@@ -25,6 +25,12 @@ bool MockAuthenticator::AuthenticateToLogin(Profile* profile,
   return false;
 }
 
+bool MockAuthenticator::CompleteLogin(Profile* profile,
+                                      const std::string& username,
+                                      const std::string& password) {
+  return false;
+}
+
 bool MockAuthenticator::AuthenticateToUnlock(const std::string& username,
                                   const std::string& password) {
   return AuthenticateToLogin(NULL /* not used */, username, password,
@@ -43,7 +49,8 @@ void MockAuthenticator::OnLoginSuccess(
   consumer_->OnLoginSuccess(expected_username_,
                             expected_password_,
                             credentials,
-                            request_pending);
+                            request_pending,
+                            false);
 }
 
 void MockAuthenticator::OnLoginFailure(const LoginFailure& failure) {
@@ -51,6 +58,15 @@ void MockAuthenticator::OnLoginFailure(const LoginFailure& failure) {
     VLOG(1) << "Posting a QuitTask to UI thread";
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask);
+}
+
+std::string MockAuthenticator::EncryptToken(const std::string& token) {
+  return std::string();
+}
+
+std::string MockAuthenticator::DecryptToken(
+    const std::string& encrypted_token) {
+  return std::string();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -73,6 +89,8 @@ void MockLoginUtils::PrepareProfile(
     const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& res,
     bool pending_requests,
+    bool using_oauth,
+    bool has_cookies,
     Delegate* delegate) {
   DCHECK_EQ(expected_username_, username);
   DCHECK_EQ(expected_password_, password);
@@ -99,6 +117,11 @@ std::string MockLoginUtils::GetOffTheRecordCommandLine(
     const CommandLine& base_command_line,
     CommandLine* command_line) {
   return std::string();
+}
+
+bool MockLoginUtils::TransferDefaultCookies(Profile* default_profile,
+                                                   Profile* new_profile) {
+  return true;
 }
 
 }  // namespace chromeos

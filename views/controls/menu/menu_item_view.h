@@ -79,16 +79,19 @@ class MenuItemView : public View {
   // ID used to identify empty menu items.
   static const int kEmptyMenuItemViewID;
 
-  // Different types of menu items.
+  // Different types of menu items.  EMPTY is a special type for empty
+  // menus that is only used internally.
   enum Type {
     NORMAL,
     SUBMENU,
     CHECKBOX,
     RADIO,
-    SEPARATOR
+    SEPARATOR,
+    EMPTY
   };
 
-  // Where the menu should be anchored to.
+  // Where the menu should be anchored to for non-RTL languages.  The
+  // opposite position will be used if base::i18n:IsRTL() is true.
   enum AnchorPosition {
     TOPLEFT,
     TOPRIGHT
@@ -111,8 +114,8 @@ class MenuItemView : public View {
   virtual ~MenuItemView();
 
   // Overridden from View:
-  virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip)
-      OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p,
+                              std::wstring* tooltip) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   // Returns the preferred height of menu items. This is only valid when the
@@ -130,7 +133,8 @@ class MenuItemView : public View {
   // Run methods. See description above class for details. Both Run methods take
   // a rectangle, which is used to position the menu. |has_mnemonics| indicates
   // whether the items have mnemonics. Mnemonics are identified by way of the
-  // character following the '&'.
+  // character following the '&'.  The anchor position is specified for non-RTL
+  // languages; the opposite value will be used for RTL.
   void RunMenuAt(gfx::NativeWindow parent,
                  MenuButton* button,
                  const gfx::Rect& bounds,
@@ -318,10 +322,7 @@ class MenuItemView : public View {
 
   // Set top and bottom margins in pixels.  If no margin is set or a
   // negative margin is specified then MenuConfig values are used.
-  void set_margins(int top_margin, int bottom_margin) {
-    top_margin_ = top_margin;
-    bottom_margin_ = bottom_margin;
-  }
+  void SetMargins(int top_margin, int bottom_margin);
 
   // Set the position of the menu with respect to the bounds (top
   // level only).
@@ -402,8 +403,8 @@ class MenuItemView : public View {
   int GetTopMargin();
   int GetBottomMargin();
 
-  // Returns the preferred width (and padding) of any children.
-  int GetChildPreferredWidth();
+  // Returns the preferred size (and padding) of any children.
+  gfx::Size GetChildPreferredSize();
 
   // Calculates the preferred size.
   gfx::Size CalculatePreferredSize();

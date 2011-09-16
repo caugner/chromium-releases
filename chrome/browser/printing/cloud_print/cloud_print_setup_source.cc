@@ -4,19 +4,17 @@
 
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_source.h"
 
-#include <algorithm>
-
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "googleurl/src/gurl.h"
-#include "grit/app_resources.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -40,7 +38,7 @@ void AddString(DictionaryValue* dictionary,
 }  // namespace
 
 CloudPrintSetupSource::CloudPrintSetupSource()
-  : DataSource(chrome::kCloudPrintSetupHost, MessageLoop::current()) {
+  : DataSource(chrome::kChromeUICloudPrintSetupHost, MessageLoop::current()) {
 }
 
 void CloudPrintSetupSource::StartDataRequest(const std::string& path_raw,
@@ -119,11 +117,8 @@ void CloudPrintSetupSource::StartDataRequest(const std::string& path_raw,
         .GetRawDataResource(IDR_CLOUD_PRINT_SETUP_FLOW_HTML));
     response = html.as_string();
   }
-  // Send the response.
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(response.size());
-  std::copy(response.begin(), response.end(), html_bytes->data.begin());
-  SendResponse(request_id, html_bytes);
+
+  SendResponse(request_id, base::RefCountedString::TakeString(&response));
 }
 
 std::string CloudPrintSetupSource::GetMimeType(const std::string& path) const {

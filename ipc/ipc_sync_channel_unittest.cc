@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
@@ -800,59 +800,6 @@ void QueuedReply(bool client_pump) {
 TEST_F(IPCSyncChannelTest, QueuedReply) {
   QueuedReply(false);
   QueuedReply(true);
-}
-
-//-----------------------------------------------------------------------------
-
-namespace {
-
-void DropAssert(const std::string&) {}
-
-class BadServer : public Worker {
- public:
-  explicit BadServer(bool pump_during_send)
-    : Worker(Channel::MODE_SERVER, "simpler_server"),
-      pump_during_send_(pump_during_send) { }
-  void Run() {
-    int answer = 0;
-
-    SyncMessage* msg = new SyncMessage(
-        MSG_ROUTING_CONTROL, SyncChannelTestMsg_Double::ID,
-        Message::PRIORITY_NORMAL, NULL);
-    if (pump_during_send_)
-      msg->EnableMessagePumping();
-
-    // Temporarily ignore asserts so that the assertion in
-    // ipc_message_utils doesn't cause termination.
-    logging::SetLogAssertHandler(&DropAssert);
-    bool result = Send(msg);
-    logging::SetLogAssertHandler(NULL);
-    DCHECK(!result);
-
-    // Need to send another message to get the client to call Done().
-    result = Send(new SyncChannelTestMsg_AnswerToLife(&answer));
-    DCHECK(result);
-    DCHECK_EQ(answer, 42);
-
-    Done();
-  }
-
-  bool pump_during_send_;
-};
-
-void BadMessage(bool pump_during_send) {
-  std::vector<Worker*> workers;
-  workers.push_back(new BadServer(pump_during_send));
-  workers.push_back(new SimpleClient());
-  RunTest(workers);
-}
-
-}  // namespace
-
-// Tests that if a message is not serialized correctly, the Send() will fail.
-TEST_F(IPCSyncChannelTest, BadMessage) {
-  BadMessage(false);
-  BadMessage(true);
 }
 
 //-----------------------------------------------------------------------------

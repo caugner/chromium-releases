@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/common/notification_registrar.h"
 
@@ -26,9 +27,9 @@ ExtensionApiTest::~ExtensionApiTest() {}
 ExtensionApiTest::ResultCatcher::ResultCatcher()
     : profile_restriction_(NULL),
       waiting_(false) {
-  registrar_.Add(this, NotificationType::EXTENSION_TEST_PASSED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_PASSED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_TEST_FAILED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_FAILED,
                  NotificationService::AllSources());
 }
 
@@ -59,15 +60,15 @@ bool ExtensionApiTest::ResultCatcher::GetNextResult() {
 }
 
 void ExtensionApiTest::ResultCatcher::Observe(
-    NotificationType type, const NotificationSource& source,
+    int type, const NotificationSource& source,
     const NotificationDetails& details) {
   if (profile_restriction_ &&
       Source<Profile>(source).ptr() != profile_restriction_) {
     return;
   }
 
-  switch (type.value) {
-    case NotificationType::EXTENSION_TEST_PASSED:
+  switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_TEST_PASSED:
       VLOG(1) << "Got EXTENSION_TEST_PASSED notification.";
       results_.push_back(true);
       messages_.push_back("");
@@ -75,7 +76,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
         MessageLoopForUI::current()->Quit();
       break;
 
-    case NotificationType::EXTENSION_TEST_FAILED:
+    case chrome::NOTIFICATION_EXTENSION_TEST_FAILED:
       VLOG(1) << "Got EXTENSION_TEST_FAILED notification.";
       results_.push_back(false);
       messages_.push_back(*(Details<std::string>(details).ptr()));
@@ -120,10 +121,18 @@ bool ExtensionApiTest::RunExtensionTestIncognitoNoFileAccess(
     const char* extension_name) {
   return RunExtensionTestImpl(extension_name, "", true, false, false);
 }
+
 bool ExtensionApiTest::RunExtensionSubtest(const char* extension_name,
                                            const std::string& page_url) {
   DCHECK(!page_url.empty()) << "Argument page_url is required.";
   return RunExtensionTestImpl(extension_name, page_url, false, true, false);
+}
+
+bool ExtensionApiTest::RunExtensionSubtestNoFileAccess(
+    const char* extension_name,
+    const std::string& page_url) {
+  DCHECK(!page_url.empty()) << "Argument page_url is required.";
+  return RunExtensionTestImpl(extension_name, page_url, false, false, false);
 }
 
 bool ExtensionApiTest::RunPageTest(const std::string& page_url) {
@@ -143,20 +152,12 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
 
   if (!std::string(extension_name).empty()) {
     bool loaded = false;
+    FilePath extension_path = test_data_dir_.AppendASCII(extension_name);
     if (load_as_component) {
-      loaded =
-          LoadExtensionAsComponent(test_data_dir_.AppendASCII(extension_name));
+      loaded = LoadExtensionAsComponent(extension_path);
     } else {
-      if (enable_incognito) {
-        loaded = enable_fileaccess ?
-          LoadExtensionIncognito(test_data_dir_.AppendASCII(extension_name)) :
-          LoadExtensionIncognitoNoFileAccess(
-              test_data_dir_.AppendASCII(extension_name));
-      } else {
-        loaded = enable_fileaccess ?
-          LoadExtension(test_data_dir_.AppendASCII(extension_name)) :
-          LoadExtensionNoFileAccess(test_data_dir_.AppendASCII(extension_name));
-      }
+      loaded = LoadExtensionWithOptions(extension_path,
+                                        enable_incognito, enable_fileaccess);
     }
     if (!loaded) {
       message_ = "Failed to load extension.";
@@ -178,8 +179,10 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
       ExtensionService* service = browser()->profile()->GetExtensionService();
       const Extension* extension =
           service->GetExtensionById(last_loaded_extension_id_, false);
-      if (!extension)
+      if (!extension) {
+        message_ = "Failed to find extension in ExtensionService.";
         return false;
+      }
 
       url = extension->GetResourceURL(page_url);
     }

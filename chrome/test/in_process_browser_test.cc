@@ -34,15 +34,16 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/main_function_params.h"
-#include "content/common/notification_type.h"
-#include "content/renderer/content_renderer_client.h"
+#include "content/renderer/mock_content_renderer_client.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 #include "sandbox/src/dep.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
+#include "base/system_monitor/system_monitor.h"
 #endif
 
 #if defined(OS_WIN)
@@ -82,6 +83,7 @@ InProcessBrowserTest::InProcessBrowserTest()
       tab_closeable_state_watcher_enabled_(false) {
 #if defined(OS_MACOSX)
   base::mac::SetOverrideAmIBundled(true);
+  base::SystemMonitor::AllocateSystemIOPorts();
 #endif
 
   // Before we run the browser, we have to hack the path to the exe to match
@@ -132,7 +134,8 @@ void InProcessBrowserTest::SetUp() {
   // and set up renderer.
   if (command_line->HasSwitch(switches::kSingleProcess)) {
     RenderProcessHost::set_run_renderer_in_process(true);
-    single_process_renderer_client_.reset(new content::ContentRendererClient);
+    single_process_renderer_client_.reset(
+        new content::MockContentRendererClient);
     content::GetContentClient()->set_renderer(
         single_process_renderer_client_.get());
   }
@@ -145,10 +148,6 @@ void InProcessBrowserTest::SetUp() {
   // Disable audio mixer as it can cause hang.
   // see http://crosbug.com/17058.
   chromeos::AudioHandler::Disable();
-
-  // Prevent loading ChromeOS component extension to prevent their interference
-  // with other browser tests.
-  command_line->AppendSwitch(switches::kSkipChromeOSComponents);
 #endif  // defined(OS_CHROMEOS)
 
   SandboxInitWrapper sandbox_wrapper;
@@ -353,11 +352,11 @@ void InProcessBrowserTest::QuitBrowsers() {
   if (BrowserList::size() == 0)
     return;
 
-  // Invoke CloseAllBrowsersAndExit on a running message loop.
-  // CloseAllBrowsersAndExit exits the message loop after everything has been
+  // Invoke CloseAllBrowsersAndMayExit on a running message loop.
+  // CloseAllBrowsersAndMayExit exits the message loop after everything has been
   // shut down properly.
   MessageLoopForUI::current()->PostTask(
       FROM_HERE,
-      NewRunnableFunction(&BrowserList::CloseAllBrowsersAndExit));
+      NewRunnableFunction(&BrowserList::AttemptExit));
   ui_test_utils::RunMessageLoop();
 }

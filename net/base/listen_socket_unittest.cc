@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "base/eintr_wrapper.h"
 #include "net/base/net_util.h"
 #include "testing/platform_test.h"
+
+namespace net {
 
 const int ListenSocketTester::kTestPort = 9999;
 
@@ -210,7 +212,6 @@ ListenSocket* ListenSocketTester::DoListen() {
   return ListenSocket::Listen(kLoopback, kTestPort, this);
 }
 
-
 class ListenSocketTest: public PlatformTest {
  public:
   ListenSocketTest() {
@@ -243,3 +244,5 @@ TEST_F(ListenSocketTest, ClientSendLong) {
 TEST_F(ListenSocketTest, ServerSend) {
   tester_->TestServerSend();
 }
+
+}  // namespace net

@@ -34,7 +34,7 @@ IN_PROC_BROWSER_TEST_F(MultipleClientLiveSessionsSyncTest, AllChanged) {
 }
 
 IN_PROC_BROWSER_TEST_F(MultipleClientLiveSessionsSyncTest,
-    EncryptedAndChanged) {
+                       EncryptedAndChanged) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   std::vector<std::vector<SessionWindow*>* > client_windows;
 

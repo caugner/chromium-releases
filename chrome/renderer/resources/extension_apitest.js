@@ -122,13 +122,22 @@ var chrome = chrome || {};
     }
   };
 
-  chrome.test.checkDeepEq = function(expected, actual) {
-    var expected_defined = typeof(expected) != 'undefined';
-    var actual_defined = typeof(actual) != 'undefined';
-    if (!expected_defined && !actual_defined)
+  chrome.test.checkDeepEq = function (expected, actual) {
+    if (expected === actual)
       return true;
-    if (expected_defined != actual_defined)
+
+    if (typeof(expected) !== typeof(actual))
       return false;
+
+    for (var p in actual) {
+      if (actual.hasOwnProperty(p) && !expected.hasOwnProperty(p))
+        return false;
+    }
+    for (var p in expected) {
+      if (expected.hasOwnProperty(p) && !actual.hasOwnProperty(p))
+        return false;
+    }
+
     for (var p in expected) {
       var eq = true;
       switch (typeof(expected[p])) {
@@ -147,28 +156,27 @@ var chrome = chrome || {};
       if (!eq)
         return false;
     }
-    for (var p in actual) {
-      if (typeof(expected[p]) == 'undefined')
-        return false;
-    }
     return true;
   };
 
-  chrome.test.assertEq = function(expected, actual) {
+  chrome.test.assertEq = function(expected, actual, message) {
+    var error_msg = "API Test Error in " + testName(currentTest);
+    if (message)
+      error_msg += ": " + message;
     if (typeof(expected) == 'object') {
       if (!chrome.test.checkDeepEq(expected, actual)) {
-        chrome.test.fail("API Test Error in " + testName(currentTest) +
+        chrome.test.fail(error_msg +
                          "\nActual: " + JSON.stringify(actual) +
                          "\nExpected: " + JSON.stringify(expected));
       }
       return;
     }
     if (expected != actual) {
-      chrome.test.fail("API Test Error in " + testName(currentTest) +
+      chrome.test.fail(error_msg +
                        "\nActual: " + actual + "\nExpected: " + expected);
     }
     if (typeof(expected) != typeof(actual)) {
-      chrome.test.fail("API Test Error in " + testName(currentTest) +
+      chrome.test.fail(error_msg +
                        " (type mismatch)\nActual Type: " + typeof(actual) +
                        "\nExpected Type:" + typeof(expected));
     }

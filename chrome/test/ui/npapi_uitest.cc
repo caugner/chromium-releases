@@ -5,14 +5,12 @@
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
-// windows headers
 #include <comutil.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <windows.h>
 #endif
 
-// runtime headers
 #include <memory.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,14 +20,15 @@
 #include "base/file_path.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_timeouts.h"
-#include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/npapi_test_helper.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/net/url_request_mock_http_job.h"
 
 using npapi_test::kTestCompleteCookie;
 using npapi_test::kTestCompleteSuccess;
@@ -103,13 +102,8 @@ TEST_F(NPAPITesterBase, GetJavaScriptURL2) {
                 kTestCompleteSuccess, TestTimeouts::action_max_timeout_ms());
 }
 
-// Test is flaky on linux/cros builders.  http://crbug.com/71904
-#if defined(OS_POSIX)
-#define MAYBE_GetURLRedirectNotification FLAKY_GetURLRedirectNotification
-#else
-#define MAYBE_GetURLRedirectNotification GetURLRedirectNotification
-#endif
-TEST_F(NPAPITesterBase, MAYBE_GetURLRedirectNotification) {
+// Test is flaky on linux/cros/win builders.  http://crbug.com/71904
+TEST_F(NPAPITesterBase, FLAKY_GetURLRedirectNotification) {
   const FilePath test_case(FILE_PATH_LITERAL("geturl_redirect_notify.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
   ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
@@ -270,10 +264,16 @@ TEST_F(NPAPIVisiblePluginTester, SelfDeleteCreatePluginInNPNEvaluate) {
 
 #endif
 
-// FLAKY. See bug http://crbug.com/17645. This bug report indicates that this
-// test is crashy. I could not repro the crash on my local setup. Leaving this
-// marked as FLAKY for now while we watch this on the builders.
-TEST_F(NPAPIVisiblePluginTester, FLAKY_OpenPopupWindowWithPlugin) {
+// http://crbug.com/17645
+// As of 6 July 2011, this test always fails on OS X and is flaky on
+// Windows (perhaps due to timing out).
+#if defined(OS_MACOSX)
+#define MAYBE_OpenPopupWindowWithPlugin DISABLED_OpenPopupWindowWithPlugin
+#else
+#define MAYBE_OpenPopupWindowWithPlugin FLAKY_OpenPopupWindowWithPlugin
+#endif
+
+TEST_F(NPAPIVisiblePluginTester, MAYBE_OpenPopupWindowWithPlugin) {
   if (ProxyLauncher::in_process_renderer())
     return;
 

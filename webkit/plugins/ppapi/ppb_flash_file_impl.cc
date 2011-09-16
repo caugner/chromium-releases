@@ -8,9 +8,11 @@
 
 #include <string>
 
-#include "ppapi/c/dev/pp_file_info_dev.h"
-#include "ppapi/c/dev/ppb_file_io_dev.h"
+#include "ppapi/c/pp_file_info.h"
+#include "ppapi/c/ppb_file_io.h"
 #include "ppapi/c/private/ppb_flash_file.h"
+#include "ppapi/shared_impl/time_conversion.h"
+#include "ppapi/thunk/enter.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/file_path.h"
 #include "webkit/plugins/ppapi/file_type_conversions.h"
@@ -23,6 +25,10 @@
 #if defined(OS_WIN)
 #include "base/utf_string_conversions.h"
 #endif
+
+using ppapi::thunk::EnterResource;
+using ppapi::thunk::PPB_FileRef_API;
+using ppapi::TimeToPPTime;
 
 namespace webkit {
 namespace ppapi {
@@ -119,7 +125,7 @@ int32_t CreateModuleLocalDir(PP_Instance pp_instance, const char* path) {
 
 int32_t QueryModuleLocalFile(PP_Instance pp_instance,
                              const char* path,
-                             PP_FileInfo_Dev* info) {
+                             PP_FileInfo* info) {
   if (!path || !info)
     return PP_ERROR_BADARGUMENT;
 
@@ -133,9 +139,9 @@ int32_t QueryModuleLocalFile(PP_Instance pp_instance,
       &file_info);
   if (result == base::PLATFORM_FILE_OK) {
     info->size = file_info.size;
-    info->creation_time = file_info.creation_time.ToDoubleT();
-    info->last_access_time = file_info.last_accessed.ToDoubleT();
-    info->last_modified_time = file_info.last_modified.ToDoubleT();
+    info->creation_time = TimeToPPTime(file_info.creation_time);
+    info->last_access_time = TimeToPPTime(file_info.last_accessed);
+    info->last_modified_time = TimeToPPTime(file_info.last_modified);
     info->system_type = PP_FILESYSTEMTYPE_EXTERNAL;
     if (file_info.is_directory)
       info->type = PP_FILETYPE_DIRECTORY;
@@ -214,10 +220,10 @@ int32_t OpenFileRefFile(PP_Resource file_ref_id,
   if (!PepperFileOpenFlagsToPlatformFileFlags(mode, &flags) || !file)
     return PP_ERROR_BADARGUMENT;
 
-  scoped_refptr<PPB_FileRef_Impl> file_ref(
-      Resource::GetAs<PPB_FileRef_Impl>(file_ref_id));
-  if (!file_ref)
+  EnterResource<PPB_FileRef_API> enter(file_ref_id, true);
+  if (enter.failed())
     return PP_ERROR_BADRESOURCE;
+  PPB_FileRef_Impl* file_ref = static_cast<PPB_FileRef_Impl*>(enter.object());
 
   PluginInstance* instance = file_ref->instance();
   if (!instance)
@@ -233,11 +239,11 @@ int32_t OpenFileRefFile(PP_Resource file_ref_id,
 }
 
 int32_t QueryFileRefFile(PP_Resource file_ref_id,
-                         PP_FileInfo_Dev* info) {
-  scoped_refptr<PPB_FileRef_Impl> file_ref(
-      Resource::GetAs<PPB_FileRef_Impl>(file_ref_id));
-  if (!file_ref)
+                         PP_FileInfo* info) {
+  EnterResource<PPB_FileRef_API> enter(file_ref_id, true);
+  if (enter.failed())
     return PP_ERROR_BADRESOURCE;
+  PPB_FileRef_Impl* file_ref = static_cast<PPB_FileRef_Impl*>(enter.object());
 
   PluginInstance* instance = file_ref->instance();
   if (!instance)
@@ -249,9 +255,9 @@ int32_t QueryFileRefFile(PP_Resource file_ref_id,
       &file_info);
   if (result == base::PLATFORM_FILE_OK) {
     info->size = file_info.size;
-    info->creation_time = file_info.creation_time.ToDoubleT();
-    info->last_access_time = file_info.last_accessed.ToDoubleT();
-    info->last_modified_time = file_info.last_modified.ToDoubleT();
+    info->creation_time = TimeToPPTime(file_info.creation_time);
+    info->last_access_time = TimeToPPTime(file_info.last_accessed);
+    info->last_modified_time = TimeToPPTime(file_info.last_modified);
     info->system_type = PP_FILESYSTEMTYPE_EXTERNAL;
     if (file_info.is_directory)
       info->type = PP_FILETYPE_DIRECTORY;

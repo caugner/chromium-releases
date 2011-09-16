@@ -123,10 +123,14 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_FORM_RESET_LABEL;
     case WebLocalizedString::FileButtonChooseFileLabel:
       return IDS_FORM_FILE_BUTTON_LABEL;
+    case WebLocalizedString::FileButtonChooseMultipleFilesLabel:
+      return IDS_FORM_MULTIPLE_FILES_BUTTON_LABEL;
     case WebLocalizedString::FileButtonNoFileSelectedLabel:
       return IDS_FORM_FILE_NO_FILE_LABEL;
     case WebLocalizedString::MultipleFileUploadText:
       return IDS_FORM_FILE_MULTIPLE_UPLOAD;
+    case WebLocalizedString::DetailsLabel:
+      return IDS_DETAILS_WITHOUT_SUMMARY_LABEL;
     case WebLocalizedString::SearchableIndexIntroduction:
       return IDS_SEARCHABLE_INDEX_INTRO;
     case WebLocalizedString::SearchMenuNoRecentSearchesText:
@@ -191,6 +195,12 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_FORM_VALIDATION_RANGE_OVERFLOW;
     case WebLocalizedString::ValidationStepMismatch:
       return IDS_FORM_VALIDATION_STEP_MISMATCH;
+    // This "default:" line exists to avoid compile warnings about enum
+    // coverage when we add a new symbol to WebLocalizedString.h in WebKit.
+    // After a planned WebKit patch is landed, we need to add a case statement
+    // for the added symbol here.
+    default:
+      break;
   }
   return -1;
 }
@@ -338,56 +348,92 @@ WebData loadAudioSpatializationResource(const char* name) {
   return WebData();
 }
 
+struct DataResource {
+  const char* name;
+  int id;
+};
+
+const DataResource kDataResources[] = {
+  { "missingImage", IDR_BROKENIMAGE },
+  { "mediaPause", IDR_MEDIA_PAUSE_BUTTON },
+  { "mediaPlay", IDR_MEDIA_PLAY_BUTTON },
+  { "mediaPlayDisabled", IDR_MEDIA_PLAY_BUTTON_DISABLED },
+  { "mediaSoundDisabled", IDR_MEDIA_SOUND_DISABLED },
+  { "mediaSoundFull", IDR_MEDIA_SOUND_FULL_BUTTON },
+  { "mediaSoundNone", IDR_MEDIA_SOUND_NONE_BUTTON },
+  { "mediaSliderThumb", IDR_MEDIA_SLIDER_THUMB },
+  { "mediaVolumeSliderThumb", IDR_MEDIA_VOLUME_SLIDER_THUMB },
+  { "mediaplayerPause", IDR_MEDIAPLAYER_PAUSE_BUTTON },
+  { "mediaplayerPauseHover", IDR_MEDIAPLAYER_PAUSE_BUTTON_HOVER },
+  { "mediaplayerPauseDown", IDR_MEDIAPLAYER_PAUSE_BUTTON_DOWN },
+  { "mediaplayerPlay", IDR_MEDIAPLAYER_PLAY_BUTTON },
+  { "mediaplayerPlayHover", IDR_MEDIAPLAYER_PLAY_BUTTON_HOVER },
+  { "mediaplayerPlayDown", IDR_MEDIAPLAYER_PLAY_BUTTON_DOWN },
+  { "mediaplayerPlayDisabled", IDR_MEDIAPLAYER_PLAY_BUTTON_DISABLED },
+  { "mediaplayerSoundDisabled", IDR_MEDIAPLAYER_SOUND_DISABLED },
+  { "mediaplayerSoundFull", IDR_MEDIAPLAYER_SOUND_FULL_BUTTON },
+  { "mediaplayerSoundFullHover", IDR_MEDIAPLAYER_SOUND_FULL_BUTTON_HOVER },
+  { "mediaplayerSoundFullDown", IDR_MEDIAPLAYER_SOUND_FULL_BUTTON_DOWN },
+  { "mediaplayerSoundLevel2", IDR_MEDIAPLAYER_SOUND_LEVEL2_BUTTON },
+  { "mediaplayerSoundLevel2Hover",
+    IDR_MEDIAPLAYER_SOUND_LEVEL2_BUTTON_HOVER },
+  { "mediaplayerSoundLevel2Down", IDR_MEDIAPLAYER_SOUND_LEVEL2_BUTTON_DOWN },
+  { "mediaplayerSoundLevel1", IDR_MEDIAPLAYER_SOUND_LEVEL1_BUTTON },
+  { "mediaplayerSoundLevel1Hover",
+    IDR_MEDIAPLAYER_SOUND_LEVEL1_BUTTON_HOVER },
+  { "mediaplayerSoundLevel1Down", IDR_MEDIAPLAYER_SOUND_LEVEL1_BUTTON_DOWN },
+  { "mediaplayerSoundNone", IDR_MEDIAPLAYER_SOUND_NONE_BUTTON },
+  { "mediaplayerSoundNoneHover", IDR_MEDIAPLAYER_SOUND_NONE_BUTTON_HOVER },
+  { "mediaplayerSoundNoneDown", IDR_MEDIAPLAYER_SOUND_NONE_BUTTON_DOWN },
+  { "mediaplayerSliderThumb", IDR_MEDIAPLAYER_SLIDER_THUMB },
+  { "mediaplayerSliderThumbHover", IDR_MEDIAPLAYER_SLIDER_THUMB_HOVER },
+  { "mediaplayerSliderThumbDown", IDR_MEDIAPLAYER_SLIDER_THUMB_DOWN },
+  { "mediaplayerVolumeSliderThumb", IDR_MEDIAPLAYER_VOLUME_SLIDER_THUMB },
+  { "mediaplayerVolumeSliderThumbHover",
+    IDR_MEDIAPLAYER_VOLUME_SLIDER_THUMB_HOVER },
+  { "mediaplayerVolumeSliderThumbDown",
+    IDR_MEDIAPLAYER_VOLUME_SLIDER_THUMB_DOWN },
+  { "panIcon", IDR_PAN_SCROLL_ICON },
+  { "searchCancel", IDR_SEARCH_CANCEL },
+  { "searchCancelPressed", IDR_SEARCH_CANCEL_PRESSED },
+  { "searchMagnifier", IDR_SEARCH_MAGNIFIER },
+  { "searchMagnifierResults", IDR_SEARCH_MAGNIFIER_RESULTS },
+  { "textAreaResizeCorner", IDR_TEXTAREA_RESIZER },
+  { "tickmarkDash", IDR_TICKMARK_DASH },
+  { "inputSpeech", IDR_INPUT_SPEECH },
+  { "inputSpeechRecording", IDR_INPUT_SPEECH_RECORDING },
+  { "inputSpeechWaiting", IDR_INPUT_SPEECH_WAITING },
+  { "americanExpressCC", IDR_AUTOFILL_CC_AMEX },
+  { "dinersCC", IDR_AUTOFILL_CC_DINERS },
+  { "discoverCC", IDR_AUTOFILL_CC_DISCOVER },
+  { "genericCC", IDR_AUTOFILL_CC_GENERIC },
+  { "jcbCC", IDR_AUTOFILL_CC_JCB },
+  { "masterCardCC", IDR_AUTOFILL_CC_MASTERCARD },
+  { "soloCC", IDR_AUTOFILL_CC_SOLO },
+  { "visaCC", IDR_AUTOFILL_CC_VISA },
+};
+
 }  // namespace
 
 WebData WebKitClientImpl::loadResource(const char* name) {
-  struct {
-    const char* name;
-    int id;
-  } resources[] = {
-    { "missingImage", IDR_BROKENIMAGE },
-    { "mediaPause", IDR_MEDIA_PAUSE_BUTTON },
-    { "mediaPlay", IDR_MEDIA_PLAY_BUTTON },
-    { "mediaPlayDisabled", IDR_MEDIA_PLAY_BUTTON_DISABLED },
-    { "mediaSoundDisabled", IDR_MEDIA_SOUND_DISABLED },
-    { "mediaSoundFull", IDR_MEDIA_SOUND_FULL_BUTTON },
-    { "mediaSoundNone", IDR_MEDIA_SOUND_NONE_BUTTON },
-    { "mediaSliderThumb", IDR_MEDIA_SLIDER_THUMB },
-    { "mediaVolumeSliderThumb", IDR_MEDIA_VOLUME_SLIDER_THUMB },
-    { "panIcon", IDR_PAN_SCROLL_ICON },
-    { "searchCancel", IDR_SEARCH_CANCEL },
-    { "searchCancelPressed", IDR_SEARCH_CANCEL_PRESSED },
-    { "searchMagnifier", IDR_SEARCH_MAGNIFIER },
-    { "searchMagnifierResults", IDR_SEARCH_MAGNIFIER_RESULTS },
-    { "textAreaResizeCorner", IDR_TEXTAREA_RESIZER },
-    { "tickmarkDash", IDR_TICKMARK_DASH },
-    { "inputSpeech", IDR_INPUT_SPEECH },
-    { "inputSpeechRecording", IDR_INPUT_SPEECH_RECORDING },
-    { "inputSpeechWaiting", IDR_INPUT_SPEECH_WAITING },
-    { "americanExpressCC", IDR_AUTOFILL_CC_AMEX },
-    { "dinersCC", IDR_AUTOFILL_CC_DINERS },
-    { "discoverCC", IDR_AUTOFILL_CC_DISCOVER },
-    { "genericCC", IDR_AUTOFILL_CC_GENERIC },
-    { "jcbCC", IDR_AUTOFILL_CC_JCB },
-    { "masterCardCC", IDR_AUTOFILL_CC_MASTERCARD },
-    { "soloCC", IDR_AUTOFILL_CC_SOLO },
-    { "visaCC", IDR_AUTOFILL_CC_VISA },
-  };
+  // Some clients will call into this method with an empty |name| when they have
+  // optional resources.  For example, the PopupMenuChromium code can have icons
+  // for some Autofill items but not for others.
+  if (!strlen(name))
+    return WebData();
 
   // Check the name prefix to see if it's an audio resource.
-  if (StartsWithASCII(name, "IRC_Composite", true)) {
+  if (StartsWithASCII(name, "IRC_Composite", true))
     return loadAudioSpatializationResource(name);
-  } else {
-    for (size_t i = 0; i < ARRAYSIZE_UNSAFE(resources); ++i) {
-      if (!strcmp(name, resources[i].name)) {
-        base::StringPiece resource = GetDataResource(resources[i].id);
-        return WebData(resource.data(), resource.size());
-      }
+
+  for (size_t i = 0; i < arraysize(kDataResources); ++i) {
+    if (!strcmp(name, kDataResources[i].name)) {
+      base::StringPiece resource = GetDataResource(kDataResources[i].id);
+      return WebData(resource.data(), resource.size());
     }
   }
-  // TODO(jhawkins): Restore this NOTREACHED once WK stops sending in empty
-  // strings. http://crbug.com/50675.
-  //NOTREACHED() << "Unknown image resource " << name;
+
+  NOTREACHED() << "Unknown image resource " << name;
   return WebData();
 }
 
@@ -440,6 +486,11 @@ double WebKitClientImpl::currentTime() {
   return base::Time::Now().ToDoubleT();
 }
 
+double WebKitClientImpl::monotonicallyIncreasingTime() {
+  return base::TimeTicks::Now().ToInternalValue() /
+      static_cast<double>(base::Time::kMicrosecondsPerSecond);
+}
+
 void WebKitClientImpl::cryptographicallyRandomValues(
     unsigned char* buffer, size_t length) {
   base::RandBytes(buffer, length);
@@ -449,8 +500,18 @@ void WebKitClientImpl::setSharedTimerFiredFunction(void (*func)()) {
   shared_timer_func_ = func;
 }
 
+#ifndef WEBKIT_USE_MONOTONIC_CLOCK_FOR_TIMER_SCHEDULING
 void WebKitClientImpl::setSharedTimerFireTime(double fire_time) {
-  shared_timer_fire_time_ = fire_time;
+  setSharedTimerFireInterval(fire_time - currentTime());
+}
+#endif
+
+void WebKitClientImpl::setSharedTimerFireInterval(double interval_seconds) {
+#ifdef WEBKIT_USE_MONOTONIC_CLOCK_FOR_TIMER_SCHEDULING
+  shared_timer_fire_time_ = interval_seconds + monotonicallyIncreasingTime();
+#else
+  shared_timer_fire_time_ = interval_seconds + currentTime();
+#endif
   if (shared_timer_suspended_)
     return;
 
@@ -465,7 +526,9 @@ void WebKitClientImpl::setSharedTimerFireTime(double fire_time) {
   // This results in measurable performance degradation unless we use ceil() to
   // always round up the sleep times.
   int64 interval = static_cast<int64>(
-      ceil((fire_time - currentTime()) * base::Time::kMicrosecondsPerSecond));
+      ceil(interval_seconds * base::Time::kMillisecondsPerSecond)
+      * base::Time::kMicrosecondsPerMillisecond);
+
   if (interval < 0)
     interval = 0;
 
@@ -589,7 +652,12 @@ void WebKitClientImpl::SuspendSharedTimer() {
 void WebKitClientImpl::ResumeSharedTimer() {
   // The shared timer may have fired or been adjusted while we were suspended.
   if (--shared_timer_suspended_ == 0 && !shared_timer_.IsRunning())
+#ifdef WEBKIT_USE_MONOTONIC_CLOCK_FOR_TIMER_SCHEDULING
+    setSharedTimerFireInterval(
+        monotonicallyIncreasingTime() - shared_timer_fire_time_);
+#else
     setSharedTimerFireTime(shared_timer_fire_time_);
+#endif
 }
 
 }  // namespace webkit_glue

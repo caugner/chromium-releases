@@ -6,13 +6,20 @@
 
 #include <gdk/gdkx.h>
 extern "C" {
+#include <X11/Xatom.h>
 #include <X11/Xlib.h>
 }
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "content/common/notification_service.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/rect.h"
+
+using std::map;
+using std::string;
 
 namespace chromeos {
 
@@ -27,16 +34,24 @@ struct AtomInfo {
 
 // Each value from the Atom enum must be present here.
 static const AtomInfo kAtomInfos[] = {
-  { WmIpc::ATOM_CHROME_LOGGED_IN,        "_CHROME_LOGGED_IN" },
-  { WmIpc::ATOM_CHROME_WINDOW_TYPE,      "_CHROME_WINDOW_TYPE" },
-  { WmIpc::ATOM_CHROME_WM_MESSAGE,       "_CHROME_WM_MESSAGE" },
-  { WmIpc::ATOM_MANAGER,                 "MANAGER" },
-  { WmIpc::ATOM_STRING,                  "STRING" },
-  { WmIpc::ATOM_UTF8_STRING,             "UTF8_STRING" },
-  { WmIpc::ATOM_WM_S0,                   "WM_S0" },
+  { WmIpc::ATOM_CHROME_LAYOUT_MODE,           "_CHROME_LAYOUT_MODE" },
+  { WmIpc::ATOM_CHROME_LOGGED_IN,             "_CHROME_LOGGED_IN" },
+  { WmIpc::ATOM_CHROME_STATE,                 "_CHROME_STATE" },
+  { WmIpc::ATOM_CHROME_STATE_COLLAPSED_PANEL, "_CHROME_STATE_COLLAPSED_PANEL" },
+  { WmIpc::ATOM_CHROME_STATE_STATUS_HIDDEN,   "_CHROME_STATE_STATUS_HIDDEN" },
+  { WmIpc::ATOM_CHROME_STATUS_BOUNDS,         "_CHROME_STATUS_BOUNDS" },
+  { WmIpc::ATOM_CHROME_WINDOW_TYPE,           "_CHROME_WINDOW_TYPE" },
+  { WmIpc::ATOM_CHROME_WM_MESSAGE,            "_CHROME_WM_MESSAGE" },
+  { WmIpc::ATOM_MANAGER,                      "MANAGER" },
+  { WmIpc::ATOM_STRING,                       "STRING" },
+  { WmIpc::ATOM_UTF8_STRING,                  "UTF8_STRING" },
+  { WmIpc::ATOM_WM_S0,                        "WM_S0" },
 };
 
-bool SetIntProperty(XID xid, Atom xatom, const std::vector<int>& values) {
+bool SetIntArrayProperty(XID xid,
+                         Atom property,
+                         Atom property_type,
+                         const std::vector<int>& values) {
   DCHECK(!values.empty());
 
   // XChangeProperty expects values of type 32 to be longs.
@@ -47,8 +62,8 @@ bool SetIntProperty(XID xid, Atom xatom, const std::vector<int>& values) {
   // TODO: Trap errors and return false on failure.
   XChangeProperty(ui::GetXDisplay(),
                   xid,
-                  xatom,
-                  xatom,
+                  property,
+                  property_type,
                   32,  // size in bits of items in 'value'
                   PropModeReplace,
                   reinterpret_cast<const unsigned char*>(data.get()),
@@ -66,6 +81,22 @@ WmIpc* WmIpc::instance() {
   return g_wm_ipc.Pointer();
 }
 
+string WmIpc::GetAtomName(AtomType type) const {
+  map<AtomType, Atom>::const_iterator atom_it = type_to_atom_.find(type);
+  DCHECK(atom_it != type_to_atom_.end()) << "Unknown AtomType " << type;
+  if (atom_it == type_to_atom_.end())
+    return "";
+
+  map<Atom, string>::const_iterator name_it =
+      atom_to_string_.find(atom_it->second);
+  DCHECK(name_it != atom_to_string_.end())
+      << "Unknown atom " << atom_it->second << " for AtomType " << type;
+  if (name_it == atom_to_string_.end())
+    return "";
+
+  return name_it->second;
+}
+
 bool WmIpc::SetWindowType(GtkWidget* widget,
                           WmIpcWindowType type,
                           const std::vector<int>* params) {
@@ -73,8 +104,9 @@ bool WmIpc::SetWindowType(GtkWidget* widget,
   values.push_back(type);
   if (params)
     values.insert(values.end(), params->begin(), params->end());
-  return SetIntProperty(ui::GetX11WindowFromGtkWidget(widget),
-                        type_to_atom_[ATOM_CHROME_WINDOW_TYPE], values);
+  const Atom atom = type_to_atom_[ATOM_CHROME_WINDOW_TYPE];
+  return SetIntArrayProperty(ui::GetX11WindowFromGtkWidget(widget),
+                             atom, atom, values);
 }
 
 WmIpcWindowType WmIpc::GetWindowType(GtkWidget* widget,
@@ -82,7 +114,7 @@ WmIpcWindowType WmIpc::GetWindowType(GtkWidget* widget,
   std::vector<int> properties;
   if (ui::GetIntArrayProperty(
           ui::GetX11WindowFromGtkWidget(widget),
-          atom_to_string_[type_to_atom_[ATOM_CHROME_WINDOW_TYPE]],
+          GetAtomName(ATOM_CHROME_WINDOW_TYPE),
           &properties)) {
     int type = properties.front();
     if (params) {
@@ -93,6 +125,29 @@ WmIpcWindowType WmIpc::GetWindowType(GtkWidget* widget,
   } else {
     return WM_IPC_WINDOW_UNKNOWN;
   }
+}
+
+bool WmIpc::GetWindowState(GtkWidget* widget,
+                           std::set<WmIpc::AtomType>* atom_types) {
+  atom_types->clear();
+
+  std::vector<Atom> atoms;
+  if (!ui::GetAtomArrayProperty(
+          ui::GetX11WindowFromGtkWidget(widget),
+          GetAtomName(ATOM_CHROME_STATE),
+          &atoms)) {
+    return false;
+  }
+
+  for (std::vector<Atom>::const_iterator it = atoms.begin();
+       it != atoms.end(); ++it) {
+    std::map<Atom, AtomType>::const_iterator type_it = atom_to_type_.find(*it);
+    if (type_it != atom_to_type_.end())
+      atom_types->insert(type_it->second);
+    else
+      LOG(WARNING) << "Unknown state atom " << *it;
+  }
+  return true;
 }
 
 void WmIpc::SendMessage(const Message& msg) {
@@ -155,12 +210,32 @@ void WmIpc::HandleNonChromeClientMessageEvent(const GdkEventClient& event) {
   }
 }
 
+void WmIpc::HandleRootWindowPropertyEvent(const GdkEventProperty& event) {
+  static GdkAtom layout_mode_gdk_atom =
+      gdk_x11_xatom_to_atom(type_to_atom_[ATOM_CHROME_LAYOUT_MODE]);
+
+  if (event.atom == layout_mode_gdk_atom)
+    FetchLayoutModeProperty();
+}
+
 void WmIpc::SetLoggedInProperty(bool logged_in) {
   std::vector<int> values;
   values.push_back(static_cast<int>(logged_in));
-  SetIntProperty(gdk_x11_get_default_root_xwindow(),
-                 type_to_atom_[ATOM_CHROME_LOGGED_IN],
-                 values);
+  const Atom atom = type_to_atom_[ATOM_CHROME_LOGGED_IN];
+  SetIntArrayProperty(gdk_x11_get_default_root_xwindow(), atom, atom, values);
+}
+
+void WmIpc::SetStatusBoundsProperty(GtkWidget* widget,
+                                    const gfx::Rect& bounds) {
+  std::vector<int> values;
+  values.push_back(bounds.x());
+  values.push_back(bounds.y());
+  values.push_back(bounds.width());
+  values.push_back(bounds.height());
+  SetIntArrayProperty(ui::GetX11WindowFromGtkWidget(widget),
+                      type_to_atom_[ATOM_CHROME_STATUS_BOUNDS],
+                      XA_CARDINAL,
+                      values);
 }
 
 void WmIpc::NotifyAboutSignout() {
@@ -169,7 +244,10 @@ void WmIpc::NotifyAboutSignout() {
   XFlush(ui::GetXDisplay());
 }
 
-WmIpc::WmIpc() {
+WmIpc::WmIpc()
+    : wm_message_atom_(0),
+      wm_(0),
+      layout_mode_(WM_IPC_LAYOUT_MAXIMIZED) {
   scoped_array<char*> names(new char*[kNumAtoms]);
   scoped_array<Atom> atoms(new Atom[kNumAtoms]);
 
@@ -184,6 +262,7 @@ WmIpc::WmIpc() {
 
   for (int i = 0; i < kNumAtoms; ++i) {
     type_to_atom_[kAtomInfos[i].atom] = atoms[i];
+    atom_to_type_[atoms[i]] = kAtomInfos[i].atom;
     atom_to_string_[atoms[i]] = kAtomInfos[i].name;
   }
 
@@ -195,9 +274,12 @@ WmIpc::WmIpc() {
   GdkWindow* root = gdk_get_default_root_window();
   GdkEventMask event_mask = gdk_window_get_events(root);
   gdk_window_set_events(
-      root, static_cast<GdkEventMask>(event_mask | GDK_STRUCTURE_MASK));
+      root,
+      static_cast<GdkEventMask>(
+          event_mask | GDK_STRUCTURE_MASK | GDK_PROPERTY_CHANGE_MASK));
 
   InitWmInfo();
+  FetchLayoutModeProperty();
 }
 
 WmIpc::~WmIpc() {}
@@ -212,6 +294,22 @@ void WmIpc::InitWmInfo() {
   // manager, we'll just define the version statically in the header.
   msg.set_param(0, 1);
   SendMessage(msg);
+}
+
+void WmIpc::FetchLayoutModeProperty() {
+  int value = 0;
+  if (ui::GetIntProperty(
+          gdk_x11_get_default_root_xwindow(),
+          GetAtomName(ATOM_CHROME_LAYOUT_MODE),
+          &value)) {
+    layout_mode_ = static_cast<WmIpcLayoutMode>(value);
+    NotificationService::current()->Notify(
+        chrome::NOTIFICATION_LAYOUT_MODE_CHANGED,
+        Source<WmIpc>(this),
+        Details<WmIpcLayoutMode>(&layout_mode_));
+  } else {
+    DLOG(WARNING) << "Missing _CHROME_LAYOUT_MODE property on root window";
+  }
 }
 
 }  // namespace chromeos

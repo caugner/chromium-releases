@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,7 +14,7 @@
 // and attach it to your node (class or method). This doc string will be
 // copied over in the generated python classes/methods.
 
-%module(docstring="Python interface to Automtion Proxy.") pyautolib
+%module(docstring="Python interface to Automation Proxy.") pyautolib
 %feature("autodoc", "1");
 
 %include <std_wstring.i>
@@ -185,6 +185,14 @@ class PyUITestBase {
            "before launching the browser. For internal use.") Initialize;
   void Initialize(const FilePath& browser_dir);
 
+  %feature("docstring", "Appends a command-line switch (with associated value "
+           "if given) to the list of switches to be passed to the browser "
+           "upon launch. Should be called before launching the browser. "
+           "For internal use only.")
+      AppendBrowserLaunchSwitch;
+  void AppendBrowserLaunchSwitch(const char* name);
+  void AppendBrowserLaunchSwitch(const char* name, const char* value);
+
   void UseNamedChannelID(const std::string& named_channel_id);
 
   %feature("docstring",
@@ -330,7 +338,8 @@ class PyUITestBase {
            "first window. Indexes are zero-based.") GetActiveTabIndex;
   int GetActiveTabIndex(int window_index=0);
   %feature("docstring", "Activate the tab at the given zero-based index in "
-           "the given or first window. Returns True on success.") ActivateTab;
+           "the given or first window.  Also brings the window to the front. "
+           "Returns True on success.") ActivateTab;
   bool ActivateTab(int tab_index, int window_index=0);
 
   %feature("docstring", "Get the title of the active tab for the given or "

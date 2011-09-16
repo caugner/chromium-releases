@@ -10,6 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "ui/base/accessibility/accessibility_types.h"
+#include "views/view.h"
 
 class SkBitmap;
 
@@ -20,19 +21,15 @@ class Rect;
 namespace views {
 class ClientView;
 class DialogDelegate;
+class NonClientFrameView;
 class View;
-class Window;
+class Widget;
 
 // WidgetDelegate interface
 // Handles events on Widgets in context-specific ways.
 class WidgetDelegate {
  public:
   WidgetDelegate();
-
-  // Called whenever the widget is activated or deactivated.
-  // TODO(beng): This should be consolidated with
-  //             WindowDelegate::OnWindowActivationChanged().
-  virtual void OnWidgetActivated(bool active);
 
   // Called whenever the widget's position changes.
   virtual void OnWidgetMove();
@@ -125,29 +122,55 @@ class WidgetDelegate {
   // this time if necessary.
   virtual void DeleteDelegate() {}
 
-  // Called when the window's activation state changes.
-  virtual void OnWindowActivationChanged(bool active) {}
-
   // Called when the user begins/ends to change the bounds of the window.
   virtual void OnWindowBeginUserBoundsChange() {}
   virtual void OnWindowEndUserBoundsChange() {}
 
-  // Returns the View that is contained within this Window.
+  // Returns the Widget associated with this delegate.
+  virtual Widget* GetWidget() = 0;
+  virtual const Widget* GetWidget() const = 0;
+
+  // Returns the View that is contained within this Widget.
   virtual View* GetContentsView();
 
-  // Called by the Window to create the Client View used to host the contents
-  // of the window.
-  virtual ClientView* CreateClientView(Window* window);
+  // Called by the Widget to create the Client View used to host the contents
+  // of the widget.
+  virtual ClientView* CreateClientView(Widget* widget);
 
-  Window* window() const { return window_; }
+  // Called by the Widget to create the NonClient Frame View for this widget.
+  // Return NULL to use the default one.
+  virtual NonClientFrameView* CreateNonClientFrameView();
+
+  // Returns true if the window can be notified with the work area change.
+  // Otherwise, the work area change for the top window will be processed by
+  // the default window manager. In some cases, like panel, we would like to
+  // manage the positions by ourselves.
+  virtual bool WillProcessWorkAreaChange() const;
 
  protected:
   virtual ~WidgetDelegate() {}
 
  private:
-  friend class Window;
-  // The Window this delegate is bound to. Weak reference.
-  Window* window_;
+  View* default_contents_view_;
+
+  DISALLOW_COPY_AND_ASSIGN(WidgetDelegate);
+};
+
+// A WidgetDelegate implementation that is-a View. Used to override GetWidget()
+// to call View's GetWidget() for the common case where a WidgetDelegate
+// implementation is-a View.
+class WidgetDelegateView : public WidgetDelegate,
+                           public View {
+ public:
+  WidgetDelegateView();
+  virtual ~WidgetDelegateView();
+
+  // Overridden from WidgetDelegate:
+  virtual Widget* GetWidget() OVERRIDE;
+  virtual const Widget* GetWidget() const OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(WidgetDelegateView);
 };
 
 }  // namespace views

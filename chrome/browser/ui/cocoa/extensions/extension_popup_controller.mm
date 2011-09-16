@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -14,6 +14,7 @@
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_source.h"
@@ -38,16 +39,16 @@ class DevtoolsNotificationBridge : public NotificationObserver {
   explicit DevtoolsNotificationBridge(ExtensionPopupController* controller)
     : controller_(controller) {}
 
-  void Observe(NotificationType type,
+  void Observe(int type,
                const NotificationSource& source,
                const NotificationDetails& details) {
-    switch (type.value) {
-      case NotificationType::EXTENSION_HOST_DID_STOP_LOADING: {
+    switch (type) {
+      case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
         if (Details<ExtensionHost>([controller_ extensionHost]) == details)
           [controller_ showDevTools];
         break;
       }
-      case NotificationType::DEVTOOLS_WINDOW_CLOSING: {
+      case content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING: {
         RenderViewHost* rvh = [controller_ extensionHost]->render_view_host();
         if (Details<RenderViewHost>(rvh) == details)
           // Allow the devtools to finish detaching before we close the popup
@@ -131,17 +132,17 @@ class DevtoolsNotificationBridge : public NotificationObserver {
     notificationBridge_.reset(new DevtoolsNotificationBridge(self));
     registrar_.reset(new NotificationRegistrar);
     registrar_->Add(notificationBridge_.get(),
-                    NotificationType::DEVTOOLS_WINDOW_CLOSING,
+                    content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
                     Source<Profile>(host->profile()));
     registrar_->Add(notificationBridge_.get(),
-                    NotificationType::EXTENSION_HOST_DID_STOP_LOADING,
+                    chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
                     Source<Profile>(host->profile()));
   }
   return self;
 }
 
 - (void)showDevTools {
-  DevToolsManager::GetInstance()->OpenDevToolsWindow(host_->render_view_host());
+  DevToolsWindow::OpenDevToolsWindow(host_->render_view_host());
 }
 
 - (void)dealloc {

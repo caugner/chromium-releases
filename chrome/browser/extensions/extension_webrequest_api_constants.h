@@ -12,6 +12,8 @@ namespace extension_webrequest_api_constants {
 
 // Keys.
 extern const char kErrorKey[];
+extern const char kFrameIdKey[];
+extern const char kFromCache[];
 extern const char kIpKey[];
 extern const char kMethodKey[];
 extern const char kRedirectUrlKey[];
@@ -35,7 +37,7 @@ extern const char kOnBeforeSendHeaders[];
 extern const char kOnCompleted[];
 extern const char kOnErrorOccurred[];
 extern const char kOnResponseStarted[];
-extern const char kOnRequestSent[];
+extern const char kOnSendHeaders[];
 
 // Error messages.
 extern const char kInvalidRedirectUrl[];

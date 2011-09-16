@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/extensions/extension_app_api.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
@@ -20,6 +21,7 @@ class ExtensionPrefs;
 class ExtensionService;
 class NotificationRegistrar;
 class PrefChangeRegistrar;
+class PrefsService;
 class Profile;
 
 namespace gfx {
@@ -37,8 +39,9 @@ class AppLauncherHandler : public WebUIMessageHandler,
 
   // Populate a dictionary with the information from an extension.
   static void CreateAppInfo(const Extension* extension,
-                            ExtensionPrefs* extension_prefs,
-                            DictionaryValue* value);
+                            const AppNotification* notification,
+                            ExtensionService* service,
+                            base::DictionaryValue* value);
 
   // Callback for pings related to launching apps on the NTP.
   static bool HandlePing(Profile* profile, const std::string& path);
@@ -48,42 +51,53 @@ class AppLauncherHandler : public WebUIMessageHandler,
   virtual void RegisterMessages();
 
   // NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                       const NotificationSource& source,
                       const NotificationDetails& details);
 
   // Populate the given dictionary with all installed app info.
-  void FillAppDictionary(DictionaryValue* value);
+  void FillAppDictionary(base::DictionaryValue* value);
+
+  // Create a dictionary value for the given extension. May return NULL, e.g. if
+  // the given extension is not an app. If non-NULL, the caller assumes
+  // ownership of the pointer.
+  base::DictionaryValue* GetAppInfo(const Extension* extension);
 
   // Populate the given dictionary with the web store promo content.
-  void FillPromoDictionary(DictionaryValue* value);
+  void FillPromoDictionary(base::DictionaryValue* value);
 
   // Callback for the "getApps" message.
-  void HandleGetApps(const ListValue* args);
+  void HandleGetApps(const base::ListValue* args);
 
   // Callback for the "launchApp" message.
-  void HandleLaunchApp(const ListValue* args);
+  void HandleLaunchApp(const base::ListValue* args);
 
   // Callback for the "setLaunchType" message.
-  void HandleSetLaunchType(const ListValue* args);
+  void HandleSetLaunchType(const base::ListValue* args);
 
   // Callback for the "uninstallApp" message.
-  void HandleUninstallApp(const ListValue* args);
+  void HandleUninstallApp(const base::ListValue* args);
 
   // Callback for the "hideAppPromo" message.
-  void HandleHideAppsPromo(const ListValue* args);
+  void HandleHideAppsPromo(const base::ListValue* args);
 
   // Callback for the "createAppShortcut" message.
-  void HandleCreateAppShortcut(const ListValue* args);
+  void HandleCreateAppShortcut(const base::ListValue* args);
 
   // Callback for the "reorderApps" message.
-  void HandleReorderApps(const ListValue* args);
+  void HandleReorderApps(const base::ListValue* args);
 
   // Callback for the "setPageIndex" message.
-  void HandleSetPageIndex(const ListValue* args);
+  void HandleSetPageIndex(const base::ListValue* args);
 
   // Callback for the "promoSeen" message.
-  void HandlePromoSeen(const ListValue* args);
+  void HandlePromoSeen(const base::ListValue* args);
+
+  // Callback for the "saveAppPageName" message.
+  void HandleSaveAppPageName(const base::ListValue* args);
+
+  // Register app launcher preferences.
+  static void RegisterUserPrefs(PrefService* pref_service);
 
  private:
   // Records a web store launch in the appropriate histograms. |promo_active|
@@ -110,7 +124,7 @@ class AppLauncherHandler : public WebUIMessageHandler,
 
   // ExtensionInstallUI::Delegate:
   virtual void InstallUIProceed();
-  virtual void InstallUIAbort();
+  virtual void InstallUIAbort(bool user_initiated);
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.

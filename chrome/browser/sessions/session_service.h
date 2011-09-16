@@ -20,12 +20,12 @@
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
-class NavigationController;
 class NavigationEntry;
 class Profile;
 class SessionCommand;
 struct SessionTab;
 struct SessionWindow;
+class TabContentsWrapper;
 
 // SessionService ------------------------------------------------------------
 
@@ -133,8 +133,7 @@ class SessionService : public BaseSessionService,
 
   // Notification that a tab has restored its entries or a closed tab is being
   // reused.
-  void TabRestored(NavigationController* controller,
-                   bool pinned);
+  void TabRestored(TabContentsWrapper* tab, bool pinned);
 
   // Sets the index of the selected entry in the navigation controller for the
   // specified tab.
@@ -200,7 +199,7 @@ class SessionService : public BaseSessionService,
   bool RestoreIfNecessary(const std::vector<GURL>& urls_to_open,
                           Browser* browser);
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -303,13 +302,13 @@ class SessionService : public BaseSessionService,
                             std::map<int, SessionWindow*>* windows);
 
   // Adds commands to commands that will recreate the state of the specified
-  // NavigationController. This adds at most kMaxNavigationCountToPersist
-  // navigations (in each direction from the current navigation index).
+  // tab. This adds at most kMaxNavigationCountToPersist navigations (in each
+  // direction from the current navigation index).
   // A pair is added to tab_to_available_range indicating the range of
   // indices that were written.
   void BuildCommandsForTab(
       const SessionID& window_id,
-      NavigationController* controller,
+      TabContentsWrapper* tab,
       int index_in_window,
       bool is_pinned,
       std::vector<SessionCommand*>* commands,
@@ -382,7 +381,7 @@ class SessionService : public BaseSessionService,
   // currently called when Save() is called to compare how often the
   // session data is currently saved verses when we may want to save it.
   // It records the data in UMA stats.
-  void RecordSessionUpdateHistogramData(NotificationType type,
+  void RecordSessionUpdateHistogramData(int type,
     base::TimeTicks* last_updated_time);
 
   // Helper methods to record the histogram data

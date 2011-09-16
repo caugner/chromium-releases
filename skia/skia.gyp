@@ -7,7 +7,6 @@
     {
       'target_name': 'skia',
       'type': '<(component)',
-      'msvs_guid': 'CD9CA56E-4E94-444C-87D4-58CA1E6F300D',
       'sources': [
         '../third_party/skia/gpu/src/GrAllocPool.cpp',
         '../third_party/skia/gpu/src/GrAtlas.cpp',
@@ -41,6 +40,7 @@
         '../third_party/skia/gpu/src/GrRectanizer_fifo.cpp',
         '../third_party/skia/gpu/src/GrResource.cpp',
         '../third_party/skia/gpu/src/GrStencil.cpp',
+        '../third_party/skia/gpu/src/GrTesselatedPathRenderer.cpp',
         '../third_party/skia/gpu/src/GrTexture.cpp',
         '../third_party/skia/gpu/src/GrTextureCache.cpp',
         '../third_party/skia/gpu/src/GrTextContext.cpp',
@@ -95,6 +95,7 @@
         '../third_party/skia/gpu/include/GrTDArray.h',
         '../third_party/skia/gpu/include/GrTHashCache.h',
         '../third_party/skia/gpu/include/GrTLList.h',
+        '../third_party/skia/gpu/include/GrTesselatedPathRenderer.h',
         '../third_party/skia/gpu/include/GrTextContext.h',
         '../third_party/skia/gpu/include/GrTextStrike.h',
         '../third_party/skia/gpu/include/GrTexture.h',
@@ -310,6 +311,7 @@
         '../third_party/skia/src/core/SkCoreBlitters.h',
         '../third_party/skia/src/core/SkCubicClipper.cpp',
         '../third_party/skia/src/core/SkCubicClipper.h',
+        '../third_party/skia/src/core/SkData.cpp',
         '../third_party/skia/src/core/SkDebug.cpp',
         #'../third_party/skia/src/core/SkDebug_stdio.cpp',
         '../third_party/skia/src/core/SkDeque.cpp',
@@ -465,6 +467,7 @@
 
         '../third_party/skia/src/opts/opts_check_SSE2.cpp',
 
+        '../third_party/skia/src/pdf/SkBitSet.cpp',
         '../third_party/skia/src/pdf/SkPDFCatalog.cpp',
         '../third_party/skia/src/pdf/SkPDFDevice.cpp',
         '../third_party/skia/src/pdf/SkPDFDocument.cpp',
@@ -526,6 +529,7 @@
         '../third_party/skia/include/core/SkColorPriv.h',
         '../third_party/skia/include/core/SkColorShader.h',
         '../third_party/skia/include/core/SkComposeShader.h',
+        '../third_party/skia/include/core/SkData.h',
         '../third_party/skia/include/core/SkDeque.h',
         '../third_party/skia/include/core/SkDescriptor.h',
         '../third_party/skia/include/core/SkDevice.h',
@@ -622,6 +626,7 @@
         '../third_party/skia/include/gpu/SkGr.h',
         '../third_party/skia/include/gpu/SkGrTexturePixelRef.h',
 
+        '../third_party/skia/include/pdf/SkBitSet.h',
         '../third_party/skia/include/pdf/SkPDFCatalog.h',
         '../third_party/skia/include/pdf/SkPDFDevice.h',
         '../third_party/skia/include/pdf/SkPDFDocument.h',
@@ -714,6 +719,7 @@
         'GR_AGGRESSIVE_SHADER_OPTS=1',
         'SK_DISABLE_FAST_AA_STROKE_RECT',
         'SK_IGNORE_CF_OPTIMIZATION',
+        'SK_IGNORE_ROTATED_FREETYPE_FIX',
       ],
       'sources!': [
         '../third_party/skia/include/core/SkTypes.h',
@@ -722,7 +728,12 @@
         [ 'OS != "mac"', {
           'sources/': [
             ['exclude', '_mac\\.(cc|cpp|mm?)$'],
-            ['exclude', '/mac/'] ],
+            ['exclude', '/mac/']
+          ],
+          'sources': [
+            '../third_party/skia/include/utils/SkMatrix44.h',
+            '../third_party/skia/src/utils/SkMatrix44.cpp',
+          ],
         }],
         [ 'toolkit_uses_gtk == 0', {
           'sources/': [ ['exclude', '_(linux|gtk)\\.(cc|cpp)$'] ],
@@ -752,14 +763,6 @@
             '../third_party/skia/src/opts/opts_check_SSE2.cpp'
           ],
         }],
-        ['clang==1', {
-          'defines': [
-            # Remove all use of __restrict__ -- skia uses it incorrectly,
-            # and clang is more strict about it.
-            # http://code.google.com/p/skia/issues/detail?id=63
-            'SK_RESTRICT=',
-          ],
-        }],
         [ 'toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gdk',
@@ -775,20 +778,11 @@
           'sources': [
             'ext/SkFontHost_fontconfig.cpp',
             'ext/SkFontHost_fontconfig_direct.cpp',
-            '../third_party/skia/src/core/SkBlitter_ARGB32_Subpixel.cpp',
-            '../third_party/skia/src/ports/SkFontHost_FreeType_Subpixel.cpp',
-          ],
-          'defines': [
-            'SK_SUPPORT_LCDTEXT',
           ],
         }],
         [ 'OS == "mac"', {
           'defines': [
             'SK_BUILD_FOR_MAC',
-          ],
-          'sources/': [
-            ['exclude', '/pdf/'],
-            ['exclude', 'ext/vector_platform_device_skia\\.(cc|h)'],
           ],
           'include_dirs': [
             '../third_party/skia/include/utils/mac',
@@ -798,11 +792,25 @@
               '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
             ],
           },
+          'conditions': [
+             [ 'use_skia == 0', {
+               'sources/': [
+                 ['exclude', '/pdf/'],
+                 ['exclude', 'ext/vector_platform_device_skia\\.(cc|h)'],
+               ],
+            },
+            { # use_skia
+              'defines': [
+                'SK_SUPPORT_888_TEXT',
+                'SK_USE_MAC_CORE_TEXT',
+              ],
+            }],
+          ],
         }],
         [ 'OS == "win"', {
           'sources!': [
             '../third_party/skia/src/core/SkMMapStream.cpp',
-            '../third_party/skia/src/ports/SkTime_Unix.cc',
+            '../third_party/skia/src/ports/SkTime_Unix.cpp',
             'ext/SkThread_chrome.cc',
           ],
           'include_dirs': [
@@ -834,6 +842,9 @@
       ],
       'dependencies': [
         'skia_opts',
+        'skia_libtess',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+	'../third_party/sfntly/sfntly.gyp:sfntly',
         '../third_party/zlib/zlib.gyp:zlib',
       ],
       'direct_dependent_settings': {
@@ -914,7 +925,14 @@
               'defines': [
                 '__ARM_HAVE_NEON',
               ],
-            }],
+              'cflags': [
+                # The neon assembly contains conditional instructions which
+                # aren't enclosed in an IT block. The assembler complains
+                # without this option.
+                # See #86592.
+                '-Wa,-mimplicit-it=always',
+              ],
+           }],
           ],
           # The assembly uses the frame pointer register (r7 in Thumb/r11 in
           # ARM), the compiler doesn't like that.
@@ -928,6 +946,45 @@
           ],
         }],
       ],
+    },
+    {
+      'target_name': 'skia_libtess',
+      'type': 'static_library',
+      'include_dirs': [
+        '../third_party/skia/third_party/glu',
+      ],
+      'sources': [
+        '../third_party/skia/third_party/glu/internal_glu.h',
+        '../third_party/skia/third_party/glu/gluos.h',
+        '../third_party/skia/third_party/glu/libtess/dict-list.h',
+        '../third_party/skia/third_party/glu/libtess/dict.c',
+        '../third_party/skia/third_party/glu/libtess/dict.h',
+        '../third_party/skia/third_party/glu/libtess/geom.c',
+        '../third_party/skia/third_party/glu/libtess/geom.h',
+        '../third_party/skia/third_party/glu/libtess/memalloc.c',
+        '../third_party/skia/third_party/glu/libtess/memalloc.h',
+        '../third_party/skia/third_party/glu/libtess/mesh.c',
+        '../third_party/skia/third_party/glu/libtess/mesh.h',
+        '../third_party/skia/third_party/glu/libtess/normal.c',
+        '../third_party/skia/third_party/glu/libtess/normal.h',
+        '../third_party/skia/third_party/glu/libtess/priorityq-heap.h',
+        '../third_party/skia/third_party/glu/libtess/priorityq-sort.h',
+        '../third_party/skia/third_party/glu/libtess/priorityq.c',
+        '../third_party/skia/third_party/glu/libtess/priorityq.h',
+        '../third_party/skia/third_party/glu/libtess/render.c',
+        '../third_party/skia/third_party/glu/libtess/render.h',
+        '../third_party/skia/third_party/glu/libtess/sweep.c',
+        '../third_party/skia/third_party/glu/libtess/sweep.h',
+        '../third_party/skia/third_party/glu/libtess/tess.c',
+        '../third_party/skia/third_party/glu/libtess/tess.h',
+        '../third_party/skia/third_party/glu/libtess/tessmono.c',
+        '../third_party/skia/third_party/glu/libtess/tessmono.h',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '../third_party/skia/third_party/glu',
+        ],
+      },
     },
     {
       'target_name': 'image_operations_bench',
@@ -945,9 +1002,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -12,18 +12,20 @@
 
 #include <map>
 
-#include "base/memory/singleton.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
+namespace content {
+struct RetargetingDetails;
+}
 class TabContents;
-struct ViewHostMsg_CreateWindow_Params;
 
-// Tracks the navigation state of all frames currently known to the
-// webNavigation API. It is mainly used to track in which frames an error
+// Tracks the navigation state of all frames in a given tab currently known to
+// the webNavigation API. It is mainly used to track in which frames an error
 // occurred so no further events for this frame are being sent.
 class FrameNavigationState {
  public:
@@ -33,13 +35,11 @@ class FrameNavigationState {
   // True if navigation events for the given frame can be sent.
   bool CanSendEvents(int64 frame_id) const;
 
-  // Starts to track a frame given by its |frame_id| showing the URL |url| in
-  // a |tab_contents|.
+  // Starts to track a frame identified by its |frame_id| showing the URL |url|.
   void TrackFrame(int64 frame_id,
                   const GURL& url,
                   bool is_main_frame,
-                  bool is_error_page,
-                  const TabContents* tab_contents);
+                  bool is_error_page);
 
   // Returns the URL corresponding to a tracked frame given by its |frame_id|.
   GURL GetUrl(int64 frame_id) const;
@@ -47,11 +47,12 @@ class FrameNavigationState {
   // True if the frame given by its |frame_id| is the main frame of its tab.
   bool IsMainFrame(int64 frame_id) const;
 
+  // Returns the frame ID of the main frame, or -1 if the frame ID is not
+  // known.
+  int64 GetMainFrameID() const;
+
   // Marks a frame as in an error state.
   void ErrorOccurredInFrame(int64 frame_id);
-
-  // Removes state associated with this tab contents and all of its frames.
-  void RemoveTabContentsState(const TabContents* tab_contents);
 
 #ifdef UNIT_TEST
   static void set_allow_extension_scheme(bool allow_extension_scheme) {
@@ -60,16 +61,12 @@ class FrameNavigationState {
 #endif
 
  private:
-  typedef std::multimap<const TabContents*, int64> TabContentsToFrameIdMap;
   struct FrameState {
     bool error_occurred;  // True if an error has occurred in this frame.
     bool is_main_frame;  // True if this is a main frame.
     GURL url;  // URL of this frame.
   };
   typedef std::map<int64, FrameState> FrameIdToStateMap;
-
-  // Tracks which frames belong to a given tab contents object.
-  TabContentsToFrameIdMap tab_contents_map_;
 
   // Tracks the state of known frames.
   FrameIdToStateMap frame_state_map_;
@@ -85,6 +82,13 @@ class ExtensionWebNavigationTabObserver : public TabContentsObserver {
  public:
   explicit ExtensionWebNavigationTabObserver(TabContents* tab_contents);
   virtual ~ExtensionWebNavigationTabObserver();
+
+  // Returns the object for the given |tab_contents|.
+  static ExtensionWebNavigationTabObserver* Get(TabContents* tab_contents);
+
+  const FrameNavigationState& frame_navigation_state() const {
+    return navigation_state_;
+  }
 
   // TabContentsObserver implementation.
   virtual void DidStartProvisionalLoadForFrame(
@@ -105,11 +109,6 @@ class ExtensionWebNavigationTabObserver : public TabContentsObserver {
   virtual void DocumentLoadedInFrame(int64 frame_id) OVERRIDE;
   virtual void DidFinishLoad(int64 frame_id) OVERRIDE;
   virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
-  virtual void DidOpenURL(const GURL& url,
-                          const GURL& referrer,
-                          WindowOpenDisposition disposition,
-                          PageTransition::Type transition);
-
 
  private:
   // True if the transition and target url correspond to a reference fragment
@@ -132,32 +131,54 @@ class ExtensionWebNavigationTabObserver : public TabContentsObserver {
 // system.
 class ExtensionWebNavigationEventRouter : public NotificationObserver {
  public:
-  // Returns the singleton instance of the event router.
-  static ExtensionWebNavigationEventRouter* GetInstance();
+  explicit ExtensionWebNavigationEventRouter(Profile* profile);
+  virtual ~ExtensionWebNavigationEventRouter();
 
   // Invoked by the extensions service once the extension system is fully set
   // up and can start dispatching events to extensions.
   void Init();
 
  private:
-  friend struct DefaultSingletonTraits<ExtensionWebNavigationEventRouter>;
+  // Used to cache the information about newly created TabContents objects.
+  struct PendingTabContents {
+    PendingTabContents();
+    PendingTabContents(TabContents* source_tab_contents,
+                       int64 source_frame_id,
+                       bool source_frame_is_main_frame,
+                       TabContents* target_tab_contents,
+                       const GURL& target_url);
+    ~PendingTabContents();
 
-  ExtensionWebNavigationEventRouter();
-  virtual ~ExtensionWebNavigationEventRouter();
+    TabContents* source_tab_contents;
+    int64 source_frame_id;
+    bool source_frame_is_main_frame;
+    TabContents* target_tab_contents;
+    GURL target_url;
+  };
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Handler for the CREATING_NEW_WINDOW event. The method takes the details of
-  // such an event and constructs a suitable JSON formatted extension event from
-  // it.
-  void CreatingNewWindow(TabContents* tab_content,
-                         const ViewHostMsg_CreateWindow_Params* details);
+  // Handler for the NOTIFICATION_RETARGETING event. The method takes the
+  // details of such an event and stores them for the later
+  // NOTIFICATION_TAB_ADDED event.
+  void Retargeting(const content::RetargetingDetails* details);
+
+  // Handler for the NOTIFICATION_TAB_ADDED event. The method takes the details
+  // of such an event and creates a JSON formated extension event from it.
+  void TabAdded(TabContents* tab_contents);
+
+  // Mapping pointers to TabContents objects to information about how they got
+  // created.
+  std::map<TabContents*, PendingTabContents> pending_tab_contents_;
 
   // Used for tracking registrations to navigation notifications.
   NotificationRegistrar registrar_;
+
+  // The profile that owns us via ExtensionService.
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionWebNavigationEventRouter);
 };

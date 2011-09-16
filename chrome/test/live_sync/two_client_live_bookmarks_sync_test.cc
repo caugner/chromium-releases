@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/rand_util.h"
-#include "base/stringprintf.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/test/live_sync/live_bookmarks_sync_test.h"
@@ -14,36 +13,11 @@ const std::wstring kGenericFolderName = L"Folder Name";
 const std::wstring kGenericSubfolderName = L"Subfolder Name";
 const std::wstring kGenericSubsubfolderName = L"Subsubfolder Name";
 
-static std::string IndexedURL(int i) {
-  return StringPrintf("http://www.host.ext:1234/path/filename/%d", i);
-}
-
-static std::wstring IndexedURLTitle(int i) {
-  return StringPrintf(L"URL Title %d", i);
-}
-
-static std::wstring IndexedFolderName(int i) {
-  return StringPrintf(L"Folder Name %d", i);
-}
-
-static std::wstring IndexedSubfolderName(int i) {
-  return StringPrintf(L"Subfolder Name %d", i);
-}
-
-static std::wstring IndexedSubsubfolderName(int i) {
-  return StringPrintf(L"Subsubfolder Name %d", i);
-}
-
 const std::vector<unsigned char> GenericFavicon() {
   return LiveBookmarksSyncTest::CreateFavicon(254);
 }
 
-const std::vector<unsigned char> IndexedFavicon(int i) {
-  return LiveBookmarksSyncTest::CreateFavicon(i);
-}
-
-// http://crbug.com/81256
-IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, FLAKY_Sanity) {
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, Sanity) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -124,9 +98,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 }
 
 // Test Scribe ID - 370489.
-// TODO(rsimha): See http://crbug.com/78840.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-                       FLAKY_SC_AddFirstBMWithFavicon) {
+                       SC_AddFirstBMWithFavicon) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -228,9 +201,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 }
 
 // Test Scribe ID - 370639 - Add bookmarks with different name and same URL.
-// http://crbug.com/81256
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-                       FLAKY_SC_DuplicateBookmarksWithSameURL) {
+                       SC_DuplicateBookmarksWithSameURL) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -910,9 +882,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, SC_HoistBMs10LevelUp) {
 }
 
 // Test Scribe ID - 371968.
-// TODO(rsimha): Enable after http://crbug.com/74853 is fixed.
-IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-                       FAILS_SC_SinkBMs10LevelDown) {
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, SC_SinkBMs10LevelDown) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -1668,3 +1638,80 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   ASSERT_TRUE(AllModelsMatch());
   ASSERT_FALSE(ContainsDuplicateBookmarks(0));
 }
+
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
+                       SingleClientEnabledEncryption) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  ASSERT_TRUE(EnableEncryption(0));
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(IsEncrypted(0));
+  ASSERT_TRUE(IsEncrypted(1));
+  ASSERT_TRUE(AllModelsMatchVerifier());
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
+                       SingleClientEnabledEncryptionAndChanged) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  ASSERT_TRUE(EnableEncryption(0));
+  ASSERT_TRUE(AddURL(0, IndexedURLTitle(0), GURL(IndexedURL(0))) != NULL);
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(IsEncrypted(0));
+  ASSERT_TRUE(IsEncrypted(1));
+  ASSERT_TRUE(AllModelsMatchVerifier());
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
+                       BothClientsEnabledEncryption) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  ASSERT_TRUE(EnableEncryption(0));
+  ASSERT_TRUE(EnableEncryption(1));
+  ASSERT_TRUE(AwaitQuiescence());
+  ASSERT_TRUE(IsEncrypted(0));
+  ASSERT_TRUE(IsEncrypted(1));
+  ASSERT_TRUE(AllModelsMatchVerifier());
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
+                       SingleClientEnabledEncryptionBothChanged) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  ASSERT_TRUE(EnableEncryption(0));
+  ASSERT_TRUE(AwaitQuiescence());
+  ASSERT_TRUE(IsEncrypted(0));
+  ASSERT_TRUE(IsEncrypted(1));
+  ASSERT_TRUE(AddURL(0, IndexedURLTitle(0), GURL(IndexedURL(0))) != NULL);
+  ASSERT_TRUE(AddURL(0, IndexedURLTitle(1), GURL(IndexedURL(1))) != NULL);
+  ASSERT_TRUE(AwaitQuiescence());
+  ASSERT_TRUE(AllModelsMatchVerifier());
+  ASSERT_TRUE(IsEncrypted(0));
+  ASSERT_TRUE(IsEncrypted(1));
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
+                       SingleClientEnabledEncryptionAndChangedMultipleTimes) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  ASSERT_TRUE(AddURL(0, IndexedURLTitle(0), GURL(IndexedURL(0))) != NULL);
+  ASSERT_TRUE(EnableEncryption(0));
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(IsEncrypted(0));
+  ASSERT_TRUE(IsEncrypted(1));
+  ASSERT_TRUE(AllModelsMatchVerifier());
+
+  ASSERT_TRUE(AddURL(0, IndexedURLTitle(1), GURL(IndexedURL(1))) != NULL);
+  ASSERT_TRUE(AddFolder(0, IndexedFolderName(0)) != NULL);
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(AllModelsMatchVerifier());
+}
+
+// TODO(zea): Add first time sync functionality testing. In particular, when
+// there are encrypted types in first time sync we need to ensure we don't
+// duplicate bookmarks.

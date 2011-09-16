@@ -4,7 +4,10 @@
 
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/memory/singleton.h"
+#include "content/browser/javascript_dialogs.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/url_constants.h"
 #include "ui/gfx/rect.h"
@@ -12,11 +15,47 @@
 TabContentsDelegate::TabContentsDelegate() {
 }
 
+TabContents* TabContentsDelegate::OpenURLFromTab(
+    TabContents* source,
+    const GURL& url,
+    const GURL& referrer,
+    WindowOpenDisposition disposition,
+    PageTransition::Type transition) {
+  return NULL;
+}
+
+void TabContentsDelegate::NavigationStateChanged(const TabContents* source,
+                                                 unsigned changed_flags) {
+}
+
 std::string TabContentsDelegate::GetNavigationHeaders(const GURL& url) {
   return std::string();
 }
 
+void TabContentsDelegate::AddNewContents(TabContents* source,
+                                         TabContents* new_contents,
+                                         WindowOpenDisposition disposition,
+                                         const gfx::Rect& initial_pos,
+                                         bool user_gesture) {
+}
+
+void TabContentsDelegate::ActivateContents(TabContents* contents) {
+}
+
+void TabContentsDelegate::DeactivateContents(TabContents* contents) {
+}
+
+void TabContentsDelegate::LoadingStateChanged(TabContents* source) {
+}
+
 void TabContentsDelegate::LoadProgressChanged(double progress) {
+}
+
+void TabContentsDelegate::CloseContents(TabContents* source) {
+}
+
+void TabContentsDelegate::MoveContents(TabContents* source,
+                                       const gfx::Rect& pos) {
 }
 
 void TabContentsDelegate::DetachContents(TabContents* source) {
@@ -26,15 +65,15 @@ bool TabContentsDelegate::IsPopupOrPanel(const TabContents* source) const {
   return false;
 }
 
-TabContents* TabContentsDelegate::GetConstrainingContents(TabContents* source) {
-  return source;
-}
-
 bool TabContentsDelegate::ShouldFocusConstrainedWindow() {
   return true;
 }
 
 void TabContentsDelegate::WillShowConstrainedWindow(TabContents* source) {
+}
+
+void TabContentsDelegate::UpdateTargetURL(TabContents* source,
+                                          const GURL& url) {
 }
 
 void TabContentsDelegate::ContentsMouseEvent(
@@ -64,8 +103,6 @@ void TabContentsDelegate::BeforeUnloadFired(TabContents* tab,
   *proceed_to_fire_unload = true;
 }
 
-bool TabContentsDelegate::IsExternalTabContainer() const { return false; }
-
 void TabContentsDelegate::SetFocusToLocationBar(bool select_all) {}
 
 bool TabContentsDelegate::ShouldFocusPageAfterCrash() {
@@ -90,6 +127,14 @@ void TabContentsDelegate::TabContentsFocused(TabContents* tab_content) {
 
 int TabContentsDelegate::GetExtraRenderViewHeight() const {
   return 0;
+}
+
+bool TabContentsDelegate::CanDownload(TabContents* source, int request_id) {
+  return true;
+}
+
+void TabContentsDelegate::OnStartDownload(TabContents* source,
+                                          DownloadItem* download) {
 }
 
 bool TabContentsDelegate::HandleContextMenu(const ContextMenuParams& params) {
@@ -173,21 +218,60 @@ gfx::NativeWindow TabContentsDelegate::GetFrameNativeWindow() {
 void TabContentsDelegate::TabContentsCreated(TabContents* new_contents) {
 }
 
-bool TabContentsDelegate::ShouldEnablePreferredSizeNotifications() {
-  return false;
-}
-
-void TabContentsDelegate::UpdatePreferredSize(const gfx::Size& pref_size) {
-}
-
 void TabContentsDelegate::ContentRestrictionsChanged(TabContents* source) {
 }
 
-bool TabContentsDelegate::ShouldShowHungRendererDialog() {
-  return true;
+void TabContentsDelegate::RendererUnresponsive(TabContents* source) {
 }
 
-void TabContentsDelegate::WorkerCrashed() {
+void TabContentsDelegate::RendererResponsive(TabContents* source) {
+}
+
+void TabContentsDelegate::WorkerCrashed(TabContents* source) {
+}
+
+void TabContentsDelegate::DidNavigateMainFramePostCommit(
+    TabContents* tab) {
+}
+
+void TabContentsDelegate::DidNavigateToPendingEntry(TabContents* tab) {
+}
+
+// A stubbed-out version of JavaScriptDialogCreator that doesn't do anything.
+class JavaScriptDialogCreatorStub : public content::JavaScriptDialogCreator {
+ public:
+  static JavaScriptDialogCreatorStub* GetInstance() {
+    return Singleton<JavaScriptDialogCreatorStub>::get();
+  }
+
+  virtual void RunJavaScriptDialog(content::JavaScriptDialogDelegate* delegate,
+                                   TitleType title_type,
+                                   const string16& title,
+                                   int dialog_flags,
+                                   const string16& message_text,
+                                   const string16& default_prompt_text,
+                                   IPC::Message* reply_message,
+                                   bool* did_suppress_message) OVERRIDE {
+    *did_suppress_message = true;
+  }
+
+  virtual void RunBeforeUnloadDialog(
+      content::JavaScriptDialogDelegate* delegate,
+      const string16& message_text,
+      IPC::Message* reply_message) OVERRIDE {
+    delegate->OnDialogClosed(reply_message, true, string16());
+  }
+
+  virtual void ResetJavaScriptState(
+      content::JavaScriptDialogDelegate* delegate) OVERRIDE {
+  }
+ private:
+  friend struct DefaultSingletonTraits<JavaScriptDialogCreatorStub>;
+};
+
+content::JavaScriptDialogCreator*
+TabContentsDelegate::GetJavaScriptDialogCreator() {
+  return JavaScriptDialogCreatorStub::GetInstance();
 }
 
 TabContentsDelegate::~TabContentsDelegate() {

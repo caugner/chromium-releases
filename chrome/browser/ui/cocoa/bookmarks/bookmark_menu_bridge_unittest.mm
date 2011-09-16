@@ -20,7 +20,7 @@
 
 class TestBookmarkMenuBridge : public BookmarkMenuBridge {
  public:
-  TestBookmarkMenuBridge(Profile* profile, NSMenu* menu)
+  TestBookmarkMenuBridge(Profile* profile, NSMenu *menu)
       : BookmarkMenuBridge(profile, menu),
         menu_(menu) {
   }
@@ -42,9 +42,9 @@ class BookmarkMenuBridgeTest : public PlatformTest {
  public:
 
    void SetUp() {
-     NSMenu* menu = [[NSMenu alloc] initWithTitle:@"test"];
+     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"test"];
      bridge_.reset(new TestBookmarkMenuBridge(browser_test_helper_.profile(),
-                                              menu));
+                   menu));
      EXPECT_TRUE(bridge_.get());
    }
 
@@ -93,25 +93,26 @@ class BookmarkMenuBridgeTest : public PlatformTest {
 
 TEST_F(BookmarkMenuBridgeTest, TestBookmarkMenuAutoSeparator) {
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  bridge_->Loaded(model);
+  bridge_->Loaded(model, false);
   NSMenu* menu = bridge_->menu_;
   bridge_->UpdateMenu(menu);
-  // The bare menu after loading has a separator and an "Other Bookmarks"
-  // submenu.
-  EXPECT_EQ(2, [menu numberOfItems]);
+  // The bare menu after loading used to have a separator and an
+  // "Other Bookmarks" submenu, but we no longer show those items if the
+  // "Other Bookmarks" submenu would be empty.
+  EXPECT_EQ(0, [menu numberOfItems]);
   // Add a bookmark and reload and there should be 8 items: the previous
   // menu contents plus two new separator, the new bookmark and three
   // versions of 'Open All Bookmarks' menu items.
-  const BookmarkNode* parent = model->GetBookmarkBarNode();
+  const BookmarkNode* parent = model->bookmark_bar_node();
   const char* url = "http://www.zim-bop-a-dee.com/";
   model->AddURL(parent, 0, ASCIIToUTF16("Bookmark"), GURL(url));
   bridge_->UpdateMenu(menu);
-  EXPECT_EQ(8, [menu numberOfItems]);
+  EXPECT_EQ(6, [menu numberOfItems]);
   // Remove the new bookmark and reload and we should have 2 items again
   // because the separator should have been removed as well.
   model->Remove(parent, 0);
   bridge_->UpdateMenu(menu);
-  EXPECT_EQ(2, [menu numberOfItems]);
+  EXPECT_EQ(0, [menu numberOfItems]);
 }
 
 // Test that ClearBookmarkMenu() removes all bookmark menus.
@@ -139,7 +140,7 @@ TEST_F(BookmarkMenuBridgeTest, TestClearBookmarkMenu) {
 // Test invalidation
 TEST_F(BookmarkMenuBridgeTest, TestInvalidation) {
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  bridge_->Loaded(model);
+  bridge_->Loaded(model, false);
 
   EXPECT_FALSE(menu_is_valid());
   bridge_->UpdateMenu(bridge_->menu_);
@@ -154,7 +155,7 @@ TEST_F(BookmarkMenuBridgeTest, TestInvalidation) {
   bridge_->UpdateMenu(bridge_->menu_);
   EXPECT_TRUE(menu_is_valid());
 
-  const BookmarkNode* parent = model->GetBookmarkBarNode();
+  const BookmarkNode* parent = model->bookmark_bar_node();
   const char* url = "http://www.zim-bop-a-dee.com/";
   model->AddURL(parent, 0, ASCIIToUTF16("Bookmark"), GURL(url));
 
@@ -170,7 +171,7 @@ TEST_F(BookmarkMenuBridgeTest, TestAddNodeToMenu) {
   NSMenu* menu = bridge_->menu_;
 
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   EXPECT_TRUE(model && root);
 
   const char* short_url = "http://foo/";
@@ -203,13 +204,13 @@ TEST_F(BookmarkMenuBridgeTest, TestAddNodeToMenu) {
   NSMenuItem* short_item = item;
   NSMenuItem* long_item = nil;
 
-  // Now confirm we have 2 submenus (the one we added, plus "other")
+  // Now confirm we have 1 submenu (the one we added, and not "other")
   int subs = 0;
   for (item in [menu itemArray]) {
     if ([item hasSubmenu])
       subs++;
   }
-  EXPECT_EQ(2, subs);
+  EXPECT_EQ(1, subs);
 
   for (item in [menu itemArray]) {
     if ([[item title] hasPrefix:@"http://super-duper"]) {
@@ -247,7 +248,7 @@ TEST_F(BookmarkMenuBridgeTest, TestAddItemToMenu) {
   NSMenu* menu = bridge_->menu_;
 
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   EXPECT_TRUE(model && root);
   EXPECT_EQ(0, [menu numberOfItems]);
 
@@ -313,7 +314,7 @@ TEST_F(BookmarkMenuBridgeTest, TestGetMenuItemForNode) {
   NSMenu* menu = bridge_->menu_;
 
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  const BookmarkNode* bookmark_bar = model->GetBookmarkBarNode();
+  const BookmarkNode* bookmark_bar = model->bookmark_bar_node();
   const BookmarkNode* root = model->AddFolder(bookmark_bar, 0, empty);
   EXPECT_TRUE(model && root);
 
@@ -363,7 +364,7 @@ TEST_F(BookmarkMenuBridgeTest, TestFaviconLoading) {
   NSMenu* menu = bridge_->menu_;
 
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   EXPECT_TRUE(model && root);
 
   const BookmarkNode* node =
@@ -380,7 +381,7 @@ TEST_F(BookmarkMenuBridgeTest, TestFaviconLoading) {
 TEST_F(BookmarkMenuBridgeTest, TestChangeTitle) {
   NSMenu* menu = bridge_->menu_;
   BookmarkModel* model = bridge_->GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   EXPECT_TRUE(model && root);
 
   const BookmarkNode* node =

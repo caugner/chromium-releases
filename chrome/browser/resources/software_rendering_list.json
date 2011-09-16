@@ -47,7 +47,7 @@
 {
   "name": "software rendering list",
   // Please update the version number whenever you change this file.
-  "version": "1.11",
+  "version": "1.14",
   "entries": [
     {
       "id": 1,
@@ -103,7 +103,7 @@
     },
     {
       "id": 8,
-      "description": "NVIDIA GeForce FX Go5200 does not support WebGL or accelerated compositing.",
+      "description": "NVIDIA GeForce FX Go5200 is assumed to be buggy.",
       "cr_bugs": [72938],
       "os": {
         "type": "any"
@@ -111,8 +111,7 @@
       "vendor_id": "0x10de",
       "device_id": ["0x0324"],
       "blacklist": [
-        "webgl",
-        "accelerated_compositing"
+        "all"
       ]
     },
     {
@@ -131,7 +130,7 @@
     {
       "id": 12,
       "description": "Drivers older than 2009-01 on Windows are assumed to be buggy.",
-      "cr_bugs": [72979],
+      "cr_bugs": [72979, 89802],
       "os": {
         "type": "win"
       },
@@ -139,6 +138,16 @@
         "op": "<",
         "number": "2009.1"
       },
+      "exceptions": [
+        {
+          "vendor_id": "0x8086",
+          "device_id": ["0x29a2"],
+          "driver_version": {
+            "op": ">=",
+            "number": "7.15.10.1624"
+          }
+        }
+      ],
       "blacklist": [
         "all"
       ]
@@ -230,6 +239,35 @@
       "vendor_id": "0x8086",
       "blacklist": [
         "all"
+      ]
+    },
+    {
+      "id": 18,
+      "description": "NVIDIA Quadro FX 1500 is buggy.",
+      "cr_bugs": [84701],
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x10de",
+      "device_id": ["0x029e"],
+      "blacklist": [
+        "all"
+      ]
+    },
+    {
+      "id": 19,
+      "description": "Accelerated 2d canvas and accelerated compositing are not supported in Mac OSX version 10.5.",
+      "cr_bugs": [87157],
+      "os": {
+        "type": "macosx",
+        "version": {
+          "op": "=",
+          "number": "10.5"
+        }
+      },
+      "blacklist": [
+        "accelerated_2d_canvas",
+        "accelerated_compositing"
       ]
     }
   ]

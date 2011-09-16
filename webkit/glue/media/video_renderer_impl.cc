@@ -18,15 +18,12 @@ VideoRendererImpl::VideoRendererImpl(bool pts_logging)
 VideoRendererImpl::~VideoRendererImpl() {}
 
 bool VideoRendererImpl::OnInitialize(media::VideoDecoder* decoder) {
-  video_size_.SetSize(width(), height());
-  bitmap_.setConfig(SkBitmap::kARGB_8888_Config, width(), height());
-  if (bitmap_.allocPixels(NULL, NULL)) {
-    bitmap_.eraseRGB(0x00, 0x00, 0x00);
-    return true;
-  }
-
-  NOTREACHED();
-  return false;
+  video_size_.SetSize(decoder->width(), decoder->height());
+  bitmap_.setConfig(SkBitmap::kARGB_8888_Config,
+                    decoder->width(), decoder->height());
+  bitmap_.allocPixels();
+  bitmap_.eraseRGB(0x00, 0x00, 0x00);
+  return true;
 }
 
 void VideoRendererImpl::OnStop(media::FilterCallback* callback) {
@@ -179,6 +176,7 @@ void VideoRendererImpl::SlowPaint(media::VideoFrame* video_frame,
                              video_frame->stride(media::VideoFrame::kUPlane),
                              bitmap_.rowBytes(),
                              yuv_type);
+    bitmap_.notifyPixelsChanged();
     bitmap_.unlockPixels();
   }
 

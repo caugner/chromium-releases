@@ -11,19 +11,22 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppp_graphics_3d_dev.h"
-// TODO(dmichael): Remove the 0.3 printing interface and remove the following
-//                 #define.
-#define PPP_PRINTING_DEV_USE_0_4 1
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/shared_impl/function_group_base.h"
+#include "ppapi/shared_impl/instance_impl.h"
+#include "ppapi/shared_impl/ppp_instance_combined.h"
+#include "ppapi/thunk/ppb_instance_api.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
@@ -32,15 +35,12 @@
 
 typedef struct NPObject NPObject;
 struct PP_Var;
-struct PPB_Instance;
-struct PPB_Instance_Private;
-struct PPB_Fullscreen_Dev;
-struct PPB_Messaging;
-struct PPB_Zoom_Dev;
 struct PPP_Find_Dev;
+struct PPP_InputEvent;
 struct PPP_Instance_Private;
 struct PPP_Messaging;
 struct PPP_Pdf;
+struct PPP_PolicyUpdate_Dev;
 struct PPP_Selection_Dev;
 struct PPP_Zoom_Dev;
 
@@ -57,6 +57,10 @@ class WebInputEvent;
 class WebPluginContainer;
 }
 
+namespace ppapi {
+struct PPP_Instance_Combined;
+}
+
 namespace webkit {
 namespace ppapi {
 
@@ -67,6 +71,7 @@ class PluginDelegate;
 class PluginModule;
 class PluginObject;
 class PPB_Graphics2D_Impl;
+class PPB_Graphics3D_Impl;
 class PPB_ImageData_Impl;
 class PPB_Surface3D_Impl;
 class PPB_URLLoader_Impl;
@@ -77,28 +82,19 @@ class Resource;
 //
 // Note: to get from a PP_Instance to a PluginInstance*, use the
 // ResourceTracker.
-class PluginInstance : public base::RefCounted<PluginInstance> {
+class PluginInstance : public base::RefCounted<PluginInstance>,
+                       public ::ppapi::FunctionGroupBase,
+                       public ::ppapi::thunk::PPB_Instance_FunctionAPI,
+                       public ::ppapi::InstanceImpl {
  public:
-  struct PPP_Instance_Combined;
-
-  PluginInstance(PluginDelegate* delegate,
-                 PluginModule* module,
-                 PPP_Instance_Combined* instance_interface);
+  // Create and return a PluginInstance object which supports the
+  // PPP_Instance_1_0 interface.
+  static PluginInstance* Create1_0(PluginDelegate* delegate,
+                                   PluginModule* module,
+                                   const void* ppp_instance_if_1_0);
 
   // Delete should be called by the WebPlugin before this destructor.
-  ~PluginInstance();
-
-  // Return a PPB_Instance interface compatible with the given interface name,
-  // if one is available.  Returns NULL if the requested interface is
-  // not supported.
-  static const void* GetInterface(const char* if_name);
-  static const PPB_Instance_Private* GetPrivateInterface();
-
-  // Returns a pointer to the interface implementing PPB_Find that is
-  // exposed to the plugin.
-  static const PPB_Fullscreen_Dev* GetFullscreenInterface();
-  static const PPB_Messaging* GetMessagingInterface();
-  static const PPB_Zoom_Dev* GetZoomInterface();
+  virtual ~PluginInstance();
 
   PluginDelegate* delegate() const { return delegate_; }
   PluginModule* module() const { return module_.get(); }
@@ -151,9 +147,6 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   void InstanceCrashed();
 
   // PPB_Instance and PPB_Instance_Private implementation.
-  PP_Var GetWindowObject();
-  PP_Var GetOwnerElementObject();
-  bool BindGraphics(PP_Resource graphics_id);
   const GURL& plugin_url() const { return plugin_url_; }
   bool full_frame() const { return full_frame_; }
   // If |type| is not PP_CURSORTYPE_CUSTOM, |custom_image| and |hot_spot| are
@@ -161,7 +154,6 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   bool SetCursor(PP_CursorType_Dev type,
                  PP_Resource custom_image,
                  const PP_Point* hot_spot);
-  PP_Var ExecuteScript(PP_Var script, PP_Var* exception);
 
   // PPP_Instance and PPP_Instance_Private pass-through.
   bool Initialize(WebKit::WebPluginContainer* container,
@@ -172,6 +164,7 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   bool HandleDocumentLoad(PPB_URLLoader_Impl* loader);
   bool HandleInputEvent(const WebKit::WebInputEvent& event,
                         WebKit::WebCursorInfo* cursor_info);
+  void HandlePolicyUpdate(const std::string& policy_json);
   PP_Var GetInstanceObject();
   void ViewChanged(const gfx::Rect& position, const gfx::Rect& clip);
 
@@ -228,7 +221,6 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // painting goes back to it
   // In pending state, events from webkit are ignored, and as soon as we receive
   // events from the fullscreen container, we go to the fullscreen state.
-  bool IsFullscreen();
   bool IsFullscreenOrPending();
 
   // Switches between fullscreen and normal mode. If |delay_report| is set to
@@ -242,8 +234,7 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
                    const char* target,
                    bool from_user_action);
 
-  // Implementation of PPB_Messaging and PPP_Messaging.
-  void PostMessage(PP_Var message);
+  // Implementation of PPP_Messaging.
   void HandleMessage(PP_Var message);
 
   PluginDelegate::PlatformContext3D* CreateContext3D();
@@ -268,28 +259,53 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
     return fullscreen_container_;
   }
 
-  // TODO(dmichael): Remove this when all plugins are ported to use scripting
-  //                 from private interfaces.
-  struct PPP_Instance_Combined : public PPP_Instance_0_5 {
-    PPP_Instance_Combined(const PPP_Instance_0_5& instance_if);
-    PPP_Instance_Combined(const PPP_Instance_0_4& instance_if);
+  // FunctionGroupBase overrides.
+  virtual ::ppapi::thunk::PPB_Instance_FunctionAPI* AsPPB_Instance_FunctionAPI()
+      OVERRIDE;
 
-    struct PP_Var (*GetInstanceObject_0_4)(PP_Instance instance);
-  };
-  template <class InterfaceType>
-  static PPP_Instance_Combined* new_instance_interface(
-      const void* interface_object) {
-    return new PPP_Instance_Combined(
-        *static_cast<const InterfaceType*>(interface_object));
-  }
+  // PPB_Instance_API implementation.
+  virtual PP_Bool BindGraphics(PP_Instance instance,
+                               PP_Resource device) OVERRIDE;
+  virtual PP_Bool IsFullFrame(PP_Instance instance) OVERRIDE;
+  virtual PP_Var GetWindowObject(PP_Instance instance) OVERRIDE;
+  virtual PP_Var GetOwnerElementObject(PP_Instance instance) OVERRIDE;
+  virtual PP_Var ExecuteScript(PP_Instance instance,
+                               PP_Var script,
+                               PP_Var* exception) OVERRIDE;
+  virtual PP_Bool IsFullscreen(PP_Instance instance) OVERRIDE;
+  virtual PP_Bool SetFullscreen(PP_Instance instance,
+                                PP_Bool fullscreen) OVERRIDE;
+  virtual PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size) OVERRIDE;
+  virtual int32_t RequestInputEvents(PP_Instance instance,
+                                     uint32_t event_classes) OVERRIDE;
+  virtual int32_t RequestFilteringInputEvents(PP_Instance instance,
+                                              uint32_t event_classes) OVERRIDE;
+  virtual void ClearInputEventRequest(PP_Instance instance,
+                                      uint32_t event_classes) OVERRIDE;
+  virtual void ZoomChanged(PP_Instance instance, double factor) OVERRIDE;
+  virtual void ZoomLimitsChanged(PP_Instance instance,
+                                 double minimum_factor,
+                                 double maximium_factor) OVERRIDE;
+  virtual void PostMessage(PP_Instance instance, PP_Var message) OVERRIDE;
+  virtual void SubscribeToPolicyUpdates(PP_Instance instance) OVERRIDE;
 
  private:
+  // See the static Create functions above for creating PluginInstance objects.
+  // This constructor is private so that we can hide the PPP_Instance_Combined
+  // details while still having 1 constructor to maintain for member
+  // initialization.
+  PluginInstance(PluginDelegate* delegate,
+                 PluginModule* module,
+                 ::ppapi::PPP_Instance_Combined* instance_interface);
+
   bool LoadFindInterface();
+  bool LoadInputEventInterface();
   bool LoadMessagingInterface();
   bool LoadPdfInterface();
-  bool LoadSelectionInterface();
+  bool LoadPolicyUpdateInterface();
   bool LoadPrintInterface();
   bool LoadPrivateInterface();
+  bool LoadSelectionInterface();
   bool LoadZoomInterface();
 
   // Determines if we think the plugin has focus, both content area and webkit
@@ -303,7 +319,7 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // Queries the plugin for supported print formats and sets |format| to the
   // best format to use. Returns false if the plugin does not support any
   // print format that we can handle (we can handle raster and PDF).
-  bool GetPreferredPrintOutputFormat(PP_PrintOutputFormat_Dev* format);
+  bool GetPreferredPrintOutputFormat(PP_PrintOutputFormat_Dev_0_4* format);
   bool PrintPDFOutput(PP_Resource print_output, WebKit::WebCanvas* canvas);
   bool PrintRasterOutput(PP_Resource print_output, WebKit::WebCanvas* canvas);
 #if defined(OS_WIN)
@@ -319,11 +335,16 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   // Get the bound graphics context as a concrete 2D graphics context or returns
   // null if the context is not 2D.
-  PPB_Graphics2D_Impl* bound_graphics_2d() const;
+  PPB_Graphics2D_Impl* GetBoundGraphics2D() const;
 
+  // Get the bound 3D graphics context.
+  // Returns NULL if bound graphics is not a 3D context.
+  PPB_Graphics3D_Impl* GetBoundGraphics3D() const;
+
+  // DEPRECATED: PPB_Surface3D_Impl is being replaced with PPB_Graphics3D_Impl.
   // Get the bound 3D graphics surface.
   // Returns NULL if bound graphics is not a 3D surface.
-  PPB_Surface3D_Impl* bound_graphics_3d() const;
+  PPB_Surface3D_Impl* GetBoundSurface3D() const;
 
   // Sets the id of the texture that the plugin draws to. The id is in the
   // compositor space so it can use it to composite with rest of the page.
@@ -337,7 +358,7 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   PluginDelegate* delegate_;
   scoped_refptr<PluginModule> module_;
-  scoped_ptr<PPP_Instance_Combined> instance_interface_;
+  scoped_ptr< ::ppapi::PPP_Instance_Combined> instance_interface_;
 
   PP_Instance pp_instance_;
 
@@ -377,25 +398,28 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // The plugin-provided interfaces.
   const PPP_Find_Dev* plugin_find_interface_;
   const PPP_Messaging* plugin_messaging_interface_;
-  const PPP_Pdf* plugin_pdf_interface_;
+  const PPP_InputEvent* plugin_input_event_interface_;
   const PPP_Instance_Private* plugin_private_interface_;
+  const PPP_Pdf* plugin_pdf_interface_;
+  const PPP_PolicyUpdate_Dev* plugin_policy_updated_interface_;
   const PPP_Selection_Dev* plugin_selection_interface_;
   const PPP_Zoom_Dev* plugin_zoom_interface_;
 
-  // A flag to indicate whether we have asked this plugin instance for its
-  // messaging interface, so that we can ask only once.
+  // Flags indicating whether we have asked this plugin instance for the
+  // corresponding interfaces, so that we can ask only once.
+  bool checked_for_plugin_input_event_interface_;
   bool checked_for_plugin_messaging_interface_;
 
   // This is only valid between a successful PrintBegin call and a PrintEnd
   // call.
-  PP_PrintSettings_Dev current_print_settings_;
+  PP_PrintSettings_Dev_0_4 current_print_settings_;
 #if defined(OS_MACOSX)
   // On the Mac, when we draw the bitmap to the PDFContext, it seems necessary
   // to keep the pixels valid until CGContextEndPage is called. We use this
   // variable to hold on to the pixels.
   scoped_refptr<PPB_ImageData_Impl> last_printed_page_;
 #endif  // defined(OS_MACOSX)
-#if WEBKIT_USING_SKIA
+#if defined(OS_LINUX) || defined(OS_WIN)
   // When printing to PDF (print preview, Linux) the entire document goes into
   // one metafile.  However, when users print only a subset of all the pages,
   // it is impossible to know if a call to PrintPage() is the last call.
@@ -408,25 +432,25 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   SkRefPtr<WebKit::WebCanvas> canvas_;
   // An array of page ranges.
   std::vector<PP_PrintPageNumberRange_Dev> ranges_;
-#endif  // WEBKIT_USING_SKIA
+#endif  // OS_LINUX || OS_WIN
 
   // The plugin print interface.  This nested struct adds functions needed for
   // backwards compatibility.
-  struct PPP_Printing_Dev_Combined : public PPP_Printing_Dev {
+  struct PPP_Printing_Dev_Combined : public PPP_Printing_Dev_0_4 {
     // Conversion constructor for the most current interface.  Sets all old
     // functions to NULL, so we know not to try to use them.
-    PPP_Printing_Dev_Combined(const PPP_Printing_Dev& base_if)
-        : PPP_Printing_Dev(base_if),
+    PPP_Printing_Dev_Combined(const PPP_Printing_Dev_0_4& base_if)
+        : PPP_Printing_Dev_0_4(base_if),
           QuerySupportedFormats_0_3(NULL),
           Begin_0_3(NULL) {}
 
     // Conversion constructor for version 0.3.  Sets unsupported functions to
     // NULL, so we know not to try to use them.
     PPP_Printing_Dev_Combined(const PPP_Printing_Dev_0_3& old_if)
-        : PPP_Printing_Dev(),  // NOTE: The parens are important, to zero-
-                               // initialize the struct.
-                               // Except older version of g++ doesn't!
-                               // So do it explicitly in the ctor.
+        : PPP_Printing_Dev_0_4(),  // NOTE: The parens are important, to zero-
+                                   // initialize the struct.
+                                   // Except older version of g++ doesn't!
+                                   // So do it explicitly in the ctor.
           QuerySupportedFormats_0_3(old_if.QuerySupportedFormats),
           Begin_0_3(old_if.Begin) {
       QuerySupportedFormats = NULL;
@@ -440,7 +464,7 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
         PP_Instance instance, uint32_t* format_count);
     // The 0.3 version of 'Begin'.
     int32_t (*Begin_0_3)(PP_Instance instance,
-                         const struct PP_PrintSettings_Dev_0_3* print_settings);
+                         const PP_PrintSettings_Dev_0_3* print_settings);
   };
   scoped_ptr<PPP_Printing_Dev_Combined> plugin_print_interface_;
 
@@ -476,6 +500,11 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // the corresponding object. These are non-owning references.
   typedef std::map<NPObject*, ObjectVar*> NPObjectToObjectVarMap;
   NPObjectToObjectVarMap np_object_to_object_var_;
+
+  // Classes of events that the plugin has registered for, both for filtering
+  // and not. The bits are PP_INPUTEVENT_CLASS_*.
+  uint32_t input_event_mask_;
+  uint32_t filtered_input_event_mask_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginInstance);
 };

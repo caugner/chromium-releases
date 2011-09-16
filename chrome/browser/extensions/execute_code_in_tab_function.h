@@ -37,8 +37,6 @@ class ExecuteCodeInTabFunction : public AsyncExtensionFunction,
   // true on success. If true is returned, this does an AddRef.
   bool Execute(const std::string& code_string);
 
-  TabContentsObserver::Registrar registrar_;
-
   // Id of tab which executes code.
   int execute_tab_id_;
 

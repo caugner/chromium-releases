@@ -5,6 +5,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GPU_SCHEDULER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GPU_SCHEDULER_H_
 
+#include <map>
 #include <queue>
 #include <vector>
 
@@ -27,6 +28,7 @@
 
 namespace gfx {
 class GLContext;
+class GLShareGroup;
 class GLSurface;
 }
 
@@ -40,31 +42,42 @@ class ContextGroup;
 class GpuScheduler : public CommandBufferEngine {
  public:
   // If a group is not passed in one will be created.
-  GpuScheduler(CommandBuffer* command_buffer,
-               SurfaceManager* surface_manager,
-               gles2::ContextGroup* group);
+  static GpuScheduler* Create(CommandBuffer* command_buffer,
+                              SurfaceManager* surface_manager,
+                              gles2::ContextGroup* group);
 
   // This constructor is for unit tests.
-  GpuScheduler(CommandBuffer* command_buffer,
-               gles2::GLES2Decoder* decoder,
-               CommandParser* parser,
-               int commands_per_update);
+  static GpuScheduler* CreateForTests(CommandBuffer* command_buffer,
+                                      gles2::GLES2Decoder* decoder,
+                                      CommandParser* parser);
 
   virtual ~GpuScheduler();
 
-  // Perform platform specific and common initialization.
+  // Platform specific code to create GLContexts and GLSurfaces that are
+  // handed off to the next function.
   bool Initialize(gfx::PluginWindowHandle hwnd,
                   const gfx::Size& size,
+                  bool software,
                   const gles2::DisallowedExtensions& disallowed_extensions,
                   const char* allowed_extensions,
                   const std::vector<int32>& attribs,
-                  GpuScheduler* parent,
-                  uint32 parent_texture_id);
+                  gfx::GLShareGroup* share_group);
+
+  // Takes ownership of GLSurface and GLContext.
+  bool InitializeCommon(
+      const scoped_refptr<gfx::GLSurface>& surface,
+      const scoped_refptr<gfx::GLContext>& context,
+      const gfx::Size& size,
+      const gles2::DisallowedExtensions& disallowed_extensions,
+      const char* allowed_extensions,
+      const std::vector<int32>& attribs);
 
   void Destroy();
   void DestroyCommon();
 
-  void PutChanged(bool sync);
+  bool SetParent(GpuScheduler* parent_scheduler, uint32 parent_texture_id);
+
+  void PutChanged();
 
   // Sets whether commands should be processed by this scheduler. Setting to
   // false unschedules. Setting to true reschedules. Whether or not the
@@ -89,6 +102,17 @@ class GpuScheduler : public CommandBufferEngine {
   void ResizeOffscreenFrameBuffer(const gfx::Size& size);
 
 #if defined(OS_MACOSX)
+  // To prevent the GPU process from overloading the browser process,
+  // we need to track the number of swap buffers calls issued and
+  // acknowledged per on-screen context, and keep the GPU from getting
+  // too far ahead of the browser. Note that this
+  // is also predicated on a flow control mechanism between the
+  // renderer and GPU processes.
+  uint64 swap_buffers_count() const;
+  uint64 acknowledged_swap_buffers_count() const;
+  void set_acknowledged_swap_buffers_count(
+      uint64 acknowledged_swap_buffers_count);
+
   // Needed only on Mac OS X, which does not render into an on-screen
   // window and therefore requires the backing store to be resized
   // manually. Returns an opaque identifier for the new backing store.
@@ -101,18 +125,9 @@ class GpuScheduler : public CommandBufferEngine {
   virtual void SetTransportDIBAllocAndFree(
       Callback2<size_t, TransportDIB::Handle*>::Type* allocator,
       Callback1<TransportDIB::Id>::Type* deallocator);
-  // Returns the id of the current IOSurface, or 0.
+  // Returns the id of the current surface that is being rendered to
+  // (or 0 if no such surface has been created).
   virtual uint64 GetSurfaceId();
-  // To prevent the GPU process from overloading the browser process,
-  // we need to track the number of swap buffers calls issued and
-  // acknowledged per on-screen (IOSurface-backed) context, and keep
-  // the GPU from getting too far ahead of the browser. Note that this
-  // is also predicated on a flow control mechanism between the
-  // renderer and GPU processes.
-  uint64 swap_buffers_count() const;
-  uint64 acknowledged_swap_buffers_count() const;
-  void set_acknowledged_swap_buffers_count(
-      uint64 acknowledged_swap_buffers_count);
 
   void DidDestroySurface();
 #endif
@@ -128,44 +143,28 @@ class GpuScheduler : public CommandBufferEngine {
 
   void SetCommandProcessedCallback(Callback0::Type* callback);
 
-  // Sets a callback which is called after a Set/WaitLatch command is processed.
-  // The bool parameter will be true for SetLatch, and false for a WaitLatch
-  // that is blocked. An unblocked WaitLatch will not trigger a callback.
-  void SetLatchCallback(const base::Callback<void(bool)>& callback) {
-    decoder_->SetLatchCallback(callback);
-  }
+  // Sets a callback which is called when set_token() is called, and passes the
+  // just-set token to the callback.  DCHECKs that no callback has previously
+  // been registered for this notification.
+  void SetTokenCallback(const base::Callback<void(int32)>& callback);
 
   // Get the GLES2Decoder associated with this scheduler.
   gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
 
- protected:
-  // Perform common initialization. Takes ownership of GLSurface and GLContext.
-  bool InitializeCommon(
-      const scoped_refptr<gfx::GLSurface>& surface,
-      const scoped_refptr<gfx::GLContext>& context,
-      const gfx::Size& size,
-      const gles2::DisallowedExtensions& disallowed_extensions,
-      const char* allowed_extensions,
-      const std::vector<int32>& attribs,
-      gles2::GLES2Decoder* parent_decoder,
-      uint32 parent_texture_id);
-
-
  private:
-  // Helper which causes a call to ProcessCommands to be scheduled later.
-  void ScheduleProcessCommands();
+  // If a group is not passed in one will be created.
+  GpuScheduler(CommandBuffer* command_buffer,
+               gles2::GLES2Decoder* decoder,
+               CommandParser* parser);
 
   // Called via a callback just before we are supposed to call the
   // user's swap buffers callback.
   void WillSwapBuffers();
-  void ProcessCommands();
 
   // The GpuScheduler holds a weak reference to the CommandBuffer. The
   // CommandBuffer owns the GpuScheduler and holds a strong reference to it
   // through the ProcessCommands callback.
   CommandBuffer* command_buffer_;
-
-  int commands_per_update_;
 
   scoped_ptr<gles2::GLES2Decoder> decoder_;
   scoped_ptr<CommandParser> parser_;
@@ -176,14 +175,15 @@ class GpuScheduler : public CommandBufferEngine {
   scoped_ptr<Callback0::Type> scheduled_callback_;
 
 #if defined(OS_MACOSX)
-  scoped_ptr<AcceleratedSurface> surface_;
   uint64 swap_buffers_count_;
   uint64 acknowledged_swap_buffers_count_;
+  scoped_ptr<AcceleratedSurface> surface_;
 #endif
 
   ScopedRunnableMethodFactory<GpuScheduler> method_factory_;
   scoped_ptr<Callback0::Type> wrapped_swap_buffers_callback_;
   scoped_ptr<Callback0::Type> command_processed_callback_;
+  base::Callback<void(int32)> set_token_callback_;
 };
 
 }  // namespace gpu

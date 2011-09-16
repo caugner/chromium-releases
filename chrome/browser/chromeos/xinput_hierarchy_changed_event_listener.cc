@@ -2,9 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(yusukes): Remove the #if once the ARM bot (crbug.com/84694) is fixed.
-#if defined(HAVE_XINPUT2)
-
 #include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
 
 #include <gdk/gdkx.h>
@@ -12,6 +9,7 @@
 #include <X11/extensions/XInput2.h>
 
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
+#include "ui/base/x/x11_util.h"
 
 namespace {
 
@@ -22,8 +20,8 @@ int GetXInputOpCode() {
   int event;
   int error;
 
-  Display* display = MessageLoopForUI::current()->GetDisplay();
-  if (!XQueryExtension(display, kExtensionName, &xi_opcode, &event, &error)) {
+  if (!XQueryExtension(
+          ui::GetXDisplay(), kExtensionName, &xi_opcode, &event, &error)) {
     VLOG(1) << "X Input extension not available: error=" << error;
     return -1;
   }
@@ -40,7 +38,7 @@ void SelectXInputEvents() {
   evmask.mask_len = sizeof(mask);
   evmask.mask = mask;
 
-  Display* display = MessageLoopForUI::current()->GetDisplay();
+  Display* display = ui::GetXDisplay();
   XISelectEvents(display, DefaultRootWindow(display), &evmask, 1);
 }
 
@@ -96,6 +94,12 @@ void XInputHierarchyChangedEventListener::Stop() {
   xiopcode_ = -1;
 }
 
+#if defined(TOUCH_UI)
+base::MessagePumpObserver::EventStatus
+    XInputHierarchyChangedEventListener::WillProcessXEvent(XEvent* xevent) {
+  return ProcessedXEvent(xevent) ? EVENT_HANDLED : EVENT_CONTINUE;
+}
+#else  // defined(TOUCH_UI)
 // static
 GdkFilterReturn XInputHierarchyChangedEventListener::GdkEventFilter(
     GdkXEvent* gxevent, GdkEvent* gevent, gpointer data) {
@@ -103,11 +107,12 @@ GdkFilterReturn XInputHierarchyChangedEventListener::GdkEventFilter(
       static_cast<XInputHierarchyChangedEventListener*>(data);
   XEvent* xevent = static_cast<XEvent*>(gxevent);
 
-  return listener->WillProcessXEvent(xevent) ? GDK_FILTER_REMOVE
-                                             : GDK_FILTER_CONTINUE;
+  return listener->ProcessedXEvent(xevent) ? GDK_FILTER_REMOVE
+                                           : GDK_FILTER_CONTINUE;
 }
+#endif  // defined(TOUCH_UI)
 
-bool XInputHierarchyChangedEventListener::WillProcessXEvent(XEvent* xevent) {
+bool XInputHierarchyChangedEventListener::ProcessedXEvent(XEvent* xevent) {
   if ((xevent->xcookie.type != GenericEvent) ||
       (xevent->xcookie.extension != xiopcode_)) {
     return false;
@@ -128,5 +133,3 @@ bool XInputHierarchyChangedEventListener::WillProcessXEvent(XEvent* xevent) {
 }
 
 }  // namespace chromeos
-
-#endif

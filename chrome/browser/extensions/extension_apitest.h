@@ -49,7 +49,7 @@ class ExtensionApiTest : public ExtensionBrowserTest {
     const std::string& message() { return message_; }
 
    private:
-    virtual void Observe(NotificationType type,
+    virtual void Observe(int type,
                          const NotificationSource& source,
                          const NotificationDetails& details);
 
@@ -96,6 +96,10 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   // "test/data/extensions/api_test".
   bool RunExtensionSubtest(const char* extension_name,
                            const std::string& page_url);
+
+  // Same as RunExtensionSubtest, but disables file access.
+  bool RunExtensionSubtestNoFileAccess(const char* extension_name,
+                                       const std::string& page_url);
 
   // Load |page_url| and wait for pass / fail notification from the extension
   // API on the page.

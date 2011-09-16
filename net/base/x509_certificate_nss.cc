@@ -281,47 +281,6 @@ void ParseDate(SECItem* der_date, base::Time* result) {
   *result = crypto::PRTimeToBaseTime(prtime);
 }
 
-void GetCertSubjectAltNamesOfType(X509Certificate::OSCertHandle cert_handle,
-                                  CERTGeneralNameType name_type,
-                                  std::vector<std::string>* result) {
-  // For future extension: We only support general names of types
-  // RFC822Name, DNSName or URI.
-  DCHECK(name_type == certRFC822Name ||
-         name_type == certDNSName ||
-         name_type == certURI);
-
-  SECItem alt_name;
-  SECStatus rv = CERT_FindCertExtension(cert_handle,
-                                        SEC_OID_X509_SUBJECT_ALT_NAME,
-                                        &alt_name);
-  if (rv != SECSuccess)
-    return;
-
-  PRArenaPool* arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
-  DCHECK(arena != NULL);
-
-  CERTGeneralName* alt_name_list;
-  alt_name_list = CERT_DecodeAltNameExtension(arena, &alt_name);
-  SECITEM_FreeItem(&alt_name, PR_FALSE);
-
-  CERTGeneralName* name = alt_name_list;
-  while (name) {
-    // All of the general name types we support are encoded as
-    // IA5String. In general, we should be switching off
-    // |name->type| and doing type-appropriate conversions.
-    if (name->type == name_type) {
-      unsigned char* p = name->name.other.data;
-      int len = name->name.other.len;
-      std::string value = std::string(reinterpret_cast<char*>(p), len);
-      result->push_back(value);
-    }
-    name = CERT_GetNextGeneralName(name);
-    if (name == alt_name_list)
-      break;
-  }
-  PORT_FreeArena(arena, PR_FALSE);
-}
-
 // Forward declarations.
 SECStatus RetryPKIXVerifyCertWithWorkarounds(
     X509Certificate::OSCertHandle cert_handle, int num_policy_oids,
@@ -488,6 +447,7 @@ SECStatus RetryPKIXVerifyCertWithWorkarounds(
     int new_nss_error = PORT_GetError();
     if (new_nss_error == SEC_ERROR_INVALID_ARGS ||
         new_nss_error == SEC_ERROR_UNKNOWN_AIA_LOCATION_TYPE ||
+        new_nss_error == SEC_ERROR_BAD_INFO_ACCESS_LOCATION ||
         new_nss_error == SEC_ERROR_BAD_HTTP_RESPONSE ||
         new_nss_error == SEC_ERROR_BAD_LDAP_RESPONSE ||
         !IS_SEC_ERROR(new_nss_error)) {
@@ -593,7 +553,6 @@ bool CheckCertPolicies(X509Certificate::OSCertHandle cert_handle,
     if (oid_tag == ev_policy_tag)
       return true;
   }
-  LOG(ERROR) << "No EV Policy Tag";
   return false;
 }
 
@@ -696,6 +655,9 @@ X509Certificate* X509Certificate::CreateSelfSigned(
   CERT_DestroyValidity(validity);
   CERT_DestroyCertificateRequest(cert_request);
 
+  if (!cert)
+    return NULL;
+
   // Sign the cert here. The logic of this method references SignCert() in NSS
   // utility certutil: http://mxr.mozilla.org/security/ident?i=SignCert.
 
@@ -747,32 +709,57 @@ X509Certificate* X509Certificate::CreateSelfSigned(
   // Save the signed result to the cert.
   cert->derCert = *result;
 
-  X509Certificate* x509_cert =
-      CreateFromHandle(cert, SOURCE_LONE_CERT_IMPORT, OSCertHandles());
+  X509Certificate* x509_cert = CreateFromHandle(cert, OSCertHandles());
   CERT_DestroyCertificate(cert);
   return x509_cert;
 }
 
-void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
-  dns_names->clear();
+void X509Certificate::GetSubjectAltName(
+    std::vector<std::string>* dns_names,
+    std::vector<std::string>* ip_addrs) const {
+  if (dns_names)
+    dns_names->clear();
+  if (ip_addrs)
+    ip_addrs->clear();
 
-  // Compare with CERT_VerifyCertName().
-  GetCertSubjectAltNamesOfType(cert_handle_, certDNSName, dns_names);
+  SECItem alt_name;
+  SECStatus rv = CERT_FindCertExtension(cert_handle_,
+                                        SEC_OID_X509_SUBJECT_ALT_NAME,
+                                        &alt_name);
+  if (rv != SECSuccess)
+    return;
 
-  if (dns_names->empty())
-    dns_names->push_back(subject_.common_name);
+  PRArenaPool* arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+  DCHECK(arena != NULL);
+
+  CERTGeneralName* alt_name_list;
+  alt_name_list = CERT_DecodeAltNameExtension(arena, &alt_name);
+  SECITEM_FreeItem(&alt_name, PR_FALSE);
+
+  CERTGeneralName* name = alt_name_list;
+  while (name) {
+    // DNSName and IPAddress are encoded as IA5String and OCTET STRINGs
+    // respectively, both of which can be byte copied from
+    // SECItemType::data into the appropriate output vector.
+    if (dns_names && name->type == certDNSName) {
+      dns_names->push_back(std::string(
+          reinterpret_cast<char*>(name->name.other.data),
+          name->name.other.len));
+    } else if (ip_addrs && name->type == certIPAddress) {
+      ip_addrs->push_back(std::string(
+          reinterpret_cast<char*>(name->name.other.data),
+          name->name.other.len));
+    }
+    name = CERT_GetNextGeneralName(name);
+    if (name == alt_name_list)
+      break;
+  }
+  PORT_FreeArena(arena, PR_FALSE);
 }
 
-int X509Certificate::Verify(const std::string& hostname,
-                            int flags,
-                            CertVerifyResult* verify_result) const {
-  verify_result->Reset();
-
-  if (IsBlacklisted()) {
-    verify_result->cert_status |= CERT_STATUS_REVOKED;
-    return ERR_CERT_REVOKED;
-  }
-
+int X509Certificate::VerifyInternal(const std::string& hostname,
+                                    int flags,
+                                    CertVerifyResult* verify_result) const {
   // Make sure that the hostname matches with the common name of the cert.
   SECStatus status = CERT_VerifyCertName(cert_handle_, hostname.c_str());
   if (status != SECSuccess)
@@ -877,14 +864,17 @@ bool X509Certificate::VerifyEV() const {
     return false;
   SHA1Fingerprint fingerprint =
       X509Certificate::CalculateFingerprint(root_ca);
-  SECOidTag ev_policy_tag = SEC_OID_UNKNOWN;
-  if (!metadata->GetPolicyOID(fingerprint, &ev_policy_tag))
+  std::vector<SECOidTag> ev_policy_tags;
+  if (!metadata->GetPolicyOIDsForCA(fingerprint, &ev_policy_tags))
     return false;
+  DCHECK(!ev_policy_tags.empty());
 
-  if (!CheckCertPolicies(cert_handle_, ev_policy_tag))
-    return false;
-
-  return true;
+  for (std::vector<SECOidTag>::const_iterator
+       i = ev_policy_tags.begin(); i != ev_policy_tags.end(); ++i) {
+    if (CheckCertPolicies(cert_handle_, *i))
+      return true;
+  }
+  return false;
 }
 
 bool X509Certificate::GetDEREncoded(std::string* encoded) {

@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "content/common/notification_observer.h"
 #include "net/base/network_change_notifier.h"
 
@@ -17,8 +17,7 @@ namespace policy {
 
 class CloudPolicyCacheBase;
 class CloudPolicyController;
-class CloudPolicyIdentityStrategy;
-class ConfigurationPolicyProvider;
+class CloudPolicyDataStore;
 class DeviceManagementService;
 class DeviceTokenFetcher;
 class PolicyNotifier;
@@ -68,16 +67,18 @@ class CloudPolicySubsystem
     DISALLOW_COPY_AND_ASSIGN(ObserverRegistrar);
   };
 
-  CloudPolicySubsystem(CloudPolicyIdentityStrategy* identity_strategy,
+  CloudPolicySubsystem(CloudPolicyDataStore* data_store,
                        CloudPolicyCacheBase* policy_cache);
   virtual ~CloudPolicySubsystem();
 
   // net::NetworkChangeNotifier::IPAddressObserver:
   virtual void OnIPAddressChanged() OVERRIDE;
 
-  // Initializes the subsystem.The first network request will only be made
-  // after |delay_milliseconds|.
-  void Initialize(PrefService* prefs, int64 delay_milliseconds);
+  // Initializes the subsystem. The first network request will only be made
+  // after |delay_milliseconds|. It can be scheduled to be happen earlier by
+  // calling |ScheduleInitialization|.
+  void CompleteInitialization(const char* refresh_pref_name,
+                              int64 delay_milliseconds);
 
   // Shuts the subsystem down. This must be called before threading and network
   // infrastructure goes away.
@@ -91,37 +92,47 @@ class CloudPolicySubsystem
   // subsystem.
   void StopAutoRetry();
 
-  ConfigurationPolicyProvider* GetManagedPolicyProvider();
-  ConfigurationPolicyProvider* GetRecommendedPolicyProvider();
-
   // Registers cloud policy related prefs.
   static void RegisterPrefs(PrefService* pref_service);
 
   // Schedule initialization of the policy backend service.
   void ScheduleServiceInitialization(int64 delay_milliseconds);
 
+  // Only used in testing.
+  CloudPolicyCacheBase* GetCloudPolicyCacheBase() const;
+
  private:
+  friend class TestingCloudPolicySubsystem;
+
+  CloudPolicySubsystem();
+
+  void Initialize(CloudPolicyDataStore* data_store,
+                  CloudPolicyCacheBase* policy_cache,
+                  const std::string& device_management_url);
+
   // Updates the policy controller with a new refresh rate value.
-  void UpdatePolicyRefreshRate();
+  void UpdatePolicyRefreshRate(int64 refresh_rate);
 
   // Returns a weak pointer to this subsystem's PolicyNotifier.
   PolicyNotifier* notifier() {
     return notifier_.get();
   }
 
+  // Factory methods that may be overridden in tests.
+  virtual void CreateDeviceTokenFetcher();
+  virtual void CreateCloudPolicyController();
+
   // NotificationObserver overrides.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // The pref service that controls the refresh rate.
-  PrefService* prefs_;
+  // Name of the preference to read the refresh rate from.
+  const char* refresh_pref_name_;
 
-  // Tracks the pref value for the policy refresh rate.
-  IntegerPrefMember policy_refresh_rate_;
+  PrefChangeRegistrar pref_change_registrar_;
 
-  // Weak reference to pass on to |cloud_policy_controller_| on creation.
-  CloudPolicyIdentityStrategy* identity_strategy_;
+  CloudPolicyDataStore* data_store_;
 
   // Cloud policy infrastructure stuff.
   scoped_ptr<PolicyNotifier> notifier_;
@@ -129,6 +140,8 @@ class CloudPolicySubsystem
   scoped_ptr<DeviceTokenFetcher> device_token_fetcher_;
   scoped_ptr<CloudPolicyCacheBase> cloud_policy_cache_;
   scoped_ptr<CloudPolicyController> cloud_policy_controller_;
+
+  std::string device_management_url_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPolicySubsystem);
 };

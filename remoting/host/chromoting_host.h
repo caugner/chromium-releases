@@ -15,8 +15,8 @@
 #include "remoting/host/client_session.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/host_status_observer.h"
-#include "remoting/jingle_glue/jingle_client.h"
 #include "remoting/jingle_glue/jingle_thread.h"
+#include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/protocol/session_manager.h"
 #include "remoting/protocol/connection_to_client.h"
 
@@ -36,6 +36,7 @@ class Capturer;
 class ChromotingHostContext;
 class DesktopEnvironment;
 class Encoder;
+class Logger;
 class MutableHostConfig;
 class ScreenRecorder;
 
@@ -65,38 +66,40 @@ class ScreenRecorder;
 class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
                        public protocol::ConnectionToClient::EventHandler,
                        public ClientSession::EventHandler,
-                       public JingleClient::Callback {
+                       public SignalStrategy::StatusObserver,
+                       public protocol::SessionManager::Listener {
  public:
-  // Factory methods that must be used to create ChromotingHost instances.
-  // Default capturer and input stub are used if it is not specified.
-  // Returned instance takes ownership of |access_verifier| and |environment|,
-  // and adds a reference to |config|. It does NOT take ownership of |context|.
-  static ChromotingHost* Create(ChromotingHostContext* context,
-                                MutableHostConfig* config,
-                                AccessVerifier* access_verifier);
+  // Factory methods that must be used to create ChromotingHost
+  // instances.  Returned instance takes ownership of
+  // |access_verifier| and |environment|. It does NOT take ownership
+  // of |context| and |logger|.
   static ChromotingHost* Create(ChromotingHostContext* context,
                                 MutableHostConfig* config,
                                 DesktopEnvironment* environment,
-                                AccessVerifier* access_verifier);
+                                AccessVerifier* access_verifier,
+                                Logger* logger,
+                                bool allow_nat_traversal);
 
   // Asynchronously start the host process.
   //
   // After this is invoked, the host process will connect to the talk
   // network and start listening for incoming connections.
   //
-  // |shutdown_task| is called if Start() has failed ot Shutdown() is called
-  // and all related operations are completed.
-  //
   // This method can only be called once during the lifetime of this object.
-  void Start(Task* shutdown_task);
+  void Start();
 
-  // Asynchronously shutdown the host process.
-  void Shutdown();
+  // Asynchronously shutdown the host process. |shutdown_task| is
+  // called after shutdown is completed.
+  void Shutdown(Task* shutdown_task);
 
-  void AddStatusObserver(const scoped_refptr<HostStatusObserver>& observer);
+  // Adds |observer| to the list of status observers. Doesn't take
+  // ownership of |observer|, so |observer| must outlive this
+  // object. All status observers must be added before the host is
+  // started.
+  void AddStatusObserver(HostStatusObserver* observer);
 
   ////////////////////////////////////////////////////////////////////////////
-  // protocol::ConnectionToClient::EventHandler implementations
+  // protocol::ConnectionToClient::EventHandler implementation.
   virtual void OnConnectionOpened(protocol::ConnectionToClient* client);
   virtual void OnConnectionClosed(protocol::ConnectionToClient* client);
   virtual void OnConnectionFailed(protocol::ConnectionToClient* client);
@@ -104,52 +107,69 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
                                        int64 sequence_number);
 
   ////////////////////////////////////////////////////////////////////////////
-  // JingleClient::Callback implementations
-  virtual void OnStateChange(JingleClient* client, JingleClient::State state);
+  // SignalStrategy::StatusObserver implementation.
+  virtual void OnStateChange(
+      SignalStrategy::StatusObserver::State state) OVERRIDE;
+  virtual void OnJidChange(const std::string& full_jid) OVERRIDE;
 
   ////////////////////////////////////////////////////////////////////////////
-  // ClientSession::EventHandler implementations
+  // ClientSession::EventHandler implementation.
   virtual void LocalLoginSucceeded(
       scoped_refptr<protocol::ConnectionToClient> client);
   virtual void LocalLoginFailed(
       scoped_refptr<protocol::ConnectionToClient> client);
 
-  // Callback for ChromotingServer.
-  void OnNewClientSession(
+  Logger* logger() { return logger_; }
+
+  // SessionManager::Listener implementation.
+  virtual void OnSessionManagerInitialized() OVERRIDE;
+  virtual void OnIncomingSession(
       protocol::Session* session,
-      protocol::SessionManager::IncomingSessionResponse* response);
+      protocol::SessionManager::IncomingSessionResponse* response) OVERRIDE;
 
   // Sets desired configuration for the protocol. Ownership of the
   // |config| is transferred to the object. Must be called before Start().
   void set_protocol_config(protocol::CandidateSessionConfig* config);
 
-  void set_me2mom(bool is_me2mom) {
-    is_me2mom_ = is_me2mom;
+  // TODO(wez): ChromotingHost shouldn't need to know about Me2Mom.
+  void set_it2me(bool is_it2me) {
+    is_it2me_ = is_it2me;
   }
+  void set_access_code(const std::string& access_code) {
+    access_code_ = access_code;
+  }
+
+  // Notify all active client sessions that local input has been detected, and
+  // that remote input should be ignored for a short time.
+  void LocalMouseMoved(const gfx::Point& new_pos);
+
+  // Pause or unpause the session. While the session is paused, remote input
+  // is ignored.
+  void PauseSession(bool pause);
 
  private:
   friend class base::RefCountedThreadSafe<ChromotingHost>;
   friend class ChromotingHostTest;
 
-  typedef std::vector<scoped_refptr<HostStatusObserver> > StatusObserverList;
+  typedef std::vector<HostStatusObserver*> StatusObserverList;
   typedef std::vector<scoped_refptr<ClientSession> > ClientList;
+
+  enum State {
+    kInitial,
+    kStarted,
+    kStopping,
+    kStopped,
+  };
 
   // Takes ownership of |access_verifier| and |environment|, and adds a
   // reference to |config|. Does NOT take ownership of |context|.
   ChromotingHost(ChromotingHostContext* context,
                  MutableHostConfig* config,
                  DesktopEnvironment* environment,
-                 AccessVerifier* access_verifier);
+                 AccessVerifier* access_verifier,
+                 Logger* logger,
+                 bool allow_nat_traversal);
   virtual ~ChromotingHost();
-
-  enum State {
-    kInitial,
-    kStarted,
-    kStopped,
-  };
-
-  // Callback for protocol::SessionManager::Close().
-  void OnServerClosed();
 
   // This method is called if a client is disconnected from the host.
   void OnClientDisconnected(protocol::ConnectionToClient* client);
@@ -159,41 +179,38 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   std::string GenerateHostAuthToken(const std::string& encoded_client_token);
 
-  bool HasAuthenticatedClients() const;
+  int AuthenticatedClientsCount() const;
 
   void EnableCurtainMode(bool enable);
 
   void ProcessPreAuthentication(
       const scoped_refptr<protocol::ConnectionToClient>& connection);
 
-  // The context that the chromoting host runs on.
+  // The following methods are called during shutdown.
+  void ShutdownNetwork();
+  void ShutdownRecorder();
+  void ShutdownFinish();
+
+  // Parameters specified when the host was created.
   ChromotingHostContext* context_;
-
   scoped_refptr<MutableHostConfig> config_;
-
   scoped_ptr<DesktopEnvironment> desktop_environment_;
+  scoped_ptr<AccessVerifier> access_verifier_;
+  Logger* logger_;
+  bool allow_nat_traversal_;
 
+  // Connection objects.
   scoped_ptr<SignalStrategy> signal_strategy_;
-
-  // The libjingle client. This is used to connect to the talk network to
-  // receive connection requests from chromoting client.
-  scoped_refptr<JingleClient> jingle_client_;
-
-  scoped_refptr<protocol::SessionManager> session_manager_;
+  std::string local_jid_;
+  scoped_ptr<protocol::SessionManager> session_manager_;
 
   StatusObserverList status_observers_;
-
-  scoped_ptr<AccessVerifier> access_verifier_;
 
   // The connections to remote clients.
   ClientList clients_;
 
   // Session manager for the host process.
   scoped_refptr<ScreenRecorder> recorder_;
-
-  // This task gets executed when this object fails to connect to the
-  // talk network or Shutdown() is called.
-  scoped_ptr<Task> shutdown_task_;
 
   // Tracks the internal state of the host.
   // This variable is written on the main thread of ChromotingHostContext
@@ -206,12 +223,17 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Configuration of the protocol.
   scoped_ptr<protocol::CandidateSessionConfig> protocol_config_;
 
-  // Whether or not the host is currently curtained.
   bool is_curtained_;
 
-  // Whether or not the host is running in "Me2Mom" mode, in which connections
+  // Whether or not the host is running in "IT2Me" mode, in which connections
   // are pre-authenticated, and hence the local login challenge can be bypassed.
-  bool is_me2mom_;
+  bool is_it2me_;
+
+  std::string access_code_;
+
+  // Stores list of tasks that should be executed when we finish
+  // shutdown. Used only while |state_| is set to kStopping.
+  std::vector<Task*> shutdown_tasks_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);
 };

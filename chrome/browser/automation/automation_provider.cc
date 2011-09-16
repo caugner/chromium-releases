@@ -15,7 +15,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
@@ -28,7 +28,6 @@
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
 #include "chrome/browser/automation/automation_extension_tracker.h"
-#include "chrome/browser/automation/automation_omnibox_tracker.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/automation/automation_provider_observers.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
@@ -41,10 +40,8 @@
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_item.h"
-#include "chrome/browser/download/save_package.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -55,17 +52,14 @@
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
-#include "chrome/browser/ssl/ssl_manager.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/download/download_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
@@ -83,10 +77,12 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/automation/tab_proxy.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/debugger/devtools_manager.h"
+#include "content/browser/download/save_package.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/ssl/ssl_manager.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
@@ -121,7 +117,6 @@ AutomationProvider::AutomationProvider(Profile* profile)
   extension_tracker_.reset(new AutomationExtensionTracker(this));
   tab_tracker_.reset(new AutomationTabTracker(this));
   window_tracker_.reset(new AutomationWindowTracker(this));
-  automation_omnibox_tracker_.reset(new AutomationOmniboxTracker(this));
   new_tab_ui_load_observer_.reset(new NewTabUILoadObserver(this));
   metric_event_duration_observer_.reset(new MetricEventDurationObserver());
   extension_test_result_observer_.reset(
@@ -161,12 +156,11 @@ bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
     automation_resource_message_filter_ = new AutomationResourceMessageFilter;
   }
 
-  channel_.reset(new IPC::SyncChannel(
+  channel_.reset(new IPC::ChannelProxy(
       effective_channel_id,
       GetChannelMode(use_named_interface),
       this,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-      true, g_browser_process->shutdown_event()));
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
   channel_->AddFilter(automation_resource_message_filter_);
 
 #if defined(OS_CHROMEOS)
@@ -582,16 +576,7 @@ class SetProxyConfigTask : public Task {
 
 void AutomationProvider::SetProxyConfig(const std::string& new_proxy_config) {
   net::URLRequestContextGetter* context_getter =
-      Profile::GetDefaultRequestContext();
-  if (!context_getter) {
-    FilePath user_data_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-    ProfileManager* profile_manager = g_browser_process->profile_manager();
-    DCHECK(profile_manager);
-    Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
-    DCHECK(profile);
-    context_getter = profile->GetRequestContext();
-  }
+      profile_->GetRequestContext();
   DCHECK(context_getter);
 
   BrowserThread::PostTask(
@@ -821,6 +806,8 @@ void AutomationProvider::InstallExtensionAndGetHandle(
     ExtensionInstallUI* client =
         (with_ui ? new ExtensionInstallUI(profile_) : NULL);
     scoped_refptr<CrxInstaller> installer(service->MakeCrxInstaller(client));
+    if (!with_ui)
+      installer->set_allow_silent_install(true);
     installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
     installer->InstallCrx(crx_path);
   } else {
@@ -976,9 +963,6 @@ void AutomationProvider::GetExtensionProperty(
 void AutomationProvider::SaveAsAsync(int tab_handle) {
   NavigationController* tab = NULL;
   TabContents* tab_contents = GetTabContentsForHandle(tab_handle, &tab);
-  if (tab_contents) {
-    TabContentsWrapper* wrapper =
-        TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
-    wrapper->download_tab_helper()->OnSavePage();
-  }
+  if (tab_contents)
+    tab_contents->OnSavePage();
 }

@@ -20,6 +20,10 @@ extern const FilePath::CharType kBrowserProcessExecutableName[];
 extern const FilePath::CharType kHelperProcessExecutableName[];
 extern const FilePath::CharType kBrowserProcessExecutablePath[];
 extern const FilePath::CharType kHelperProcessExecutablePath[];
+extern const FilePath::CharType kBrowserProcessExecutableNameChromium[];
+extern const FilePath::CharType kHelperProcessExecutableNameChromium[];
+extern const FilePath::CharType kBrowserProcessExecutablePathChromium[];
+extern const FilePath::CharType kHelperProcessExecutablePathChromium[];
 #if defined(OS_MACOSX)
 extern const FilePath::CharType kFrameworkName[];
 #endif
@@ -53,7 +57,6 @@ extern const FilePath::CharType kHistoryFilename[];
 extern const FilePath::CharType kLocalStateFilename[];
 extern const FilePath::CharType kPreferencesFilename[];
 extern const FilePath::CharType kSafeBrowsingBaseFilename[];
-extern const FilePath::CharType kSafeBrowsingPhishingModelFilename[];
 extern const FilePath::CharType kSingletonCookieFilename[];
 extern const FilePath::CharType kSingletonSocketFilename[];
 extern const FilePath::CharType kSingletonLockFilename[];
@@ -71,7 +74,6 @@ extern const FilePath::CharType kJumpListIconDirname[];
 extern const FilePath::CharType kWebAppDirname[];
 extern const FilePath::CharType kServiceStateFileName[];
 
-extern const unsigned int kMaxRendererProcessCount;
 extern const int kStatsMaxThreads;
 extern const int kStatsMaxCounters;
 

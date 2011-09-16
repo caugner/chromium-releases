@@ -4,14 +4,15 @@
 
 #include "chrome/browser/sync/sync_ui_util.h"
 
-#include "base/command_line.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/proto_enum_conversions.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -76,9 +77,8 @@ string16 GetSyncedStateStatusLabel(ProfileSyncService* service) {
   if (user_name.empty())
     return label;
 
-  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   return l10n_util::GetStringFUTF16(
-      browser_command_line.HasSwitch(switches::kMultiProfiles) ?
+      ProfileManager::IsMultipleProfilesEnabled() ?
           IDS_PROFILES_SYNCED_TO_USER_WITH_TIME :
           IDS_SYNC_ACCOUNT_SYNCED_TO_USER_WITH_TIME,
       user_name,
@@ -277,7 +277,7 @@ void OpenSyncMyBookmarksDialog(Profile* profile,
     if (create_window)
       browser->window()->Show();
   } else {
-    service->ShowLoginDialog(NULL);
+    service->ShowLoginDialog();
     ProfileSyncService::SyncEvent(code);  // UMA stats
   }
 }
@@ -425,6 +425,21 @@ void ConstructAboutInformation(ProfileSyncService* service,
     sync_ui_util::AddIntSyncDetail(details,
                                    "Useful Sync Cycles",
                                    full_status.useful_sync_cycles);
+    sync_ui_util::AddBoolSyncDetail(details,
+                                    "Explicit Passphrase",
+                                    service->IsUsingSecondaryPassphrase());
+    sync_ui_util::AddBoolSyncDetail(details,
+                                    "Passphrase Required",
+                                    service->IsPassphraseRequired());
+    sync_ui_util::AddBoolSyncDetail(details,
+                                    "Cryptographer Ready",
+                                    full_status.cryptographer_ready);
+    sync_ui_util::AddBoolSyncDetail(details,
+                                    "Cryptographer Has Pending Keys",
+                                    full_status.crypto_has_pending_keys);
+    sync_ui_util::AddStringSyncDetails(details,
+        "Encrypted Types",
+        syncable::ModelTypeSetToString(full_status.encrypted_types));
 
     const browser_sync::sessions::SyncSessionSnapshot* snapshot =
         service->sync_initialized() ?
@@ -473,28 +488,6 @@ void ConstructAboutInformation(ProfileSyncService* service,
         val->SetString("group", ModelSafeGroupToString(it->second));
         routing_info->Append(val);
       }
-
-      sync_ui_util::AddBoolSyncDetail(details,
-          "Autofill Migrated",
-          service->GetAutofillMigrationState() ==
-          syncable::MIGRATED);
-      syncable::AutofillMigrationDebugInfo info =
-          service->GetAutofillMigrationDebugInfo();
-
-      sync_ui_util::AddIntSyncDetail(details,
-                                     "Bookmarks created during migration",
-                                     info.bookmarks_added_during_migration);
-      sync_ui_util::AddIntSyncDetail(details,
-          "Autofill entries created during migration",
-          info.autofill_entries_added_during_migration);
-      sync_ui_util::AddIntSyncDetail(details,
-          "Autofill Profiles created during migration",
-          info.autofill_profile_added_during_migration);
-
-      DictionaryValue* val = new DictionaryValue;
-      val->SetString("stat_name", "Autofill Migration Time");
-      val->SetString("stat_value", ConstructTime(info.autofill_migration_time));
-      details->Append(val);
     }
   }
 }

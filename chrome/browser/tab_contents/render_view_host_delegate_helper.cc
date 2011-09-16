@@ -9,8 +9,8 @@
 #include "base/command_line.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/background_contents_service.h"
-#include "chrome/browser/background_contents_service_factory.h"
+#include "chrome/browser/background/background_contents_service.h"
+#include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -22,19 +22,43 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/gpu/gpu_data_manager.h"
+#include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_widget_fullscreen_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/site_instance.h"
+#include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/webui/web_ui.h"
+#include "content/common/notification_service.h"
+#include "content/common/view_messages.h"
+#include "net/base/network_change_notifier.h"
 
-RenderViewHostDelegateViewHelper::RenderViewHostDelegateViewHelper() {}
+RenderViewHostDelegateViewHelper::RenderViewHostDelegateViewHelper() {
+  registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
+                 NotificationService::AllSources());
+}
 
 RenderViewHostDelegateViewHelper::~RenderViewHostDelegateViewHelper() {}
+
+void RenderViewHostDelegateViewHelper::Observe(
+    int type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  DCHECK_EQ(type, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED);
+  RenderWidgetHost* host = Source<RenderWidgetHost>(source).ptr();
+  for (PendingWidgetViews::iterator i = pending_widget_views_.begin();
+       i != pending_widget_views_.end(); ++i) {
+    if (host->view() == i->second) {
+      pending_widget_views_.erase(i);
+      break;
+    }
+  }
+}
 
 BackgroundContents*
 RenderViewHostDelegateViewHelper::MaybeCreateBackgroundContents(
@@ -201,18 +225,79 @@ RenderWidgetHostView* RenderViewHostDelegateViewHelper::GetCreatedWidget(
   return widget_host_view;
 }
 
-void RenderViewHostDelegateViewHelper::RenderWidgetHostDestroyed(
-    RenderWidgetHost* host) {
-  for (PendingWidgetViews::iterator i = pending_widget_views_.begin();
-       i != pending_widget_views_.end(); ++i) {
-    if (host->view() == i->second) {
-      pending_widget_views_.erase(i);
-      return;
-    }
+TabContents* RenderViewHostDelegateViewHelper::CreateNewWindowFromTabContents(
+    TabContents* tab_contents,
+    int route_id,
+    const ViewHostMsg_CreateWindow_Params& params) {
+  TabContents* new_contents = CreateNewWindow(
+      route_id,
+      tab_contents->profile(),
+      tab_contents->GetSiteInstance(),
+      tab_contents->GetWebUITypeForCurrentState(),
+      tab_contents,
+      params.window_container_type,
+      params.frame_name);
+
+  if (new_contents) {
+    content::RetargetingDetails details;
+    details.source_tab_contents = tab_contents;
+    details.source_frame_id = params.opener_frame_id;
+    details.target_url = params.target_url;
+    details.target_tab_contents = new_contents;
+    NotificationService::current()->Notify(
+        content::NOTIFICATION_RETARGETING,
+        Source<Profile>(tab_contents->profile()),
+        Details<content::RetargetingDetails>(&details));
+
+    if (tab_contents->delegate())
+      tab_contents->delegate()->TabContentsCreated(new_contents);
+  } else {
+    NotificationService::current()->Notify(
+        content::NOTIFICATION_CREATING_NEW_WINDOW_CANCELLED,
+        Source<TabContents>(tab_contents),
+        Details<const ViewHostMsg_CreateWindow_Params>(&params));
   }
+
+  return new_contents;
 }
 
-bool RenderViewHostDelegateHelper::gpu_enabled_ = true;
+TabContents* RenderViewHostDelegateViewHelper::ShowCreatedWindow(
+    TabContents* tab_contents,
+    int route_id,
+    WindowOpenDisposition disposition,
+    const gfx::Rect& initial_pos,
+    bool user_gesture) {
+  TabContents* contents = GetCreatedWindow(route_id);
+  if (contents) {
+    tab_contents->AddNewContents(
+        contents, disposition, initial_pos, user_gesture);
+  }
+  return contents;
+}
+
+RenderWidgetHostView* RenderViewHostDelegateViewHelper::ShowCreatedWidget(
+    TabContents* tab_contents, int route_id, const gfx::Rect& initial_pos) {
+  if (tab_contents->delegate())
+    tab_contents->delegate()->RenderWidgetShowing();
+
+  RenderWidgetHostView* widget_host_view = GetCreatedWidget(route_id);
+  widget_host_view->InitAsPopup(tab_contents->GetRenderWidgetHostView(),
+                                initial_pos);
+  widget_host_view->GetRenderWidgetHost()->Init();
+  return widget_host_view;
+}
+
+RenderWidgetHostView*
+    RenderViewHostDelegateViewHelper::ShowCreatedFullscreenWidget(
+        TabContents* tab_contents, int route_id) {
+  if (tab_contents->delegate())
+    tab_contents->delegate()->RenderWidgetShowing();
+
+  RenderWidgetHostView* widget_host_view = GetCreatedWidget(route_id);
+  widget_host_view->InitAsFullscreen(tab_contents->GetRenderWidgetHostView());
+  widget_host_view->GetRenderWidgetHost()->Init();
+  return widget_host_view;
+}
 
 // static
 WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
@@ -265,8 +350,7 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
 
   {  // Command line switches are used for preferences with no user interface.
     const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-    web_prefs.developer_extras_enabled =
-        !command_line.HasSwitch(switches::kDisableDevTools);
+    web_prefs.developer_extras_enabled = true;
     web_prefs.javascript_enabled =
         !command_line.HasSwitch(switches::kDisableJavaScript) &&
         prefs->GetBoolean(prefs::kWebKitJavascriptEnabled);
@@ -295,9 +379,9 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.databases_enabled =
         !command_line.HasSwitch(switches::kDisableDatabases);
     web_prefs.webaudio_enabled =
-        command_line.HasSwitch(switches::kEnableWebAudio);
+        !command_line.HasSwitch(switches::kDisableWebAudio);
     web_prefs.experimental_webgl_enabled =
-        gpu_enabled() &&
+        GpuProcessHost::gpu_enabled() &&
         !command_line.HasSwitch(switches::kDisable3DAPIs) &&
         !prefs->GetBoolean(prefs::kDisable3DAPIs) &&
         !command_line.HasSwitch(switches::kDisableExperimentalWebGL);
@@ -314,15 +398,15 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.show_fps_counter =
         command_line.HasSwitch(switches::kShowFPSCounter);
     web_prefs.accelerated_compositing_enabled =
-        gpu_enabled() &&
+        GpuProcessHost::gpu_enabled() &&
         !command_line.HasSwitch(switches::kDisableAcceleratedCompositing);
     web_prefs.force_compositing_mode =
         command_line.HasSwitch(switches::kForceCompositingMode);
     web_prefs.accelerated_2d_canvas_enabled =
-        gpu_enabled() &&
-        command_line.HasSwitch(switches::kEnableAccelerated2dCanvas);
+        GpuProcessHost::gpu_enabled() &&
+        !command_line.HasSwitch(switches::kDisableAccelerated2dCanvas);
     web_prefs.accelerated_drawing_enabled =
-        gpu_enabled() &&
+        GpuProcessHost::gpu_enabled() &&
         command_line.HasSwitch(switches::kEnableAcceleratedDrawing);
     web_prefs.accelerated_layers_enabled =
         !command_line.HasSwitch(switches::kDisableAcceleratedLayers);
@@ -342,6 +426,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
         prefs->GetBoolean(prefs::kWebKitAllowDisplayingInsecureContent);
     web_prefs.allow_running_insecure_content =
         prefs->GetBoolean(prefs::kWebKitAllowRunningInsecureContent);
+    web_prefs.enable_scroll_animator =
+        command_line.HasSwitch(switches::kEnableSmoothScrolling);
 
     // The user stylesheet watcher may not exist in a testing profile.
     if (profile->GetUserStyleSheetWatcher()) {
@@ -386,6 +472,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.loads_images_automatically = true;
     web_prefs.javascript_enabled = true;
   }
+
+  web_prefs.is_online = !net::NetworkChangeNotifier::IsOffline();
 
   return web_prefs;
 }

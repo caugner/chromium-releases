@@ -33,6 +33,12 @@
             'src/filesystem_interception.h',
             'src/filesystem_policy.cc',
             'src/filesystem_policy.h',
+            'src/handle_closer.cc',
+            'src/handle_closer.h',
+            'src/handle_closer_agent.cc',
+            'src/handle_closer_agent.h',
+            'src/handle_table.cc',
+            'src/handle_table.h',
             'src/interception.cc',
             'src/interception.h',
             'src/interception_agent.cc',
@@ -193,7 +199,6 @@
           'export_dependent_settings': [
             '../base/base.gyp:base',
           ],
-          'msvs_guid': '881F6A97-D539-4C48-B401-DF04385B2343',
           'sources': [
             # Files that are used by the 32-bit version of Windows sandbox only.
             'src/resolver_32.cc',
@@ -238,13 +243,13 @@
           'dependencies': [
             '../testing/gtest.gyp:gtest',
             '../base/base.gyp:base_nacl_win64',
+            '../base/base.gyp:base_static_win64',
           ],
           'configurations': {
             'Common_Base': {
               'msvs_target_platform': 'x64',
             },
           },
-          'msvs_guid': 'BE3468E6-B314-4310-B449-6FC0C52EE155',
           'sources': [
             # Files that are used by the 64-bit version of Windows sandbox only.
             'src/interceptors_64.cc',
@@ -282,6 +287,7 @@
             'src/dep_test.cc',
             'src/file_policy_test.cc',
             'tests/integration_tests/integration_tests_test.cc',
+            'src/handle_closer_test.cc',
             'src/integrity_level_test.cc',
             'src/ipc_ping_test.cc',
             'src/named_pipe_policy_test.cc',
@@ -319,6 +325,7 @@
             'tests/common/test_utils.cc',
             'tests/common/test_utils.h',
             'tests/unit_tests/unit_tests.cc',
+            'src/handle_table_unittest.cc',
             'src/interception_unittest.cc',
             'src/service_resolver_unittest.cc',
             'src/restricted_token_unittest.cc',
@@ -385,9 +392,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

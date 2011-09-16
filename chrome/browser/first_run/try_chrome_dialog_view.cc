@@ -17,9 +17,10 @@
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/button/radio_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/link.h"
 #include "views/layout/grid_layout.h"
@@ -62,7 +63,7 @@ TryChromeDialogView::Result TryChromeDialogView::ShowModal(
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
   views::ImageView* icon = new views::ImageView();
-  icon->SetImage(*rb.GetNativeImageNamed(IDR_PRODUCT_ICON_32));
+  icon->SetImage(*rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_32));
   gfx::Size icon_size = icon->GetPreferredSize();
 
   // An approximate window size. After Layout() we'll get better bounds.
@@ -179,10 +180,10 @@ TryChromeDialogView::Result TryChromeDialogView::ShowModal(
   const string16 cancel_it(l10n_util::GetStringUTF16(IDS_TRY_TOAST_CANCEL));
   const string16 why_this(l10n_util::GetStringUTF16(IDS_TRY_TOAST_WHY));
   layout->StartRowWithPadding(0, 3, 0, 10);
-  views::Button* accept_button = new views::NativeButton(this, ok_it);
+  views::Button* accept_button = new views::NativeTextButton(this, ok_it);
   accept_button->set_tag(BT_OK_BUTTON);
   layout->AddView(accept_button);
-  views::Button* cancel_button = new views::NativeButton(this, cancel_it);
+  views::Button* cancel_button = new views::NativeTextButton(this, cancel_it);
   cancel_button->set_tag(BT_CLOSE_BUTTON);
   layout->AddView(cancel_button);
   // Fifth row views.

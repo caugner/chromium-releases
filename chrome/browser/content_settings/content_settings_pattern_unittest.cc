@@ -74,12 +74,12 @@ TEST(ContentSettingsPatternTest, FromURL) {
   pattern = ContentSettingsPattern::FromURL(GURL("https://www.google.com:443"));
   EXPECT_TRUE(pattern.Matches(GURL("https://www.google.com")));
   EXPECT_TRUE(pattern.Matches(GURL("https://www.google.com:443")));
-  EXPECT_TRUE(pattern.Matches(GURL("https://www.google.com:444")));
+  EXPECT_FALSE(pattern.Matches(GURL("https://www.google.com:444")));
   EXPECT_FALSE(pattern.Matches(GURL("http://www.google.com:443")));
 
   pattern = ContentSettingsPattern::FromURL(GURL("https://127.0.0.1"));
   EXPECT_TRUE(pattern.IsValid());
-  EXPECT_STREQ("https://127.0.0.1", pattern.ToString().c_str());
+  EXPECT_STREQ("https://127.0.0.1:443", pattern.ToString().c_str());
 
   pattern = ContentSettingsPattern::FromURL(GURL("http://[::1]"));
   EXPECT_TRUE(pattern.IsValid());
@@ -373,30 +373,71 @@ TEST(ContentSettingsPatternTest, Compare) {
             Pattern("*://[*.]google.com:*").Compare(
                 Pattern("*://[*.]google.com:*")));
 
-  // Test disjoint patterns.
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+  ContentSettingsPattern invalid_pattern1;
+  ContentSettingsPattern invalid_pattern2 =
+      ContentSettingsPattern::FromString("google.com*");
+
+  // Compare invalid patterns.
+  EXPECT_TRUE(!invalid_pattern1.IsValid());
+  EXPECT_TRUE(!invalid_pattern2.IsValid());
+  EXPECT_EQ(ContentSettingsPattern::IDENTITY,
+            invalid_pattern1.Compare(invalid_pattern2));
+  EXPECT_TRUE(invalid_pattern1 == invalid_pattern2);
+
+  // Compare a pattern with an IPv4 addresse to a pattern with a domain name.
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_POST,
+            Pattern("http://www.google.com").Compare(
+                Pattern("127.0.0.1")));
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
+            Pattern("127.0.0.1").Compare(
+                Pattern("http://www.google.com")));
+  EXPECT_TRUE(Pattern("127.0.0.1") > Pattern("http://www.google.com"));
+  EXPECT_TRUE(Pattern("http://www.google.com") < Pattern("127.0.0.1"));
+
+  // Compare a pattern with an IPv6 address to a patterns with a domain name.
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_POST,
+            Pattern("http://www.google.com").Compare(
+                Pattern("[::1]")));
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
+            Pattern("[::1]").Compare(
+                Pattern("http://www.google.com")));
+  EXPECT_TRUE(Pattern("[::1]") > Pattern("http://www.google.com"));
+  EXPECT_TRUE(Pattern("http://www.google.com") < Pattern("[::1]"));
+
+  // Compare a pattern with an IPv6 addresse to a pattern with an IPv4 addresse.
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
+            Pattern("127.0.0.1").Compare(
+                Pattern("[::1]")));
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_POST,
+            Pattern("[::1]").Compare(
+                Pattern("127.0.0.1")));
+  EXPECT_TRUE(Pattern("[::1]") < Pattern("127.0.0.1"));
+  EXPECT_TRUE(Pattern("127.0.0.1") > Pattern("[::1]"));
+
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
             Pattern("http://www.google.com").Compare(
                 Pattern("http://www.youtube.com")));
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
             Pattern("http://[*.]google.com").Compare(
                 Pattern("http://[*.]youtube.com")));
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_POST,
             Pattern("http://[*.]host.com").Compare(
                 Pattern("http://[*.]evilhost.com")));
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_POST,
             Pattern("*://www.google.com:80").Compare(
                 Pattern("*://www.google.com:8080")));
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
             Pattern("https://www.google.com:80").Compare(
                 Pattern("http://www.google.com:80")));
 
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
             Pattern("http://[*.]google.com:90").Compare(
                 Pattern("http://mail.google.com:80")));
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
             Pattern("https://[*.]google.com:80").Compare(
                 Pattern("http://mail.google.com:80")));
-  EXPECT_EQ(ContentSettingsPattern::DISJOINT,
+  EXPECT_EQ(ContentSettingsPattern::DISJOINT_ORDER_PRE,
             Pattern("https://mail.google.com:*").Compare(
                 Pattern("http://mail.google.com:80")));
 

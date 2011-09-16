@@ -6,12 +6,10 @@
 
 #include "base/command_line.h"
 #include "base/path_service.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/content_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 
@@ -79,7 +77,7 @@ class PluginServiceTest : public InProcessBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) {
 #ifdef OS_MACOSX
     FilePath browser_directory;
-    PathService::Get(chrome::DIR_APP, &browser_directory);
+    PathService::Get(base::DIR_MODULE, &browser_directory);
     command_line->AppendSwitchPath(switches::kExtraPluginDir,
                                    browser_directory.AppendASCII("plugins"));
 #endif

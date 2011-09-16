@@ -90,18 +90,24 @@ SkBitmap GetBitmapForBackingStore(
     // close, and let the caller make it the exact size if desired.
     result = SkBitmapOperations::DownsampleByTwoUntilSize(
         clipped_bitmap, desired_width, desired_height);
-  } else {
-    // Need to resize it to the size we want, so downsample until it's
-    // close, and let the caller make it the exact size if desired.
-    result = SkBitmapOperations::DownsampleByTwoUntilSize(
-        bmp, desired_width, desired_height);
-
     // This is a bit subtle. SkBitmaps are refcounted, but the magic
     // ones in PlatformCanvas can't be assigned to SkBitmap with proper
     // refcounting.  If the bitmap doesn't change, then the downsampler
     // will return the input bitmap, which will be the reference to the
     // weird PlatformCanvas one insetad of a regular one. To get a
     // regular refcounted bitmap, we need to copy it.
+    //
+    // Note that GetClippedBitmap() does extractSubset() but it won't copy
+    // the pixels, hence we check result size == clipped_bitmap size here.
+    if (clipped_bitmap.width() == result.width() &&
+        clipped_bitmap.height() == result.height())
+      clipped_bitmap.copyTo(&result, SkBitmap::kARGB_8888_Config);
+  } else {
+    // Need to resize it to the size we want, so downsample until it's
+    // close, and let the caller make it the exact size if desired.
+    result = SkBitmapOperations::DownsampleByTwoUntilSize(
+        bmp, desired_width, desired_height);
+    // See comments above about why we are making copy here.
     if (bmp.width() == result.width() &&
         bmp.height() == result.height())
       bmp.copyTo(&result, SkBitmap::kARGB_8888_Config);
@@ -121,8 +127,7 @@ struct ThumbnailGenerator::AsyncRequestInfo {
 };
 
 ThumbnailGenerator::ThumbnailGenerator()
-    : tab_contents_observer_registrar_(this),
-      load_interrupted_(false) {
+    : load_interrupted_(false) {
   // The BrowserProcessImpl creates this non-lazily. If you add nontrivial
   // stuff here, be sure to convert it to being lazily created.
   //
@@ -134,16 +139,16 @@ ThumbnailGenerator::~ThumbnailGenerator() {
 }
 
 void ThumbnailGenerator::StartThumbnailing(TabContents* tab_contents) {
-  tab_contents_observer_registrar_.Observe(tab_contents);
+  TabContentsObserver::Observe(tab_contents);
 
   if (registrar_.IsEmpty()) {
     // Even though we deal in RenderWidgetHosts, we only care about its
     // subclass, RenderViewHost when it is in a tab. We don't make thumbnails
     // for RenderViewHosts that aren't in tabs, or RenderWidgetHosts that
     // aren't views like select popups.
-    registrar_.Add(this, NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
+    registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
                    Source<TabContents>(tab_contents));
-    registrar_.Add(this, NotificationType::TAB_CONTENTS_DISCONNECTED,
+    registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
                    Source<TabContents>(tab_contents));
   }
 }
@@ -154,26 +159,26 @@ void ThumbnailGenerator::MonitorRenderer(RenderWidgetHost* renderer,
   bool currently_monitored =
       registrar_.IsRegistered(
         this,
-        NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
+        content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
         renderer_source);
   if (monitor != currently_monitored) {
     if (monitor) {
       registrar_.Add(
           this,
-          NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
+          content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
           renderer_source);
       registrar_.Add(
           this,
-          NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED,
+          content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
           renderer_source);
     } else {
       registrar_.Remove(
           this,
-          NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
+          content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
           renderer_source);
       registrar_.Remove(
           this,
-          NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED,
+          content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
           renderer_source);
     }
   }
@@ -184,6 +189,8 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
                                         ThumbnailReadyCallback* callback,
                                         gfx::Size page_size,
                                         gfx::Size desired_size) {
+  scoped_ptr<ThumbnailReadyCallback> callback_deleter(callback);
+
   if (prefer_backing_store) {
     BackingStore* backing_store = renderer->GetBackingStore(false);
     if (backing_store) {
@@ -196,7 +203,6 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
                                                     NULL);
       callback->Run(first_try);
 
-      delete callback;
       return;
     }
     // Now, if the backing store didn't exist, we will still try and
@@ -210,6 +216,13 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
   scoped_ptr<TransportDIB> thumbnail_dib(TransportDIB::Create(
       desired_size.width() * desired_size.height() * 4, sequence_num));
 
+#if defined(USE_X11)
+  // TODO: IPC a handle to the renderer like Windows.
+  // http://code.google.com/p/chromium/issues/detail?id=89777
+  NOTIMPLEMENTED();
+  return;
+#else
+
 #if defined(OS_WIN)
   // Duplicate the handle to the DIB here because the renderer process does not
   // have permission. The duplicated handle is owned by the renderer process,
@@ -220,7 +233,6 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
       false);
   if (!renderer_dib_handle) {
     LOG(WARNING) << "Could not duplicate dib handle for renderer";
-    delete callback;
     return;
   }
 #else
@@ -228,7 +240,7 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
 #endif
 
   linked_ptr<AsyncRequestInfo> request_info(new AsyncRequestInfo);
-  request_info->callback.reset(callback);
+  request_info->callback.reset(callback_deleter.release());
   request_info->thumbnail_dib.reset(thumbnail_dib.release());
   request_info->renderer = renderer;
   ThumbnailCallbackMap::value_type new_value(sequence_num, request_info);
@@ -241,6 +253,8 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
 
   renderer->PaintAtSize(
       renderer_dib_handle, sequence_num, page_size, desired_size);
+
+#endif  // defined(USE_X11)
 }
 
 SkBitmap ThumbnailGenerator::GetThumbnailForRenderer(
@@ -302,23 +316,23 @@ void ThumbnailGenerator::WidgetDidReceivePaintAtSizeAck(
   }
 }
 
-void ThumbnailGenerator::Observe(NotificationType type,
+void ThumbnailGenerator::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB: {
+  switch (type) {
+    case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
       // Install our observer for all new RVHs.
       RenderViewHost* renderer = Details<RenderViewHost>(details).ptr();
       MonitorRenderer(renderer, true);
       break;
     }
 
-    case NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED:
+    case content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED:
       if (!*Details<bool>(details).ptr())
         WidgetHidden(Source<RenderWidgetHost>(source).ptr());
       break;
 
-    case NotificationType::RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK: {
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK: {
       RenderWidgetHost::PaintAtSizeAckDetails* size_ack_details =
           Details<RenderWidgetHost::PaintAtSizeAckDetails>(details).ptr();
       WidgetDidReceivePaintAtSizeAck(
@@ -328,12 +342,12 @@ void ThumbnailGenerator::Observe(NotificationType type,
       break;
     }
 
-    case NotificationType::TAB_CONTENTS_DISCONNECTED:
+    case content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED:
       TabContentsDisconnected(Source<TabContents>(source).ptr());
       break;
 
     default:
-      NOTREACHED() << "Unexpected notification type: " << type.value;
+      NOTREACHED() << "Unexpected notification type: " << type;
   }
 }
 
@@ -447,7 +461,7 @@ void ThumbnailGenerator::UpdateThumbnailIfNecessary(
   score.good_clipping =
       (clip_result == ThumbnailGenerator::kTallerThanWide ||
        clip_result == ThumbnailGenerator::kNotClipped);
-  score.load_completed = (!tab_contents->is_loading() && !load_interrupted_);
+  score.load_completed = (!load_interrupted_ && !tab_contents->IsLoading());
 
   top_sites->SetPageThumbnail(url, thumbnail, score);
   VLOG(1) << "Thumbnail taken for " << url << ": " << score.ToString();

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@
 namespace views {
 
 class DialogDelegate;
-class NativeButton;
-class Window;
+class NativeTextButton;
+class Widget;
 namespace internal {
 class RootView;
 }
@@ -36,15 +36,15 @@ class DialogClientView : public ClientView,
                          public ButtonListener,
                          public FocusChangeListener {
  public:
-  DialogClientView(Window* window, View* contents_view);
+  DialogClientView(Widget* widget, View* contents_view);
   virtual ~DialogClientView();
 
-  // Adds the dialog buttons required by the supplied WindowDelegate to the
+  // Adds the dialog buttons required by the supplied DialogDelegate to the
   // view.
   void ShowDialogButtons();
 
   // Updates the enabled state and label of the buttons required by the
-  // supplied WindowDelegate
+  // supplied DialogDelegate
   void UpdateDialogButtons();
 
   // Accept the changes made in the window that contains this ClientView.
@@ -54,8 +54,8 @@ class DialogClientView : public ClientView,
   void CancelWindow();
 
   // Accessors in case the user wishes to adjust these buttons.
-  NativeButton* ok_button() const { return ok_button_; }
-  NativeButton* cancel_button() const { return cancel_button_; }
+  NativeTextButton* ok_button() const { return ok_button_; }
+  NativeTextButton* cancel_button() const { return cancel_button_; }
 
   // Sets the view that is positioned along the bottom of the buttons. The
   // bottom view is positioned beneath the buttons at the full width of the
@@ -70,9 +70,10 @@ class DialogClientView : public ClientView,
 
   // Overridden from ClientView:
   virtual bool CanClose() OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
+  virtual void WidgetClosing() OVERRIDE;
   virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
   virtual DialogClientView* AsDialogClientView() OVERRIDE;
+  virtual const DialogClientView* AsDialogClientView() const OVERRIDE;
 
   // FocusChangeListener implementation:
   virtual void FocusWillChange(View* focused_before,
@@ -106,7 +107,7 @@ class DialogClientView : public ClientView,
   void LayoutContentsView();
 
   // Makes the specified button the default button.
-  void SetDefaultButton(NativeButton* button);
+  void SetDefaultButton(NativeTextButton* button);
 
   bool has_dialog_buttons() const { return ok_button_ || cancel_button_; }
 
@@ -116,7 +117,7 @@ class DialogClientView : public ClientView,
   // Returns the DialogDelegate for the window.
   DialogDelegate* GetDialogDelegate() const;
 
-  // Closes the window.
+  // Closes the widget.
   void Close();
 
   // Updates focus listener.
@@ -125,11 +126,11 @@ class DialogClientView : public ClientView,
   static void InitClass();
 
   // The dialog buttons.
-  NativeButton* ok_button_;
-  NativeButton* cancel_button_;
+  NativeTextButton* ok_button_;
+  NativeTextButton* cancel_button_;
 
   // The button that is currently the default button if any.
-  NativeButton* default_button_;
+  NativeTextButton* default_button_;
 
   // The button-level extra view, NULL unless the dialog delegate supplies one.
   View* extra_view_;

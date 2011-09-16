@@ -7,55 +7,31 @@
 #pragma once
 
 #include "base/memory/ref_counted.h"
+#include "ui/gfx/transform.h"
 #include "ui/gfx/native_widget_types.h"
 
 class SkBitmap;
 namespace gfx {
 class Point;
+class Rect;
 class Size;
 }
 
 namespace ui {
-class Transform;
 
-#if !defined(COMPOSITOR_2)
-typedef unsigned int TextureID;
+struct TextureDrawParams {
+  TextureDrawParams() : transform(), blend(false) {}
 
-// Compositor object to take care of GPU painting.
-// A Browser compositor object is responsible for generating the final
-// displayable form of pixels comprising a single widget's contents. It draws an
-// appropriately transformed texture for each transformed view in the widget's
-// view hierarchy. The initial implementation uses GL for this purpose.
-// Future CLs will adapt this to ongoing Skia development.
-class Compositor : public base::RefCounted<Compositor> {
- public:
-  // Create a compositor from the provided handle.
-  static Compositor* Create(gfx::AcceleratedWidget widget);
+  // The transform to be applied to the texture.
+  ui::Transform transform;
 
-  // Notifies the compositor that compositing is about to start.
-  virtual void NotifyStart() = 0;
+  // If this is true, then the texture is blended with the pixels behind it.
+  // Otherwise, the drawn pixels clobber the old pixels.
+  bool blend;
 
-  // Notifies the compositor that compositing is complete.
-  virtual void NotifyEnd() = 0;
-
-  // Draws the given texture with the given transform.
-  virtual void DrawTextureWithTransform(TextureID txt,
-                                        const ui::Transform& transform) = 0;
-
-  // Save the current transformation that can be restored with RestoreTransform.
-  virtual void SaveTransform() = 0;
-
-  // Restore a previously saved transformation using SaveTransform.
-  virtual void RestoreTransform() = 0;
-
- protected:
-  virtual ~Compositor() {}
-
- private:
-  friend class base::RefCounted<Compositor>;
+  // Copy and assignment are allowed.
 };
 
-#else
 // Textures are created by a Compositor for managing an accelerated view.
 // Any time a View with a texture needs to redraw itself it invokes SetBitmap().
 // When the view is ready to be drawn Draw() is invoked.
@@ -64,10 +40,8 @@ class Compositor : public base::RefCounted<Compositor> {
 // the bitmap.
 //
 // Views own the Texture.
-class Texture {
+class Texture : public base::RefCounted<Texture> {
  public:
-  virtual ~Texture() {}
-
   // Sets the bitmap of this texture. The bitmaps origin is at |origin|.
   // |overall_size| gives the total size of texture.
   virtual void SetBitmap(const SkBitmap& bitmap,
@@ -75,7 +49,13 @@ class Texture {
                          const gfx::Size& overall_size) = 0;
 
   // Draws the texture.
-  virtual void Draw(const ui::Transform& transform) = 0;
+  virtual void Draw(const ui::TextureDrawParams& params) = 0;
+
+ protected:
+  virtual ~Texture() {}
+
+ private:
+  friend class base::RefCounted<Texture>;
 };
 
 // Compositor object to take care of GPU painting.
@@ -86,7 +66,8 @@ class Texture {
 class Compositor : public base::RefCounted<Compositor> {
  public:
   // Create a compositor from the provided handle.
-  static Compositor* Create(gfx::AcceleratedWidget widget);
+  static Compositor* Create(gfx::AcceleratedWidget widget,
+                            const gfx::Size& size);
 
   // Creates a new texture. The caller owns the returned object.
   virtual Texture* CreateTexture() = 0;
@@ -97,6 +78,16 @@ class Compositor : public base::RefCounted<Compositor> {
   // Notifies the compositor that compositing is complete.
   virtual void NotifyEnd() = 0;
 
+  // Blurs the specific region in the compositor.
+  virtual void Blur(const gfx::Rect& bounds) = 0;
+
+  // Schedules a paint on the widget this Compositor was created for.
+  virtual void SchedulePaint() = 0;
+
+  // Notifies the compositor that the size of the widget that it is
+  // drawing to has changed.
+  virtual void OnWidgetSizeChanged(const gfx::Size& size) = 0;
+
  protected:
   virtual ~Compositor() {}
 
@@ -104,7 +95,6 @@ class Compositor : public base::RefCounted<Compositor> {
   friend class base::RefCounted<Compositor>;
 };
 
-#endif  // COMPOSITOR_2
 }  // namespace ui
 
 #endif  // UI_GFX_COMPOSITOR_COMPOSITOR_H_

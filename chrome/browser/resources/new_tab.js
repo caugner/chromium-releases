@@ -435,7 +435,7 @@ function isAnimating() {
   return de.getAttribute('enable-section-animations') == 'true';
 }
 
-// Layout the sections in a modified accordian. The header and miniview, if
+// Layout the sections in a modified accordion. The header and miniview, if
 // visible are fixed within the viewport. If there is an expanded section, its
 // it scrolls.
 //
@@ -488,6 +488,10 @@ function layoutSections() {
     }
   }
 
+  // Include the height of the sync promo bar.
+  var sync_promo_height = $('sync-promo').offsetHeight;
+  headerHeight += sync_promo_height;
+
   // Calculate the height of the fixed elements below the expanded section, if
   // any.
   for (; section = sections[i]; i++) {
@@ -501,6 +505,7 @@ function layoutSections() {
   // space to show the expanded section completely, this will be the available
   // height. Otherwise, we use the intrinsic height of the expanded section.
   var expandedSectionHeight;
+  var expandedSectionIsClipped = false;
   if (expandedSection) {
     var flexHeight = window.innerHeight - headerHeight - footerHeight;
     if (flexHeight < expandedSection.scrollingHeight) {
@@ -520,6 +525,7 @@ function layoutSections() {
           footerHeight +
           fudge +
           'px';
+      expandedSectionIsClipped = true;
     } else {
       expandedSectionHeight = expandedSection.scrollingHeight;
       document.body.style.height = '';
@@ -533,7 +539,7 @@ function layoutSections() {
   maxiviewVisibleHeight = expandedSectionHeight;
 
   // Now position all the elements.
-  var y = LAYOUT_SPACING_TOP;
+  var y = LAYOUT_SPACING_TOP + sync_promo_height;
   for (i = 0, section; section = sections[i]; i++) {
     section.section.style.top = y + 'px';
     y += section.fixedHeight;
@@ -552,7 +558,8 @@ function layoutSections() {
     }
 
     if (section.maxiview && section == expandedSection)
-      updateMask(section.maxiview, expandedSectionHeight);
+      updateMask(
+          section.maxiview, expandedSectionHeight, expandedSectionIsClipped);
 
     if (section == expandedSection)
       y += expandedSectionHeight;
@@ -560,11 +567,21 @@ function layoutSections() {
   if (cr.isChromeOS)
     $('closed-sections-bar').style.top = y + 'px';
 
+  // Position the notification container below the sync promo.
+  $('notification-container').style.top = sync_promo_height + 'px';
+
   updateMenuSections();
   updateAttributionDisplay(y);
 }
 
-function updateMask(maxiview, visibleHeightPx) {
+function updateMask(maxiview, visibleHeightPx, isClipped) {
+  // If the section isn't actually clipped, then we don't want to use a mask at
+  // all, since enabling one turns off subpixel anti-aliasing.
+  if (!isClipped) {
+    maxiview.style.WebkitMaskImage = 'none';
+    return;
+  }
+
   // We want to end up with 10px gradients at the top and bottom of
   // visibleHeight, but webkit-mask only supports expression in terms of
   // percentages.
@@ -715,7 +732,8 @@ function hideSection(section) {
 
       var maxiview = getSectionMaxiview(el);
       if (maxiview) {
-        maxiview.classList.add(isDoneLoading() ? 'collapsing' : 'collapsed');
+        maxiview.classList.add((isDoneLoading() && isAnimating()) ?
+                               'collapsing' : 'collapsed');
         maxiview.classList.remove('opaque');
       }
 
@@ -1418,7 +1436,6 @@ function updateLogin(login) {
   $('login-container').style.display = login ? 'block' : '';
   if (login)
     $('login-username').textContent = login;
-
 }
 
 var mostVisited = new MostVisited(
@@ -1428,7 +1445,7 @@ var mostVisited = new MostVisited(
     useSmallGrid(),
     shownSections & Section.THUMB);
 
-function setMostVisitedPages(data, firstRun, hasBlacklistedUrls) {
+function setMostVisitedPages(data, hasBlacklistedUrls) {
   logEvent('received most visited pages');
 
   mostVisited.updateSettingsLink(hasBlacklistedUrls);
@@ -1457,10 +1474,12 @@ function isDoneLoading() {
   return !document.body.classList.contains('loading');
 }
 
-// Initialize the listener for the "hide this" link on the apps promo. We do
-// this outside of getAppsCallback because it only needs to be done once per
-// NTP load.
 document.addEventListener('DOMContentLoaded', function() {
+  cr.enablePlatformSpecificCSSRules();
+
+  // Initialize the listener for the "hide this" link on the apps promo. We do
+  // this outside of getAppsCallback because it only needs to be done once per
+  // NTP load.
   $('apps-promo-hide').addEventListener('click', function() {
     chrome.send('hideAppsPromo', []);
     document.documentElement.classList.remove('apps-promo-visible');

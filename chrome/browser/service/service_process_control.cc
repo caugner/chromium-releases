@@ -7,12 +7,13 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/process_util.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/service_messages.h"
 #include "chrome/common/service_process_util.h"
 #include "content/browser/browser_thread.h"
@@ -22,8 +23,7 @@
 
 
 // ServiceProcessControl implementation.
-ServiceProcessControl::ServiceProcessControl(Profile* profile)
-    : profile_(profile) {
+ServiceProcessControl::ServiceProcessControl() {
 }
 
 ServiceProcessControl::~ServiceProcessControl() {
@@ -45,10 +45,9 @@ void ServiceProcessControl::ConnectInternal() {
 
   // TODO(hclam): Handle error connecting to channel.
   const IPC::ChannelHandle channel_id = GetServiceProcessChannel();
-  channel_.reset(new IPC::SyncChannel(
+  channel_.reset(new IPC::ChannelProxy(
       channel_id, IPC::Channel::MODE_NAMED_CLIENT, this,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO), true,
-      g_browser_process->shutdown_event()));
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
 }
 
 void ServiceProcessControl::RunConnectDoneTasks() {
@@ -166,6 +165,11 @@ void ServiceProcessControl::Launch(Task* success_task, Task* failure_task) {
       NewRunnableMethod(this, &ServiceProcessControl::OnProcessLaunched));
 }
 
+void ServiceProcessControl::Disconnect() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  channel_.reset();
+}
+
 void ServiceProcessControl::OnProcessLaunched() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (launcher_->launched()) {
@@ -194,7 +198,6 @@ bool ServiceProcessControl::OnMessageReceived(const IPC::Message& message) {
 
 void ServiceProcessControl::OnChannelConnected(int32 peer_pid) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  channel_->set_sync_messages_with_no_timeout_allowed(false);
 
   // We just established a channel with the service process. Notify it if an
   // upgrade is available.
@@ -202,7 +205,7 @@ void ServiceProcessControl::OnChannelConnected(int32 peer_pid) {
     Send(new ServiceMsg_UpdateAvailable);
   } else {
     if (registrar_.IsEmpty())
-      registrar_.Add(this, NotificationType::UPGRADE_RECOMMENDED,
+      registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                      NotificationService::AllSources());
   }
   RunConnectDoneTasks();
@@ -222,10 +225,10 @@ bool ServiceProcessControl::Send(IPC::Message* message) {
 }
 
 // NotificationObserver implementation.
-void ServiceProcessControl::Observe(NotificationType type,
+void ServiceProcessControl::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
-  if (type == NotificationType::UPGRADE_RECOMMENDED) {
+  if (type == chrome::NOTIFICATION_UPGRADE_RECOMMENDED) {
     Send(new ServiceMsg_UpdateAvailable);
   }
 }
@@ -241,15 +244,22 @@ void ServiceProcessControl::OnCloudPrintProxyInfo(
 
 bool ServiceProcessControl::GetCloudPrintProxyInfo(
     CloudPrintProxyInfoHandler* cloud_print_info_callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(cloud_print_info_callback);
   cloud_print_info_callback_.reset(cloud_print_info_callback);
   return Send(new ServiceMsg_GetCloudPrintProxyInfo());
 }
 
 bool ServiceProcessControl::Shutdown() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   bool ret = Send(new ServiceMsg_Shutdown());
   channel_.reset();
   return ret;
+}
+
+// static
+ServiceProcessControl* ServiceProcessControl::GetInstance() {
+  return Singleton<ServiceProcessControl>::get();
 }
 
 DISABLE_RUNNABLE_METHOD_REFCOUNT(ServiceProcessControl);
@@ -302,7 +312,11 @@ void ServiceProcessControl::Launcher::DoDetectLaunched() {
 
 void ServiceProcessControl::Launcher::DoRun() {
   DCHECK(notify_task_.get());
-  if (base::LaunchApp(*cmd_line_, false, true, NULL)) {
+  base::LaunchOptions options;
+#if defined(OS_WIN)
+  options.start_hidden = true;
+#endif
+  if (base::LaunchProcess(*cmd_line_, options, NULL)) {
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                             NewRunnableMethod(this,
                                               &Launcher::DoDetectLaunched));

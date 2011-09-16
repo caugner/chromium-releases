@@ -7,18 +7,16 @@
 #include "base/lazy_instance.h"
 #include "chrome/browser/chromeos/cros/brightness_library.h"
 #include "chrome/browser/chromeos/cros/burn_library.h"
-#include "chrome/browser/chromeos/cros/cros_library_loader.h"
+#include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/input_method_library.h"
 #include "chrome/browser/chromeos/cros/libcros_service_library.h"
+#include "chrome/browser/chromeos/cros/library_loader.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/mount_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros/power_library.h"
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
 #include "chrome/browser/chromeos/cros/speech_synthesis_library.h"
-#include "chrome/browser/chromeos/cros/syslogs_library.h"
-#include "chrome/browser/chromeos/cros/touchpad_library.h"
 #include "chrome/browser/chromeos/cros/update_library.h"
 
 #define DEFINE_GET_LIBRARY_METHOD(class_prefix, var_prefix)                    \
@@ -58,8 +56,8 @@ CrosLibrary* CrosLibrary::Get() {
 
 DEFINE_GET_LIBRARY_METHOD(Brightness, brightness);
 DEFINE_GET_LIBRARY_METHOD(Burn, burn);
+DEFINE_GET_LIBRARY_METHOD(Cert, cert);
 DEFINE_GET_LIBRARY_METHOD(Cryptohome, crypto);
-DEFINE_GET_LIBRARY_METHOD(InputMethod, input_method);
 DEFINE_GET_LIBRARY_METHOD(LibCrosService, libcros_service);
 DEFINE_GET_LIBRARY_METHOD(Login, login);
 DEFINE_GET_LIBRARY_METHOD(Mount, mount);
@@ -67,8 +65,6 @@ DEFINE_GET_LIBRARY_METHOD(Network, network);
 DEFINE_GET_LIBRARY_METHOD(Power, power);
 DEFINE_GET_LIBRARY_METHOD(ScreenLock, screen_lock);
 DEFINE_GET_LIBRARY_METHOD(SpeechSynthesis, speech_synthesis);
-DEFINE_GET_LIBRARY_METHOD(Syslogs, syslogs);
-DEFINE_GET_LIBRARY_METHOD(Touchpad, touchpad);
 DEFINE_GET_LIBRARY_METHOD(Update, update);
 
 bool CrosLibrary::EnsureLoaded() {
@@ -77,7 +73,7 @@ bool CrosLibrary::EnsureLoaded() {
 
   if (!loaded_ && !load_error_) {
     if (!library_loader_) {
-      library_loader_ = new CrosLibraryLoader();
+      library_loader_ = LibraryLoader::GetImpl();
       own_library_loader_ = true;
     }
     loaded_ = library_loader_->Load(&load_error_string_);
@@ -114,9 +110,9 @@ void CrosLibrary::TestApi::SetLibraryLoader(LibraryLoader* loader, bool own) {
 }
 
 DEFINE_SET_LIBRARY_METHOD(Brightness, brightness);
+DEFINE_SET_LIBRARY_METHOD(Cert, cert);
 DEFINE_SET_LIBRARY_METHOD(Burn, burn);
 DEFINE_SET_LIBRARY_METHOD(Cryptohome, crypto);
-DEFINE_SET_LIBRARY_METHOD(InputMethod, input_method);
 DEFINE_SET_LIBRARY_METHOD(LibCrosService, libcros_service);
 DEFINE_SET_LIBRARY_METHOD(Login, login);
 DEFINE_SET_LIBRARY_METHOD(Mount, mount);
@@ -124,8 +120,6 @@ DEFINE_SET_LIBRARY_METHOD(Network, network);
 DEFINE_SET_LIBRARY_METHOD(Power, power);
 DEFINE_SET_LIBRARY_METHOD(ScreenLock, screen_lock);
 DEFINE_SET_LIBRARY_METHOD(SpeechSynthesis, speech_synthesis);
-DEFINE_SET_LIBRARY_METHOD(Syslogs, syslogs);
-DEFINE_SET_LIBRARY_METHOD(Touchpad, touchpad);
 DEFINE_SET_LIBRARY_METHOD(Update, update);
 
 } // namespace chromeos

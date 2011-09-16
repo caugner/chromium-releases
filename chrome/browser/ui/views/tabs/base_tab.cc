@@ -14,10 +14,10 @@
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/animation_container.h"
 #include "ui/base/animation/slide_animation.h"
@@ -153,7 +153,7 @@ BaseTab::BaseTab(TabController* controller)
       theme_provider_(NULL) {
   BaseTab::InitResources();
 
-  SetID(VIEW_ID_TAB);
+  set_id(VIEW_ID_TAB);
 
   // Add the Close Button.
   close_button_ = new TabCloseButton(this);
@@ -173,7 +173,7 @@ BaseTab::BaseTab(TabController* controller)
   close_button_->SetAnimationDuration(0);
   AddChildView(close_button_);
 
-  SetContextMenuController(this);
+  set_context_menu_controller(this);
 }
 
 BaseTab::~BaseTab() {
@@ -513,7 +513,7 @@ void BaseTab::ButtonPressed(views::Button* sender, const views::Event& event) {
 void BaseTab::ShowContextMenuForView(views::View* source,
                                      const gfx::Point& p,
                                      bool is_mouse_gesture) {
-  if (controller())
+  if (controller() && !closing())
     controller()->ShowContextMenuForTab(this, p);
 }
 

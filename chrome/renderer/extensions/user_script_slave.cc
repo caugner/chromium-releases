@@ -21,9 +21,12 @@
 #include "chrome/renderer/extensions/extension_groups.h"
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -81,9 +84,10 @@ int UserScriptSlave::GetIsolatedWorldId(
 void UserScriptSlave::InitializeIsolatedWorld(
     int isolated_world_id,
     const Extension* extension) {
-  const URLPatternList& permissions =
-      extension->GetEffectiveHostPermissions().patterns();
-  for (size_t i = 0; i < permissions.size(); ++i) {
+  const URLPatternSet& permissions =
+      extension->GetEffectiveHostPermissions();
+  for (URLPatternSet::const_iterator i = permissions.begin();
+       i != permissions.end(); ++i) {
     const char* schemes[] = {
       chrome::kHttpScheme,
       chrome::kHttpsScheme,
@@ -91,12 +95,12 @@ void UserScriptSlave::InitializeIsolatedWorld(
       chrome::kChromeUIScheme,
     };
     for (size_t j = 0; j < arraysize(schemes); ++j) {
-      if (permissions[i].MatchesScheme(schemes[j])) {
+      if (i->MatchesScheme(schemes[j])) {
         WebSecurityPolicy::addOriginAccessWhitelistEntry(
             extension->url(),
             WebString::fromUTF8(schemes[j]),
-            WebString::fromUTF8(permissions[i].host()),
-            permissions[i].match_subdomains());
+            WebString::fromUTF8(i->host()),
+            i->match_subdomains());
       }
     }
   }
@@ -195,9 +199,10 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
 
     WebVector<WebString> patterns;
     std::vector<WebString> temp_patterns;
-    for (size_t k = 0; k < script->url_patterns().size(); ++k) {
-      URLPatternList explicit_patterns =
-          script->url_patterns()[k].ConvertToExplicitSchemes();
+    const URLPatternSet& url_patterns = script->url_patterns();
+    for (URLPatternSet::const_iterator k = url_patterns.begin();
+         k != url_patterns.end(); ++k) {
+      URLPatternList explicit_patterns = k->ConvertToExplicitSchemes();
       for (size_t m = 0; m < explicit_patterns.size(); ++m) {
         temp_patterns.push_back(WebString::fromUTF8(
             explicit_patterns[m].GetAsString()));
@@ -209,12 +214,13 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
       const UserScript::File& file = scripts_[i]->css_scripts()[j];
       std::string content = file.GetContent().as_string();
 
-       WebView::addUserStyleSheet(
+      WebView::addUserStyleSheet(
           WebString::fromUTF8(content),
           patterns,
            script->match_all_frames() ?
               WebView::UserContentInjectInAllFrames :
-              WebView::UserContentInjectInTopFrameOnly);
+              WebView::UserContentInjectInTopFrameOnly,
+          WebView::UserStyleInjectInExistingDocuments);
     }
   }
 
@@ -234,9 +240,21 @@ void UserScriptSlave::InsertInitExtensionCode(
 
 void UserScriptSlave::InjectScripts(WebFrame* frame,
                                     UserScript::RunLocation location) {
-  GURL frame_url = GURL(frame->url());
-  if (frame_url.is_empty())
+  // Normally we would use frame->document().url() to determine the document's
+  // URL, but to decide whether to inject a content script, we use the URL from
+  // the data source. This "quirk" helps prevents content scripts from
+  // inadvertently adding DOM elements to the compose iframe in Gmail because
+  // the compose iframe's dataSource URL is about:blank, but the document URL
+  // changes to match the parent document after Gmail document.writes into
+  // it to create the editor.
+  // http://code.google.com/p/chromium/issues/detail?id=86742
+  GURL data_source_url = GURL(frame->dataSource()->request().url());
+  if (data_source_url.is_empty())
     return;
+
+  if (frame->isViewSourceModeEnabled())
+    data_source_url = GURL(chrome::kViewSourceScheme + std::string(":") +
+                           data_source_url.spec());
 
   PerfTimer timer;
   int num_css = 0;
@@ -256,7 +274,7 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
     if (!extension)
       continue;
 
-    if (!extension->CanExecuteScriptOnPage(frame_url, script, NULL))
+    if (!extension->CanExecuteScriptOnPage(data_source_url, script, NULL))
       continue;
 
     // We rely on WebCore for CSS injection, but it's still useful to know how

@@ -98,11 +98,12 @@ class Bubble
                       BubbleDelegate* delegate);
 
 #if defined(OS_CHROMEOS)
-  // Shows the Bubble without grabbing the focus. Others are the same as
-  // above.  TYPE_POPUP widget is used to achieve the focusless effect.
-  // If |show_while_screen_is_locked| is true, a property is set telling the
-  // window manager to continue showing the bubble even while the screen is
-  // locked.
+  // Shows the Bubble without grabbing the focus. Doesn't set the Escape
+  // accelerator so user code is responsible for closing the bubble on pressing
+  // the Esc key. Others are the same as above. TYPE_POPUP widget is used
+  // to achieve the focusless effect. If |show_while_screen_is_locked| is true,
+  // a property is set telling the window manager to continue showing the bubble
+  // even while the screen is locked.
   static Bubble* ShowFocusless(views::Widget* parent,
                                const gfx::Rect& position_relative_to,
                                BubbleBorder::ArrowLocation arrow_location,
@@ -160,7 +161,7 @@ class Bubble
   virtual void OnActivate(UINT action, BOOL minimized, HWND window);
 #elif defined(TOOLKIT_USES_GTK)
   // Overridden from NativeWidgetGtk:
-  virtual void IsActiveChanged();
+  virtual void OnActiveChanged() OVERRIDE;
 #endif
 
 #if defined(OS_WIN)
@@ -189,6 +190,9 @@ class Bubble
 
   // Animates to a visible/hidden state (visible if |fade_in| is true).
   void Fade(bool fade_in);
+
+  void RegisterEscapeAccelerator();
+  void UnregisterEscapeAccelerator();
 
   // Overridden from AcceleratorTarget:
   virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
@@ -219,6 +223,8 @@ class Bubble
   BubbleBorder::ArrowLocation arrow_location_;
 
   views::View* contents_;
+
+  bool accelerator_registered_;
 
   DISALLOW_COPY_AND_ASSIGN(Bubble);
 };

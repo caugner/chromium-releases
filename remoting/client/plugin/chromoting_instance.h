@@ -12,24 +12,26 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "ppapi/c/dev/ppp_policy_update_dev.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_resource.h"
-#include "ppapi/cpp/instance.h"
+#include "ppapi/c/pp_var.h"
 #include "ppapi/cpp/var.h"
+#include "ppapi/cpp/private/instance_private.h"
 #include "remoting/client/client_context.h"
 #include "remoting/client/plugin/chromoting_scriptable_object.h"
 #include "remoting/client/plugin/pepper_client_logger.h"
 #include "remoting/protocol/connection_to_host.h"
 
 class MessageLoop;
-struct PP_InputEvent;
 
 namespace base {
 class Thread;
 }  // namespace base
 
 namespace pp {
+class InputEvent;
 class Module;
 }  // namespace pp
 
@@ -54,7 +56,7 @@ namespace protocol {
 class HostConnection;
 }  // namespace protocol
 
-class ChromotingInstance : public pp::Instance {
+class ChromotingInstance : public pp::InstancePrivate {
  public:
   // The mimetype for which this plugin is registered.
   static const char *kMimeType;
@@ -62,22 +64,22 @@ class ChromotingInstance : public pp::Instance {
   explicit ChromotingInstance(PP_Instance instance);
   virtual ~ChromotingInstance();
 
-  virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]);
-  virtual void Connect(const ClientConfig& config);
-  virtual void ConnectSandboxed(const std::string& your_jid,
-                                const std::string& host_jid,
-                                const std::string& nonce);
-  virtual bool HandleInputEvent(const PP_InputEvent& event);
-  virtual void Disconnect();
-  virtual pp::Var GetInstanceObject();
-  virtual void ViewChanged(const pp::Rect& position, const pp::Rect& clip);
-
   // pp::Instance interface.
   virtual void DidChangeView(const pp::Rect& position, const pp::Rect& clip)
       OVERRIDE;
+  virtual bool Init(uint32_t argc, const char* argn[], const char* argv[])
+      OVERRIDE;
+  virtual bool HandleInputEvent(const pp::InputEvent& event) OVERRIDE;
+
+  // pp::InstancePrivate interface.
+  virtual pp::Var GetInstanceObject() OVERRIDE;
 
   // Convenience wrapper to get the ChromotingScriptableObject.
   ChromotingScriptableObject* GetScriptableObject();
+
+  // Initiates and cancels connections.
+  void Connect(const ClientConfig& config);
+  void Disconnect();
 
   // Called by ChromotingScriptableObject to provide username and password.
   void SubmitLoginInfo(const std::string& username,
@@ -93,14 +95,28 @@ class ChromotingInstance : public pp::Instance {
   // If no connection is currently active then NULL will be returned.
   ChromotingStats* GetStats();
 
+  void ReleaseAllKeys();
+
+  bool DoScaling() const { return scale_to_fit_; }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromotingInstanceTest, TestCaseSetup);
+
+  static PPP_PolicyUpdate_Dev kPolicyUpdatedInterface;
+  static void PolicyUpdatedThunk(PP_Instance pp_instance,
+                                 PP_Var pp_policy_json);
+  void SubscribeToNatTraversalPolicy();
+  bool IsNatTraversalAllowed(const std::string& policy_json);
+  void HandlePolicyUpdate(const std::string policy_json);
 
   bool initialized_;
 
   ClientContext context_;
   scoped_ptr<protocol::ConnectionToHost> host_connection_;
   scoped_ptr<PepperView> view_;
+
+  // True if scale to fit is enabled.
+  bool scale_to_fit_;
 
   // PepperViewProxy is refcounted and used to interface between chromoting
   // objects and PepperView and perform thread switching. It wraps around
@@ -125,6 +141,18 @@ class ChromotingInstance : public pp::Instance {
   // JavaScript interface to control this instance.
   // This wraps a ChromotingScriptableObject in a pp::Var.
   pp::Var instance_object_;
+
+  // Controls if this instance of the plugin should attempt to bridge
+  // firewalls.
+  bool enable_client_nat_traversal_;
+
+  // True when the initial policy is received. Used to avoid taking
+  // action before the browser has informed the plugin about its policy
+  // settings.
+  bool initial_policy_received_;
+
+  ScopedRunnableMethodFactory<ChromotingInstance> task_factory_;
+  scoped_ptr<Task> delayed_connect_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingInstance);
 };

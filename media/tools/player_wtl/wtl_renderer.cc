@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,11 @@ WtlVideoRenderer::WtlVideoRenderer(WtlVideoWindow* window)
     : window_(window) {
 }
 
-WtlVideoRenderer::~WtlVideoRenderer() {
-}
+WtlVideoRenderer::~WtlVideoRenderer() {}
 
-// static
-bool WtlVideoRenderer::IsMediaFormatSupported(
-    const media::MediaFormat& media_format) {
-  return ParseMediaFormat(media_format, NULL, NULL, NULL, NULL);
+bool WtlVideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
+  window_->SetSize(decoder->width(), decoder->height());
+  return true;
 }
 
 void WtlVideoRenderer::OnStop(media::FilterCallback* callback) {
@@ -24,11 +22,6 @@ void WtlVideoRenderer::OnStop(media::FilterCallback* callback) {
     callback->Run();
     delete callback;
   }
-}
-
-bool WtlVideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
-  window_->SetSize(width(), height());
-  return true;
 }
 
 void WtlVideoRenderer::OnFrameAvailable() {

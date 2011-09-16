@@ -8,7 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/values.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -35,6 +35,7 @@ HttpNetworkSession::HttpNetworkSession(const Params& params)
                                ClientSocketFactory::GetDefaultFactory(),
                            params.host_resolver,
                            params.cert_verifier,
+                           params.origin_bound_cert_service,
                            params.dnsrr_resolver,
                            params.dns_cert_checker,
                            params.ssl_host_info_factory,
@@ -63,8 +64,36 @@ void HttpNetworkSession::RemoveResponseDrainer(
   response_drainers_.erase(drainer);
 }
 
+SOCKSClientSocketPool* HttpNetworkSession::GetSocketPoolForSOCKSProxy(
+    const HostPortPair& socks_proxy) {
+  return socket_pool_manager_.GetSocketPoolForSOCKSProxy(socks_proxy);
+}
+
+HttpProxyClientSocketPool* HttpNetworkSession::GetSocketPoolForHTTPProxy(
+    const HostPortPair& http_proxy) {
+  return socket_pool_manager_.GetSocketPoolForHTTPProxy(http_proxy);
+}
+
+SSLClientSocketPool* HttpNetworkSession::GetSocketPoolForSSLWithProxy(
+    const HostPortPair& proxy_server) {
+  return socket_pool_manager_.GetSocketPoolForSSLWithProxy(proxy_server);
+}
+
+Value* HttpNetworkSession::SocketPoolInfoToValue() const {
+  return socket_pool_manager_.SocketPoolInfoToValue();
+}
+
 Value* HttpNetworkSession::SpdySessionPoolInfoToValue() const {
   return spdy_session_pool_.SpdySessionPoolInfoToValue();
+}
+
+void HttpNetworkSession::CloseAllConnections() {
+  socket_pool_manager_.FlushSocketPools();
+  spdy_session_pool_.CloseCurrentSessions();
+}
+
+void HttpNetworkSession::CloseIdleConnections() {
+  socket_pool_manager_.CloseIdleSockets();
 }
 
 }  //  namespace net

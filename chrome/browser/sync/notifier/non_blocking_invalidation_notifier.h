@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/sync/notifier/sync_notifier.h"
 #include "jingle/notifier/base/notifier_options.h"
@@ -31,22 +32,22 @@ class NonBlockingInvalidationNotifier : public SyncNotifier {
   virtual ~NonBlockingInvalidationNotifier();
 
   // SyncNotifier implementation.
-  virtual void AddObserver(SyncNotifierObserver* observer);
-  virtual void RemoveObserver(SyncNotifierObserver* observer);
-  virtual void SetState(const std::string& state);
+  virtual void AddObserver(SyncNotifierObserver* observer) OVERRIDE;
+  virtual void RemoveObserver(SyncNotifierObserver* observer) OVERRIDE;
+  virtual void SetUniqueId(const std::string& unique_id) OVERRIDE;
+  virtual void SetState(const std::string& state) OVERRIDE;
   virtual void UpdateCredentials(
-      const std::string& email, const std::string& token);
-  virtual void UpdateEnabledTypes(const syncable::ModelTypeSet& types);
-  virtual void SendNotification();
+      const std::string& email, const std::string& token) OVERRIDE;
+  virtual void UpdateEnabledTypes(
+      const syncable::ModelTypeSet& types) OVERRIDE;
+  virtual void SendNotification() OVERRIDE;
 
  private:
-  void CheckOrSetValidThread();
   // The real guts of NonBlockingInvalidationNotifier, which allows this class
   // to not be refcounted.
   class Core;
   scoped_refptr<Core> core_;
-  scoped_refptr<base::MessageLoopProxy> construction_message_loop_proxy_;
-  scoped_refptr<base::MessageLoopProxy> method_message_loop_proxy_;
+  scoped_refptr<base::MessageLoopProxy> parent_message_loop_proxy_;
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
   DISALLOW_COPY_AND_ASSIGN(NonBlockingInvalidationNotifier);
 };

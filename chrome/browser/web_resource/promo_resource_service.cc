@@ -10,14 +10,14 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/apps_promo.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -93,18 +93,18 @@ void PromoResourceService::RegisterUserPrefs(PrefService* prefs) {
 }
 
 // static
-bool PromoResourceService::IsBuildTargeted(platform_util::Channel channel,
+bool PromoResourceService::IsBuildTargeted(chrome::VersionInfo::Channel channel,
                                            int builds_allowed) {
   if (builds_allowed == NO_BUILD)
     return false;
   switch (channel) {
-    case platform_util::CHANNEL_CANARY:
+    case chrome::VersionInfo::CHANNEL_CANARY:
       return (CANARY_BUILD & builds_allowed) != 0;
-    case platform_util::CHANNEL_DEV:
+    case chrome::VersionInfo::CHANNEL_DEV:
       return (DEV_BUILD & builds_allowed) != 0;
-    case platform_util::CHANNEL_BETA:
+    case chrome::VersionInfo::CHANNEL_BETA:
       return (BETA_BUILD & builds_allowed) != 0;
-    case platform_util::CHANNEL_STABLE:
+    case chrome::VersionInfo::CHANNEL_STABLE:
       return (STABLE_BUILD & builds_allowed) != 0;
     default:
       return false;
@@ -112,16 +112,15 @@ bool PromoResourceService::IsBuildTargeted(platform_util::Channel channel,
 }
 
 PromoResourceService::PromoResourceService(Profile* profile)
-    : WebResourceService(profile,
-                         profile->GetPrefs(),
+    : WebResourceService(profile->GetPrefs(),
                          PromoResourceService::kDefaultPromoResourceServer,
                          true,  // append locale to URL
-                         NotificationType::PROMO_RESOURCE_STATE_CHANGED,
+                         chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
                          prefs::kNTPPromoResourceCacheUpdate,
                          kStartResourceFetchDelay,
                          kCacheUpdateDelay),
       web_resource_cache_(NULL),
-      channel_(platform_util::CHANNEL_UNKNOWN) {
+      channel_(chrome::VersionInfo::CHANNEL_UNKNOWN) {
   Init();
 }
 
@@ -132,10 +131,10 @@ void PromoResourceService::Init() {
 }
 
 bool PromoResourceService::IsThisBuildTargeted(int builds_targeted) {
-  if (channel_ == platform_util::CHANNEL_UNKNOWN) {
+  if (channel_ == chrome::VersionInfo::CHANNEL_UNKNOWN) {
     // GetChannel hits the registry on Windows. See http://crbug.com/70898.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    channel_ = platform_util::GetChannel();
+    channel_ = chrome::VersionInfo::GetChannel();
   }
 
   return IsBuildTargeted(channel_, builds_targeted);
@@ -382,7 +381,7 @@ void PromoResourceService::UnpackWebStoreSignal(
   AppsPromo::SetWebStoreSupportedForLocale(is_webstore_active);
 
   NotificationService::current()->Notify(
-      NotificationType::WEB_STORE_PROMO_LOADED,
+      chrome::NOTIFICATION_WEB_STORE_PROMO_LOADED,
       Source<PromoResourceService>(this),
       NotificationService::NoDetails());
 
@@ -451,7 +450,7 @@ void PromoResourceService::UnpackLogoSignal(
     prefs_->SetDouble(prefs::kNTPCustomLogoStart, logo_start);
     prefs_->SetDouble(prefs::kNTPCustomLogoEnd, logo_end);
     NotificationService* service = NotificationService::current();
-    service->Notify(NotificationType::PROMO_RESOURCE_STATE_CHANGED,
+    service->Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
                     Source<WebResourceService>(this),
                     NotificationService::NoDetails());
   }
@@ -475,7 +474,7 @@ bool CanShowPromo(Profile* profile) {
   if (prefs->HasPrefPath(prefs::kNTPPromoBuild)) {
     // GetChannel hits the registry on Windows. See http://crbug.com/70898.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    platform_util::Channel channel = platform_util::GetChannel();
+    chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
     is_promo_build = PromoResourceService::IsBuildTargeted(
         channel, prefs->GetInteger(prefs::kNTPPromoBuild));
   }

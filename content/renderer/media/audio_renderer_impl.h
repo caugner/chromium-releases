@@ -43,7 +43,8 @@
 #include "base/message_loop.h"
 #include "base/shared_memory.h"
 #include "base/synchronization/lock.h"
-#include "content/renderer/audio_message_filter.h"
+#include "base/threading/simple_thread.h"
+#include "content/renderer/media/audio_message_filter.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
 #include "media/base/filters.h"
@@ -51,12 +52,14 @@
 
 class AudioMessageFilter;
 
-class AudioRendererImpl : public media::AudioRendererBase,
-                          public AudioMessageFilter::Delegate,
-                          public MessageLoop::DestructionObserver {
+class AudioRendererImpl
+    : public media::AudioRendererBase,
+      public AudioMessageFilter::Delegate,
+      public base::DelegateSimpleThread::Delegate,
+      public MessageLoop::DestructionObserver {
  public:
   // Methods called on Render thread ------------------------------------------
-  explicit AudioRendererImpl(AudioMessageFilter* filter);
+  explicit AudioRendererImpl();
   virtual ~AudioRendererImpl();
 
   // Methods called on IO thread ----------------------------------------------
@@ -89,8 +92,17 @@ class AudioRendererImpl : public media::AudioRendererBase,
   virtual void ConsumeAudioSamples(scoped_refptr<media::Buffer> buffer_in);
 
  private:
+  // We are using either low- or high-latency code path.
+  enum LatencyType {
+    kUninitializedLatency = 0,
+    kLowLatency,
+    kHighLatency
+  };
+  static LatencyType latency_type_;
+
   // For access to constructor and IO thread methods.
   friend class AudioRendererImplTest;
+  friend class DelegateCaller;
   FRIEND_TEST_ALL_PREFIXES(AudioRendererImplTest, Stop);
   FRIEND_TEST_ALL_PREFIXES(AudioRendererImplTest,
                            DestroyedMessageLoop_ConsumeAudioSamples);
@@ -114,10 +126,31 @@ class AudioRendererImpl : public media::AudioRendererBase,
   // Called on IO thread when message loop is dying.
   virtual void WillDestroyCurrentMessageLoop();
 
+  // DelegateSimpleThread::Delegate implementation.
+  virtual void Run();
+
+  // (Re-)starts playback.
+  void NotifyDataAvailableIfNecessary();
+
+  // Creates socket. Virtual so tests can override.
+  virtual void CreateSocket(base::SyncSocket::Handle socket_handle);
+
+  // Launching audio thread. Virtual so tests can override.
+  virtual void CreateAudioThread();
+
+  // Accessors used by tests.
+  LatencyType latency_type() {
+    return latency_type_;
+  }
+
+  // Should be called before any class instance is created.
+  static void set_latency_type(LatencyType latency_type);
+
+  // Helper method for IPC send calls.
+  void Send(IPC::Message* message);
+
   // Used to calculate audio delay given bytes.
   uint32 bytes_per_second_;
-
-  scoped_refptr<AudioMessageFilter> filter_;
 
   // ID of the stream created in the browser process.
   int32 stream_id_;
@@ -126,8 +159,14 @@ class AudioRendererImpl : public media::AudioRendererBase,
   scoped_ptr<base::SharedMemory> shared_memory_;
   uint32 shared_memory_size_;
 
-  // Message loop for the IO thread.
-  MessageLoop* io_loop_;
+  // Cached audio message filter (lives on the main render thread).
+  scoped_refptr<AudioMessageFilter> filter_;
+
+  // Low latency IPC stuff.
+  scoped_ptr<base::SyncSocket> socket_;
+
+  // That thread waits for audio input.
+  scoped_ptr<base::DelegateSimpleThread> audio_thread_;
 
   // Protects:
   // - |stopped_|

@@ -10,7 +10,6 @@
 
 #include "ppapi/cpp/audio.h"
 #include "ppapi/cpp/audio_config.h"
-#include "ppapi/cpp/common.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/core.h"
 #include "ppapi/cpp/dev/buffer_dev.h"
@@ -18,14 +17,12 @@
 #include "ppapi/cpp/dev/directory_entry_dev.h"
 #include "ppapi/cpp/dev/directory_reader_dev.h"
 #include "ppapi/cpp/dev/file_chooser_dev.h"
-#include "ppapi/cpp/dev/file_io_dev.h"
-#include "ppapi/cpp/dev/file_ref_dev.h"
-#include "ppapi/cpp/dev/file_system_dev.h"
 #include "ppapi/cpp/dev/find_dev.h"
 #include "ppapi/cpp/dev/font_dev.h"
 #include "ppapi/cpp/dev/fullscreen_dev.h"
 #include "ppapi/cpp/dev/graphics_3d_client_dev.h"
 #include "ppapi/cpp/dev/graphics_3d_dev.h"
+#include "ppapi/cpp/dev/memory_dev.h"
 #include "ppapi/cpp/dev/printing_dev.h"
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 #include "ppapi/cpp/dev/scrollbar_dev.h"
@@ -37,6 +34,9 @@
 #include "ppapi/cpp/dev/widget_client_dev.h"
 #include "ppapi/cpp/dev/widget_dev.h"
 #include "ppapi/cpp/dev/zoom_dev.h"
+#include "ppapi/cpp/file_io.h"
+#include "ppapi/cpp/file_ref.h"
+#include "ppapi/cpp/file_system.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/instance.h"
@@ -57,4 +57,3 @@
 #include "ppapi/cpp/var.h"
 
 #endif  // PPAPI_TESTS_ALL_CPP_INCLUDES_H_
-

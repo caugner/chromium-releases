@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
@@ -17,14 +17,15 @@
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/page_transition_types.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/submenu_view.h"
 
 using views::MenuItemView;
 
@@ -61,9 +62,21 @@ void BookmarkMenuDelegate::Init(views::MenuDelegate* real_delegate,
   real_delegate_ = real_delegate;
   if (parent) {
     parent_menu_item_ = parent;
+    int initial_count = parent->GetSubmenu() ?
+        parent->GetSubmenu()->GetMenuItemCount() : 0;
+    if ((start_child_index < node->child_count()) &&
+        (initial_count > 0)) {
+      parent->AppendSeparator();
+    }
     BuildMenu(node, start_child_index, parent, &next_menu_id_);
-    if (show_options == SHOW_OTHER_FOLDER)
-      BuildOtherFolderMenu(parent, &next_menu_id_);
+    if (show_options == SHOW_OTHER_FOLDER) {
+      const BookmarkNode* other_folder =
+          profile_->GetBookmarkModel()->other_node();
+      if (!other_folder->empty()) {
+        parent->AppendSeparator();
+        BuildOtherFolderMenu(parent, &next_menu_id_);
+      }
+    }
   } else {
     menu_ = CreateMenu(node, start_child_index, show_options);
   }
@@ -83,9 +96,9 @@ std::wstring BookmarkMenuDelegate::GetTooltipText(
   DCHECK(menu_id_to_node_map_.find(id) != menu_id_to_node_map_.end());
 
   const BookmarkNode* node = menu_id_to_node_map_[id];
-  if (node->type() == BookmarkNode::URL)
+  if (node->is_url())
     return BookmarkBarView::CreateToolTipForURLAndTitle(
-        screen_loc, node->GetURL(), UTF16ToWide(node->GetTitle()), profile_);
+        screen_loc, node->url(), UTF16ToWide(node->GetTitle()), profile_);
   return std::wstring();
 }
 
@@ -205,7 +218,7 @@ int BookmarkMenuDelegate::OnPerformDrop(
     case views::MenuDelegate::DROP_BEFORE:
       if (drop_node == model->other_node()) {
         // This can happen with SHOW_OTHER_FOLDER.
-        drop_parent = model->GetBookmarkBarNode();
+        drop_parent = model->bookmark_bar_node();
         index_to_drop_at = drop_parent->child_count();
       }
       break;

@@ -17,7 +17,7 @@
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/browser_main_win.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
-#import "chrome/browser/cocoa/keystone_glue.h"
+#import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -48,7 +48,7 @@ void WarnAboutMinimumSystemRequirements() {
 // From browser_main_win.h, stubs until we figure out the right thing...
 
 int DoUninstallTasks(bool chrome_still_running) {
-  return ResultCodes::NORMAL_EXIT;
+  return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 int HandleIconsCommands(const CommandLine& parsed_command_line) {

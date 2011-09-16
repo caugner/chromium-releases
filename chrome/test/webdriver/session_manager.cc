@@ -4,31 +4,7 @@
 
 #include "chrome/test/webdriver/session_manager.h"
 
-#include "base/logging.h"
-#include "chrome/test/webdriver/utility_functions.h"
-#include "net/base/net_util.h"
-
-#if defined(OS_WIN)
-#include <Winsock2.h>
-#endif
-
 namespace webdriver {
-
-std::string SessionManager::GetAddress() {
-  std::string hostname = net::GetHostName();
-#if defined(OS_WIN)
-  if (hostname.length()) {
-    // Get the fully qualified name.
-    struct hostent* host_entry = gethostbyname(hostname.c_str());
-    if (host_entry)
-      hostname = host_entry->h_name;
-  }
-#endif
-  if (hostname.empty()) {
-    hostname = "localhost";
-  }
-  return hostname + ":" + port_ + url_base_;
-}
 
 void SessionManager::Add(Session* session) {
   base::AutoLock lock(map_lock_);
@@ -42,14 +18,10 @@ bool SessionManager::Has(const std::string& id) const {
 
 bool SessionManager::Remove(const std::string& id) {
   std::map<std::string, Session*>::iterator it;
-  Session* session;
   base::AutoLock lock(map_lock_);
   it = map_.find(id);
-  if (it == map_.end()) {
-    VLOG(1) << "No such session with ID " << id;
+  if (it == map_.end())
     return false;
-  }
-  session = it->second;
   map_.erase(it);
   return true;
 }
@@ -58,10 +30,8 @@ Session* SessionManager::GetSession(const std::string& id) const {
   std::map<std::string, Session*>::const_iterator it;
   base::AutoLock lock(map_lock_);
   it = map_.find(id);
-  if (it == map_.end()) {
-    VLOG(1) << "No such session with ID " << id;
+  if (it == map_.end())
     return NULL;
-  }
   return it->second;
 }
 

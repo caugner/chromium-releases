@@ -33,7 +33,6 @@
     {
       'target_name': 'ipc_tests',
       'type': 'executable',
-      'msvs_guid': 'B92AE829-E1CD-4781-824A-DCB1603A1672',
       'dependencies': [
         'ipc',
         '../base/base.gyp:base',
@@ -88,9 +87,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

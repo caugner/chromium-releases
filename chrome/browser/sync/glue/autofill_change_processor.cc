@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/string_util.h"
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_database.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/guid.h"
 #include "content/common/notification_service.h"
 
@@ -54,7 +56,7 @@ AutofillChangeProcessor::AutofillChangeProcessor(
 
 AutofillChangeProcessor::~AutofillChangeProcessor() {}
 
-void AutofillChangeProcessor::Observe(NotificationType type,
+void AutofillChangeProcessor::Observe(int type,
                                       const NotificationSource& source,
                                       const NotificationDetails& details) {
   // Ensure this notification came from our web database.
@@ -67,7 +69,7 @@ void AutofillChangeProcessor::Observe(NotificationType type,
   if (!observing_)
     return;
 
-  sync_api::WriteTransaction trans(share_handle());
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
   sync_api::ReadNode autofill_root(&trans);
   if (!autofill_root.InitByTagLookup(kAutofillTag)) {
     error_handler()->OnUnrecoverableError(FROM_HERE,
@@ -76,7 +78,7 @@ void AutofillChangeProcessor::Observe(NotificationType type,
     return;
   }
 
-  DCHECK(type.value == NotificationType::AUTOFILL_ENTRIES_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED);
 
   AutofillChangeList* changes = Details<AutofillChangeList>(details).ptr();
   ObserveAutofillEntriesChanged(changes, &trans, autofill_root);
@@ -198,8 +200,6 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
     return;
   StopObserving();
 
-  bool autofill_profile_not_migrated = HasNotMigratedYet(trans);
-
   sync_api::ReadNode autofill_root(trans);
   if (!autofill_root.InitByTagLookup(kAutofillTag)) {
     error_handler()->OnUnrecoverableError(FROM_HERE,
@@ -214,11 +214,12 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
           << "Autofill specifics data not present on delete!";
       const sync_pb::AutofillSpecifics& autofill =
           changes[i].specifics.GetExtension(sync_pb::autofill);
-      if (autofill.has_value() ||
-        (autofill_profile_not_migrated && autofill.has_profile())) {
+      if (autofill.has_value()) {
         autofill_changes_.push_back(AutofillChangeRecord(changes[i].action,
                                                          changes[i].id,
                                                          autofill));
+      } else if (autofill.has_profile()) {
+        LOG(WARNING) << "Change for old-style autofill profile being dropped!";
       } else {
         NOTREACHED() << "Autofill specifics has no data!";
       }
@@ -240,10 +241,11 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
     const sync_pb::AutofillSpecifics& autofill(
         sync_node.GetAutofillSpecifics());
     int64 sync_id = sync_node.GetId();
-    if (autofill.has_value() ||
-      (autofill_profile_not_migrated && autofill.has_profile())) {
+    if (autofill.has_value()) {
       autofill_changes_.push_back(AutofillChangeRecord(changes[i].action,
                                                        sync_id, autofill));
+    } else if (autofill.has_profile()) {
+      LOG(WARNING) << "Change for old-style autofill profile being dropped!";
     } else {
       NOTREACHED() << "Autofill specifics has no data!";
     }
@@ -418,7 +420,8 @@ void AutofillChangeProcessor::StopImpl() {
 
 void AutofillChangeProcessor::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  notification_registrar_.Add(this, NotificationType::AUTOFILL_ENTRIES_CHANGED,
+  notification_registrar_.Add(this,
+                              chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
                               NotificationService::AllSources());
 }
 
@@ -440,11 +443,6 @@ void AutofillChangeProcessor::WriteAutofillEntry(
     autofill.add_usage_timestamp(timestamp->ToInternalValue());
   }
   node->SetAutofillSpecifics(autofill);
-}
-
-bool AutofillChangeProcessor::HasNotMigratedYet(
-    const sync_api::BaseTransaction* trans) {
-  return model_associator_->HasNotMigratedYet(trans);
 }
 
 }  // namespace browser_sync

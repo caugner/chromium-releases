@@ -37,7 +37,6 @@ class FilePath;
 class GURL;
 class MessageLoop;
 class NavigationController;
-class NotificationType;
 class Profile;
 class RenderViewHost;
 class RenderWidgetHost;
@@ -45,7 +44,10 @@ class ScopedTempDir;
 class SkBitmap;
 class TabContents;
 class TabContentsWrapper;
-class Value;
+
+namespace browser {
+struct NavigateParams;
+}
 
 namespace gfx {
 class Size;
@@ -86,20 +88,25 @@ void RunAllPendingInMessageLoop();
 bool GetCurrentTabTitle(const Browser* browser, string16* title);
 
 // Waits for the current tab to complete the navigation. Returns true on
-// success.
+// success. TODO(gbillock): remove this race hazard.
+// Use WindowedNotificationObserver instead.
 bool WaitForNavigationInCurrentTab(Browser* browser);
 
 // Waits for the current tab to complete the specified number of navigations.
-// Returns true on success.
+// Returns true on success. TODO(gbillock): remove this race hazard.
+// Use WindowedNotificationObserver instead.
 bool WaitForNavigationsInCurrentTab(Browser* browser,
                                     int number_of_navigations);
 
 // Waits for |controller| to complete a navigation. This blocks until
-// the navigation finishes.
+// the navigation finishes. TODO(gbillock): remove this race hazard.
+// Use WindowedNotificationObserver instead.
 void WaitForNavigation(NavigationController* controller);
 
 // Waits for |controller| to complete a navigation. This blocks until
-// the specified number of navigations complete.
+// the specified number of navigations complete. TODO(gbillock): remove this
+// race hazard.
+// Use WindowedNotificationObserver instead.
 void WaitForNavigations(NavigationController* controller,
                         int number_of_navigations);
 
@@ -116,19 +123,18 @@ void WaitForLoadStop(TabContents* tab);
 // Waits for a new browser to be created, returning the browser.
 Browser* WaitForNewBrowser();
 
-// Waits for a new browser to be created, returning the browser.
-// Pass in the number of browsers that exist before the navigation starts in
-// |start_count|, and it will exit even if the notification occurs before it's
-// called.
-Browser* WaitForNewBrowserWithCount(size_t start_count);
-
 // Opens |url| in an incognito browser window with the incognito profile of
 // |profile|, blocking until the navigation finishes. This will create a new
 // browser if a browser with the incognito profile does not exist.
 void OpenURLOffTheRecord(Profile* profile, const GURL& url);
 
+// Performs the provided navigation process, blocking until the navigation
+// finishes. May change the params in some cases (i.e. if the navigation
+// opens a new browser window). Uses browser::Navigate.
+void NavigateToURL(browser::NavigateParams* params);
+
 // Navigates the selected tab of |browser| to |url|, blocking until the
-// navigation finishes.
+// navigation finishes. Uses Browser::OpenURL --> browser::Navigate.
 void NavigateToURL(Browser* browser, const GURL& url);
 
 // Navigates the specified tab of |browser| to |url|, blocking until the
@@ -223,17 +229,17 @@ bool IsViewFocused(const Browser* browser, ViewID vid);
 void ClickOnView(const Browser* browser, ViewID vid);
 
 // Blocks until a notification for given |type| is received.
-void WaitForNotification(NotificationType type);
+void WaitForNotification(int type);
 
 // Blocks until a notification for given |type| from the specified |source|
 // is received.
-void WaitForNotificationFrom(NotificationType type,
+void WaitForNotificationFrom(int type,
                              const NotificationSource& source);
 
 // Register |observer| for the given |type| and |source| and run
 // the message loop until the observer posts a quit task.
 void RegisterAndWait(NotificationObserver* observer,
-                     NotificationType type,
+                     int type,
                      const NotificationSource& source);
 
 // Blocks until |model| finishes loading.
@@ -274,7 +280,7 @@ bool SendKeyPressAndWait(const Browser* browser,
                          bool shift,
                          bool alt,
                          bool command,
-                         NotificationType type,
+                         int type,
                          const NotificationSource& source) WARN_UNUSED_RESULT;
 
 // Run a message loop only for the specified amount of time.
@@ -370,7 +376,7 @@ class TestNotificationObserver : public NotificationObserver {
   }
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -396,7 +402,7 @@ class WindowedNotificationObserver : public NotificationObserver {
   // Register to listen for notifications of the given type from either a
   // specific source, or from all sources if |source| is
   // NotificationService::AllSources().
-  WindowedNotificationObserver(NotificationType notification_type,
+  WindowedNotificationObserver(int notification_type,
                                const NotificationSource& source);
   virtual ~WindowedNotificationObserver();
 
@@ -426,7 +432,7 @@ class WindowedNotificationObserver : public NotificationObserver {
   void WaitFor(const NotificationSource& source);
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
@@ -448,7 +454,7 @@ template <class U>
 class WindowedNotificationObserverWithDetails
     : public WindowedNotificationObserver {
  public:
-  WindowedNotificationObserverWithDetails(NotificationType notification_type,
+  WindowedNotificationObserverWithDetails(int notification_type,
                                           const NotificationSource& source)
       : WindowedNotificationObserver(notification_type, source) {}
 
@@ -462,7 +468,7 @@ class WindowedNotificationObserverWithDetails
     return true;
   }
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
     const U* details_ptr = Details<U>(details).ptr();
@@ -477,6 +483,34 @@ class WindowedNotificationObserverWithDetails
   DISALLOW_COPY_AND_ASSIGN(WindowedNotificationObserverWithDetails);
 };
 
+// Watches title changes on a tab, blocking until an expected title is set.
+class TitleWatcher : public NotificationObserver {
+ public:
+  // |tab_contents| must be non-NULL and needs to stay alive for the
+  // entire lifetime of |this|. |expected_title| is the title that |this|
+  // will wait for.
+  TitleWatcher(TabContents* tab_contents, const string16& expected_title);
+  virtual ~TitleWatcher();
+
+  // Waits until the title for the tab is set to the |expected_title|
+  // passed into the constructor.
+  bool Wait() WARN_UNUSED_RESULT;
+
+ private:
+  // NotificationObserver
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
+
+  TabContents* expected_tab_;
+  string16 expected_title_;
+  NotificationRegistrar notification_registrar_;
+  bool title_observed_;
+  bool quit_loop_on_observation_;
+
+  DISALLOW_COPY_AND_ASSIGN(TitleWatcher);
+};
+
 // See SendKeyPressAndWait.  This function additionally performs a check on the
 // NotificationDetails using the provided Details<U>.
 template <class U>
@@ -487,7 +521,7 @@ bool SendKeyPressAndWaitWithDetails(
     bool shift,
     bool alt,
     bool command,
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const Details<U>& details) WARN_UNUSED_RESULT;
 
@@ -499,7 +533,7 @@ bool SendKeyPressAndWaitWithDetails(
     bool shift,
     bool alt,
     bool command,
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const Details<U>& details) {
   WindowedNotificationObserverWithDetails<U> observer(type, source);
@@ -537,7 +571,7 @@ class DOMMessageQueue : public NotificationObserver {
   bool WaitForMessage(std::string* message) WARN_UNUSED_RESULT;
 
   // Overridden NotificationObserver methods.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

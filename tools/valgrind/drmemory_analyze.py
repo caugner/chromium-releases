@@ -47,6 +47,7 @@ class DrMemoryAnalyze:
   def ReadSection(self):
     FILE_PREFIXES_TO_CUT = [
         "build\\src\\",
+        "chromium\\src\\",
         "crt_bld\\self_x86\\",
     ]
     CUT_STACK_BELOW = ".*testing.*Test.*Run.*"
@@ -69,13 +70,13 @@ class DrMemoryAnalyze:
       # access address in the UNADDRESSABLE ACCESS reports like this:
       # Note: next higher malloc: <address range>
       # Note: prev lower malloc:  <address range>
-      match_malloc_info = re.search("Note: .* malloc: 0x.*", tmp_line)
+      match_malloc_info = re.search("Note: .* malloc: +0x.*", tmp_line)
       if match_malloc_info:
         result.append(tmp_line)
         self.ReadLine()
         continue
 
-      match_binary_fname = re.search("(0x[0-9a-fA-F]+) <.*> (.*)!([^+]*)"
+      match_binary_fname = re.search("0x[0-9a-fA-F]+ <(.*)> .*!([^+]*)"
                                      "(?:\+0x[0-9a-fA-F]+)?\n", tmp_line)
       self.ReadLine()
       match_src_line = re.search("\s*(.*):([0-9]+)(?:\+0x[0-9a-fA-F]+)?",
@@ -83,11 +84,11 @@ class DrMemoryAnalyze:
       if match_src_line:
         self.ReadLine()
         if match_binary_fname:
-          pc, binary, fname = match_binary_fname.groups()
+          binary, fname = match_binary_fname.groups()
           if re.search(CUT_STACK_BELOW, fname):
             break
-          report_line = (" #%2i %s %-50s" % (cnt, pc, fname))
-          if not re.search("\.exe$", binary):
+          report_line = (" #%2i %-50s" % (cnt, fname))
+          if not re.search("\.exe\+0x", binary):
             # Print the DLL name
             report_line += " " + binary
           src, lineno = match_src_line.groups()

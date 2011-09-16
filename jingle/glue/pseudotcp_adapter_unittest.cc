@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "jingle/glue/thread_wrapper.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -254,6 +255,8 @@ class TCPChannelTester : public base::RefCountedThreadSafe<TCPChannelTester> {
 class PseudoTcpAdapterTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
+    JingleThreadWrapper::EnsureForCurrentThread();
+
     host_socket_ = new FakeSocket();
     client_socket_ = new FakeSocket();
 
@@ -276,8 +279,15 @@ TEST_F(PseudoTcpAdapterTest, DataTransfer) {
   TestCompletionCallback host_connect_cb;
   TestCompletionCallback client_connect_cb;
 
-  host_pseudotcp_->Connect(&host_connect_cb);
-  client_pseudotcp_->Connect(&client_connect_cb);
+  int rv1 = host_pseudotcp_->Connect(&host_connect_cb);
+  int rv2 = client_pseudotcp_->Connect(&client_connect_cb);
+
+  if (rv1 == net::ERR_IO_PENDING)
+    rv1 = host_connect_cb.WaitForResult();
+  if (rv2 == net::ERR_IO_PENDING)
+    rv2 = client_connect_cb.WaitForResult();
+  ASSERT_EQ(net::OK, rv1);
+  ASSERT_EQ(net::OK, rv2);
 
   scoped_refptr<TCPChannelTester> tester =
       new TCPChannelTester(&message_loop_, host_pseudotcp_.get(),
@@ -295,8 +305,15 @@ TEST_F(PseudoTcpAdapterTest, LossyChannel) {
   TestCompletionCallback host_connect_cb;
   TestCompletionCallback client_connect_cb;
 
-  host_pseudotcp_->Connect(&host_connect_cb);
-  client_pseudotcp_->Connect(&client_connect_cb);
+  int rv1 = host_pseudotcp_->Connect(&host_connect_cb);
+  int rv2 = client_pseudotcp_->Connect(&client_connect_cb);
+
+  if (rv1 == net::ERR_IO_PENDING)
+    rv1 = host_connect_cb.WaitForResult();
+  if (rv2 == net::ERR_IO_PENDING)
+    rv2 = client_connect_cb.WaitForResult();
+  ASSERT_EQ(net::OK, rv1);
+  ASSERT_EQ(net::OK, rv2);
 
   scoped_refptr<TCPChannelTester> tester =
       new TCPChannelTester(&message_loop_, host_pseudotcp_.get(),

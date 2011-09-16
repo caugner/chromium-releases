@@ -16,7 +16,6 @@
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/local_file_system_file_util.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -30,6 +29,7 @@ using WebKit::WebFileSystem;
 
 using base::PlatformFileError;
 
+static const char kChromeScheme[] = "chrome";
 static const char kExtensionScheme[] = "chrome-extension";
 
 namespace fileapi {
@@ -88,7 +88,6 @@ FilePath FileSystemPathManager::ValidateFileSystemRootAndGetPathOnFileThread(
   case kFileSystemTypePersistent:
     return sandbox_provider_->ValidateFileSystemRootAndGetPathOnFileThread(
         origin_url, type, virtual_path, create);
-    break;
   case kFileSystemTypeExternal:
     return external_provider_.get() ?
         external_provider_->ValidateFileSystemRootAndGetPathOnFileThread(
@@ -105,7 +104,7 @@ bool FileSystemPathManager::IsAllowedScheme(const GURL& url) const {
   // Basically we only accept http or https. We allow file:// URLs
   // only if --allow-file-access-from-files flag is given.
   return url.SchemeIs("http") || url.SchemeIs("https") ||
-         url.SchemeIs(kExtensionScheme) ||
+         url.SchemeIs(kExtensionScheme) || url.SchemeIs(kChromeScheme) ||
          (url.SchemeIsFile() && allow_file_access_from_files_);
 }
 
@@ -168,7 +167,12 @@ FileSystemFileUtil* FileSystemPathManager::GetFileSystemFileUtil(
     case kFileSystemTypePersistent:
       return sandbox_provider_->GetFileSystemFileUtil();
     case kFileSystemTypeExternal:
-      return LocalFileSystemFileUtil::GetInstance();
+      if (external_provider_.get()) {
+        return external_provider_->GetFileSystemFileUtil();
+      } else {
+        NOTREACHED();
+        return NULL;
+      }
     case kFileSystemTypeUnknown:
     default:
       NOTREACHED();

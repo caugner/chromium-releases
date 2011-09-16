@@ -6,22 +6,16 @@
 
 #include <map>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_types.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
-#include "chrome/browser/notifications/notifications_prefs_cache.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/content_browser_client.h"
@@ -33,11 +27,14 @@
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/content_switches.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/notification_service.h"
 #include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
 #include "ipc/ipc_channel_handle.h"
+#include "ipc/ipc_platform_file.h"
+#include "media/audio/audio_util.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver_impl.h"
 #include "net/base/io_buffer.h"
@@ -67,9 +64,6 @@
 #endif
 #if defined(OS_WIN)
 #include "content/common/child_process_host.h"
-#endif
-#if defined(USE_NSS)
-#include "chrome/browser/ui/crypto_module_password_dialog.h"
 #endif
 
 using net::CookieStore;
@@ -133,7 +127,7 @@ class OpenChannelToNpapiPluginCallback : public RenderMessageCompletionCallback,
   }
 
   virtual bool OffTheRecord() {
-    return filter()->incognito();
+    return filter()->OffTheRecord();
   }
 
   virtual void SetPluginInfo(const webkit::npapi::WebPluginInfo& info) {
@@ -198,6 +192,8 @@ class OpenChannelToPpapiBrokerCallback : public PpapiBrokerProcessHost::Client {
         routing_id_(routing_id),
         request_id_(request_id) {
   }
+
+  virtual ~OpenChannelToPpapiBrokerCallback() {}
 
   virtual void GetChannelInfo(base::ProcessHandle* renderer_handle,
                               int* renderer_id) {
@@ -277,17 +273,13 @@ RenderMessageFilter::RenderMessageFilter(
     Profile* profile,
     net::URLRequestContextGetter* request_context,
     RenderWidgetHelper* render_widget_helper)
-    : resource_dispatcher_host_(g_browser_process->resource_dispatcher_host()),
+    : resource_dispatcher_host_(
+          content::GetContentClient()->browser()->GetResourceDispatcherHost()),
       plugin_service_(plugin_service),
       profile_(profile),
-      extension_info_map_(profile->GetExtensionInfoMap()),
       request_context_(request_context),
       resource_context_(profile->GetResourceContext()),
-      extensions_request_context_(profile->GetRequestContextForExtensions()),
       render_widget_helper_(render_widget_helper),
-      notification_prefs_(
-          DesktopNotificationServiceFactory::GetForProfile(profile)->
-              prefs_cache()),
       incognito_(profile->IsOffTheRecord()),
       webkit_context_(profile->GetWebKitContext()),
       render_process_id_(render_process_id) {
@@ -339,7 +331,7 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnMsgCreateFullscreenWidget)
     IPC_MESSAGE_HANDLER(ViewHostMsg_SetCookie, OnSetCookie)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetCookies, OnGetCookies)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetRawCookies, OnGetRawCookies)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetRawCookies, OnGetRawCookies)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DeleteCookie, OnDeleteCookie)
     IPC_MESSAGE_HANDLER(ViewHostMsg_CookiesEnabled, OnCookiesEnabled)
 #if defined(OS_MACOSX)
@@ -375,6 +367,8 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ViewHostMsg_EnableSpdy, OnEnableSpdy)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_Keygen, OnKeygen)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AsyncOpenFile, OnAsyncOpenFile)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareSampleRate,
+                        OnGetHardwareSampleRate)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
 
@@ -385,17 +379,19 @@ void RenderMessageFilter::OnDestruct() const {
   BrowserThread::DeleteOnIOThread::Destruct(this);
 }
 
+bool RenderMessageFilter::OffTheRecord() const {
+  return incognito_ ||
+         !content::GetContentClient()->browser()->AllowSaveLocalState(
+             resource_context_);
+}
+
 void RenderMessageFilter::OnMsgCreateWindow(
     const ViewHostMsg_CreateWindow_Params& params,
     int* route_id, int64* cloned_session_storage_namespace_id) {
-  // If the opener is trying to create a background window but doesn't have
-  // the appropriate permission, fail the attempt.
-  if (params.window_container_type == WINDOW_CONTAINER_TYPE_BACKGROUND) {
-    if (!extension_info_map_->CheckURLAccessToExtensionPermission(
-            params.opener_url, Extension::kBackgroundPermission)) {
-      *route_id = MSG_ROUTING_NONE;
-      return;
-    }
+  if (!content::GetContentClient()->browser()->CanCreateWindow(
+          params.opener_url, params.window_container_type, resource_context_)) {
+    *route_id = MSG_ROUTING_NONE;
+    return;
   }
 
   *cloned_session_storage_namespace_id =
@@ -427,44 +423,34 @@ void RenderMessageFilter::OnSetCookie(const IPC::Message& message,
           resource_context_, render_process_id_, message.routing_id(),
           &options)) {
     net::URLRequestContext* context = GetRequestContextForURL(url);
-    context->cookie_store()->SetCookieWithOptions(url, cookie, options);
+    // Pass a null callback since we don't care about when the 'set' completes.
+    context->cookie_store()->SetCookieWithOptionsAsync(
+        url, cookie, options, net::CookieMonster::SetCookiesCallback());
   }
 }
 
-// We use DELAY_REPLY even though we have the result here because we want the
-// message's routing_id, and there's no (current) way to get it.
 void RenderMessageFilter::OnGetCookies(const GURL& url,
                                        const GURL& first_party_for_cookies,
                                        IPC::Message* reply_msg) {
   net::URLRequestContext* context = GetRequestContextForURL(url);
   net::CookieMonster* cookie_monster =
       context->cookie_store()->GetCookieMonster();
-  net::CookieList cookie_list = cookie_monster->GetAllCookiesForURL(url);
-
-  std::string cookies;
-  if (content::GetContentClient()->browser()->AllowGetCookie(
-          url, first_party_for_cookies, cookie_list, resource_context_,
-          render_process_id_, reply_msg->routing_id())) {
-    cookies = context->cookie_store()->GetCookies(url);
-  }
-
-  ViewHostMsg_GetCookies::WriteReplyParams(reply_msg, cookies);
-  Send(reply_msg);
+  cookie_monster->GetAllCookiesForURLAsync(
+      url, base::Bind(&RenderMessageFilter::CheckPolicyForCookies, this, url,
+                      first_party_for_cookies, reply_msg));
 }
 
 void RenderMessageFilter::OnGetRawCookies(
     const GURL& url,
     const GURL& first_party_for_cookies,
-    std::vector<webkit_glue::WebCookie>* cookies) {
-  cookies->clear();
-
+    IPC::Message* reply_msg) {
   // Only return raw cookies to trusted renderers or if this request is
   // not targeted to an an external host like ChromeFrame.
   // TODO(ananta) We need to support retreiving raw cookies from external
   // hosts.
   if (!ChildProcessSecurityPolicy::GetInstance()->CanReadRawCookies(
           render_process_id_)) {
-    return;
+    SendGetRawCookiesResponse(reply_msg, net::CookieList());
   }
 
   // We check policy here to avoid sending back cookies that would not normally
@@ -473,16 +459,15 @@ void RenderMessageFilter::OnGetRawCookies(
   net::URLRequestContext* context = GetRequestContextForURL(url);
   net::CookieMonster* cookie_monster =
       context->cookie_store()->GetCookieMonster();
-  net::CookieList cookie_list = cookie_monster->GetAllCookiesForURL(url);
-
-  for (size_t i = 0; i < cookie_list.size(); ++i)
-    cookies->push_back(webkit_glue::WebCookie(cookie_list[i]));
+  cookie_monster->GetAllCookiesForURLAsync(
+      url, base::Bind(&RenderMessageFilter::SendGetRawCookiesResponse,
+                      this, reply_msg));
 }
 
 void RenderMessageFilter::OnDeleteCookie(const GURL& url,
                                          const std::string& cookie_name) {
   net::URLRequestContext* context = GetRequestContextForURL(url);
-  context->cookie_store()->DeleteCookie(url, cookie_name);
+  context->cookie_store()->DeleteCookieAsync(url, cookie_name, base::Closure());
 }
 
 void RenderMessageFilter::OnCookiesEnabled(
@@ -522,7 +507,7 @@ void RenderMessageFilter::OnLoadFont(const FontDescriptor& font,
 #endif  // OS_MACOSX
 
 #if defined(OS_WIN)  // This hack is Windows-specific.
-void RenderMessageFilter::OnPreCacheFont(LOGFONT font) {
+void RenderMessageFilter::OnPreCacheFont(const LOGFONT& font) {
   ChildProcessHost::PreCacheFont(font);
 }
 #endif  // OS_WIN
@@ -595,14 +580,21 @@ void RenderMessageFilter::OnGenerateRoutingID(int* route_id) {
   *route_id = render_widget_helper_->GetNextRoutingID();
 }
 
+void RenderMessageFilter::OnGetHardwareSampleRate(double* sample_rate) {
+  *sample_rate = media::GetAudioHardwareSampleRate();
+}
+
 void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                         const GURL& url,
-                                        const GURL& referrer) {
+                                        const GURL& referrer,
+                                        const string16& suggested_name) {
   // Don't show "Save As" UI.
   bool prompt_for_save_location = false;
+  DownloadSaveInfo save_info;
+  save_info.suggested_name = suggested_name;
   resource_dispatcher_host_->BeginDownload(url,
                                            referrer,
-                                           DownloadSaveInfo(),
+                                           save_info,
                                            prompt_for_save_location,
                                            render_process_id_,
                                            message.routing_id(),
@@ -613,17 +605,8 @@ void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
 
 void RenderMessageFilter::OnCheckNotificationPermission(
     const GURL& source_url, int* result) {
-  *result = WebKit::WebNotificationPresenter::PermissionNotAllowed;
-
-  if (extension_info_map_->CheckURLAccessToExtensionPermission(
-          source_url, Extension::kNotificationPermission)) {
-    *result = WebKit::WebNotificationPresenter::PermissionAllowed;
-    return;
-  }
-
-  // Fall back to the regular notification preferences, which works on an
-  // origin basis.
-  *result = notification_prefs_->HasPermission(source_url.GetOrigin());
+  *result = content::GetContentClient()->browser()->
+      CheckDesktopNotificationPermission(source_url, resource_context_);
 }
 
 void RenderMessageFilter::OnAllocateSharedMemoryBuffer(
@@ -641,10 +624,14 @@ void RenderMessageFilter::OnAllocateSharedMemoryBuffer(
 net::URLRequestContext* RenderMessageFilter::GetRequestContextForURL(
     const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  net::URLRequestContextGetter* context_getter =
-      url.SchemeIs(chrome::kExtensionScheme) ?
-          extensions_request_context_ : request_context_;
-  return context_getter->GetURLRequestContext();
+
+  net::URLRequestContext* context =
+      content::GetContentClient()->browser()->OverrideRequestContextForURL(
+          url, resource_context_);
+  if (!context)
+    context = request_context_->GetURLRequestContext();
+
+  return context;
 }
 
 #if defined(OS_MACOSX)
@@ -825,8 +812,7 @@ void RenderMessageFilter::OnKeygenOnWorkerThread(
 #if defined(USE_NSS)
   // Attach a password delegate so we can authenticate.
   keygen_handler.set_crypto_module_password_delegate(
-      browser::NewCryptoModuleBlockingDialogDelegate(
-          browser::kCryptoModulePasswordKeygen, url.host()));
+      content::GetContentClient()->browser()->GetCryptoPasswordDelegate(url));
 #endif  // defined(USE_NSS)
 
   ViewHostMsg_Keygen::WriteReplyParams(
@@ -864,19 +850,49 @@ void RenderMessageFilter::AsyncOpenFileOnFileThread(const FilePath& path,
   base::PlatformFile file = base::CreatePlatformFile(
       path, flags, NULL, &error_code);
   IPC::PlatformFileForTransit file_for_transit =
-      IPC::InvalidPlatformFileForTransit();
-  if (file != base::kInvalidPlatformFileValue) {
-#if defined(OS_WIN)
-    ::DuplicateHandle(::GetCurrentProcess(), file, peer_handle(),
-                      &file_for_transit, 0, false, DUPLICATE_SAME_ACCESS);
-#else
-    file_for_transit = base::FileDescriptor(file, true);
-#endif
-  }
+      file != base::kInvalidPlatformFileValue ?
+          IPC::GetFileHandleForProcess(file, peer_handle(), true) :
+          IPC::InvalidPlatformFileForTransit();
 
   IPC::Message* reply = new ViewMsg_AsyncOpenFile_ACK(
       routing_id, error_code, file_for_transit, message_id);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE, NewRunnableMethod(
           this, &RenderMessageFilter::Send, reply));
+}
+
+void RenderMessageFilter::CheckPolicyForCookies(
+    const GURL& url,
+    const GURL& first_party_for_cookies,
+    IPC::Message* reply_msg,
+    const net::CookieList& cookie_list) {
+  net::URLRequestContext* context = GetRequestContextForURL(url);
+  // Check the policy for get cookies, and pass cookie_list to the
+  // TabSpecificContentSetting for logging purose.
+  if (content::GetContentClient()->browser()->AllowGetCookie(
+          url, first_party_for_cookies, cookie_list, resource_context_,
+          render_process_id_, reply_msg->routing_id())) {
+    // Gets the cookies from cookie store if allowed.
+    context->cookie_store()->GetCookiesAsync(
+        url, base::Bind(&RenderMessageFilter::SendGetCookiesResponse,
+                        this, reply_msg));
+  } else {
+    SendGetCookiesResponse(reply_msg, std::string());
+  }
+}
+
+void RenderMessageFilter::SendGetCookiesResponse(IPC::Message* reply_msg,
+                                                 const std::string& cookies) {
+  ViewHostMsg_GetCookies::WriteReplyParams(reply_msg, cookies);
+  Send(reply_msg);
+}
+
+void RenderMessageFilter::SendGetRawCookiesResponse(
+    IPC::Message* reply_msg,
+    const net::CookieList& cookie_list) {
+  std::vector<webkit_glue::WebCookie> cookies;
+  for (size_t i = 0; i < cookie_list.size(); ++i)
+    cookies.push_back(webkit_glue::WebCookie(cookie_list[i]));
+  ViewHostMsg_GetRawCookies::WriteReplyParams(reply_msg, cookies);
+  Send(reply_msg);
 }
