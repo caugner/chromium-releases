@@ -34,7 +34,7 @@ LoginHtmlDialog::LoginHtmlDialog(Delegate* delegate,
                                  Style style)
     : delegate_(delegate),
       parent_window_(parent_window),
-      title_(title),
+      title_(WideToUTF16Hack(title)),
       url_(url),
       style_(style),
       bubble_frame_view_(NULL),
@@ -52,23 +52,21 @@ void LoginHtmlDialog::Show() {
   HtmlDialogView* html_view =
       new HtmlDialogView(ProfileManager::GetDefaultProfile(), this);
   if (style_ & STYLE_BUBBLE) {
-    views::Widget* bubble_window = BubbleWindow::Create(
-        parent_window_, gfx::Rect(),
-        static_cast<BubbleWindow::Style>(
-            BubbleWindow::STYLE_XBAR | BubbleWindow::STYLE_THROBBER),
+    views::Widget* bubble_window = BubbleWindow::Create(parent_window_,
+        static_cast<BubbleWindowStyle>(STYLE_XBAR | STYLE_THROBBER),
         html_view);
     bubble_frame_view_ = static_cast<BubbleFrameView*>(
         bubble_window->non_client_view()->frame_view());
   } else {
     views::Widget::CreateWindowWithParent(html_view, parent_window_);
   }
+  html_view->InitDialog();
   if (bubble_frame_view_) {
     bubble_frame_view_->StartThrobber();
     notification_registrar_.Add(
         this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-        NotificationService::AllSources());
+        Source<TabContents>(html_view->dom_contents()->tab_contents()));
   }
-  html_view->InitDialog();
   html_view->GetWidget()->Show();
   is_open_ = true;
 }
@@ -86,7 +84,7 @@ bool LoginHtmlDialog::IsDialogModal() const {
   return true;
 }
 
-std::wstring LoginHtmlDialog::GetDialogTitle() const {
+string16 LoginHtmlDialog::GetDialogTitle() const {
   return title_;
 }
 

@@ -32,6 +32,7 @@
 
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -53,7 +54,6 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
-#include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "webkit/appcache/appcache_interfaces.h"
@@ -311,7 +311,7 @@ class RequestProxy : public net::URLRequest::Delegate,
       FilePath path;
       if (file_util::CreateTemporaryFile(&path)) {
         downloaded_file_ = DeletableFileReference::GetOrCreate(
-            path, base::MessageLoopProxy::CreateForCurrentThread());
+            path, base::MessageLoopProxy::current());
         file_stream_.Open(
             path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_WRITE);
       }
@@ -321,7 +321,7 @@ class RequestProxy : public net::URLRequest::Delegate,
 
     if (request_->has_upload() &&
         params->load_flags & net::LOAD_ENABLE_UPLOAD_PROGRESS) {
-      upload_progress_timer_.Start(
+      upload_progress_timer_.Start(FROM_HERE,
           base::TimeDelta::FromMilliseconds(kUpdateUploadProgressIntervalMsec),
           this, &RequestProxy::MaybeUpdateUploadProgress);
     }
@@ -416,14 +416,14 @@ class RequestProxy : public net::URLRequest::Delegate,
 
   virtual void OnReceivedRedirect(net::URLRequest* request,
                                   const GURL& new_url,
-                                  bool* defer_redirect) {
+                                  bool* defer_redirect) OVERRIDE {
     DCHECK(request->status().is_success());
     ResourceResponseInfo info;
     PopulateResponseInfo(request, &info);
     OnReceivedRedirect(new_url, info, defer_redirect);
   }
 
-  virtual void OnResponseStarted(net::URLRequest* request) {
+  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE {
     if (request->status().is_success()) {
       ResourceResponseInfo info;
       PopulateResponseInfo(request, &info);
@@ -436,12 +436,14 @@ class RequestProxy : public net::URLRequest::Delegate,
 
   virtual void OnSSLCertificateError(net::URLRequest* request,
                                      int cert_error,
-                                     net::X509Certificate* cert) {
+                                     net::X509Certificate* cert) OVERRIDE {
     // Allow all certificate errors.
     request->ContinueDespiteLastError();
   }
 
-  virtual bool CanGetCookies(net::URLRequest* request) {
+  virtual bool CanGetCookies(
+      const net::URLRequest* request,
+      const net::CookieList& cookie_list) const OVERRIDE {
     StaticCookiePolicy::Type policy_type = g_accept_all_cookies ?
         StaticCookiePolicy::ALLOW_ALL_COOKIES :
         StaticCookiePolicy::BLOCK_SETTING_THIRD_PARTY_COOKIES;
@@ -452,9 +454,9 @@ class RequestProxy : public net::URLRequest::Delegate,
     return rv == net::OK;
   }
 
-  virtual bool CanSetCookie(net::URLRequest* request,
+  virtual bool CanSetCookie(const net::URLRequest* request,
                             const std::string& cookie_line,
-                            net::CookieOptions* options) {
+                            net::CookieOptions* options) const OVERRIDE {
     StaticCookiePolicy::Type policy_type = g_accept_all_cookies ?
         StaticCookiePolicy::ALLOW_ALL_COOKIES :
         StaticCookiePolicy::BLOCK_SETTING_THIRD_PARTY_COOKIES;
@@ -465,7 +467,8 @@ class RequestProxy : public net::URLRequest::Delegate,
     return rv == net::OK;
   }
 
-  virtual void OnReadCompleted(net::URLRequest* request, int bytes_read) {
+  virtual void OnReadCompleted(net::URLRequest* request,
+                               int bytes_read) OVERRIDE {
     if (request->status().is_success() && bytes_read > 0) {
       OnReceivedData(bytes_read);
     } else {
@@ -725,6 +728,8 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
     static_cast<SyncRequestProxy*>(proxy_)->WaitForCompletion();
   }
 
+  virtual void UpdateRoutingId(int new_routing_id) { }
+
  private:
   // Ownership of params_ is transfered to the proxy when the proxy is created.
   scoped_ptr<RequestParams> params_;
@@ -784,25 +789,6 @@ namespace webkit_glue {
 ResourceLoaderBridge* ResourceLoaderBridge::Create(
     const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info) {
   return new ResourceLoaderBridgeImpl(request_info);
-}
-
-// Issue the proxy resolve request on the io thread, and wait
-// for the result.
-bool FindProxyForUrl(const GURL& url, std::string* proxy_list) {
-  DCHECK(g_request_context);
-
-  scoped_refptr<net::SyncProxyServiceHelper> sync_proxy_service(
-      new net::SyncProxyServiceHelper(g_io_thread->message_loop(),
-      g_request_context->proxy_service()));
-
-  net::ProxyInfo proxy_info;
-  int rv = sync_proxy_service->ResolveProxy(url, &proxy_info,
-                                            net::BoundNetLog());
-  if (rv == net::OK) {
-    *proxy_list = proxy_info.ToPacString();
-  }
-
-  return rv == net::OK;
 }
 
 }  // namespace webkit_glue

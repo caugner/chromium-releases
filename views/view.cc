@@ -26,6 +26,7 @@
 #include "views/layout/layout_manager.h"
 #include "views/views_delegate.h"
 #include "views/widget/native_widget_private.h"
+#include "views/widget/native_widget_views.h"
 #include "views/widget/root_view.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/widget/widget.h"
@@ -762,9 +763,7 @@ void View::Paint(gfx::Canvas* canvas) {
   PaintChildren(canvas);
 
   if (layer_canvas.get()) {
-    layer()->SetBitmap(
-        layer_canvas->AsCanvasSkia()->getDevice()->accessBitmap(false),
-        layer_rect.origin());
+    layer()->SetCanvas(*layer_canvas->AsCanvasSkia(), layer_rect.origin());
     layer_helper_->set_bitmap_needs_updating(false);
   }
 }
@@ -1207,11 +1206,17 @@ void View::PaintToLayer(const gfx::Rect& dirty_region) {
 void View::OnWillCompositeLayer() {
 }
 
-bool View::SetExternalTexture(ui::Texture* texture) {
-  // A little heavy-handed -- it should be that each child has it's own layer.
-  // The desired use case is where there are no children.
-  DCHECK_EQ(child_count(), 0);
+void View::SetFillsBoundsOpaquely(bool fills_bounds_opaquely) {
+  if (!layer_helper_.get())
+    layer_helper_.reset(new internal::LayerHelper());
 
+  layer_helper_->set_fills_bounds_opaquely(fills_bounds_opaquely);
+
+  if (layer())
+    layer()->SetFillsBoundsOpaquely(fills_bounds_opaquely);
+}
+
+bool View::SetExternalTexture(ui::Texture* texture) {
   if (!texture && !layer_helper_.get())
     return true;
 
@@ -1225,6 +1230,13 @@ bool View::SetExternalTexture(ui::Texture* texture) {
 
   if (use_external && !layer())
     return false;
+
+  // Child views must not paint into the external texture. So make sure each
+  // child view has its own layer to paint into.
+  if (use_external) {
+    for (Views::iterator i = children_.begin(); i != children_.end(); ++i)
+      (*i)->SetPaintToLayer(true);
+  }
 
   layer_helper_->set_layer_updated_externally(use_external);
   layer_helper_->set_bitmap_needs_updating(!use_external);
@@ -1287,7 +1299,7 @@ void View::MoveLayerToParent(ui::Layer* parent_layer,
     local_point.Offset(x(), y());
   if (layer() && parent_layer != layer()) {
     parent_layer->Add(layer());
-    layer()->set_bounds(
+    layer()->SetBounds(
         gfx::Rect(local_point.x(), local_point.y(), width(), height()));
   } else {
     for (int i = 0, count = child_count(); i < count; ++i)
@@ -1668,12 +1680,28 @@ void View::ConvertPointToView(const View* src,
   DCHECK(dst);
   DCHECK(point);
 
+  const Widget* src_widget = src ? src->GetWidget() : NULL ;
+  const Widget* dst_widget = dst->GetWidget();
+  // If dest and src aren't in the same widget, try to convert the
+  // point to the destination widget's coordinates first.
+  // TODO(oshima|sadrul): Cleanup and consolidate conversion methods.
+  if (Widget::IsPureViews() && src_widget && src_widget != dst_widget) {
+    // convert to src_widget first.
+    gfx::Point p = *point;
+    src->ConvertPointForAncestor(src_widget->GetRootView(), &p);
+    if (dst_widget->ConvertPointFromAncestor(src_widget, &p)) {
+      // Convertion to destination widget's coordinates was successful.
+      // Use destination's root as a source to convert the point further.
+      src = dst_widget->GetRootView();
+      *point = p;
+    }
+  }
+
   if (src == NULL || src->Contains(dst)) {
     dst->ConvertPointFromAncestor(src, point);
     if (!src) {
-      const Widget* widget = dst->GetWidget();
-      if (widget) {
-        gfx::Rect b = widget->GetClientAreaScreenBounds();
+      if (dst_widget) {
+        gfx::Rect b = dst_widget->GetClientAreaScreenBounds();
         point->SetPoint(point->x() - b.x(), point->y() - b.y());
       }
     }
@@ -1712,7 +1740,9 @@ bool View::ConvertPointFromAncestor(const View* ancestor,
 
 bool View::ShouldPaintToLayer() const {
   return use_acceleration_when_possible &&
-      layer_helper_.get() && layer_helper_->ShouldPaintToLayer();
+      ((layer_helper_.get() && layer_helper_->ShouldPaintToLayer()) ||
+       (parent_ && parent_->layer_helper_.get() &&
+        parent_->layer_helper_->layer_updated_externally()));
 }
 
 void View::CreateLayer() {
@@ -1732,8 +1762,9 @@ void View::CreateLayer() {
   DCHECK(ancestor_with_layer || parent_ == NULL);
 
   layer_helper_->SetLayer(new ui::Layer(compositor));
-  layer()->set_bounds(gfx::Rect(offset.x(), offset.y(), width(), height()));
-  layer()->set_transform(GetTransform());
+  layer()->SetFillsBoundsOpaquely(layer_helper_->fills_bounds_opaquely());
+  layer()->SetBounds(gfx::Rect(offset.x(), offset.y(), width(), height()));
+  layer()->SetTransform(GetTransform());
   if (ancestor_with_layer)
     ancestor_with_layer->layer()->Add(layer());
   layer_helper_->set_bitmap_needs_updating(true);
@@ -1763,7 +1794,9 @@ void View::DestroyLayer() {
   if (!layer_helper_.get())
     return;
 
-  if (!layer_helper_->property_setter_explicitly_set() && !ShouldPaintToLayer())
+  if (!layer_helper_->property_setter_explicitly_set() &&
+      !ShouldPaintToLayer() &&
+      !layer_helper_->fills_bounds_opaquely())
     layer_helper_.reset();
   else
     layer_helper_->SetLayer(NULL);

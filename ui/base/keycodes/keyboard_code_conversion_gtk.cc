@@ -621,6 +621,20 @@ int GdkKeyCodeForWindowsKeyCode(KeyboardCode keycode, bool shift) {
     }
 }
 
+int GdkNativeKeyCodeForWindowsKeyCode(KeyboardCode keycode, bool shift) {
+  int keyval = GdkKeyCodeForWindowsKeyCode(keycode, shift);
+  GdkKeymapKey* keys;
+  gint n_keys;
+
+  int native_keycode = 0;
+  if (keyval && gdk_keymap_get_entries_for_keyval(0, keyval, &keys, &n_keys)) {
+    native_keycode = keys[0].keycode;
+    g_free(keys);
+  }
+
+  return native_keycode;
+}
+
 KeyboardCode KeyboardCodeFromGdkEventKey(GdkEventKey* event) {
   KeyboardCode keycode = WindowsKeyCodeForGdkKeyCode(event->keyval);
 #ifdef USE_X11

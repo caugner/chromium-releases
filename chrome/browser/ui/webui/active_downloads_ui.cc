@@ -24,8 +24,6 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/media/media_player.h"
-#include "chrome/browser/download/download_item.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -33,12 +31,14 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/fileicon_source_cros.h"
+#include "chrome/browser/ui/webui/fileicon_source_chromeos.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/url_fetcher.h"
 #include "grit/browser_resources.h"
@@ -156,15 +156,15 @@ class ActiveDownloadsHandler
   void Init();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // DownloadItem::Observer interface.
-  virtual void OnDownloadUpdated(DownloadItem* item);
-  virtual void OnDownloadOpened(DownloadItem* item) { }
+  virtual void OnDownloadUpdated(DownloadItem* item) OVERRIDE;
+  virtual void OnDownloadOpened(DownloadItem* item) OVERRIDE { }
 
   // DownloadManager::Observer interface.
-  virtual void ModelChanged();
+  virtual void ModelChanged() OVERRIDE;
 
   // WebUI Callbacks.
   void HandleGetDownloads(const ListValue* args);
@@ -210,7 +210,7 @@ ActiveDownloadsHandler::~ActiveDownloadsHandler() {
 }
 
 WebUIMessageHandler* ActiveDownloadsHandler::Attach(WebUI* web_ui) {
-  profile_ = web_ui->GetProfile();
+  profile_ = Profile::FromWebUI(web_ui);
   profile_->GetChromeURLDataManager()->AddDataSource(new FileIconSourceCros());
   tab_contents_ = web_ui->tab_contents();
   return WebUIMessageHandler::Attach(web_ui);
@@ -382,7 +382,8 @@ ActiveDownloadsUI::ActiveDownloadsUI(TabContents* contents)
   ActiveDownloadsUIHTMLSource* html_source = new ActiveDownloadsUIHTMLSource();
 
   // Set up the chrome://active-downloads/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 
 // static

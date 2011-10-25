@@ -17,12 +17,15 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/bookmarks/recently_used_folders_combo_model.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -71,7 +74,7 @@ void BookmarkBubbleGtk::Observe(int type,
   } else {
     for (std::vector<GtkWidget*>::iterator it = labels_.begin();
          it != labels_.end(); ++it) {
-      gtk_widget_modify_fg(*it, GTK_STATE_NORMAL, &gtk_util::kGdkBlack);
+      gtk_widget_modify_fg(*it, GTK_STATE_NORMAL, &ui::kGdkBlack);
     }
   }
 }
@@ -93,13 +96,13 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
       apply_edits_(true),
       remove_bookmark_(false) {
   GtkWidget* label = gtk_label_new(l10n_util::GetStringUTF8(
-      newly_bookmarked_ ? IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED :
-                          IDS_BOOMARK_BUBBLE_PAGE_BOOKMARK).c_str());
+      newly_bookmarked_ ? IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARKED :
+                          IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARK).c_str());
   labels_.push_back(label);
   remove_button_ = theme_service_->BuildChromeLinkButton(
-      l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_REMOVE_BOOKMARK));
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_BUBBLE_REMOVE_BOOKMARK));
   GtkWidget* edit_button = gtk_button_new_with_label(
-      l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_OPTIONS).c_str());
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_BUBBLE_OPTIONS).c_str());
   GtkWidget* close_button = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_DONE).c_str());
 
@@ -128,9 +131,9 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
   // with the entry and folder combo lining up.
   GtkWidget* table = gtk_util::CreateLabeledControlsGroup(
       &labels_,
-      l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_TITLE_TEXT).c_str(),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_BUBBLE_TITLE_TEXT).c_str(),
       name_entry_,
-      l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_FOLDER_TEXT).c_str(),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_BUBBLE_FOLDER_TEXT).c_str(),
       folder_combo_,
       NULL);
 
@@ -306,17 +309,25 @@ void BookmarkBubbleGtk::ShowEditor() {
   // Commit any edits now.
   ApplyEdits();
 
+#if !defined(WEBUI_DIALOGS)
   // Closing might delete us, so we'll cache what we need on the stack.
   Profile* profile = profile_;
   GtkWindow* toplevel = GTK_WINDOW(gtk_widget_get_toplevel(anchor_));
+#endif
 
   // Close the bubble, deleting the C++ objects, etc.
   bubble_->Close();
 
   if (node) {
+#if defined(WEBUI_DIALOGS)
+    Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+    DCHECK(browser);
+    browser->OpenBookmarkManagerEditNode(node->id());
+#else
     BookmarkEditor::Show(toplevel, profile, NULL,
                          BookmarkEditor::EditDetails(node),
                          BookmarkEditor::SHOW_TREE);
+#endif
   }
 }
 

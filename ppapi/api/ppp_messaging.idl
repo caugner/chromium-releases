@@ -11,7 +11,6 @@
  */
 
 label Chrome {
-  M13 = 0.1,
   M14 = 1.0
 };
 
@@ -20,7 +19,6 @@ label Chrome {
  * that you must implement to handle postMessage events on the associated
  * DOM element.
  */
-[version=0.1]
 interface PPP_Messaging {
   /**
    * HandleMessage() is a function that the browser calls when PostMessage()
@@ -29,19 +27,19 @@ interface PPP_Messaging {
    * JavaScript execution will not be blocked while HandleMessage() is
    * processing the message.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    * @param[in] message A <code>PP_Var</code> containing the data to be sent
    * to JavaScript. Message can have an int32_t, double, bool, or string value
    * (objects are not supported).
    *
-   * <strong>Example:</strong>
-   *
    * The following JavaScript code invokes <code>HandleMessage</code>, passing
    * the module instance on which it was invoked, with <code>message</code>
    * being a string <code>PP_Var</code> containing "Hello world!"
    *
-   * @code
+   * <strong>Example:</strong>
+   *
+   * <code>
    *
    * <body>
    *   <object id="plugin"
@@ -51,7 +49,7 @@ interface PPP_Messaging {
    *   </script>
    * </body>
    *
-   * @endcode
+   * </code>
    *
    */
   void HandleMessage([in] PP_Instance instance, [in] PP_Var message);

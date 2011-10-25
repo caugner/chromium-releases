@@ -47,7 +47,7 @@ class OmniboxViewViews : public views::View,
                    Profile* profile,
                    CommandUpdater* command_updater,
                    bool popup_window_mode,
-                   const views::View* location_bar);
+                   views::View* location_bar);
   virtual ~OmniboxViewViews();
 
   // Initialize, create the underlying views, etc;
@@ -156,8 +156,7 @@ class OmniboxViewViews : public views::View,
   // Selects the text given by |caret| and |end|.
   void SelectRange(size_t caret, size_t end);
 
-  AutocompletePopupView* CreatePopupView(Profile* profile,
-                                         const View* location_bar);
+  AutocompletePopupView* CreatePopupView(View* location_bar);
 
   views::Textfield* textfield_;
 

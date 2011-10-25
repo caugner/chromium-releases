@@ -16,8 +16,12 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/browser_child_process_host.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 #include "ui/gfx/native_widget_types.h"
+
+namespace content {
+class ResourceContext;
+}
 
 namespace gfx {
 class Rect;
@@ -41,11 +45,13 @@ class PluginProcessHost : public BrowserChildProcessHost {
  public:
   class Client {
    public:
-    // Returns a opaque unique identifier for the process requesting
+    // Returns an opaque unique identifier for the process requesting
     // the channel.
     virtual int ID() = 0;
+    // Returns the resource context for the renderer requesting the channel.
+    virtual const content::ResourceContext& GetResourceContext() = 0;
     virtual bool OffTheRecord() = 0;
-    virtual void SetPluginInfo(const webkit::npapi::WebPluginInfo& info) = 0;
+    virtual void SetPluginInfo(const webkit::WebPluginInfo& info) = 0;
     // The client should delete itself when one of these methods is called.
     virtual void OnChannelOpened(const IPC::ChannelHandle& handle) = 0;
     virtual void OnError() = 0;
@@ -59,19 +65,23 @@ class PluginProcessHost : public BrowserChildProcessHost {
 
   // Initialize the new plugin process, returning true on success. This must
   // be called before the object can be used.
-  bool Init(const webkit::npapi::WebPluginInfo& info, const std::string& locale);
+  bool Init(const webkit::WebPluginInfo& info, const std::string& locale);
 
   // Force the plugin process to shutdown (cleanly).
   virtual void ForceShutdown();
 
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void OnChannelConnected(int32 peer_pid);
-  virtual void OnChannelError();
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
 
   // Tells the plugin process to create a new channel for communication with a
   // renderer.  When the plugin process responds with the channel name,
   // OnChannelOpened in the client is called.
   void OpenChannelToPlugin(Client* client);
+
+  // Cancels all pending channel requests for the given resource context.
+  static void CancelPendingRequestsForResourceContext(
+      const content::ResourceContext* context);
 
   // This function is called on the IO thread once we receive a reply from the
   // modal HTML dialog (in the form of a JSON string). This function forwards
@@ -85,7 +95,7 @@ class PluginProcessHost : public BrowserChildProcessHost {
   void OnAppActivation();
 #endif
 
-  const webkit::npapi::WebPluginInfo& info() const { return info_; }
+  const webkit::WebPluginInfo& info() const { return info_; }
 
 #if defined(OS_WIN)
   // Tracks plugin parent windows created on the browser UI thread.
@@ -131,7 +141,7 @@ class PluginProcessHost : public BrowserChildProcessHost {
   std::queue<Client*> sent_requests_;
 
   // Information about the plugin.
-  webkit::npapi::WebPluginInfo info_;
+  webkit::WebPluginInfo info_;
 
 #if defined(OS_WIN)
   // Tracks plugin parent windows created on the UI thread.

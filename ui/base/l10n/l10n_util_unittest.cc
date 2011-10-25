@@ -65,36 +65,6 @@ TEST_F(L10nUtilTest, DISABLED_GetString) {
 }
 #endif  // defined(OS_WIN)
 
-TEST_F(L10nUtilTest, TruncateString) {
-  string16 string = ASCIIToUTF16("foooooey    bxxxar baz");
-
-  // Make sure it doesn't modify the string if length > string length.
-  EXPECT_EQ(string, l10n_util::TruncateString(string, 100));
-
-  // Test no characters.
-  EXPECT_EQ(L"", UTF16ToWide(l10n_util::TruncateString(string, 0)));
-
-  // Test 1 character.
-  EXPECT_EQ(L"\x2026", UTF16ToWide(l10n_util::TruncateString(string, 1)));
-
-  // Test adds ... at right spot when there is enough room to break at a
-  // word boundary.
-  EXPECT_EQ(L"foooooey\x2026",
-            UTF16ToWide(l10n_util::TruncateString(string, 14)));
-
-  // Test adds ... at right spot when there is not enough space in first word.
-  EXPECT_EQ(L"f\x2026", UTF16ToWide(l10n_util::TruncateString(string, 2)));
-
-  // Test adds ... at right spot when there is not enough room to break at a
-  // word boundary.
-  EXPECT_EQ(L"foooooey\x2026",
-            UTF16ToWide(l10n_util::TruncateString(string, 11)));
-
-  // Test completely truncates string if break is on initial whitespace.
-  EXPECT_EQ(L"\x2026",
-            UTF16ToWide(l10n_util::TruncateString(ASCIIToUTF16("   "), 2)));
-}
-
 void SetICUDefaultLocale(const std::string& locale_string) {
   icu::Locale locale(locale_string.c_str());
   UErrorCode error_code = U_ZERO_ERROR;
@@ -120,7 +90,7 @@ void SetDefaultLocaleForTest(const std::string& tag, base::Environment* env) {
 TEST_F(L10nUtilTest, GetAppLocale) {
   scoped_ptr<base::Environment> env;
   // Use a temporary locale dir so we don't have to actually build the locale
-  // dlls for this test.
+  // pak files for this test.
   FilePath orig_locale_dir;
   PathService::Get(ui::DIR_LOCALES, &orig_locale_dir);
   FilePath new_locale_dir;
@@ -145,14 +115,9 @@ TEST_F(L10nUtilTest, GetAppLocale) {
     "ca@valencia",
   };
 
-#if defined(OS_WIN)
-  static const char kLocaleFileExtension[] = ".dll";
-#elif defined(OS_POSIX)
-  static const char kLocaleFileExtension[] = ".pak";
-#endif
   for (size_t i = 0; i < arraysize(filenames); ++i) {
     FilePath filename = new_locale_dir.AppendASCII(
-        filenames[i] + kLocaleFileExtension);
+        filenames[i] + ".pak");
     file_util::WriteFile(filename, "", 0);
   }
 
@@ -228,6 +193,17 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   SetICUDefaultLocale("en-US");
   EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale("en-GB"));
 
+  SetICUDefaultLocale("en-US");
+  EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale("en-AU"));
+
+  SetICUDefaultLocale("en-US");
+  EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale("en-NZ"));
+
+  SetICUDefaultLocale("en-US");
+  EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale("en-CA"));
+
+  SetICUDefaultLocale("en-US");
+  EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale("en-ZA"));
 #else  // defined(OS_CHROMEOS)
   SetDefaultLocaleForTest("en-GB", env.get());
   EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale(""));

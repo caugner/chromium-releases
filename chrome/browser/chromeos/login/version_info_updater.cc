@@ -21,7 +21,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -86,16 +86,11 @@ void VersionInfoUpdater::UpdateVersionLabel() {
     return;
 
   chrome::VersionInfo version_info;
-  std::string label_text = l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
-  label_text += ' ';
-  label_text += version_info.Version();
-  label_text += " (";
-  // TODO(rkc): Fix this for RTL.
-  // http://code.google.com/p/chromium-os/issues/detail?id=17621
-  label_text += l10n_util::GetStringUTF8(IDS_PLATFORM_LABEL);
-  label_text += ' ';
-  label_text += version_text_;
-  label_text += ')';
+  std::string label_text = l10n_util::GetStringFUTF8(
+      IDS_LOGIN_VERSION_LABEL_FORMAT,
+      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+      UTF8ToUTF16(version_info.Version()),
+      UTF8ToUTF16(version_text_));
 
   if (!enterprise_domain_text_.empty()) {
     label_text += ' ';

@@ -1,3 +1,17 @@
+.hbox {
+  display: -webkit-box;
+  -webkit-box-orient: horizontal;
+}
+
+.vbox {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.stretch {
+  -webkit-box-flex: 1;  
+}
+
 .frozen,
 .subpage-sheet-container.frozen {
   position: fixed;
@@ -231,15 +245,13 @@ div.page section:last-child {
   border-bottom: none;
 }
 
-div.page > h3 {
+h3 {
   font-size: 105%;
   font-weight: bold;
   margin: 20px 0 10px 0;
 }
 
 section > h3 {
-  font-size: 105%;
-  font-weight: bold;
   margin: 0;
   vertical-align: middle;
   width: 130px;

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,10 @@
 #include "base/callback.h"
 #include "remoting/protocol/video_stub.h"
 
+namespace base {
+class MessageLoopProxy;
+}  // namespace base
+
 namespace remoting {
 
 class ChromotocolConnection;
@@ -23,14 +27,20 @@ class SessionConfig;
 
 class VideoReader {
  public:
-  static VideoReader* Create(const SessionConfig* config);
+  static VideoReader* Create(base::MessageLoopProxy* message_loop,
+                             const SessionConfig* config);
+
+  // The callback is called when initialization is finished. The
+  // parameter is set to true on success.
+  typedef base::Callback<void(bool)> InitializedCallback;
 
   virtual ~VideoReader();
 
   // Initializies the reader. Doesn't take ownership of either |connection|
   // or |video_stub|.
   virtual void Init(Session* session,
-                    VideoStub* video_stub) = 0;
+                    VideoStub* video_stub,
+                    const InitializedCallback& callback) = 0;
 
  protected:
   VideoReader() { }

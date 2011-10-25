@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
@@ -104,22 +105,26 @@ void NonFrontendDataTypeController::StartAssociation() {
   }
 
   base::TimeTicks start_time = base::TimeTicks::Now();
-  bool merge_success = model_associator_->AssociateModels();
+  SyncError error;
+  bool merge_success = model_associator_->AssociateModels(&error);
   RecordAssociationTime(base::TimeTicks::Now() - start_time);
   if (!merge_success) {
-    StartFailed(ASSOCIATION_FAILED, FROM_HERE);
+    StartFailed(ASSOCIATION_FAILED, error.location());
     return;
   }
 
-  profile_sync_service_->ActivateDataType(this, change_processor_.get());
+  profile_sync_service_->ActivateDataType(type(), model_safe_group(),
+                                          change_processor_.get());
   StartDone(!sync_has_nodes ? OK_FIRST_RUN : OK, RUNNING, FROM_HERE);
 }
 
-void NonFrontendDataTypeController::StartFailed(StartResult result,
+void NonFrontendDataTypeController::StartFailed(
+    StartResult result,
     const tracked_objects::Location& location) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   model_associator_.reset();
   change_processor_.reset();
+  // TODO(zea): Send the full SyncError on failure and handle it higher up.
   StartDone(result, NOT_RUNNING, location);
 }
 
@@ -195,8 +200,7 @@ void NonFrontendDataTypeController::Stop() {
 
   // Deactivate the change processor on the UI thread. We dont want to listen
   // for any more changes or process them from server.
-  if (change_processor_.get())
-    profile_sync_service_->DeactivateDataType(this, change_processor_.get());
+  profile_sync_service_->DeactivateDataType(type());
 
   if (StopAssociationAsync()) {
     datatype_stopped_.Wait();
@@ -216,8 +220,10 @@ void NonFrontendDataTypeController::StopModels() {
 
 void NonFrontendDataTypeController::StopAssociation() {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (model_associator_.get())
-    model_associator_->DisassociateModels();
+  if (model_associator_.get()) {
+    SyncError error;
+    model_associator_->DisassociateModels(&error);
+  }
   model_associator_.reset();
   change_processor_.reset();
   datatype_stopped_.Signal();
@@ -237,7 +243,7 @@ void NonFrontendDataTypeController::OnUnrecoverableError(
     const std::string& message) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   RecordUnrecoverableError(from_here, message);
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, NewRunnableMethod(this,
+  BrowserThread::PostTask(BrowserThread::UI, from_here, NewRunnableMethod(this,
       &NonFrontendDataTypeController::OnUnrecoverableErrorImpl, from_here,
       message));
 }

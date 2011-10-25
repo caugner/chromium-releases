@@ -165,14 +165,14 @@ class MobileSetupHandler
   void Init(TabContents* contents);
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // NetworkLibrary::NetworkManagerObserver implementation.
-  virtual void OnNetworkManagerChanged(chromeos::NetworkLibrary* obj);
+  virtual void OnNetworkManagerChanged(chromeos::NetworkLibrary* obj) OVERRIDE;
   // NetworkLibrary::NetworkObserver implementation.
   virtual void OnNetworkChanged(chromeos::NetworkLibrary* obj,
-                                const chromeos::Network* network);
+                                const chromeos::Network* network) OVERRIDE;
 
  private:
   typedef enum PlanActivationState {
@@ -401,8 +401,9 @@ void MobileSetupUIHTMLSource::StartDataRequest(const std::string& path,
                                                bool is_incognito,
                                                int request_id) {
   chromeos::CellularNetwork* network = GetCellularNetwork(service_path_);
-  DCHECK(network);
-  if (!network->SupportsActivation()) {
+  // If we are activating, shutting down, or logging in, |network| may not
+  // be available.
+  if (!network || !network->SupportsActivation()) {
     scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
     SendResponse(request_id, html_bytes);
     return;
@@ -1127,6 +1128,7 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
       // limbo by the network library.
       if (!reconnect_timer_.IsRunning()) {
         reconnect_timer_.Start(
+            FROM_HERE,
             base::TimeDelta::FromMilliseconds(kReconnectTimerDelayMS),
             this, &MobileSetupHandler::ReconnectTimerFired);
       }
@@ -1329,5 +1331,6 @@ MobileSetupUI::MobileSetupUI(TabContents* contents) : ChromeWebUI(contents) {
       new MobileSetupUIHTMLSource(service_path);
 
   // Set up the chrome://mobilesetup/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }

@@ -6,8 +6,12 @@
 
 #include "base/logging.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
+#import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_manager.h"
 #import "chrome/browser/ui/panels/panel_window_controller_cocoa.h"
+#include "content/common/native_web_keyboard_event.h"
 
 namespace {
 
@@ -43,7 +47,8 @@ PanelBrowserWindowCocoa::PanelBrowserWindowCocoa(Browser* browser,
   : browser_(browser),
     panel_(panel),
     bounds_(bounds),
-    is_shown_(false) {
+    is_shown_(false),
+    has_find_bar_(false) {
   controller_ = [[PanelWindowControllerCocoa alloc] initWithBrowserWindow:this];
 }
 
@@ -89,7 +94,7 @@ void PanelBrowserWindowCocoa::OnPanelExpansionStateChanged(
   NOTIMPLEMENTED();
 }
 
-bool PanelBrowserWindowCocoa::ShouldBringUpPanelTitleBar(int mouse_x,
+bool PanelBrowserWindowCocoa::ShouldBringUpPanelTitlebar(int mouse_x,
                                                          int mouse_y) const {
   NOTIMPLEMENTED();
   return false;
@@ -100,13 +105,7 @@ void PanelBrowserWindowCocoa::ClosePanel() {
       return;
 
   NSWindow* window = [controller_ window];
-  NSRect frame = [window frame];
-  frame.size.height = kMinimumWindowSize;
-  // TODO(dimich): make this async. Currently, multiple panels will serially
-  // (and annoyingly) close when user exits Chrome.
-  [window setFrame:frame display:YES animate:YES];
-  browser_->OnWindowClosing();
-  DestroyPanelBrowser();  // not immediately, though.
+  [window performClose:controller_];
 }
 
 void PanelBrowserWindowCocoa::ActivatePanel() {
@@ -127,11 +126,22 @@ gfx::NativeWindow PanelBrowserWindowCocoa::GetNativePanelHandle() {
 }
 
 void PanelBrowserWindowCocoa::UpdatePanelTitleBar() {
-  NOTIMPLEMENTED();
+  if (!is_shown_)
+    return;
+  [controller_ updateTitleBar];
 }
 
 void PanelBrowserWindowCocoa::ShowTaskManagerForPanel() {
   NOTIMPLEMENTED();
+}
+
+FindBar* PanelBrowserWindowCocoa::CreatePanelFindBar() {
+  DCHECK(!has_find_bar_) << "find bar should only be created once";
+  has_find_bar_ = true;
+
+  FindBarBridge* bridge = new FindBarBridge();
+  [controller_ addFindBar:bridge->find_bar_cocoa_controller()];
+  return bridge;
 }
 
 void PanelBrowserWindowCocoa::NotifyPanelOnUserChangedTheme() {
@@ -147,11 +157,64 @@ bool PanelBrowserWindowCocoa::IsDrawingAttention() const {
   return false;
 }
 
-void PanelBrowserWindowCocoa::DestroyPanelBrowser() {
-  [controller_ close];
-  controller_ = NULL;
+bool PanelBrowserWindowCocoa::PreHandlePanelKeyboardEvent(
+    const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
+  if (![BrowserWindowUtils shouldHandleKeyboardEvent:event])
+    return false;
+
+  int id = [BrowserWindowUtils getCommandId:event];
+  if (id == -1)
+    return false;
+
+  if (browser()->IsReservedCommandOrKey(id, event)) {
+      return [BrowserWindowUtils handleKeyboardEvent:event.os_event
+                                 inWindow:GetNativePanelHandle()];
+  }
+
+  DCHECK(is_keyboard_shortcut);
+  *is_keyboard_shortcut = true;
+  return false;
 }
 
-NativePanelTesting* PanelBrowserWindowCocoa::GetNativePanelTesting() {
-  return this;
+void PanelBrowserWindowCocoa::HandlePanelKeyboardEvent(
+    const NativeWebKeyboardEvent& event) {
+  if ([BrowserWindowUtils shouldHandleKeyboardEvent:event]) {
+    [BrowserWindowUtils handleKeyboardEvent:event.os_event
+                                   inWindow:GetNativePanelHandle()];
+  }
+}
+
+Browser* PanelBrowserWindowCocoa::GetPanelBrowser() const {
+  return browser();
+}
+
+void PanelBrowserWindowCocoa::DestroyPanelBrowser() {
+  [controller_ close];
+}
+
+void PanelBrowserWindowCocoa::didCloseNativeWindow() {
+  DCHECK(!isClosed());
+  panel_->manager()->Remove(panel_.get());
+  controller_ = NULL;
+}
+gfx::Size PanelBrowserWindowCocoa::GetNonClientAreaExtent() const {
+  NOTIMPLEMENTED();
+  return gfx::Size();
+}
+
+int PanelBrowserWindowCocoa::GetRestoredHeight() const {
+  NOTIMPLEMENTED();
+  return 0;
+}
+
+void PanelBrowserWindowCocoa::SetRestoredHeight(int height) {
+  NOTIMPLEMENTED();
+}
+
+// NativePanelTesting implementation.
+
+// static
+NativePanelTesting* NativePanelTesting::Create(NativePanel* native_panel) {
+  NOTIMPLEMENTED();
+  return NULL;
 }

@@ -25,10 +25,10 @@ class WaitableEvent;
 }
 
 namespace ppapi {
-struct Preferences;
-}
 
-namespace pp {
+struct Preferences;
+class Resource;
+
 namespace proxy {
 
 // Used to keep track of per-instance data.
@@ -38,9 +38,9 @@ struct InstanceData {
   PP_Bool fullscreen;
 };
 
-class PluginDispatcher : public Dispatcher {
+class PPAPI_PROXY_EXPORT PluginDispatcher : public Dispatcher {
  public:
-  class PluginDelegate : public ProxyChannel::Delegate {
+  class PPAPI_PROXY_EXPORT PluginDelegate : public ProxyChannel::Delegate {
    public:
     // Returns the set used for globally uniquifying PP_Instances. This same
     // set must be returned for all channels.
@@ -50,7 +50,7 @@ class PluginDispatcher : public Dispatcher {
 
     // Returns the WebKit forwarding object used to make calls into WebKit.
     // Necessary only on the plugin side.
-    virtual ppapi::WebKitForwarding* GetWebKitForwarding() = 0;
+    virtual WebKitForwarding* GetWebKitForwarding() = 0;
 
     // Posts the given task to the WebKit thread associated with this plugin
     // process. The WebKit thread should be lazily created if it does not
@@ -83,6 +83,10 @@ class PluginDispatcher : public Dispatcher {
   // renderers sharing the same plugin. This mapping is maintained by
   // DidCreateInstance/DidDestroyInstance.
   static PluginDispatcher* GetForInstance(PP_Instance instance);
+
+  // Same as GetForInstance but retrieves the instance from the given resource
+  // object as a convenience. Returns NULL on failure.
+  static PluginDispatcher* GetForResource(const Resource* resource);
 
   static const void* GetInterfaceFromDispatcher(const char* interface);
 
@@ -118,17 +122,16 @@ class PluginDispatcher : public Dispatcher {
   bool SendToBrowser(IPC::Message* msg);
 
   // Returns the WebKitForwarding object used to forward events to WebKit.
-  ppapi::WebKitForwarding* GetWebKitForwarding();
+  WebKitForwarding* GetWebKitForwarding();
 
   // Returns the Preferences.
-  const ppapi::Preferences& preferences() const { return preferences_; }
+  const Preferences& preferences() const { return preferences_; }
 
   // Returns the "new-style" function API for the given interface ID, creating
   // it if necessary.
   // TODO(brettw) this is in progress. It should be merged with the target
   // proxies so there is one list to consult.
-  ppapi::FunctionGroupBase* GetFunctionAPI(
-      pp::proxy::InterfaceID id);
+  FunctionGroupBase* GetFunctionAPI(InterfaceID id);
 
   uint32 plugin_dispatcher_id() const { return plugin_dispatcher_id_; }
 
@@ -141,7 +144,7 @@ class PluginDispatcher : public Dispatcher {
 
   // IPC message handlers.
   void OnMsgSupportsInterface(const std::string& interface_name, bool* result);
-  void OnMsgSetPreferences(const ::ppapi::Preferences& prefs);
+  void OnMsgSetPreferences(const Preferences& prefs);
 
   PluginDelegate* plugin_delegate_;
 
@@ -152,8 +155,7 @@ class PluginDispatcher : public Dispatcher {
   // Function proxies created for "new-style" FunctionGroups.
   // TODO(brettw) this is in progress. It should be merged with the target
   // proxies so there is one list to consult.
-  scoped_ptr< ::ppapi::FunctionGroupBase >
-      function_proxies_[INTERFACE_ID_COUNT];
+  scoped_ptr<FunctionGroupBase> function_proxies_[INTERFACE_ID_COUNT];
 
   typedef base::hash_map<PP_Instance, InstanceData> InstanceDataMap;
   InstanceDataMap instance_map_;
@@ -161,7 +163,7 @@ class PluginDispatcher : public Dispatcher {
   // The preferences sent from the host. We only want to set this once, which
   // is what the received_preferences_ indicates. See OnMsgSetPreferences.
   bool received_preferences_;
-  ppapi::Preferences preferences_;
+  Preferences preferences_;
 
   uint32 plugin_dispatcher_id_;
 
@@ -169,6 +171,6 @@ class PluginDispatcher : public Dispatcher {
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PLUGIN_DISPATCHER_H_

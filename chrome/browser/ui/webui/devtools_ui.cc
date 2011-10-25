@@ -8,7 +8,7 @@
 #include "base/string_util.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -85,22 +85,20 @@ std::string DevToolsDataSource::GetMimeType(const std::string& path) const {
 }
 
 // static
-void DevToolsUI::RegisterDevToolsDataSource() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+void DevToolsUI::RegisterDevToolsDataSource(Profile* profile) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   static bool registered = false;
   if (!registered) {
     DevToolsDataSource* data_source = new DevToolsDataSource();
-    ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
-        Profile::Deprecated::GetDefaultRequestContext()->
-        GetURLRequestContext());
-    context->chrome_url_data_manager_backend()->AddDataSource(data_source);
+    profile->GetChromeURLDataManager()->AddDataSource(data_source);
     registered = true;
   }
 }
 
 DevToolsUI::DevToolsUI(TabContents* contents) : ChromeWebUI(contents) {
   DevToolsDataSource* data_source = new DevToolsDataSource();
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(data_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(data_source);
 }
 
 void DevToolsUI::RenderViewCreated(RenderViewHost* render_view_host) {

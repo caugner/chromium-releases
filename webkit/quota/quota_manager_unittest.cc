@@ -52,8 +52,8 @@ class QuotaManagerTest : public testing::Test {
     quota_manager_ = new QuotaManager(
         false /* is_incognito */,
         data_dir_.path(),
-        MessageLoopProxy::CreateForCurrentThread(),
-        MessageLoopProxy::CreateForCurrentThread(),
+        MessageLoopProxy::current(),
+        MessageLoopProxy::current(),
         mock_special_storage_policy_);
     // Don't (automatically) start the eviction for testing.
     quota_manager_->eviction_disabled_ = true;
@@ -225,6 +225,7 @@ class QuotaManagerTest : public testing::Test {
 
   void GetOriginsModifiedSince(StorageType type, base::Time modified_since) {
     modified_origins_.clear();
+    modified_origins_type_ = kStorageTypeUnknown;
     quota_manager_->GetOriginsModifiedSince(type, modified_since,
         callback_factory_.NewCallback(
             &QuotaManagerTest::DidGetModifiedOrigins));
@@ -306,8 +307,9 @@ class QuotaManagerTest : public testing::Test {
     lru_origin_ = origin;
   }
 
-  void DidGetModifiedOrigins(const std::set<GURL>& origins) {
+  void DidGetModifiedOrigins(const std::set<GURL>& origins, StorageType type) {
     modified_origins_ = origins;
+    modified_origins_type_ = type;
   }
 
   void DidDumpQuotaTable(const QuotaTableEntries& entries) {
@@ -345,6 +347,7 @@ class QuotaManagerTest : public testing::Test {
   int64 available_space() const { return available_space_; }
   const GURL& lru_origin() const { return lru_origin_; }
   const std::set<GURL>& modified_origins() const { return modified_origins_; }
+  StorageType modified_origins_type() const { return modified_origins_type_; }
   const QuotaTableEntries& quota_entries() const { return quota_entries_; }
   const OriginInfoTableEntries& origin_info_entries() const {
     return origin_info_entries_;
@@ -374,6 +377,7 @@ class QuotaManagerTest : public testing::Test {
   int64 available_space_;
   GURL lru_origin_;
   std::set<GURL> modified_origins_;
+  StorageType modified_origins_type_;
   QuotaTableEntries quota_entries_;
   OriginInfoTableEntries origin_info_entries_;
   int status_callback_count_;
@@ -706,6 +710,11 @@ TEST_F(QuotaManagerTest, GetTemporaryUsageAndQuota_Unlimited) {
   SetTemporaryGlobalQuota(1000);
   MessageLoop::current()->RunAllPending();
 
+  GetGlobalUsage(kTemp);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(10 + 50 + 4000, usage());
+  EXPECT_EQ(4000, unlimited_usage());
+
   const int kPerHostQuotaFor1000 =
       1000 / QuotaManager::kPerHostTemporaryPortion;
 
@@ -751,6 +760,33 @@ TEST_F(QuotaManagerTest, GetTemporaryUsageAndQuota_Unlimited) {
   EXPECT_EQ(kQuotaStatusOk, status());
   EXPECT_EQ(4000, usage());
   EXPECT_EQ(kint64max, quota());
+
+  // Revoke the unlimited rights and make sure the change is noticed.
+  mock_special_storage_policy()->Reset();
+  mock_special_storage_policy()->NotifyChanged();
+
+  GetGlobalUsage(kTemp);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(10 + 50 + 4000, usage());
+  EXPECT_EQ(0, unlimited_usage());
+
+  GetUsageAndQuota(GURL("http://usage10/"), kTemp);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(kQuotaStatusOk, status());
+  EXPECT_EQ(10, usage());
+  EXPECT_EQ(10, quota());  // should be clamped to our current usage
+
+  GetUsageAndQuota(GURL("http://usage50/"), kTemp);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(kQuotaStatusOk, status());
+  EXPECT_EQ(50, usage());
+  EXPECT_EQ(kPerHostQuotaFor100, quota());
+
+  GetUsageAndQuota(GURL("http://unlimited/"), kTemp);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(kQuotaStatusOk, status());
+  EXPECT_EQ(4000, usage());
+  EXPECT_EQ(kPerHostQuotaFor100, quota());
 }
 
 TEST_F(QuotaManagerTest, OriginInUse) {
@@ -1435,6 +1471,7 @@ TEST_F(QuotaManagerTest, GetOriginsModifiedSince) {
   GetOriginsModifiedSince(kTemp, base::Time());
   MessageLoop::current()->RunAllPending();
   EXPECT_TRUE(modified_origins().empty());
+  EXPECT_EQ(modified_origins_type(), kTemp);
 
   base::Time time1 = client->IncrementMockTime();
   client->ModifyOriginAndNotify(GURL("http://a.com/"), kTemp, 10);
@@ -1448,6 +1485,7 @@ TEST_F(QuotaManagerTest, GetOriginsModifiedSince) {
   GetOriginsModifiedSince(kTemp, time1);
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(4U, modified_origins().size());
+  EXPECT_EQ(modified_origins_type(), kTemp);
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kData); ++i) {
     if (kData[i].type == kTemp)
       EXPECT_EQ(1U, modified_origins().count(GURL(kData[i].origin)));
@@ -1460,6 +1498,7 @@ TEST_F(QuotaManagerTest, GetOriginsModifiedSince) {
   GetOriginsModifiedSince(kTemp, time3);
   MessageLoop::current()->RunAllPending();
   EXPECT_TRUE(modified_origins().empty());
+  EXPECT_EQ(modified_origins_type(), kTemp);
 
   client->ModifyOriginAndNotify(GURL("http://a.com/"), kTemp, 10);
 
@@ -1467,6 +1506,7 @@ TEST_F(QuotaManagerTest, GetOriginsModifiedSince) {
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(1U, modified_origins().size());
   EXPECT_EQ(1U, modified_origins().count(GURL("http://a.com/")));
+  EXPECT_EQ(modified_origins_type(), kTemp);
 }
 
 TEST_F(QuotaManagerTest, DumpQuotaTable) {

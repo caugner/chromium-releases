@@ -9,10 +9,11 @@
 #include <queue>
 #include <string>
 
-#include "base/base_api.h"
+#include "base/base_export.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop_proxy.h"
 #include "base/message_pump.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
@@ -27,11 +28,15 @@
 #elif defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
 #if !defined(OS_MACOSX)
-#if defined(TOUCH_UI)
+
+#if defined(USE_WAYLAND)
+#include "base/message_pump_wayland.h"
+#elif defined(TOUCH_UI)
 #include "base/message_pump_x.h"
 #else
 #include "base/message_pump_gtk.h"
 #endif
+
 #endif
 #endif
 
@@ -75,7 +80,7 @@ class Births;
 // Please be SURE your task is reentrant (nestable) and all global variables
 // are stable and accessible before calling SetNestableTasksAllowed(true).
 //
-class BASE_API MessageLoop : public base::MessagePump::Delegate {
+class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
  public:
 #if defined(OS_WIN)
   typedef base::MessagePumpWin::Dispatcher Dispatcher;
@@ -115,6 +120,11 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
 
   static void EnableHistogrammer(bool enable_histogrammer);
 
+  typedef base::MessagePump* (MessagePumpFactory)();
+  // Using the given base::MessagePumpForUIFactory to override the default
+  // MessagePump implementation for 'TYPE_UI'.
+  static void InitMessagePumpForUIFactory(MessagePumpFactory* factory);
+
   // A DestructionObserver is notified when the current MessageLoop is being
   // destroyed.  These obsevers are notified prior to MessageLoop::current()
   // being changed to return NULL.  This gives interested parties the chance to
@@ -123,7 +133,7 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
   // NOTE: Any tasks posted to the MessageLoop during this notification will
   // not be run.  Instead, they will be deleted.
   //
-  class BASE_API DestructionObserver {
+  class BASE_EXPORT DestructionObserver {
    public:
     virtual void WillDestroyCurrentMessageLoop() = 0;
 
@@ -262,6 +272,11 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
   }
   const std::string& thread_name() const { return thread_name_; }
 
+  // Gets the message loop proxy associated with this message loop.
+  scoped_refptr<base::MessageLoopProxy> message_loop_proxy() {
+    return message_loop_proxy_.get();
+  }
+
   // Enables or disables the recursive task processing. This happens in the case
   // of recursive message loops. Some unwanted message loop may occurs when
   // using common controls or printer functions. By default, recursive task
@@ -312,7 +327,7 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
   // MessageLoop.
   //
   // NOTE: A TaskObserver implementation should be extremely fast!
-  class BASE_API TaskObserver {
+  class BASE_EXPORT TaskObserver {
    public:
     TaskObserver();
 
@@ -368,12 +383,17 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
     // once it becomes idle.
     bool quit_received;
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
     Dispatcher* dispatcher;
 #endif
   };
 
-  class BASE_API AutoRunState : RunState {
+#if defined(OS_ANDROID)
+  // Android Java process manages the UI thread message loop. So its
+  // MessagePumpForUI needs to keep the RunState.
+ public:
+#endif
+  class BASE_EXPORT AutoRunState : RunState {
    public:
     explicit AutoRunState(MessageLoop* loop);
     ~AutoRunState();
@@ -381,6 +401,9 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
     MessageLoop* loop_;
     RunState* previous_state_;
   };
+#if defined(OS_ANDROID)
+ protected:
+#endif
 
   // This structure is copied around by value.
   struct PendingTask {
@@ -556,6 +579,9 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
 
   ObserverList<TaskObserver> task_observers_;
 
+  // The message loop proxy associated with this message loop, if one exists.
+  scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(MessageLoop);
 };
@@ -567,7 +593,7 @@ class BASE_API MessageLoop : public base::MessagePump::Delegate {
 // This class is typically used like so:
 //   MessageLoopForUI::current()->...call some method...
 //
-class BASE_API MessageLoopForUI : public MessageLoop {
+class BASE_EXPORT MessageLoopForUI : public MessageLoop {
  public:
   MessageLoopForUI() : MessageLoop(TYPE_UI) {
   }
@@ -583,7 +609,12 @@ class BASE_API MessageLoopForUI : public MessageLoop {
   void DidProcessMessage(const MSG& message);
 #endif  // defined(OS_WIN)
 
-#if !defined(OS_MACOSX)
+#if defined(OS_ANDROID)
+  // On Android, the UI message loop is handled by Java side. So Run() should
+  // never be called. Instead use Start(), which will forward all the native UI
+  // events to the Java message loop.
+  void Start();
+#elif !defined(OS_MACOSX)
   // Please see message_pump_win/message_pump_glib for definitions of these
   // methods.
   void AddObserver(Observer* observer);
@@ -611,7 +642,7 @@ COMPILE_ASSERT(sizeof(MessageLoop) == sizeof(MessageLoopForUI),
 // This class is typically used like so:
 //   MessageLoopForIO::current()->...call some method...
 //
-class BASE_API MessageLoopForIO : public MessageLoop {
+class BASE_EXPORT MessageLoopForIO : public MessageLoop {
  public:
 #if defined(OS_WIN)
   typedef base::MessagePumpForIO::IOHandler IOHandler;

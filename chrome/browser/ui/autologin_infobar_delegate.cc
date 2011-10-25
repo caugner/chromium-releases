@@ -10,6 +10,7 @@
 #include "base/string_split.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -52,9 +53,9 @@ class AutoLoginRedirector : public NotificationObserver {
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
-  // Redirect tab to TokenAuth URL, logging the user in and navigating
+  // Redirect tab to MergeSession URL, logging the user in and navigating
   // to the desired page.
-  void RedirectToTokenAuth(const std::string& token);
+  void RedirectToMergeSession(const std::string& token);
 
   TabContentsWrapper* tab_contents_wrapper_;
   const std::string args_;
@@ -70,14 +71,14 @@ AutoLoginRedirector::AutoLoginRedirector(
   // to be re-issued.  The token service guarantees to fire either
   // TOKEN_AVAILABLE or TOKEN_REQUEST_FAILED, so we will get at least one or
   // the other, allow AutoLoginRedirector to delete itself correctly.
+  TokenService* service = tab_contents_wrapper_->profile()->GetTokenService();
   registrar_.Add(this,
                  chrome::NOTIFICATION_TOKEN_AVAILABLE,
-                 NotificationService::AllSources());
+                 Source<TokenService>(service));
   registrar_.Add(this,
                  chrome::NOTIFICATION_TOKEN_REQUEST_FAILED,
-                 NotificationService::AllSources());
-  tab_contents_wrapper_->tab_contents()->profile()->GetTokenService()->
-      StartFetchingTokens();
+                 Source<TokenService>(service));
+  service->StartFetchingTokens();
 }
 
 AutoLoginRedirector::~AutoLoginRedirector() {
@@ -95,7 +96,7 @@ void AutoLoginRedirector::Observe(int type,
         Details<TokenService::TokenAvailableDetails>(details).ptr();
 
     if (tok_details->service() == GaiaConstants::kGaiaService) {
-      RedirectToTokenAuth(tok_details->token());
+      RedirectToMergeSession(tok_details->token());
       delete this;
       return;
     }
@@ -111,7 +112,7 @@ void AutoLoginRedirector::Observe(int type,
   }
 }
 
-void AutoLoginRedirector::RedirectToTokenAuth(const std::string& token) {
+void AutoLoginRedirector::RedirectToMergeSession(const std::string& token) {
   // The args are URL encoded, so we need to decode them before use.
   url_canon::RawCanonOutputT<char16> output;
   url_util::DecodeURLEscapeSequences(args_.c_str(), args_.length(), &output);
@@ -120,9 +121,9 @@ void AutoLoginRedirector::RedirectToTokenAuth(const std::string& token) {
 
   const char kUrlFormat[] = "%s?"
                             "source=chrome&"
-                            "auth=%s&"
+                            "uberauth=%s&"
                             "%s";
-  const std::string url_string = GaiaUrls::GetInstance()->token_auth_url();
+  const std::string url_string = GaiaUrls::GetInstance()->merge_session_url();
   std::string url = base::StringPrintf(kUrlFormat,
                                        url_string.c_str(),
                                        token.c_str(),
@@ -134,23 +135,15 @@ void AutoLoginRedirector::RedirectToTokenAuth(const std::string& token) {
 }
 
 // static
-void AutoLoginInfoBarDelegate::RegisterUserPrefs(PrefService* user_prefs) {
-#if defined(ENABLE_AUTO_LOGIN_AFTER_M14)
-  // Pre-login is being taken out of M14, but will be put back in right after
-  // the fork.
-  user_prefs->RegisterBooleanPref(prefs::kAutologinEnabled, false,
-                                  PrefService::SYNCABLE_PREF);
-#endif
-}
-
-// static
 void AutoLoginInfoBarDelegate::ShowIfAutoLoginRequested(
     net::URLRequest* request,
     int child_id,
     int route_id) {
-#if defined(ENABLE_AUTO_LOGIN_AFTER_M14)
-  // Pre-login is being taken out of M14, but will be put back in right after
-  // the fork.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAutologin)) {
+    return;
+  }
+
   // See if the response contains the X-Auto-Login header.  If so, this was
   // a request for a login page, and the server is allowing the browser to
   // suggest auto-login, if available.
@@ -185,7 +178,6 @@ void AutoLoginInfoBarDelegate::ShowIfAutoLoginRequested(
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
       NewRunnableFunction(&AutoLoginInfoBarDelegate::ShowInfoBarIfNeeded,
                           account, args, child_id, route_id));
-#endif
 }
 
 // static
@@ -198,26 +190,25 @@ void AutoLoginInfoBarDelegate::ShowInfoBarIfNeeded(const std::string& account,
   if (!tab_contents)
     return;
 
-  // If auto-login is turned off, then simply return.
-  if (!tab_contents->profile()->GetPrefs()->GetBoolean(
-      prefs::kAutologinEnabled))
-    return;
-
   TabContentsWrapper* tab_contents_wrapper =
       TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
   // tab_contents_wrapper is NULL for TabContents hosted in HTMLDialog.
   if (!tab_contents_wrapper)
     return;
 
+  // If auto-login is turned off, then simply return.
+  if (!tab_contents_wrapper->profile()->GetPrefs()->GetBoolean(
+      prefs::kAutologinEnabled))
+    return;
+
   // Make sure that the account specified matches the logged in user.
   // However, account is usually empty.  In an incognito window, there may
   // not be a profile sync service and/or signin manager.
-  if (!tab_contents_wrapper->tab_contents()->profile()->HasProfileSyncService())
+  if (!tab_contents_wrapper->profile()->HasProfileSyncService())
     return;
 
   SigninManager* signin_manager =
-      tab_contents_wrapper->tab_contents()->profile()->
-          GetProfileSyncService()->signin();
+      tab_contents_wrapper->profile()->GetProfileSyncService()->signin();
   if (!signin_manager)
     return;
 
@@ -227,7 +218,7 @@ void AutoLoginInfoBarDelegate::ShowInfoBarIfNeeded(const std::string& account,
 
   // Make sure there are credentials in the token manager, otherwise there is
   // no way to craft the TokenAuth URL.
-  if (!tab_contents_wrapper->tab_contents()->profile()->GetTokenService()->
+  if (!tab_contents_wrapper->profile()->GetTokenService()->
       AreCredentialsValid()) {
     return;
   }
@@ -259,7 +250,7 @@ void AutoLoginInfoBarDelegate::Observe(int type,
                                        const NotificationDetails& details) {
   if (type == content::NOTIFICATION_LOAD_STOP) {
     // The wrapper takes ownership of this delegate.
-    tab_contents_wrapper_->AddInfoBar(this);
+    tab_contents_wrapper_->infobar_tab_helper()->AddInfoBar(this);
     registrar_.RemoveAll();
   } else if (type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED) {
     // The tab contents was destroyed before the naviagation completed, so
@@ -280,12 +271,8 @@ InfoBarDelegate::Type AutoLoginInfoBarDelegate::GetInfoBarType() const {
 }
 
 string16 AutoLoginInfoBarDelegate::GetMessageText() const {
-  string16 format = l10n_util::GetStringUTF16(IDS_AUTOLOGIN_INFOBAR_MESSAGE);
-  std::wstring format_wide = UTF16ToWide(format);
-  std::wstring account_wide = UTF8ToWide(account_);
-  std::wstring message = base::StringPrintf(format_wide.c_str(),
-                                            account_wide.c_str());
-  return WideToUTF16(message);
+  return l10n_util::GetStringFUTF16(IDS_AUTOLOGIN_INFOBAR_MESSAGE,
+                                    UTF8ToUTF16(account_));
 }
 
 int AutoLoginInfoBarDelegate::GetButtons() const {
@@ -305,8 +292,7 @@ bool AutoLoginInfoBarDelegate::Accept() {
 }
 
 bool AutoLoginInfoBarDelegate::Cancel() {
-  PrefService* user_prefs = tab_contents_wrapper_->tab_contents()->profile()->
-      GetPrefs();
+  PrefService* user_prefs = tab_contents_wrapper_->profile()->GetPrefs();
   user_prefs->SetBoolean(prefs::kAutologinEnabled, false);
   user_prefs->ScheduleSavePersistentPrefs();
   return true;

@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/extension_tab_helper.h"
 
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -13,6 +14,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -63,8 +65,9 @@ void ExtensionTabHelper::SetExtensionAppById(
   if (extension_app_id.empty())
     return;
 
-  ExtensionService* extension_service =
-      tab_contents()->profile()->GetExtensionService();
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  ExtensionService* extension_service = profile->GetExtensionService();
   if (!extension_service || !extension_service->is_ready())
     return;
 
@@ -87,7 +90,9 @@ void ExtensionTabHelper::DidNavigateMainFramePostCommit(
   if (details.is_in_page)
     return;
 
-  ExtensionService* service = tab_contents()->profile()->GetExtensionService();
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  ExtensionService* service = profile->GetExtensionService();
   if (!service)
     return;
 
@@ -120,6 +125,8 @@ bool ExtensionTabHelper::OnMessageReceived(const IPC::Message& message) {
                         OnDidGetApplicationInfo)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_InstallApplication,
                         OnInstallApplication)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_InlineWebstoreInstall,
+                        OnInlineWebstoreInstall)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -137,6 +144,15 @@ void ExtensionTabHelper::OnDidGetApplicationInfo(
 void ExtensionTabHelper::OnInstallApplication(const WebApplicationInfo& info) {
   if (wrapper_->delegate())
     wrapper_->delegate()->OnInstallApplication(wrapper_, info);
+}
+
+void ExtensionTabHelper::OnInlineWebstoreInstall(
+    int install_id,
+    const std::string& webstore_item_id,
+    const GURL& requestor_url) {
+  scoped_refptr<WebstoreInlineInstaller> installer(new WebstoreInlineInstaller(
+      tab_contents(), install_id, webstore_item_id, requestor_url, this));
+  installer->BeginInstall();
 }
 
 void ExtensionTabHelper::OnRequest(
@@ -187,22 +203,19 @@ Browser* ExtensionTabHelper::GetBrowser() {
   return NULL;
 }
 
-TabContents* ExtensionTabHelper::GetAssociatedTabContents() const {
-  return tab_contents();
+void ExtensionTabHelper::OnInlineInstallSuccess(int install_id) {
+  Send(new ExtensionMsg_InlineWebstoreInstallResponse(
+      routing_id(), install_id, true, ""));
 }
 
-gfx::NativeWindow ExtensionTabHelper::GetCustomFrameNativeWindow() {
-  if (GetBrowser())
-    return NULL;
+void ExtensionTabHelper::OnInlineInstallFailure(int install_id,
+                                                const std::string& error) {
+  Send(new ExtensionMsg_InlineWebstoreInstallResponse(
+      routing_id(), install_id, false, error));
+}
 
-  // If there was no browser associated with the function dispatcher delegate,
-  // then this WebUI may be hosted in an ExternalTabContainer, and a framing
-  // window will be accessible through the tab_contents.
-  TabContentsDelegate* tab_contents_delegate = tab_contents()->delegate();
-  if (tab_contents_delegate)
-    return tab_contents_delegate->GetFrameNativeWindow();
-  else
-    return NULL;
+TabContents* ExtensionTabHelper::GetAssociatedTabContents() const {
+  return tab_contents();
 }
 
 gfx::NativeView ExtensionTabHelper::GetNativeViewOfHost() {

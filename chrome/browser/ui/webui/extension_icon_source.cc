@@ -19,6 +19,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
+#include "grit/component_extension_resources_map.h"
 #include "grit/theme_resources.h"
 #include "googleurl/src/gurl.h"
 #include "skia/ext/image_operations.h"
@@ -75,9 +76,15 @@ ExtensionIconSource::~ExtensionIconSource() {
 GURL ExtensionIconSource::GetIconURL(const Extension* extension,
                                      Extension::Icons icon_size,
                                      ExtensionIconSet::MatchType match,
-                                     bool grayscale) {
+                                     bool grayscale,
+                                     bool* exists) {
+  if (exists)
+    *exists = true;
   if (extension->id() == extension_misc::kWebStoreAppId)
     return GURL("chrome://theme/IDR_WEBSTORE_ICON");
+
+  if (exists && extension->GetIconURL(icon_size, match) == GURL())
+    *exists = false;
 
   GURL icon_url(base::StringPrintf("%s%s/%d/%d%s",
                                    chrome::kChromeUIExtensionIconURL,
@@ -120,10 +127,15 @@ void ExtensionIconSource::StartDataRequest(const std::string& path,
   ExtensionResource icon =
       request->extension->GetIconResource(request->size, request->match);
 
-  if (icon.relative_path().empty())
+  if (icon.relative_path().empty()) {
     LoadIconFailed(request_id);
-  else
+  } else {
+    if (request->extension->location() == Extension::COMPONENT &&
+        TryLoadingComponentExtensionImage(icon, request_id)) {
+      return;
+    }
     LoadExtensionImage(icon, request_id);
+  }
 }
 
 void ExtensionIconSource::LoadIconFailed(int request_id) {
@@ -175,6 +187,28 @@ void ExtensionIconSource::LoadDefaultImage(int request_id) {
       request->size, request->size);
 
   FinalizeImage(decoded, request_id);
+}
+
+bool ExtensionIconSource::TryLoadingComponentExtensionImage(
+    const ExtensionResource& icon, int request_id) {
+  ExtensionIconRequest* request = GetData(request_id);
+  FilePath directory_path = request->extension->path();
+  FilePath relative_path = directory_path.BaseName().Append(
+      icon.relative_path());
+  for (size_t i = 0; i < kComponentExtensionResourcesSize; ++i) {
+    FilePath bm_resource_path =
+        FilePath().AppendASCII(kComponentExtensionResources[i].name);
+#if defined(OS_WIN)
+    bm_resource_path = bm_resource_path.NormalizeWindowsPathSeparators();
+#endif
+    if (relative_path == bm_resource_path) {
+      scoped_ptr<SkBitmap> decoded(LoadImageByResourceId(
+          kComponentExtensionResources[i].value));
+      FinalizeImage(decoded.get(), request_id);
+      return true;
+    }
+  }
+  return false;
 }
 
 void ExtensionIconSource::LoadExtensionImage(const ExtensionResource& icon,
@@ -278,7 +312,7 @@ bool ExtensionIconSource::ParseData(const std::string& path,
 
   std::string extension_id = path_parts.at(0);
   const Extension* extension =
-      profile_->GetExtensionService()->GetExtensionById(extension_id, true);
+      profile_->GetExtensionService()->GetInstalledExtension(extension_id);
   if (!extension)
     return false;
 

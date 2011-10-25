@@ -27,7 +27,7 @@
 #include "sql/init_status.h"
 
 class BookmarkService;
-struct DownloadHistoryInfo;
+struct DownloadPersistentStoreInfo;
 class FilePath;
 class GURL;
 class HistoryURLProvider;
@@ -48,6 +48,10 @@ class Time;
 namespace browser_sync {
 class HistoryModelWorker;
 class TypedUrlDataTypeController;
+}
+
+namespace gfx {
+class Image;
 }
 
 namespace history {
@@ -377,12 +381,6 @@ class HistoryService : public CancelableRequestProvider,
   typedef Callback2<Handle, scoped_refptr<RefCountedBytes> >::Type
       ThumbnailDataCallback;
 
-  // Sets the thumbnail for a given URL. The URL must be in the history
-  // database or the request will be ignored.
-  void SetPageThumbnail(const GURL& url,
-                        const SkBitmap& thumbnail,
-                        const ThumbnailScore& score);
-
   // Requests a page thumbnail. See ThumbnailDataCallback definition above.
   Handle GetPageThumbnail(const GURL& page_url,
                           CancelableRequestConsumerBase* consumer,
@@ -421,19 +419,19 @@ class HistoryService : public CancelableRequestProvider,
   // 'info' contains all the download's creation state, and 'callback' runs
   // when the history service request is complete.
   Handle CreateDownload(int32 id,
-                        const DownloadHistoryInfo& info,
+                        const DownloadPersistentStoreInfo& info,
                         CancelableRequestConsumerBase* consumer,
                         DownloadCreateCallback* callback);
 
   // Implemented by the caller of 'QueryDownloads' below, and is called when the
   // history service has retrieved a list of all download state. The call
-  typedef Callback1<std::vector<DownloadHistoryInfo>*>::Type
+  typedef Callback1<std::vector<DownloadPersistentStoreInfo>*>::Type
       DownloadQueryCallback;
 
   // Begins a history request to retrieve the state of all downloads in the
   // history db. 'callback' runs when the history service request is complete,
-  // at which point 'info' contains an array of DownloadHistoryInfo, one per
-  // download.
+  // at which point 'info' contains an array of DownloadPersistentStoreInfo, one
+  // per download.
   Handle QueryDownloads(CancelableRequestConsumerBase* consumer,
                         DownloadQueryCallback* callback);
 

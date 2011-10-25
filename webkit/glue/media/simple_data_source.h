@@ -27,6 +27,10 @@
 class MessageLoop;
 class WebMediaPlayerDelegateImpl;
 
+namespace media {
+class MediaLog;
+}
+
 namespace webkit_glue {
 
 class SimpleDataSource
@@ -37,6 +41,7 @@ class SimpleDataSource
   static media::DataSourceFactory* CreateFactory(
       MessageLoop* render_loop,
       WebKit::WebFrame* frame,
+      media::MediaLog* media_log,
       WebDataSourceBuildObserverHack* build_observer);
 
   SimpleDataSource(MessageLoop* render_loop, WebKit::WebFrame* frame);
@@ -52,6 +57,7 @@ class SimpleDataSource
   virtual bool GetSize(int64* size_out);
   virtual bool IsStreaming();
   virtual void SetPreload(media::Preload preload);
+  virtual void SetBitrate(int bitrate);
 
   // Used to inject a mock used for unittests.
   virtual void SetURLLoaderForTest(WebKit::WebURLLoader* mock_loader);
@@ -88,7 +94,7 @@ class SimpleDataSource
 
   // webkit_glue::WebDataSource implementation.
   virtual void Initialize(const std::string& url,
-                          media::PipelineStatusCallback* callback);
+                          const media::PipelineStatusCB& callback);
   virtual void CancelInitialize();
   virtual bool HasSingleOrigin();
   virtual void Abort();
@@ -133,7 +139,7 @@ class SimpleDataSource
   base::Lock lock_;
 
   // Filter callbacks.
-  scoped_ptr<media::PipelineStatusCallback> initialize_callback_;
+  media::PipelineStatusCB initialize_cb_;
 
   // Used to ensure mocks for unittests are used instead of reset in Start().
   bool keep_test_loader_;

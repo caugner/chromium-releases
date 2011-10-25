@@ -27,29 +27,31 @@
 
 namespace media {
 
+class MediaLog;
+
 // Adapter for using asynchronous Pipeline methods in code that wants to run
 // synchronously.  To use, construct an instance of this class and pass the
 // |Callback()| to the Pipeline method requiring a callback.  Then Wait() for
 // the callback to get fired and call status() to see what the callback's
 // argument was.  This object is for one-time use; call |Callback()| exactly
 // once.
-class PipelineStatusNotification {
+class MEDIA_EXPORT PipelineStatusNotification {
  public:
   PipelineStatusNotification();
   ~PipelineStatusNotification();
 
   // See class-level comment for usage.
-  media::PipelineStatusCallback* Callback();
-  void Notify(media::PipelineStatus status);
+  PipelineStatusCB Callback();
   void Wait();
-  media::PipelineStatus status();
+  PipelineStatus status();
 
  private:
+  void Notify(media::PipelineStatus status);
+
   base::Lock lock_;
   base::ConditionVariable cv_;
   media::PipelineStatus status_;
   bool notified_;
-  scoped_ptr<media::PipelineStatusCallback> callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PipelineStatusNotification);
 };
@@ -91,20 +93,20 @@ class PipelineStatusNotification {
 // If any error ever happens, this object will transition to the "Error" state
 // from any state. If Stop() is ever called, this object will transition to
 // "Stopped" state.
-class PipelineImpl : public Pipeline, public FilterHost {
+class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
  public:
-  explicit PipelineImpl(MessageLoop* message_loop);
+  explicit PipelineImpl(MessageLoop* message_loop, MediaLog* media_log);
 
   // Pipeline implementation.
-  virtual void Init(PipelineStatusCallback* ended_callback,
-                    PipelineStatusCallback* error_callback,
-                    PipelineStatusCallback* network_callback);
+  virtual void Init(const PipelineStatusCB& ended_callback,
+                    const PipelineStatusCB& error_callback,
+                    const PipelineStatusCB& network_callback);
   virtual bool Start(FilterCollection* filter_collection,
                      const std::string& uri,
-                     PipelineStatusCallback* start_callback);
-  virtual void Stop(PipelineStatusCallback* stop_callback);
+                     const PipelineStatusCB& start_callback);
+  virtual void Stop(const PipelineStatusCB& stop_callback);
   virtual void Seek(base::TimeDelta time,
-                    PipelineStatusCallback* seek_callback);
+                    const PipelineStatusCB& seek_callback);
   virtual bool IsRunning() const;
   virtual bool IsInitialized() const;
   virtual bool IsNetworkActive() const;
@@ -128,6 +130,8 @@ class PipelineImpl : public Pipeline, public FilterHost {
   void SetClockForTesting(Clock* clock);
 
  private:
+  friend class MediaLog;
+
   // Pipeline states, as described above.
   enum State {
     kCreated,
@@ -154,7 +158,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   void ResetState();
 
   // Updates |state_|. All state transitions should use this call.
-  void set_state(State next_state);
+  void SetState(State next_state);
 
   // Simple method used to make sure the pipeline is running normally.
   bool IsPipelineOk();
@@ -222,7 +226,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // message loop.
   void StartTask(FilterCollection* filter_collection,
                  const std::string& url,
-                 PipelineStatusCallback* start_callback);
+                 const PipelineStatusCB& start_callback);
 
   // InitializeTask() performs initialization in multiple passes. It is executed
   // as a result of calling Start() or InitializationComplete() that advances
@@ -231,7 +235,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   void InitializeTask();
 
   // Stops and destroys all filters, placing the pipeline in the kStopped state.
-  void StopTask(PipelineStatusCallback* stop_callback);
+  void StopTask(const PipelineStatusCB& stop_callback);
 
   // Carries out stopping and destroying all filters, placing the pipeline in
   // the kError state.
@@ -250,7 +254,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   void PreloadChangedTask(Preload preload);
 
   // Carries out notifying filters that we are seeking to a new timestamp.
-  void SeekTask(base::TimeDelta time, PipelineStatusCallback* seek_callback);
+  void SeekTask(base::TimeDelta time, const PipelineStatusCB& seek_callback);
 
   // Carries out handling a notification from a filter that it has ended.
   void NotifyEndedTask();
@@ -313,6 +317,9 @@ class PipelineImpl : public Pipeline, public FilterHost {
 
   // Message loop used to execute pipeline tasks.
   MessageLoop* message_loop_;
+
+  // MediaLog to which to log events.
+  scoped_refptr<MediaLog> media_log_;
 
   // Lock used to serialize access for the following data members.
   mutable base::Lock lock_;
@@ -429,11 +436,11 @@ class PipelineImpl : public Pipeline, public FilterHost {
   std::string url_;
 
   // Callbacks for various pipeline operations.
-  scoped_ptr<PipelineStatusCallback> seek_callback_;
-  scoped_ptr<PipelineStatusCallback> stop_callback_;
-  scoped_ptr<PipelineStatusCallback> ended_callback_;
-  scoped_ptr<PipelineStatusCallback> error_callback_;
-  scoped_ptr<PipelineStatusCallback> network_callback_;
+  PipelineStatusCB seek_callback_;
+  PipelineStatusCB stop_callback_;
+  PipelineStatusCB ended_callback_;
+  PipelineStatusCB error_callback_;
+  PipelineStatusCB network_callback_;
 
   // Reference to the filter(s) that constitute the pipeline.
   scoped_refptr<Filter> pipeline_filter_;

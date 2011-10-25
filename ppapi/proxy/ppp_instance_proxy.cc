@@ -16,7 +16,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -163,6 +163,7 @@ void PPP_Instance_Proxy::OnMsgDidCreate(
   PluginDispatcher* plugin_dispatcher =
       static_cast<PluginDispatcher*>(dispatcher());
   plugin_dispatcher->DidCreateInstance(instance);
+  ppapi::TrackerBase::Get()->GetResourceTracker()->DidCreateInstance(instance);
 
   // Make sure the arrays always have at least one element so we can take the
   // address below.
@@ -183,6 +184,7 @@ void PPP_Instance_Proxy::OnMsgDidCreate(
 
 void PPP_Instance_Proxy::OnMsgDidDestroy(PP_Instance instance) {
   combined_interface_->DidDestroy(instance);
+  ppapi::TrackerBase::Get()->GetResourceTracker()->DidDeleteInstance(instance);
   static_cast<PluginDispatcher*>(dispatcher())->DidDestroyInstance(instance);
 }
 
@@ -223,4 +225,4 @@ void PPP_Instance_Proxy::OnMsgHandleDocumentLoad(PP_Instance instance,
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

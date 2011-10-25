@@ -37,6 +37,10 @@ class TemplateURL;
 // loaded as is.
 class InstantLoader : public NotificationObserver {
  public:
+  // Header and value set on loads that originate from instant.
+  static const char* const kInstantHeader;
+  static const char* const kInstantHeaderValue;
+
   InstantLoader(InstantLoaderDelegate* delegate, TemplateURLID id);
   virtual ~InstantLoader();
 
@@ -73,6 +77,10 @@ class InstantLoader : public NotificationObserver {
   // a |preview_contents()| for it.
   void MaybeLoadInstantURL(TabContentsWrapper* tab_contents,
                            const TemplateURL* template_url);
+
+  // Returns true if the preview NavigationController's TabContents has a
+  // pending NavigationEntry.
+  bool IsNavigationPending() const;
 
   // NotificationObserver:
   virtual void Observe(int type,

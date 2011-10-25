@@ -16,6 +16,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_permission_set.h"
@@ -104,6 +105,12 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     TYPE_PACKAGED_APP
   };
 
+  enum SyncType {
+    SYNC_TYPE_NONE = 0,
+    SYNC_TYPE_EXTENSION,
+    SYNC_TYPE_APP
+  };
+
   // An NPAPI plugin included in the extension.
   struct PluginInfo {
     FilePath path;  // Path to the plugin.
@@ -179,6 +186,10 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     // |FROM_WEBSTORE| indicates that the extension was installed from the
     // Chrome Web Store.
     FROM_WEBSTORE = 1 << 3,
+
+    // |FROM_BOOKMARK| indicates the extension was created using a mock App
+    // created from a bookmark.
+    FROM_BOOKMARK = 1 << 4,
   };
 
   static scoped_refptr<Extension> Create(const FilePath& path,
@@ -197,22 +208,10 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
       const std::string& explicit_id,
       std::string* error);
 
-  // Return the update url used by gallery/webstore extensions.
-  static GURL GalleryUpdateUrl(bool secure);
-
   // Given two install sources, return the one which should take priority
   // over the other. If an extension is installed from two sources A and B,
   // its install source should be set to GetHigherPriorityLocation(A, B).
   static Location GetHigherPriorityLocation(Location loc1, Location loc2);
-
-  // Returns the full list of permission messages that this extension
-  // should display at install time.
-  ExtensionPermissionMessages GetPermissionMessages() const;
-
-  // Returns the full list of permission messages that this extension
-  // should display at install time. The messages are returned as strings
-  // for convenience.
-  std::vector<string16> GetPermissionMessageStrings() const;
 
   // Icon sizes used by the extension system.
   static const int kIconSizes[];
@@ -360,21 +359,28 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Returns the base extension url for a given |extension_id|.
   static GURL GetBaseURLFromExtensionId(const std::string& extension_id);
 
-  // Returns the url prefix for the extension/apps gallery. Can be set via the
-  // --apps-gallery-url switch. The URL returned will not contain a trailing
-  // slash. Do not use this as a prefix/extent for the store.  Instead see
-  // ExtensionService::GetWebStoreApp or
-  // ExtensionService::IsDownloadFromGallery
-  static std::string ChromeStoreLaunchURL();
-
   // Adds an extension to the scripting whitelist. Used for testing only.
   static void SetScriptingWhitelist(const ScriptingWhitelist& whitelist);
   static const ScriptingWhitelist* GetScriptingWhitelist();
+
+  // Parses the host and api permissions from the specified permission |key|
+  // in the manifest |source|.
+  bool ParsePermissions(const base::DictionaryValue* source,
+                        const char* key,
+                        int flags,
+                        std::string* error,
+                        ExtensionAPIPermissionSet* api_permissions,
+                        URLPatternSet* host_permissions);
 
   bool HasAPIPermission(ExtensionAPIPermission::ID permission) const;
   bool HasAPIPermission(const std::string& function_name) const;
 
   const URLPatternSet& GetEffectiveHostPermissions() const;
+
+  // Returns true if the extension can silently increase its permission level.
+  // Extensions that can silently increase permissions are installed through
+  // mechanisms that are implicitly trusted.
+  bool CanSilentlyIncreasePermissions() const;
 
   // Whether or not the extension is allowed permission for a URL pattern from
   // the manifest.  http, https, and chrome://favicon/ is allowed for all
@@ -395,6 +401,21 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Whether the extension effectively has all permissions (for example, by
   // having an NPAPI plugin).
   bool HasFullPermissions() const;
+
+  // Returns the full list of permission messages that this extension
+  // should display at install time.
+  ExtensionPermissionMessages GetPermissionMessages() const;
+
+  // Returns the full list of permission messages that this extension
+  // should display at install time. The messages are returned as strings
+  // for convenience.
+  std::vector<string16> GetPermissionMessageStrings() const;
+
+  // Sets the active |permissions|.
+  void SetActivePermissions(const ExtensionPermissionSet* permissions) const;
+
+  // Gets the extension's active permission set.
+  scoped_refptr<const ExtensionPermissionSet> GetActivePermissions() const;
 
   // Whether context menu should be shown for page and browser actions.
   bool ShowConfigureContextMenus() const;
@@ -456,6 +477,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Returns true if this extension or app includes areas within |origin|.
   bool OverlapsWithOrigin(const GURL& origin) const;
 
+  // Returns the sync bucket to use for this extension.
+  SyncType GetSyncType() const;
+
   // Accessors:
 
   const FilePath& path() const { return path_; }
@@ -490,8 +514,11 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const GURL& options_url() const { return options_url_; }
   const GURL& devtools_url() const { return devtools_url_; }
   const std::vector<GURL>& toolstrips() const { return toolstrips_; }
-  const ExtensionPermissionSet* permission_set() const {
-    return permission_set_.get();
+  const ExtensionPermissionSet* optional_permission_set() const {
+    return optional_permission_set_.get();
+  }
+  const ExtensionPermissionSet* required_permission_set() const {
+    return required_permission_set_.get();
   }
   const GURL& update_url() const { return update_url_; }
   const ExtensionIconSet& icons() const { return icons_; }
@@ -504,11 +531,13 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   }
   const std::string omnibox_keyword() const { return omnibox_keyword_; }
   bool incognito_split_mode() const { return incognito_split_mode_; }
+  bool offline_enabled() const { return offline_enabled_; }
   const std::vector<TtsVoice>& tts_voices() const { return tts_voices_; }
 
   bool wants_file_access() const { return wants_file_access_; }
   int creation_flags() const { return creation_flags_; }
   bool from_webstore() const { return (creation_flags_ & FROM_WEBSTORE) != 0; }
+  bool from_bookmark() const { return (creation_flags_ & FROM_BOOKMARK) != 0; }
 
   const std::string& content_security_policy() const {
     return content_security_policy_;
@@ -545,6 +574,20 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // scale it (or the empty string if the image is at its original size).
   typedef std::pair<FilePath, std::string> ImageCacheKey;
   typedef std::map<ImageCacheKey, SkBitmap> ImageCache;
+
+  class RuntimeData {
+   public:
+    RuntimeData();
+    explicit RuntimeData(const ExtensionPermissionSet* active);
+    ~RuntimeData();
+
+    void SetActivePermissions(const ExtensionPermissionSet* active);
+    scoped_refptr<const ExtensionPermissionSet> GetActivePermissions() const;
+
+   private:
+    friend class base::RefCountedThreadSafe<RuntimeData>;
+    scoped_refptr<const ExtensionPermissionSet> active_permissions_;
+  };
 
   // Normalize the path for use by the extension. On Windows, this will make
   // sure the drive letter is uppercase.
@@ -665,11 +708,21 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // mode.
   bool incognito_split_mode_;
 
+  // Whether the extension or app should be enabled when offline.
+  bool offline_enabled_;
+
   // Defines the set of URLs in the extension's web content.
   URLPatternSet extent_;
 
-  // The set of permissions that the extension effectively has access to.
-  scoped_ptr<ExtensionPermissionSet> permission_set_;
+  // The extension runtime data.
+  mutable base::Lock runtime_data_lock_;
+  mutable RuntimeData runtime_data_;
+
+  // The set of permissions the extension can request at runtime.
+  scoped_refptr<const ExtensionPermissionSet> optional_permission_set_;
+
+  // The extension's required / default set of permissions.
+  scoped_refptr<const ExtensionPermissionSet> required_permission_set_;
 
   // The icons for the extension.
   ExtensionIconSet icons_;
@@ -848,13 +901,7 @@ struct UninstalledExtensionInfo {
 };
 
 struct UnloadedExtensionInfo {
-  enum Reason {
-    DISABLE,    // The extension is being disabled.
-    UPDATE,     // The extension is being updated to a newer version.
-    UNINSTALL,  // The extension is being uninstalled.
-  };
-
-  Reason reason;
+  extension_misc::UnloadedExtensionReason reason;
 
   // Was the extension already disabled?
   bool already_disabled;
@@ -862,7 +909,32 @@ struct UnloadedExtensionInfo {
   // The extension being unloaded - this should always be non-NULL.
   const Extension* extension;
 
-  UnloadedExtensionInfo(const Extension* extension, Reason reason);
+  UnloadedExtensionInfo(
+      const Extension* extension,
+      extension_misc::UnloadedExtensionReason reason);
+};
+
+// The details sent for EXTENSION_PERMISSIONS_UPDATED notifications.
+struct UpdatedExtensionPermissionsInfo {
+  enum Reason {
+    ADDED,   // The permissions were added to the extension.
+    REMOVED, // The permissions were removed from the extension.
+  };
+
+  Reason reason;
+
+  // The extension who's permissions have changed.
+  const Extension* extension;
+
+  // The permissions that have changed. For Reason::ADDED, this would contain
+  // only the permissions that have added, and for Reason::REMOVED, this would
+  // only contain the removed permissions.
+  const ExtensionPermissionSet* permissions;
+
+  UpdatedExtensionPermissionsInfo(
+      const Extension* extension,
+      const ExtensionPermissionSet* permissions,
+      Reason reason);
 };
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_H_

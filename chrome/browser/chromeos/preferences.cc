@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/preferences.h"
 
+#include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram.h"
 #include "base/string_split.h"
@@ -20,7 +21,9 @@
 #include "chrome/browser/chromeos/system/touchpad_settings.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
@@ -110,8 +113,8 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
       prefs::kLanguageHangulKeyboard,
       language_prefs::kHangulKeyboardNameIDPairs[0].keyboard_id,
       PrefService::SYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kLanguageHangulHanjaKeys,
-                            language_prefs::kHangulHanjaKeys,
+  prefs->RegisterStringPref(prefs::kLanguageHangulHanjaBindingKeys,
+                            language_prefs::kHangulHanjaBindingKeys,
                             // Don't sync the pref as it's not user-configurable
                             PrefService::UNSYNCABLE_PREF);
   for (size_t i = 0; i < language_prefs::kNumPinyinBooleanPrefs; ++i) {
@@ -169,6 +172,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterIntegerPref(prefs::kLanguageXkbAutoRepeatInterval,
                              language_prefs::kXkbAutoRepeatIntervalInMs,
                              PrefService::UNSYNCABLE_PREF);
+
+  prefs->RegisterDictionaryPref(prefs::kLanguagePreferredVirtualKeyboard,
+                                PrefService::SYNCABLE_PREF);
 
   // Screen lock default to off.
   prefs->RegisterBooleanPref(prefs::kEnableScreenLock,
@@ -230,8 +236,8 @@ void Preferences::Init(PrefService* prefs) {
         language_prefs::kChewingIntegerPrefs[i].pref_name, prefs, this);
   }
   language_hangul_keyboard_.Init(prefs::kLanguageHangulKeyboard, prefs, this);
-  language_hangul_hanja_keys_.Init(
-      prefs::kLanguageHangulHanjaKeys, prefs, this);
+  language_hangul_hanja_binding_keys_.Init(
+      prefs::kLanguageHangulHanjaBindingKeys, prefs, this);
   for (size_t i = 0; i < language_prefs::kNumPinyinBooleanPrefs; ++i) {
     language_pinyin_boolean_prefs_[i].Init(
         language_prefs::kPinyinBooleanPrefs[i].pref_name, prefs, this);
@@ -273,6 +279,9 @@ void Preferences::Init(PrefService* prefs) {
 
   // Initialize preferences to currently saved state.
   NotifyPrefChanged(NULL);
+
+  // Initialize virtual keyboard settings to currently saved state.
+  UpdateVirturalKeyboardPreference(prefs);
 
   // If a guest is logged in, initialize the prefs as if this is the first
   // login.
@@ -394,10 +403,10 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
                             language_prefs::kHangulKeyboardConfigName,
                             language_hangul_keyboard_.GetValue());
   }
-  if (!pref_name || *pref_name == prefs::kLanguageHangulHanjaKeys) {
+  if (!pref_name || *pref_name == prefs::kLanguageHangulHanjaBindingKeys) {
     SetLanguageConfigString(language_prefs::kHangulSectionName,
-                            language_prefs::kHangulHanjaKeysConfigName,
-                            language_hangul_hanja_keys_.GetValue());
+                            language_prefs::kHangulHanjaBindingKeysConfigName,
+                            language_hangul_hanja_binding_keys_.GetValue());
   }
   for (size_t i = 0; i < language_prefs::kNumPinyinBooleanPrefs; ++i) {
     if (!pref_name ||
@@ -557,6 +566,41 @@ void Preferences::UpdateAutoRepeatRate() {
   DCHECK(rate.initial_delay_in_ms > 0);
   DCHECK(rate.repeat_interval_in_ms > 0);
   input_method::SetAutoRepeatRate(rate);
+}
+
+void Preferences::UpdateVirturalKeyboardPreference(PrefService* prefs) {
+  const DictionaryValue* virtual_keyboard_pref =
+      prefs->GetDictionary(prefs::kLanguagePreferredVirtualKeyboard);
+  DCHECK(virtual_keyboard_pref);
+
+  input_method::InputMethodManager* input_method_manager =
+      input_method::InputMethodManager::GetInstance();
+  input_method_manager->ClearAllVirtualKeyboardPreferences();
+
+  std::string url;
+  std::vector<std::string> layouts_to_remove;
+  for (DictionaryValue::key_iterator iter = virtual_keyboard_pref->begin_keys();
+       iter != virtual_keyboard_pref->end_keys();
+       ++iter) {
+    const std::string& layout_id = *iter;  // e.g. "us", "handwriting-vk"
+    if (!virtual_keyboard_pref->GetString(layout_id, &url))
+      continue;
+    if (!input_method_manager->SetVirtualKeyboardPreference(
+            layout_id, GURL(url))) {
+      // Either |layout_id| or |url| is invalid. Remove the key from |prefs|
+      // later.
+      layouts_to_remove.push_back(layout_id);
+      LOG(ERROR) << "Removing invalid virtual keyboard pref: layout="
+                 << layout_id;
+    }
+  }
+
+  // Remove invalid prefs.
+  DictionaryPrefUpdate updater(prefs, prefs::kLanguagePreferredVirtualKeyboard);
+  DictionaryValue* pref_value = updater.Get();
+  for (size_t i = 0; i < layouts_to_remove.size(); ++i) {
+    pref_value->RemoveWithoutPathExpansion(layouts_to_remove[i], NULL);
+  }
 }
 
 }  // namespace chromeos

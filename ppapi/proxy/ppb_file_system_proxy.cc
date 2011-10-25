@@ -11,7 +11,6 @@
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
 #include "ppapi/thunk/enter.h"
@@ -23,7 +22,7 @@ using ppapi::thunk::EnterFunctionNoLock;
 using ppapi::thunk::PPB_FileSystem_API;
 using ppapi::thunk::ResourceCreationAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -38,12 +37,12 @@ InterfaceProxy* CreateFileSystemProxy(Dispatcher* dispatcher,
 // This object maintains most of the state of the ref in the plugin for fast
 // querying. It's all set in the constructor from the "create info" sent from
 // the host.
-class FileSystem : public PluginResource, public PPB_FileSystem_API {
+class FileSystem : public Resource, public PPB_FileSystem_API {
  public:
   FileSystem(const HostResource& host_resource, PP_FileSystemType type);
   virtual ~FileSystem();
 
-  // ResourceObjectBase override.
+  // Resource override.
   virtual PPB_FileSystem_API* AsPPB_FileSystem_API() OVERRIDE;
 
   // PPB_FileSystem_APi implementation.
@@ -64,7 +63,7 @@ class FileSystem : public PluginResource, public PPB_FileSystem_API {
 
 FileSystem::FileSystem(const HostResource& host_resource,
                        PP_FileSystemType type)
-    : PluginResource(host_resource),
+    : Resource(host_resource),
       type_(type),
       called_open_(false),
       current_open_callback_(PP_MakeCompletionCallback(NULL, NULL)) {
@@ -97,8 +96,9 @@ int32_t FileSystem::Open(int64_t expected_size,
 
   current_open_callback_ = callback;
   called_open_ = true;
-  GetDispatcher()->Send(new PpapiHostMsg_PPBFileSystem_Open(
-      INTERFACE_ID_PPB_FILE_SYSTEM, host_resource(), expected_size));
+  PluginDispatcher::GetForResource(this)->Send(
+      new PpapiHostMsg_PPBFileSystem_Open(
+          INTERFACE_ID_PPB_FILE_SYSTEM, host_resource(), expected_size));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -121,7 +121,7 @@ PPB_FileSystem_Proxy::~PPB_FileSystem_Proxy() {
 
 const InterfaceProxy::Info* PPB_FileSystem_Proxy::GetInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_FileSystem_Thunk(),
+    thunk::GetPPB_FileSystem_Thunk(),
     PPB_FILESYSTEM_INTERFACE,
     INTERFACE_ID_PPB_FILE_SYSTEM,
     false,
@@ -143,9 +143,7 @@ PP_Resource PPB_FileSystem_Proxy::CreateProxyResource(
       INTERFACE_ID_PPB_FILE_SYSTEM, instance, type, &result));
   if (result.is_null())
     return 0;
-
-  linked_ptr<FileSystem> object(new FileSystem(result, type));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return (new FileSystem(result, type))->GetReference();
 }
 
 bool PPB_FileSystem_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -174,16 +172,11 @@ void PPB_FileSystem_Proxy::OnMsgCreate(PP_Instance instance,
 
 void PPB_FileSystem_Proxy::OnMsgOpen(const HostResource& host_resource,
                                      int64_t expected_size) {
-  EnterHostFromHostResource<PPB_FileSystem_API> enter(host_resource);
-  if (enter.failed())
-    return;
-
-  CompletionCallback callback = callback_factory_.NewOptionalCallback(
+  EnterHostFromHostResourceForceCallback<PPB_FileSystem_API> enter(
+      host_resource, callback_factory_,
       &PPB_FileSystem_Proxy::OpenCompleteInHost, host_resource);
-  int32_t result = enter.object()->Open(expected_size,
-                                        callback.pp_completion_callback());
-  if (result != PP_OK_COMPLETIONPENDING)
-    callback.Run(result);
+  if (enter.succeeded())
+    enter.SetResult(enter.object()->Open(expected_size, enter.callback()));
 }
 
 // Called in the plugin to handle the open callback.
@@ -202,4 +195,4 @@ void PPB_FileSystem_Proxy::OpenCompleteInHost(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

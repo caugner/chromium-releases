@@ -18,6 +18,10 @@ template<class T> class PrefMember;
 
 typedef PrefMember<bool> BooleanPrefMember;
 
+namespace policy {
+class URLBlacklistManager;
+}
+
 // ChromeNetworkDelegate is the central point from within the chrome code to
 // add hooks into the network stack.
 class ChromeNetworkDelegate : public net::NetworkDelegate {
@@ -30,6 +34,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   ChromeNetworkDelegate(
       ExtensionEventRouterForwarder* event_router,
       ExtensionInfoMap* extension_info_map,
+      const policy::URLBlacklistManager* url_blacklist_manager,
       void* profile,
       BooleanPrefMember* enable_referrers);
   virtual ~ChromeNetworkDelegate();
@@ -58,6 +63,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   virtual void OnURLRequestDestroyed(net::URLRequest* request) OVERRIDE;
   virtual void OnPACScriptError(int line_number,
                                 const string16& error) OVERRIDE;
+  virtual void OnAuthRequired(net::URLRequest* request,
+                              const net::AuthChallengeInfo& auth_info) OVERRIDE;
 
   scoped_refptr<ExtensionEventRouterForwarder> event_router_;
   void* profile_;
@@ -66,6 +73,9 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
 
   // Weak, owned by our owner.
   BooleanPrefMember* enable_referrers_;
+
+  // Weak, owned by our owner.
+  const policy::URLBlacklistManager* url_blacklist_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNetworkDelegate);
 };

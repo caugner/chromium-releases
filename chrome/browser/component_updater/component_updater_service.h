@@ -81,6 +81,15 @@ class ComponentUpdateService {
   // Controls the component updater behavior.
   class Configurator {
    public:
+    enum Events {
+      kManifestCheck,
+      kComponentUpdated,
+      kManifestError,
+      kNetworkError,
+      kUnpackError,
+      kInstallerError
+    };
+
     virtual ~Configurator() {}
     // Delay in seconds from calling Start() to the first update check.
     virtual int InitialDelay() = 0;
@@ -88,6 +97,8 @@ class ComponentUpdateService {
     virtual int NextCheckDelay() = 0;
     // Delay in seconds from each task step. Used to smooth out CPU/IO usage.
     virtual int StepDelay() = 0;
+    // Minimun delta time in seconds before checking again the same component.
+    virtual int MinimumReCheckWait() = 0;
     // The url that is going to be used update checks over Omaha protocol.
     virtual GURL UpdateUrl() = 0;
     // How big each update request can be. Don't go above 2000.
@@ -96,6 +107,10 @@ class ComponentUpdateService {
     virtual net::URLRequestContextGetter* RequestContext() = 0;
     // True means that all ops are peformed in this process.
     virtual bool InProcess() = 0;
+    // The component updater will call this function when an interesting event
+    // happens. It should be used mostly as a place to add application specific
+    // logging or telemetry. |extra| is |event| dependent.
+    virtual void OnEvent(Events event, int extra) = 0;
   };
 
   // Start doing update checks and installing new versions of registered
@@ -110,14 +125,11 @@ class ComponentUpdateService {
   // before calling Start().
   virtual Status RegisterComponent(const CrxComponent& component) = 0;
 
- protected:
   virtual ~ComponentUpdateService() {}
 };
 
-// Creates the component updater. Pass NULL in |config| to use the default
-// configuration. Only the first caller can specify a configuration; on
-// subsequent calls it will be ignored and the current instance of the
-// component updater will be used.
+// Creates the component updater. You must pass a valid |config| allocated on
+// the heap which the component updater will own.
 ComponentUpdateService* ComponentUpdateServiceFactory(
     ComponentUpdateService::Configurator* config);
 

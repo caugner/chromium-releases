@@ -1,0 +1,202 @@
+{
+  "ACCESS_CODE": {
+    "message": "Access code",
+    "description": "Label for the access code entry box. This is where the client user enters the code that permits access to the host."
+  },
+  "ACCESS_CODE_TIMER": {
+    "message": "This access code will expire in $timeout$",
+    "description": "Text displayed when the access code is due to time out within 30 seconds.",
+    "placeholders": {
+      "timeout": {
+        "content": "$1",
+        "example": "0:30"
+      }
+    }
+  },
+  "CANCEL": {
+    "message": "Cancel",
+    "description": "Label for general-purpose Cancel buttons."
+  },
+  "CLOSE_PROMPT": {
+    "message": "Leaving this page will end your Chromoting session.",
+    "description": "Message shown when the Chromoting client tab is closed while a connection is active."
+  },
+  "CONNECT_BUTTON": {
+    "message": "Connect",
+    "description": "Label for the connect button. Clicking this button will start the Chromoting session if the access code is correct."
+  },
+  "CONTINUE_BUTTON": {
+    "message": "Continue",
+    "description": "Label for the continue button on the pre-authorization page. Clicking this button takes the user to the standard Google Accounts authorization page."
+  },
+  "CONTINUE_PROMPT": {
+    "message": "You are currently sharing this machine with another user. Please confirm that you want to continue sharing.",
+    "description": "Message displayed when the session has lasted longer than five minutes, explaining that the host computer is being shared and asking whether or not the user wants to continue sharing it."
+  },
+  "DESCRIPTION_AUTHORIZE": {
+    "message": "In order to use Chromoting you must first grant extended access permissions to your computer. Click Continue to view the required permissions. You only have to do this once.",
+    "description": "Text shown when the app first starts, or if the access token is invalidated, explaining the need to authorize the Chromoting app before use."
+  },
+  "DESCRIPTION_CONNECT": {
+    "message": "Ask the user whose computer you wish to access to click \u2018Share This Computer\u2019 and then provide you with the access code.",
+    "description": "Description for the client app. This is shown to the client user above the access code entry box before the connection is started. Note that the 'Share This Computer' quote should be copied verbatim from the corresponding translation."
+  },
+  "DESCRIPTION_SHARE": {
+    "message": "With Chromoting you can easily and securely let another Chromium user see and control your computer.",
+    "description": "Description for the host app. This is shown to the host above the 'Share This Computer' button user before the client connects."
+  },
+  "DISCONNECT_BUTTON": {
+    "message": "Disconnect",
+    "description": "Label for the disconnect button, without keyboard shortcuts. Only used in case we aren't able to enable hot-key support."
+  },
+  "DISCONNECT_BUTTON_PLUS_SHORTCUT_LINUX": {
+    "message": "Disconnect (Ctrl+Alt+Esc)",
+    "description": "Label for the disconnect button including the Linux keyboard shortcut."
+  },
+  "DISCONNECT_BUTTON_PLUS_SHORTCUT_MAC_OS_X": {
+    "message": "Disconnect (\u2325\u2303\u238b)",
+    "description": "Label for the disconnect button including the Mac OS X keyboard shortcut."
+  },
+  "DISCONNECT_BUTTON_PLUS_SHORTCUT_WINDOWS": {
+    "message": "Disconnect (Ctrl+Alt+Esc)",
+    "description": "Label for the disconnect button including the Windows keyboard shortcut."
+  },
+  "ERROR_GENERIC": {
+    "message": "An unknown error occurred. Please sign out of Chromoting and try again.",
+    "description": "Generic error message, displayed if something went wrong, but we aren't able to determine what, or the cause is too technical to be of use to a typical user."
+  },
+  "ERROR_INVALID_ACCESS_CODE": {
+    "message": "The access code is invalid. Please try again.",
+    "description": "Error displayed if an invalid access code is entered."
+  },
+  "ERROR_MISSING_PLUGIN": {
+    "message": "Plugin missing or out-of-date. Please make sure you're running the latest version of Chromium and try again.",
+    "description": "Error displayed if the client plugin fails to load. The most common reason for this is that the web-app is being used in a version of Chromium that doesn't support it."
+  },
+  "ERROR_NO_RESPONSE": {
+    "message": "Failed to get a response from the server.",
+    "description": "Error displayed by the client if the server does not respond to a network request."
+  },
+  "ERROR_AUTHENTICATION_FAILED": {
+    "message": "Authentication failed. Please sign out of Chromoting and try again.",
+    "description": "Error displayed if authentication fails. This can be caused by stale credentials, in which logging out of the web-app and retrying can fix the problem."
+  },
+  "ERROR_UNABLE_TO_GET_TOKEN": {
+    "message": "There was a problem accessing the server. Please try again.",
+    "description": "Error message displayed if an access token could not be generated."
+  },
+  "FOOTER_CLIENT": {
+    "message": "Click here to $linkBegin$share this computer$linkEnd$ with another user.",
+    "description": "Instructions and hyperlink to switch from client mode to host mode.",
+    "placeholders": {
+      "linkBegin": {
+        "content": "$1",
+        "example": "<a href=...>"
+      },
+      "linkEnd": {
+        "content": "$2",
+        "example": "</a>"
+      }
+    }
+  },
+  "FOOTER_CHROME_OS": {
+    "message": "Sharing is not currently supported on Chromebooks.",
+    "description": "Footer text displayed on ChromeOS in lieu of the mode switch hyperlink."
+  },
+  "FOOTER_HOST": {
+    "message": "Click here to $linkBegin$access a shared computer$linkEnd$.",
+    "description": "Instructions and hyperlink to switch from host mode to client mode.",
+    "placeholders": {
+      "linkBegin": {
+        "content": "$1",
+        "example": "<a href=...>"
+      },
+      "linkEnd": {
+        "content": "$2",
+        "example": "</a>"
+      }
+    }
+  },
+  "FOOTER_WAITING": {
+    "message": "waiting for connection\u2026",
+    "description": "Footer text displayed at the host after an access code has been generated, but before a client connects."
+  },
+  "HELP": {
+    "message": "Help",
+    "description": "Help link, displayed in the top-left (assuming ltr layout) corner of the main screen. Clicking this takes the user to our FAQ."
+  },
+  "INSTRUCTIONS_SHARE_ABOVE": {
+    "message": "To begin sharing your desktop, provide the access code below to the person who will be assisting you.",
+    "description": "Instructions shown above the access code when it is ready to be conveyed to the client."
+  },
+  "INSTRUCTIONS_SHARE_BELOW": {
+    "message": "Once they enter the code your sharing session will begin.",
+    "description": "Instructions shown below the access code when it is ready to be conveyed to the client."
+  },
+  "LABEL_CONNECTED": {
+    "message": "Connected:",
+    "description": "String displayed in front of the host when a connection is active informing the client user who they are connected to."
+  },
+  "SIGN_OUT_BUTTON": {
+    "message": "Sign out",
+    "description": "Sign out button, visible if the user has authenticated. Clicking this clears authentication credentials and returns the web-app to the initial 'unauthenticated' state."
+  },
+  "MESSAGE_GENERATING": {
+    "message": "Generating access code\u2026",
+    "description": "Text shown while generating an access code."
+  },
+  "MESSAGE_SESSION_FINISHED": {
+    "message": "Your Chromoting session has ended.",
+    "description": "Message displayed when the client or host has disconnected."
+  },
+  "MESSAGE_SHARED": {
+    "message": "Your desktop is currently being shared with $user$.",
+    "description": "Message shown on the host computer while a session is active informing them who is connected.",
+    "placeholders": {
+      "user": {
+        "content": "$1",
+        "example": "user@domain.com"
+      }
+    }
+  },
+  "MODE_AUTHORIZE": {
+    "message": "Authorize",
+    "description": "Sub-title for the one-time authorization step. Displayed after the product name and separated by a chevron."
+  },
+  "MODE_CONNECT": {
+    "message": "Connect",
+    "description": "Sub-title for the client app. Displayed after the product name and separated by a chevron."
+  },
+  "MODE_SHARE": {
+    "message": "Share",
+    "description": "Sub-title for the host app. Displayed after the product name and separated by a chevron."
+  },
+  "OK": {
+    "message": "OK",
+    "description": "Label for general-purpose OK buttons."
+  },
+  "PRODUCT_DESCRIPTION": {
+    "message": "Remote support in Chromium.",
+    "description": "Web-app description. Displayed in Chromium's extensions page."
+  },
+  "PRODUCT_NAME": {
+    "message": "Chromoting",
+    "description": "The product name. Displayed in various Chromium pages, including the New Tab page, and displayed prominently on the app's main page."
+  },
+  "SHARE_BUTTON": {
+    "message": "Share This Computer",
+    "description": "Label for the share button on the host-side. Clicking this button generates an access code to be conveyed to the client."
+  },
+  "STOP_SHARING_BUTTON": {
+    "message": "Stop Sharing",
+    "description": "Label for the 'stop sharing' button on the host-side. Clicking this button disconnects the client."
+  },
+  "TOOLTIP_SCALING": {
+    "message": "Scale to fit",
+    "description": "The tool-tip shown when the user hovers over the scale to fit button. Clicking this button toggles between scaling down the remote desktop to fit it inside the Chromium browser window and displaying it at 1:1 scale."
+  },
+  "VERIFYING_CODE": {
+    "message": "Verifying access code\u2026",
+    "description": "Message displayed on the client while the access code is verified."
+  }
+}

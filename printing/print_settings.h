@@ -5,7 +5,10 @@
 #ifndef PRINTING_PRINT_SETTINGS_H_
 #define PRINTING_PRINT_SETTINGS_H_
 
-#include "printing/page_overlays.h"
+#include <string>
+
+#include "base/memory/scoped_ptr.h"
+#include "base/string16.h"
 #include "printing/page_range.h"
 #include "printing/page_setup.h"
 #include "ui/gfx/rect.h"
@@ -13,7 +16,7 @@
 namespace printing {
 
 // OS-independent print settings.
-class PrintSettings {
+class PRINTING_EXPORT PrintSettings {
  public:
   PrintSettings();
   ~PrintSettings();
@@ -78,9 +81,6 @@ class PrintSettings {
   // scaled to ScreenDpi/dpix*desired_dpi.
   int desired_dpi;
 
-  // The various overlays (headers and footers).
-  PageOverlays overlays;
-
   // Indicates if the user only wants to print the current selection.
   bool selection_only;
 
@@ -96,6 +96,14 @@ class PrintSettings {
 
   // Updates the orientation and flip the page if needed.
   void SetOrientation(bool landscape);
+
+  // Strings to be printed as headers and footers if requested by the user.
+  string16 date;
+  string16 title;
+  string16 url;
+
+  // True if the user wants headers and footers to be displayed.
+  bool display_header_footer;
 
  private:
   //////////////////////////////////////////////////////////////////////////////

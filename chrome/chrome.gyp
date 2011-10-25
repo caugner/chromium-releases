@@ -29,6 +29,7 @@
       'syncapi_core',
       'utility',
       'service',
+      '../content/content.gyp:content_app',
       '../content/content.gyp:content_gpu',
       '../content/content.gyp:content_ppapi_plugin',
       '../content/content.gyp:content_worker',
@@ -129,6 +130,7 @@
     'chrome_common.gypi',
     'chrome_dll.gypi',
     'chrome_exe.gypi',
+    'chrome_dll_syzygy.gypi',  # This must follow chrome_dll and chrome_exe.
     'chrome_installer.gypi',
     'chrome_installer_util.gypi',
     'chrome_renderer.gypi',
@@ -345,6 +347,14 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
         {
+          'action_name': 'devtools_frontend_resources',
+          'variables': {
+            'grit_grd_file':
+               'browser/debugger/frontend/devtools_frontend_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ]
+        },
+        {
           'action_name': 'devtools_resources',
           # This can't use ../build/grit_action.gypi because the grd file
           # is generated a build time, so the trick of using grit_info to get
@@ -355,40 +365,13 @@
           },
           'inputs': [
             '<(grit_grd_file)',
+            '<!@pymod_do_main(grit_info --inputs)',
           ],
           'outputs': [
             '<(grit_out_dir)/grit/devtools_resources.h',
             '<(grit_out_dir)/devtools_resources.pak',
             '<(grit_out_dir)/grit/devtools_resources_map.cc',
             '<(grit_out_dir)/grit/devtools_resources_map.h',
-          ],
-          'action': ['<@(grit_cmd)',
-                     '-i', '<(grit_grd_file)', 'build',
-                     '-o', '<(grit_out_dir)',
-                     '-D', 'SHARED_INTERMEDIATE_DIR=<(SHARED_INTERMEDIATE_DIR)',
-                     '<@(grit_defines)' ],
-          'message': 'Generating resources from <(grit_grd_file)',
-        },
-        {
-          'action_name': 'devtools_frontend_resources',
-          # This can't use ../build/grit_action.gypi because the grd file
-          # is generated a build time, so the trick of using grit_info to get
-          # the real inputs/outputs at GYP time isn't possible.
-          'variables': {
-            'grit_cmd': ['python', '../tools/grit/grit.py'],
-            'frontend_folder': '../content/browser/debugger/frontend',
-            'grit_grd_file':
-               '<(frontend_folder)/devtools_frontend_resources.grd',
-          },
-          'inputs': [
-            '<(grit_grd_file)',
-            '<(frontend_folder)/devtools_frontend.html',
-          ],
-          'outputs': [
-            '<(grit_out_dir)/grit/devtools_frontend_resources.h',
-            '<(grit_out_dir)/devtools_frontend_resources.pak',
-            '<(grit_out_dir)/grit/devtools_frontend_resources_map.cc',
-            '<(grit_out_dir)/grit/devtools_frontend_resources_map.h',
           ],
           'action': ['<@(grit_cmd)',
                      '-i', '<(grit_grd_file)', 'build',
@@ -434,14 +417,16 @@
         'chrome_extra_resources',
         'chrome_resources',
         'chrome_strings',
-        '../base/base.gyp:base',
-        '../net/net.gyp:http_server',
-        '../net/net.gyp:net',
         'theme_resources',
         'theme_resources_standard',
+        '../base/base.gyp:base',
+        '../content/content.gyp:content_browser',
+        '../net/net.gyp:http_server',
+        '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
+        '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
       ],
       'include_dirs': [
         '..',
@@ -469,20 +454,8 @@
         'browser/debugger/extension_ports_remote_service.h',
         'browser/debugger/inspectable_tab_proxy.cc',
         'browser/debugger/inspectable_tab_proxy.h',
-        '../content/browser/debugger/devtools_client_host.cc',
-        '../content/browser/debugger/devtools_client_host.h',
-        '../content/browser/debugger/devtools_handler.cc',
-        '../content/browser/debugger/devtools_handler.h',
-        '../content/browser/debugger/devtools_http_protocol_handler.cc',
-        '../content/browser/debugger/devtools_http_protocol_handler.h',
-        '../content/browser/debugger/devtools_manager.cc',
-        '../content/browser/debugger/devtools_manager.h',
-        '../content/browser/debugger/devtools_netlog_observer.cc',
-        '../content/browser/debugger/devtools_netlog_observer.h',
-        '../content/browser/debugger/worker_devtools_manager_io.cc',
-        '../content/browser/debugger/worker_devtools_manager_io.h',
-        '../content/browser/debugger/worker_devtools_message_filter.cc',
-        '../content/browser/debugger/worker_devtools_message_filter.h',
+        'browser/debugger/remote_debugging_server.cc',
+        'browser/debugger/remote_debugging_server.h',
       ],
       'conditions': [
         ['toolkit_uses_gtk == 1', {
@@ -533,11 +506,31 @@
       'target_name': 'syncapi_core',
       'type': 'static_library',
       'sources': [
-        'browser/sync/engine/http_post_provider_factory.h',
-        'browser/sync/engine/http_post_provider_interface.h',
-        'browser/sync/engine/syncapi.cc',
-        'browser/sync/engine/syncapi.h',
-        'browser/sync/engine/configure_reason.h'
+        'browser/sync/engine/syncapi_internal.cc',
+        'browser/sync/engine/syncapi_internal.h',
+        'browser/sync/internal_api/base_node.cc',
+        'browser/sync/internal_api/base_node.h',
+        'browser/sync/internal_api/base_transaction.cc',
+        'browser/sync/internal_api/base_transaction.h',
+        'browser/sync/internal_api/change_reorder_buffer.cc',
+        'browser/sync/internal_api/change_reorder_buffer.h',
+        'browser/sync/internal_api/configure_reason.h',
+        'browser/sync/internal_api/http_post_provider_factory.h',
+        'browser/sync/internal_api/http_post_provider_interface.h',
+        'browser/sync/internal_api/read_node.cc',
+        'browser/sync/internal_api/read_node.h',
+        'browser/sync/internal_api/read_transaction.cc',
+        'browser/sync/internal_api/read_transaction.h',
+        'browser/sync/internal_api/syncapi_server_connection_manager.cc',
+        'browser/sync/internal_api/syncapi_server_connection_manager.h',
+        'browser/sync/internal_api/sync_manager.cc',
+        'browser/sync/internal_api/sync_manager.h',
+        'browser/sync/internal_api/user_share.cc',
+        'browser/sync/internal_api/user_share.h',
+        'browser/sync/internal_api/write_node.cc',
+        'browser/sync/internal_api/write_node.h',
+        'browser/sync/internal_api/write_transaction.cc',
+        'browser/sync/internal_api/write_transaction.h',
       ],
       'include_dirs': [
         '..',
@@ -554,18 +547,18 @@
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/sqlite/sqlite.gyp:sqlite',
         'app/policy/cloud_policy_codegen.gyp:policy',
-        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto',
         'common_constants',
         'common_net',
         'sync',
         'sync_notifier',
       ],
       'export_dependent_settings': [
-        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto',
         'sync',
       ],
       # This target exports a hard dependency because syncapi.h includes
-      # generated proto header files from sync_proto_cpp.
+      # generated proto header files from sync_proto.
       'hard_dependency': 1,
     },
     {
@@ -581,21 +574,23 @@
         'browser/sync/api/sync_change.cc',
         'browser/sync/api/sync_change_processor.h',
         'browser/sync/api/sync_change_processor.cc',
+        'browser/sync/api/sync_error.h',
+        'browser/sync/api/sync_error.cc',
       ],
       'include_dirs': [
         '..',
       ],
       'dependencies': [
         '../base/base.gyp:base',
-        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto',
         'sync',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
-        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto',
         'sync',
       ],
-      # Even though this target depends on sync_proto_cpp, it doesn't
+      # Even though this target depends on sync_proto, it doesn't
       # need to export a hard dependency since we explicitly avoid
       # including the generated proto header files from this target's
       # header files.
@@ -612,8 +607,6 @@
         'browser/sync/engine/build_and_process_conflict_sets_command.h',
         'browser/sync/engine/build_commit_command.cc',
         'browser/sync/engine/build_commit_command.h',
-        'browser/sync/engine/change_reorder_buffer.cc',
-        'browser/sync/engine/change_reorder_buffer.h',
         'browser/sync/engine/cleanup_disabled_types_command.cc',
         'browser/sync/engine/cleanup_disabled_types_command.h',
         'browser/sync/engine/clear_data_command.cc',
@@ -630,10 +623,10 @@
         'browser/sync/engine/model_safe_worker.h',
         'browser/sync/engine/net/server_connection_manager.cc',
         'browser/sync/engine/net/server_connection_manager.h',
-        'browser/sync/engine/net/syncapi_server_connection_manager.cc',
-        'browser/sync/engine/net/syncapi_server_connection_manager.h',
         'browser/sync/engine/net/url_translator.cc',
         'browser/sync/engine/net/url_translator.h',
+        'browser/sync/engine/nigori_util.cc',
+        'browser/sync/engine/nigori_util.h',
         'browser/sync/engine/nudge_source.cc',
         'browser/sync/engine/nudge_source.h',
         'browser/sync/engine/polling_constants.cc',
@@ -667,25 +660,25 @@
         'browser/sync/engine/update_applicator.h',
         'browser/sync/engine/verify_updates_command.cc',
         'browser/sync/engine/verify_updates_command.h',
-        'browser/sync/js_arg_list.cc',
-        'browser/sync/js_arg_list.h',
-        'browser/sync/js_backend.h',
-        'browser/sync/js_transaction_observer.cc',
-        'browser/sync/js_transaction_observer.h',
-        'browser/sync/js_event_details.cc',
-        'browser/sync/js_event_details.h',
-        'browser/sync/js_event_handler.h',
-        'browser/sync/js_event_handler_list.cc',
-        'browser/sync/js_event_handler_list.h',
-        'browser/sync/js_event_router.h',
-        'browser/sync/js_frontend.h',
-        'browser/sync/js_sync_manager_observer.cc',
-        'browser/sync/js_sync_manager_observer.h',
+        'browser/sync/js/js_arg_list.cc',
+        'browser/sync/js/js_arg_list.h',
+        'browser/sync/js/js_backend.h',
+        'browser/sync/js/js_controller.h',
+        'browser/sync/js/js_event_details.cc',
+        'browser/sync/js/js_event_details.h',
+        'browser/sync/js/js_event_handler.h',
+        'browser/sync/js/js_reply_handler.h',
+        'browser/sync/js/js_sync_manager_observer.cc',
+        'browser/sync/js/js_sync_manager_observer.h',
+        'browser/sync/js/js_transaction_observer.cc',
+        'browser/sync/js/js_transaction_observer.h',
         'browser/sync/protocol/proto_enum_conversions.cc',
         'browser/sync/protocol/proto_enum_conversions.h',
         'browser/sync/protocol/proto_value_conversions.cc',
         'browser/sync/protocol/proto_value_conversions.h',
         'browser/sync/protocol/service_constants.h',
+        'browser/sync/protocol/sync_protocol_error.cc',
+        'browser/sync/protocol/sync_protocol_error.h',
         'browser/sync/sessions/ordered_commit_set.cc',
         'browser/sync/sessions/ordered_commit_set.h',
         'browser/sync/sessions/session_state.cc',
@@ -697,6 +690,8 @@
         'browser/sync/sessions/sync_session_context.cc',
         'browser/sync/sessions/sync_session_context.h',
         'browser/sync/shared_value.h',
+        'browser/sync/sync_js_controller.cc',
+        'browser/sync/sync_js_controller.h',
         'browser/sync/syncable/blob.h',
         'browser/sync/syncable/dir_open_result.h',
         'browser/sync/syncable/directory_backing_store.cc',
@@ -709,8 +704,6 @@
         'browser/sync/syncable/model_type.h',
         'browser/sync/syncable/model_type_payload_map.cc',
         'browser/sync/syncable/model_type_payload_map.h',
-        'browser/sync/syncable/nigori_util.cc',
-        'browser/sync/syncable/nigori_util.h',
         'browser/sync/syncable/syncable-inl.h',
         'browser/sync/syncable/syncable.cc',
         'browser/sync/syncable/syncable.h',
@@ -730,10 +723,16 @@
         'browser/sync/util/logging.h',
         'browser/sync/util/nigori.cc',
         'browser/sync/util/nigori.h',
+        'browser/sync/util/oauth.cc',
+        'browser/sync/util/oauth.h',
+        'browser/sync/util/sqlite_utils.cc',
+        'browser/sync/util/sqlite_utils.h',
         'browser/sync/util/user_settings.cc',
         'browser/sync/util/user_settings.h',
         'browser/sync/util/user_settings_posix.cc',
         'browser/sync/util/user_settings_win.cc',
+        'browser/sync/weak_handle.cc',
+        'browser/sync/weak_handle.h',
       ],
       'include_dirs': [
         '..',
@@ -748,15 +747,15 @@
         '../base/base.gyp:base',
         '../crypto/crypto.gyp:crypto',
         '../skia/skia.gyp:skia',
-        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
         '../crypto/crypto.gyp:crypto',
-        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto',
       ],
       # This target exports a hard dependency because its header files include
-      # protobuf header files from sync_proto_cpp.
+      # protobuf header files from sync_proto.
       'hard_dependency': 1,
       'conditions': [
         ['OS=="win"', {
@@ -847,6 +846,8 @@
         '../third_party/libjingle/libjingle.gyp:libjingle',
       ],
       'sources': [
+        'service/chrome_service_application_mac.h',
+        'service/chrome_service_application_mac.mm',
         'service/service_child_process_host.cc',
         'service/service_child_process_host.h',
         'service/service_ipc_server.cc',
@@ -942,19 +943,18 @@
           'mac_bundle': 1,
           'dependencies': [
             'chrome_dll',
-            'interpose_dependency_shim',
             'infoplist_strings_tool',
           ],
           'sources': [
-            # chrome_exe_main_mac.mm's main() is the entry point for
+            # chrome_exe_main_mac.cc's main() is the entry point for
             # the "chrome" (browser app) target.  All it does is jump
             # to chrome_dll's ChromeMain.  This is appropriate for
             # helper processes too, because the logic to discriminate
             # between process types at run time is actually directed
             # by the --type command line argument processed by
-            # ChromeMain.  Sharing chrome_exe_main_mac.mm with the
+            # ChromeMain.  Sharing chrome_exe_main_mac.cc with the
             # browser app will suffice for now.
-            'app/chrome_exe_main_mac.mm',
+            'app/chrome_exe_main_mac.cc',
             'app/helper-Info.plist',
           ],
           # TODO(mark): Come up with a fancier way to do this.  It should only
@@ -974,68 +974,24 @@
             'CHROMIUM_SHORT_NAME': '<(branding)',
             'CHROMIUM_STRIP_SAVE_FILE': 'app/app.saves',
             'INFOPLIST_FILE': 'app/helper-Info.plist',
-            # Stop the helper executable from being position-independent
-            # since that turns on ASLR, which breaks NaCl.  ASLR breaks
-            # NaCl's ability to reliably allocate 1GB of address space for
-            # untrusted code to run in.
-            # See http://code.google.com/p/nativeclient/issues/detail?id=2043
-            # TODO(mseaborn): Create a separate helper executable for NaCl
-            # so that the renderer process can still use ASLR.
-	    'OTHER_LDFLAGS!': ['-Wl,-pie'],
           },
-          'copies': [
-            {
-              'destination': '<(PRODUCT_DIR)/<(mac_product_name) Helper.app/Contents/MacOS',
-              'files': [
-                '<(PRODUCT_DIR)/libplugin_carbon_interpose.dylib',
-              ],
-            },
-          ],
-          'actions': [
-            {
-              # Generate the InfoPlist.strings file
-              'action_name': 'Generate InfoPlist.strings files',
-              'variables': {
-                'tool_path': '<(PRODUCT_DIR)/infoplist_strings_tool',
-                # Unique dir to write to so the [lang].lproj/InfoPlist.strings
-                # for the main app and the helper app don't name collide.
-                'output_path': '<(INTERMEDIATE_DIR)/helper_infoplist_strings',
-              },
-              'conditions': [
-                [ 'branding == "Chrome"', {
-                  'variables': {
-                     'branding_name': 'google_chrome_strings',
-                  },
-                }, { # else branding!="Chrome"
-                  'variables': {
-                     'branding_name': 'chromium_strings',
-                  },
-                }],
-              ],
-              'inputs': [
-                '<(tool_path)',
-                '<(version_path)',
-                # TODO: remove this helper when we have loops in GYP
-                '>!@(<(apply_locales_cmd) \'<(grit_out_dir)/<(branding_name)_ZZLOCALE.pak\' <(locales))',
-              ],
-              'outputs': [
-                # TODO: remove this helper when we have loops in GYP
-                '>!@(<(apply_locales_cmd) -d \'<(output_path)/ZZLOCALE.lproj/InfoPlist.strings\' <(locales))',
-              ],
-              'action': [
-                '<(tool_path)',
-                '-b', '<(branding_name)',
-                '-v', '<(version_path)',
-                '-g', '<(grit_out_dir)',
-                '-o', '<(output_path)',
-                '-t', 'helper',
-                '<@(locales)',
-              ],
-              'message': 'Generating the language InfoPlist.strings files',
-              'process_outputs_as_mac_bundle_resources': 1,
-            },
-          ],
           'postbuilds': [
+            {
+              # The helper doesn't have real localizations, it just has
+              # empty .lproj directories, which is enough to convince Cocoa
+              # that anything running out of the helper .app supports those
+              # languages.
+              'postbuild_name': 'Make Empty Localizations',
+              'variables': {
+                'locale_dirs': [
+                  '>!@(<(apply_locales_cmd) -d ZZLOCALE.lproj <(locales))',
+                ],
+              },
+              'action': [
+                'tools/build/mac/make_locale_dirs.sh',
+                '<@(locale_dirs)',
+              ],
+            },
             {
               # The framework (chrome_dll) defines its load-time path
               # (DYLIB_INSTALL_NAME_BASE) relative to the main executable
@@ -1064,6 +1020,14 @@
                          '<(branding)',
                          '<(mac_bundle_id)'],
             },
+            {
+              # Make sure there isn't any Objective-C in the helper app's
+              # executable.
+              'postbuild_name': 'Verify No Objective-C',
+              'action': [
+                'tools/build/mac/verify_no_objc.sh',
+              ],
+            },
           ],
           'conditions': [
             ['mac_breakpad==1', {
@@ -1077,6 +1041,12 @@
                 'STRIPFLAGS': '-s $(CHROMIUM_STRIP_SAVE_FILE)',
               },
             }],
+            ['asan==1', {
+              'xcode_settings': {
+                # Override the outer definition of CHROMIUM_STRIP_SAVE_FILE.
+                'CHROMIUM_STRIP_SAVE_FILE': 'app/app_asan.saves',
+              },
+            }],
           ],
         },  # target helper_app
         {
@@ -1087,8 +1057,8 @@
           'product_name': '<(mac_product_name) App Mode Loader',
           'sources': [
             'app/app_mode_loader_mac.mm',
-            'common/app_mode_common_mac.h',
-            'common/app_mode_common_mac.mm',
+            'common/mac/app_mode_common.h',
+            'common/mac/app_mode_common.mm',
           ],
           'include_dirs': [
             '..',
@@ -1172,7 +1142,7 @@
           'xcode_settings': {
             'DYLIB_COMPATIBILITY_VERSION': '<(version_mac_dylib)',
             'DYLIB_CURRENT_VERSION': '<(version_mac_dylib)',
-            'DYLIB_INSTALL_NAME_BASE': '@executable_path',
+            'DYLIB_INSTALL_NAME_BASE': '@executable_path/../../..',
           },
           'postbuilds': [
             {
@@ -1380,7 +1350,6 @@
             'installer/mini_installer.gyp:*',
             'installer/installer_tools.gyp:*',
             'installer/upgrade_test.gyp:*',
-            '../app/app.gyp:*',
             '../base/base.gyp:*',
             '../chrome_frame/chrome_frame.gyp:*',
             '../content/content.gyp:*',
@@ -1395,21 +1364,6 @@
             '../sql/sql.gyp:*',
             '../testing/gmock.gyp:*',
             '../testing/gtest.gyp:*',
-            '../third_party/bsdiff/bsdiff.gyp:*',
-            '../third_party/bspatch/bspatch.gyp:*',
-            '../third_party/bzip2/bzip2.gyp:*',
-            '../third_party/codesighs/codesighs.gyp:*',
-            '../third_party/iccjpeg/iccjpeg.gyp:*',
-            '../third_party/icu/icu.gyp:*',
-            '../third_party/libpng/libpng.gyp:*',
-            '../third_party/libwebp/libwebp.gyp:*',
-            '../third_party/libxslt/libxslt.gyp:*',
-            '../third_party/lzma_sdk/lzma_sdk.gyp:*',
-            '../third_party/modp_b64/modp_b64.gyp:*',
-            '../third_party/npapi/npapi.gyp:*',
-            '../third_party/qcms/qcms.gyp:*',
-            '../third_party/sqlite/sqlite.gyp:*',
-            '../third_party/zlib/zlib.gyp:*',
             '../ui/ui.gyp:*',
             '../webkit/support/webkit_support.gyp:*',
             '../webkit/webkit.gyp:*',
@@ -1570,6 +1524,9 @@
              'test/automation/javascript_execution_controller.h',
              'test/automation/tab_proxy.cc',
              'test/automation/tab_proxy.h',
+             'test/automation/value_conversion_traits.cc',
+             'test/automation/value_conversion_traits.h',
+             'test/automation/value_conversion_util.h',
              'test/automation/window_proxy.cc',
              'test/automation/window_proxy.h',
           ],
@@ -1599,15 +1556,65 @@
             },
           },
         },
+        {
+          'target_name': 'crash_service_win64',
+          'type': 'executable',
+          'product_name': 'crash_service64',
+          'dependencies': [
+            'app/policy/cloud_policy_codegen.gyp:policy_win64',
+            'common_constants_win64',
+            'installer_util_nacl_win64',
+            '../base/base.gyp:base_static_win64',
+            '../breakpad/breakpad.gyp:breakpad_handler_win64',
+            '../breakpad/breakpad.gyp:breakpad_sender_win64',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'sources': [
+            'tools/crash_service/crash_service.cc',
+            'tools/crash_service/crash_service.h',
+            'tools/crash_service/main.cc',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
+            },
+          },
+          'configurations': {
+            'Common_Base': {
+              'msvs_target_platform': 'x64',
+            },
+          },
+        },
       ]},  # 'targets'
     ],  # OS=="win"
-    ['os_posix == 1 and OS != "mac"', {
+    ['OS != "mac"', {
       'targets': [{
         'target_name': 'packed_resources',
         'type': 'none',
         'variables': {
           'repack_path': '../tools/data_pack/repack.py',
         },
+        'dependencies': [
+          # MSVS needs the dependencies explictly named, Make is able to
+          # derive the dependencies from the output files.
+          'chrome_resources',
+          'chrome_strings',
+          'default_plugin/default_plugin.gyp:default_plugin_resources',
+          'platform_locale_settings',
+          'theme_resources',
+          'theme_resources_standard',
+          'theme_resources_large',
+          '<(DEPTH)/net/net.gyp:net_resources',
+          '<(DEPTH)/ui/base/strings/ui_strings.gyp:ui_strings',
+          '<(DEPTH)/ui/ui.gyp:gfx_resources',
+          '<(DEPTH)/ui/ui.gyp:ui_resources',
+          '<(DEPTH)/ui/ui.gyp:ui_resources_large',
+          '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
+          '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
+          '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
+        ],
         'actions': [
           # TODO(mark): These actions are duplicated for the Mac in the
           # chrome_dll target.  Can they be unified?
@@ -1635,10 +1642,12 @@
                 ['touchui==0', {
                   'pak_inputs': [
                     '<(grit_out_dir)/theme_resources_standard.pak',
+                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
                   ],
                 }, {  # else: touchui!=0
                   'pak_inputs': [
                     '<(grit_out_dir)/theme_resources_large.pak',
+                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_large/ui_resources_large.pak',
                   ],
                 }],
               ],
@@ -1666,15 +1675,10 @@
             },
             'inputs': [
               'tools/build/repack_locales.py',
-              # NOTE: Ideally the common command args would be shared amongst
-              # inputs/outputs/action, but the args include shell variables
-              # which need to be passed intact, and command expansion wants
-              # to expand the shell variables. Adding the explicit quoting
-              # here was the only way it seemed to work.
-              '>!@(<(repack_locales_cmd) -i <(branding_flag) -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
+              '<!@pymod_do_main(repack_locales -i <(branding_flag) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(locales))'
             ],
             'outputs': [
-              '>!@(<(repack_locales_cmd) -o -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
+              '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(locales))'
             ],
             'action': [
               '<@(repack_locales_cmd)',
@@ -1685,15 +1689,48 @@
               '<@(locales)',
             ],
           },
+          {
+              'action_name': 'repack_pseudo_locales',
+              'variables': {
+                'conditions': [
+                  ['branding=="Chrome"', {
+                    'branding_flag': ['-b', 'google_chrome',],
+                  }, {  # else: branding!="Chrome"
+                    'branding_flag': ['-b', 'chromium',],
+                  }],
+                ],
+              },
+              'inputs': [
+                'tools/build/repack_locales.py',
+                '<!@pymod_do_main(repack_locales -i <(branding_flag) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
+              ],
+              'outputs': [
+                '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
+              ],
+              'action': [
+                '<@(repack_locales_cmd)',
+                '<@(branding_flag)',
+                '-g', '<(grit_out_dir)',
+                '-s', '<(SHARED_INTERMEDIATE_DIR)',
+                '-x', '<(INTERMEDIATE_DIR)',
+                '<@(pseudo_locales)',
+              ],
+            },
         ],
         # We'll install the resource files to the product directory.
         'copies': [
           {
             'destination': '<(PRODUCT_DIR)/locales',
             'files': [
-              '>!@(<(repack_locales_cmd) -o -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
+              '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(locales))'
             ],
           },
+          {
+              'destination': '<(PRODUCT_DIR)/pseudo_locales',
+              'files': [
+                '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
+              ],
+            },
           {
             'destination': '<(PRODUCT_DIR)',
             'files': [
@@ -1702,6 +1739,6 @@
           },
         ],
       }],  # targets
-    }],  # os_posix == 1 and OS != "mac"
+    }],  # OS != "mac"
   ],  # 'conditions'
 }

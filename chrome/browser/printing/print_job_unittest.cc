@@ -80,13 +80,15 @@ class TestPrintNotifObserv : public NotificationObserver {
   virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    EXPECT_FALSE(true);
+    ADD_FAILURE();
   }
 };
 
 }  // namespace
 
-TEST(PrintJobTest, SimplePrint) {
+typedef testing::Test PrintJobTest;
+
+TEST_F(PrintJobTest, SimplePrint) {
   // Test the multi-threaded nature of PrintJob to make sure we can use it with
   // known lifetime.
 
@@ -108,7 +110,7 @@ TEST(PrintJobTest, SimplePrint) {
   EXPECT_TRUE(check);
 }
 
-TEST(PrintJobTest, SimplePrintLateInit) {
+TEST_F(PrintJobTest, SimplePrintLateInit) {
   volatile bool check = false;
   MessageLoop current;
   scoped_refptr<printing::PrintJob> job(new TestPrintJob(&check));

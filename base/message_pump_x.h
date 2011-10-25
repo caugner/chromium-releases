@@ -19,7 +19,7 @@ typedef struct _XDisplay Display;
 namespace base {
 
 // The documentation for this class is in message_pump_glib.h
-class BASE_API MessagePumpObserver {
+class BASE_EXPORT MessagePumpObserver {
  public:
    enum EventStatus {
      EVENT_CONTINUE,    // The event should be dispatched as normal.
@@ -59,7 +59,7 @@ class MessagePumpDispatcher {
 };
 
 // This class implements a message-pump for dispatching X events.
-class BASE_API MessagePumpX : public MessagePumpGlib {
+class BASE_EXPORT MessagePumpX : public MessagePumpGlib {
  public:
   MessagePumpX();
   virtual ~MessagePumpX();
@@ -107,6 +107,10 @@ class BASE_API MessagePumpX : public MessagePumpGlib {
   // Update the lookup table and flag the events that should be captured and
   // processed so that GDK doesn't get to them.
   void InitializeEventsToCapture(void);
+
+  // The event source for X events (used only when GTK event processing is
+  // disabled).
+  GSource* x_source_;
 
   // The event source for GDK events.
   GSource* gdksource_;

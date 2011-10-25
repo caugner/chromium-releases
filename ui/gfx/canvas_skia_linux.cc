@@ -45,17 +45,20 @@ void UpdateCairoFontOptions() {
   if (!cairo_font_options)
     cairo_font_options = cairo_font_options_create();
 
-  GtkSettings* gtk_settings = gtk_settings_get_default();
   gint antialias = 0;
   gint hinting = 0;
   gchar* hint_style = NULL;
   gchar* rgba_style = NULL;
+
+#if !defined(USE_WAYLAND)
+  GtkSettings* gtk_settings = gtk_settings_get_default();
   g_object_get(gtk_settings,
                "gtk-xft-antialias", &antialias,
                "gtk-xft-hinting", &hinting,
                "gtk-xft-hintstyle", &hint_style,
                "gtk-xft-rgba", &rgba_style,
                NULL);
+#endif
 
   // g_object_get() doesn't tell us whether the properties were present or not,
   // but if they aren't (because gnome-settings-daemon isn't running), we'll get
@@ -126,6 +129,8 @@ void SetupPangoLayout(PangoLayout* layout,
     pango_layout_set_width(layout, width * PANGO_SCALE);
 
   if (flags & gfx::Canvas::TEXT_ALIGN_CENTER) {
+    // We don't support center aligned w/ eliding.
+    DCHECK(gfx::Canvas::NO_ELLIPSIS);
     pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
   } else if (flags & gfx::Canvas::TEXT_ALIGN_RIGHT) {
     pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);

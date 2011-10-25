@@ -43,7 +43,6 @@ class GpuScheduler : public CommandBufferEngine {
  public:
   // If a group is not passed in one will be created.
   static GpuScheduler* Create(CommandBuffer* command_buffer,
-                              SurfaceManager* surface_manager,
                               gles2::ContextGroup* group);
 
   // This constructor is for unit tests.
@@ -98,9 +97,6 @@ class GpuScheduler : public CommandBufferEngine {
   virtual bool SetGetOffset(int32 offset);
   virtual int32 GetGetOffset();
 
-  // Asynchronously resizes an offscreen frame buffer.
-  void ResizeOffscreenFrameBuffer(const gfx::Size& size);
-
 #if defined(OS_MACOSX)
   // To prevent the GPU process from overloading the browser process,
   // we need to track the number of swap buffers calls issued and
@@ -130,23 +126,18 @@ class GpuScheduler : public CommandBufferEngine {
   virtual uint64 GetSurfaceId();
 
   void DidDestroySurface();
+
+  // Sets a callback which is called when a SwapBuffers command is processed.
+  // Must be called after Initialize().
+  // It is not defined on which thread this callback is called.
+  void SetSwapBuffersCallback(Callback0::Type* callback);
 #endif
 
   // Sets a callback that is called when a glResizeCHROMIUM command
   // is processed.
   void SetResizeCallback(Callback1<gfx::Size>::Type* callback);
 
-  // Sets a callback which is called when a SwapBuffers command is processed.
-  // Must be called after Initialize().
-  // It is not defined on which thread this callback is called.
-  void SetSwapBuffersCallback(Callback0::Type* callback);
-
   void SetCommandProcessedCallback(Callback0::Type* callback);
-
-  // Sets a callback which is called when set_token() is called, and passes the
-  // just-set token to the callback.  DCHECKs that no callback has previously
-  // been registered for this notification.
-  void SetTokenCallback(const base::Callback<void(int32)>& callback);
 
   // Get the GLES2Decoder associated with this scheduler.
   gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
@@ -157,9 +148,11 @@ class GpuScheduler : public CommandBufferEngine {
                gles2::GLES2Decoder* decoder,
                CommandParser* parser);
 
+#if defined(OS_MACOSX)
   // Called via a callback just before we are supposed to call the
   // user's swap buffers callback.
   void WillSwapBuffers();
+#endif
 
   // The GpuScheduler holds a weak reference to the CommandBuffer. The
   // CommandBuffer owns the GpuScheduler and holds a strong reference to it
@@ -178,12 +171,11 @@ class GpuScheduler : public CommandBufferEngine {
   uint64 swap_buffers_count_;
   uint64 acknowledged_swap_buffers_count_;
   scoped_ptr<AcceleratedSurface> surface_;
+  scoped_ptr<Callback0::Type> wrapped_swap_buffers_callback_;
 #endif
 
   ScopedRunnableMethodFactory<GpuScheduler> method_factory_;
-  scoped_ptr<Callback0::Type> wrapped_swap_buffers_callback_;
   scoped_ptr<Callback0::Type> command_processed_callback_;
-  base::Callback<void(int32)> set_token_callback_;
 };
 
 }  // namespace gpu

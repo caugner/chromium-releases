@@ -101,17 +101,15 @@ class WebPlugin {
   // reference.
   virtual NPObject* GetPluginElement() = 0;
 
+  // Resolves the proxies for the url, returns true on success.
+  virtual bool FindProxyForUrl(const GURL& url, std::string* proxy_list) = 0;
+
   // Cookies
   virtual void SetCookie(const GURL& url,
                          const GURL& first_party_for_cookies,
                          const std::string& cookie) = 0;
   virtual std::string GetCookies(const GURL& url,
                                  const GURL& first_party_for_cookies) = 0;
-
-  // When a default plugin has downloaded the plugin list and finds it is
-  // available, it calls this method to notify the renderer. Also it will update
-  // the status when user clicks on the plugin to install.
-  virtual void OnMissingPluginStatus(int status) = 0;
 
   // Handles GetURL/GetURLNotify/PostURL/PostURLNotify requests initiated
   // by plugins.  If the plugin wants notification of the result, notify_id will
@@ -163,11 +161,6 @@ class WebPlugin {
   // Returns the accelerated surface abstraction for accelerated plugins.
   virtual WebPluginAcceleratedSurface* GetAcceleratedSurface();
 #endif
-
-  // Gets the WebPluginDelegate that implements the interface.
-  // This API is only for use with Pepper, and is only overridden
-  // by in-renderer implementations.
-  virtual WebPluginDelegate* delegate();
 
   // Handles NPN_URLRedirectResponse calls issued by plugins in response to
   // HTTP URL redirect notifications.

@@ -18,9 +18,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
+#include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/language_preferences.h"
-#include "chrome/browser/chromeos/login/enterprise_enrollment_screen.h"
+#include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/eula_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -30,18 +31,23 @@
 #include "chrome/browser/chromeos/login/network_screen.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
 #include "chrome/browser/chromeos/login/registration_screen.h"
+#include "chrome/browser/chromeos/login/signed_settings_temp_storage.h"
 #include "chrome/browser/chromeos/login/update_screen.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
-#include "chrome/browser/chromeos/metrics_cros_settings_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/options/options_util.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/accelerator.h"
+
+#if defined(USE_LINUX_BREAKPAD)
+#include "chrome/app/breakpad_linux.h"
+#endif
 
 namespace {
 
@@ -232,12 +238,14 @@ chromeos::EnterpriseEnrollmentScreen*
 }
 
 void WizardController::ShowNetworkScreen() {
+  VLOG(1) << "Showing network screen.";
   SetStatusAreaVisible(false);
   SetCurrentScreen(GetNetworkScreen());
   host_->SetOobeProgress(chromeos::BackgroundView::SELECT_NETWORK);
 }
 
 void WizardController::ShowLoginScreen() {
+  VLOG(1) << "Showing login screen.";
   SetStatusAreaVisible(true);
   host_->SetOobeProgress(chromeos::BackgroundView::SIGNIN);
   host_->StartSignInScreen();
@@ -378,8 +386,30 @@ void WizardController::OnUpdateCompleted() {
 
 void WizardController::OnEulaAccepted() {
   MarkEulaAccepted();
-  chromeos::MetricsCrosSettingsProvider::SetMetricsStatus(
-      usage_statistics_reporting_);
+  // TODO(pastarmovj): Make this code cache the value for the pref in a better
+  // way until we can store it in the policy blob. See explanation below:
+  // At this point we can not write this in the signed settings pref blob.
+  // But we can at least create the consent file and Chrome would port that
+  // if the device is owned by a local user. In case of enterprise enrolled
+  // device the setting will be respected only until the policy is not set.
+  SignedSettingsTempStorage::Store(
+      kStatsReportingPref,
+      (usage_statistics_reporting_ ? "true" : "false"),
+      g_browser_process->local_state());
+  bool enabled =
+      OptionsUtil::ResolveMetricsReportingEnabled(usage_statistics_reporting_);
+  // Make sure the local state cached value is updated too because the real
+  // policy will only get written when the owner is created and the cache won't
+  // be updated until the policy is reread.
+  g_browser_process->local_state()->SetBoolean(kStatsReportingPref, enabled);
+  if (enabled) {
+#if defined(USE_LINUX_BREAKPAD)
+    // The crash reporter initialization needs IO to complete.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    InitCrashReporter();
+#endif
+  }
+
   InitiateOOBEUpdate();
 }
 
@@ -478,6 +508,7 @@ void WizardController::SetCurrentScreenSmooth(WizardScreen* new_current,
 
   if (use_smoothing) {
     smooth_show_timer_.Start(
+        FROM_HERE,
         base::TimeDelta::FromMilliseconds(kShowDelayMs),
         this,
         &WizardController::ShowCurrentScreen);

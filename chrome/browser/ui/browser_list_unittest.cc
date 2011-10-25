@@ -6,7 +6,8 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/browser_with_test_window_test.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/testing_browser_process.h"
 
 typedef BrowserWithTestWindowTest BrowserListTest;
 
@@ -171,7 +172,8 @@ TEST_F(BrowserListTest, TabContentsIteratorBackgroundPrinting) {
 
   EXPECT_EQ(4U, CountAllTabs());
 
-  TestingBrowserProcess* browser_process = testing_browser_process_.get();
+  TestingBrowserProcess* browser_process =
+      static_cast<TestingBrowserProcess*>(g_browser_process);
   printing::BackgroundPrintingManager* bg_print_manager =
       browser_process->background_printing_manager();
 
@@ -181,7 +183,7 @@ TEST_F(BrowserListTest, TabContentsIteratorBackgroundPrinting) {
   int page_id = 1;
   NavigateToPrintUrl(tab, page_id++);
 
-  bg_print_manager->OwnTabContents(tab);
+  bg_print_manager->OwnPrintPreviewTab(tab);
 
   EXPECT_EQ(4U, CountAllTabs());
 
@@ -214,7 +216,7 @@ TEST_F(BrowserListTest, TabContentsIteratorBackgroundPrinting) {
   }
   for (std::vector<TabContentsWrapper*>::iterator it = owned_tabs.begin();
        it != owned_tabs.end(); ++it) {
-    bg_print_manager->OwnTabContents(*it);
+    bg_print_manager->OwnPrintPreviewTab(*it);
   }
 
   EXPECT_EQ(6U, CountAllTabs());

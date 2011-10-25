@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,15 @@
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
+#include "chrome/browser/sync/protocol/sync.pb.h"
+#include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 
+using browser_sync::SyncProtocolErrorType;
 using std::string;
 using std::stringstream;
 using syncable::BASE_VERSION;
@@ -90,6 +93,7 @@ void SyncerProtoUtil::HandleMigrationDoneResponse(
     to_migrate.insert(syncable::GetModelTypeFromExtensionFieldNumber(
         response->migrated_data_type_id(i)));
   }
+  // TODO(akalin): This should be a set union.
   session->status_controller()->set_types_needing_local_migration(to_migrate);
 }
 
@@ -98,12 +102,6 @@ bool SyncerProtoUtil::VerifyResponseBirthday(syncable::Directory* dir,
     const ClientToServerResponse* response) {
 
   std::string local_birthday = dir->store_birthday();
-
-  if (response->error_code() == ClientToServerResponse::CLEAR_PENDING) {
-    // Birthday verification failures result in stopping sync and deleting
-    // local sync data.
-    return false;
-  }
 
   if (local_birthday.empty()) {
     if (!response->has_store_birthday()) {
@@ -143,35 +141,31 @@ bool SyncerProtoUtil::PostAndProcessHeaders(ServerConnectionManager* scm,
                                             const ClientToServerMessage& msg,
                                             ClientToServerResponse* response) {
 
-  std::string tx, rx;
-  msg.SerializeToString(&tx);
+  ServerConnectionManager::PostBufferParams params;
+  msg.SerializeToString(&params.buffer_in);
 
-  HttpResponse http_response;
-  ServerConnectionManager::PostBufferParams params = {
-    tx, &rx, &http_response
-  };
-
-  ScopedServerStatusWatcher server_status_watcher(scm, &http_response);
+  ScopedServerStatusWatcher server_status_watcher(scm, &params.response);
+  // Fills in params.buffer_out and params.response.
   if (!scm->PostBufferWithCachedAuth(&params, &server_status_watcher)) {
-    LOG(WARNING) << "Error posting from syncer:" << http_response;
+    LOG(WARNING) << "Error posting from syncer:" << params.response;
     return false;
   }
 
-  std::string new_token = http_response.update_client_auth_header;
+  std::string new_token = params.response.update_client_auth_header;
   if (!new_token.empty()) {
     SyncEngineEvent event(SyncEngineEvent::UPDATED_TOKEN);
     event.updated_token = new_token;
     session->context()->NotifyListeners(event);
   }
 
-  if (response->ParseFromString(rx)) {
+  if (response->ParseFromString(params.buffer_out)) {
     // TODO(tim): This is an egregious layering violation (bug 35060).
     switch (response->error_code()) {
       case ClientToServerResponse::ACCESS_DENIED:
       case ClientToServerResponse::AUTH_INVALID:
       case ClientToServerResponse::USER_NOT_ACTIVATED:
         // Fires on ScopedServerStatusWatcher
-        http_response.server_status = HttpResponse::SYNC_AUTH_ERROR;
+        params.response.server_status = HttpResponse::SYNC_AUTH_ERROR;
         return false;
       default:
         return true;
@@ -179,6 +173,20 @@ bool SyncerProtoUtil::PostAndProcessHeaders(ServerConnectionManager* scm,
   }
 
   return false;
+}
+
+base::TimeDelta SyncerProtoUtil::GetThrottleDelay(
+    const sync_pb::ClientToServerResponse& response) {
+  base::TimeDelta throttle_delay =
+      base::TimeDelta::FromSeconds(kSyncDelayAfterThrottled);
+  if (response.has_client_command()) {
+    const sync_pb::ClientCommand& command = response.client_command();
+    if (command.has_throttle_delay_seconds()) {
+      throttle_delay =
+          base::TimeDelta::FromSeconds(command.throttle_delay_seconds());
+    }
+  }
+  return throttle_delay;
 }
 
 namespace {
@@ -193,6 +201,78 @@ bool IsVeryFirstGetUpdates(const ClientToServerMessage& message) {
       return false;
   }
   return true;
+}
+
+SyncProtocolErrorType ConvertSyncProtocolErrorTypePBToLocalType(
+    const sync_pb::ClientToServerResponse::ErrorType& error_type) {
+  switch (error_type) {
+    case ClientToServerResponse::SUCCESS:
+      return browser_sync::SYNC_SUCCESS;
+    case ClientToServerResponse::NOT_MY_BIRTHDAY:
+      return browser_sync::NOT_MY_BIRTHDAY;
+    case ClientToServerResponse::THROTTLED:
+      return browser_sync::THROTTLED;
+    case ClientToServerResponse::CLEAR_PENDING:
+      return browser_sync::CLEAR_PENDING;
+    case ClientToServerResponse::TRANSIENT_ERROR:
+      return browser_sync::TRANSIENT_ERROR;
+    case ClientToServerResponse::MIGRATION_DONE:
+      return browser_sync::MIGRATION_DONE;
+    case ClientToServerResponse::UNKNOWN:
+      return browser_sync::UNKNOWN_ERROR;
+    case ClientToServerResponse::USER_NOT_ACTIVATED:
+    case ClientToServerResponse::AUTH_INVALID:
+    case ClientToServerResponse::ACCESS_DENIED:
+      return browser_sync::INVALID_CREDENTIAL;
+    default:
+      NOTREACHED();
+      return browser_sync::UNKNOWN_ERROR;
+  }
+}
+
+browser_sync::ClientAction ConvertClientActionPBToLocalClientAction(
+    const sync_pb::ClientToServerResponse::Error::Action& action) {
+  switch (action) {
+    case ClientToServerResponse::Error::UPGRADE_CLIENT:
+      return browser_sync::UPGRADE_CLIENT;
+    case ClientToServerResponse::Error::CLEAR_USER_DATA_AND_RESYNC:
+      return browser_sync::CLEAR_USER_DATA_AND_RESYNC;
+    case ClientToServerResponse::Error::ENABLE_SYNC_ON_ACCOUNT:
+      return browser_sync::ENABLE_SYNC_ON_ACCOUNT;
+    case ClientToServerResponse::Error::STOP_AND_RESTART_SYNC:
+      return browser_sync::STOP_AND_RESTART_SYNC;
+    case ClientToServerResponse::Error::DISABLE_SYNC_ON_CLIENT:
+      return browser_sync::DISABLE_SYNC_ON_CLIENT;
+    case ClientToServerResponse::Error::UNKNOWN_ACTION:
+      return browser_sync::UNKNOWN_ACTION;
+    default:
+      NOTREACHED();
+      return browser_sync::UNKNOWN_ACTION;
+  }
+}
+
+browser_sync::SyncProtocolError ConvertErrorPBToLocalType(
+    const sync_pb::ClientToServerResponse::Error& error) {
+  browser_sync::SyncProtocolError sync_protocol_error;
+  sync_protocol_error.error_type = ConvertSyncProtocolErrorTypePBToLocalType(
+      error.error_type());
+  sync_protocol_error.error_description = error.error_description();
+  sync_protocol_error.url = error.url();
+  sync_protocol_error.action = ConvertClientActionPBToLocalClientAction(
+      error.action());
+  return sync_protocol_error;
+}
+
+// TODO(lipalani) : Rename these function names as per the CR for issue 7740067.
+browser_sync::SyncProtocolError ConvertLegacyErrorCodeToNewError(
+    const sync_pb::ClientToServerResponse::ErrorType& error_type) {
+  browser_sync::SyncProtocolError error;
+  error.error_type = ConvertSyncProtocolErrorTypePBToLocalType(error_type);
+  if (error_type == ClientToServerResponse::CLEAR_PENDING ||
+      error_type == ClientToServerResponse::NOT_MY_BIRTHDAY) {
+      error.action = browser_sync::DISABLE_SYNC_ON_CLIENT;
+  }  // There is no other action we can compute for legacy server.
+  return error;
 }
 
 }  // namespace
@@ -218,36 +298,52 @@ bool SyncerProtoUtil::PostClientToServerMessage(
                              msg, response))
     return false;
 
+  browser_sync::SyncProtocolError sync_protocol_error;
+
+  // Birthday mismatch overrides any error that is sent by the server.
   if (!VerifyResponseBirthday(dir, response)) {
-    session->status_controller()->set_syncer_stuck(true);
-    session->delegate()->OnShouldStopSyncingPermanently();
-    return false;
+    sync_protocol_error.error_type = browser_sync::NOT_MY_BIRTHDAY;
+     sync_protocol_error.action =
+         browser_sync::DISABLE_SYNC_ON_CLIENT;
+  } else if (response->has_error()) {
+    // This is a new server. Just get the error from the protocol.
+    sync_protocol_error = ConvertErrorPBToLocalType(response->error());
+  } else {
+    // Legacy server implementation. Compute the error based on |error_code|.
+    sync_protocol_error = ConvertLegacyErrorCodeToNewError(
+        response->error_code());
   }
 
-  switch (response->error_code()) {
-    case ClientToServerResponse::UNKNOWN:
+  // Now set the error into the status so the layers above us could read it.
+  sessions::StatusController* status = session->status_controller();
+  status->set_sync_protocol_error(sync_protocol_error);
+
+  // Inform the delegate of the error we got.
+  session->delegate()->OnSyncProtocolError(session->TakeSnapshot());
+
+  // Now do any special handling for the error type and decide on the return
+  // value.
+  switch (sync_protocol_error.error_type) {
+    case browser_sync::UNKNOWN_ERROR:
       LOG(WARNING) << "Sync protocol out-of-date. The server is using a more "
                    << "recent version.";
       return false;
-    case ClientToServerResponse::SUCCESS:
+    case browser_sync::SYNC_SUCCESS:
       LogResponseProfilingData(*response);
       return true;
-    case ClientToServerResponse::THROTTLED:
+    case browser_sync::THROTTLED:
       LOG(WARNING) << "Client silenced by server.";
       session->delegate()->OnSilencedUntil(base::TimeTicks::Now() +
-          base::TimeDelta::FromSeconds(kSyncDelayAfterThrottled));
+          GetThrottleDelay(*response));
       return false;
-    case ClientToServerResponse::TRANSIENT_ERROR:
+    case browser_sync::TRANSIENT_ERROR:
       return false;
-    case ClientToServerResponse::MIGRATION_DONE:
+    case browser_sync::MIGRATION_DONE:
       HandleMigrationDoneResponse(response, session);
       return false;
-    case ClientToServerResponse::USER_NOT_ACTIVATED:
-    case ClientToServerResponse::AUTH_INVALID:
-    case ClientToServerResponse::ACCESS_DENIED:
-      // WARNING: PostAndProcessHeaders contains a hack for this case.
-      LOG(WARNING) << "SyncerProtoUtil: Authentication expired.";
-      // TODO(sync): Was this meant to be a fall-through?
+    case browser_sync::CLEAR_PENDING:
+    case browser_sync::NOT_MY_BIRTHDAY:
+      return false;
     default:
       NOTREACHED();
       return false;

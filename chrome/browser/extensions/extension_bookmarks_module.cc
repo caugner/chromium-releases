@@ -79,7 +79,7 @@ void BookmarksFunction::Run() {
   if (!model->IsLoaded()) {
     // Bookmarks are not ready yet.  We'll wait.
     registrar_.Add(this, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
-                   NotificationService::AllSources());
+                   NotificationService::AllBrowserContextsAndSources());
     AddRef();  // Balanced in Observe().
     return;
   }
@@ -114,6 +114,10 @@ void BookmarksFunction::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED);
+  Profile* source_profile = Source<Profile>(source).ptr();
+  if (!source_profile || !source_profile->IsSameProfile(profile()))
+    return;
+
   DCHECK(profile()->GetBookmarkModel()->IsLoaded());
   Run();
   Release();  // Balanced in Run().

@@ -4,6 +4,7 @@
 
 #include "base/values.h"
 
+#include "base/float_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -59,6 +60,8 @@ Value* CopyWithoutEmptyChildren(Value* node) {
 
 }  // namespace
 
+namespace base {
+
 ///////////////////// Value ////////////////////
 
 Value::~Value() {
@@ -92,11 +95,6 @@ StringValue* Value::CreateStringValue(const std::string& in_value) {
 // static
 StringValue* Value::CreateStringValue(const string16& in_value) {
   return new StringValue(in_value);
-}
-
-// static
-BinaryValue* Value::CreateBinaryValue(char* buffer, size_t size) {
-  return BinaryValue::Create(buffer, size);
 }
 
 bool Value::GetAsBoolean(bool* out_value) const {
@@ -148,7 +146,7 @@ bool Value::Equals(const Value* a, const Value* b) {
   return a->Equals(b);
 }
 
-Value::Value(ValueType type) : type_(type) {
+Value::Value(Type type) : type_(type) {
 }
 
 ///////////////////// FundamentalValue ////////////////////
@@ -163,6 +161,11 @@ FundamentalValue::FundamentalValue(int in_value)
 
 FundamentalValue::FundamentalValue(double in_value)
     : Value(TYPE_DOUBLE), double_value_(in_value) {
+  if (!IsFinite(double_value_)) {
+    NOTREACHED() << "Non-finite (i.e. NaN or positive/negative infinity) "
+                 << "values cannot be represented in JSON";
+    double_value_ = 0.0;
+  }
 }
 
 FundamentalValue::~FundamentalValue() {
@@ -821,21 +824,19 @@ bool ListValue::Remove(size_t index, Value** out_value) {
   return true;
 }
 
-int ListValue::Remove(const Value& value) {
+bool ListValue::Remove(const Value& value, size_t* index) {
   for (ValueVector::iterator i(list_.begin()); i != list_.end(); ++i) {
     if ((*i)->Equals(&value)) {
-      size_t index = i - list_.begin();
+      size_t previous_index = i - list_.begin();
       delete *i;
       list_.erase(i);
 
-      // TODO(anyone): Returning a signed int type here is just wrong.
-      // Change this interface to return a size_t.
-      DCHECK(index <= INT_MAX);
-      int return_index = static_cast<int>(index);
-      return return_index;
+      if (index)
+        *index = previous_index;
+      return true;
     }
   }
-  return -1;
+  return false;
 }
 
 void ListValue::Append(Value* in_value) {
@@ -906,3 +907,5 @@ bool ListValue::Equals(const Value* other) const {
 
 ValueSerializer::~ValueSerializer() {
 }
+
+}  // namespace base

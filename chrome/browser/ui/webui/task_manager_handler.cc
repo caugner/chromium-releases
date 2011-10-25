@@ -110,7 +110,7 @@ static Value* CreateColumnValue(const TaskManagerModel* tm,
   return NULL;
 }
 
-static void CreateGroupColomnList(const TaskManagerModel* tm,
+static void CreateGroupColumnList(const TaskManagerModel* tm,
                                   const std::string column_name,
                                   const int index,
                                   const int length,
@@ -145,36 +145,36 @@ static DictionaryValue* CreateTaskGroupValue(const TaskManagerModel* tm,
                   tm->IsBackgroundResource(index));
 
   // Columns which have one datum in each group.
-  CreateGroupColomnList(tm, "processId", index, 1, val);
-  CreateGroupColomnList(tm, "processIdValue", index, 1, val);
-  CreateGroupColomnList(tm, "cpuUsage", index, 1, val);
-  CreateGroupColomnList(tm, "cpuUsageValue", index, 1, val);
-  CreateGroupColomnList(tm, "physicalMemory", index, 1, val);
-  CreateGroupColomnList(tm, "physicalMemoryValue", index, 1, val);
-  CreateGroupColomnList(tm, "sharedMemory", index, 1, val);
-  CreateGroupColomnList(tm, "sharedMemoryValue", index, 1, val);
-  CreateGroupColomnList(tm, "privateMemory", index, 1, val);
-  CreateGroupColomnList(tm, "privateMemoryValue", index, 1, val);
-  CreateGroupColomnList(tm, "webCoreImageCacheSize", index, 1, val);
-  CreateGroupColomnList(tm, "webCoreImageCacheSizeValue", index, 1, val);
-  CreateGroupColomnList(tm, "webCoreScriptsCacheSize", index, 1, val);
-  CreateGroupColomnList(tm, "webCoreScriptsCacheSizeValue", index, 1, val);
-  CreateGroupColomnList(tm, "webCoreCSSCacheSize", index, 1, val);
-  CreateGroupColomnList(tm, "webCoreCSSCacheSizeValue", index, 1, val);
-  CreateGroupColomnList(tm, "sqliteMemoryUsed", index, 1, val);
-  CreateGroupColomnList(tm, "sqliteMemoryUsedValue", index, 1, val);
-  CreateGroupColomnList(tm, "v8MemoryAllocatedSize", index, 1, val);
-  CreateGroupColomnList(tm, "v8MemoryAllocatedSizeValue", index, 1, val);
+  CreateGroupColumnList(tm, "processId", index, 1, val);
+  CreateGroupColumnList(tm, "processIdValue", index, 1, val);
+  CreateGroupColumnList(tm, "cpuUsage", index, 1, val);
+  CreateGroupColumnList(tm, "cpuUsageValue", index, 1, val);
+  CreateGroupColumnList(tm, "physicalMemory", index, 1, val);
+  CreateGroupColumnList(tm, "physicalMemoryValue", index, 1, val);
+  CreateGroupColumnList(tm, "sharedMemory", index, 1, val);
+  CreateGroupColumnList(tm, "sharedMemoryValue", index, 1, val);
+  CreateGroupColumnList(tm, "privateMemory", index, 1, val);
+  CreateGroupColumnList(tm, "privateMemoryValue", index, 1, val);
+  CreateGroupColumnList(tm, "webCoreImageCacheSize", index, 1, val);
+  CreateGroupColumnList(tm, "webCoreImageCacheSizeValue", index, 1, val);
+  CreateGroupColumnList(tm, "webCoreScriptsCacheSize", index, 1, val);
+  CreateGroupColumnList(tm, "webCoreScriptsCacheSizeValue", index, 1, val);
+  CreateGroupColumnList(tm, "webCoreCSSCacheSize", index, 1, val);
+  CreateGroupColumnList(tm, "webCoreCSSCacheSizeValue", index, 1, val);
+  CreateGroupColumnList(tm, "sqliteMemoryUsed", index, 1, val);
+  CreateGroupColumnList(tm, "sqliteMemoryUsedValue", index, 1, val);
+  CreateGroupColumnList(tm, "v8MemoryAllocatedSize", index, 1, val);
+  CreateGroupColumnList(tm, "v8MemoryAllocatedSizeValue", index, 1, val);
 
   // Columns which have some data in each group.
-  CreateGroupColomnList(tm, "icon", index, length, val);
-  CreateGroupColomnList(tm, "title", index, length, val);
-  CreateGroupColomnList(tm, "networkUsage", index, length, val);
-  CreateGroupColomnList(tm, "networkUsageValue", index, length, val);
-  CreateGroupColomnList(tm, "fps", index, length, val);
-  CreateGroupColomnList(tm, "fpsValue", index, length, val);
-  CreateGroupColomnList(tm, "goatsTeleported", index, length, val);
-  CreateGroupColomnList(tm, "goatsTeleportedValue", index, length, val);
+  CreateGroupColumnList(tm, "icon", index, length, val);
+  CreateGroupColumnList(tm, "title", index, length, val);
+  CreateGroupColumnList(tm, "networkUsage", index, length, val);
+  CreateGroupColumnList(tm, "networkUsageValue", index, length, val);
+  CreateGroupColumnList(tm, "fps", index, length, val);
+  CreateGroupColumnList(tm, "fpsValue", index, length, val);
+  CreateGroupColumnList(tm, "goatsTeleported", index, length, val);
+  CreateGroupColumnList(tm, "goatsTeleportedValue", index, length, val);
 
   return val;
 }
@@ -196,12 +196,12 @@ TaskManagerHandler::~TaskManagerHandler() {
 void TaskManagerHandler::OnModelChanged() {
   const int count = model_->GroupCount();
 
-  FundamentalValue start_value(0);
-  FundamentalValue length_value(count);
-  ListValue tasks_value;
-  for (int i = 0; i < count; i++) {
+  base::FundamentalValue start_value(0);
+  base::FundamentalValue length_value(count);
+  base::ListValue tasks_value;
+  for (int i = 0; i < count; ++i)
     tasks_value.Append(CreateTaskGroupValue(model_, i));
-  }
+
   if (is_enabled_) {
     web_ui_->CallJavascriptFunction("taskChanged",
                                     start_value, length_value, tasks_value);
@@ -372,13 +372,13 @@ void TaskManagerHandler::UpdateResourceGroupTable(int start, int length) {
 
 void TaskManagerHandler::OnGroupChanged(const int group_start,
                                         const int group_length) {
-  FundamentalValue start_value(group_start);
-  FundamentalValue length_value(group_length);
-  ListValue tasks_value;
+  base::FundamentalValue start_value(group_start);
+  base::FundamentalValue length_value(group_length);
+  base::ListValue tasks_value;
 
-  for (int i = 0; i < group_length; i++) {
+  for (int i = 0; i < group_length; ++i)
     tasks_value.Append(CreateTaskGroupValue(model_, group_start + i));
-  }
+
   if (is_enabled_) {
     web_ui_->CallJavascriptFunction("taskChanged",
                                     start_value, length_value, tasks_value);
@@ -387,12 +387,12 @@ void TaskManagerHandler::OnGroupChanged(const int group_start,
 
 void TaskManagerHandler::OnGroupAdded(const int group_start,
                                       const int group_length) {
-  FundamentalValue start_value(group_start);
-  FundamentalValue length_value(group_length);
-  ListValue tasks_value;
-  for (int i = 0; i < group_length; i++) {
+  base::FundamentalValue start_value(group_start);
+  base::FundamentalValue length_value(group_length);
+  base::ListValue tasks_value;
+  for (int i = 0; i < group_length; ++i)
     tasks_value.Append(CreateTaskGroupValue(model_, group_start + i));
-  }
+
   if (is_enabled_) {
     web_ui_->CallJavascriptFunction("taskAdded",
                                     start_value, length_value, tasks_value);
@@ -401,9 +401,8 @@ void TaskManagerHandler::OnGroupAdded(const int group_start,
 
 void TaskManagerHandler::OnGroupRemoved(const int group_start,
                                         const int group_length) {
-  FundamentalValue start_value(group_start);
-  FundamentalValue length_value(group_length);
+  base::FundamentalValue start_value(group_start);
+  base::FundamentalValue length_value(group_length);
   if (is_enabled_)
     web_ui_->CallJavascriptFunction("taskRemoved", start_value, length_value);
 }
-

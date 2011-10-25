@@ -112,15 +112,12 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_JAVASCRIPT_CONSOLE },
   { "keyboardOverlayLockScreenOrPowerOff",
     IDS_KEYBOARD_OVERLAY_LOCK_SCREEN_OR_POWER_OFF },
-  { "keyboardOverlayMoveToEndOfNextWord",
-    IDS_KEYBOARD_OVERLAY_MOVE_TO_END_OF_NEXT_WORD },
-  { "keyboardOverlayMoveToStartOfPreviousWord",
-    IDS_KEYBOARD_OVERLAY_MOVE_TO_START_OF_PREVIOUS_WORD },
   { "keyboardOverlayNewIncognitoWindow",
     IDS_KEYBOARD_OVERLAY_NEW_INCOGNITO_WINDOW },
   { "keyboardOverlayNewTab", IDS_KEYBOARD_OVERLAY_NEW_TAB },
   { "keyboardOverlayNewWindow", IDS_KEYBOARD_OVERLAY_NEW_WINDOW },
   { "keyboardOverlayNextWindow", IDS_KEYBOARD_OVERLAY_NEXT_WINDOW },
+  { "keyboardOverlayNextWord", IDS_KEYBOARD_OVERLAY_NEXT_WORD },
   { "keyboardOverlayOpenAddressInNewTab",
     IDS_KEYBOARD_OVERLAY_OPEN_ADDRESS_IN_NEW_TAB },
   { "keyboardOverlayOpenFileManager", IDS_KEYBOARD_OVERLAY_OPEN_FILE_MANAGER },
@@ -130,6 +127,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayPasteAsPlainText",
     IDS_KEYBOARD_OVERLAY_PASTE_AS_PLAIN_TEXT },
   { "keyboardOverlayPreviousWindow", IDS_KEYBOARD_OVERLAY_PREVIOUS_WINDOW },
+  { "keyboardOverlayPreviousWord", IDS_KEYBOARD_OVERLAY_PREVIOUS_WORD },
   { "keyboardOverlayPrint", IDS_KEYBOARD_OVERLAY_PRINT },
   { "keyboardOverlayReloadCurrentPage",
     IDS_KEYBOARD_OVERLAY_RELOAD_CURRENT_PAGE },
@@ -207,8 +205,8 @@ class KeyboardOverlayHandler
   virtual ~KeyboardOverlayHandler();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
  private:
   // Called when the page requires the input method ID corresponding to the
@@ -317,11 +315,12 @@ void KeyboardOverlayHandler::GetLabelMap(const ListValue* args) {
 
 KeyboardOverlayUI::KeyboardOverlayUI(TabContents* contents)
     : HtmlDialogUI(contents) {
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
   KeyboardOverlayHandler* handler =
-      new KeyboardOverlayHandler(contents->profile());
+      new KeyboardOverlayHandler(profile);
   AddMessageHandler((handler)->Attach(this));
   KeyboardOverlayUIHTMLSource* html_source = new KeyboardOverlayUIHTMLSource();
 
   // Set up the chrome://keyboardoverlay/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }

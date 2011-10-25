@@ -13,15 +13,16 @@
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_resource.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/host_resource.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/thunk.h"
 #include "skia/ext/platform_canvas.h"
 #include "ui/gfx/surface/transport_dib.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -46,7 +47,7 @@ PPB_ImageData_Proxy::~PPB_ImageData_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_ImageData_Proxy::GetInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_ImageData_Thunk(),
+    thunk::GetPPB_ImageData_Thunk(),
     PPB_IMAGEDATA_INTERFACE,
     INTERFACE_ID_PPB_IMAGE_DATA,
     false,
@@ -64,7 +65,7 @@ bool PPB_ImageData_Proxy::OnMessageReceived(const IPC::Message& msg) {
 ImageData::ImageData(const HostResource& resource,
                      const PP_ImageDataDesc& desc,
                      ImageHandle handle)
-    : PluginResource(resource),
+    : Resource(resource),
       desc_(desc) {
 #if defined(OS_WIN)
   transport_dib_.reset(TransportDIB::CreateWithHandle(handle));
@@ -76,11 +77,7 @@ ImageData::ImageData(const HostResource& resource,
 ImageData::~ImageData() {
 }
 
-::ppapi::thunk::PPB_ImageData_API* ImageData::AsPPB_ImageData_API() {
-  return this;
-}
-
-ImageData* ImageData::AsImageData() {
+thunk::PPB_ImageData_API* ImageData::AsPPB_ImageData_API() {
   return this;
 }
 
@@ -135,4 +132,4 @@ ImageHandle ImageData::HandleFromInt(int32_t i) {
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

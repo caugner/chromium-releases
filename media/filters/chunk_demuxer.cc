@@ -91,6 +91,7 @@ class ChunkDemuxerStream : public DemuxerStream {
   ReadCBQueue read_cbs_;
   BufferQueue buffers_;
   bool shutdown_called_;
+  bool received_end_of_stream_;
 
   // Keeps track of the timestamp of the last buffer we have
   // added to |buffers_|. This is used to enforce buffers with strictly
@@ -104,6 +105,7 @@ ChunkDemuxerStream::ChunkDemuxerStream(Type type, AVStream* stream)
     : type_(type),
       av_stream_(stream),
       shutdown_called_(false),
+      received_end_of_stream_(false),
       last_buffer_timestamp_(kNoTimestamp) {
 }
 
@@ -113,6 +115,7 @@ void ChunkDemuxerStream::Flush() {
   VLOG(1) << "Flush()";
   base::AutoLock auto_lock(lock_);
   buffers_.clear();
+  received_end_of_stream_ = false;
   last_buffer_timestamp_ = kNoTimestamp;
 }
 
@@ -139,8 +142,21 @@ void ChunkDemuxerStream::AddBuffers(const BufferQueue& buffers) {
 
     for (BufferQueue::const_iterator itr = buffers.begin();
          itr != buffers.end(); itr++) {
+      // Make sure we aren't trying to add a buffer after we have received and
+      // "end of stream" buffer.
+      DCHECK(!received_end_of_stream_);
 
-      if (!(*itr)->IsEndOfStream()) {
+      if ((*itr)->IsEndOfStream()) {
+        received_end_of_stream_ = true;
+
+        // Push enough EOS buffers to satisfy outstanding Read() requests.
+        if (read_cbs_.size() > buffers_.size()) {
+          size_t pending_read_without_data = read_cbs_.size() - buffers_.size();
+          for (size_t i = 0; i <= pending_read_without_data; ++i) {
+            buffers_.push_back(*itr);
+          }
+        }
+      } else {
         base::TimeDelta current_ts = (*itr)->GetTimestamp();
         if (last_buffer_timestamp_ != kNoTimestamp) {
           DCHECK_GT(current_ts.ToInternalValue(),
@@ -148,9 +164,8 @@ void ChunkDemuxerStream::AddBuffers(const BufferQueue& buffers) {
         }
 
         last_buffer_timestamp_ = current_ts;
+        buffers_.push_back(*itr);
       }
-
-      buffers_.push_back(*itr);
     }
 
     while (!buffers_.empty() && !read_cbs_.empty()) {
@@ -230,7 +245,7 @@ void ChunkDemuxerStream::Read(const ReadCallback& read_callback) {
   {
     base::AutoLock auto_lock(lock_);
 
-    if (shutdown_called_) {
+    if (shutdown_called_ || (received_end_of_stream_ && buffers_.empty())) {
       buffer = CreateEOSBuffer();
     } else {
       if (buffers_.empty()) {
@@ -283,6 +298,12 @@ ChunkDemuxer::~ChunkDemuxer() {
 
   DestroyAVFormatContext(format_context_);
   format_context_ = NULL;
+
+  if (url_protocol_.get()) {
+    FFmpegGlue::GetInstance()->RemoveProtocol(url_protocol_.get());
+    url_protocol_.reset();
+    url_protocol_buffer_.reset();
+  }
 }
 
 void ChunkDemuxer::Init(PipelineStatusCB cb) {
@@ -317,17 +338,22 @@ void ChunkDemuxer::Stop(FilterCallback* callback) {
 void ChunkDemuxer::Seek(base::TimeDelta time, const FilterStatusCB&  cb) {
   VLOG(1) << "Seek(" << time.InSecondsF() << ")";
 
+  PipelineStatus status = PIPELINE_ERROR_INVALID_STATE;
   {
     base::AutoLock auto_lock(lock_);
 
-    if (seek_waits_for_data_) {
-      VLOG(1) << "Seek() : waiting for more data to arrive.";
-      seek_cb_ = cb;
-      return;
+    if (state_ == INITIALIZED || state_ == ENDED) {
+      if (seek_waits_for_data_) {
+        VLOG(1) << "Seek() : waiting for more data to arrive.";
+        seek_cb_ = cb;
+        return;
+      }
+
+      status = PIPELINE_OK;
     }
   }
 
-  cb.Run(PIPELINE_OK);
+  cb.Run(status);
 }
 
 void ChunkDemuxer::OnAudioRendererDisabled() {
@@ -388,7 +414,7 @@ bool ChunkDemuxer::AppendData(const uint8* data, unsigned length) {
       case INITIALIZING:
         if (!ParseInfoAndTracks_Locked(data, length)) {
           VLOG(1) << "AppendData(): parsing info & tracks failed";
-          return false;
+          ReportError_Locked(DEMUXER_ERROR_COULD_NOT_OPEN);
         }
         return true;
         break;
@@ -396,17 +422,17 @@ bool ChunkDemuxer::AppendData(const uint8* data, unsigned length) {
       case INITIALIZED:
         if (!ParseAndAppendData_Locked(data, length)) {
           VLOG(1) << "AppendData(): parsing data failed";
-          return false;
+          ReportError_Locked(PIPELINE_ERROR_DECODE);
+          return true;
         }
         break;
 
       case WAITING_FOR_INIT:
       case ENDED:
-      case INIT_ERROR:
+      case PARSE_ERROR:
       case SHUTDOWN:
         VLOG(1) << "AppendData(): called in unexpected state " << state_;
         return false;
-        break;
     }
 
     seek_waits_for_data_ = false;
@@ -448,21 +474,21 @@ bool ChunkDemuxer::AppendData(const uint8* data, unsigned length) {
 void ChunkDemuxer::EndOfStream(PipelineStatus status) {
   VLOG(1) << "EndOfStream(" << status << ")";
   base::AutoLock auto_lock(lock_);
-  DCHECK((state_ == INITIALIZING) || (state_ == INITIALIZED) ||
-         (state_ == SHUTDOWN));
+  DCHECK_NE(state_, WAITING_FOR_INIT);
+  DCHECK_NE(state_, ENDED);
 
-  if (state_ == SHUTDOWN)
+  if (state_ == SHUTDOWN || state_ == PARSE_ERROR)
     return;
 
   if (state_ == INITIALIZING) {
-    InitFailed_Locked();
+    ReportError_Locked(DEMUXER_ERROR_COULD_NOT_OPEN);
     return;
   }
 
   ChangeState(ENDED);
 
   if (status != PIPELINE_OK) {
-    host()->SetError(status);
+    ReportError_Locked(status);
     return;
   }
 
@@ -481,7 +507,6 @@ bool ChunkDemuxer::HasEnded() {
   base::AutoLock auto_lock(lock_);
   return (state_ == ENDED);
 }
-
 
 void ChunkDemuxer::Shutdown() {
   VLOG(1) << "Shutdown()";
@@ -525,10 +550,8 @@ bool ChunkDemuxer::ParseInfoAndTracks_Locked(const uint8* data, int size) {
   WebMInfoParser info_parser;
   int res = info_parser.Parse(cur, cur_size);
 
-  if (res <= 0) {
-    InitFailed_Locked();
+  if (res <= 0)
     return false;
-  }
 
   cur += res;
   cur_size -= res;
@@ -536,10 +559,8 @@ bool ChunkDemuxer::ParseInfoAndTracks_Locked(const uint8* data, int size) {
   WebMTracksParser tracks_parser(info_parser.timecode_scale());
   res = tracks_parser.Parse(cur, cur_size);
 
-  if (res <= 0) {
-    InitFailed_Locked();
+  if (res <= 0)
     return false;
-  }
 
   double mult = info_parser.timecode_scale() / 1000.0;
   duration_ = base::TimeDelta::FromMicroseconds(info_parser.duration() * mult);
@@ -554,7 +575,6 @@ bool ChunkDemuxer::ParseInfoAndTracks_Locked(const uint8* data, int size) {
   format_context_ = CreateFormatContext(data, size);
 
   if (!format_context_ || !SetupStreams()) {
-    InitFailed_Locked();
     return false;
   }
 
@@ -565,13 +585,17 @@ bool ChunkDemuxer::ParseInfoAndTracks_Locked(const uint8* data, int size) {
 }
 
 AVFormatContext* ChunkDemuxer::CreateFormatContext(const uint8* data,
-                                                   int size) const {
+                                                   int size) {
+  DCHECK(!url_protocol_.get());
+  DCHECK(!url_protocol_buffer_.get());
+
   int segment_size = size + sizeof(kEmptyCluster);
   int buf_size = sizeof(kWebMHeader) + segment_size;
-  scoped_array<uint8> buf(new uint8[buf_size]);
-  memcpy(buf.get(), kWebMHeader, sizeof(kWebMHeader));
-  memcpy(buf.get() + sizeof(kWebMHeader), data, size);
-  memcpy(buf.get() + sizeof(kWebMHeader) + size, kEmptyCluster,
+  url_protocol_buffer_.reset(new uint8[buf_size]);
+  uint8* buf = url_protocol_buffer_.get();
+  memcpy(buf, kWebMHeader, sizeof(kWebMHeader));
+  memcpy(buf + sizeof(kWebMHeader), data, size);
+  memcpy(buf + sizeof(kWebMHeader) + size, kEmptyCluster,
          sizeof(kEmptyCluster));
 
   // Update the segment size in the buffer.
@@ -581,15 +605,12 @@ AVFormatContext* ChunkDemuxer::CreateFormatContext(const uint8* data,
     buf[kSegmentSizeOffset + i] = (tmp >> (8 * (7 - i))) & 0xff;
   }
 
-  InMemoryUrlProtocol imup(buf.get(), buf_size, true);
-  std::string key = FFmpegGlue::GetInstance()->AddProtocol(&imup);
+  url_protocol_.reset(new InMemoryUrlProtocol(buf, buf_size, true));
+  std::string key = FFmpegGlue::GetInstance()->AddProtocol(url_protocol_.get());
 
   // Open FFmpeg AVFormatContext.
   AVFormatContext* context = NULL;
   int result = av_open_input_file(&context, key.c_str(), NULL, 0, NULL);
-
-  // Remove ourself from protocol list.
-  FFmpegGlue::GetInstance()->RemoveProtocol(&imup);
 
   if (result < 0)
     return NULL;
@@ -670,11 +691,34 @@ bool ChunkDemuxer::ParseAndAppendData_Locked(const uint8* data, int length) {
   return true;
 }
 
-void ChunkDemuxer::InitFailed_Locked() {
-  ChangeState(INIT_ERROR);
+void ChunkDemuxer::ReportError_Locked(PipelineStatus error) {
+  DCHECK_NE(error, PIPELINE_OK);
+
+  ChangeState(PARSE_ERROR);
+
   PipelineStatusCB cb;
-  std::swap(cb, init_cb_);
-  cb.Run(DEMUXER_ERROR_COULD_NOT_OPEN);
+
+  if (!init_cb_.is_null()) {
+    std::swap(cb, init_cb_);
+  } else {
+    if (!seek_cb_.is_null())
+      std::swap(cb, seek_cb_);
+
+    if (audio_.get())
+      audio_->Shutdown();
+
+    if (video_.get())
+      video_->Shutdown();
+  }
+
+  {
+    base::AutoUnlock auto_unlock(lock_);
+    if (cb.is_null()) {
+      host()->SetError(error);
+      return;
+    }
+    cb.Run(error);
+  }
 }
 
 }  // namespace media

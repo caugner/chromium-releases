@@ -80,10 +80,10 @@ class Rect {
   }
 
   /// A constructor accepting a pointer to a <code>Point</code> representing
-  /// the origin of the rectangle and a pointer to a Size representing the
-  /// height and width.
+  /// the origin of the rectangle and a pointer to a <code>Size</code>
+  /// representing the height and width.
   ///
-  /// @param[in] origin A pointer to a <code>Point<code> representing the
+  /// @param[in] origin A pointer to a <code>Point</code> representing the
   /// upper-left starting coordinate.
   /// @param[in] size A pointer to a <code>Size</code> representing the height
   /// and width.
@@ -299,7 +299,7 @@ class Rect {
   /// IsEmpty() determines if the area of a rectangle is zero. Returns true if
   /// the area of the rectangle is zero.
   ///
-  /// @return True if the area of the rectangle is zero.
+  /// @return true if the area of the rectangle is zero.
   bool IsEmpty() const {
     return rect_.size.width == 0 && rect_.size.height == 0;
   }
@@ -311,7 +311,7 @@ class Rect {
   /// @param[in] point_x An int32_t value representing a x value.
   /// @param[in] point_y An int32_t value representing a y value.
   ///
-  /// @return True if the point_x and point_y fall inside the rectangle.
+  /// @return true if the point_x and point_y fall inside the rectangle.
   bool Contains(int32_t point_x, int32_t point_y) const;
 
   /// Contains() determines if the specified point is contained by this
@@ -319,7 +319,7 @@ class Rect {
   ///
   /// @param[in] point A pointer to a Point representing a 2D coordinate.
   ///
-  /// @return True if the point_x and point_y fall inside the rectangle.
+  /// @return true if the point_x and point_y fall inside the rectangle.
   bool Contains(const Point& point) const {
     return Contains(point.x(), point.y());
   }
@@ -328,7 +328,7 @@ class Rect {
   ///
   /// @param[in] rect A pointer to a <code>Rect</code>.
   ///
-  /// @return True if the rectangle fall inside this rectangle.
+  /// @return true if the rectangle fall inside this rectangle.
   bool Contains(const Rect& rect) const;
 
   /// Insersects() determines if this rectangle intersects the specified
@@ -336,7 +336,7 @@ class Rect {
   ///
   /// @param[in] rect A pointer to a <code>Rect</code>.
   ///
-  /// @return True if the rectangle intersects  this rectangle.
+  /// @return true if the rectangle intersects  this rectangle.
   bool Intersects(const Rect& rect) const;
 
   /// Intersect() computes the intersection of this rectangle with the given
@@ -358,7 +358,7 @@ class Rect {
   /// Subtract() computes the rectangle resulting from subtracting
   /// <code>rect</code> from this Rect.  If <code>rect</code>does not intersect
   /// completely in either the x or y direction, then <code>*this</code> is
-  /// returned. If <code>rect<code> contains <code>this</code>, then an empty
+  /// returned. If <code>rect</code> contains <code>this</code>, then an empty
   /// <code>Rect</code> is returned.
   ///
   /// @param[in] rect A pointer to a <code>Rect</code>.

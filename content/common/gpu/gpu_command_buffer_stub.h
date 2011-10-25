@@ -17,6 +17,7 @@
 #include "base/task.h"
 #include "content/common/gpu/media/gpu_video_decode_accelerator.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
+#include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
@@ -33,6 +34,7 @@ class GpuCommandBufferStub
  public:
   GpuCommandBufferStub(
       GpuChannel* channel,
+      GpuCommandBufferStub* share_group,
       gfx::PluginWindowHandle handle,
       const gfx::Size& size,
       const gpu::gles2::DisallowedExtensions& disallowed_extensions,
@@ -71,12 +73,6 @@ class GpuCommandBufferStub
   // to the same renderer process.
   int32 route_id() const { return route_id_; }
 
-  // Return the current token in the underlying command buffer, or 0 if not yet
-  // initialized.
-  int32 token() const {
-    return command_buffer_.get() ? command_buffer_->GetState().token : 0;
-  }
-
 #if defined(OS_WIN)
   // Called only by the compositor window's window proc
   void OnCompositorWindowPainted();
@@ -88,11 +84,6 @@ class GpuCommandBufferStub
   // Called only by the GpuChannel.
   void AcceleratedSurfaceBuffersSwapped(uint64 swap_buffers_count);
 #endif  // defined(OS_MACOSX)
-
-  // Register a callback to be Run() whenever the underlying scheduler receives
-  // a set_token() call.  The callback will be Run() with the just-set token as
-  // its only parameter.  Multiple callbacks may be registered.
-  void AddSetTokenCallback(const base::Callback<void(int32)>& callback);
 
  private:
   // Cleans up and sends reply if OnInitialize failed.
@@ -111,6 +102,7 @@ class GpuCommandBufferStub
                uint32 flush_count,
                IPC::Message* reply_message);
   void OnAsyncFlush(int32 put_offset, uint32 flush_count);
+  void OnEcho(const IPC::Message& message);
   void OnRescheduled();
   void OnCreateTransferBuffer(int32 size,
                               int32 id_request,
@@ -121,30 +113,29 @@ class GpuCommandBufferStub
                                 IPC::Message* reply_message);
   void OnDestroyTransferBuffer(int32 id, IPC::Message* reply_message);
   void OnGetTransferBuffer(int32 id, IPC::Message* reply_message);
-  void OnResizeOffscreenFrameBuffer(const gfx::Size& size);
 
-  void OnCreateVideoDecoder(const std::vector<uint32>& configs);
-  void OnDestroyVideoDecoder();
+  void OnCreateVideoDecoder(
+      media::VideoDecodeAccelerator::Profile profile,
+      IPC::Message* reply_message);
+  void OnDestroyVideoDecoder(int32 decoder_route_id);
 
+#if defined(OS_MACOSX)
   void OnSwapBuffers();
+#endif
+
   void OnCommandProcessed();
   void OnParseError();
 
-#if defined(OS_MACOSX)
-  void OnSetWindowSize(const gfx::Size& size);
-  void SwapBuffersCallback();
-#endif  // defined(OS_MACOSX)
-
-  void ResizeCallback(gfx::Size size);
+  void OnResize(gfx::Size size);
   void ReportState();
-
-  // Callback registered with GpuScheduler to receive set_token() notifications.
-  void OnSetToken(int32 token);
 
   // The lifetime of objects of this class is managed by a GpuChannel. The
   // GpuChannels destroy all the GpuCommandBufferStubs that they own when they
   // are destroyed. So a raw pointer is safe.
   GpuChannel* channel_;
+
+  // The group of contexts that share namespaces with this context.
+  scoped_refptr<gpu::gles2::ContextGroup> context_group_;
 
   gfx::PluginWindowHandle handle_;
   gfx::Size initial_size_;
@@ -162,7 +153,6 @@ class GpuCommandBufferStub
 
   scoped_ptr<gpu::CommandBufferService> command_buffer_;
   scoped_ptr<gpu::GpuScheduler> scheduler_;
-  std::vector<base::Callback<void(int32)> > set_token_callbacks_;
 
   // SetParent may be called before Initialize, in which case we need to keep
   // around the parent stub, so that Initialize can set the parent correctly.
@@ -172,8 +162,9 @@ class GpuCommandBufferStub
   GpuWatchdog* watchdog_;
   ScopedRunnableMethodFactory<GpuCommandBufferStub> task_factory_;
 
-  // The video decoder associated with this stub, if any.
-  scoped_ptr<GpuVideoDecodeAccelerator> video_decoder_;
+  // Zero or more video decoders owned by this stub, keyed by their
+  // decoder_route_id.
+  IDMap<GpuVideoDecodeAccelerator, IDMapOwnPointer> video_decoders_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferStub);
 };

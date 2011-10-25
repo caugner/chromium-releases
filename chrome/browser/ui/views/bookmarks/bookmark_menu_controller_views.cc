@@ -24,21 +24,25 @@
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/menu_button.h"
+#include "views/controls/menu/menu_runner.h"
+#include "views/widget/widget.h"
 
 using views::MenuItemView;
 
 BookmarkMenuController::BookmarkMenuController(Profile* profile,
-                                               PageNavigator* navigator,
-                                               gfx::NativeWindow parent,
+                                               PageNavigator* page_navigator,
+                                               views::Widget* parent,
                                                const BookmarkNode* node,
                                                int start_child_index)
-    : menu_delegate_(new BookmarkMenuDelegate(profile, navigator, parent, 1)),
+    : menu_delegate_(
+        new BookmarkMenuDelegate(profile, page_navigator, parent, 1)),
       node_(node),
       observer_(NULL),
       for_drop_(false),
       bookmark_bar_(NULL) {
   menu_delegate_->Init(this, NULL, node, start_child_index,
                        BookmarkMenuDelegate::HIDE_OTHER_FOLDER);
+  menu_runner_.reset(new views::MenuRunner(menu_delegate_->menu()));
 }
 
 void BookmarkMenuController::RunMenuAt(BookmarkBarView* bookmark_bar,
@@ -48,27 +52,19 @@ void BookmarkMenuController::RunMenuAt(BookmarkBarView* bookmark_bar,
   DCHECK(menu_button);
   MenuItemView::AnchorPosition anchor;
   bookmark_bar_->GetAnchorPositionForButton(menu_button, &anchor);
-  RunMenuAt(menu_button, anchor, for_drop);
-}
-
-void BookmarkMenuController::RunMenuAt(
-    views::MenuButton* button,
-    MenuItemView::AnchorPosition position,
-    bool for_drop) {
   gfx::Point screen_loc;
-  views::View::ConvertPointToScreen(button, &screen_loc);
+  views::View::ConvertPointToScreen(menu_button, &screen_loc);
   // Subtract 1 from the height to make the popup flush with the button border.
-  gfx::Rect bounds(screen_loc.x(), screen_loc.y(), button->width(),
-                   button->height() - 1);
+  gfx::Rect bounds(screen_loc.x(), screen_loc.y(), menu_button->width(),
+                   menu_button->height() - 1);
   for_drop_ = for_drop;
   menu_delegate_->profile()->GetBookmarkModel()->AddObserver(this);
-  if (for_drop) {
-    menu()->RunMenuForDropAt(menu_delegate_->parent(), bounds, position);
-  } else {
-    menu()->RunMenuAt(menu_delegate_->parent(), button, bounds, position,
-                      false);
+  // We only delete ourself after the menu completes, so we can safely ignore
+  // the return value.
+  ignore_result(menu_runner_->RunMenuAt(menu_delegate_->parent(), menu_button,
+      bounds, anchor, for_drop ? views::MenuRunner::FOR_DROP : 0));
+  if (!for_drop)
     delete this;
-  }
 }
 
 void BookmarkMenuController::Cancel() {
@@ -81,6 +77,10 @@ MenuItemView* BookmarkMenuController::menu() const {
 
 MenuItemView* BookmarkMenuController::context_menu() const {
   return menu_delegate_->context_menu();
+}
+
+void BookmarkMenuController::SetPageNavigator(PageNavigator* navigator) {
+  menu_delegate_->SetPageNavigator(navigator);
 }
 
 std::wstring BookmarkMenuController::GetTooltipText(int id,

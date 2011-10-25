@@ -15,8 +15,15 @@ namespace base {
 class MessageLoopProxy;
 }  // namespace base
 
+namespace content {
+
 class P2PSocketDispatcher;
 
+// P2PHostAddressRequest performs DNS hostname resolution. It's used
+// to resolve addresses of STUN and relay servers.
+//
+// TODO(sergeyu): Name of this class may be confusing. Rename it to
+// something else, e.g. P2PHostnameResolver.
 class P2PHostAddressRequest :
     public base::RefCountedThreadSafe<P2PHostAddressRequest>  {
  public:
@@ -64,5 +71,7 @@ class P2PHostAddressRequest :
 
   DISALLOW_COPY_AND_ASSIGN(P2PHostAddressRequest);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_P2P_HOST_ADDRESS_REQUEST_H_

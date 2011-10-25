@@ -5,6 +5,7 @@
 #include "printing/print_settings.h"
 
 #include "base/atomic_sequence_num.h"
+#include "printing/print_job_constants.h"
 #include "printing/units.h"
 
 namespace printing {
@@ -18,6 +19,10 @@ PrintSettings::PrintSettings()
       desired_dpi(72),
       selection_only(false),
       use_overlays(true),
+      date(),
+      title(),
+      url(),
+      display_header_footer(false),
       dpi_(0),
       landscape_(false),
       supports_alpha_blend_(true) {
@@ -32,6 +37,10 @@ void PrintSettings::Clear() {
   max_shrink = 2.;
   desired_dpi = 72;
   selection_only = false;
+  date = string16();
+  title = string16();
+  url = string16();
+  display_header_footer = false;
   printer_name_.clear();
   device_name_.clear();
   page_setup_device_units_.Clear();
@@ -49,8 +58,8 @@ void PrintSettings::SetPrinterPrintableArea(
   int margin_printer_units = 0;
   if (use_overlays) {
     // Hard-code text_height = 0.5cm = ~1/5 of inch.
-    header_footer_text_height = ConvertUnit(500, kHundrethsMMPerInch,
-                                            units_per_inch);
+    header_footer_text_height = ConvertUnit(kSettingHeaderFooterInterstice,
+                                            kPointsPerInch, units_per_inch);
     // Default margins 1.0cm = ~2/5 of an inch.
     margin_printer_units = ConvertUnit(1000, kHundrethsMMPerInch,
                                        units_per_inch);
@@ -82,7 +91,6 @@ bool PrintSettings::Equals(const PrintSettings& rhs) const {
       min_shrink == rhs.min_shrink &&
       max_shrink == rhs.max_shrink &&
       desired_dpi == rhs.desired_dpi &&
-      overlays.Equals(rhs.overlays) &&
       device_name_ == rhs.device_name_ &&
       page_setup_device_units_.Equals(rhs.page_setup_device_units_) &&
       dpi_ == rhs.dpi_ &&

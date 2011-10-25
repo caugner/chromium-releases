@@ -24,7 +24,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/wm_ipc.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #endif
 
 using std::vector;
@@ -38,12 +38,13 @@ const int ExtensionPopup::kMinHeight = 25;
 const int ExtensionPopup::kMaxWidth = 800;
 const int ExtensionPopup::kMaxHeight = 600;
 
-ExtensionPopup::ExtensionPopup(ExtensionHost* host,
-                               views::Widget* frame,
-                               const gfx::Rect& relative_to,
-                               BubbleBorder::ArrowLocation arrow_location,
-                               bool inspect_with_devtools,
-                               Observer* observer)
+ExtensionPopup::ExtensionPopup(
+    ExtensionHost* host,
+    views::Widget* frame,
+    const gfx::Rect& relative_to,
+    views::BubbleBorder::ArrowLocation arrow_location,
+    bool inspect_with_devtools,
+    Observer* observer)
     : BrowserBubble(host->view(),
                     frame,
                     relative_to,
@@ -129,7 +130,7 @@ void ExtensionPopup::Observe(int type,
         if (inspect_with_devtools_) {
           // Listen for the the devtools window closing.
           registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-              Source<Profile>(extension_host_->profile()));
+              Source<content::BrowserContext>(extension_host_->profile()));
           DevToolsWindow::ToggleDevToolsWindow(
               extension_host_->render_view_host(),
               DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
@@ -176,7 +177,7 @@ ExtensionPopup* ExtensionPopup::Show(
     const GURL& url,
     Browser* browser,
     const gfx::Rect& relative_to,
-    BubbleBorder::ArrowLocation arrow_location,
+    views::BubbleBorder::ArrowLocation arrow_location,
     bool inspect_with_devtools,
     Observer* observer) {
   ExtensionProcessManager* manager =

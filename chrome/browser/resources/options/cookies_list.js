@@ -26,7 +26,7 @@ cr.define('options', function() {
                    ['accessed', 'label_cookie_last_accessed'] ],
     'database': [ ['name', 'label_cookie_name'],
                   ['desc', 'label_webdb_desc'],
-                  ['webdbSize', 'label_local_storage_size'],
+                  ['size', 'label_local_storage_size'],
                   ['modified', 'label_local_storage_last_modified'] ],
     'local_storage': [ ['origin', 'label_local_storage_origin'],
                        ['size', 'label_local_storage_size'],
@@ -55,6 +55,24 @@ cr.define('options', function() {
     if (height && height.substr(-2) == 'px')
       return parseInt(height.substr(0, height.length - 2));
     return item.getBoundingClientRect().height;
+  }
+
+  /**
+   * Create tree nodes for the objects in the data array, and insert them all
+   * into the given list using its @{code splice} method at the given index.
+   * @param {Array.<Object>} data The data objects for the nodes to add.
+   * @param {number} start The index at which to start inserting the nodes.
+   * @return {Array.<CookieTreeNode>} An array of CookieTreeNodes added.
+   */
+  function spliceTreeNodes(data, start, list) {
+    var nodes = data.map(function(x) { return new CookieTreeNode(x); });
+    // Insert [start, 0] at the beginning of the array of nodes, making it
+    // into the arguments we want to pass to @{code list.splice} below.
+    nodes.splice(0, 0, start, 0);
+    list.splice.apply(list, nodes);
+    // Remove the [start, 0] prefix and return the array of nodes.
+    nodes.splice(0, 2);
+    return nodes;
   }
 
   var parentLookup = {};
@@ -101,6 +119,8 @@ cr.define('options', function() {
       this.siteChild.className = 'cookie-site';
       this.dataChild = this.ownerDocument.createElement('div');
       this.dataChild.className = 'cookie-data';
+      this.sizeChild = this.ownerDocument.createElement('div');
+      this.sizeChild.className = 'cookie-size';
       this.itemsChild = this.ownerDocument.createElement('div');
       this.itemsChild.className = 'cookie-items';
       this.infoChild = this.ownerDocument.createElement('div');
@@ -113,6 +133,7 @@ cr.define('options', function() {
       var content = this.contentElement;
       content.appendChild(this.siteChild);
       content.appendChild(this.dataChild);
+      content.appendChild(this.sizeChild);
       content.appendChild(this.itemsChild);
       this.itemsChild.appendChild(this.infoChild);
       if (this.origin && this.origin.data) {
@@ -232,6 +253,10 @@ cr.define('options', function() {
         else
           text = list[i];
       this.dataChild.textContent = text;
+      if (info.quota && info.quota.totalUsage) {
+        this.sizeChild.textContent = info.quota.totalUsage;
+      }
+
       if (this.expanded)
         this.updateItems_();
     },
@@ -333,15 +358,15 @@ cr.define('options', function() {
 
   CookieTreeNode.prototype = {
     /**
-     * Insert a cookie tree node at the given index.
+     * Insert the given list of cookie tree nodes at the given index.
      * Both CookiesList and CookieTreeNode implement this API.
-     * @param {Object} data The data object for the node to add.
-     * @param {number} index The index at which to insert the node.
+     * @param {Array.<Object>} data The data objects for the nodes to add.
+     * @param {number} start The index at which to start inserting the nodes.
      */
-    insertAt: function(data, index) {
-      var child = new CookieTreeNode(data);
-      this.children.splice(index, 0, child);
-      child.parent = this;
+    insertAt: function(data, start) {
+      var nodes = spliceTreeNodes(data, start, this.children);
+      for (var i = 0; i < nodes.length; i++)
+        nodes[i].parent = this;
       this.updateOrigin();
     },
 
@@ -412,18 +437,21 @@ cr.define('options', function() {
         for (var i = 0; i < this.children.length; ++i)
           this.children[i].collectSummaryInfo(info);
       } else if (this.data && !this.data.hasChildren) {
-        if (this.data.type == 'cookie')
+        if (this.data.type == 'cookie') {
           info.cookies++;
-        else if (this.data.type == 'database')
+        } else if (this.data.type == 'database') {
           info.database = true;
-        else if (this.data.type == 'local_storage')
+        } else if (this.data.type == 'local_storage') {
           info.localStorage = true;
-        else if (this.data.type == 'app_cache')
+        } else if (this.data.type == 'app_cache') {
           info.appCache = true;
-        else if (this.data.type == 'indexed_db')
+        } else if (this.data.type == 'indexed_db') {
           info.indexedDb = true;
-        else if (this.data.type == 'file_system')
+        } else if (this.data.type == 'file_system') {
           info.fileSystem = true;
+        } else if (this.data.type == 'quota') {
+          info.quota = this.data;
+        }
       }
     },
 
@@ -456,6 +484,8 @@ cr.define('options', function() {
             text = localStrings.getString('cookie_file_system');
             break;
         }
+        if (!text)
+          return;
         var div = item.ownerDocument.createElement('div');
         div.className = 'cookie-item';
         // Help out screen readers and such: this is a clickable thing.
@@ -718,13 +748,13 @@ cr.define('options', function() {
     },
 
     /**
-     * Insert a cookie tree node at the given index.
+     * Insert the given list of cookie tree nodes at the given index.
      * Both CookiesList and CookieTreeNode implement this API.
-     * @param {Object} data The data object for the node to add.
-     * @param {number} index The index at which to insert the node.
+     * @param {Array.<Object>} data The data objects for the nodes to add.
+     * @param {number} start The index at which to start inserting the nodes.
      */
-    insertAt: function(data, index) {
-      this.dataModel.splice(index, 0, new CookieTreeNode(data));
+    insertAt: function(data, start) {
+      spliceTreeNodes(data, start, this.dataModel);
     },
 
     /**
@@ -751,10 +781,8 @@ cr.define('options', function() {
 
     /**
      * Add tree nodes by given parent.
-     * Note: this method will be O(n^2) in the general case. Use it only to
-     * populate an empty parent or to insert single nodes to avoid this.
      * @param {Object} parent The parent node.
-     * @param {number} start Start index of where to insert nodes.
+     * @param {number} start The index at which to start inserting the nodes.
      * @param {Array} nodesData Nodes data array.
      * @private
      */
@@ -763,8 +791,7 @@ cr.define('options', function() {
         return;
 
       parent.startBatchUpdates();
-      for (var i = 0; i < nodesData.length; ++i)
-        parent.insertAt(nodesData[i], start + i);
+      parent.insertAt(nodesData, start);
       parent.endBatchUpdates();
 
       cr.dispatchSimpleEvent(this, 'change');
@@ -773,10 +800,8 @@ cr.define('options', function() {
     /**
      * Add tree nodes by parent id.
      * This is used by cookies_view.js.
-     * Note: this method will be O(n^2) in the general case. Use it only to
-     * populate an empty parent or to insert single nodes to avoid this.
      * @param {string} parentId Id of the parent node.
-     * @param {number} start Start index of where to insert nodes.
+     * @param {number} start The index at which to start inserting the nodes.
      * @param {Array} nodesData Nodes data array.
      */
     addByParentId: function(parentId, start, nodesData) {
@@ -788,7 +813,7 @@ cr.define('options', function() {
      * Removes tree nodes by parent id.
      * This is used by cookies_view.js.
      * @param {string} parentId Id of the parent node.
-     * @param {number} start Start index of nodes to remove.
+     * @param {number} start The index at which to start removing the nodes.
      * @param {number} count Number of nodes to remove.
      */
     removeByParentId: function(parentId, start, count) {

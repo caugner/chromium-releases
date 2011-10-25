@@ -5,12 +5,13 @@
 #include "base/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -33,30 +34,31 @@ class TestHtmlDialogUIDelegate : public HtmlDialogUIDelegate {
   virtual ~TestHtmlDialogUIDelegate() {}
 
   // HTMLDialogUIDelegate implementation:
-  virtual bool IsDialogModal() const {
+  virtual bool IsDialogModal() const OVERRIDE {
     return true;
   }
-  virtual std::wstring GetDialogTitle() const {
-    return std::wstring(L"Test");
+  virtual string16 GetDialogTitle() const OVERRIDE {
+    return ASCIIToUTF16("Test");
   }
-  virtual GURL GetDialogContentURL() const {
+  virtual GURL GetDialogContentURL() const OVERRIDE {
     return GURL(chrome::kChromeUIChromeURLsURL);
   }
   virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const { }
-  virtual void GetDialogSize(gfx::Size* size) const {
+      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE { }
+  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE {
     size->set_width(40);
     size->set_height(40);
   }
-  virtual std::string GetDialogArgs() const {
+  virtual std::string GetDialogArgs() const OVERRIDE {
     return std::string();
   }
-  virtual void OnDialogClosed(const std::string& json_retval) { }
-  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog) {
+  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE { }
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog)
+      OVERRIDE {
     if (out_close_dialog)
       *out_close_dialog = true;
   }
-  virtual bool ShouldShowDialogTitle() const { return true; }
+  virtual bool ShouldShowDialogTitle() const OVERRIDE { return true; }
 };
 
 }  // namespace
@@ -151,8 +153,8 @@ IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, MAYBE_SizeWindow) {
   actual_bounds = html_view->GetWidget()->GetClientAreaScreenBounds();
   EXPECT_EQ(set_bounds, actual_bounds);
 
-  rwhv_bounds =
-      html_view->tab_contents()->GetRenderWidgetHostView()->GetViewBounds();
+  rwhv_bounds = html_view->dom_contents()->tab_contents()->
+      GetRenderWidgetHostView()->GetViewBounds();
   EXPECT_LT(0, rwhv_bounds.width());
   EXPECT_LT(0, rwhv_bounds.height());
   EXPECT_GE(set_bounds.width(), rwhv_bounds.width());
@@ -167,8 +169,8 @@ IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, MAYBE_SizeWindow) {
   actual_bounds = html_view->GetWidget()->GetClientAreaScreenBounds();
   EXPECT_EQ(set_bounds, actual_bounds);
 
-  rwhv_bounds =
-      html_view->tab_contents()->GetRenderWidgetHostView()->GetViewBounds();
+  rwhv_bounds = html_view->dom_contents()->tab_contents()->
+      GetRenderWidgetHostView()->GetViewBounds();
   EXPECT_LT(0, rwhv_bounds.width());
   EXPECT_LT(0, rwhv_bounds.height());
   EXPECT_GE(set_bounds.width(), rwhv_bounds.width());
@@ -183,8 +185,8 @@ IN_PROC_BROWSER_TEST_F(HtmlDialogBrowserTest, MAYBE_SizeWindow) {
   actual_bounds = html_view->GetWidget()->GetClientAreaScreenBounds();
   EXPECT_EQ(set_bounds, actual_bounds);
 
-  rwhv_bounds =
-      html_view->tab_contents()->GetRenderWidgetHostView()->GetViewBounds();
+  rwhv_bounds = html_view->dom_contents()->tab_contents()->
+      GetRenderWidgetHostView()->GetViewBounds();
   EXPECT_LT(0, rwhv_bounds.width());
   EXPECT_LT(0, rwhv_bounds.height());
   EXPECT_GE(set_bounds.width(), rwhv_bounds.width());

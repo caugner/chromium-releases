@@ -18,8 +18,8 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/surface/transport_dib.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
 #include "webkit/plugins/npapi/webplugin_delegate.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_MACOSX)
 #include "base/hash_tables.h"
@@ -114,7 +114,6 @@ class WebPluginDelegateProxy
   virtual void DidReceiveManualData(const char* buffer, int length);
   virtual void DidFinishManualLoading();
   virtual void DidManualLoadFail();
-  virtual void InstallMissingPlugin();
   virtual webkit::npapi::WebPluginResourceClient* CreateResourceClient(
       unsigned long resource_id, const GURL& url, int notify_id);
   virtual webkit::npapi::WebPluginResourceClient* CreateSeekableResourceClient(
@@ -147,13 +146,13 @@ class WebPluginDelegateProxy
   void OnCancelResource(int id);
   void OnInvalidateRect(const gfx::Rect& rect, bool allow_buffer_flipping);
   void OnGetWindowScriptNPObject(int route_id, bool* success);
+  void OnResolveProxy(const GURL& url, bool* result, std::string* proxy_list);
   void OnGetPluginElement(int route_id, bool* success);
   void OnSetCookie(const GURL& url,
                    const GURL& first_party_for_cookies,
                    const std::string& cookie);
   void OnGetCookies(const GURL& url, const GURL& first_party_for_cookies,
                     std::string* cookies);
-  void OnMissingPluginStatus(int status);
   void OnCancelDocumentLoad();
   void OnInitiateHTTPRangeRequest(const std::string& url,
                                   const std::string& range_info,
@@ -264,7 +263,7 @@ class WebPluginDelegateProxy
   scoped_refptr<PluginChannelHost> channel_host_;
   std::string mime_type_;
   int instance_id_;
-  webkit::npapi::WebPluginInfo info_;
+  webkit::WebPluginInfo info_;
 
   gfx::Rect plugin_rect_;
   gfx::Rect clip_rect_;

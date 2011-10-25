@@ -21,6 +21,7 @@
 #include "content/common/child_process_info.h"
 #include "content/common/debug_flags.h"
 #include "sandbox/src/sandbox.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 static sandbox::BrokerServices* g_broker_services = NULL;
 
@@ -68,7 +69,6 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"rlhook.dll",                  // Trustware Bufferzone.
   L"rooksdol.dll",                // Trustware Rapport.
   L"rpchromebrowserrecordhelper.dll",  // RealPlayer.
-  L"rpmainbrowserrecordplugin.dll",    // RealPlayer.
   L"r3hook.dll",                  // Kaspersky Internet Security.
   L"sahook.dll",                  // McAfee Site Advisor.
   L"sbrige.dll",                  // Unknown.
@@ -80,10 +80,19 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"syncor11.dll",                // SynthCore Midi interface.
   L"systools.dll",                // Panda Antivirus.
   L"tfwah.dll",                   // Threatfire (PC tools).
-  L"ycwebcamerasource.ax",        // Cyberlink Camera helper.
   L"wblind.dll",                  // Stardock Object desktop.
   L"wbhelp.dll",                  // Stardock Object desktop.
   L"winstylerthemehelper.dll"     // Tuneup utilities 2006.
+};
+
+// The DLLs listed here are known (or under strong suspicion) of causing crashes
+// when they are loaded in the plugin process.
+const wchar_t* const kTroublesomePluginDlls[] = {
+  L"rpmainbrowserrecordplugin.dll",      // RealPlayer.
+  L"rpchromebrowserrecordhelper.dll",    // RealPlayer.
+  L"rpchrome10browserrecordhelper.dll",  // RealPlayer.
+  L"ycwebcamerasource.ax"                // Cyberlink Camera helper.
+  L"CLRGL.ax"                            // Cyberlink Camera helper.
 };
 
 // Adds the policy rules for the path and path\ with the semantic |access|.
@@ -155,31 +164,38 @@ bool IsExpandedModuleName(HMODULE module, const wchar_t* module_name) {
 }
 
 // Adds a single dll by |module_name| into the |policy| blacklist.
-// To minimize the list we only add an unload policy only if the dll is
-// also loaded in this process. All the injected dlls of interest do this.
+// If |check_in_browser| is true we only add an unload policy only if the dll
+// is also loaded in this process.
 void BlacklistAddOneDll(const wchar_t* module_name,
+                        bool check_in_browser,
                         sandbox::TargetPolicy* policy) {
-  HMODULE module = ::GetModuleHandleW(module_name);
+  HMODULE module = check_in_browser ? ::GetModuleHandleW(module_name) : NULL;
   if (!module) {
-    // The module could have been loaded with a 8.3 short name. We use
-    // the most common case: 'thelongname.dll' becomes 'thelon~1.dll'.
+    // The module could have been loaded with a 8.3 short name. We check
+    // the three most common cases: 'thelongname.dll' becomes
+    // 'thelon~1.dll', 'thelon~2.dll' and 'thelon~3.dll'.
     std::wstring name(module_name);
     size_t period = name.rfind(L'.');
     DCHECK_NE(std::string::npos, period);
     DCHECK_LE(3U, (name.size() - period));
     if (period <= 8)
       return;
-    std::wstring alt_name = name.substr(0, 6) + L"~1";
-    alt_name += name.substr(period, name.size());
-    module = ::GetModuleHandleW(alt_name.c_str());
-    if (!module)
-      return;
-    // We found it, but because it only has 6 significant letters, we
-    // want to make sure it is the right one.
-    if (!IsExpandedModuleName(module, module_name))
-      return;
-    // Found a match. We add both forms to the policy.
-    policy->AddDllToUnload(alt_name.c_str());
+    for (int ix = 0; ix < 3; ++ix) {
+      const wchar_t suffix[] = {'~', ('1' + ix), 0};
+      std::wstring alt_name = name.substr(0, 6) + suffix;
+      alt_name += name.substr(period, name.size());
+      if (check_in_browser) {
+        module = ::GetModuleHandleW(alt_name.c_str());
+        if (!module)
+          return;
+        // We found it, but because it only has 6 significant letters, we
+        // want to make sure it is the right one.
+        if (!IsExpandedModuleName(module, module_name))
+          return;
+      }
+      // Found a match. We add both forms to the policy.
+      policy->AddDllToUnload(alt_name.c_str());
+    }
   }
   policy->AddDllToUnload(module_name);
   VLOG(1) << "dll to unload found: " << module_name;
@@ -189,9 +205,16 @@ void BlacklistAddOneDll(const wchar_t* module_name,
 // Adds policy rules for unloaded the known dlls that cause chrome to crash.
 // Eviction of injected DLLs is done by the sandbox so that the injected module
 // does not get a chance to execute any code.
-void AddDllEvictionPolicy(sandbox::TargetPolicy* policy) {
+void AddGenericDllEvictionPolicy(sandbox::TargetPolicy* policy) {
   for (int ix = 0; ix != arraysize(kTroublesomeDlls); ++ix)
-    BlacklistAddOneDll(kTroublesomeDlls[ix], policy);
+    BlacklistAddOneDll(kTroublesomeDlls[ix], true, policy);
+}
+
+// Same as AddGenericDllEvictionPolicy but specifically for plugins. In this
+// case we add the blacklisted dlls even if they are not loaded in this process.
+void AddPluginDllEvictionPolicy(sandbox::TargetPolicy* policy) {
+  for (int ix = 0; ix != arraysize(kTroublesomePluginDlls); ++ix)
+    BlacklistAddOneDll(kTroublesomePluginDlls[ix], false, policy);
 }
 
 // Returns the object path prepended with the current logon session.
@@ -216,10 +239,11 @@ string16 PrependWindowsSessionPath(const char16* object) {
 // Closes handles that are opened at process creation and initialization.
 void AddBaseHandleClosePolicy(sandbox::TargetPolicy* policy) {
   // Being able to manipulate anything BaseNamedObjects is bad.
-  policy->AddKernelObjectToClose(L"Directory", PrependWindowsSessionPath(
-      L"\\BaseNamedObjects").data());
-  policy->AddKernelObjectToClose(L"Section", PrependWindowsSessionPath(
-      L"\\BaseNamedObjects\\windows_shell_global_counters").data());
+  string16 object_path = PrependWindowsSessionPath(L"\\BaseNamedObjects");
+  policy->AddKernelObjectToClose(L"Directory", object_path.data());
+  object_path = PrependWindowsSessionPath(
+      L"\\BaseNamedObjects\\windows_shell_global_counters");
+  policy->AddKernelObjectToClose(L"Section", object_path.data());
 }
 
 // Adds the generic policy rules to a sandbox TargetPolicy.
@@ -270,19 +294,35 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
 // desktop.
 // TODO(cpu): Lock down the sandbox more if possible.
 // TODO(apatrick): Use D3D9Ex to render windowless.
-bool AddPolicyForGPU(CommandLine*, sandbox::TargetPolicy* policy) {
-  policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
-
+bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
   if (base::win::GetVersion() > base::win::VERSION_XP) {
     policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
                           sandbox::USER_LIMITED);
-    policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+    if (cmd_line->GetSwitchValueASCII(switches::kUseGL) ==
+        gfx::kGLImplementationDesktopName) {
+      policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
+      policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+    } else {
+      // UI restrictions break when we access Windows from outside our job.
+      // However, we don't want a proxy window in this process because it can
+      // introduce deadlocks where the renderer blocks on the gpu, which in
+      // turn blocks on the browser UI thread. So, instead we forgo a window
+      // message pump entirely and just add job restrictions to prevent child
+      // processes.
+      policy->SetJobLevel(sandbox::JOB_LIMITED_USER,
+                          JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS |
+                          JOB_OBJECT_UILIMIT_DESKTOP |
+                          JOB_OBJECT_UILIMIT_EXITWINDOWS |
+                          JOB_OBJECT_UILIMIT_DISPLAYSETTINGS);
+      policy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+    }
   } else {
+    policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
     policy->SetTokenLevel(sandbox::USER_UNPROTECTED,
                           sandbox::USER_LIMITED);
   }
 
-  AddDllEvictionPolicy(policy);
+  AddGenericDllEvictionPolicy(policy);
   return true;
 }
 
@@ -306,7 +346,7 @@ void AddPolicyForRenderer(sandbox::TargetPolicy* policy) {
     DLOG(WARNING) << "Failed to apply desktop security to the renderer";
   }
 
-  AddDllEvictionPolicy(policy);
+  AddGenericDllEvictionPolicy(policy);
 }
 
 // The Pepper process as locked-down as a renderer execpt that it can
@@ -433,7 +473,8 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   }
 
   if (type == ChildProcessInfo::PLUGIN_PROCESS) {
-    AddDllEvictionPolicy(policy);
+    AddGenericDllEvictionPolicy(policy);
+    AddPluginDllEvictionPolicy(policy);
   } else if (type == ChildProcessInfo::GPU_PROCESS) {
     if (!AddPolicyForGPU(cmd_line, policy))
       return 0;
@@ -489,6 +530,26 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
 
   if (sandbox::SBOX_ALL_OK != result)
     return 0;
+
+  // For Native Client sel_ldr processes on 32-bit Windows, reserve 1 GB of
+  // address space to prevent later failure due to address space fragmentation
+  // from .dll loading. The NaCl process will attempt to locate this space by
+  // scanning the address space using VirtualQuery.
+  // TODO(bbudge) Handle the --no-sandbox case.
+  // http://code.google.com/p/nativeclient/issues/detail?id=2131
+  if (type == ChildProcessInfo::NACL_LOADER_PROCESS &&
+      (base::win::OSInfo::GetInstance()->wow64_status() ==
+          base::win::OSInfo::WOW64_DISABLED)) {
+    const SIZE_T kOneGigabyte = 1 << 30;
+    void *nacl_mem = VirtualAllocEx(target.hProcess,
+                                    NULL,
+                                    kOneGigabyte,
+                                    MEM_RESERVE,
+                                    PAGE_NOACCESS);
+    if (!nacl_mem) {
+      DLOG(WARNING) << "Failed to reserve address space for Native Client";
+    }
+  }
 
   ResumeThread(target.hThread);
   CloseHandle(target.hThread);

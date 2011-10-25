@@ -7,7 +7,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/testing_pref_service.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "content/common/notification_observer_mock.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
@@ -154,7 +154,7 @@ TEST_F(PrefNotifierTest, AddAndRemovePrefObservers) {
 }
 
 TEST_F(PrefNotifierTest, FireObservers) {
-  FundamentalValue value_true(true);
+  base::FundamentalValue value_true(true);
   PrefNotifierImpl notifier(&pref_service_);
   notifier.AddPrefObserver(kChangedPref, &obs1_);
   notifier.AddPrefObserver(kUnchangedPref, &obs1_);

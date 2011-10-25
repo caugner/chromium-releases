@@ -14,6 +14,10 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 
+namespace base {
+class DictionaryValue;
+}  // namespace
+
 namespace browser_sync {
 
 enum ModelSafeGroup {
@@ -51,12 +55,6 @@ class ModelSafeWorker : public base::RefCountedThreadSafe<ModelSafeWorker> {
 
   virtual ModelSafeGroup GetModelSafeGroup();
 
-  // Check the current thread and see if it's the thread associated with
-  // this worker.  If this returns true, then it should be safe to operate
-  // on models that are in this worker's group.  If this returns false,
-  // such work should not be attempted.
-  virtual bool CurrentThreadIsWorkThread();
-
  private:
   friend class base::RefCountedThreadSafe<ModelSafeWorker>;
 
@@ -68,6 +66,16 @@ class ModelSafeWorker : public base::RefCountedThreadSafe<ModelSafeWorker> {
 // disabling sync for certain types, as well as model association completions.
 typedef std::map<syncable::ModelType, ModelSafeGroup>
     ModelSafeRoutingInfo;
+
+// Caller takes ownership of return value.
+base::DictionaryValue* ModelSafeRoutingInfoToValue(
+    const ModelSafeRoutingInfo& routing_info);
+
+std::string ModelSafeRoutingInfoToString(
+    const ModelSafeRoutingInfo& routing_info);
+
+syncable::ModelTypeSet GetRoutingInfoTypes(
+    const ModelSafeRoutingInfo& routing_info);
 
 ModelSafeGroup GetGroupForModelType(const syncable::ModelType type,
                                     const ModelSafeRoutingInfo& routes);

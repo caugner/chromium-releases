@@ -11,11 +11,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
+#include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/url_request_info_impl.h"
 #include "ppapi/thunk/ppb_url_loader_api.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
 #include "webkit/plugins/ppapi/callbacks.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/resource.h"
 
 namespace WebKit {
 class WebFrame;
@@ -25,22 +26,19 @@ class WebURL;
 namespace webkit {
 namespace ppapi {
 
-class PluginInstance;
 class PPB_URLRequestInfo_Impl;
 class PPB_URLResponseInfo_Impl;
 
-class PPB_URLLoader_Impl : public Resource,
+class PPB_URLLoader_Impl : public ::ppapi::Resource,
                            public ::ppapi::thunk::PPB_URLLoader_API,
                            public WebKit::WebURLLoaderClient {
  public:
-  PPB_URLLoader_Impl(PluginInstance* instance, bool main_document_loader);
+  PPB_URLLoader_Impl(PP_Instance instance, bool main_document_loader);
   virtual ~PPB_URLLoader_Impl();
 
-  // ResourceObjectBase overrides.
-  virtual ::ppapi::thunk::PPB_URLLoader_API* AsPPB_URLLoader_API() OVERRIDE;
-
   // Resource overrides.
-  virtual void ClearInstance() OVERRIDE;
+  virtual ::ppapi::thunk::PPB_URLLoader_API* AsPPB_URLLoader_API() OVERRIDE;
+  virtual void InstanceWasDeleted() OVERRIDE;
 
   // PPB_URLLoader_API implementation.
   virtual int32_t Open(PP_Resource request_id,
@@ -119,13 +117,30 @@ class PPB_URLLoader_Impl : public Resource,
   bool RecordDownloadProgress() const;
   bool RecordUploadProgress() const;
 
+  // Calls SetDefersLoading on the current load. This encapsulates the logic
+  // differences between document loads and regular ones.
+  void SetDefersLoading(bool defers_loading);
+
   void FinishLoading(int32_t done_status);
 
   // If true, then the plugin instance is a full-frame plugin and we're just
   // wrapping the main document's loader (i.e. loader_ is null).
   bool main_document_loader_;
+
+  // Keep a copy of the request data. We specifically do this instead of
+  // keeping a reference to the request resource, because the plugin might
+  // change the request info resource out from under us.
+  ::ppapi::PPB_URLRequestInfo_Data request_data_;
+
+  // The loader associated with this request. MAY BE NULL.
+  //
+  // This will be NULL if the load hasn't been opened yet, or if this is a main
+  // document loader (when registered as a mime type). Therefore, you should
+  // always NULL check this value before using it. In the case of a main
+  // document load, you would call the functions on the document to cancel the
+  // load, etc. since there is no loader.
   scoped_ptr<WebKit::WebURLLoader> loader_;
-  scoped_refptr<PPB_URLRequestInfo_Impl> request_info_;
+
   scoped_refptr<PPB_URLResponseInfo_Impl> response_info_;
   scoped_refptr<TrackedCompletionCallback> pending_callback_;
   std::deque<char> buffer_;

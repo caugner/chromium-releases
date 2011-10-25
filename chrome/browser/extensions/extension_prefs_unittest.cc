@@ -148,7 +148,7 @@ class ExtensionPrefsToolbarOrder : public ExtensionPrefsTest {
 TEST_F(ExtensionPrefsToolbarOrder, ToolbarOrder) {}
 
 
-// Tests the GetExtensionState/SetExtensionState functions.
+// Tests the IsExtensionDisabled/SetExtensionState functions.
 class ExtensionPrefsExtensionState : public ExtensionPrefsTest {
  public:
   virtual void Initialize() {
@@ -157,7 +157,7 @@ class ExtensionPrefsExtensionState : public ExtensionPrefsTest {
   }
 
   virtual void Verify() {
-    EXPECT_EQ(Extension::DISABLED, prefs()->GetExtensionState(extension->id()));
+    EXPECT_TRUE(prefs()->IsExtensionDisabled(extension->id()));
   }
 
  private:
@@ -219,32 +219,32 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
 
     ExtensionAPIPermissionSet empty_set;
     URLPatternSet empty_extent;
-    scoped_ptr<ExtensionPermissionSet> permissions;
-    scoped_ptr<ExtensionPermissionSet> granted_permissions;
+    scoped_refptr<ExtensionPermissionSet> permissions;
+    scoped_refptr<ExtensionPermissionSet> granted_permissions;
 
     // Make sure both granted api and host permissions start empty.
-    granted_permissions.reset(
-        prefs()->GetGrantedPermissions(extension_id_));
+    granted_permissions =
+        prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_TRUE(granted_permissions->IsEmpty());
 
-    permissions.reset(new ExtensionPermissionSet(
-        api_perm_set1_, empty_extent, empty_extent));
+    permissions = new ExtensionPermissionSet(
+        api_perm_set1_, empty_extent, empty_extent);
 
     // Add part of the api permissions.
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
-    granted_permissions.reset(prefs()->GetGrantedPermissions(extension_id_));
+    granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_TRUE(granted_permissions.get());
     EXPECT_FALSE(granted_permissions->IsEmpty());
     EXPECT_EQ(expected_apis, granted_permissions->apis());
     EXPECT_TRUE(granted_permissions->effective_hosts().is_empty());
     EXPECT_FALSE(granted_permissions->HasEffectiveFullAccess());
-    granted_permissions.reset();
+    granted_permissions = NULL;
 
     // Add part of the explicit host permissions.
-    permissions.reset(new ExtensionPermissionSet(
-        empty_set, ehost_perm_set1_, empty_extent));
+    permissions = new ExtensionPermissionSet(
+        empty_set, ehost_perm_set1_, empty_extent);
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
-    granted_permissions.reset(prefs()->GetGrantedPermissions(extension_id_));
+    granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_FALSE(granted_permissions->IsEmpty());
     EXPECT_FALSE(granted_permissions->HasEffectiveFullAccess());
     EXPECT_EQ(expected_apis, granted_permissions->apis());
@@ -254,10 +254,10 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
               granted_permissions->effective_hosts());
 
     // Add part of the scriptable host permissions.
-    permissions.reset(new ExtensionPermissionSet(
-        empty_set, empty_extent, shost_perm_set1_));
+    permissions = new ExtensionPermissionSet(
+        empty_set, empty_extent, shost_perm_set1_);
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
-    granted_permissions.reset(prefs()->GetGrantedPermissions(extension_id_));
+    granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_FALSE(granted_permissions->IsEmpty());
     EXPECT_FALSE(granted_permissions->HasEffectiveFullAccess());
     EXPECT_EQ(expected_apis, granted_permissions->apis());
@@ -271,15 +271,15 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     EXPECT_EQ(effective_permissions_, granted_permissions->effective_hosts());
 
     // Add the rest of both the permissions.
-    permissions.reset(new ExtensionPermissionSet(
-       api_perm_set2_, ehost_perm_set2_, shost_perm_set2_));
+    permissions = new ExtensionPermissionSet(
+       api_perm_set2_, ehost_perm_set2_, shost_perm_set2_);
 
     std::set_union(expected_apis.begin(), expected_apis.end(),
                    api_perm_set2_.begin(), api_perm_set2_.end(),
                    std::inserter(api_permissions_, api_permissions_.begin()));
 
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
-    granted_permissions.reset(prefs()->GetGrantedPermissions(extension_id_));
+    granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_TRUE(granted_permissions.get());
     EXPECT_FALSE(granted_permissions->IsEmpty());
     EXPECT_EQ(api_permissions_, granted_permissions->apis());
@@ -294,7 +294,7 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
   }
 
   virtual void Verify() {
-    scoped_ptr<ExtensionPermissionSet> permissions(
+    scoped_refptr<ExtensionPermissionSet> permissions(
         prefs()->GetGrantedPermissions(extension_id_));
     EXPECT_TRUE(permissions.get());
     EXPECT_FALSE(permissions->HasEffectiveFullAccess());
@@ -320,6 +320,54 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
   URLPatternSet effective_permissions_;
 };
 TEST_F(ExtensionPrefsGrantedPermissions, GrantedPermissions) {}
+
+// Tests the SetActivePermissions / GetActivePermissions functions.
+class ExtensionPrefsActivePermissions : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() {
+    extension_id_ = prefs_.AddExtensionAndReturnId("test");
+
+    ExtensionAPIPermissionSet api_perms;
+    api_perms.insert(ExtensionAPIPermission::kTab);
+    api_perms.insert(ExtensionAPIPermission::kBookmark);
+    api_perms.insert(ExtensionAPIPermission::kHistory);
+
+    URLPatternSet ehosts;
+    AddPattern(&ehosts, "http://*.google.com/*");
+    AddPattern(&ehosts, "http://example.com/*");
+    AddPattern(&ehosts, "chrome://favicon/*");
+
+    URLPatternSet shosts;
+    AddPattern(&shosts, "https://*.google.com/*");
+    AddPattern(&shosts, "http://reddit.com/r/test/*");
+
+    active_perms_ = new ExtensionPermissionSet(api_perms, ehosts, shosts);
+
+    // Make sure the active permissions start empty.
+    scoped_refptr<ExtensionPermissionSet> active(
+        prefs()->GetActivePermissions(extension_id_));
+    EXPECT_TRUE(active->IsEmpty());
+
+    // Set the active permissions.
+    prefs()->SetActivePermissions(extension_id_, active_perms_.get());
+    active = prefs()->GetActivePermissions(extension_id_);
+    EXPECT_EQ(active_perms_->apis(), active->apis());
+    EXPECT_EQ(active_perms_->explicit_hosts(), active->explicit_hosts());
+    EXPECT_EQ(active_perms_->scriptable_hosts(), active->scriptable_hosts());
+    EXPECT_EQ(*active_perms_, *active);
+  }
+
+  virtual void Verify() {
+    scoped_refptr<ExtensionPermissionSet> permissions(
+        prefs()->GetActivePermissions(extension_id_));
+    EXPECT_EQ(*active_perms_, *permissions);
+  }
+
+ private:
+  std::string extension_id_;
+  scoped_refptr<ExtensionPermissionSet> active_perms_;
+};
+TEST_F(ExtensionPrefsActivePermissions, SetAndGetActivePermissions) {}
 
 // Tests the GetVersionString function.
 class ExtensionPrefsVersionString : public ExtensionPrefsTest {
@@ -527,15 +575,13 @@ class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
  public:
   virtual void Initialize() {
     extension_ = prefs_.AddExtension("on_extension_installed");
-    EXPECT_EQ(Extension::ENABLED,
-              prefs()->GetExtensionState(extension_->id()));
+    EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
     prefs()->OnExtensionInstalled(
-        extension_.get(), Extension::DISABLED, false);
+        extension_.get(), Extension::DISABLED, false, -1);
   }
 
   virtual void Verify() {
-    EXPECT_EQ(Extension::DISABLED,
-              prefs()->GetExtensionState(extension_->id()));
+    EXPECT_TRUE(prefs()->IsExtensionDisabled(extension_->id()));
   }
 
  private:
@@ -548,27 +594,31 @@ class ExtensionPrefsAppLaunchIndex : public ExtensionPrefsTest {
  public:
   virtual void Initialize() {
     // No extensions yet.
-    EXPECT_EQ(0, prefs()->GetNextAppLaunchIndex());
+    EXPECT_EQ(0, prefs()->GetNextAppLaunchIndex(0));
 
-    extension_ = prefs_.AddExtension("on_extension_installed");
-    EXPECT_EQ(Extension::ENABLED,
-        prefs()->GetExtensionState(extension_->id()));
-    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED, false);
+    extension_ = prefs_.AddApp("on_extension_installed");
+    EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
+    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
+                                  false, -1);
   }
 
   virtual void Verify() {
     int launch_index = prefs()->GetAppLaunchIndex(extension_->id());
     // Extension should have been assigned a launch index > 0.
     EXPECT_GT(launch_index, 0);
-    EXPECT_EQ(launch_index + 1, prefs()->GetNextAppLaunchIndex());
+    EXPECT_EQ(launch_index + 1, prefs()->GetNextAppLaunchIndex(0));
     // Set a new launch index of one higher and verify.
     prefs()->SetAppLaunchIndex(extension_->id(),
-        prefs()->GetNextAppLaunchIndex());
+                               prefs()->GetNextAppLaunchIndex(0));
     int new_launch_index = prefs()->GetAppLaunchIndex(extension_->id());
     EXPECT_EQ(launch_index + 1, new_launch_index);
 
     // This extension doesn't exist, so it should return -1.
     EXPECT_EQ(-1, prefs()->GetAppLaunchIndex("foo"));
+
+    // The second page doesn't have any apps so its next launch index should
+    // still be 0.
+    EXPECT_EQ(prefs()->GetNextAppLaunchIndex(1), 0);
   }
 
  private:
@@ -579,36 +629,60 @@ TEST_F(ExtensionPrefsAppLaunchIndex, ExtensionPrefsAppLaunchIndex) {}
 class ExtensionPrefsPageIndex : public ExtensionPrefsTest {
  public:
   virtual void Initialize() {
-    extension_id_ = prefs_.AddExtensionAndReturnId("page_index");
+    extension_ = prefs_.AddApp("page_index");
+    // Install to page 3 (index 2).
+    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
+                                  false, 2);
+    EXPECT_EQ(2, prefs()->GetPageIndex(extension_->id()));
 
-    int page_index = prefs()->GetPageIndex(extension_id_);
-    // Extension should not have been assigned a page
-    EXPECT_EQ(page_index, -1);
-
-    // Set the page index
-    prefs()->SetPageIndex(extension_id_, 2);
+    scoped_refptr<Extension> extension2 = prefs_.AddApp("page_index_2");
+    // Install without any page preference.
+    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
+                                  false, -1);
+    EXPECT_EQ(0, prefs()->GetPageIndex(extension_->id()));
   }
 
   virtual void Verify() {
+    // Set the page index.
+    prefs()->SetPageIndex(extension_->id(), 1);
     // Verify the page index.
-    int page_index = prefs()->GetPageIndex(extension_id_);
-    EXPECT_EQ(page_index, 2);
+    EXPECT_EQ(1, prefs()->GetPageIndex(extension_->id()));
 
     // This extension doesn't exist, so it should return -1.
     EXPECT_EQ(-1, prefs()->GetPageIndex("foo"));
   }
 
  private:
-  std::string extension_id_;
+  scoped_refptr<Extension> extension_;
 };
 TEST_F(ExtensionPrefsPageIndex, ExtensionPrefsPageIndex) {}
+
+class ExtensionPrefsAppLocation : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() {
+    extension_ = prefs_.AddExtension("not_an_app");
+    // Non-apps should not have any app launch index or page index.
+    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
+                                  false, 0);
+  }
+
+  virtual void Verify() {
+    EXPECT_EQ(-1, prefs()->GetAppLaunchIndex(extension_->id()));
+    EXPECT_EQ(-1, prefs()->GetPageIndex(extension_->id()));
+  }
+
+ private:
+  scoped_refptr<Extension> extension_;
+};
+TEST_F(ExtensionPrefsAppLocation, ExtensionPrefsAppLocation) {}
 
 class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
  public:
   virtual void Initialize() {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->WasAppDraggedByUser(extension_->id()));
-    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED, false);
+    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
+                                  false, -1);
   }
 
   virtual void Verify() {
@@ -625,6 +699,42 @@ class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
   scoped_refptr<Extension> extension_;
 };
 TEST_F(ExtensionPrefsAppDraggedByUser, ExtensionPrefsAppDraggedByUser) {}
+
+class ExtensionPrefsFlags : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() {
+    {
+      base::DictionaryValue dictionary;
+      dictionary.SetString(extension_manifest_keys::kName, "from_webstore");
+      dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
+      webstore_extension_ = prefs_.AddExtensionWithManifestAndFlags(
+          dictionary, Extension::INTERNAL,
+          Extension::STRICT_ERROR_CHECKS | Extension::FROM_WEBSTORE);
+    }
+
+    {
+      base::DictionaryValue dictionary;
+      dictionary.SetString(extension_manifest_keys::kName, "from_bookmark");
+      dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
+      bookmark_extension_ = prefs_.AddExtensionWithManifestAndFlags(
+          dictionary, Extension::INTERNAL,
+          Extension::STRICT_ERROR_CHECKS | Extension::FROM_BOOKMARK);
+    }
+  }
+
+  virtual void Verify() {
+    EXPECT_TRUE(prefs()->IsFromWebStore(webstore_extension_->id()));
+    EXPECT_FALSE(prefs()->IsFromBookmark(webstore_extension_->id()));
+
+    EXPECT_TRUE(prefs()->IsFromBookmark(bookmark_extension_->id()));
+    EXPECT_FALSE(prefs()->IsFromWebStore(bookmark_extension_->id()));
+  }
+
+ private:
+  scoped_refptr<Extension> webstore_extension_;
+  scoped_refptr<Extension> bookmark_extension_;
+};
+TEST_F(ExtensionPrefsFlags, ExtensionPrefsFlags) {}
 
 namespace keys = extension_manifest_keys;
 
@@ -722,7 +832,7 @@ class ExtensionPrefsPreferencesBase : public ExtensionPrefsTest {
     Extension* extensions[] = {ext1_, ext2_, ext3_};
     for (int i = 0; i < 3; ++i) {
       if (ext == extensions[i] && !installed[i]) {
-        prefs()->OnExtensionInstalled(ext, Extension::ENABLED, false);
+        prefs()->OnExtensionInstalled(ext, Extension::ENABLED, false, -1);
         installed[i] = true;
         break;
       }
@@ -822,10 +932,21 @@ class ExtensionPrefsUninstallExtension
   virtual void Initialize() {
     InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
     InstallExtControlledPref(ext1_, kPref2, Value::CreateStringValue("val2"));
+    ExtensionContentSettingsStore* store = prefs()->content_settings_store();
+    ContentSettingsPattern pattern =
+        ContentSettingsPattern::FromString("http://[*.]example.com");
+    store->SetExtensionContentSetting(ext1_->id(),
+                                      pattern, pattern,
+                                      CONTENT_SETTINGS_TYPE_IMAGES,
+                                      std::string(),
+                                      CONTENT_SETTING_BLOCK,
+                                      kExtensionPrefsScopeRegular);
 
     UninstallExtension(ext1_->id());
   }
   virtual void Verify() {
+    EXPECT_EQ(NULL, prefs()->GetExtensionPref(ext1_->id()));
+
     std::string actual;
     actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ(kDefaultPref1, actual);

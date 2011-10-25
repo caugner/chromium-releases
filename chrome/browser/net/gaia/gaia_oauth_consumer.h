@@ -17,16 +17,18 @@ class GaiaOAuthConsumer {
   virtual ~GaiaOAuthConsumer() {}
 
   virtual void OnGetOAuthTokenSuccess(const std::string& oauth_token) {}
-  virtual void OnGetOAuthTokenFailure() {}
+  virtual void OnGetOAuthTokenFailure(const GoogleServiceAuthError& error) {}
 
   virtual void OnOAuthGetAccessTokenSuccess(const std::string& token,
                                             const std::string& secret) {}
   virtual void OnOAuthGetAccessTokenFailure(
       const GoogleServiceAuthError& error) {}
 
-  virtual void OnOAuthWrapBridgeSuccess(const std::string& token,
+  virtual void OnOAuthWrapBridgeSuccess(const std::string& service_scope,
+                                        const std::string& token,
                                         const std::string& expires_in) {}
-  virtual void OnOAuthWrapBridgeFailure(const GoogleServiceAuthError& error) {}
+  virtual void OnOAuthWrapBridgeFailure(const std::string& service_scope,
+                                        const GoogleServiceAuthError& error) {}
 
   virtual void OnUserInfoSuccess(const std::string& email) {}
   virtual void OnUserInfoFailure(const GoogleServiceAuthError& error) {}
@@ -35,6 +37,9 @@ class GaiaOAuthConsumer {
                                    const std::string& lsid,
                                    const std::string& auth) {}
   virtual void OnOAuthLoginFailure(const GoogleServiceAuthError& error) {}
+
+  virtual void OnOAuthRevokeTokenSuccess() {}
+  virtual void OnOAuthRevokeTokenFailure(const GoogleServiceAuthError& error) {}
 };
 
 #endif  // CHROME_BROWSER_NET_GAIA_GAIA_OAUTH_CONSUMER_H_

@@ -5,17 +5,17 @@
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_expanded_container.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
+#include "ui/base/gtk/gtk_expanded_container.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 
@@ -27,9 +27,6 @@ const int kElementPadding = 5;
 // Extra padding on either end of info bar.
 const int kLeftPadding = 5;
 const int kRightPadding = 5;
-
-// The total height of the info bar.
-const int kInfoBarHeight = 37;
 
 // Spacing between buttons.
 const int kButtonButtonSpacing = 3;
@@ -67,7 +64,6 @@ InfoBarGtk::InfoBarGtk(TabContentsWrapper* owner, InfoBarDelegate* delegate)
                    G_CALLBACK(OnBackgroundExposeThunk), this);
   gtk_container_add(GTK_CONTAINER(padding), hbox_);
   gtk_container_add(GTK_CONTAINER(bg_box_), padding);
-  gtk_widget_set_size_request(bg_box_, -1, kInfoBarHeight);
 
   // Add the icon on the left, if any.
   gfx::Image* icon = delegate->GetIcon();
@@ -113,7 +109,7 @@ int InfoBarGtk::AnimatingHeight() const {
 }
 
 GtkWidget* InfoBarGtk::CreateLabel(const std::string& text) {
-  return theme_service_->BuildLabel(text, gtk_util::kGdkBlack);
+  return theme_service_->BuildLabel(text, ui::kGdkBlack);
 }
 
 GtkWidget* InfoBarGtk::CreateLinkButton(const std::string& text) {
@@ -164,7 +160,7 @@ void InfoBarGtk::AddLabelWithInlineLink(const string16& display_text,
 }
 
 void InfoBarGtk::GetTopColor(InfoBarDelegate::Type type,
-                             double* r, double* g, double *b) {
+                             double* r, double* g, double* b) {
   SkColor color = theme_service_->UsingNativeTheme() ?
                   theme_service_->GetColor(ThemeService::COLOR_TOOLBAR) :
                   GetInfoBarTopColor(type);
@@ -174,7 +170,7 @@ void InfoBarGtk::GetTopColor(InfoBarDelegate::Type type,
 }
 
 void InfoBarGtk::GetBottomColor(InfoBarDelegate::Type type,
-                                double* r, double* g, double *b) {
+                                double* r, double* g, double* b) {
   SkColor color = theme_service_->UsingNativeTheme() ?
                   theme_service_->GetColor(ThemeService::COLOR_TOOLBAR) :
                   GetInfoBarBottomColor(type);
@@ -247,10 +243,10 @@ void InfoBarGtk::PlatformSpecificShow(bool animate) {
 }
 
 void InfoBarGtk::PlatformSpecificOnHeightsRecalculated() {
-  GtkRequisition req;
-  gtk_widget_size_request(bg_box_, &req);
+  gtk_widget_set_size_request(bg_box_, -1, bar_target_height());
   gtk_expanded_container_move(GTK_EXPANDED_CONTAINER(widget_.get()),
-                              bg_box_, 0, bar_height() - req.height);
+                              bg_box_, 0,
+                              bar_height() - bar_target_height());
 
   gtk_widget_set_size_request(widget_.get(), -1, bar_height());
   gtk_widget_queue_draw(widget_.get());

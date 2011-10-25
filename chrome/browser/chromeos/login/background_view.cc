@@ -12,7 +12,6 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/oobe_progress_bar.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
@@ -33,7 +32,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/x11_util.h"
@@ -47,6 +46,9 @@ using views::Widget;
 namespace {
 
 const SkColor kVersionColor = 0xff5c739f;
+
+// Tentative background color that matches WebUI login.
+const SkColor kBackgroundColor = 0xfffefefe;
 
 // Returns the corresponding step id for step constant.
 int GetStepId(size_t step) {
@@ -94,8 +96,8 @@ BackgroundView::~BackgroundView() {
 }
 
 void BackgroundView::Init(const GURL& background_url) {
-  views::Painter* painter = CreateBackgroundPainter();
-  set_background(views::Background::CreateBackgroundPainter(true, painter));
+  set_background(
+      views::Background::CreateSolidBackground(kBackgroundColor));
   InitStatusArea();
   InitInfoLabels();
   if (!background_url.is_empty()) {
@@ -154,7 +156,7 @@ views::Widget* BackgroundView::CreateWindowContainingView(
 
 void BackgroundView::CreateModalPopup(views::WidgetDelegate* view) {
   views::Widget* window = browser::CreateViewsWindow(
-      GetNativeWindow(), gfx::Rect(), view);
+      GetNativeWindow(), view);
   window->SetAlwaysOnTop(true);
   window->Show();
 }
@@ -288,11 +290,11 @@ void BackgroundView::OpenButtonOptions(const views::View* button_view) {
 }
 
 StatusAreaHost::ScreenMode BackgroundView::GetScreenMode() const {
-  return kLoginMode;
+  return kViewsLoginMode;
 }
 
 StatusAreaHost::TextStyle BackgroundView::GetTextStyle() const {
-  return kWhitePlain;
+  return kGrayPlain;
 }
 
 void BackgroundView::ButtonVisibilityChanged(views::View* button_view) {
@@ -309,12 +311,12 @@ void BackgroundView::OnLocaleChanged() {
 
 void BackgroundView::OnOSVersionLabelTextUpdated(
     const std::string& os_version_label_text) {
-  os_version_label_->SetText(ASCIIToWide(os_version_label_text));
+  os_version_label_->SetText(UTF8ToWide(os_version_label_text));
 }
 
 void BackgroundView::OnBootTimesLabelTextUpdated(
     const std::string& boot_times_label_text) {
-  boot_times_label_->SetText(ASCIIToWide(boot_times_label_text));
+  boot_times_label_->SetText(UTF8ToWide(boot_times_label_text));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

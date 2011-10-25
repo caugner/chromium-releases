@@ -14,12 +14,13 @@
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/interstitial_page.h"
@@ -246,12 +247,13 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FLAKY_BrowsersRememberFocus) {
   browser2->window()->Show();
   ui_test_utils::NavigateToURL(browser2, url);
 
-  HWND hwnd2 = reinterpret_cast<HWND>(browser2->window()->GetNativeHandle());
+  gfx::NativeWindow window2 = browser2->window()->GetNativeHandle();
   BrowserView* browser_view2 =
-      BrowserView::GetBrowserViewForNativeWindow(hwnd2);
+      BrowserView::GetBrowserViewForNativeWindow(window2);
   ASSERT_TRUE(browser_view2);
-  views::FocusManager* focus_manager2 =
-      views::FocusManager::GetFocusManagerForNativeView(hwnd2);
+  views::Widget* widget2 = views::Widget::GetWidgetForNativeWindow(window2);
+  ASSERT_TRUE(widget2);
+  views::FocusManager* focus_manager2 = widget2->GetFocusManager();
   ASSERT_TRUE(focus_manager2);
   EXPECT_EQ(browser_view2->GetTabContentsContainerView(),
             focus_manager2->GetFocusedView());
@@ -264,9 +266,9 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FLAKY_BrowsersRememberFocus) {
 
   // Switch back to the second browser, focus should still be on the page.
   browser2->window()->Activate();
-  EXPECT_EQ(NULL,
-            views::FocusManager::GetFocusManagerForNativeView(
-                browser()->window()->GetNativeHandle())->GetFocusedView());
+  views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
+  ASSERT_TRUE(widget);
+  EXPECT_EQ(NULL, widget->GetFocusManager()->GetFocusedView());
   EXPECT_EQ(browser_view2->GetTabContentsContainerView(),
             focus_manager2->GetFocusedView());
 
@@ -846,11 +848,23 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
   ASSERT_TRUE(test_server()->Start());
 
   // Open the new tab, reload.
-  browser()->NewTab();
+  {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        NotificationService::AllSources());
+    browser()->NewTab();
+    observer.Wait();
+  }
   ui_test_utils::RunAllPendingInMessageLoop();
 
-  browser()->Reload(CURRENT_TAB);
-  ASSERT_TRUE(ui_test_utils::WaitForNavigationInCurrentTab(browser()));
+  {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        Source<NavigationController>(
+            &browser()->GetSelectedTabContentsWrapper()->controller()));
+    browser()->Reload(CURRENT_TAB);
+    observer.Wait();
+  }
   // Focus should stay on the location bar.
   ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
 
@@ -858,8 +872,14 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
   ui_test_utils::NavigateToURL(browser(), test_server()->GetURL(kSimplePage));
   browser()->FocusLocationBar();
   ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
-  browser()->Reload(CURRENT_TAB);
-  ASSERT_TRUE(ui_test_utils::WaitForNavigationInCurrentTab(browser()));
+  {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        Source<NavigationController>(
+            &browser()->GetSelectedTabContentsWrapper()->controller()));
+    browser()->Reload(CURRENT_TAB);
+    observer.Wait();
+  }
 
   // Focus should now be on the tab contents.
   browser()->ShowDownloadsTab();
@@ -874,8 +894,14 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FocusOnReloadCrashedTab) {
   // Open a regular page, crash, reload.
   ui_test_utils::NavigateToURL(browser(), test_server()->GetURL(kSimplePage));
   ui_test_utils::CrashTab(browser()->GetSelectedTabContents());
-  browser()->Reload(CURRENT_TAB);
-  ASSERT_TRUE(ui_test_utils::WaitForNavigationInCurrentTab(browser()));
+  {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        Source<NavigationController>(
+            &browser()->GetSelectedTabContentsWrapper()->controller()));
+    browser()->Reload(CURRENT_TAB);
+    observer.Wait();
+  }
 
   // Focus should now be on the tab contents.
   browser()->ShowDownloadsTab();

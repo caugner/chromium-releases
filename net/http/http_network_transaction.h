@@ -32,8 +32,9 @@ class HttpStreamRequest;
 class IOBuffer;
 struct HttpRequestInfo;
 
-class NET_TEST HttpNetworkTransaction : public HttpTransaction,
-                                        public HttpStreamRequest::Delegate {
+class NET_EXPORT_PRIVATE HttpNetworkTransaction
+    : public HttpTransaction,
+      public HttpStreamRequest::Delegate {
  public:
   explicit HttpNetworkTransaction(HttpNetworkSession* session);
 
@@ -53,6 +54,7 @@ class NET_TEST HttpNetworkTransaction : public HttpTransaction,
 
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
   virtual void StopCaching() {}
+  virtual void DoneReading() {}
   virtual const HttpResponseInfo* GetResponseInfo() const;
   virtual LoadState GetLoadState() const;
   virtual uint64 GetUploadProgress() const;
@@ -246,7 +248,8 @@ class NET_TEST HttpNetworkTransaction : public HttpTransaction,
   // responses.
   bool logged_response_time_;
 
-  SSLConfig ssl_config_;
+  SSLConfig server_ssl_config_;
+  SSLConfig proxy_ssl_config_;
 
   HttpRequestHeaders request_headers_;
 

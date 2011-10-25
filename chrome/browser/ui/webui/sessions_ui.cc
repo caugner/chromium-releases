@@ -7,14 +7,16 @@
 #include <algorithm>
 
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
+#include "chrome/browser/sync/glue/synced_session.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -24,62 +26,26 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
-
 namespace {
 
-///////////////////////////////////////////////////////////////////////////////
-//
-// SessionsUIHTMLSource
-//
-///////////////////////////////////////////////////////////////////////////////
+ChromeWebUIDataSource* CreateSessionsUIHTMLSource() {
+  ChromeWebUIDataSource* source =
+      new ChromeWebUIDataSource(chrome::kChromeUISessionsHost);
 
-class SessionsUIHTMLSource : public ChromeURLDataManager::DataSource {
- public:
-  SessionsUIHTMLSource()
-      : DataSource(chrome::kChromeUISessionsHost, MessageLoop::current()) {}
+  source->AddLocalizedString("sessionsTitle", IDS_SESSIONS_TITLE);
+  source->AddLocalizedString("sessionsCountFormat",
+                             IDS_SESSIONS_SESSION_COUNT_BANNER_FORMAT);
+  source->AddLocalizedString("noSessionsMessage",
+                             IDS_SESSIONS_NO_SESSIONS_MESSAGE);
+  source->AddLocalizedString("magicCountFormat",
+                             IDS_SESSIONS_MAGIC_LIST_BANNER_FORMAT);
+  source->AddLocalizedString("noMagicMessage",
+                             IDS_SESSIONS_NO_MAGIC_MESSAGE);
 
-  // Called when the network layer has requested a resource underneath
-  // the path we registered.
-  virtual void StartDataRequest(const std::string& path,
-                                bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const {
-    return "text/html";
-  }
-
- private:
-  ~SessionsUIHTMLSource() {}
-
-  DISALLOW_COPY_AND_ASSIGN(SessionsUIHTMLSource);
-};
-
-void SessionsUIHTMLSource::StartDataRequest(const std::string& path,
-                                            bool is_incognito,
-                                            int request_id) {
-  DictionaryValue localized_strings;
-  localized_strings.SetString("sessionsTitle",
-      l10n_util::GetStringUTF16(IDS_SESSIONS_TITLE));
-  localized_strings.SetString("sessionsCountFormat",
-      l10n_util::GetStringUTF16(IDS_SESSIONS_SESSION_COUNT_BANNER_FORMAT));
-  localized_strings.SetString("noSessionsMessage",
-      l10n_util::GetStringUTF16(IDS_SESSIONS_NO_SESSIONS_MESSAGE));
-
-  localized_strings.SetString("magicCountFormat",
-      l10n_util::GetStringUTF16(IDS_SESSIONS_MAGIC_LIST_BANNER_FORMAT));
-  localized_strings.SetString("noMagicMessage",
-      l10n_util::GetStringUTF16(IDS_SESSIONS_NO_MAGIC_MESSAGE));
-
-  ChromeURLDataManager::DataSource::SetFontAndTextDirection(&localized_strings);
-
-  static const base::StringPiece sessions_html(
-      ResourceBundle::GetSharedInstance().
-      GetRawDataResource(IDR_SESSIONS_HTML));
-  std::string full_html =
-      jstemplate_builder::GetI18nTemplateHtml(sessions_html,
-                                              &localized_strings);
-  jstemplate_builder::AppendJsTemplateSourceHtml(&full_html);
-
-  SendResponse(request_id, base::RefCountedString::TakeString(&full_html));
+  source->set_json_path("strings.js");
+  source->add_resource_path("sessions.js", IDR_SESSIONS_JS);
+  source->set_default_resource(IDR_SESSIONS_HTML);
+  return source;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -95,8 +61,8 @@ class SessionsDOMHandler : public WebUIMessageHandler {
   virtual ~SessionsDOMHandler();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
  private:
   // Asynchronously fetches the session list. Called from JS.
@@ -116,16 +82,19 @@ class SessionsDOMHandler : public WebUIMessageHandler {
                      ListValue* window_list);
 
   // Appends each entry in |sessions| to |session_list| as a DictonaryValue.
-  void GetSessionList(const std::vector<const SyncedSession*>& sessions,
-                      ListValue* session_list);
+  void GetSessionList(
+      const std::vector<const browser_sync::SyncedSession*>& sessions,
+      ListValue* session_list);
 
   // Traverses all tabs in |sessions| and adds them to |all_tabs|.
-  void GetAllTabs(const std::vector<const SyncedSession*>& sessions,
-                  std::vector<SessionTab*>* all_tabs);
+  void GetAllTabs(
+      const std::vector<const browser_sync::SyncedSession*>& sessions,
+      std::vector<SessionTab*>* all_tabs);
 
   // Creates a "magic" list of tabs from all the sessions.
-  void CreateMagicTabList(const std::vector<const SyncedSession*>& sessions,
-                          ListValue* tab_list);
+  void CreateMagicTabList(
+      const std::vector<const browser_sync::SyncedSession*>& sessions,
+      ListValue* tab_list);
 
   DISALLOW_COPY_AND_ASSIGN(SessionsDOMHandler);
 };
@@ -152,7 +121,7 @@ void SessionsDOMHandler::HandleRequestSessions(const ListValue* args) {
 browser_sync::SessionModelAssociator* SessionsDOMHandler::GetModelAssociator() {
   // We only want to get the model associator if there is one, and it is done
   // syncing sessions.
-  Profile* profile = web_ui_->GetProfile();
+  Profile* profile = Profile::FromWebUI(web_ui_);
   if (!profile->HasProfileSyncService())
     return NULL;
   ProfileSyncService* service = profile->GetProfileSyncService();
@@ -203,11 +172,11 @@ void SessionsDOMHandler::GetWindowList(
 }
 
 void SessionsDOMHandler::GetSessionList(
-    const std::vector<const SyncedSession*>& sessions,
+    const std::vector<const browser_sync::SyncedSession*>& sessions,
     ListValue* session_list) {
-  for (std::vector<const SyncedSession*>::const_iterator it =
+  for (std::vector<const browser_sync::SyncedSession*>::const_iterator it =
        sessions.begin(); it != sessions.end(); ++it) {
-    const SyncedSession* session = *it;
+    const browser_sync::SyncedSession* session = *it;
     scoped_ptr<DictionaryValue> session_data(new DictionaryValue());
     session_data->SetString("tag", session->session_tag);
     scoped_ptr<ListValue> window_list(new ListValue());
@@ -218,7 +187,7 @@ void SessionsDOMHandler::GetSessionList(
 }
 
 void SessionsDOMHandler::GetAllTabs(
-    const std::vector<const SyncedSession*>& sessions,
+    const std::vector<const browser_sync::SyncedSession*>& sessions,
     std::vector<SessionTab*>* all_tabs) {
   for (size_t i = 0; i < sessions.size(); i++) {
     const std::vector<SessionWindow*>& windows = sessions[i]->windows;
@@ -235,7 +204,7 @@ bool CompareTabsByTimestamp(SessionTab* lhs, SessionTab* rhs) {
 }
 
 void SessionsDOMHandler::CreateMagicTabList(
-    const std::vector<const SyncedSession*>& sessions,
+    const std::vector<const browser_sync::SyncedSession*>& sessions,
     ListValue* tab_list) {
   std::vector<SessionTab*> all_tabs;
   GetAllTabs(sessions, &all_tabs);
@@ -258,7 +227,7 @@ void SessionsDOMHandler::UpdateUI() {
   browser_sync::SessionModelAssociator* associator = GetModelAssociator();
   // Make sure the associator has been created.
   if (associator) {
-    std::vector<const SyncedSession*> sessions;
+    std::vector<const browser_sync::SyncedSession*> sessions;
     if (associator->GetAllForeignSessions(&sessions)) {
       GetSessionList(sessions, &session_list);
       CreateMagicTabList(sessions, &magic_list);
@@ -283,10 +252,10 @@ void SessionsDOMHandler::UpdateUI() {
 SessionsUI::SessionsUI(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new SessionsDOMHandler())->Attach(this));
 
-  SessionsUIHTMLSource* html_source = new SessionsUIHTMLSource();
-
   // Set up the chrome://sessions/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(
+      CreateSessionsUIHTMLSource());
 }
 
 // static

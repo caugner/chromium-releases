@@ -30,6 +30,10 @@
 #include "content/common/unix_domain_socket_posix.h"
 #include "sandbox/linux/suid/suid_unsafe_environment_variables.h"
 
+#if defined(USE_TCMALLOC)
+#include "third_party/tcmalloc/chromium/src/google/heap-profiler.h"
+#endif
+
 static void SaveSUIDUnsafeEnvironmentVariables() {
   // The ELF loader will clear many environment variables so we save them to
   // different names here so that the SUID sandbox can resolve them for the
@@ -109,7 +113,6 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
     switches::kRegisterPepperPlugins,
     switches::kDisableSeccompSandbox,
     switches::kEnableSeccompSandbox,
-    switches::kNaClLinuxHelper,
   };
   cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches,
                             arraysize(kForwardSwitches));
@@ -118,9 +121,14 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
       &cmd_line, -1);
 
   sandbox_binary_ = sandbox_cmd.c_str();
-  struct stat st;
 
-  if (!sandbox_cmd.empty() && stat(sandbox_binary_.c_str(), &st) == 0) {
+  if (!sandbox_cmd.empty()) {
+    struct stat st;
+    if (stat(sandbox_binary_.c_str(), &st) != 0) {
+      LOG(FATAL) << "The SUID sandbox helper binary is missing: "
+                 << sandbox_binary_ << " Aborting now.";
+    }
+
     if (access(sandbox_binary_.c_str(), X_OK) == 0 &&
         (st.st_uid == 0) &&
         (st.st_mode & S_ISUID) &&
@@ -135,6 +143,10 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
                     "I'm aborting now. You need to make sure that "
                  << sandbox_binary_ << " is mode 4755 and owned by root.";
     }
+  } else {
+    LOG(WARNING) << "Running without the SUID sandbox! See "
+        "http://code.google.com/p/chromium/wiki/LinuxSUIDSandboxDevelopment "
+        "for more information on developing with the sandbox on.";
   }
 
   // Start up the sandbox host process and get the file descriptor for the
@@ -159,7 +171,7 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
     // In the SUID sandbox, the real zygote is forked from the sandbox.
     // We need to look for it.
     // But first, wait for the zygote to tell us it's running.
-    // The sending code is in chrome/browser/zygote_main_linux.cc.
+    // The sending code is in content/browser/zygote_main_linux.cc.
     std::vector<int> fds_vec;
     const int kExpectedLength = sizeof(kZygoteMagic);
     char buf[kExpectedLength];
@@ -259,28 +271,35 @@ pid_t ZygoteHost::ForkRequest(
       return base::kNullProcessHandle;
   }
 
-  const int kRendererScore = 5;
-  AdjustRendererOOMScore(pid, kRendererScore);
+  // This is just a starting score for a renderer or extension (the
+  // only types of processes that will be started this way).  It will
+  // get adjusted as time goes on.  (This is the same value as
+  // chrome::kLowestRendererOomScore in chrome/chrome_constants.h, but
+  // that's not something we can include here.)
+  const int kLowestRendererOomScore = 300;
+  AdjustRendererOOMScore(pid, kLowestRendererOomScore);
 
   return pid;
 }
 
 void ZygoteHost::AdjustRendererOOMScore(base::ProcessHandle pid, int score) {
-  // 1) You can't change the oom_adj of a non-dumpable process (EPERM) unless
-  //    you're root. Because of this, we can't set the oom_adj from the browser
-  //    process.
+  // 1) You can't change the oom_score_adj of a non-dumpable process
+  //    (EPERM) unless you're root. Because of this, we can't set the
+  //    oom_adj from the browser process.
   //
-  // 2) We can't set the oom_adj before entering the sandbox because the
-  //    zygote is in the sandbox and the zygote is as critical as the browser
-  //    process. Its oom_adj value shouldn't be changed.
+  // 2) We can't set the oom_score_adj before entering the sandbox
+  //    because the zygote is in the sandbox and the zygote is as
+  //    critical as the browser process. Its oom_adj value shouldn't
+  //    be changed.
   //
-  // 3) A non-dumpable process can't even change its own oom_adj because it's
-  //    root owned 0644. The sandboxed processes don't even have /proc, but one
-  //    could imagine passing in a descriptor from outside.
+  // 3) A non-dumpable process can't even change its own oom_score_adj
+  //    because it's root owned 0644. The sandboxed processes don't
+  //    even have /proc, but one could imagine passing in a descriptor
+  //    from outside.
   //
   // So, in the normal case, we use the SUID binary to change it for us.
   // However, Fedora (and other SELinux systems) don't like us touching other
-  // process's oom_adj values
+  // process's oom_score_adj (or oom_adj) values
   // (https://bugzilla.redhat.com/show_bug.cgi?id=581256).
   //
   // The offical way to get the SELinux mode is selinux_getenforcemode, but I
@@ -299,9 +318,20 @@ void ZygoteHost::AdjustRendererOOMScore(base::ProcessHandle pid, int score) {
   }
 
   if (using_suid_sandbox_ && !selinux) {
+#if defined(USE_TCMALLOC)
+    // If heap profiling is running, these processes are not exiting, at least
+    // on ChromeOS. The easiest thing to do is not launch them when profiling.
+    // TODO(stevenjb): Investigate further and fix.
+    if (IsHeapProfilerRunning())
+      return;
+#endif
+    // The command line switch used for supplying the OOM adjustment score
+    // to the setuid sandbox.
+    static const char kAdjustOOMScoreSwitch[] = "--adjust-oom-score";
+
     std::vector<std::string> adj_oom_score_cmdline;
     adj_oom_score_cmdline.push_back(sandbox_binary_);
-    adj_oom_score_cmdline.push_back(base::kAdjustOOMScoreSwitch);
+    adj_oom_score_cmdline.push_back(kAdjustOOMScoreSwitch);
     adj_oom_score_cmdline.push_back(base::Int64ToString(pid));
     adj_oom_score_cmdline.push_back(base::IntToString(score));
 

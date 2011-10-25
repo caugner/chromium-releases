@@ -18,10 +18,11 @@ namespace IPC {
 class MessageReplyDeserializer;
 }
 
-struct PrintMsg_Print_Params;
-struct PrintMsg_PrintPages_Params;
+struct PrintHostMsg_DidGetPreviewPageCount_Params;
 struct PrintHostMsg_DidPreviewPage_Params;
 struct PrintHostMsg_ScriptedPrint_Params;
+struct PrintMsg_PrintPages_Params;
+struct PrintMsg_Print_Params;
 
 // This class is very simple mock of RenderThread. It simulates an IPC channel
 // which supports only two messages:
@@ -84,6 +85,9 @@ class MockRenderThread : public RenderThreadBase {
   // False if the user decides to cancel.
   void set_print_dialog_user_response(bool response);
 
+  // Cancel print preview when print preview has |page| remaining pages.
+  void set_print_preview_cancel_page_number(int page);
+
   // Get the number of pages to generate for print preview.
   int print_preview_pages_remaining();
 
@@ -125,9 +129,13 @@ class MockRenderThread : public RenderThreadBase {
 
   void OnDidGetPrintedPagesCount(int cookie, int number_pages);
   void OnDidPrintPage(const PrintHostMsg_DidPrintPage_Params& params);
-  void OnDidGetPreviewPageCount(int document_cookie, int number_pages,
-                                bool is_modifiable);
+  void OnDidGetPreviewPageCount(
+      const PrintHostMsg_DidGetPreviewPageCount_Params& params);
   void OnDidPreviewPage(const PrintHostMsg_DidPreviewPage_Params& params);
+  void OnCheckForCancel(const std::string& preview_ui_addr,
+                        int preview_request_id,
+                        bool* cancel);
+
 
   // For print preview, PrintWebViewHelper will update settings.
   void OnUpdatePrintSettings(int document_cookie,
@@ -154,6 +162,10 @@ class MockRenderThread : public RenderThreadBase {
 
   // True to simulate user clicking print. False to cancel.
   bool print_dialog_user_response_;
+
+  // Simulates cancelling print preview if |print_preview_pages_remaining_|
+  // equals this.
+  int print_preview_cancel_page_number_;
 
   // Number of pages to generate for print preview.
   int print_preview_pages_remaining_;

@@ -30,7 +30,7 @@ class ProfileSyncFactoryMock : public ProfileSyncFactory {
   MOCK_METHOD2(CreateDataTypeManager,
                browser_sync::DataTypeManager*(
                    browser_sync::SyncBackendHost*,
-                   const browser_sync::DataTypeController::TypeMap&));
+                   const browser_sync::DataTypeController::TypeMap*));
   MOCK_METHOD2(CreateAppSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,
                      browser_sync::UnrecoverableErrorHandler* error_handler));
@@ -70,6 +70,10 @@ class ProfileSyncFactoryMock : public ProfileSyncFactory {
                SyncComponents(
                    ProfileSyncService* profile_sync_service,
                    history::HistoryBackend* history_backend,
+                   browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_METHOD2(CreateSearchEngineSyncComponents,
+               SyncComponents(
+                   ProfileSyncService* profile_sync_service,
                    browser_sync::UnrecoverableErrorHandler* error_handler));
 
  private:

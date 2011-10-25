@@ -10,14 +10,14 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_resource.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/shared_impl/function_group_base.h"
+#include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/thunk/ppb_cursor_control_api.h"
 
 struct PPB_CursorControl_Dev;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class PPB_CursorControl_Proxy
@@ -51,7 +51,7 @@ class PPB_CursorControl_Proxy
   // Message handlers.
   void OnMsgSetCursor(PP_Instance instance,
                       int32_t type,
-                      HostResource custom_image,
+                      const ppapi::HostResource& custom_image,
                       const PP_Point& hot_spot,
                       PP_Bool* result);
   void OnMsgLockCursor(PP_Instance instance,
@@ -65,6 +65,6 @@ class PPB_CursorControl_Proxy
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PPB_CURSOR_CONTROL_PROXY_H_

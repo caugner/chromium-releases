@@ -15,14 +15,16 @@
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
-#include "chrome/browser/spellcheck_host_observer.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
+class ChromeDownloadManagerDelegate;
 class ExtensionPrefs;
 class ExtensionPrefValueMap;
+class ExtensionSettings;
+class NetPrefObserver;
 class PrefService;
-class SpellCheckHostMetrics;
+class SpellCheckProfile;
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
@@ -32,11 +34,8 @@ class Preferences;
 }
 #endif
 
-class NetPrefObserver;
-
 // The default profile implementation.
 class ProfileImpl : public Profile,
-                    public SpellCheckHostObserver,
                     public NotificationObserver {
  public:
   virtual ~ProfileImpl();
@@ -92,11 +91,10 @@ class ProfileImpl : public Profile,
   virtual void RegisterExtensionWithRequestContexts(const Extension* extension);
   virtual void UnregisterExtensionWithRequestContexts(
       const std::string& extension_id,
-      const UnloadedExtensionInfo::Reason reason);
+      const extension_misc::UnloadedExtensionReason reason);
   virtual net::SSLConfigService* GetSSLConfigService();
   virtual HostContentSettingsMap* GetHostContentSettingsMap();
   virtual HostZoomMap* GetHostZoomMap();
-  virtual GeolocationContentSettingsMap* GetGeolocationContentSettingsMap();
   virtual GeolocationPermissionContext* GetGeolocationPermissionContext();
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher();
   virtual FindBarState* GetFindBarState();
@@ -120,12 +118,9 @@ class ProfileImpl : public Profile,
       const std::string& cros_user);
   virtual TokenService* GetTokenService();
   void InitSyncService(const std::string& cros_user);
-  virtual CloudPrintProxyService* GetCloudPrintProxyService();
-  void InitCloudPrintProxyService();
   virtual ChromeBlobStorageContext* GetBlobStorageContext();
   virtual ExtensionInfoMap* GetExtensionInfoMap();
   virtual PromoCounter* GetInstantPromoCounter();
-  virtual BrowserSignin* GetBrowserSignin();
   virtual ChromeURLDataManager* GetChromeURLDataManager();
 
 #if defined(OS_CHROMEOS)
@@ -142,9 +137,6 @@ class ProfileImpl : public Profile,
   virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
-
-  // SpellCheckHostObserver implementation.
-  virtual void SpellCheckHostInitialized();
 
  private:
   friend class Profile;
@@ -181,6 +173,8 @@ class ProfileImpl : public Profile,
 
   void CreateQuotaManagerAndClients();
 
+  SpellCheckProfile* GetSpellCheckProfile();
+
   NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
 
@@ -197,6 +191,7 @@ class ProfileImpl : public Profile,
   // Keep extension_prefs_ on top of extension_service_ because the latter
   // maintains a pointer to the first and shall be destructed first.
   scoped_ptr<ExtensionPrefs> extension_prefs_;
+  scoped_refptr<ExtensionSettings> extension_settings_;
   scoped_ptr<ExtensionService> extension_service_;
   scoped_refptr<UserScriptMaster> user_script_master_;
   scoped_refptr<ExtensionDevToolsManager> extension_devtools_manager_;
@@ -220,7 +215,6 @@ class ProfileImpl : public Profile,
   scoped_ptr<TokenService> token_service_;
   scoped_ptr<ProfileSyncFactory> profile_sync_factory_;
   scoped_ptr<ProfileSyncService> sync_service_;
-  scoped_ptr<CloudPrintProxyService> cloud_print_proxy_service_;
 
   ProfileImplIOData::Handle io_data_;
 
@@ -228,12 +222,11 @@ class ProfileImpl : public Profile,
 
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<HostZoomMap> host_zoom_map_;
-  scoped_refptr<GeolocationContentSettingsMap>
-      geolocation_content_settings_map_;
   scoped_refptr<GeolocationPermissionContext>
       geolocation_permission_context_;
   scoped_refptr<UserStyleSheetWatcher> user_style_sheet_watcher_;
   scoped_ptr<FindBarState> find_bar_state_;
+  scoped_refptr<ChromeDownloadManagerDelegate> download_manager_delegate_;
   scoped_refptr<DownloadManager> download_manager_;
   scoped_refptr<HistoryService> history_service_;
   scoped_refptr<FaviconService> favicon_service_;
@@ -244,7 +237,6 @@ class ProfileImpl : public Profile,
   scoped_refptr<WebKitContext> webkit_context_;
   scoped_refptr<PersonalDataManager> personal_data_manager_;
   scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-  scoped_ptr<BrowserSignin> browser_signin_;
   scoped_refptr<quota::QuotaManager> quota_manager_;
   bool history_service_created_;
   bool favicon_service_created_;
@@ -262,12 +254,7 @@ class ProfileImpl : public Profile,
   // See GetStartTime for details.
   base::Time start_time_;
 
-  scoped_refptr<SpellCheckHost> spellcheck_host_;
-  scoped_ptr<SpellCheckHostMetrics> spellcheck_host_metrics_;
-
-  // Indicates whether |spellcheck_host_| has told us initialization is
-  // finished.
-  bool spellcheck_host_ready_;
+  scoped_ptr<SpellCheckProfile> spellcheck_profile_;
 
 #if defined(OS_WIN)
   bool checked_instant_promo_;

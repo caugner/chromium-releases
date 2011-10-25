@@ -164,6 +164,14 @@ GLvoid StubGLDrawArrays(GLenum mode, GLint first, GLsizei count) {
   glDrawArrays(mode, first, count);
 }
 
+GLvoid StubGLDrawBuffer(GLenum mode) {
+  glDrawBuffer(mode);
+}
+
+GLvoid StubGLDrawBuffers(GLsizei n, const GLenum* bufs) {
+  glDrawBuffersARB(n, bufs);
+}
+
 GLvoid StubGLDrawElements(GLenum mode, GLsizei count, GLenum type,
                           const void* indices) {
   glDrawElements(mode, count, type, indices);
@@ -214,6 +222,12 @@ GLvoid StubGLGetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
   glGetBufferParameteriv(target, pname, params);
 }
 
+GLvoid StubGLGetFramebufferAttachmentParameteriv(GLenum target,
+                                                 GLenum attachment,
+                                                 GLenum pname, GLint* params) {
+  glGetFramebufferAttachmentParameterivEXT(target, attachment, pname, params);
+}
+
 GLenum StubGLGetError() {
   return glGetError();
 }
@@ -231,6 +245,11 @@ GLvoid StubGLGetProgramiv(GLuint program, GLenum pname, GLint* params) {
   glGetProgramiv(program, pname, params);
 }
 
+GLvoid StubGLGetRenderbufferParameteriv(GLenum target,
+                                        GLenum pname, GLint* params) {
+  glGetRenderbufferParameterivEXT(target, pname, params);
+}
+
 GLvoid StubGLGetShaderInfoLog(GLuint shader, GLsizei bufsize, GLsizei* length,
                               char* infolog) {
   glGetShaderInfoLog(shader, bufsize, length, infolog);
@@ -242,6 +261,11 @@ GLvoid StubGLGetShaderiv(GLuint shader, GLenum pname, GLint* params) {
 
 const GLubyte* StubGLGetString(GLenum name) {
   return glGetString(name);
+}
+
+GLvoid StubGLGetTexLevelParameteriv(GLenum target, GLint level,
+                                    GLenum pname, GLint* params) {
+  glGetTexLevelParameteriv(target, level, pname, params);
 }
 
 GLint StubGLGetUniformLocation(GLuint program, const char* name) {
@@ -264,12 +288,16 @@ GLvoid StubGLPixelStorei(GLenum pname, GLint param) {
   glPixelStorei(pname, param);
 }
 
+GLvoid StubGLReadBuffer(GLenum src) {
+  glReadBuffer(src);
+}
+
 GLvoid StubGLReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
                         GLenum format, GLenum type, void* pixels) {
   glReadPixels(x, y, width, height, format, type, pixels);
 }
 
-GLvoid StubGLRenderBufferStorage(GLenum target, GLenum internalformat,
+GLvoid StubGLRenderbufferStorage(GLenum target, GLenum internalformat,
                                  GLsizei width, GLsizei height) {
   glRenderbufferStorageEXT(target, internalformat, width, height);
 }
@@ -441,150 +469,136 @@ GLvoid StubGLViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
 
 namespace gfx {
 
-void BindSkiaToInProcessGL() {
-  static bool host_StubGL_installed = false;
-  if (!host_StubGL_installed) {
-    GrGLBinding binding;
-    switch (gfx::GetGLImplementation()) {
-      case gfx::kGLImplementationNone:
-        NOTREACHED();
-        return;
-      case gfx::kGLImplementationDesktopGL:
-        binding = kDesktop_GrGLBinding;
-        break;
-      case gfx::kGLImplementationOSMesaGL:
-        binding = kDesktop_GrGLBinding;
-        break;
-      case gfx::kGLImplementationEGLGLES2:
-        binding = kES2_GrGLBinding;
-        break;
-      case gfx::kGLImplementationMockGL:
-        NOTREACHED();
-        return;
-      default:
-        NOTREACHED();
-        return;
-    }
-
-    static GrGLInterface host_gl_interface = {
-      binding,
-
-      kProbe_GrGLCapability,   // NPOTRenderTargetSupport
-      kProbe_GrGLCapability,   // MinRenderTargetHeight
-      kProbe_GrGLCapability,   // MinRenderTargetWidth
-
-      StubGLActiveTexture,
-      StubGLAttachShader,
-      StubGLBindAttribLocation,
-      StubGLBindBuffer,
-      StubGLBindTexture,
-      StubGLBlendColor,
-      StubGLBlendFunc,
-      StubGLBufferData,
-      StubGLBufferSubData,
-      StubGLClear,
-      StubGLClearColor,
-      StubGLClearStencil,
-      NULL,  // glClientActiveTexture
-      NULL,  // glColor4ub
-      StubGLColorMask,
-      NULL,  // glColorPointer
-      StubGLCompileShader,
-      StubGLCompressedTexImage2D,
-      StubGLCreateProgram,
-      StubGLCreateShader,
-      StubGLCullFace,
-      StubGLDeleteBuffers,
-      StubGLDeleteProgram,
-      StubGLDeleteShader,
-      StubGLDeleteTextures,
-      StubGLDepthMask,
-      StubGLDisable,
-      NULL,  // glDisableClientState
-      StubGLDisableVertexAttribArray,
-      StubGLDrawArrays,
-      StubGLDrawElements,
-      StubGLEnable,
-      NULL,  // glEnableClientState
-      StubGLEnableVertexAttribArray,
-      StubGLFrontFace,
-      StubGLGenBuffers,
-      StubGLGenTextures,
-      StubGLGetBufferParameteriv,
-      StubGLGetError,
-      StubGLGetIntegerv,
-      StubGLGetProgramInfoLog,
-      StubGLGetProgramiv,
-      StubGLGetShaderInfoLog,
-      StubGLGetShaderiv,
-      StubGLGetString,
-      StubGLGetUniformLocation,
-      StubGLLineWidth,
-      StubGLLinkProgram,
-      NULL,  // glLoadMatrixf
-      NULL,  // glMatrixMode
-      StubGLPixelStorei,
-      NULL,  // glPointSize
-      StubGLReadPixels,
-      StubGLScissor,
-      NULL,  // glShadeModel
-      StubGLShaderSource,
-      StubGLStencilFunc,
-      StubGLStencilFuncSeparate,
-      StubGLStencilMask,
-      StubGLStencilMaskSeparate,
-      StubGLStencilOp,
-      StubGLStencilOpSeparate,
-      NULL,  // glTexCoordPointer
-      NULL,  // glTexEnvi
-      StubGLTexImage2D,
-      StubGLTexParameteri,
-      StubGLTexSubImage2D,
-      StubGLUniform1f,
-      StubGLUniform1i,
-      StubGLUniform1fv,
-      StubGLUniform1iv,
-      StubGLUniform2f,
-      StubGLUniform2i,
-      StubGLUniform2fv,
-      StubGLUniform2iv,
-      StubGLUniform3f,
-      StubGLUniform3i,
-      StubGLUniform3fv,
-      StubGLUniform3iv,
-      StubGLUniform4f,
-      StubGLUniform4i,
-      StubGLUniform4fv,
-      StubGLUniform4iv,
-      StubGLUniformMatrix2fv,
-      StubGLUniformMatrix3fv,
-      StubGLUniformMatrix4fv,
-      StubGLUseProgram,
-      StubGLVertexAttrib4fv,
-      StubGLVertexAttribPointer,
-      NULL,  // glVertexPointer
-      StubGLViewport,
-      StubGLBindFramebuffer,
-      StubGLBindRenderbuffer,
-      StubGLCheckFramebufferStatus,
-      StubGLDeleteFramebuffers,
-      StubGLDeleteRenderbuffers,
-      StubGLFramebufferRenderbuffer,
-      StubGLFramebufferTexture2D,
-      StubGLGenFramebuffers,
-      StubGLGenRenderbuffers,
-      StubGLRenderBufferStorage,
-      StubGLRenderbufferStorageMultisample,
-      StubGLBlitFramebuffer,
-      NULL,  // glResolveMultisampleFramebuffer
-      StubGLMapBuffer,
-      StubGLUnmapBuffer,
-      StubBindFragDataLocationIndexedARB,
-      GrGLInterface::kStaticInitEndGuard,
-    };
-    GrGLSetGLInterface(&host_gl_interface);
-    host_StubGL_installed = true;
+GrGLInterface* CreateInProcessSkiaGLBinding() {
+  GrGLBinding binding;
+  switch (gfx::GetGLImplementation()) {
+    case gfx::kGLImplementationNone:
+      NOTREACHED();
+      return NULL;
+    case gfx::kGLImplementationDesktopGL:
+      binding = kDesktop_GrGLBinding;
+      break;
+    case gfx::kGLImplementationOSMesaGL:
+      binding = kDesktop_GrGLBinding;
+      break;
+    case gfx::kGLImplementationEGLGLES2:
+      binding = kES2_GrGLBinding;
+      break;
+    case gfx::kGLImplementationMockGL:
+      NOTREACHED();
+      return NULL;
+    default:
+      NOTREACHED();
+      return NULL;
   }
+
+  GrGLInterface* interface = new GrGLInterface;
+
+  interface->fBindingsExported = binding;
+  interface->fActiveTexture = StubGLActiveTexture;
+  interface->fAttachShader = StubGLAttachShader;
+  interface->fBindAttribLocation = StubGLBindAttribLocation;
+  interface->fBindBuffer = StubGLBindBuffer;
+  interface->fBindTexture = StubGLBindTexture;
+  interface->fBlendColor = StubGLBlendColor;
+  interface->fBlendFunc = StubGLBlendFunc;
+  interface->fBufferData = StubGLBufferData;
+  interface->fBufferSubData = StubGLBufferSubData;
+  interface->fClear = StubGLClear;
+  interface->fClearColor = StubGLClearColor;
+  interface->fClearStencil = StubGLClearStencil;
+  interface->fColorMask = StubGLColorMask;
+  interface->fCompileShader = StubGLCompileShader;
+  interface->fCompressedTexImage2D = StubGLCompressedTexImage2D;
+  interface->fCreateProgram = StubGLCreateProgram;
+  interface->fCreateShader = StubGLCreateShader;
+  interface->fCullFace = StubGLCullFace;
+  interface->fDeleteBuffers = StubGLDeleteBuffers;
+  interface->fDeleteProgram = StubGLDeleteProgram;
+  interface->fDeleteShader = StubGLDeleteShader;
+  interface->fDeleteTextures = StubGLDeleteTextures;
+  interface->fDepthMask = StubGLDepthMask;
+  interface->fDisable = StubGLDisable;
+  interface->fDisableVertexAttribArray = StubGLDisableVertexAttribArray;
+  interface->fDrawArrays = StubGLDrawArrays;
+  interface->fDrawBuffer = StubGLDrawBuffer;
+  interface->fDrawBuffers = StubGLDrawBuffers;
+  interface->fDrawElements = StubGLDrawElements;
+  interface->fEnable = StubGLEnable;
+  interface->fEnableVertexAttribArray = StubGLEnableVertexAttribArray;
+  interface->fFrontFace = StubGLFrontFace;
+  interface->fGenBuffers = StubGLGenBuffers;
+  interface->fGenTextures = StubGLGenTextures;
+  interface->fGetBufferParameteriv = StubGLGetBufferParameteriv;
+  interface->fGetError = StubGLGetError;
+  interface->fGetIntegerv = StubGLGetIntegerv;
+  interface->fGetProgramInfoLog = StubGLGetProgramInfoLog;
+  interface->fGetProgramiv = StubGLGetProgramiv;
+  interface->fGetShaderInfoLog = StubGLGetShaderInfoLog;
+  interface->fGetShaderiv = StubGLGetShaderiv;
+  interface->fGetString = StubGLGetString;
+  interface->fGetTexLevelParameteriv = StubGLGetTexLevelParameteriv;
+  interface->fGetUniformLocation = StubGLGetUniformLocation;
+  interface->fLineWidth = StubGLLineWidth;
+  interface->fLinkProgram = StubGLLinkProgram;
+  interface->fPixelStorei = StubGLPixelStorei;
+  interface->fReadBuffer = StubGLReadBuffer;
+  interface->fReadPixels = StubGLReadPixels;
+  interface->fScissor = StubGLScissor;
+  interface->fShaderSource = StubGLShaderSource;
+  interface->fStencilFunc = StubGLStencilFunc;
+  interface->fStencilFuncSeparate = StubGLStencilFuncSeparate;
+  interface->fStencilMask = StubGLStencilMask;
+  interface->fStencilMaskSeparate = StubGLStencilMaskSeparate;
+  interface->fStencilOp = StubGLStencilOp;
+  interface->fStencilOpSeparate = StubGLStencilOpSeparate;
+  interface->fTexImage2D = StubGLTexImage2D;
+  interface->fTexParameteri = StubGLTexParameteri;
+  interface->fTexSubImage2D = StubGLTexSubImage2D;
+  interface->fUniform1f = StubGLUniform1f;
+  interface->fUniform1i = StubGLUniform1i;
+  interface->fUniform1fv = StubGLUniform1fv;
+  interface->fUniform1iv = StubGLUniform1iv;
+  interface->fUniform2f = StubGLUniform2f;
+  interface->fUniform2i = StubGLUniform2i;
+  interface->fUniform2fv = StubGLUniform2fv;
+  interface->fUniform2iv = StubGLUniform2iv;
+  interface->fUniform3f = StubGLUniform3f;
+  interface->fUniform3i = StubGLUniform3i;
+  interface->fUniform3fv = StubGLUniform3fv;
+  interface->fUniform3iv = StubGLUniform3iv;
+  interface->fUniform4f = StubGLUniform4f;
+  interface->fUniform4i = StubGLUniform4i;
+  interface->fUniform4fv = StubGLUniform4fv;
+  interface->fUniform4iv = StubGLUniform4iv;
+  interface->fUniformMatrix2fv = StubGLUniformMatrix2fv;
+  interface->fUniformMatrix3fv = StubGLUniformMatrix3fv;
+  interface->fUniformMatrix4fv = StubGLUniformMatrix4fv;
+  interface->fUseProgram = StubGLUseProgram;
+  interface->fVertexAttrib4fv = StubGLVertexAttrib4fv;
+  interface->fVertexAttribPointer = StubGLVertexAttribPointer;
+  interface->fViewport = StubGLViewport;
+  interface->fBindFramebuffer = StubGLBindFramebuffer;
+  interface->fBindRenderbuffer = StubGLBindRenderbuffer;
+  interface->fCheckFramebufferStatus = StubGLCheckFramebufferStatus;
+  interface->fDeleteFramebuffers = StubGLDeleteFramebuffers;
+  interface->fDeleteRenderbuffers = StubGLDeleteRenderbuffers;
+  interface->fFramebufferRenderbuffer = StubGLFramebufferRenderbuffer;
+  interface->fFramebufferTexture2D = StubGLFramebufferTexture2D;
+  interface->fGenFramebuffers = StubGLGenFramebuffers;
+  interface->fGenRenderbuffers = StubGLGenRenderbuffers;
+  interface->fGetFramebufferAttachmentParameteriv =
+    StubGLGetFramebufferAttachmentParameteriv;
+  interface->fGetRenderbufferParameteriv = StubGLGetRenderbufferParameteriv;
+  interface->fRenderbufferStorage = StubGLRenderbufferStorage;
+  interface->fRenderbufferStorageMultisample =
+    StubGLRenderbufferStorageMultisample;
+  interface->fBlitFramebuffer = StubGLBlitFramebuffer;
+  interface->fMapBuffer = StubGLMapBuffer;
+  interface->fUnmapBuffer = StubGLUnmapBuffer;
+  interface->fBindFragDataLocationIndexed =
+    StubBindFragDataLocationIndexedARB;
+  return interface;
 }
 
 }  // namespace gfx

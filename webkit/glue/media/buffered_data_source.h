@@ -14,18 +14,26 @@
 #include "media/base/filters.h"
 #include "webkit/glue/media/buffered_resource_loader.h"
 
+namespace media {
+class MediaLog;
+}
+
 namespace webkit_glue {
 
+// This class may be created on any thread, and is callable from the render
+// thread as well as media-specific threads.
 class BufferedDataSource : public WebDataSource {
  public:
   // Creates a DataSourceFactory for building BufferedDataSource objects.
   static media::DataSourceFactory* CreateFactory(
       MessageLoop* render_loop,
       WebKit::WebFrame* frame,
+      media::MediaLog* media_log,
       WebDataSourceBuildObserverHack* build_observer);
 
   BufferedDataSource(MessageLoop* render_loop,
-                     WebKit::WebFrame* frame);
+                     WebKit::WebFrame* frame,
+                     media::MediaLog* media_log);
 
   virtual ~BufferedDataSource();
 
@@ -42,10 +50,11 @@ class BufferedDataSource : public WebDataSource {
   virtual bool GetSize(int64* size_out);
   virtual bool IsStreaming();
   virtual void SetPreload(media::Preload preload);
+  virtual void SetBitrate(int bitrate);
 
   // webkit_glue::WebDataSource implementation.
   virtual void Initialize(const std::string& url,
-                          media::PipelineStatusCallback* callback);
+                          const media::PipelineStatusCB& callback);
   virtual void CancelInitialize();
   virtual bool HasSingleOrigin();
   virtual void Abort();
@@ -58,6 +67,8 @@ class BufferedDataSource : public WebDataSource {
       int64 first_byte_position, int64 last_byte_position);
 
  private:
+  friend class BufferedDataSourceTest2;
+
   // Posted to perform initialization on render thread and start resource
   // loading.
   void InitializeTask();
@@ -81,6 +92,9 @@ class BufferedDataSource : public WebDataSource {
   // This task saves the preload value for the media.
   void SetPreloadTask(media::Preload preload);
 
+  // Tells |loader_| the bitrate of the media.
+  void SetBitrateTask(int bitrate);
+
   // Decides which DeferStrategy to used based on the current state of the
   // BufferedDataSource.
   BufferedResourceLoader::DeferStrategy ChooseDeferStrategy();
@@ -92,7 +106,7 @@ class BufferedDataSource : public WebDataSource {
   // Calls |read_callback_| and reset all read parameters.
   void DoneRead_Locked(int error);
 
-  // Calls |initialize_callback_| and reset it.
+  // Calls |initialize_cb_| and reset it.
   void DoneInitialization_Locked(media::PipelineStatus status);
 
   // Callback method for |loader_| if URL for the resource requested is using
@@ -119,7 +133,7 @@ class BufferedDataSource : public WebDataSource {
   // Callback method when a network event is received.
   void NetworkEventCallback();
 
-  void UpdateHostState();
+  void UpdateHostState_Locked();
 
   // URL of the resource requested.
   GURL url_;
@@ -148,7 +162,7 @@ class BufferedDataSource : public WebDataSource {
   bool network_activity_;
 
   // Callback method from the pipeline for initialization.
-  scoped_ptr<media::PipelineStatusCallback> initialize_callback_;
+  media::PipelineStatusCB initialize_cb_;
 
   // Read parameters received from the Read() method call.
   scoped_ptr<media::DataSource::ReadCallback> read_callback_;
@@ -172,7 +186,8 @@ class BufferedDataSource : public WebDataSource {
   // The message loop of the render thread.
   MessageLoop* render_loop_;
 
-  // Protects |stopped_|.
+  // Protects |stop_signal_received_|, |stopped_on_render_loop_| and
+  // |initialize_cb_|.
   base::Lock lock_;
 
   // Stop signal to suppressing activities. This variable is set on the pipeline
@@ -201,6 +216,14 @@ class BufferedDataSource : public WebDataSource {
 
   // Number of cache miss retries left.
   int cache_miss_retries_left_;
+
+  // Bitrate of the content, 0 if unknown.
+  int bitrate_;
+
+  // Current playback rate.
+  float playback_rate_;
+
+  scoped_refptr<media::MediaLog> media_log_;
 
   DISALLOW_COPY_AND_ASSIGN(BufferedDataSource);
 };

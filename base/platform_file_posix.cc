@@ -147,6 +147,25 @@ bool ClosePlatformFile(PlatformFile file) {
 }
 
 int ReadPlatformFile(PlatformFile file, int64 offset, char* data, int size) {
+  if (file < 0 || size < 0)
+    return -1;
+
+  int bytes_read = 0;
+  int rv;
+  do {
+    rv = HANDLE_EINTR(pread(file, data + bytes_read,
+                            size - bytes_read, offset + bytes_read));
+    if (rv <= 0)
+      break;
+
+    bytes_read += rv;
+  } while (bytes_read < size);
+
+  return bytes_read ? bytes_read : rv;
+}
+
+int ReadPlatformFileNoBestEffort(PlatformFile file, int64 offset,
+                                 char* data, int size) {
   if (file < 0)
     return -1;
 
@@ -155,10 +174,21 @@ int ReadPlatformFile(PlatformFile file, int64 offset, char* data, int size) {
 
 int WritePlatformFile(PlatformFile file, int64 offset,
                       const char* data, int size) {
-  if (file < 0)
+  if (file < 0 || size < 0)
     return -1;
 
-  return HANDLE_EINTR(pwrite(file, data, size, offset));
+  int bytes_written = 0;
+  int rv;
+  do {
+    rv = HANDLE_EINTR(pwrite(file, data + bytes_written,
+                             size - bytes_written, offset + bytes_written));
+    if (rv <= 0)
+      break;
+
+    bytes_written += rv;
+  } while (bytes_written < size);
+
+  return bytes_written ? bytes_written : rv;
 }
 
 bool TruncatePlatformFile(PlatformFile file, int64 length) {

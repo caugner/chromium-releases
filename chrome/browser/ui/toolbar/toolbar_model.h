@@ -40,7 +40,7 @@ class ToolbarModel {
   ~ToolbarModel();
 
   // Returns the text that should be displayed in the location bar.
-  std::wstring GetText() const;
+  string16 GetText() const;
 
   // Returns the security level that the toolbar should display.
   SecurityLevel GetSecurityLevel() const;
@@ -52,7 +52,7 @@ class ToolbarModel {
 
   // Returns the name of the EV cert holder.  Only call this when the security
   // level is EV_SECURE.
-  std::wstring GetEVCertName() const;
+  string16 GetEVCertName() const;
 
   // Getter/setter of whether the text in location bar is currently being
   // edited.

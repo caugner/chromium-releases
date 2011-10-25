@@ -6,7 +6,7 @@
 #define BASE_TASK_H_
 #pragma once
 
-#include "base/base_api.h"
+#include "base/base_export.h"
 #include "base/debug/alias.h"
 #include "base/memory/raw_scoped_refptr_mismatch_checker.h"
 #include "base/memory/weak_ptr.h"
@@ -22,7 +22,7 @@ const size_t kDeadTask = 0xDEAD7A53;
 // A task is a generic runnable thingy, usually used for running code on a
 // different thread or for scheduling future tasks off of the message loop.
 
-class BASE_API Task : public tracked_objects::Tracked {
+class BASE_EXPORT Task : public tracked_objects::Tracked {
  public:
   Task();
   virtual ~Task();
@@ -31,7 +31,7 @@ class BASE_API Task : public tracked_objects::Tracked {
   virtual void Run() = 0;
 };
 
-class BASE_API CancelableTask : public Task {
+class BASE_EXPORT CancelableTask : public Task {
  public:
   CancelableTask();
   virtual ~CancelableTask();
@@ -216,6 +216,17 @@ class ReleaseTask : public CancelableTask {
  private:
   const T* obj_;
 };
+
+// Equivalents for use by base::Bind().
+template<typename T>
+void DeletePointer(T* obj) {
+  delete obj;
+}
+
+template<typename T>
+void ReleasePointer(T* obj) {
+  obj->Release();
+}
 
 // RunnableMethodTraits --------------------------------------------------------
 //
@@ -462,14 +473,6 @@ class RunnableFunction : public Task {
   }
 
   virtual void Run() {
-    // TODO(apatrick): Remove this ASAP. This ensures that the function pointer
-    // is available in minidumps for the purpose of diagnosing
-    // http://crbug.com/81449.
-    Function function = function_;
-    base::debug::Alias(&function);
-    Params params = params_;
-    base::debug::Alias(&params);
-
     if (function_)
       DispatchToFunction(function_, params_);
   }
@@ -550,7 +553,7 @@ namespace base {
 
 // ScopedTaskRunner is akin to scoped_ptr for Tasks.  It ensures that the Task
 // is executed and deleted no matter how the current scope exits.
-class BASE_API ScopedTaskRunner {
+class BASE_EXPORT ScopedTaskRunner {
  public:
   // Takes ownership of the task.
   explicit ScopedTaskRunner(Task* task);
@@ -563,6 +566,44 @@ class BASE_API ScopedTaskRunner {
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedTaskRunner);
 };
+
+namespace subtle {
+
+// This class is meant for use in the implementation of MessageLoop classes
+// such as MessageLoop, MessageLoopProxy, BrowserThread, and WorkerPool to
+// implement the compatibility APIs while we are transitioning from Task to
+// Callback.
+//
+// It should NOT be used anywhere else!
+//
+// In particular, notice that this is RefCounted instead of
+// RefCountedThreadSafe.  We rely on the fact that users of this class are
+// careful to ensure that a lock is taken during transfer of ownership for
+// objects from this class to ensure the refcount is not corrupted.
+class TaskClosureAdapter : public RefCounted<TaskClosureAdapter> {
+ public:
+  explicit TaskClosureAdapter(Task* task);
+
+  // |should_leak_task| points to a flag variable that can be used to determine
+  // if this class should leak the Task on destruction.  This is important
+  // at MessageLoop shutdown since not all tasks can be safely deleted without
+  // running.  See MessageLoop::DeletePendingTasks() for the exact behavior
+  // of when a Task should be deleted. It is subtle.
+  TaskClosureAdapter(Task* task, bool* should_leak_task);
+
+  void Run();
+
+ private:
+  friend class base::RefCounted<TaskClosureAdapter>;
+
+  ~TaskClosureAdapter();
+
+  Task* task_;
+  bool* should_leak_task_;
+  static bool kTaskLeakingDefault;
+};
+
+}  // namespace subtle
 
 }  // namespace base
 

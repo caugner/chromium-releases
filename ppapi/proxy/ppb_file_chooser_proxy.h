@@ -17,11 +17,14 @@
 
 struct PPB_FileChooser_Dev;
 
-namespace pp {
-namespace proxy {
+namespace ppapi {
 
 class HostResource;
-struct PPBFileRef_CreateInfo;
+struct PPB_FileRef_CreateInfo;
+
+namespace proxy {
+
+class SerializedVarReceiveInput;
 
 class PPB_FileChooser_Proxy : public InterfaceProxy {
  public:
@@ -29,10 +32,12 @@ class PPB_FileChooser_Proxy : public InterfaceProxy {
   virtual ~PPB_FileChooser_Proxy();
 
   static const Info* GetInfo();
+  static const Info* GetInfo0_4();
 
   static PP_Resource CreateProxyResource(
       PP_Instance instance,
-      const PP_FileChooserOptions_Dev* options);
+      PP_FileChooserMode_Dev mode,
+      const PP_Var& accept_mime_types);
 
   const PPB_FileChooser_Dev* ppb_file_chooser_target() const {
     return static_cast<const PPB_FileChooser_Dev*>(target_interface());
@@ -45,27 +50,27 @@ class PPB_FileChooser_Proxy : public InterfaceProxy {
   // Plugin -> host message handlers.
   void OnMsgCreate(PP_Instance instance,
                    int mode,
-                   const std::string& accept_mime_types,
-                   pp::proxy::HostResource* result);
-  void OnMsgShow(const pp::proxy::HostResource& chooser);
+                   SerializedVarReceiveInput accept_mime_types,
+                   ppapi::HostResource* result);
+  void OnMsgShow(const ppapi::HostResource& chooser);
 
   // Host -> plugin message handlers.
   void OnMsgChooseComplete(
-      const pp::proxy::HostResource& chooser,
+      const ppapi::HostResource& chooser,
       int32_t result_code,
-      const std::vector<PPBFileRef_CreateInfo>& chosen_files);
+      const std::vector<PPB_FileRef_CreateInfo>& chosen_files);
 
   // Called when the show is complete in the host. This will notify the plugin
   // via IPC and OnMsgChooseComplete will be called there.
-  void OnShowCallback(int32_t result, const HostResource& chooser);
+  void OnShowCallback(int32_t result, const ppapi::HostResource& chooser);
 
-  CompletionCallbackFactory<PPB_FileChooser_Proxy,
-                            ProxyNonThreadSafeRefCount> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_FileChooser_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_FileChooser_Proxy);
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_FILE_CHOOSER_PROXY_H_

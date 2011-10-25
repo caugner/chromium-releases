@@ -38,6 +38,24 @@
 #include "content/common/view_messages.h"
 #include "net/base/network_change_notifier.h"
 
+namespace {
+
+// Fills |map| with the per-script font prefs under path |map_name|.
+void FillFontFamilyMap(const PrefService* prefs,
+                       const char* map_name,
+                       WebPreferences::ScriptFontFamilyMap* map) {
+  for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
+    const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
+    std::string pref_name = base::StringPrintf("%s.%s", map_name, script);
+    std::string font_family = prefs->GetString(pref_name.c_str());
+    if (!font_family.empty())
+      map->push_back(std::make_pair(script, UTF8ToUTF16(font_family)));
+  }
+}
+
+}  // namespace
+
+
 RenderViewHostDelegateViewHelper::RenderViewHostDelegateViewHelper() {
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
                  NotificationService::AllSources());
@@ -231,7 +249,7 @@ TabContents* RenderViewHostDelegateViewHelper::CreateNewWindowFromTabContents(
     const ViewHostMsg_CreateWindow_Params& params) {
   TabContents* new_contents = CreateNewWindow(
       route_id,
-      tab_contents->profile(),
+      Profile::FromBrowserContext(tab_contents->browser_context()),
       tab_contents->GetSiteInstance(),
       tab_contents->GetWebUITypeForCurrentState(),
       tab_contents,
@@ -246,7 +264,7 @@ TabContents* RenderViewHostDelegateViewHelper::CreateNewWindowFromTabContents(
     details.target_tab_contents = new_contents;
     NotificationService::current()->Notify(
         content::NOTIFICATION_RETARGETING,
-        Source<Profile>(tab_contents->profile()),
+        Source<content::BrowserContext>(tab_contents->browser_context()),
         Details<content::RetargetingDetails>(&details));
 
     if (tab_contents->delegate())
@@ -301,7 +319,8 @@ RenderWidgetHostView*
 
 // static
 WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
-    Profile* profile, bool is_web_ui) {
+    content::BrowserContext* browser_context, bool is_web_ui) {
+  Profile* profile = Profile::FromBrowserContext(browser_context);
   PrefService* prefs = profile->GetPrefs();
   WebPreferences web_prefs;
 
@@ -317,6 +336,19 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
       UTF8ToUTF16(prefs->GetString(prefs::kWebKitCursiveFontFamily));
   web_prefs.fantasy_font_family =
       UTF8ToUTF16(prefs->GetString(prefs::kWebKitFantasyFontFamily));
+
+  FillFontFamilyMap(prefs, prefs::kWebKitStandardFontFamilyMap,
+                    &web_prefs.standard_font_family_map);
+  FillFontFamilyMap(prefs, prefs::kWebKitFixedFontFamilyMap,
+                    &web_prefs.fixed_font_family_map);
+  FillFontFamilyMap(prefs, prefs::kWebKitSerifFontFamilyMap,
+                    &web_prefs.serif_font_family_map);
+  FillFontFamilyMap(prefs, prefs::kWebKitSansSerifFontFamilyMap,
+                    &web_prefs.sans_serif_font_family_map);
+  FillFontFamilyMap(prefs, prefs::kWebKitCursiveFontFamilyMap,
+                    &web_prefs.cursive_font_family_map);
+  FillFontFamilyMap(prefs, prefs::kWebKitFantasyFontFamilyMap,
+                    &web_prefs.fantasy_font_family_map);
 
   web_prefs.default_font_size =
       prefs->GetInteger(prefs::kWebKitDefaultFontSize);
@@ -402,6 +434,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
         !command_line.HasSwitch(switches::kDisableAcceleratedCompositing);
     web_prefs.force_compositing_mode =
         command_line.HasSwitch(switches::kForceCompositingMode);
+    web_prefs.allow_webui_compositing =
+        command_line.HasSwitch(switches::kAllowWebUICompositing);
     web_prefs.accelerated_2d_canvas_enabled =
         GpuProcessHost::gpu_enabled() &&
         !command_line.HasSwitch(switches::kDisableAccelerated2dCanvas);
@@ -413,7 +447,7 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.composite_to_texture_enabled =
         command_line.HasSwitch(switches::kEnableCompositeToTexture);
     web_prefs.accelerated_plugins_enabled =
-        command_line.HasSwitch(switches::kEnableAcceleratedPlugins);
+        !command_line.HasSwitch(switches::kDisableAcceleratedPlugins);
     web_prefs.accelerated_video_enabled =
         !command_line.HasSwitch(switches::kDisableAcceleratedVideo);
     web_prefs.memory_info_enabled =
@@ -421,13 +455,23 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.interactive_form_validation_enabled =
         !command_line.HasSwitch(switches::kDisableInteractiveFormValidation);
     web_prefs.fullscreen_enabled =
-        command_line.HasSwitch(switches::kEnableFullScreen);
+        !command_line.HasSwitch(switches::kDisableFullScreen);
     web_prefs.allow_displaying_insecure_content =
         prefs->GetBoolean(prefs::kWebKitAllowDisplayingInsecureContent);
     web_prefs.allow_running_insecure_content =
         prefs->GetBoolean(prefs::kWebKitAllowRunningInsecureContent);
-    web_prefs.enable_scroll_animator =
-        command_line.HasSwitch(switches::kEnableSmoothScrolling);
+
+#if defined(OS_MACOSX)
+    bool default_enable_scroll_animator = true;
+#else
+    // On CrOS, the launcher always passes in the --enable flag.
+    bool default_enable_scroll_animator = false;
+#endif
+    web_prefs.enable_scroll_animator = default_enable_scroll_animator;
+    if (command_line.HasSwitch(switches::kEnableSmoothScrolling))
+      web_prefs.enable_scroll_animator = true;
+    if (command_line.HasSwitch(switches::kDisableSmoothScrolling))
+      web_prefs.enable_scroll_animator = false;
 
     // The user stylesheet watcher may not exist in a testing profile.
     if (profile->GetUserStyleSheetWatcher()) {
@@ -447,6 +491,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
       web_prefs.accelerated_compositing_enabled = false;
     if (blacklist_flags & GpuFeatureFlags::kGpuFeatureWebgl)
       web_prefs.experimental_webgl_enabled = false;
+    if (blacklist_flags & GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas)
+      web_prefs.accelerated_2d_canvas_enabled = false;
     if (blacklist_flags & GpuFeatureFlags::kGpuFeatureMultisampling)
       web_prefs.gl_multisampling_enabled = false;
   }
@@ -479,14 +525,19 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
 }
 
 void RenderViewHostDelegateHelper::UpdateInspectorSetting(
-    Profile* profile, const std::string& key, const std::string& value) {
-  DictionaryPrefUpdate update(profile->GetPrefs(),
-                              prefs::kWebKitInspectorSettings);
+    content::BrowserContext* browser_context,
+    const std::string& key,
+    const std::string& value) {
+  DictionaryPrefUpdate update(
+      Profile::FromBrowserContext(browser_context)->GetPrefs(),
+      prefs::kWebKitInspectorSettings);
   DictionaryValue* inspector_settings = update.Get();
   inspector_settings->SetWithoutPathExpansion(key,
                                               Value::CreateStringValue(value));
 }
 
-void RenderViewHostDelegateHelper::ClearInspectorSettings(Profile* profile) {
-  profile->GetPrefs()->ClearPref(prefs::kWebKitInspectorSettings);
+void RenderViewHostDelegateHelper::ClearInspectorSettings(
+    content::BrowserContext* browser_context) {
+  Profile::FromBrowserContext(browser_context)->GetPrefs()->
+      ClearPref(prefs::kWebKitInspectorSettings);
 }

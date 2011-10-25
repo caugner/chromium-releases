@@ -89,6 +89,20 @@ const char* GetUpdatesSourceString(
   return "";
 }
 
+const char* GetDeviceTypeString(
+    sync_pb::SessionHeader::DeviceType device_type) {
+  ASSERT_ENUM_BOUNDS(sync_pb::SessionHeader, DeviceType, TYPE_WIN, TYPE_OTHER);
+  switch (device_type) {
+    ENUM_CASE(sync_pb::SessionHeader, TYPE_WIN);
+    ENUM_CASE(sync_pb::SessionHeader, TYPE_MAC);
+    ENUM_CASE(sync_pb::SessionHeader, TYPE_LINUX);
+    ENUM_CASE(sync_pb::SessionHeader, TYPE_CROS);
+    ENUM_CASE(sync_pb::SessionHeader, TYPE_OTHER);
+  }
+  NOTREACHED();
+  return "";
+}
+
 #undef ASSERT_ENUM_BOUNDS
 #undef ENUM_CASE
 

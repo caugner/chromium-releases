@@ -169,7 +169,7 @@ void DhcpProxyScriptFetcherWin::OnFetcherDone(int result) {
   // for the rest of the results.
   if (state_ == STATE_NO_RESULTS) {
     state_ = STATE_SOME_RESULTS;
-    wait_timer_.Start(
+    wait_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(ImplGetMaxWaitMs()),
         this, &DhcpProxyScriptFetcherWin::OnWaitTimer);
   }
@@ -371,7 +371,7 @@ DhcpProxyScriptFetcherWin::WorkerThread::WorkerThread() {
 void DhcpProxyScriptFetcherWin::WorkerThread::Init(
     const base::WeakPtr<DhcpProxyScriptFetcherWin>& owner) {
   owner_ = owner;
-  origin_loop_ = base::MessageLoopProxy::CreateForCurrentThread();
+  origin_loop_ = base::MessageLoopProxy::current();
 }
 
 bool DhcpProxyScriptFetcherWin::WorkerThread::ImplGetCandidateAdapterNames(

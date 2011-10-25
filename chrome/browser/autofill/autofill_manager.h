@@ -17,6 +17,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
+#include "base/time.h"
 #include "chrome/browser/autofill/autofill_download.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_structure.h"
@@ -49,9 +50,6 @@ class AutofillManager : public TabContentsObserver,
  public:
   explicit AutofillManager(TabContentsWrapper* tab_contents);
   virtual ~AutofillManager();
-
-  // Registers our browser prefs.
-  static void RegisterBrowserPrefs(PrefService* prefs);
 
   // Registers our Enable/Disable Autofill pref.
   static void RegisterUserPrefs(PrefService* prefs);
@@ -113,8 +111,13 @@ class AutofillManager : public TabContentsObserver,
   void UnpackGUIDs(int id, GUIDPair* cc_guid, GUIDPair* profile_guid);
 
  private:
-  void OnFormSubmitted(const webkit_glue::FormData& form);
-  void OnFormsSeen(const std::vector<webkit_glue::FormData>& forms);
+  void OnFormSubmitted(const webkit_glue::FormData& form,
+                       const base::TimeTicks& timestamp);
+  void OnFormsSeen(const std::vector<webkit_glue::FormData>& forms,
+                   const base::TimeTicks& timestamp);
+  void OnTextFieldDidChange(const webkit_glue::FormData& form,
+                            const webkit_glue::FormField& field,
+                            const base::TimeTicks& timestamp);
   void OnQueryFormFieldAutofill(int query_id,
                                 const webkit_glue::FormData& form,
                                 const webkit_glue::FormField& field);
@@ -123,8 +126,9 @@ class AutofillManager : public TabContentsObserver,
                               const webkit_glue::FormField& field,
                               int unique_id);
   void OnShowAutofillDialog();
-  void OnDidFillAutofillFormData();
-  void OnDidShowAutofillSuggestions();
+  void OnDidPreviewAutofillFormData();
+  void OnDidFillAutofillFormData(const base::TimeTicks& timestamp);
+  void OnDidShowAutofillSuggestions(bool is_new_popup);
 
   // Fills |host| with the RenderViewHost for this tab.
   // Returns false if Autofill is disabled or if the host is unavailable.
@@ -167,24 +171,25 @@ class AutofillManager : public TabContentsObserver,
                                 std::vector<string16>* icons,
                                 std::vector<int>* unique_ids);
 
-  // Set |field| argument's value based on |type| and contents of the
-  // |credit_card|.
-  void FillCreditCardFormField(const CreditCard* credit_card,
+  // Set |field|'s value based on |type| and contents of the |credit_card|.
+  void FillCreditCardFormField(const CreditCard& credit_card,
                                AutofillFieldType type,
                                webkit_glue::FormField* field);
 
-  // Set |field| argument's value based on |type| and contents of the |profile|.
-  // The |variant| parameter specifies which value in a multi-valued profile.
-  void FillFormField(const AutofillProfile* profile,
-                     AutofillFieldType type,
+  // Set |field|'s value based on |cached_field|'s type and contents of the
+  // |profile|.  The |variant| parameter specifies which value in a multi-valued
+  // profile.
+  void FillFormField(const AutofillProfile& profile,
+                     const AutofillField& cached_field,
                      size_t variant,
                      webkit_glue::FormField* field);
 
-  // Set |field| argument's value for phone/fax number based on contents of the
-  // |profile|. |type| is the type of the phone.
-  // The |variant| parameter specifies which value in a multi-valued profile.
-  void FillPhoneNumberField(const AutofillProfile* profile,
-                            AutofillFieldType type,
+  // Set |field|'s value for phone/fax number based on contents of the
+  // |profile|.  The |cached_field| specifies the type of the phone and whether
+  // this is a phone prefix or suffix.  The |variant| parameter specifies which
+  // value in a multi-valued profile.
+  void FillPhoneNumberField(const AutofillProfile& profile,
+                            const AutofillField& cached_field,
                             size_t variant,
                             webkit_glue::FormField* field);
 
@@ -194,6 +199,12 @@ class AutofillManager : public TabContentsObserver,
   // Uses existing personal data to determine possible field types for the
   // |submitted_form|.
   void DeterminePossibleFieldTypesForUpload(FormStructure* submitted_form);
+
+  // If |initial_interaction_timestamp_| is unset or is set to a later time than
+  // |interaction_timestamp|, updates the cached timestamp.  The latter check is
+  // needed because IPC messages can arrive out of order.
+  void UpdateInitialInteractionTimestamp(
+      const base::TimeTicks& interaction_timestamp);
 
   // The owning TabContentsWrapper.
   TabContentsWrapper* tab_contents_wrapper_;
@@ -216,12 +227,24 @@ class AutofillManager : public TabContentsObserver,
 
   // For logging UMA metrics. Overridden by metrics tests.
   scoped_ptr<const AutofillMetrics> metric_logger_;
-
   // Have we logged whether Autofill is enabled for this page load?
   bool has_logged_autofill_enabled_;
-
   // Have we logged an address suggestions count metric for this page?
   bool has_logged_address_suggestions_count_;
+  // Have we shown Autofill suggestions at least once?
+  bool did_show_suggestions_;
+  // Has the user manually edited at least one form field among the autofillable
+  // ones?
+  bool user_did_type_;
+  // Has the user autofilled a form on this page?
+  bool user_did_autofill_;
+  // Has the user edited a field that was previously autofilled?
+  bool user_did_edit_autofilled_field_;
+  // When the page finished loading.
+  base::TimeTicks forms_loaded_timestamp_;
+  // When the user first interacted with a potentially fillable form on this
+  // page.
+  base::TimeTicks initial_interaction_timestamp_;
 
   // Our copy of the form data.
   ScopedVector<FormStructure> form_structures_;
@@ -241,6 +264,8 @@ class AutofillManager : public TabContentsObserver,
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillAddressForm);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillAddressAndCreditCardForm);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillFormWithMultipleSections);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           FillFormWithAuthorSpecifiedSections);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillFormWithMultipleEmails);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillAutofilledForm);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FillPhoneNumber);
@@ -261,6 +286,10 @@ class AutofillManager : public TabContentsObserver,
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsForFailure);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsWithExperimentId);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, SaneMetricsWithCacheMismatch);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest,
+                           UserHappinessFormLoadAndSubmission);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, UserHappinessFormInteraction);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, FormFillDuration);
 
   DISALLOW_COPY_AND_ASSIGN(AutofillManager);
 };

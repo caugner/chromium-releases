@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,7 +8,7 @@
 
 #include "base/logging.h"
 #include "chrome/browser/password_manager/encryptor.h"
-#include "chrome/common/sqlite_utils.h"
+#include "chrome/browser/sync/util/sqlite_utils.h"
 
 namespace browser_sync {
 
@@ -27,7 +27,7 @@ void UserSettings::SetAuthTokenForService(
     return;
   }
   ScopedDBHandle dbhandle(this);
-  SQLStatement statement;
+  sqlite_utils::SQLStatement statement;
   statement.prepare(dbhandle.get(),
                     "INSERT INTO cookies "
                     "(email, service_name, service_token) "
@@ -45,7 +45,7 @@ bool UserSettings::GetLastUserAndServiceToken(const std::string& service_name,
                                               std::string* username,
                                               std::string* service_token) {
   ScopedDBHandle dbhandle(this);
-  SQLStatement query;
+  sqlite_utils::SQLStatement query;
   query.prepare(dbhandle.get(),
                 "SELECT email, service_token FROM cookies"
                 " WHERE service_name = ?");

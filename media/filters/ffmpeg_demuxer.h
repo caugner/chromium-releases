@@ -125,7 +125,7 @@ class FFmpegDemuxerStream : public DemuxerStream {
   DISALLOW_COPY_AND_ASSIGN(FFmpegDemuxerStream);
 };
 
-class FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
+class MEDIA_EXPORT FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
  public:
   explicit FFmpegDemuxer(MessageLoop* message_loop);
   virtual ~FFmpegDemuxer();
@@ -134,7 +134,7 @@ class FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
   virtual void PostDemuxTask();
 
   void Initialize(
-      DataSource* data_source, PipelineStatusCallback* callback);
+      DataSource* data_source, const PipelineStatusCB& callback);
 
   // Filter implementation.
   virtual void Stop(FilterCallback* callback);
@@ -161,6 +161,10 @@ class FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
   // For testing purposes.
   void disable_first_seek_hack_for_testing() { first_seek_hack_ = false; }
 
+  // Returns the bitrate of media file. May be obtained from container or
+  // approximated. Returns 0 if it is unknown.
+  int GetBitrate();
+
  private:
   // Only allow a factory to create this class.
   friend class MockFFmpegDemuxer;
@@ -168,7 +172,7 @@ class FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
 
   // Carries out initialization on the demuxer thread.
   void InitializeTask(
-      DataSource* data_source, PipelineStatusCallback* callback);
+      DataSource* data_source, const PipelineStatusCB& callback);
 
   // Carries out a seek on the demuxer thread.
   void SeekTask(base::TimeDelta time, const FilterStatusCB& cb);

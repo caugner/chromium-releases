@@ -6,7 +6,10 @@
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_
 #pragma once
 
+#include <string>
+
 #include "base/basictypes.h"
+#include "googleurl/src/gurl.h"
 
 // Keys used in JSON representation of extensions.
 namespace extension_manifest_keys {
@@ -53,8 +56,10 @@ namespace extension_manifest_keys {
   extern const char* kNaClModulesMIMEType;
   extern const char* kNaClModulesPath;
   extern const char* kName;
+  extern const char* kOfflineEnabled;
   extern const char* kOmnibox;
   extern const char* kOmniboxKeyword;
+  extern const char* kOptionalPermissions;
   extern const char* kOptionsPage;
   extern const char* kPageAction;
   extern const char* kPageActionDefaultIcon;
@@ -71,6 +76,7 @@ namespace extension_manifest_keys {
   extern const char* kPluginsPath;
   extern const char* kPluginsPublic;
   extern const char* kPublicKey;
+  extern const char* kRequirements;
   extern const char* kRunAt;
   extern const char* kShiftKey;
   extern const char* kShortcutKey;
@@ -192,6 +198,7 @@ namespace extension_manifest_errors {
   extern const char* kInvalidNaClModulesMIMEType;
   extern const char* kInvalidNaClModulesPath;
   extern const char* kInvalidName;
+  extern const char* kInvalidOfflineEnabled;
   extern const char* kInvalidOmniboxKeyword;
   extern const char* kInvalidOptionsPage;
   extern const char* kInvalidOptionsPageExpectUrlInPackage;
@@ -214,6 +221,8 @@ namespace extension_manifest_errors {
   extern const char* kInvalidPlugins;
   extern const char* kInvalidPluginsPath;
   extern const char* kInvalidPluginsPublic;
+  extern const char* kInvalidRequirement;
+  extern const char* kInvalidRequirements;
   extern const char* kInvalidRunAt;
   extern const char* kInvalidSidebar;
   extern const char* kInvalidSidebarDefaultIconPath;
@@ -263,6 +272,32 @@ namespace extension_manifest_errors {
 }  // namespace extension_manifest_errors
 
 namespace extension_urls {
+  // Returns the URL prefix for the extension/apps gallery. Can be set via the
+  // --apps-gallery-url switch. The URL returned will not contain a trailing
+  // slash. Do not use this as a prefix/extent for the store.  Instead see
+  // ExtensionService::GetWebStoreApp or
+  // ExtensionService::IsDownloadFromGallery
+  std::string GetWebstoreLaunchURL();
+
+  // Returns the URL prefix for an item in the extension/app gallery. This URL
+  // will contain a trailing slash and should be concatenated with an item ID
+  // to get the item detail URL.
+  std::string GetWebstoreItemDetailURLPrefix();
+
+  // Returns the URL used to get webstore data (ratings, manifest, icon URL,
+  // etc.) about an extension from the webstore as JSON.
+  GURL GetWebstoreItemJsonDataURL(const std::string& extension_id);
+
+  // Return the update URL used by gallery/webstore extensions/apps. The
+  // |secure| parameter will be ignored if the update URL is overriden with
+  // --apps-gallery-update-url.
+  GURL GetWebstoreUpdateUrl(bool secure);
+
+  // Return the URL for an extension/app's .crx file that is hosted by the
+  // webstore.
+  GURL GetWebstoreInstallUrl(const std::string& extension_id,
+                             const std::string& locale);
+
   // The greatest common prefixes of the main extensions gallery's browse and
   // download URLs.
   extern const char* kGalleryBrowsePrefix;
@@ -409,6 +444,12 @@ namespace extension_misc {
     INSTALL_CAUSE_AUTOMATION,
     NUM_INSTALL_CAUSES
   };
-}  // extension_misc
+
+  enum UnloadedExtensionReason {
+    UNLOAD_REASON_DISABLE,    // Extension is being disabled.
+    UNLOAD_REASON_UPDATE,     // Extension is being updated to a newer version.
+    UNLOAD_REASON_UNINSTALL,  // Extension is being uninstalled.
+  };
+} // extension_misc
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_

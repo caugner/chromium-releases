@@ -5,11 +5,13 @@
 {
   'variables': {
     'chromium_code': 1,
+    # Override to dynamically link the PulseAudio library.
+    'use_pulseaudio%': 0,
   },
   'targets': [
     {
       'target_name': 'media',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         'yuv_convert',
         '../base/base.gyp:base',
@@ -17,6 +19,10 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
         '../third_party/openmax/openmax.gyp:il',
+        '../ui/ui.gyp:ui',
+      ],
+      'defines': [
+        'MEDIA_IMPLEMENTATION',
       ],
       'include_dirs': [
         '..',
@@ -56,6 +62,8 @@
         'audio/linux/alsa_util.h',
         'audio/linux/alsa_wrapper.cc',
         'audio/linux/alsa_wrapper.h',
+        'audio/linux/pulse_output.cc',
+        'audio/linux/pulse_output.h',
         'audio/openbsd/audio_manager_openbsd.cc',
         'audio/openbsd/audio_manager_openbsd.h',
         'audio/mac/audio_input_mac.cc',
@@ -104,6 +112,10 @@
         'base/h264_bitstream_converter.cc',
         'base/h264_bitstream_converter.h',
         'base/media.h',
+        'base/media_export.h',
+        'base/media_log.cc',
+        'base/media_log.h',
+        'base/media_log_event.h',
         'base/media_posix.cc',
         'base/media_switches.cc',
         'base/media_switches.h',
@@ -156,6 +168,10 @@
         'filters/chunk_demuxer_factory.cc',
         'filters/chunk_demuxer_factory.h',
         'filters/decoder_base.h',
+        'filters/dummy_demuxer.cc',
+        'filters/dummy_demuxer.h',
+        'filters/dummy_demuxer_factory.cc',
+        'filters/dummy_demuxer_factory.h',
         'filters/ffmpeg_audio_decoder.cc',
         'filters/ffmpeg_audio_decoder.h',
         'filters/ffmpeg_demuxer.cc',
@@ -186,13 +202,15 @@
         'video/capture/linux/video_capture_device_linux.h',
         'video/capture/video_capture.h',
         'video/capture/video_capture_device.h',
+        'video/capture/video_capture_proxy.cc',
+        'video/capture/video_capture_proxy.h',
         'video/capture/win/filter_base_win.cc',
         'video/capture/win/filter_base_win.h',
         'video/capture/win/pin_base_win.cc',
         'video/capture/win/pin_base_win.h',
         'video/capture/win/sink_filter_observer_win.h',
         'video/capture/win/sink_filter_win.cc',
-        'video/capture/win/sink_filter_win.h',        
+        'video/capture/win/sink_filter_win.h',
         'video/capture/win/sink_input_pin_win.cc',
         'video/capture/win/sink_input_pin_win.h',
         'video/capture/win/video_capture_device_win.cc',
@@ -223,12 +241,33 @@
         ],
       },
       'conditions': [
-        ['OS == "linux" or OS == "freebsd" or OS == "solaris"', {
+        ['OS=="linux" or OS=="freebsd" or OS=="solaris"', {
           'link_settings': {
             'libraries': [
               '-lasound',
             ],
           },
+          'conditions': [
+            ['OS=="linux"', {
+              'conditions': [
+                ['use_pulseaudio == 1', {
+                  'link_settings': {
+                    'libraries': [
+                      '-lpulse',
+                    ],
+                  },
+                  'defines': [
+                    'USE_PULSEAUDIO',
+                  ],
+                }, {  # else: use_pulseaudio == 0
+                  'sources!': [
+                    'audio/linux/pulse_output.cc',
+                    'audio/linux/pulse_output.h',
+                  ],
+                }],
+              ],
+            }],
+          ],
         }],
         ['OS=="openbsd"', {
           'sources/': [ ['exclude', 'alsa_' ],
@@ -387,6 +426,7 @@
       'dependencies': [
         'media',
         'media_test_support',
+        'yuv_convert',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
@@ -412,8 +452,6 @@
         'base/djb2_unittest.cc',
         'base/filter_collection_unittest.cc',
         'base/h264_bitstream_converter_unittest.cc',
-        'base/mock_ffmpeg.cc',
-        'base/mock_ffmpeg.h',
         'base/mock_reader.h',
         'base/mock_task.cc',
         'base/mock_task.h',
@@ -423,6 +461,8 @@
         'base/run_all_unittests.cc',
         'base/seekable_buffer_unittest.cc',
         'base/state_matrix_unittest.cc',
+        'base/test_data_util.cc',
+        'base/test_data_util.h',
         'base/video_frame_unittest.cc',
         'base/video_util_unittest.cc',
         'base/yuv_convert_unittest.cc',
@@ -495,6 +535,7 @@
       'type': 'executable',
       'dependencies': [
         'media',
+        'yuv_convert',
         '../base/base.gyp:base',
         '../skia/skia.gyp:skia',
       ],
@@ -541,7 +582,9 @@
           'type': 'executable',
           'dependencies': [
             'media',
+            'yuv_convert',
             '../base/base.gyp:base',
+            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
           ],
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
@@ -593,6 +636,7 @@
           'type': 'executable',
           'dependencies': [
             'media',
+            'yuv_convert',
             '../base/base.gyp:base',
           ],
           'include_dirs': [
@@ -618,6 +662,7 @@
           'type': 'executable',
           'dependencies': [
             'media',
+            'yuv_convert',
             '../base/base.gyp:base',
             '../ui/gfx/gl/gl.gyp:gl',
           ],
@@ -684,6 +729,7 @@
           'type': 'executable',
           'dependencies': [
             'media',
+            'yuv_convert',
             '../base/base.gyp:base',
             '../ui/gfx/gl/gl.gyp:gl',
           ],

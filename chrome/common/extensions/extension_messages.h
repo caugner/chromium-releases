@@ -8,6 +8,7 @@
 #include "base/shared_memory.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_permission_set.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "chrome/common/web_apps.h"
@@ -109,6 +110,11 @@ struct ExtensionMsg_Loaded_Params {
   // to generate the extension ID for extensions that are loaded unpacked.
   FilePath path;
 
+  // The extension's current active permissions.
+  ExtensionAPIPermissionSet apis;
+  URLPatternSet explicit_hosts;
+  URLPatternSet scriptable_hosts;
+
   // We keep this separate so that it can be used in logging.
   std::string id;
 
@@ -129,6 +135,14 @@ struct ParamTraits<URLPattern> {
 template <>
 struct ParamTraits<URLPatternSet> {
   typedef URLPatternSet param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* p);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<ExtensionAPIPermission::ID> {
+  typedef ExtensionAPIPermission::ID param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
@@ -214,6 +228,14 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_GetApplicationInfo,
 IPC_MESSAGE_ROUTED1(ExtensionMsg_UpdateBrowserWindowId,
                     int /* id of browser window */)
 
+// Tell the renderer to update an extension's permission set.
+IPC_MESSAGE_CONTROL5(ExtensionMsg_UpdatePermissions,
+                     int /* UpdateExtensionPermissionsInfo::REASON */,
+                     std::string /* extension_id*/,
+                     ExtensionAPIPermissionSet /* permissions */,
+                     URLPatternSet /* explicit_hosts */,
+                     URLPatternSet /* scriptable_hosts */)
+
 // Tell the renderer which type this view is.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_NotifyRenderViewType,
                     ViewType::Type /* view_type */)
@@ -288,6 +310,23 @@ IPC_MESSAGE_ROUTED2(ExtensionHostMsg_DidGetApplicationInfo,
                     int32 /* page_id */,
                     WebApplicationInfo)
 
-// Sent by the renderer to implement chrome.app.installApplication().
+// Sent by the renderer to implement chrome.app.install().
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_InstallApplication,
                     WebApplicationInfo)
+
+// Sent by the renderer to implement chrome.webstore.install().
+IPC_MESSAGE_ROUTED3(ExtensionHostMsg_InlineWebstoreInstall,
+                    int32 /* install id */,
+                    std::string /* Web Store item ID */,
+                    GURL /* requestor URL */)
+
+// Send to renderer once the installation mentioned above is complete.
+IPC_MESSAGE_ROUTED3(ExtensionMsg_InlineWebstoreInstallResponse,
+                    int32 /* install id */,
+                    bool /* whether the install was successful */,
+                    std::string /* error */)
+
+// Deliver a message sent with ExtensionHostMsg_PostMessage.
+IPC_MESSAGE_ROUTED2(ExtensionMsg_DeliverMessage,
+                    int /* target_port_id */,
+                    std::string /* message */)

@@ -36,12 +36,6 @@
 
 namespace {
 
-#if defined(OS_WIN)
-static const FilePath::CharType kLocaleFileExtension[] = L".dll";
-#elif defined(OS_POSIX)
-static const FilePath::CharType kLocaleFileExtension[] = ".pak";
-#endif
-
 static const char* const kAcceptLanguageList[] = {
   "af",     // Afrikaans
   "am",     // Amharic
@@ -64,7 +58,7 @@ static const char* const kAcceptLanguageList[] = {
   "de-DE",  // German (Germany)
   "el",     // Greek
   "en",     // English
-  "en-AU",  // English (Austrailia)
+  "en-AU",  // English (Australia)
   "en-CA",  // English (Canada)
   "en-GB",  // English (UK)
   "en-NZ",  // English (New Zealand)
@@ -231,8 +225,7 @@ bool IsLocalePartiallyPopulated(const std::string& locale_name) {
 }
 
 #if !defined(OS_MACOSX)
-bool IsLocaleAvailable(const std::string& locale,
-                       const FilePath& locale_path) {
+bool IsLocaleAvailable(const std::string& locale) {
   // If locale has any illegal characters in it, we don't want to try to
   // load it because it may be pointing outside the locale data file directory.
   if (!file_util::IsFilenameLegal(ASCIIToUTF16(locale)))
@@ -246,16 +239,12 @@ bool IsLocaleAvailable(const std::string& locale,
   if (!l10n_util::IsLocaleSupportedByOS(locale))
     return false;
 
-  FilePath test_path = locale_path;
-  test_path =
-    test_path.AppendASCII(locale).ReplaceExtension(kLocaleFileExtension);
-  return file_util::PathExists(test_path);
+  return ResourceBundle::LocaleDataPakExists(locale);
 }
 
 bool CheckAndResolveLocale(const std::string& locale,
-                           const FilePath& locale_path,
                            std::string* resolved_locale) {
-  if (IsLocaleAvailable(locale, locale_path)) {
+  if (IsLocaleAvailable(locale)) {
     *resolved_locale = locale;
     return true;
   }
@@ -279,9 +268,10 @@ bool CheckAndResolveLocale(const std::string& locale,
     std::string tmp_locale(lang);
     // Map es-RR other than es-ES to es-419 (Chrome's Latin American
     // Spanish locale).
-    if (LowerCaseEqualsASCII(lang, "es") && !LowerCaseEqualsASCII(region, "es"))
+    if (LowerCaseEqualsASCII(lang, "es") &&
+        !LowerCaseEqualsASCII(region, "es")) {
       tmp_locale.append("-419");
-    else if (LowerCaseEqualsASCII(lang, "zh")) {
+    } else if (LowerCaseEqualsASCII(lang, "zh")) {
       // Map zh-HK and zh-MO to zh-TW. Otherwise, zh-FOO is mapped to zh-CN.
       if (LowerCaseEqualsASCII(region, "hk") ||
           LowerCaseEqualsASCII(region, "mo")) { // Macao
@@ -289,8 +279,23 @@ bool CheckAndResolveLocale(const std::string& locale,
       } else {
         tmp_locale.append("-CN");
       }
+#if defined(OS_CHROMEOS)
+    } else if (LowerCaseEqualsASCII(lang, "en")) {
+      // Map Australian, Canadian, New Zealand and South African English
+      // to British English for now.
+      // TODO(jungshik): en-CA may have to change sides once
+      // we have OS locale separate from app locale (Chrome's UI language).
+      if (LowerCaseEqualsASCII(region, "au") ||
+          LowerCaseEqualsASCII(region, "ca") ||
+          LowerCaseEqualsASCII(region, "nz") ||
+          LowerCaseEqualsASCII(region, "za")) {
+        tmp_locale.append("-GB");
+      } else {
+        tmp_locale.append("-US");
+      }
+#endif
     }
-    if (IsLocaleAvailable(tmp_locale, locale_path)) {
+    if (IsLocaleAvailable(tmp_locale)) {
       resolved_locale->swap(tmp_locale);
       return true;
     }
@@ -311,7 +316,7 @@ bool CheckAndResolveLocale(const std::string& locale,
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(alias_map); ++i) {
     if (LowerCaseEqualsASCII(locale, alias_map[i].source)) {
       std::string tmp_locale(alias_map[i].dest);
-      if (IsLocaleAvailable(tmp_locale, locale_path)) {
+      if (IsLocaleAvailable(tmp_locale)) {
         resolved_locale->swap(tmp_locale);
         return true;
       }
@@ -370,8 +375,6 @@ std::string GetApplicationLocale(const std::string& pref_locale) {
 
 #else
 
-  FilePath locale_path;
-  PathService::Get(ui::DIR_LOCALES, &locale_path);
   std::string resolved_locale;
   std::vector<std::string> candidates;
 
@@ -384,7 +387,7 @@ std::string GetApplicationLocale(const std::string& pref_locale) {
 
   // First, try the preference value.
   if (!pref_locale.empty())
-    candidates.push_back(pref_locale);
+    candidates.push_back(GetCanonicalLocale(pref_locale));
 
   // Next, try the overridden locale.
   const std::vector<std::string>& languages = l10n_util::GetLocaleOverrides();
@@ -424,7 +427,7 @@ std::string GetApplicationLocale(const std::string& pref_locale) {
 
   std::vector<std::string>::const_iterator i = candidates.begin();
   for (; i != candidates.end(); ++i) {
-    if (CheckAndResolveLocale(*i, locale_path, &resolved_locale)) {
+    if (CheckAndResolveLocale(*i, &resolved_locale)) {
       base::i18n::SetICUDefaultLocale(resolved_locale);
       return resolved_locale;
     }
@@ -432,7 +435,7 @@ std::string GetApplicationLocale(const std::string& pref_locale) {
 
   // Fallback on en-US.
   const std::string fallback_locale("en-US");
-  if (IsLocaleAvailable(fallback_locale, locale_path)) {
+  if (IsLocaleAvailable(fallback_locale)) {
     base::i18n::SetICUDefaultLocale(fallback_locale);
     return fallback_locale;
   }
@@ -739,69 +742,6 @@ string16 GetStringFUTF16Int(int message_id, int a) {
 
 string16 GetStringFUTF16Int(int message_id, int64 a) {
   return GetStringFUTF16(message_id, UTF8ToUTF16(base::Int64ToString(a)));
-}
-
-string16 TruncateString(const string16& string, size_t length) {
-  if (string.size() <= length)
-    // String fits, return it.
-    return string;
-
-  if (length == 0) {
-    // No room for the elide string, return an empty string.
-    return string16();
-  }
-  size_t max = length - 1;
-
-  // Added to the end of strings that are too big.
-  static const char16 kElideString[] = { 0x2026, 0 };
-
-  if (max == 0) {
-    // Just enough room for the elide string.
-    return kElideString;
-  }
-
-  // Use a line iterator to find the first boundary.
-  UErrorCode status = U_ZERO_ERROR;
-  scoped_ptr<icu::RuleBasedBreakIterator> bi(
-      static_cast<icu::RuleBasedBreakIterator*>(
-          icu::RuleBasedBreakIterator::createLineInstance(
-              icu::Locale::getDefault(), status)));
-  if (U_FAILURE(status))
-    return string.substr(0, max) + kElideString;
-  bi->setText(string.c_str());
-  int32_t index = bi->preceding(static_cast<int32_t>(max));
-  if (index == icu::BreakIterator::DONE) {
-    index = static_cast<int32_t>(max);
-  } else {
-    // Found a valid break (may be the beginning of the string). Now use
-    // a character iterator to find the previous non-whitespace character.
-    icu::StringCharacterIterator char_iterator(string.c_str());
-    if (index == 0) {
-      // No valid line breaks. Start at the end again. This ensures we break
-      // on a valid character boundary.
-      index = static_cast<int32_t>(max);
-    }
-    char_iterator.setIndex(index);
-    while (char_iterator.hasPrevious()) {
-      char_iterator.previous();
-      if (!(u_isspace(char_iterator.current()) ||
-            u_charType(char_iterator.current()) == U_CONTROL_CHAR ||
-            u_charType(char_iterator.current()) == U_NON_SPACING_MARK)) {
-        // Not a whitespace character. Advance the iterator so that we
-        // include the current character in the truncated string.
-        char_iterator.next();
-        break;
-      }
-    }
-    if (char_iterator.hasPrevious()) {
-      // Found a valid break point.
-      index = char_iterator.getIndex();
-    } else {
-      // String has leading whitespace, return the elide string.
-      return kElideString;
-    }
-  }
-  return string.substr(0, index) + kElideString;
 }
 
 // Compares the character data stored in two different string16 strings by

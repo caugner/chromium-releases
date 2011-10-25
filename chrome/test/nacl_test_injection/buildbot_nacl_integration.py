@@ -28,7 +28,28 @@ def Main(args):
   # them off on the main Chrome waterfall, but not on NaCl's integration bots.
   # This makes it easier to see when things have been fixed NaCl side.
   if not is_integration_bot:
-    pass
+    # TODO(ncbray): Reenable when this issue is resolved.
+    # http://code.google.com/p/nativeclient/issues/detail?id=2091
+    tests_to_disable.append('run_ppapi_bad_browser_test')
+    # This thread safety stress test is flaky on at least Windows.
+    # See http://code.google.com/p/nativeclient/issues/detail?id=2124
+    # TODO(mseaborn): Reenable when this issue is resolved.
+    tests_to_disable.append('run_ppapi_ppb_var_browser_test')
+    # Te behavior of the URLRequest changed slightly and this test needs to be
+    # updated. http://code.google.com/p/chromium/issues/detail?id=94352
+    tests_to_disable.append('run_ppapi_ppb_url_request_info_browser_test')
+
+    # TODO(ncbray) why did these tests flake?
+    # http://code.google.com/p/nativeclient/issues/detail?id=2230
+    tests_to_disable.extend([
+        'run_pm_manifest_file_chrome_browser_test',
+        'run_srpc_basic_chrome_browser_test',
+        'run_srpc_hw_data_chrome_browser_test',
+        'run_srpc_hw_chrome_browser_test',
+        'run_srpc_manifest_file_chrome_browser_test',
+        'run_srpc_nameservice_chrome_browser_test',
+        'run_srpc_nrd_xfer_chrome_browser_test',
+        ])
 
   if sys.platform == 'darwin':
     # The following test is failing on Mac OS X 10.5.  This may be

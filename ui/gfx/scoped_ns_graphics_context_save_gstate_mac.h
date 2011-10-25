@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "ui/base/ui_export.h"
 
 #if defined(__OBJC__)
 @class NSGraphicsContext;
@@ -16,8 +17,8 @@ class NSGraphicsContext;
 
 namespace gfx {
 
-// What this class does should be self-evident and self-documenting.
-class ScopedNSGraphicsContextSaveGState {
+// A class to save/restore the state of the current context.
+class UI_EXPORT ScopedNSGraphicsContextSaveGState {
  public:
   ScopedNSGraphicsContextSaveGState();
   ~ScopedNSGraphicsContextSaveGState();

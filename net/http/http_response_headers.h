@@ -12,7 +12,7 @@
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/http/http_version.h"
 
 class Pickle;
@@ -25,7 +25,7 @@ class TimeDelta;
 namespace net {
 
 // HttpResponseHeaders: parses and holds HTTP response headers.
-class NET_API HttpResponseHeaders
+class NET_EXPORT HttpResponseHeaders
     : public base::RefCountedThreadSafe<HttpResponseHeaders> {
  public:
   // Persist options.
@@ -44,9 +44,6 @@ class NET_API HttpResponseHeaders
   // (Note that line continuations should have already been joined;
   // see HttpUtil::AssembleRawHeaders)
   //
-  // NOTE: For now, raw_headers is not really 'raw' in that this constructor is
-  // called with a 'NativeMB' string on Windows because WinHTTP does not allow
-  // us to access the raw byte sequence as sent by a web server.  In any case,
   // HttpResponseHeaders does not perform any encoding changes on the input.
   //
   explicit HttpResponseHeaders(const std::string& raw_headers);

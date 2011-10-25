@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/lazy_instance.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/translate_errors.h"
@@ -181,7 +181,11 @@ class TranslateManager : public NotificationObserver,
       TabContents* tab);
 
   NotificationRegistrar notification_registrar_;
-  PrefChangeRegistrar pref_change_registrar_;
+
+  // Each PrefChangeRegistrar only tracks a single PrefService, so a map from
+  // each PrefService used to its registrar is needed.
+  typedef std::map<PrefService*, PrefChangeRegistrar*> PrefServiceRegistrarMap;
+  PrefServiceRegistrarMap pref_change_registrars_;
 
   // A map that associates a profile with its parsed "accept languages".
   typedef std::set<std::string> LanguageSet;

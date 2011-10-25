@@ -9,12 +9,12 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
-#include "ppapi/c/dev/ppb_var_deprecated.h"
+#include "ppapi/c/ppb_var.h"
 #include "ppapi/proxy/host_var_serialization_rules.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -70,13 +70,10 @@ HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
     g_module_to_dispatcher = new ModuleToDispatcherMap;
   (*g_module_to_dispatcher)[pp_module_] = this;
 
-  const PPB_Var_Deprecated* var_interface =
-      static_cast<const PPB_Var_Deprecated*>(
-          local_get_interface(PPB_VAR_DEPRECATED_INTERFACE));
+  const PPB_Var* var_interface =
+      static_cast<const PPB_Var*>(local_get_interface(PPB_VAR_INTERFACE));
   SetSerializationRules(new HostVarSerializationRules(var_interface, module));
 
-  // TODO(brettw): It might be more testable to inject the PPB_Proxy_Private
-  // instead of requesting it from GetLocalInterface.
   ppb_proxy_ = reinterpret_cast<const PPB_Proxy_Private*>(
       GetLocalInterface(PPB_PROXY_PRIVATE_INTERFACE));
   DCHECK(ppb_proxy_) << "The proxy interface should always be supported.";
@@ -211,7 +208,12 @@ const void* HostDispatcher::GetProxiedInterface(const std::string& interface) {
   if (iter == plugin_if_supported_.end()) {
     // Need to query. Cache the result so we only do this once.
     bool supported = false;
+
+    bool previous_reentrancy_value = allow_plugin_reentrancy_;
+    allow_plugin_reentrancy_ = true;
     Send(new PpapiMsg_SupportsInterface(interface, &supported));
+    allow_plugin_reentrancy_ = previous_reentrancy_value;
+
     std::pair<PluginIFSupportedMap::iterator, bool> iter_success_pair;
     iter_success_pair = plugin_if_supported_.insert(
         PluginIFSupportedMap::value_type(interface, supported));
@@ -270,5 +272,4 @@ ScopedModuleReference::~ScopedModuleReference() {
 }
 
 }  // namespace proxy
-}  // namespace pp
-
+}  // namespace ppapi

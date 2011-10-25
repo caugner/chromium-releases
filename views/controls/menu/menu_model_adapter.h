@@ -19,7 +19,7 @@ class MenuItemView;
 
 // This class wraps an instance of ui::MenuModel with the
 // views::MenuDelegate interface required by views::MenuItemView.
-class MenuModelAdapter : public MenuDelegate {
+class VIEWS_EXPORT MenuModelAdapter : public MenuDelegate {
  public:
   // The caller retains ownership of the ui::MenuModel instance and
   // must ensure it exists for the lifetime of the adapter.
@@ -29,6 +29,10 @@ class MenuModelAdapter : public MenuDelegate {
   // Populate a MenuItemView menu with the ui::MenuModel items
   // (including submenus).
   virtual void BuildMenu(MenuItemView* menu);
+
+  // Convenience for creating and populating a menu. The caller owns the
+  // returned MenuItemView.
+  MenuItemView* CreateMenu();
 
   void set_triggerable_event_flags(int triggerable_event_flags) {
     triggerable_event_flags_ = triggerable_event_flags;

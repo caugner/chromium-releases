@@ -14,7 +14,6 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/plugin_updater.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_content_client.h"
@@ -107,15 +106,15 @@ const Experiment kExperiments[] = {
     "cloud-print-proxy",  // FLAGS:RECORD_UMA
     IDS_FLAGS_CLOUD_PRINT_PROXY_NAME,
     IDS_FLAGS_CLOUD_PRINT_PROXY_DESCRIPTION,
-#if defined(GOOGLE_CHROME_BUILD)
     // For a Chrome build, we know we have a PDF plug-in on Windows, so it's
-    // fully enabled. Linux still need some final polish.
-    kOsLinux,
-#else
+    // fully enabled.
     // Otherwise, where we know Windows could be working if a viable PDF
-    // plug-in could be supplied, we'll keep the lab enabled. Mac always has
-    // PDF rasterization available, so no flag needed there.
-    kOsWin | kOsLinux,
+    // plug-in could be supplied, we'll keep the lab enabled. Mac and Linux
+    // always have PDF rasterization available, so no flag needed there.
+#if !defined(GOOGLE_CHROME_BUILD)
+    kOsWin,
+#else
+    0,
 #endif
     SINGLE_VALUE_TYPE(switches::kEnableCloudPrintProxy)
   },
@@ -125,6 +124,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_CRXLESS_WEB_APPS_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableCrxlessWebApps)
+  },
+  {
+    "lazy-background-pages",
+    IDS_FLAGS_LAZY_BACKGROUND_PAGES_NAME,
+    IDS_FLAGS_LAZY_BACKGROUND_PAGES_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableLazyBackgroundPages)
   },
   {
     "ignore-gpu-blacklist",
@@ -161,9 +167,12 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kDisableGpuVsync)
   },
-#if !defined(GOOGLE_CHROME_BUILD)
+  // Exposed on all platforms until there is a workaround for easy access to
+  // the native print dialog for users that need it. Once that's done, revert
+  // back to:
   // Only expose this for Chromium builds where users may not have the PDF
   // plugin. Do not give Google Chrome users the option to disable it here.
+  // Also expose it for Chrome OS where print preview is still experimental.
   {
     "print-preview",  // FLAGS:RECORD_UMA
     IDS_FLAGS_PRINT_PREVIEW_NAME,
@@ -171,21 +180,22 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnablePrintPreview)
   },
-#endif
+  {
+    "cloud-print",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_CLOUD_PRINT_NAME,
+    IDS_FLAGS_CLOUD_PRINT_DESCRIPTION,
+    // Define this for all platforms except Chrome OS.
+    // It makes no sense to disable it on Chrome OS.
+    kOsMac | kOsWin | kOsLinux,
+    SINGLE_VALUE_TYPE(switches::kEnableCloudPrint)
+  },
   // TODO(dspringer): When NaCl is on by default, remove this flag entry.
   {
-    switches::kEnableNaCl,  // FLAGS:RECORD_UMA
+    "enable-nacl",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ENABLE_NACL_NAME,
     IDS_FLAGS_ENABLE_NACL_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableNaCl)
-  },
-  {
-    "dns-server",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_DNS_SERVER_NAME,
-    IDS_FLAGS_DNS_SERVER_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDnsServer)
   },
   {
     "extension-apis",  // FLAGS:RECORD_UMA
@@ -193,6 +203,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_EXPERIMENTAL_EXTENSION_APIS_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableExperimentalExtensionApis)
+  },
+  {
+    "apps-new-install-bubble",
+    IDS_FLAGS_APPS_NEW_INSTALL_BUBBLE_NAME,
+    IDS_FLAGS_APPS_NEW_INSTALL_BUBBLE_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kAppsNewInstallBubble)
   },
   {
     "click-to-play",  // FLAGS:RECORD_UMA
@@ -237,20 +254,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kFocusExistingTabOnOpen)
   },
   {
-    "compact-navigation",
-    IDS_FLAGS_ENABLE_COMPACT_NAVIGATION,
-    IDS_FLAGS_ENABLE_COMPACT_NAVIGATION_DESCRIPTION,
-    kOsWin,  // TODO(stevet): Add other platforms when ready.
-    SINGLE_VALUE_TYPE(switches::kEnableCompactNavigation)
-  },
-  {
-    "new-tab-page-4",
-    IDS_FLAGS_NEW_TAB_PAGE_4_NAME,
-    IDS_FLAGS_NEW_TAB_PAGE_4_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kNewTabPage4)
-  },
-  {
     "tab-groups-context-menu",
     IDS_FLAGS_TAB_GROUPS_CONTEXT_MENU_NAME,
     IDS_FLAGS_TAB_GROUPS_CONTEXT_MENU_DESCRIPTION,
@@ -286,17 +289,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kPreloadInstantSearch)
   },
   {
-    "disable-pre-login",
-    IDS_FLAGS_PRE_LOGIN_NAME,
-    IDS_FLAGS_PRE_LOGIN_DESCRIPTION,
-    kOsMac | kOsWin | kOsLinux,
-    SINGLE_VALUE_TYPE(switches::kDisablePreLogin)
-  },
-#if defined(ENABLE_PRE_LOGIN_AFTER_M14)
-  // Pre-login is being taken out of M14, but will be put back in right after
-  // the fork.
-#endif
-  {
     "static-ip-config",
     IDS_FLAGS_STATIC_IP_CONFIG_NAME,
     IDS_FLAGS_STATIC_IP_CONFIG_DESCRIPTION,
@@ -316,26 +308,41 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kShowAutofillTypePredictions)
   },
   {
-    "sync-typed-urls",
-    IDS_FLAGS_SYNC_TYPED_URLS_NAME,
-    IDS_FLAGS_SYNC_TYPED_URLS_DESCRIPTION,
+    "sync-oauth",
+    IDS_FLAGS_SYNC_OAUTH_NAME,
+    IDS_FLAGS_SYNC_OAUTH_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableSyncTypedUrls)
+    SINGLE_VALUE_TYPE(switches::kEnableSyncOAuth)
+  },
+  {
+    "sync-sessions",
+    IDS_FLAGS_SYNC_SESSIONS_NAME,
+    IDS_FLAGS_SYNC_SESSIONS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableSyncSessions)
+  },
+  {
+    "sync-search-engines",
+    IDS_FLAGS_SYNC_SEARCH_ENGINES_NAME,
+    IDS_FLAGS_SYNC_SEARCH_ENGINES_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableSyncSearchEngines)
   },
   {
     "enable-smooth-scrolling",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ENABLE_SMOOTH_SCROLLING_NAME,
     IDS_FLAGS_ENABLE_SMOOTH_SCROLLING_DESCRIPTION,
     // Can't expose the switch unless the code is compiled in.
+    // On by default for the Mac (different implementation in WebKit).
 #if defined(ENABLE_SMOOTH_SCROLLING)
-    kOsAll,
+    kOsWin | kOsLinux | kOsCrOS,
 #else
     0,
 #endif
     SINGLE_VALUE_TYPE(switches::kEnableSmoothScrolling)
   },
   {
-    "prerender-from-omnibox",
+    "prerender-from-omnibox",  // FLAGS:RECORD_UMA
     IDS_FLAGS_PRERENDER_FROM_OMNIBOX_NAME,
     IDS_FLAGS_PRERENDER_FROM_OMNIBOX_DESCRIPTION,
     kOsAll,
@@ -363,7 +370,40 @@ const Experiment kExperiments[] = {
     kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kWebUILogin)
   },
+  {
+    "enable-archives",
+    IDS_FILE_BROWSER_MOUNT_ARCHIVE,
+    IDS_FILE_MANAGER,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableArchives)
+  },
 #endif
+  {
+    "memory-widget",
+    IDS_FLAGS_MEMORY_WIDGET_NAME,
+    IDS_FLAGS_MEMORY_WIDGET_DESCRIPTION,
+    kOsCrOS,
+#if defined(OS_CHROMEOS)
+    // This switch exists only on Chrome OS.
+    SINGLE_VALUE_TYPE(switches::kMemoryWidget)
+#else
+    SINGLE_VALUE_TYPE("")
+#endif
+  },
+  {
+    "downloads-new-ui",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_DOWNLOADS_NEW_UI_NAME,
+    IDS_FLAGS_DOWNLOADS_NEW_UI_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kDownloadsNewUI)
+  },
+  {
+    "enable-autologin",
+    IDS_FLAGS_ENABLE_AUTOLOGIN_NAME,
+    IDS_FLAGS_ENABLE_AUTOLOGIN_DESCRIPTION,
+    kOsMac | kOsWin | kOsLinux,
+    SINGLE_VALUE_TYPE(switches::kEnableAutologin)
+  },
 };
 
 const Experiment* experiments = kExperiments;
@@ -725,21 +765,10 @@ void FlagsState::SetExperimentEnabled(
   DCHECK(e);
 
   if (e->type == Experiment::SINGLE_VALUE) {
-    if (enable) {
+    if (enable)
       enabled_experiments.insert(internal_name);
-      // If enabling NaCl, make sure the plugin is also enabled. See bug
-      // http://code.google.com/p/chromium/issues/detail?id=81010 for more
-      // information.
-      // TODO(dspringer): When NaCl is on by default, remove this code.
-      if (internal_name == switches::kEnableNaCl) {
-        PluginUpdater* plugin_updater = PluginUpdater::GetInstance();
-        string16 nacl_plugin_name =
-            ASCIIToUTF16(chrome::ChromeContentClient::kNaClPluginName);
-        plugin_updater->EnablePluginGroup(true, nacl_plugin_name);
-      }
-    } else {
+    else
       enabled_experiments.erase(internal_name);
-    }
   } else {
     if (enable) {
       // Enable the first choice.

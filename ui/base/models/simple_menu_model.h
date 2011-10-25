@@ -20,9 +20,9 @@ class ButtonMenuItemModel;
 // items. This makes it easy to construct fixed menus. Menus populated by
 // dynamic data sources may be better off implementing MenuModel directly.
 // The breadth of MenuModel is not exposed through this API.
-class UI_API SimpleMenuModel : public MenuModel {
+class UI_EXPORT SimpleMenuModel : public MenuModel {
  public:
-  class UI_API Delegate {
+  class UI_EXPORT Delegate {
    public:
     // Methods for determining the state of specific command ids.
     virtual bool IsCommandIdChecked(int command_id) const = 0;
@@ -48,6 +48,9 @@ class UI_API SimpleMenuModel : public MenuModel {
 
     // Performs the action associated with the specified command id.
     virtual void ExecuteCommand(int command_id) = 0;
+    // Performs the action associates with the specified command id
+    // with |event_flags|.
+    virtual void ExecuteCommand(int command_id, int event_flags);
 
     // Notifies the delegate that the menu is about to show.
     virtual void MenuWillShow(SimpleMenuModel* source);
@@ -122,6 +125,7 @@ class UI_API SimpleMenuModel : public MenuModel {
   virtual bool IsVisibleAt(int index) const OVERRIDE;
   virtual void HighlightChangedTo(int index) OVERRIDE;
   virtual void ActivatedAt(int index) OVERRIDE;
+  virtual void ActivatedAt(int index, int event_flags) OVERRIDE;
   virtual MenuModel* GetSubmenuModelAt(int index) const OVERRIDE;
   virtual void MenuWillShow() OVERRIDE;
   virtual void MenuClosed() OVERRIDE;

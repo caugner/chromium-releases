@@ -133,7 +133,7 @@ class DevtoolsNotificationBridge : public NotificationObserver {
     registrar_.reset(new NotificationRegistrar);
     registrar_->Add(notificationBridge_.get(),
                     content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-                    Source<Profile>(host->profile()));
+                    Source<content::BrowserContext>(host->profile()));
     registrar_->Add(notificationBridge_.get(),
                     chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
                     Source<Profile>(host->profile()));
@@ -171,15 +171,7 @@ class DevtoolsNotificationBridge : public NotificationObserver {
 }
 
 - (void)close {
-  [parentWindow_ removeChildWindow:[self window]];
-
-  // No longer have a parent window, so nil out the pointer and deregister for
-  // notifications.
-  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-  [center removeObserver:self
-                    name:NSWindowWillCloseNotification
-                  object:parentWindow_];
-  parentWindow_ = nil;
+  [[[self window] parentWindow] removeChildWindow:[self window]];
   [super close];
 }
 

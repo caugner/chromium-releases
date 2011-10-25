@@ -14,6 +14,17 @@ typedef union _GdkEvent GdkEvent;
 #if defined(USE_X11)
 typedef union _XEvent XEvent;
 #endif
+#if defined(USE_WAYLAND)
+namespace ui {
+union WaylandEvent;
+}
+#endif
+
+#if defined(USE_AURA)
+namespace aura {
+class Event;
+}
+#endif
 
 namespace views {
 
@@ -29,12 +40,20 @@ namespace views {
 // views, we can remove NativeEvent2 and typedef XEvent* to NativeEvent. The
 // world will then be beautiful(ish).
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+typedef aura::Event* NativeEvent;
+#elif defined(OS_WIN)
 typedef MSG NativeEvent;
-#endif
-#if defined(OS_LINUX)
+#elif defined(OS_LINUX)
+
+#if defined(USE_WAYLAND)
+typedef ui::WaylandEvent* NativeEvent;
+#else
 typedef GdkEvent* NativeEvent;
 #endif
+
+#endif
+
 #if defined(USE_X11)
 typedef XEvent* NativeEvent2;
 #else

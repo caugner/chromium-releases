@@ -15,7 +15,7 @@
 #include "chrome/browser/chromeos/login/test_attempt_state.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher_unittest.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -28,7 +28,7 @@ using ::testing::_;
 
 namespace chromeos {
 
-class OnlineAttemptTest : public ::testing::Test {
+class OnlineAttemptTest : public testing::Test {
  public:
   OnlineAttemptTest()
       : message_loop_(MessageLoop::TYPE_UI),
@@ -102,6 +102,9 @@ class OnlineAttemptTest : public ::testing::Test {
   TestAttemptState state_;
   scoped_ptr<MockAuthAttemptStateResolver> resolver_;
   scoped_refptr<OnlineAttempt> attempt_;
+
+  // Initializes / shuts down a stub CrosLibrary.
+  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
 };
 
 TEST_F(OnlineAttemptTest, LoginSuccess) {
@@ -132,7 +135,6 @@ TEST_F(OnlineAttemptTest, LoginCancelRetry) {
   // This factory creates fake URLFetchers that Start() a fake fetch attempt
   // and then come back on the IO thread saying they've been canceled.
   MockFactory<GotCanceledFetcher> factory;
-  URLFetcher::set_factory(&factory);
 
   attempt_->Initiate(&profile);
   BrowserThread::PostTask(
@@ -144,7 +146,6 @@ TEST_F(OnlineAttemptTest, LoginCancelRetry) {
   EXPECT_TRUE(error == state_.online_outcome().error());
   EXPECT_EQ(LoginFailure::NETWORK_AUTH_FAILED,
             state_.online_outcome().reason());
-  URLFetcher::set_factory(NULL);
 }
 
 TEST_F(OnlineAttemptTest, LoginTimeout) {
@@ -159,7 +160,6 @@ TEST_F(OnlineAttemptTest, LoginTimeout) {
   // This factory creates fake URLFetchers that Start() a fake fetch attempt
   // and then come back on the IO thread saying they've been canceled.
   MockFactory<ExpectCanceledFetcher> factory;
-  URLFetcher::set_factory(&factory);
 
   attempt_->Initiate(&profile);
   BrowserThread::PostTask(
@@ -172,7 +172,6 @@ TEST_F(OnlineAttemptTest, LoginTimeout) {
   MessageLoop::current()->Run();
 
   EXPECT_EQ(LoginFailure::LOGIN_TIMED_OUT, state_.online_outcome().reason());
-  URLFetcher::set_factory(NULL);
 }
 
 TEST_F(OnlineAttemptTest, HostedLoginRejected) {
@@ -188,7 +187,6 @@ TEST_F(OnlineAttemptTest, HostedLoginRejected) {
 
   // This is how we inject fake URLFetcher objects, with a factory.
   MockFactory<HostedFetcher> factory;
-  URLFetcher::set_factory(&factory);
 
   TestAttemptState local_state("", "", "", "", "", true);
   attempt_ = new OnlineAttempt(false, &local_state, resolver_.get());
@@ -202,7 +200,6 @@ TEST_F(OnlineAttemptTest, HostedLoginRejected) {
   EXPECT_EQ(error, local_state.online_outcome());
   EXPECT_EQ(LoginFailure::NETWORK_AUTH_FAILED,
             local_state.online_outcome().reason());
-  URLFetcher::set_factory(NULL);
 }
 
 TEST_F(OnlineAttemptTest, FullLogin) {
@@ -214,7 +211,6 @@ TEST_F(OnlineAttemptTest, FullLogin) {
 
   // This is how we inject fake URLFetcher objects, with a factory.
   MockFactory<SuccessFetcher> factory;
-  URLFetcher::set_factory(&factory);
 
   TestAttemptState local_state("", "", "", "", "", true);
   attempt_ = new OnlineAttempt(false, &local_state, resolver_.get());
@@ -226,7 +222,6 @@ TEST_F(OnlineAttemptTest, FullLogin) {
   MessageLoop::current()->Run();
 
   EXPECT_EQ(LoginFailure::None(), local_state.online_outcome());
-  URLFetcher::set_factory(NULL);
 }
 
 TEST_F(OnlineAttemptTest, LoginNetFailure) {

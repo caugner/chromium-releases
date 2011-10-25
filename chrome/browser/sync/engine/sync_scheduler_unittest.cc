@@ -10,12 +10,11 @@
 #include "base/task.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/browser/sync/engine/mock_model_safe_workers.h"
-#include "chrome/browser/sync/engine/configure_reason.h"
 #include "chrome/browser/sync/engine/sync_scheduler.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/sessions/test_util.h"
-#include "chrome/test/sync/engine/mock_connection_manager.h"
-#include "chrome/test/sync/engine/test_directory_setter_upper.h"
+#include "chrome/browser/sync/test/engine/mock_connection_manager.h"
+#include "chrome/browser/sync/test/engine/test_directory_setter_upper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -289,7 +288,7 @@ TEST_F(SyncSchedulerTest, Config) {
   RunLoop();
 
   scheduler()->ScheduleConfig(
-      model_types, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      model_types, GetUpdatesCallerInfo::RECONFIGURATION);
   RunLoop();
 
   ASSERT_EQ(1U, records.snapshots.size());
@@ -319,7 +318,7 @@ TEST_F(SyncSchedulerTest, ConfigWithBackingOff) {
 
   ASSERT_EQ(0U, records.snapshots.size());
   scheduler()->ScheduleConfig(
-      model_types, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      model_types, GetUpdatesCallerInfo::RECONFIGURATION);
   RunLoop();
 
   ASSERT_EQ(1U, records.snapshots.size());
@@ -356,12 +355,12 @@ TEST_F(SyncSchedulerTest, MultipleConfigWithBackingOff) {
 
   ASSERT_EQ(0U, records.snapshots.size());
   scheduler()->ScheduleConfig(
-      model_types1, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      model_types1, GetUpdatesCallerInfo::RECONFIGURATION);
   RunLoop();
 
   ASSERT_EQ(1U, records.snapshots.size());
   scheduler()->ScheduleConfig(
-      model_types2, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      model_types2, GetUpdatesCallerInfo::RECONFIGURATION);
   RunLoop();
 
   ASSERT_EQ(2U, records.snapshots.size());
@@ -399,7 +398,7 @@ TEST_F(SyncSchedulerTest, NudgeWithConfigWithBackingOff) {
 
   ASSERT_EQ(0U, records.snapshots.size());
   scheduler()->ScheduleConfig(
-      model_types, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      model_types, GetUpdatesCallerInfo::RECONFIGURATION);
   RunLoop();
 
   ASSERT_EQ(1U, records.snapshots.size());
@@ -629,6 +628,37 @@ TEST_F(SyncSchedulerTest, PollIntervalUpdate) {
   AnalyzePollRun(records, kMinNumSamples, optimal_start, poll2);
 }
 
+// Test that the sessions commit delay is updated when needed.
+TEST_F(SyncSchedulerTest, SessionsCommitDelay) {
+  SyncShareRecords records;
+  TimeDelta delay1(TimeDelta::FromMilliseconds(120));
+  TimeDelta delay2(TimeDelta::FromMilliseconds(30));
+  scheduler()->OnReceivedSessionsCommitDelay(delay1);
+
+  EXPECT_CALL(*syncer(), SyncShare(_,_,_))
+      .WillOnce(
+          DoAll(
+              WithArg<0>(
+                  sessions::test_util::SimulateSessionsCommitDelayUpdate(
+                      delay2)),
+              Invoke(sessions::test_util::SimulateSuccess),
+              QuitLoopNowAction()));
+
+  EXPECT_EQ(delay1, scheduler()->sessions_commit_delay());
+  StartSyncScheduler(SyncScheduler::NORMAL_MODE);
+  RunLoop();
+
+  EXPECT_EQ(delay1, scheduler()->sessions_commit_delay());
+  syncable::ModelTypeBitSet model_types;
+  model_types[syncable::BOOKMARKS] = true;
+  scheduler()->ScheduleNudge(
+      zero(), NUDGE_SOURCE_LOCAL, model_types, FROM_HERE);
+  RunLoop();
+
+  EXPECT_EQ(delay2, scheduler()->sessions_commit_delay());
+  scheduler()->Stop();
+}
+
 // Test that a sync session is run through to completion.
 TEST_F(SyncSchedulerTest, HasMoreToSync) {
   EXPECT_CALL(*syncer(), SyncShare(_,_,_))
@@ -667,7 +697,7 @@ TEST_F(SyncSchedulerTest, ThrottlingDoesThrottle) {
   RunLoop();
 
   scheduler()->ScheduleConfig(
-      types, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      types, GetUpdatesCallerInfo::RECONFIGURATION);
   PumpLoop();
 }
 
@@ -720,7 +750,7 @@ TEST_F(SyncSchedulerTest, ConfigurationMode) {
   config_types[syncable::BOOKMARKS] = true;
 
   scheduler()->ScheduleConfig(
-      config_types, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      config_types, GetUpdatesCallerInfo::RECONFIGURATION);
   RunLoop();
 
   ASSERT_EQ(1U, records.snapshots.size());
@@ -822,7 +852,7 @@ TEST_F(SyncSchedulerTest, BackoffDropsJobs) {
   RunLoop();
 
   scheduler()->ScheduleConfig(
-      types, sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      types, GetUpdatesCallerInfo::RECONFIGURATION);
   PumpLoop();
 
   StartSyncScheduler(SyncScheduler::NORMAL_MODE);
@@ -964,7 +994,7 @@ TEST_F(SyncSchedulerTest, SyncerSteps) {
   RunLoop();
 
   scheduler()->ScheduleConfig(
-      ModelTypeBitSet(), sync_api::CONFIGURE_REASON_RECONFIGURATION);
+      ModelTypeBitSet(), GetUpdatesCallerInfo::RECONFIGURATION);
   PumpLoop();
   PumpLoop();
 
@@ -978,7 +1008,8 @@ TEST_F(SyncSchedulerTest, SyncerSteps) {
   RunLoop();
 
   scheduler()->ScheduleCleanupDisabledTypes();
-  PumpLoop();
+  // Only need to pump once, as ScheduleCleanupDisabledTypes()
+  // schedules the job directly.
   PumpLoop();
 
   scheduler()->Stop();

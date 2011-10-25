@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_var.h"
 
 struct NPObject;
@@ -29,6 +30,42 @@ class PluginObject;
 // The contents of the PP_Var will be copied unless the PP_Var corresponds to
 // an object.
 bool PPVarToNPVariant(PP_Var var, NPVariant* result);
+
+// Returns a PP_Var that corresponds to the given NPVariant. The contents of
+// the NPVariant will be copied unless the NPVariant corresponds to an
+// object. This will handle all Variant types including POD, strings, and
+// objects.
+//
+// The returned PP_Var will have a refcount of 1, this passing ownership of
+// the reference to the caller. This is suitable for returning to a plugin.
+PP_Var NPVariantToPPVar(PluginInstance* instance, const NPVariant* variant);
+
+// Returns a NPIdentifier that corresponds to the given PP_Var. The contents
+// of the PP_Var will be copied. Returns 0 if the given PP_Var is not a a
+// string or integer type.
+NPIdentifier PPVarToNPIdentifier(PP_Var var);
+
+// Returns a PP_Var corresponding to the given identifier. In the case of
+// a string identifier, the string will be allocated associated with the
+// given module. A returned string will have a reference count of 1.
+PP_Var NPIdentifierToPPVar(PP_Module module, NPIdentifier id);
+
+// Helper function to create a PP_Var of type object that contains the given
+// NPObject for use byt he given module. Calling this function multiple times
+// given the same module + NPObject results in the same PP_Var, assuming that
+// there is still a PP_Var with a reference open to it from the previous
+// call.
+//
+// The module is necessary because we can have different modules pointing to
+// the same NPObject, and we want to keep their refs separate.
+//
+// If no ObjectVar currently exists corresponding to the NPObject, one is
+// created associated with the given module.
+//
+// Note: this could easily be changed to take a PP_Instance instead if that
+// makes certain calls in the future easier. Currently all callers have a
+// PluginInstance so that's what we use here.
+PP_Var NPObjectToPPVar(PluginInstance* instance, NPObject* object);
 
 // PPResultAndExceptionToNPResult ----------------------------------------------
 
@@ -181,6 +218,61 @@ class NPObjectAccessorWithIdentifier {
   PP_Var identifier_;
 
   DISALLOW_COPY_AND_ASSIGN(NPObjectAccessorWithIdentifier);
+};
+
+// TryCatch --------------------------------------------------------------------
+
+// Instantiate this object on the stack to catch V8 exceptions and pass them
+// to an optional out parameter supplied by the plugin.
+class TryCatch {
+ public:
+  // The given exception may be NULL if the consumer isn't interested in
+  // catching exceptions. If non-NULL, the given var will be updated if any
+  // exception is thrown (so it must outlive the TryCatch object).
+  //
+  // The module associated with the exception is passed so we know which module
+  // to associate any exception string with. It may be NULL if you don't know
+  // the module at construction time, in which case you should set it later
+  // by calling set_module().
+  //
+  // If an exception is thrown when the module is NULL, setting *any* exception
+  // will result in using the InvalidObjectException.
+  TryCatch(PP_Module module, PP_Var* exception);
+  ~TryCatch();
+
+  // Get and set the module. This may be NULL (see the constructor).
+  PP_Module pp_module() { return pp_module_; }
+  void set_pp_module(PP_Module module) { pp_module_ = module; }
+
+  // Returns true is an exception has been thrown. This can be true immediately
+  // after construction if the var passed to the constructor is non-void.
+  bool has_exception() const { return has_exception_; }
+
+  // Sets the given exception. If no module has been set yet, the message will
+  // be ignored (since we have no module to associate the string with) and the
+  // SetInvalidObjectException() will be used instead.
+  //
+  // If an exception has been previously set, this function will do nothing
+  // (normally you want only the first exception).
+  void SetException(const char* message);
+
+  // Sets the exception to be a generic message contained in a magic string
+  // not associated with any module.
+  void SetInvalidObjectException();
+
+ private:
+  static void Catch(void* self, const char* message);
+
+  PP_Module pp_module_;
+
+  // True if an exception has been thrown. Since the exception itself may be
+  // NULL if the plugin isn't interested in getting the exception, this will
+  // always indicate if SetException has been called, regardless of whether
+  // the exception itself has been stored.
+  bool has_exception_;
+
+  // May be null if the consumer isn't interesting in catching exceptions.
+  PP_Var* exception_;
 };
 
 }  // namespace ppapi

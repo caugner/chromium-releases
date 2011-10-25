@@ -8,28 +8,34 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/native_web_keyboard_event_views.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/backing_store_skia.h"
 #include "content/browser/renderer_host/render_widget_host.h"
-#include "content/common/native_web_keyboard_event.h"
 #include "content/common/result_codes.h"
 #include "content/common/view_messages.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia.h"
 #include "views/events/event.h"
 #include "views/ime/input_method.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/widget/widget.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include <gtk/gtk.h>
+#include <gtk/gtkwindow.h>
+#include <gdk/gdkx.h>
+#endif
 
 #if defined(TOUCH_UI)
 #include "chrome/browser/renderer_host/accelerated_surface_container_touch.h"
@@ -87,9 +93,16 @@ RenderWidgetHostViewViews::RenderWidgetHostViewViews(RenderWidgetHost* host)
       visually_deemphasized_(false),
       touch_event_(),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
-      has_composition_text_(false) {
+      has_composition_text_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(touch_selection_controller_(
+          views::TouchSelectionController::create(this))) {
   set_focusable(true);
   host_->SetView(this);
+
+#if defined(TOUCH_UI)
+  SetPaintToLayer(true);
+  SetFillsBoundsOpaquely(true);
+#endif
 }
 
 RenderWidgetHostViewViews::~RenderWidgetHostViewViews() {
@@ -109,13 +122,12 @@ void RenderWidgetHostViewViews::InitAsPopup(
   // to tell the parent it's showing a popup so that it doesn't respond to
   // blurs.
   parent->is_showing_context_menu_ = true;
-  views::View* root_view = GetWidget()->GetRootView();
-  // TODO(fsamuel): WebKit is computing the screen coordinates incorrectly.
-  // Fixing this is a long and involved process, because WebKit needs to know
-  // how to direct an IPC at a particular View. For now, we simply convert
-  // the broken screen coordinates into relative coordinates.
-  gfx::Point p(pos.x() - root_view->GetScreenBounds().x(),
-               pos.y() - root_view->GetScreenBounds().y());
+
+  // pos is in screen coordinates but a view is positioned relative
+  // to its parent. Here we convert screen coordinates to relative
+  // coordinates.
+  gfx::Point p(pos.x() - parent_host_view->GetViewBounds().x(),
+               pos.y() - parent_host_view->GetViewBounds().y());
   views::View::SetBounds(p.x(), p.y(), pos.width(), pos.height());
   Show();
 
@@ -143,6 +155,11 @@ void RenderWidgetHostViewViews::DidBecomeSelected() {
   is_hidden_ = false;
   if (host_)
     host_->WasRestored();
+
+  if (touch_selection_controller_.get()) {
+    touch_selection_controller_->SelectionChanged(selection_start_,
+                                                  selection_end_);
+  }
 }
 
 void RenderWidgetHostViewViews::WasHidden() {
@@ -158,6 +175,9 @@ void RenderWidgetHostViewViews::WasHidden() {
   // reduce its resource utilization.
   if (host_)
     host_->WasHidden();
+
+  if (touch_selection_controller_.get())
+    touch_selection_controller_->ClientViewLostFocus();
 }
 
 void RenderWidgetHostViewViews::SetSize(const gfx::Size& size) {
@@ -177,10 +197,23 @@ void RenderWidgetHostViewViews::SetBounds(const gfx::Rect& rect) {
   NOTIMPLEMENTED();
 }
 
-gfx::NativeView RenderWidgetHostViewViews::GetNativeView() {
-  if (GetWidget())
-    return GetWidget()->GetNativeView();
-  return NULL;
+gfx::NativeView RenderWidgetHostViewViews::GetNativeView() const {
+  // TODO(oshima): There is no native view here for RWHVV.
+  // Use top level widget's native view for now. This is not
+  // correct and has to be fixed somehow.
+  return GetWidget() ? GetWidget()->GetNativeView() : NULL;
+}
+
+gfx::NativeViewId RenderWidgetHostViewViews::GetNativeViewId() const {
+#if defined(OS_WIN)
+  // TODO(oshima): Windows uses message filter to handle inquiry for
+  // window/screen info, which requires HWND. Just pass the
+  // browser window's HWND (same as before) for now.
+  return reinterpret_cast<gfx::NativeViewId>(GetNativeView());
+#else
+  return reinterpret_cast<gfx::NativeViewId>(
+      const_cast<RenderWidgetHostViewViews*>(this));
+#endif
 }
 
 void RenderWidgetHostViewViews::MovePluginWindows(
@@ -206,7 +239,7 @@ bool RenderWidgetHostViewViews::IsShowing() {
 }
 
 gfx::Rect RenderWidgetHostViewViews::GetViewBounds() const {
-  return bounds();
+  return GetScreenBounds();
 }
 
 void RenderWidgetHostViewViews::SetIsLoading(bool is_loading) {
@@ -300,15 +333,21 @@ void RenderWidgetHostViewViews::SetTooltipText(const std::wstring& tip) {
   // Clamp the tooltip length to kMaxTooltipLength so that we don't
   // accidentally DOS the user with a mega tooltip.
   tooltip_text_ =
-      l10n_util::TruncateString(WideToUTF16Hack(tip), kMaxTooltipLength);
+      ui::TruncateString(WideToUTF16Hack(tip), kMaxTooltipLength);
   if (GetWidget())
     GetWidget()->TooltipTextChanged(this);
 }
 
 void RenderWidgetHostViewViews::SelectionChanged(const std::string& text,
-                                                 const ui::Range& range) {
+                                                 const ui::Range& range,
+                                                 const gfx::Point& start,
+                                                 const gfx::Point& end) {
   // TODO(anicolao): deal with the clipboard without GTK
   NOTIMPLEMENTED();
+  selection_start_ = start;
+  selection_end_ = end;
+  if (touch_selection_controller_.get())
+    touch_selection_controller_->SelectionChanged(start, end);
 }
 
 void RenderWidgetHostViewViews::ShowingContextMenu(bool showing) {
@@ -331,6 +370,47 @@ void RenderWidgetHostViewViews::SetVisuallyDeemphasized(
   // TODO(anicolao)
 }
 
+void RenderWidgetHostViewViews::UnhandledWheelEvent(
+    const WebKit::WebMouseWheelEvent& event) {
+}
+
+void RenderWidgetHostViewViews::SetHasHorizontalScrollbar(
+    bool has_horizontal_scrollbar) {
+}
+
+void RenderWidgetHostViewViews::SetScrollOffsetPinning(
+    bool is_pinned_to_left, bool is_pinned_to_right) {
+}
+
+void RenderWidgetHostViewViews::SelectRect(const gfx::Point& start,
+                                           const gfx::Point& end) {
+  if (host_)
+    host_->Send(new ViewMsg_SelectRange(host_->routing_id(), start, end));
+}
+
+bool RenderWidgetHostViewViews::IsCommandIdChecked(int command_id) const {
+  NOTREACHED();
+  return true;
+}
+
+bool RenderWidgetHostViewViews::IsCommandIdEnabled(int command_id) const {
+  // TODO(varunjain): implement this.
+  NOTIMPLEMENTED();
+  return true;
+}
+
+bool RenderWidgetHostViewViews::GetAcceleratorForCommandId(
+    int command_id,
+    ui::Accelerator* accelerator) {
+  NOTREACHED();
+  return true;
+}
+
+void RenderWidgetHostViewViews::ExecuteCommand(int command_id) {
+  // TODO(varunjain): implement this.
+  NOTIMPLEMENTED();
+}
+
 std::string RenderWidgetHostViewViews::GetClassName() const {
   return kViewClassName;
 }
@@ -341,6 +421,16 @@ gfx::NativeCursor RenderWidgetHostViewViews::GetCursor(
 }
 
 bool RenderWidgetHostViewViews::OnMousePressed(const views::MouseEvent& event) {
+  // The special buttons on a mouse (e.g. back, forward etc.) are not correctly
+  // recognized by views Events. Ignore those events here, so that the event
+  // bubbles up the view hierarchy and the appropriate parent view can handle
+  // them.
+  if (!(event.flags() & (ui::EF_LEFT_BUTTON_DOWN |
+                         ui::EF_RIGHT_BUTTON_DOWN |
+                         ui::EF_MIDDLE_BUTTON_DOWN))) {
+    return false;
+  }
+
   if (!host_)
     return false;
 
@@ -368,6 +458,12 @@ bool RenderWidgetHostViewViews::OnMouseDragged(const views::MouseEvent& event) {
 
 void RenderWidgetHostViewViews::OnMouseReleased(
     const views::MouseEvent& event) {
+  if (!(event.flags() & (ui::EF_LEFT_BUTTON_DOWN |
+                         ui::EF_RIGHT_BUTTON_DOWN |
+                         ui::EF_MIDDLE_BUTTON_DOWN))) {
+    return;
+  }
+
   if (!host_)
     return;
 
@@ -398,14 +494,14 @@ bool RenderWidgetHostViewViews::OnKeyPressed(const views::KeyEvent& event) {
   // TODO(suzhe): Support editor key bindings.
   if (!host_)
     return false;
-  host_->ForwardKeyboardEvent(NativeWebKeyboardEvent(event));
+  host_->ForwardKeyboardEvent(NativeWebKeyboardEventViews(event));
   return true;
 }
 
 bool RenderWidgetHostViewViews::OnKeyReleased(const views::KeyEvent& event) {
   if (!host_)
     return false;
-  host_->ForwardKeyboardEvent(NativeWebKeyboardEvent(event));
+  host_->ForwardKeyboardEvent(NativeWebKeyboardEventViews(event));
   return true;
 }
 
@@ -488,9 +584,9 @@ void RenderWidgetHostViewViews::InsertText(const string16& text) {
 
 void RenderWidgetHostViewViews::InsertChar(char16 ch, int flags) {
   if (host_) {
-    NativeWebKeyboardEvent::FromViewsEvent from_views_event;
-    NativeWebKeyboardEvent wke(ch, flags, base::Time::Now().ToDoubleT(),
-                               from_views_event);
+    NativeWebKeyboardEventViews::FromViewsEvent from_views_event;
+    NativeWebKeyboardEventViews wke(ch, flags, base::Time::Now().ToDoubleT(),
+                                    from_views_event);
     host_->ForwardKeyboardEvent(wke);
   }
 }
@@ -583,9 +679,6 @@ void RenderWidgetHostViewViews::OnPaint(gfx::Canvas* canvas) {
                       bounds().width(), bounds().height(),
                       SkXfermode::kClear_Mode);
 
-#if defined(TOOLKIT_USES_GTK)
-  GdkWindow* window = GetInnerNativeView()->window;
-#endif
   DCHECK(!about_to_validate_and_paint_);
 
   // TODO(anicolao): get the damage somehow
@@ -607,7 +700,7 @@ void RenderWidgetHostViewViews::OnPaint(gfx::Canvas* canvas) {
     // Only render the widget if it is attached to a window; there's a short
     // period where this object isn't attached to a window but hasn't been
     // Destroy()ed yet and it receives paint messages...
-    if (window) {
+    if (GetInnerNativeView()->window) {
 #endif
       if (!visually_deemphasized_) {
         // In the common case, use XCopyArea. We don't draw more than once, so

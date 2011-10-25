@@ -9,8 +9,9 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -31,7 +32,8 @@ class IsolatedAppApiTest : public ExtensionApiTest {
 
   const Extension* GetInstalledApp(TabContents* contents) {
     const Extension* installed_app = NULL;
-    ExtensionService* service = contents->profile()->GetExtensionService();
+    Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+    ExtensionService* service = profile->GetExtensionService();
     if (service) {
       installed_app = service->GetInstalledAppForRenderer(
           contents->render_view_host()->process()->id());
@@ -89,27 +91,40 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppApiTest, MAYBE_CookieIsolation) {
   ASSERT_TRUE(!GetInstalledApp(tab3));
 
   // Check that each tab sees its own cookie.
-  ASSERT_TRUE(HasCookie(tab1, "app1=3"));
-  ASSERT_TRUE(HasCookie(tab2, "app2=4"));
-  ASSERT_TRUE(HasCookie(tab3, "normalPage=5"));
+  EXPECT_TRUE(HasCookie(tab1, "app1=3"));
+  EXPECT_TRUE(HasCookie(tab2, "app2=4"));
+  EXPECT_TRUE(HasCookie(tab3, "normalPage=5"));
 
   // Check that app1 tab cannot see the other cookies.
-  ASSERT_FALSE(HasCookie(tab1, "app2"));
-  ASSERT_FALSE(HasCookie(tab1, "normalPage"));
+  EXPECT_FALSE(HasCookie(tab1, "app2"));
+  EXPECT_FALSE(HasCookie(tab1, "normalPage"));
 
   // Check that app2 tab cannot see the other cookies.
-  ASSERT_FALSE(HasCookie(tab2, "app1"));
-  ASSERT_FALSE(HasCookie(tab2, "normalPage"));
+  EXPECT_FALSE(HasCookie(tab2, "app1"));
+  EXPECT_FALSE(HasCookie(tab2, "normalPage"));
 
   // Check that normal tab cannot see the other cookies.
-  ASSERT_FALSE(HasCookie(tab3, "app1"));
-  ASSERT_FALSE(HasCookie(tab3, "app2"));
+  EXPECT_FALSE(HasCookie(tab3, "app1"));
+  EXPECT_FALSE(HasCookie(tab3, "app2"));
 
   // Check that the non_app iframe cookie is associated with app1 and not the
   // normal tab.  (For now, iframes are always rendered in their parent
   // process, even if they aren't in the app manifest.)
-  ASSERT_TRUE(HasCookie(tab1, "nonAppFrame=6"));
-  ASSERT_FALSE(HasCookie(tab3, "nonAppFrame"));
+  EXPECT_TRUE(HasCookie(tab1, "nonAppFrame=6"));
+  EXPECT_FALSE(HasCookie(tab3, "nonAppFrame"));
+
+  // Check that isolation persists even if the tab crashes and is reloaded.
+  browser()->SelectNumberedTab(1);
+  ui_test_utils::CrashTab(tab1);
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &browser()->GetSelectedTabContentsWrapper()->controller()));
+  browser()->Reload(CURRENT_TAB);
+  observer.Wait();
+  EXPECT_TRUE(HasCookie(tab1, "app1=3"));
+  EXPECT_FALSE(HasCookie(tab1, "app2"));
+  EXPECT_FALSE(HasCookie(tab1, "normalPage"));
 }
 
 // Ensure that cookies are not isolated if the isolated apps are not installed.

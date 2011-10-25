@@ -6,7 +6,9 @@
 #define CHROME_BROWSER_UI_VIEWS_PAGE_INFO_BUBBLE_VIEW_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/page_info_model.h"
+#include "chrome/browser/page_info_model_observer.h"
 #include "chrome/browser/ui/views/bubble/bubble.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
@@ -18,7 +20,7 @@ class Label;
 }
 
 class PageInfoBubbleView : public views::View,
-                           public PageInfoModel::PageInfoModelObserver,
+                           public PageInfoModelObserver,
                            public BubbleDelegate,
                            public views::LinkListener,
                            public ui::AnimationDelegate {
@@ -35,11 +37,11 @@ class PageInfoBubbleView : public views::View,
 
   void set_bubble(Bubble* bubble) { bubble_ = bubble; }
 
-  // View methods:
+  // views::View methods:
   virtual gfx::Size GetPreferredSize();
 
-  // PageInfoModel::PageInfoModelObserver methods:
-  virtual void ModelChanged();
+  // PageInfoModelObserver methods:
+  virtual void OnPageInfoModelChanged() OVERRIDE;
 
   // BubbleDelegate methods:
   virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape);
@@ -50,13 +52,16 @@ class PageInfoBubbleView : public views::View,
   // views::LinkListener methods:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
-  // Overridden from ui::AnimationDelegate.
+  // ui::AnimationDelegate methods:
   virtual void AnimationEnded(const ui::Animation* animation);
   virtual void AnimationProgressed(const ui::Animation* animation);
 
  private:
   // Gets the size of the separator, including padding.
   gfx::Size GetSeparatorSize();
+
+  // Get the current value of |resize_animation_| (in [0.0, 1.0]).
+  double GetResizeAnimationCurrentValue();
 
   // Gets the animation value to use for setting the height.
   double HeightAnimationValue();

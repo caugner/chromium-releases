@@ -4,6 +4,11 @@
 
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/chromeos/accessibility_util.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
@@ -14,11 +19,17 @@
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/dom_view.h"
+#include "chrome/common/render_messages.h"
+#include "content/browser/renderer_host/render_view_host_observer.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "views/widget/native_widget_gtk.h"
 #include "views/widget/widget.h"
+
+#if defined(TOUCH_UI)
+#include "chrome/browser/ui/touch/keyboard/keyboard_manager.h"
+#endif
 
 namespace {
 
@@ -27,6 +38,59 @@ const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
 // These strings must be kept in sync with handleAccelerator() in oobe.js.
 const char kAccelNameAccessibility[] = "accessibility";
 const char kAccelNameEnrollment[] = "enrollment";
+
+// Observes IPC messages from the FrameSniffer and notifies JS if error
+// appears.
+class SnifferObserver : public RenderViewHostObserver {
+ public:
+  SnifferObserver(RenderViewHost* host, WebUI* webui)
+      : RenderViewHostObserver(host), webui_(webui) {
+    DCHECK(webui_);
+    Send(new ChromeViewMsg_StartFrameSniffer(routing_id(),
+                                             UTF8ToUTF16("gaia-frame")));
+  }
+
+  virtual ~SnifferObserver() {}
+
+  // IPC::Channel::Listener implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message) {
+    bool handled = true;
+    IPC_BEGIN_MESSAGE_MAP(SnifferObserver, message)
+      IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FrameLoadingError, OnError)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_END_MESSAGE_MAP()
+    return handled;
+  }
+
+ private:
+  void OnError(int error) {
+    base::FundamentalValue error_value(error);
+    webui_->CallJavascriptFunction("login.OfflineMessageScreen.onFrameError",
+                                   error_value);
+  }
+
+  WebUI* webui_;
+};
+
+// A View class which places its first child at the right most position.
+class RightAlignedView : public views::View {
+ public:
+  virtual void Layout() OVERRIDE;
+  virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
+};
+
+void RightAlignedView::Layout() {
+  if (has_children()) {
+    views::View* child = child_at(0);
+    gfx::Size preferred_size = child->GetPreferredSize();
+    child->SetBounds(width() - preferred_size.width(),
+                     0, preferred_size.width(), preferred_size.height());
+  }
+}
+
+void RightAlignedView::ChildPreferredSizeChanged(View* child) {
+  Layout();
+}
 
 }  // namespace
 
@@ -39,10 +103,14 @@ const int WebUILoginView::kStatusAreaCornerPadding = 5;
 
 WebUILoginView::WebUILoginView()
     : status_area_(NULL),
-      profile_(NULL),
       webui_login_(NULL),
       status_window_(NULL),
-      host_window_frozen_(false) {
+      host_window_frozen_(false),
+      status_area_visibility_on_init_(true) {
+#if defined(TOUCH_UI)
+  // Make sure the singleton KeyboardManager object is created.
+  KeyboardManager::GetInstance();
+#endif
   accel_map_[views::Accelerator(ui::VKEY_Z, false, true, true)] =
       kAccelNameAccessibility;
   accel_map_[views::Accelerator(ui::VKEY_E, false, true, true)] =
@@ -54,21 +122,21 @@ WebUILoginView::WebUILoginView()
 
 WebUILoginView::~WebUILoginView() {
   if (status_window_)
-    status_window_->Close();
+    status_window_->CloseNow();
   status_window_ = NULL;
 }
 
 void WebUILoginView::Init() {
-  profile_ = ProfileManager::GetDefaultProfile();
 
   webui_login_ = new DOMView();
   AddChildView(webui_login_);
-  webui_login_->Init(profile_, NULL);
+  webui_login_->Init(ProfileManager::GetDefaultProfile(), NULL);
   webui_login_->SetVisible(true);
-  webui_login_->tab_contents()->set_delegate(this);
 
-  tab_watcher_.reset(new TabFirstRenderWatcher(webui_login_->tab_contents(),
-                                               this));
+  TabContents* tab_contents = webui_login_->dom_contents()->tab_contents();
+  tab_contents->set_delegate(this);
+
+  tab_watcher_.reset(new TabFirstRenderWatcher(tab_contents, this));
 }
 
 std::string WebUILoginView::GetClassName() const {
@@ -84,7 +152,7 @@ bool WebUILoginView::AcceleratorPressed(
   if (!webui_login_)
     return true;
 
-  WebUI* web_ui = webui_login_->tab_contents()->web_ui();
+  WebUI* web_ui = webui_login_->dom_contents()->tab_contents()->web_ui();
   if (web_ui) {
     base::StringValue accel_name(entry->second);
     web_ui->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
@@ -118,7 +186,7 @@ void WebUILoginView::LoadURL(const GURL & url) {
 }
 
 WebUI* WebUILoginView::GetWebUI() {
-  return webui_login_->tab_contents()->web_ui();
+  return webui_login_->dom_contents()->tab_contents()->web_ui();
 }
 
 void WebUILoginView::SetStatusAreaEnabled(bool enable) {
@@ -129,6 +197,8 @@ void WebUILoginView::SetStatusAreaEnabled(bool enable) {
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
   if (status_area_)
     status_area_->SetVisible(visible);
+  else
+    status_area_visibility_on_init_ = visible;
 }
 
 // WebUILoginView protected: ---------------------------------------------------
@@ -144,7 +214,7 @@ void WebUILoginView::ChildPreferredSizeChanged(View* child) {
 }
 
 Profile* WebUILoginView::GetProfile() const {
-  return profile_;
+  return NULL;
 }
 
 void WebUILoginView::ExecuteBrowserCommand(int id) const {
@@ -173,11 +243,11 @@ void WebUILoginView::OpenButtonOptions(const views::View* button_view) {
 }
 
 StatusAreaHost::ScreenMode WebUILoginView::GetScreenMode() const {
-  return kLoginMode;
+  return kWebUILoginMode;
 }
 
 StatusAreaHost::TextStyle WebUILoginView::GetTextStyle() const {
-  return kWhitePlain;
+  return kGrayPlain;
 }
 
 void WebUILoginView::ButtonVisibilityChanged(views::View* button_view) {
@@ -193,10 +263,16 @@ void WebUILoginView::OnLocaleChanged() {
   SchedulePaint();
 }
 
+void WebUILoginView::OnRenderHostCreated(RenderViewHost* host) {
+  new SnifferObserver(host, GetWebUI());
+}
+
 void WebUILoginView::OnTabMainFrameLoaded() {
+  VLOG(1) << "WebUI login main frame loaded.";
 }
 
 void WebUILoginView::OnTabMainFrameFirstRender() {
+  VLOG(1) << "WebUI login main frame rendered.";
   InitStatusArea();
 
   if (host_window_frozen_) {
@@ -213,18 +289,33 @@ void WebUILoginView::InitStatusArea() {
   DCHECK(status_window_ == NULL);
   status_area_ = new StatusAreaView(this);
   status_area_->Init();
+  status_area_->SetVisible(status_area_visibility_on_init_);
 
   views::Widget* login_window = WebUILoginDisplay::GetLoginWindow();
-  gfx::Size size = status_area_->GetPreferredSize();
-  gfx::Rect bounds(width() - size.width() - kStatusAreaCornerPadding,
-                   kStatusAreaCornerPadding,
-                   size.width(),
-                   size.height());
-
+  // Width of |status_window| is meant to be large enough.
+  // The current value of status_area_->GetPreferredSize().width()
+  // will be too small when button status is changed.
+  // (e.g. when CapsLock indicator appears)
+  gfx::Size widget_size(width()/2,
+                        status_area_->GetPreferredSize().height());
+  const int widget_x = base::i18n::IsRTL() ?
+      kStatusAreaCornerPadding :
+      width() - widget_size.width() - kStatusAreaCornerPadding;
+  gfx::Rect widget_bounds(widget_x, kStatusAreaCornerPadding,
+                          widget_size.width(), widget_size.height());
+  // TODO(nkostylev): Make status area in the same window as |webui_login_|
+  // once RenderWidgetHostViewViews is ready.
+#if defined(TOUCH_UI)
+  // TODO(oshima): Window manager doesn't know about touch event, hence can't
+  // activate the window. Use POPUP for now. This will be non issue
+  // once we move to pure views + in chrome WM.
+  views::Widget::InitParams widget_params(
+      views::Widget::InitParams::TYPE_POPUP);
+#else
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  widget_params.bounds = bounds;
-  widget_params.double_buffer = true;
+#endif
+  widget_params.bounds = widget_bounds;
   widget_params.transparent = true;
   widget_params.parent = login_window->GetNativeView();
   status_window_ = new views::Widget;
@@ -233,7 +324,9 @@ void WebUILoginView::InitStatusArea() {
       status_window_->GetNativeView(),
       chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
       NULL);
-  status_window_->SetContentsView(status_area_);
+  views::View* contents_view = new RightAlignedView;
+  contents_view->AddChildView(status_area_);
+  status_window_->SetContentsView(contents_view);
   status_window_->Show();
 }
 
@@ -248,10 +341,26 @@ bool WebUILoginView::HandleContextMenu(const ContextMenuParams& params) {
 #endif
 }
 
-bool WebUILoginView::TakeFocus(bool reverse) {
-  // Forward the focus back to web contents.
-  webui_login_->tab_contents()->FocusThroughTabTraversal(reverse);
+bool WebUILoginView::IsPopupOrPanel(const TabContents* source) const {
   return true;
+}
+
+bool WebUILoginView::TakeFocus(bool reverse) {
+  if (status_area_ && status_area_->IsVisible()) {
+    // Forward the focus to the status area.
+    base::Callback<void(bool)> return_focus_cb =
+        base::Bind(&WebUILoginView::ReturnFocus, base::Unretained(this));
+    status_area_->TakeFocus(reverse, return_focus_cb);
+    status_area_->GetWidget()->Activate();
+  }
+  return true;
+}
+
+void WebUILoginView::ReturnFocus(bool reverse) {
+  // Return the focus to the web contents.
+  webui_login_->dom_contents()->tab_contents()->
+      FocusThroughTabTraversal(reverse);
+  GetWidget()->Activate();
 }
 
 void WebUILoginView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {

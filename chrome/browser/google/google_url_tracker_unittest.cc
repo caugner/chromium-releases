@@ -11,12 +11,12 @@
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_pref_service.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
-#include "content/common/test_url_fetcher_factory.h"
 #include "content/common/url_fetcher.h"
+#include "content/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
@@ -100,7 +100,7 @@ InfoBarDelegate* CreateTestInfobar(
 
 // GoogleURLTrackerTest -------------------------------------------------------
 
-class GoogleURLTrackerTest : public TestingBrowserProcessTest {
+class GoogleURLTrackerTest : public testing::Test {
  protected:
   GoogleURLTrackerTest();
   virtual ~GoogleURLTrackerTest();
@@ -144,7 +144,7 @@ GoogleURLTrackerTest::GoogleURLTrackerTest()
     : observer_(new TestNotificationObserver),
       message_loop_(MessageLoop::TYPE_IO),
       io_thread_(BrowserThread::IO, &message_loop_),
-      local_state_(testing_browser_process_.get()) {
+      local_state_(static_cast<TestingBrowserProcess*>(g_browser_process)) {
 }
 
 GoogleURLTrackerTest::~GoogleURLTrackerTest() {
@@ -155,16 +155,16 @@ void GoogleURLTrackerTest::SetUp() {
   GoogleURLTracker* tracker = new GoogleURLTracker;
   tracker->queue_wakeup_task_ = false;
   MessageLoop::current()->RunAllPending();
-  testing_browser_process_.get()->SetGoogleURLTracker(tracker);
+  static_cast<TestingBrowserProcess*>(g_browser_process)->SetGoogleURLTracker(
+      tracker);
 
-  URLFetcher::set_factory(&fetcher_factory_);
   g_browser_process->google_url_tracker()->infobar_creator_ =
       &CreateTestInfobar;
 }
 
 void GoogleURLTrackerTest::TearDown() {
-  URLFetcher::set_factory(NULL);
-  testing_browser_process_.get()->SetGoogleURLTracker(NULL);
+  static_cast<TestingBrowserProcess*>(g_browser_process)->SetGoogleURLTracker(
+      NULL);
   network_change_notifier_.reset();
 }
 

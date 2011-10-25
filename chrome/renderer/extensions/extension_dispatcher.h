@@ -20,6 +20,7 @@ class RenderThread;
 class URLPattern;
 class UserScriptSlave;
 struct ExtensionMsg_Loaded_Params;
+struct ExtensionMsg_UpdatePermissions_Params;
 
 namespace base {
 class ListValue;
@@ -68,6 +69,7 @@ class ExtensionDispatcher : public RenderProcessObserver {
                        const std::string& function_name,
                        const base::ListValue& args,
                        const GURL& event_url);
+  void OnDeliverMessage(int target_port_id, const std::string& message);
   void OnSetFunctionNames(const std::vector<std::string>& names);
   void OnLoaded(const ExtensionMsg_Loaded_Params& params);
   void OnUnloaded(const std::string& id);
@@ -77,6 +79,11 @@ class ExtensionDispatcher : public RenderProcessObserver {
       const std::vector<std::string>& page_actions);
   void OnActivateApplication(const std::string& extension_id);
   void OnActivateExtension(const std::string& extension_id);
+  void OnUpdatePermissions(int reason_id,
+                           const std::string& extension_id,
+                           const ExtensionAPIPermissionSet& apis,
+                           const URLPatternSet& explicit_hosts,
+                           const URLPatternSet& scriptable_hosts);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
 
   // Update the list of active extensions that will be reported when we crash.
@@ -87,7 +94,10 @@ class ExtensionDispatcher : public RenderProcessObserver {
   void RegisterExtension(v8::Extension* extension, bool restrict_to_extensions);
 
   // Sets up the host permissions for |extension|.
-  void InitHostPermissions(const Extension* extension);
+  void InitOriginPermissions(const Extension* extension);
+  void UpdateOriginPermissions(UpdatedExtensionPermissionsInfo::Reason reason,
+                               const Extension* extension,
+                               const URLPatternSet& origins);
 
   // True if this renderer is running extensions.
   bool is_extension_process_;

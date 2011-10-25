@@ -25,11 +25,7 @@
           # Test files are not included.
           'common/about_handler.cc',
           'common/about_handler.h',
-          'common/app_mode_common_mac.h',
-          'common/app_mode_common_mac.mm',
           'common/attrition_experiments.h',
-          'common/attributed_string_coder_mac.h',
-          'common/attributed_string_coder_mac.mm',
           'common/auto_start_linux.cc',
           'common/auto_start_linux.h',
           'common/autofill_messages.h',
@@ -105,8 +101,6 @@
         'common_constants',
         'common_net',
         'default_plugin/default_plugin.gyp:default_plugin',
-        'safe_browsing_csd_proto',
-        'safe_browsing_proto',
         'theme_resources',
         'theme_resources_standard',
         '../base/base.gyp:base',
@@ -122,10 +116,10 @@
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libxml/libxml.gyp:libxml',
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../third_party/sqlite/sqlite.gyp:sqlite',
         '../third_party/zlib/zlib.gyp:zlib',
         '../ui/ui.gyp:ui_resources',
+        '../ui/ui.gyp:ui_resources_standard',
         '../webkit/support/webkit_support.gyp:glue',
       ],
       'sources': [
@@ -143,6 +137,7 @@
         'common/chrome_content_client.h',
         'common/chrome_content_plugin_client.cc',
         'common/chrome_content_plugin_client.h',
+        'common/chrome_plugin_messages.h',
         'common/cloud_print/cloud_print_proxy_info.cc',
         'common/cloud_print/cloud_print_proxy_info.h',
         'common/common_api.h',
@@ -154,8 +149,6 @@
         'common/custom_handlers/protocol_handler.h',
         'common/default_plugin.cc',
         'common/default_plugin.h',
-        'common/deprecated/event_sys-inl.h',
-        'common/deprecated/event_sys.h',
         'common/extensions/extension.cc',
         'common/extensions/extension.h',
         'common/extensions/extension_action.cc',
@@ -207,24 +200,31 @@
         'common/json_schema_validator.h',
         'common/jstemplate_builder.cc',
         'common/jstemplate_builder.h',
-        'common/launchd_mac.h',
-        'common/launchd_mac.mm',
+        'common/mac/app_mode_common.h',
+        'common/mac/app_mode_common.mm',
+        'common/mac/attributed_string_coder.h',
+        'common/mac/attributed_string_coder.mm',
+        'common/mac/cfbundle_blocker.h',
+        'common/mac/cfbundle_blocker.mm',
+        'common/mac/launchd.h',
+        'common/mac/launchd.mm',
+        'common/mac/objc_method_swizzle.h',
+        'common/mac/objc_method_swizzle.mm',
+        'common/mac/objc_zombie.h',
+        'common/mac/objc_zombie.mm',
         'common/libxml_utils.cc',
         'common/libxml_utils.h',
         'common/native_window_notification_source.h',
         'common/persistent_pref_store.h',
         'common/pref_store.cc',
         'common/pref_store.h',
+        'common/print_messages.cc',
         'common/print_messages.h',
         'common/random.cc',
         'common/random.h',
         'common/render_messages.cc',
         'common/render_messages.h',
         'common/scoped_co_mem.h',
-        '<(protoc_out_dir)/chrome/common/safe_browsing/client_model.pb.cc',
-        '<(protoc_out_dir)/chrome/common/safe_browsing/client_model.pb.h',
-        '<(protoc_out_dir)/chrome/common/safe_browsing/csd.pb.cc',
-        '<(protoc_out_dir)/chrome/common/safe_browsing/csd.pb.h',
         'common/search_provider.h',
         'common/service_messages.h',
         'common/service_process_util.cc',
@@ -237,14 +237,11 @@
         'common/spellcheck_common.cc',
         'common/spellcheck_common.h',
         'common/spellcheck_messages.h',
-        'common/sqlite_utils.cc',
-        'common/sqlite_utils.h',
         'common/text_input_client_messages.h',
         'common/thumbnail_score.cc',
         'common/thumbnail_score.h',
         'common/url_constants.cc',
         'common/url_constants.h',
-        'common/utility_messages.h',
         'common/visitedlink_common.cc',
         'common/visitedlink_common.h',
         'common/web_apps.cc',
@@ -273,6 +270,12 @@
             ],
           },
         },],
+        ['toolkit_views==1', {
+          'sources': [
+            'common/native_web_keyboard_event_views.cc',
+            'common/native_web_keyboard_event_views.h',
+          ],
+        }],        
         ['os_posix == 1 and OS != "mac"', {
           'include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)',
@@ -331,6 +334,9 @@
           ],
         }],
         ['OS=="mac"', {
+          'dependencies': [
+            '../third_party/mach_override/mach_override.gyp:mach_override',
+          ],
           'include_dirs': [
             '../third_party/GTM',
           ],
@@ -341,15 +347,8 @@
           ],
         }],
       ],
-      # This target exports a hard_dependency because its include files
-      # include generated header files from safe_browsing_csd_proto and
-      # safe_browsing_proto.
-      'hard_dependency': 1,
       'export_dependent_settings': [
         '../base/base.gyp:base',
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-        'safe_browsing_csd_proto',
-        'safe_browsing_proto',
       ],
     },
     {
@@ -417,96 +416,20 @@
        ],
     },
     {
-      # Protobuf compiler / generator for the safebrowsing client model proto.
+      # Protobuf compiler / generator for the safebrowsing client
+      # model proto and the client-side detection (csd) request
+      # protocol buffer.
       'target_name': 'safe_browsing_proto',
-      'type': 'none',
-      'sources': [ 'common/safe_browsing/client_model.proto' ],
-      'rules': [
-        {
-          'rule_name': 'genproto',
-          'extension': 'proto',
-          'inputs': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-          ],
-          'variables': {
-            # The protoc compiler requires a proto_path argument with the
-            # directory containing the .proto file.
-            # There's no generator variable that corresponds to this, so fake
-            # it.
-            'rule_input_relpath': 'common/safe_browsing',
-          },
-          'outputs': [
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.h',
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.cc',
-          ],
-          'action': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-            '--proto_path=./<(rule_input_relpath)',
-            './<(rule_input_relpath)/<(RULE_INPUT_ROOT)<(RULE_INPUT_EXT)',
-            '--cpp_out=<(protoc_out_dir)/chrome/<(rule_input_relpath)',
-          ],
-          'message': 'Generating C++ code from <(RULE_INPUT_PATH)',
-        },
+      'type': 'static_library',
+      'sources': [
+        'common/safe_browsing/client_model.proto',
+        'common/safe_browsing/csd.proto'
       ],
-      'dependencies': [
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-        '../third_party/protobuf/protobuf.gyp:protoc#host',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(protoc_out_dir)',
-        ]
+      'variables': {
+        'proto_in_dir': 'common/safe_browsing',
+        'proto_out_dir': 'chrome/common/safe_browsing',
       },
-      'export_dependent_settings': [
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-      ],
-    },
-    {
-      # Protobuf compiler / generator for the safebrowsing client-side detection
-      # (csd) request protocol buffer which is used both in the renderer and in
-      # the browser.
-      'target_name': 'safe_browsing_csd_proto',
-      'type': 'none',
-      'sources': [ 'common/safe_browsing/csd.proto' ],
-      'rules': [
-        {
-          'rule_name': 'genproto',
-          'extension': 'proto',
-          'inputs': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-          ],
-          'variables': {
-            # The protoc compiler requires a proto_path argument with the
-            # directory containing the .proto file.
-            # There's no generator variable that corresponds to this, so fake
-            # it.
-            'rule_input_relpath': 'common/safe_browsing',
-          },
-          'outputs': [
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.h',
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.cc',
-          ],
-          'action': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-            '--proto_path=./<(rule_input_relpath)',
-            './<(rule_input_relpath)/<(RULE_INPUT_ROOT)<(RULE_INPUT_EXT)',
-            '--cpp_out=<(protoc_out_dir)/chrome/<(rule_input_relpath)',
-          ],
-          'message': 'Generating C++ code from <(RULE_INPUT_PATH)',
-        },
-      ],
-      'dependencies': [
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-        '../third_party/protobuf/protobuf.gyp:protoc#host',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(protoc_out_dir)',
-        ]
-      },
-      'export_dependent_settings': [
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-      ],
+      'includes': [ '../build/protoc.gypi' ],
     },
   ],
   'conditions': [
@@ -531,6 +454,7 @@
             '../third_party/libxml/libxml.gyp:libxml',
             '../ui/ui.gyp:ui_nacl_win64',
             '../ui/ui.gyp:ui_resources',
+            '../ui/ui.gyp:ui_resources_standard',
           ],
           'include_dirs': [
             '../third_party/icu/public/i18n',

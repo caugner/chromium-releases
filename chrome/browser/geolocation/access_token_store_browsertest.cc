@@ -1,13 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/geolocation/access_token_store.h"
-
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/browser/geolocation/chrome_access_token_store.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/browser_thread.h"
 
 namespace {
@@ -18,6 +17,7 @@ namespace {
 const BrowserThread::ID kExpectedClientThreadId = BrowserThread::IO;
 const char* kRefServerUrl1 = "https://test.domain.example/foo?id=bar.bar";
 const char* kRefServerUrl2 = "http://another.domain.example/foo?id=bar.bar#2";
+const char* kOldDefaultNetworkProviderUrl = "https://www.google.com/loc/json";
 
 class GeolocationAccessTokenStoreTest
     : public InProcessBrowserTest {
@@ -30,7 +30,8 @@ class GeolocationAccessTokenStoreTest
       const string16* token_to_set);
 
   void OnAccessTokenStoresLoaded(
-        AccessTokenStore::AccessTokenSet access_token_set);
+      AccessTokenStore::AccessTokenSet access_token_set,
+      net::URLRequestContextGetter* context_getter);
 
   scoped_refptr<AccessTokenStore> token_store_;
   CancelableRequestConsumer request_consumer_;
@@ -45,19 +46,20 @@ void StartTestStepFromClientThread(
     AccessTokenStore::LoadAccessTokensCallbackType* callback) {
   ASSERT_TRUE(BrowserThread::CurrentlyOn(kExpectedClientThreadId));
   if (*store == NULL)
-    (*store) = NewChromePrefsAccessTokenStore();
+    (*store) = new ChromeAccessTokenStore();
   (*store)->LoadAccessTokens(consumer, callback);
 }
 
 struct TokenLoadClientForTest {
-  void NotReachedCallback(AccessTokenStore::AccessTokenSet /*tokens*/) {
+  void NotReachedCallback(AccessTokenStore::AccessTokenSet /*tokens*/,
+                          net::URLRequestContextGetter* /*context_getter*/) {
     NOTREACHED() << "This request should have been canceled before callback";
   }
 };
 
 void RunCancelTestInClientTread() {
   ASSERT_TRUE(BrowserThread::CurrentlyOn(kExpectedClientThreadId));
-  scoped_refptr<AccessTokenStore> store(NewChromePrefsAccessTokenStore());
+  scoped_refptr<AccessTokenStore> store(new ChromeAccessTokenStore());
   CancelableRequestConsumer consumer;
   TokenLoadClientForTest load_client;
 
@@ -102,11 +104,12 @@ void GeolocationAccessTokenStoreTest::DoTestStepAndWaitForResults(
 }
 
 void GeolocationAccessTokenStoreTest::OnAccessTokenStoresLoaded(
-    AccessTokenStore::AccessTokenSet access_token_set) {
+    AccessTokenStore::AccessTokenSet access_token_set,
+    net::URLRequestContextGetter* context_getter) {
   ASSERT_TRUE(BrowserThread::CurrentlyOn(kExpectedClientThreadId))
       << "Callback from token factory should be from the same thread as the "
          "LoadAccessTokenStores request was made on";
-  EXPECT_TRUE(token_to_set_ || token_to_expect_) << "No work to do?";
+  DCHECK(context_getter);
   AccessTokenStore::AccessTokenSet::const_iterator item =
       access_token_set.find(ref_url_);
   if (!token_to_expect_) {
@@ -117,8 +120,7 @@ void GeolocationAccessTokenStoreTest::OnAccessTokenStoresLoaded(
   }
 
   if (token_to_set_) {
-    scoped_refptr<AccessTokenStore> store(
-        NewChromePrefsAccessTokenStore());
+    scoped_refptr<AccessTokenStore> store(new ChromeAccessTokenStore());
     store->SaveAccessToken(ref_url_, *token_to_set_);
   }
   BrowserThread::PostTask(
@@ -141,6 +143,19 @@ IN_PROC_BROWSER_TEST_F(GeolocationAccessTokenStoreTest, SetAcrossInstances) {
   DoTestStepAndWaitForResults(kRefServerUrl2, NULL, &ref_token2);
   DoTestStepAndWaitForResults(kRefServerUrl2, &ref_token2, NULL);
   DoTestStepAndWaitForResults(kRefServerUrl1, &ref_token1, NULL);
+}
+
+IN_PROC_BROWSER_TEST_F(GeolocationAccessTokenStoreTest, OldUrlRemoval) {
+  const string16 ref_token1 = ASCIIToUTF16("jksdfo90,'s#\"#1*(");
+  ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // Set a token for the old default network provider url.
+  DoTestStepAndWaitForResults(kOldDefaultNetworkProviderUrl,
+                              NULL, &ref_token1);
+  // Check that the token related to the old default network provider url
+  // was deleted.
+  DoTestStepAndWaitForResults(kOldDefaultNetworkProviderUrl,
+                              NULL, NULL);
 }
 
 IN_PROC_BROWSER_TEST_F(GeolocationAccessTokenStoreTest, CancelRequest) {

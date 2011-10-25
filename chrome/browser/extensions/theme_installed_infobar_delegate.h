@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_THEME_INSTALLED_INFOBAR_DELEGATE_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -35,11 +36,12 @@ class ThemeInstalledInfoBarDelegate : public ConfirmInfoBarDelegate,
   ThemeService* theme_service() { return theme_service_; }
 
   // ConfirmInfoBarDelegate:
-  virtual bool Cancel();
+  virtual bool Cancel() OVERRIDE;
 
  private:
   // ConfirmInfoBarDelegate:
   virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual Type GetInfoBarType() const OVERRIDE;
   virtual ThemeInstalledInfoBarDelegate*
       AsThemePreviewInfobarDelegate() OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;

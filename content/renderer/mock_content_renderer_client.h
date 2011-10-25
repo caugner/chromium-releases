@@ -6,6 +6,8 @@
 #define CONTENT_RENDERER_MOCK_CONTENT_RENDERER_CLIENT_H_
 #pragma once
 
+#include <string>
+
 #include "base/compiler_specific.h"
 #include "content/renderer/content_renderer_client.h"
 
@@ -35,6 +37,7 @@ class MockContentRendererClient : public ContentRendererClient {
   virtual bool ShouldFork(WebKit::WebFrame* frame,
                           const GURL& url,
                           bool is_content_initiated,
+                          bool is_initial_navigation,
                           bool* send_referrer) OVERRIDE;
   virtual bool WillSendRequest(WebKit::WebFrame* frame,
                                const GURL& url,
@@ -43,7 +46,8 @@ class MockContentRendererClient : public ContentRendererClient {
   virtual void DidCreateScriptContext(WebKit::WebFrame* frame) OVERRIDE;
   virtual void DidDestroyScriptContext(WebKit::WebFrame* frame) OVERRIDE;
   virtual void DidCreateIsolatedScriptContext(
-      WebKit::WebFrame* frame) OVERRIDE;
+      WebKit::WebFrame* frame, int world_id,
+      v8::Handle<v8::Context> context) OVERRIDE;
   virtual unsigned long long VisitedLinkHash(const char* canonical_url,
                                              size_t length) OVERRIDE;
   virtual bool IsLinkVisited(unsigned long long link_hash) OVERRIDE;
@@ -51,6 +55,14 @@ class MockContentRendererClient : public ContentRendererClient {
   virtual bool ShouldOverridePageVisibilityState(
       const RenderView* render_view,
       WebKit::WebPageVisibilityState* override_state) const OVERRIDE;
+  virtual bool HandleGetCookieRequest(RenderView* sender,
+                                      const GURL& url,
+                                      const GURL& first_party_for_cookies,
+                                      std::string* cookies) OVERRIDE;
+  virtual bool HandleSetCookieRequest(RenderView* sender,
+                                      const GURL& url,
+                                      const GURL& first_party_for_cookies,
+                                      const std::string& value) OVERRIDE;
 };
 
 }  // namespace content

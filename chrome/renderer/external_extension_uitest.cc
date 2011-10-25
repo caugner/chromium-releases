@@ -10,7 +10,6 @@
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_layout_test.h"
-#include "chrome/test/ui_test_utils.h"
 #include "net/base/escape.h"
 #include "net/test/test_server.h"
 
@@ -129,7 +128,13 @@ void SearchProviderTest::FinishIsSearchProviderInstalledTest(
   EXPECT_TRUE(data.tab->Close(true));
 }
 
-TEST_F(SearchProviderTest, TestIsSearchProviderInstalled) {
+// Flaky on XP debug. http://crbug.com/62777
+#if defined(OS_WIN)
+#define MAYBE_TestIsSearchProviderInstalled FLAKY_TestIsSearchProviderInstalled
+#else
+#define MAYBE_TestIsSearchProviderInstalled TestIsSearchProviderInstalled
+#endif
+TEST_F(SearchProviderTest, MAYBE_TestIsSearchProviderInstalled) {
   ASSERT_TRUE(test_server_started_);
 
   // Use the default search provider, other installed search provider, and

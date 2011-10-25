@@ -17,11 +17,11 @@
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
-#include "ppapi/c/dev/ppp_graphics_3d_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/c/ppp_graphics_3d.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/shared_impl/function_group_base.h"
 #include "ppapi/shared_impl/instance_impl.h"
@@ -33,7 +33,6 @@
 #include "ui/gfx/rect.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
-typedef struct NPObject NPObject;
 struct PP_Var;
 struct PPP_Find_Dev;
 struct PPP_InputEvent;
@@ -59,6 +58,7 @@ class WebPluginContainer;
 
 namespace ppapi {
 struct PPP_Instance_Combined;
+class Resource;
 }
 
 namespace webkit {
@@ -76,7 +76,6 @@ class PPB_ImageData_Impl;
 class PPB_Surface3D_Impl;
 class PPB_URLLoader_Impl;
 class PPB_URLRequestInfo_Impl;
-class Resource;
 
 // Represents one time a plugin appears on one web page.
 //
@@ -239,18 +238,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
 
   PluginDelegate::PlatformContext3D* CreateContext3D();
 
-  // Tracks all live ObjectVar. This is so we can map between PluginModule +
-  // NPObject and get the ObjectVar corresponding to it. This Add/Remove
-  // function should be called by the ObjectVar when it is created and
-  // destroyed.
-  void AddNPObjectVar(ObjectVar* object_var);
-  void RemoveNPObjectVar(ObjectVar* object_var);
-
-  // Looks up a previously registered ObjectVar for the given NPObject and
-  // module. Returns NULL if there is no ObjectVar corresponding to the given
-  // NPObject for the given module. See AddNPObjectVar above.
-  ObjectVar* ObjectVarForNPObject(NPObject* np_object) const;
-
   // Returns true iff the plugin is a full-page plugin (i.e. not in an iframe or
   // embedded in a page).
   bool IsFullPagePlugin() const;
@@ -319,7 +306,7 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // Queries the plugin for supported print formats and sets |format| to the
   // best format to use. Returns false if the plugin does not support any
   // print format that we can handle (we can handle raster and PDF).
-  bool GetPreferredPrintOutputFormat(PP_PrintOutputFormat_Dev_0_4* format);
+  bool GetPreferredPrintOutputFormat(PP_PrintOutputFormat_Dev* format);
   bool PrintPDFOutput(PP_Resource print_output, WebKit::WebCanvas* canvas);
   bool PrintRasterOutput(PP_Resource print_output, WebKit::WebCanvas* canvas);
 #if defined(OS_WIN)
@@ -356,6 +343,12 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
                        int num_ranges,
                        WebKit::WebCanvas* canvas);
 
+  void DoSetCursor(WebKit::WebCursorInfo* cursor);
+
+  // Returns true if the WebView the plugin is in renders via the accelerated
+  // compositing path.
+  bool IsViewAccelerated();
+
   PluginDelegate* delegate_;
   scoped_refptr<PluginModule> module_;
   scoped_ptr< ::ppapi::PPP_Instance_Combined> instance_interface_;
@@ -372,6 +365,11 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // an entire document rather than an embed tag.
   bool full_frame_;
 
+  // Indicates if we've ever sent a didChangeView to the plugin. This ensure we
+  // always send an initial notification, even if the position and clip are the
+  // same as the default values.
+  bool sent_did_change_view_;
+
   // Position in the viewport (which moves as the page is scrolled) of this
   // plugin. This will be a 0-sized rectangle if the plugin has not yet been
   // laid out.
@@ -383,7 +381,7 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   gfx::Rect clip_;
 
   // The current device context for painting in 2D or 3D.
-  scoped_refptr<Resource> bound_graphics_;
+  scoped_refptr< ::ppapi::Resource> bound_graphics_;
 
   // We track two types of focus, one from WebKit, which is the focus among
   // all elements of the page, one one from the browser, which is whether the
@@ -412,7 +410,7 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
 
   // This is only valid between a successful PrintBegin call and a PrintEnd
   // call.
-  PP_PrintSettings_Dev_0_4 current_print_settings_;
+  PP_PrintSettings_Dev current_print_settings_;
 #if defined(OS_MACOSX)
   // On the Mac, when we draw the bitmap to the PDFContext, it seems necessary
   // to keep the pixels valid until CGContextEndPage is called. We use this
@@ -434,42 +432,11 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   std::vector<PP_PrintPageNumberRange_Dev> ranges_;
 #endif  // OS_LINUX || OS_WIN
 
-  // The plugin print interface.  This nested struct adds functions needed for
-  // backwards compatibility.
-  struct PPP_Printing_Dev_Combined : public PPP_Printing_Dev_0_4 {
-    // Conversion constructor for the most current interface.  Sets all old
-    // functions to NULL, so we know not to try to use them.
-    PPP_Printing_Dev_Combined(const PPP_Printing_Dev_0_4& base_if)
-        : PPP_Printing_Dev_0_4(base_if),
-          QuerySupportedFormats_0_3(NULL),
-          Begin_0_3(NULL) {}
-
-    // Conversion constructor for version 0.3.  Sets unsupported functions to
-    // NULL, so we know not to try to use them.
-    PPP_Printing_Dev_Combined(const PPP_Printing_Dev_0_3& old_if)
-        : PPP_Printing_Dev_0_4(),  // NOTE: The parens are important, to zero-
-                                   // initialize the struct.
-                                   // Except older version of g++ doesn't!
-                                   // So do it explicitly in the ctor.
-          QuerySupportedFormats_0_3(old_if.QuerySupportedFormats),
-          Begin_0_3(old_if.Begin) {
-      QuerySupportedFormats = NULL;
-      Begin = NULL;
-      PrintPages = old_if.PrintPages;
-      End = old_if.End;
-    }
-
-    // The 0.3 version of 'QuerySupportedFormats'.
-    PP_PrintOutputFormat_Dev_0_3* (*QuerySupportedFormats_0_3)(
-        PP_Instance instance, uint32_t* format_count);
-    // The 0.3 version of 'Begin'.
-    int32_t (*Begin_0_3)(PP_Instance instance,
-                         const PP_PrintSettings_Dev_0_3* print_settings);
-  };
-  scoped_ptr<PPP_Printing_Dev_Combined> plugin_print_interface_;
+  // The plugin print interface.
+  const PPP_Printing_Dev* plugin_print_interface_;
 
   // The plugin 3D interface.
-  const PPP_Graphics3D_Dev* plugin_graphics_3d_interface_;
+  const PPP_Graphics3D* plugin_graphics_3d_interface_;
 
   // Contains the cursor if it's set by the plugin.
   scoped_ptr<WebKit::WebCursorInfo> cursor_;
@@ -495,11 +462,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
 
   typedef std::set<PluginObject*> PluginObjectSet;
   PluginObjectSet live_plugin_objects_;
-
-  // Tracks all live ObjectVars used by this module so we can map NPObjects to
-  // the corresponding object. These are non-owning references.
-  typedef std::map<NPObject*, ObjectVar*> NPObjectToObjectVarMap;
-  NPObjectToObjectVarMap np_object_to_object_var_;
 
   // Classes of events that the plugin has registered for, both for filtering
   // and not. The bits are PP_INPUTEVENT_CLASS_*.

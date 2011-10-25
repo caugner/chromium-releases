@@ -19,9 +19,9 @@
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/win_util.h"
 #include "ui/base/win/window_impl.h"
 #include "views/focus/focus_manager.h"
-#include "views/ime/input_method_delegate.h"
 #include "views/layout/layout_manager.h"
 #include "views/widget/native_widget_private.h"
 
@@ -48,18 +48,10 @@ class NativeWidgetDelegate;
 // This is exposed only for testing
 // Adjusts the value of |child_rect| if necessary to ensure that it is
 // completely visible within |parent_rect|.
-void EnsureRectIsVisibleInRect(const gfx::Rect& parent_rect,
-                               gfx::Rect* child_rect,
-                               int padding);
+VIEWS_EXPORT void EnsureRectIsVisibleInRect(const gfx::Rect& parent_rect,
+                                            gfx::Rect* child_rect,
+                                            int padding);
 }  // namespace internal
-
-// A Windows message reflected from other windows. This message is sent
-// with the following arguments:
-// hWnd - Target window
-// uMsg - kReflectedMessage
-// wParam - Should be 0
-// lParam - Pointer to MSG struct containing the original message.
-const int kReflectedMessage = WM_APP + 3;
 
 // These two messages aren't defined in winuser.h, but they are sent to windows
 // with captions. They appear to paint the window caption and frame.
@@ -85,10 +77,9 @@ const int WM_NCUAHDRAWFRAME = 0xAF;
 //  then responsible for cleaning up after it.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class NativeWidgetWin : public ui::WindowImpl,
-                        public internal::NativeWidgetPrivate,
-                        public MessageLoopForUI::Observer,
-                        public internal::InputMethodDelegate {
+class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
+                                     public MessageLoopForUI::Observer,
+                                     public internal::NativeWidgetPrivate {
  public:
   explicit NativeWidgetWin(internal::NativeWidgetDelegate* delegate);
   virtual ~NativeWidgetWin();
@@ -216,14 +207,11 @@ class NativeWidgetWin : public ui::WindowImpl,
   virtual void SetMouseCapture() OVERRIDE;
   virtual void ReleaseMouseCapture() OVERRIDE;
   virtual bool HasMouseCapture() const OVERRIDE;
-  virtual void SetKeyboardCapture() OVERRIDE;
-  virtual void ReleaseKeyboardCapture() OVERRIDE;
-  virtual bool HasKeyboardCapture() const OVERRIDE;
-  virtual InputMethod* GetInputMethodNative() OVERRIDE;
-  virtual void ReplaceInputMethod(InputMethod* input_method) OVERRIDE;
+  virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
-  virtual void GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
-                                                bool* maximized) const OVERRIDE;
+  virtual void GetWindowPlacement(
+     gfx::Rect* bounds,
+     ui::WindowShowState* show_state) const OVERRIDE;
   virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
   virtual void SetWindowIcons(const SkBitmap& window_icon,
                               const SkBitmap& app_icon) OVERRIDE;
@@ -248,7 +236,7 @@ class NativeWidgetWin : public ui::WindowImpl,
   virtual void Hide() OVERRIDE;
   virtual void ShowMaximizedWithBounds(
       const gfx::Rect& restored_bounds) OVERRIDE;
-  virtual void ShowWithState(ShowState state) OVERRIDE;
+  virtual void ShowWithWindowState(ui::WindowShowState show_state) OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
@@ -271,6 +259,8 @@ class NativeWidgetWin : public ui::WindowImpl,
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
+  virtual bool ConvertPointFromAncestor(
+      const Widget* ancestor, gfx::Point* point) const OVERRIDE;
 
  protected:
   // Information saved before going into fullscreen mode, used to restore the
@@ -300,7 +290,7 @@ class NativeWidgetWin : public ui::WindowImpl,
     MESSAGE_RANGE_HANDLER_EX(WM_NCMOUSEMOVE, WM_NCXBUTTONDBLCLK, OnMouseRange)
 
     // Reflected message handler
-    MESSAGE_HANDLER_EX(kReflectedMessage, OnReflectedMessage)
+    MESSAGE_HANDLER_EX(base::win::kReflectedMessage, OnReflectedMessage)
 
     // CustomFrameWindow hacks
     MESSAGE_HANDLER_EX(WM_NCUAHDRAWCAPTION, OnNCUAHDrawCaption)
@@ -518,10 +508,12 @@ class NativeWidgetWin : public ui::WindowImpl,
   // frame windows.
   void ResetWindowRegion(bool force);
 
-  // Calls the default WM_NCACTIVATE handler with the specified activation
-  // value, safely wrapping the call in a ScopedRedrawLock to prevent frame
-  // flicker.
-  LRESULT CallDefaultNCActivateHandler(BOOL active);
+  // Calls DefWindowProc, safely wrapping the call in a ScopedRedrawLock to
+  // prevent frame flicker. DefWindowProc handling can otherwise render the
+  // classic-look window title bar directly.
+  LRESULT DefWindowProcWithRedrawLock(UINT message,
+                                      WPARAM w_param,
+                                      LPARAM l_param);
 
   // Stops ignoring SetWindowPos() requests (see below).
   void StopIgnoringPosChanges() { ignore_window_pos_changes_ = false; }
@@ -611,11 +603,6 @@ class NativeWidgetWin : public ui::WindowImpl,
 
   ViewProps props_;
 
-  scoped_ptr<InputMethod> input_method_;
-
-  // Indicates if the |input_method_| is an InputMethodWin instance.
-  bool is_input_method_win_;
-
   // True if we're in fullscreen mode.
   bool fullscreen_;
 
@@ -629,8 +616,9 @@ class NativeWidgetWin : public ui::WindowImpl,
   DWORD drag_frame_saved_window_style_;
   DWORD drag_frame_saved_window_ex_style_;
 
-  // True if updates to this window are currently locked.
-  bool lock_updates_;
+  // Represents the number of ScopedRedrawLocks active against this widget.
+  // If this is greater than zero, the widget should be locked against updates.
+  int lock_updates_count_;
 
   // The window styles of the window before updates were locked.
   DWORD saved_window_style_;
@@ -659,6 +647,16 @@ class NativeWidgetWin : public ui::WindowImpl,
 
   // The compositor for accelerated drawing.
   scoped_refptr<ui::Compositor> compositor_;
+
+  // This flag can be initialized and checked after certain operations (such as
+  // DefWindowProc) to avoid stack-controlled NativeWidgetWin operations (such
+  // as unlocking the Window with a ScopedRedrawLock) after Widget destruction.
+  bool* destroyed_;
+
+  // True if the widget is going to have a non_client_view. We cache this value
+  // rather than asking the Widget for the non_client_view so that we know at
+  // Init time, before the Widget has created the NonClientView.
+  bool has_non_client_view_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetWin);
 };

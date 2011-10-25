@@ -11,13 +11,13 @@
 
 #include "base/basictypes.h"
 #include "base/time.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 
 class GURL;
 
 namespace net {
 
-class NET_TEST SocketStreamMetrics {
+class NET_EXPORT_PRIVATE SocketStreamMetrics {
  public:
   enum ProtocolType {
     PROTOCOL_UNKNOWN,
@@ -32,6 +32,7 @@ class NET_TEST SocketStreamMetrics {
     TUNNEL_CONNECTION,
     SOCKS_CONNECTION,
     SSL_CONNECTION,
+    SECURE_PROXY_CONNECTION,
     NUM_CONNECTION_TYPES,
   };
 

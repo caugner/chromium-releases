@@ -36,7 +36,7 @@ void HistoryTabHelper::UpdateHistoryForNavigation(
 void HistoryTabHelper::UpdateHistoryPageTitle(const NavigationEntry& entry) {
   HistoryService* hs = GetHistoryService();
   if (hs)
-    hs->SetPageTitle(entry.virtual_url(), entry.title());
+    hs->SetPageTitle(entry.virtual_url(), entry.GetTitleForDisplay(""));
 }
 
 scoped_refptr<history::HistoryAddPageArgs>
@@ -67,8 +67,8 @@ HistoryTabHelper::CreateHistoryAddPageArgs(
 bool HistoryTabHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(HistoryTabHelper, message)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_PageContents, OnPageContents)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_Thumbnail, OnThumbnail)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_PageContents, OnPageContents)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_Thumbnail, OnThumbnail)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -143,18 +143,24 @@ void HistoryTabHelper::OnPageContents(const GURL& url,
 void HistoryTabHelper::OnThumbnail(const GURL& url,
                                    const ThumbnailScore& score,
                                    const SkBitmap& bitmap) {
-  if (tab_contents()->profile()->IsOffTheRecord())
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  if (profile->IsOffTheRecord())
     return;
 
-  // Tell History about this thumbnail
-  history::TopSites* ts = tab_contents()->profile()->GetTopSites();
-  if (ts)
-    ts->SetPageThumbnail(url, bitmap, score);
+  // Tell History about this thumbnail.
+  history::TopSites* ts = profile->GetTopSites();
+  if (ts) {
+    gfx::Image thumbnail(new SkBitmap(bitmap));
+    ts->SetPageThumbnail(url, &thumbnail, score);
+  }
 }
 
 HistoryService* HistoryTabHelper::GetHistoryService() {
-  if (tab_contents()->profile()->IsOffTheRecord())
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  if (profile->IsOffTheRecord())
     return NULL;
 
-  return tab_contents()->profile()->GetHistoryService(Profile::IMPLICIT_ACCESS);
+  return profile->GetHistoryService(Profile::IMPLICIT_ACCESS);
 }

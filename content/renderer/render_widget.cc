@@ -17,7 +17,7 @@
 #include "content/common/view_messages.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread.h"
-#include "content/renderer/renderer_webkitclient_impl.h"
+#include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkShader.h"
@@ -1030,8 +1030,7 @@ WebRect RenderWidget::windowRect() {
 
 void RenderWidget::setToolTipText(const WebKit::WebString& text,
                                   WebTextDirection hint) {
-  Send(new ViewHostMsg_SetTooltipText(routing_id_, UTF16ToWideHack(text),
-                                      hint));
+  Send(new ViewHostMsg_SetTooltipText(routing_id_, text, hint));
 }
 
 void RenderWidget::setWindowRect(const WebRect& pos) {
@@ -1317,12 +1316,22 @@ COMPILE_ASSERT(int(WebKit::WebTextInputTypeText) == \
                int(ui::TEXT_INPUT_TYPE_TEXT), mismatching_enums);
 COMPILE_ASSERT(int(WebKit::WebTextInputTypePassword) == \
                int(ui::TEXT_INPUT_TYPE_PASSWORD), mismatching_enums);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeSearch) == \
+               int(ui::TEXT_INPUT_TYPE_SEARCH), mismatching_enums);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeEmail) == \
+               int(ui::TEXT_INPUT_TYPE_EMAIL), mismatching_enums);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeNumber) == \
+               int(ui::TEXT_INPUT_TYPE_NUMBER), mismatching_enums);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeTelephone) == \
+               int(ui::TEXT_INPUT_TYPE_TELEPHONE), mismatching_enums);
+COMPILE_ASSERT(int(WebKit::WebTextInputTypeURL) == \
+               int(ui::TEXT_INPUT_TYPE_URL), mismatching_enums);
 
 ui::TextInputType RenderWidget::GetTextInputType() {
   if (webwidget_) {
     int type = webwidget_->textInputType();
     // Check the type is in the range representable by ui::TextInputType.
-    DCHECK(type <= ui::TEXT_INPUT_TYPE_PASSWORD) <<
+    DCHECK(type <= ui::TEXT_INPUT_TYPE_URL) <<
       "WebKit::WebTextInputType and ui::TextInputType not synchronized";
     return static_cast<ui::TextInputType>(type);
   }

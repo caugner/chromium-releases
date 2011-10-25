@@ -10,8 +10,9 @@
 #include "chrome/browser/policy/device_management_backend_mock.h"
 #include "chrome/browser/policy/device_management_service.h"
 #include "chrome/browser/policy/proto/device_management_constants.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "content/browser/browser_thread.h"
-#include "content/common/test_url_fetcher_factory.h"
+#include "content/test/test_url_fetcher_factory.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
@@ -50,15 +51,11 @@ class DeviceManagementServiceTestBase : public TESTBASE {
     InitializeService();
   }
 
-  virtual void SetUp() {
-    URLFetcher::set_factory(&factory_);
-  }
-
   virtual void TearDown() {
-    URLFetcher::set_factory(NULL);
     backend_.reset();
     service_.reset();
     loop_.RunAllPending();
+    TESTBASE::TearDown();
   }
 
   void ResetService() {
@@ -146,7 +143,9 @@ TEST_P(DeviceManagementServiceFailedRequestTest, PolicyRequest) {
   em::DevicePolicySettingRequest* setting_request =
       request.add_setting_request();
   setting_request->set_key(kChromeDevicePolicySettingKey);
-  backend_->ProcessPolicyRequest(kDMToken, kDeviceId, request, &mock);
+  backend_->ProcessPolicyRequest(kDMToken, kDeviceId,
+                                 CloudPolicyDataStore::USER_AFFILIATION_NONE,
+                                 request, &mock);
   TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
 
@@ -181,6 +180,16 @@ INSTANTIATE_TEST_CASE_P(
             DeviceManagementBackend::kErrorServiceManagementNotSupported,
             net::URLRequestStatus::SUCCESS,
             403,
+            PROTO_STRING(kResponseEmpty)),
+        FailedRequestParams(
+            DeviceManagementBackend::kErrorServiceInvalidSerialNumber,
+            net::URLRequestStatus::SUCCESS,
+            405,
+            PROTO_STRING(kResponseEmpty)),
+        FailedRequestParams(
+            DeviceManagementBackend::kErrorServiceDeviceIdConflict,
+            net::URLRequestStatus::SUCCESS,
+            409,
             PROTO_STRING(kResponseEmpty)),
         FailedRequestParams(
             DeviceManagementBackend::kErrorServiceDeviceNotFound,
@@ -414,7 +423,9 @@ TEST_F(DeviceManagementServiceTest, CancelPolicyRequest) {
       request.add_setting_request();
   setting_request->set_key(kChromeDevicePolicySettingKey);
   setting_request->set_watermark("stale");
-  backend_->ProcessPolicyRequest(kDMToken, kDeviceId, request, &mock);
+  backend_->ProcessPolicyRequest(kDMToken, kDeviceId,
+                                 CloudPolicyDataStore::USER_AFFILIATION_NONE,
+                                 request, &mock);
   TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
 
@@ -466,7 +477,9 @@ TEST_F(DeviceManagementServiceTest, CancelRequestAfterShutdown) {
       request.add_setting_request();
   setting_request->set_key(kChromeDevicePolicySettingKey);
   setting_request->set_watermark("stale");
-  backend_->ProcessPolicyRequest(kDMToken, kDeviceId, request, &mock);
+  backend_->ProcessPolicyRequest(kDMToken, kDeviceId,
+                                 CloudPolicyDataStore::USER_AFFILIATION_NONE,
+                                 request, &mock);
   TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
 

@@ -47,7 +47,7 @@ void UpdateButtonHelper(NativeTextButton* button_view,
                         MessageBoxFlags::DialogButton button) {
   std::wstring label = delegate->GetDialogButtonLabel(button);
   if (!label.empty())
-    button_view->SetLabel(label);
+    button_view->SetText(label);
   button_view->SetEnabled(delegate->IsDialogButtonEnabled(button));
   button_view->SetVisible(delegate->IsDialogButtonVisible(button));
 }
@@ -312,6 +312,9 @@ const DialogClientView* DialogClientView::AsDialogClientView() const {
 void DialogClientView::OnPaint(gfx::Canvas* canvas) {
 #if defined(OS_WIN)
   FillViewWithSysColor(canvas, this, GetSysColor(COLOR_3DFACE));
+#elif defined(USE_WAYLAND)
+  SkColor sk_color = SkColorSetARGB(200, 255, 255, 255);
+  canvas->FillRectInt(sk_color, 0, 0, width(), height());
 #else
   GtkWidget* widget = GetWidget()->GetNativeView();
   if (GTK_IS_WINDOW(widget)) {

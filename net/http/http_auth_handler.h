@@ -10,7 +10,7 @@
 
 #include "base/string16.h"
 #include "net/base/completion_callback.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/http/http_auth.h"
 
@@ -21,7 +21,7 @@ struct HttpRequestInfo;
 // HttpAuthHandler is the interface for the authentication schemes
 // (basic, digest, NTLM, Negotiate).
 // HttpAuthHandler objects are typically created by an HttpAuthHandlerFactory.
-class NET_TEST HttpAuthHandler {
+class NET_EXPORT_PRIVATE HttpAuthHandler {
  public:
   HttpAuthHandler();
   virtual ~HttpAuthHandler();
@@ -134,6 +134,11 @@ class NET_TEST HttpAuthHandler {
   // NOTE: SSO is a potential security risk.
   // TODO(cbentzel): Add a pointer to Firefox documentation about risk.
   virtual bool AllowsDefaultCredentials();
+
+  // Returns whether explicit credentials can be used with this handler.  If
+  // true the user may be prompted for credentials if an implicit identity
+  // cannot be determined.
+  virtual bool AllowsExplicitCredentials();
 
  protected:
   enum Property {

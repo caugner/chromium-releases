@@ -156,34 +156,38 @@ class ChildProcessLauncher::Context
       }
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 
-      bool launched = false;
+      // Actually launch the app.
+      base::LaunchOptions options;
+      options.environ = &env;
+      options.fds_to_remap = &fds_to_map;
+
 #if defined(OS_MACOSX)
-      // It is possible for the child process to die immediately after
-      // launching.  To prevent leaking MachBroker map entries in this case,
-      // lock around all of LaunchProcess().  If the child dies, the death
-      // notification will be processed by the MachBroker after the call to
-      // AddPlaceholderForPid(), enabling proper cleanup.
-      {  // begin scope for AutoLock
+      // Use synchronization to make sure that the MachBroker is ready to
+      // receive a check-in from the new process before the new process
+      // actually tries to check in.
+      base::LaunchSynchronizationHandle synchronization_handle;
+      options.synchronize = &synchronization_handle;
+#endif  // defined(OS_MACOSX)
+
+      bool launched = base::LaunchProcess(*cmd_line, options, &handle);
+
+#if defined(OS_MACOSX)
+      if (launched) {
         MachBroker* broker = MachBroker::GetInstance();
-        base::AutoLock lock(broker->GetLock());
+        {
+          base::AutoLock lock(broker->GetLock());
 
-        // This call to |PrepareForFork()| will start the MachBroker listener
-        // thread, if it is not already running.  Therefore the browser process
-        // will be listening for Mach IPC before LaunchProcess() is called.
-        broker->PrepareForFork();
-#endif
-
-        // Actually launch the app.
-        base::LaunchOptions options;
-        options.environ = &env;
-        options.fds_to_remap = &fds_to_map;
-        launched = base::LaunchProcess(*cmd_line, options, &handle);
-
-#if defined(OS_MACOSX)
-        if (launched)
+          // Make sure the MachBroker is running, and inform it to expect a
+          // check-in from the new process.
+          broker->EnsureRunning();
           broker->AddPlaceholderForPid(handle);
-      }  // end scope for AutoLock
-#endif
+        }
+
+        // Now that the MachBroker is ready, the child may continue.
+        base::LaunchSynchronize(synchronization_handle);
+      }
+#endif  // defined(OS_MACOSX)
+
       if (!launched)
         handle = base::kNullProcessHandle;
     }
@@ -256,13 +260,6 @@ class ChildProcessLauncher::Context
     process_.SetProcessBackgrounded(background);
   }
 
-// TODO(apatrick): Remove this ASAP. http://crbog.com/81449 shows that this is
-// called before later calling null. Disable optimization to try and get more
-// information about what happened here.
-#if defined(OS_WIN)
-#pragma optimize("", off)
-#endif
-
   static void TerminateInternal(
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
       bool zygote,
@@ -287,10 +284,6 @@ class ChildProcessLauncher::Context
 #endif  // OS_POSIX
     process.Close();
   }
-
-#if defined(OS_WIN)
-#pragma optimize("", on)
-#endif
 
   Client* client_;
   BrowserThread::ID client_thread_id_;

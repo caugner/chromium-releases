@@ -462,9 +462,9 @@ INSTANTIATE_TEST_CASE_P(
         PolicyTestParams::ForBooleanPolicy(
             kPolicyInstantEnabled,
             key::kInstantEnabled),
-        PolicyTestParams::ForBooleanPolicy(
-            kPolicyIncognitoEnabled,
-            key::kIncognitoEnabled),
+        PolicyTestParams::ForIntegerPolicy(
+            kPolicyIncognitoModeAvailability,
+            key::kIncognitoModeAvailability),
         PolicyTestParams::ForBooleanPolicy(
             kPolicyDisablePluginFinder,
             key::kDisablePluginFinder),
@@ -507,5 +507,18 @@ INSTANTIATE_TEST_CASE_P(
         PolicyTestParams::ForIntegerPolicy(
             kPolicyMaxConnectionsPerProxy,
             key::kMaxConnectionsPerProxy)));
+
+// testing::Values has a limit of 50 test templates, which is reached by the
+// instantiations above. Add tests for new policies here:
+INSTANTIATE_TEST_CASE_P(
+    ConfigurationPolicyProviderWinTestInstance2,
+    ConfigurationPolicyProviderWinTest,
+    testing::Values(
+        PolicyTestParams::ForListPolicy(
+            kPolicyURLBlacklist,
+            key::kURLBlacklist),
+        PolicyTestParams::ForListPolicy(
+            kPolicyURLWhitelist,
+            key::kURLWhitelist)));
 
 }  // namespace policy

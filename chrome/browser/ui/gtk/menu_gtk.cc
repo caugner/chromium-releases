@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/gtk/gtk_custom_menu.h"
 #include "chrome/browser/ui/gtk/gtk_custom_menu_item.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/views/event_utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/accelerator_gtk.h"
 #include "ui/base/models/button_menu_item_model.h"
@@ -706,12 +707,11 @@ void MenuGtk::ExecuteCommand(ui::MenuModel* model, int id) {
     delegate_->CommandWillBeExecuted();
 
   GdkEvent* event = gtk_get_current_event();
-  if (event && event->type == GDK_BUTTON_RELEASE) {
-    model->ActivatedAtWithDisposition(
-        id, event_utils::DispositionFromEventFlags(event->button.state));
-  } else {
-    model->ActivatedAt(id);
-  }
+  int event_flags = 0;
+
+  if (event && event->type == GDK_BUTTON_RELEASE)
+    event_flags = event_utils::EventFlagsFromGdkState(event->button.state);
+  model->ActivatedAt(id, event_flags);
 
   if (event)
     gdk_event_free(event);
@@ -801,11 +801,7 @@ void MenuGtk::SetMenuItemInfo(GtkWidget* widget, gpointer userdata) {
             gfx::ConvertAcceleratorsFromWindowsStyle(
                 UTF16ToUTF8(model->GetLabelAt(id)));
 
-#if GTK_CHECK_VERSION(2, 16, 0)
         gtk_menu_item_set_label(GTK_MENU_ITEM(widget), label.c_str());
-#else
-        gtk_label_set_label(GTK_LABEL(GTK_BIN(widget)->child), label.c_str());
-#endif
         if (GTK_IS_IMAGE_MENU_ITEM(widget)) {
           SkBitmap icon;
           if (model->GetIconAt(id, &icon)) {

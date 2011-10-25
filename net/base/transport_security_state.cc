@@ -569,11 +569,19 @@ bool TransportSecurityState::IsPreloadedSTS(
     0,
   };
 
+  // kTestAcceptableCerts doesn't actually match any public keys and is used
+  // with "pinningtest.appspot.com", below, to test if pinning is active.
+  static const char* kTestAcceptableCerts[] = {
+    "sha1/AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  };
+
   // In the medium term this list is likely to just be hardcoded here. This,
   // slightly odd, form removes the need for additional relocations records.
   static const struct HSTSPreload kPreloadedSTS[] = {
     // (*.)google.com, iff using SSL must use an acceptable certificate.
     {12, true, "\006google\003com", false, kGoogleAcceptableCerts },
+    {25, true, "\013pinningtest\007appspot\003com", false,
+     kTestAcceptableCerts },
     // Now we force HTTPS for subtrees of google.com.
     {19, true, "\006health\006google\003com", true, kGoogleAcceptableCerts },
     {21, true, "\010checkout\006google\003com", true, kGoogleAcceptableCerts },
@@ -598,6 +606,7 @@ bool TransportSecurityState::IsPreloadedSTS(
     {20, true, "\006market\007android\003com", true, kGoogleAcceptableCerts },
     {26, true, "\003ssl\020google-analytics\003com", true,
      kGoogleAcceptableCerts },
+    {18, true, "\005drive\006google\003com", true, kGoogleAcceptableCerts },
     // Other Google-related domains that must use an acceptable certificate
     // iff using SSL.
     {11, true, "\005ytimg\003com", false, kGoogleAcceptableCerts },
@@ -646,6 +655,13 @@ bool TransportSecurityState::IsPreloadedSTS(
     {13, true, "\010uprotect\002it", true, 0 },
     {14, false, "\010squareup\003com", true, 0 },
     {9, true, "\004cert\002se", true, 0 },
+    {11, true, "\006crypto\002is", true, 0 },
+    {20, true, "\005simon\007butcher\004name", true, 0 },
+    {10, true, "\004linx\003net", true, 0 },
+    {13, false, "\007dropcam\003com", true, 0 },
+    {17, false, "\003www\007dropcam\003com", true, 0 },
+    {30, true, "\010ebanking\014indovinabank\003com\002vn", true, 0 },
+    {13, false, "\007epoxate\003com", true, 0 },
 #if defined(OS_CHROMEOS)
     {13, false, "\007twitter\003com", true, 0 },
     {17, false, "\003www\007twitter\003com", true, 0 },

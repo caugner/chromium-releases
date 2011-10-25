@@ -13,24 +13,17 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "chrome/browser/printing/print_view_manager.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper_synced_tab_delegate.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/common/notification_registrar.h"
-
-namespace prerender {
-class PrerenderObserver;
-}
-
-namespace printing {
-class PrintPreviewMessageHandler;
-}
 
 class AutocompleteHistoryManager;
 class AutofillManager;
 class AutomationTabHelper;
 class BlockedContentTabHelper;
 class BookmarkTabHelper;
+class DownloadRequestLimiterObserver;
 class Extension;
 class ExtensionTabHelper;
 class ExtensionWebNavigationTabObserver;
@@ -38,21 +31,41 @@ class ExternalProtocolObserver;
 class FaviconTabHelper;
 class FileSelectObserver;
 class FindTabHelper;
-class FirewallTraversalTabHelper;
-class InfoBarDelegate;
+class FirewallTraversalObserver;
+class InfoBarTabHelper;
 class HistoryTabHelper;
 class NavigationController;
 class OmniboxSearchHint;
 class PasswordManager;
 class PasswordManagerDelegate;
 class PluginObserver;
+class Profile;
 class RestoreTabHelper;
 class SearchEngineTabHelper;
 class TabContentsSSLHelper;
 class TabContentsWrapperDelegate;
+class TabContentsWrapperSyncedTabDelegate;
 class TabSpecificContentSettings;
 class ThumbnailGenerator;
 class TranslateTabHelper;
+class WebIntentPickerController;
+
+namespace browser_sync {
+class SyncedTabDelegate;
+}
+
+namespace IPC {
+class Message;
+}
+
+namespace prerender {
+class PrerenderTabHelper;
+}
+
+namespace printing {
+class PrintViewManager;
+class PrintPreviewMessageHandler;
+}
 
 namespace safe_browsing {
 class ClientSideDetectionHost;
@@ -91,6 +104,9 @@ class TabContentsWrapper : public TabContentsObserver,
   // Captures a snapshot of the page.
   void CaptureSnapshot();
 
+  // Stop this tab rendering in fullscreen mode.
+  void ExitFullscreenMode();
+
   // Helper to retrieve the existing instance that wraps a given TabContents.
   // Returns NULL if there is no such existing instance.
   // NOTE: This is not intended for general use. It is intended for situations
@@ -105,6 +121,10 @@ class TabContentsWrapper : public TabContentsObserver,
   TabContentsWrapperDelegate* delegate() const { return delegate_; }
   void set_delegate(TabContentsWrapperDelegate* d) { delegate_ = d; }
 
+  browser_sync::SyncedTabDelegate* synced_tab_delegate() const {
+    return synced_tab_delegate_.get();
+  }
+
   TabContents* tab_contents() const { return tab_contents_.get(); }
   NavigationController& controller() const {
     return tab_contents()->controller();
@@ -113,7 +133,9 @@ class TabContentsWrapper : public TabContentsObserver,
   RenderViewHost* render_view_host() const {
     return tab_contents()->render_view_host();
   }
-  Profile* profile() const { return tab_contents()->profile(); }
+  WebUI* web_ui() const { return tab_contents()->web_ui(); }
+
+  Profile* profile() const;
 
   // Tab Helpers ---------------------------------------------------------------
 
@@ -144,14 +166,26 @@ class TabContentsWrapper : public TabContentsObserver,
     return extension_tab_helper_.get();
   }
 
-  FindTabHelper* find_tab_helper() { return find_tab_helper_.get(); }
-
   FaviconTabHelper* favicon_tab_helper() { return favicon_tab_helper_.get(); }
+  FindTabHelper* find_tab_helper() { return find_tab_helper_.get(); }
   HistoryTabHelper* history_tab_helper() { return history_tab_helper_.get(); }
+  InfoBarTabHelper* infobar_tab_helper() { return infobar_tab_helper_.get(); }
   PasswordManager* password_manager() { return password_manager_.get(); }
+
+  prerender::PrerenderTabHelper* prerender_tab_helper() {
+    return prerender_tab_helper_.get();
+  }
 
   printing::PrintViewManager* print_view_manager() {
     return print_view_manager_.get();
+  }
+
+  RestoreTabHelper* restore_tab_helper() {
+    return restore_tab_helper_.get();
+  }
+
+  const RestoreTabHelper* restore_tab_helper() const {
+    return restore_tab_helper_.get();
   }
 
   safe_browsing::ClientSideDetectionHost* safebrowsing_detection_host() {
@@ -172,16 +206,8 @@ class TabContentsWrapper : public TabContentsObserver,
     return translate_tab_helper_.get();
   }
 
-  prerender::PrerenderObserver* prerender_observer() {
-    return prerender_observer_.get();
-  }
-
-  RestoreTabHelper* restore_tab_helper() {
-    return restore_tab_helper_.get();
-  }
-
-  const RestoreTabHelper* restore_tab_helper() const {
-    return restore_tab_helper_.get();
+  WebIntentPickerController* web_intent_picker_controller() {
+    return web_intent_picker_controller_.get();
   }
 
   // Overrides -----------------------------------------------------------------
@@ -198,49 +224,12 @@ class TabContentsWrapper : public TabContentsObserver,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
-  // Infobars ------------------------------------------------------------------
-
-  // Adds an InfoBar for the specified |delegate|.
-  //
-  // If infobars are disabled for this tab or the tab already has a delegate
-  // which returns true for InfoBarDelegate::EqualsDelegate(delegate),
-  // |delegate| is closed immediately without being added.
-  void AddInfoBar(InfoBarDelegate* delegate);
-
-  // Removes the InfoBar for the specified |delegate|.
-  //
-  // If infobars are disabled for this tab, this will do nothing, on the
-  // assumption that the matching AddInfoBar() call will have already closed the
-  // delegate (see above).
-  void RemoveInfoBar(InfoBarDelegate* delegate);
-
-  // Replaces one infobar with another, without any animation in between.
-  //
-  // If infobars are disabled for this tab, |new_delegate| is closed immediately
-  // without being added, and nothing else happens.
-  //
-  // NOTE: This does not perform any EqualsDelegate() checks like AddInfoBar().
-  void ReplaceInfoBar(InfoBarDelegate* old_delegate,
-                      InfoBarDelegate* new_delegate);
-
-  // Enumeration and access functions.
-  size_t infobar_count() const { return infobars_.size(); }
-  // WARNING: This does not sanity-check |index|!
-  InfoBarDelegate* GetInfoBarDelegateAt(size_t index);
-  void set_infobars_enabled(bool value) { infobars_enabled_ = value; }
-
  private:
   // Internal helpers ----------------------------------------------------------
 
   // Message handlers.
-  void OnJSOutOfMemory();
-  void OnRegisterProtocolHandler(const std::string& protocol,
-                                 const GURL& url,
-                                 const string16& title);
   void OnSnapshot(const SkBitmap& bitmap);
   void OnPDFHasUnsupportedFeature();
-  void OnDidBlockDisplayingInsecureContent();
-  void OnDidBlockRunningInsecureContent();
 
   // Returns the server that can provide alternate error pages.  If the returned
   // URL is empty, the default error page built into WebKit will be used.
@@ -259,20 +248,16 @@ class TabContentsWrapper : public TabContentsObserver,
   // safe browsing preference has changed.
   void UpdateSafebrowsingDetectionHost();
 
-  void RemoveInfoBarInternal(InfoBarDelegate* delegate, bool animate);
-  void RemoveAllInfoBars(bool animate);
-
   // Data for core operation ---------------------------------------------------
 
   // Delegate for notifying our owner about stuff. Not owned by us.
   TabContentsWrapperDelegate* delegate_;
 
-  // Delegates for InfoBars associated with this TabContentsWrapper.
-  std::vector<InfoBarDelegate*> infobars_;
-  bool infobars_enabled_;
-
   NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
+
+  // Helper which implements the SyncedTabDelegate interface.
+  scoped_ptr<TabContentsWrapperSyncedTabDelegate> synced_tab_delegate_;
 
   // Data for current page -----------------------------------------------------
 
@@ -292,17 +277,23 @@ class TabContentsWrapper : public TabContentsObserver,
   scoped_ptr<ExtensionTabHelper> extension_tab_helper_;
   scoped_ptr<FaviconTabHelper> favicon_tab_helper_;
   scoped_ptr<FindTabHelper> find_tab_helper_;
-  scoped_ptr<FirewallTraversalTabHelper> firewall_traversal_tab_helper_;
   scoped_ptr<HistoryTabHelper> history_tab_helper_;
-  scoped_ptr<RestoreTabHelper> restore_tab_helper_;
+  scoped_ptr<InfoBarTabHelper> infobar_tab_helper_;
 
   // PasswordManager and its delegate. The delegate must outlive the manager,
   // per documentation in password_manager.h.
   scoped_ptr<PasswordManagerDelegate> password_manager_delegate_;
   scoped_ptr<PasswordManager> password_manager_;
 
+  scoped_ptr<prerender::PrerenderTabHelper> prerender_tab_helper_;
+
   // Handles print job for this contents.
   scoped_ptr<printing::PrintViewManager> print_view_manager_;
+
+  scoped_ptr<RestoreTabHelper> restore_tab_helper_;
+
+  // Handles displaying a web intents picker to the user.
+  scoped_ptr<WebIntentPickerController> web_intent_picker_controller_;
 
   // Handles IPCs related to SafeBrowsing client-side phishing detection.
   scoped_ptr<safe_browsing::ClientSideDetectionHost>
@@ -321,12 +312,12 @@ class TabContentsWrapper : public TabContentsObserver,
   // (These provide no API for callers; objects that need to exist 1:1 with tabs
   // and silently do their thing live here.)
 
-  scoped_ptr<ExternalProtocolObserver> external_protocol_observer_;
-  scoped_ptr<FileSelectObserver> file_select_observer_;
-  scoped_ptr<PluginObserver> plugin_observer_;
-  scoped_ptr<prerender::PrerenderObserver> prerender_observer_;
-  scoped_ptr<printing::PrintPreviewMessageHandler> print_preview_;
+  scoped_ptr<DownloadRequestLimiterObserver> download_request_limiter_observer_;
   scoped_ptr<ExtensionWebNavigationTabObserver> webnavigation_observer_;
+  scoped_ptr<ExternalProtocolObserver> external_protocol_observer_;
+  scoped_ptr<FirewallTraversalObserver> firewall_traversal_observer_;
+  scoped_ptr<PluginObserver> plugin_observer_;
+  scoped_ptr<printing::PrintPreviewMessageHandler> print_preview_;
   scoped_ptr<ThumbnailGenerator> thumbnail_generation_observer_;
 
   // TabContents (MUST BE LAST) ------------------------------------------------

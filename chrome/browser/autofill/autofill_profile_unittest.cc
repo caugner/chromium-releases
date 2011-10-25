@@ -24,9 +24,11 @@ bool UpdateProfileLabel(AutofillProfile *profile) {
 
 }  // namespace
 
+typedef testing::Test AutofillProfileTest;
+
 // Tests different possibilities for summary string generation.
 // Based on existence of first name, last name, and address line 1.
-TEST(AutofillProfileTest, PreviewSummaryString) {
+TEST_F(AutofillProfileTest, PreviewSummaryString) {
   // Case 0/null: ""
   AutofillProfile profile0;
   // Empty profile - nothing to update.
@@ -38,25 +40,34 @@ TEST(AutofillProfileTest, PreviewSummaryString) {
   // data is used: "Hollywood, CA"
   AutofillProfile profile00;
   autofill_test::SetProfileInfo(&profile00, "", "Mitchell", "",
-      "johnwayne@me.xyz", "Fox", "", "unit 5", "Hollywood", "CA", "91601", "US",
+      "johnwayne@me.xyz", "Fox", "", "", "Hollywood", "CA", "91601", "US",
       "16505678910", "78127654321");
   EXPECT_TRUE(UpdateProfileLabel(&profile00));
   string16 summary00 = profile00.Label();
   EXPECT_EQ(ASCIIToUTF16("Hollywood, CA"), summary00);
 
-  // Case 1: "<address>"
+  // Case 1: "<address>" without line 2.
   AutofillProfile profile1;
   autofill_test::SetProfileInfo(&profile1, "", "Mitchell", "",
-      "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5", "Hollywood", "CA",
+      "johnwayne@me.xyz", "Fox", "123 Zoo St.", "", "Hollywood", "CA",
       "91601", "US", "16505678910", "78127654321");
   EXPECT_TRUE(UpdateProfileLabel(&profile1));
   string16 summary1 = profile1.Label();
   EXPECT_EQ(ASCIIToUTF16("123 Zoo St., Hollywood"), summary1);
 
+  // Case 1a: "<address>" with line 2.
+  AutofillProfile profile1a;
+  autofill_test::SetProfileInfo(&profile1a, "", "Mitchell", "",
+      "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5", "Hollywood", "CA",
+      "91601", "US", "16505678910", "78127654321");
+  EXPECT_TRUE(UpdateProfileLabel(&profile1a));
+  string16 summary1a = profile1a.Label();
+  EXPECT_EQ(ASCIIToUTF16("123 Zoo St., unit 5"), summary1a);
+
   // Case 2: "<lastname>"
   AutofillProfile profile2;
   autofill_test::SetProfileInfo(&profile2, "", "Mitchell",
-      "Morrison", "johnwayne@me.xyz", "Fox", "", "unit 5", "Hollywood", "CA",
+      "Morrison", "johnwayne@me.xyz", "Fox", "", "", "Hollywood", "CA",
       "91601", "US", "16505678910", "78127654321");
   EXPECT_TRUE(UpdateProfileLabel(&profile2));
   string16 summary2 = profile2.Label();
@@ -66,7 +77,7 @@ TEST(AutofillProfileTest, PreviewSummaryString) {
   // Case 3: "<lastname>, <address>"
   AutofillProfile profile3;
   autofill_test::SetProfileInfo(&profile3, "", "Mitchell",
-      "Morrison", "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5",
+      "Morrison", "johnwayne@me.xyz", "Fox", "123 Zoo St.", "",
       "Hollywood", "CA", "91601", "US", "16505678910", "78127654321");
   EXPECT_TRUE(UpdateProfileLabel(&profile3));
   string16 summary3 = profile3.Label();
@@ -75,7 +86,7 @@ TEST(AutofillProfileTest, PreviewSummaryString) {
   // Case 4: "<firstname>"
   AutofillProfile profile4;
   autofill_test::SetProfileInfo(&profile4, "Marion", "Mitchell", "",
-      "johnwayne@me.xyz", "Fox", "", "unit 5", "Hollywood", "CA", "91601", "US",
+      "johnwayne@me.xyz", "Fox", "", "", "Hollywood", "CA", "91601", "US",
       "16505678910", "01987654321");
   EXPECT_TRUE(UpdateProfileLabel(&profile4));
   string16 summary4 = profile4.Label();
@@ -93,7 +104,7 @@ TEST(AutofillProfileTest, PreviewSummaryString) {
   // Case 6: "<firstname> <lastname>"
   AutofillProfile profile6;
   autofill_test::SetProfileInfo(&profile6, "Marion", "Mitchell",
-      "Morrison", "johnwayne@me.xyz", "Fox", "", "unit 5", "Hollywood", "CA",
+      "Morrison", "johnwayne@me.xyz", "Fox", "", "", "Hollywood", "CA",
       "91601", "US", "16505678910", "78127654321");
   EXPECT_TRUE(UpdateProfileLabel(&profile6));
   string16 summary6 = profile6.Label();
@@ -128,7 +139,7 @@ TEST(AutofillProfileTest, PreviewSummaryString) {
       "Marion Mitchell Morrison, 123 Zoo St., marion@me.xyz"), summary7a);
 }
 
-TEST(AutofillProfileTest, AdjustInferredLabels) {
+TEST_F(AutofillProfileTest, AdjustInferredLabels) {
   std::vector<AutofillProfile*> profiles;
   profiles.push_back(new AutofillProfile);
   autofill_test::SetProfileInfo(
@@ -294,7 +305,7 @@ TEST(AutofillProfileTest, AdjustInferredLabels) {
   STLDeleteContainerPointers(profiles.begin(), profiles.end());
 }
 
-TEST(AutofillProfileTest, CreateInferredLabels) {
+TEST_F(AutofillProfileTest, CreateInferredLabels) {
   std::vector<AutofillProfile*> profiles;
   profiles.push_back(new AutofillProfile);
   autofill_test::SetProfileInfo(profiles[0],
@@ -379,6 +390,15 @@ TEST(AutofillProfileTest, CreateInferredLabels) {
   EXPECT_EQ(string16(), labels[0]);
   EXPECT_EQ(string16(), labels[1]);
 
+  suggested_fields.clear();
+  // In our implementation we always display NAME_FULL for NAME_MIDDLE_INITIAL
+  suggested_fields.push_back(NAME_MIDDLE_INITIAL);
+  // One field at least, from suggested fields - no filter.
+  AutofillProfile::CreateInferredLabels(&profiles, &suggested_fields,
+                                        UNKNOWN_TYPE, 1, &labels);
+  EXPECT_EQ(ASCIIToUTF16("John Doe"), labels[0]);
+  EXPECT_EQ(ASCIIToUTF16("Jane Doe"), labels[1]);
+
   // One field at least, from suggested fields - filter same as the first non-
   // unknown suggested field.
   suggested_fields.clear();
@@ -396,7 +416,7 @@ TEST(AutofillProfileTest, CreateInferredLabels) {
 
 // Test that we fall back to using the full name if there are no other
 // distinguishing fields, but only if it makes sense given the suggested fields.
-TEST(AutofillProfileTest, CreateInferredLabelsFallsBackToFullName) {
+TEST_F(AutofillProfileTest, CreateInferredLabelsFallsBackToFullName) {
   ScopedVector<AutofillProfile> profiles;
   profiles.push_back(new AutofillProfile);
   autofill_test::SetProfileInfo(profiles[0],
@@ -430,7 +450,7 @@ TEST(AutofillProfileTest, CreateInferredLabelsFallsBackToFullName) {
 }
 
 // Test that we do not show duplicate fields in the labels.
-TEST(AutofillProfileTest, CreateInferredLabelsNoDuplicatedFields) {
+TEST_F(AutofillProfileTest, CreateInferredLabelsNoDuplicatedFields) {
   ScopedVector<AutofillProfile> profiles;
   profiles.push_back(new AutofillProfile);
   autofill_test::SetProfileInfo(profiles[0],
@@ -456,7 +476,7 @@ TEST(AutofillProfileTest, CreateInferredLabelsNoDuplicatedFields) {
 }
 
 // Make sure that empty fields are not treated as distinguishing fields.
-TEST(AutofillProfileTest, CreateInferredLabelsSkipsEmptyFields) {
+TEST_F(AutofillProfileTest, CreateInferredLabelsSkipsEmptyFields) {
   ScopedVector<AutofillProfile> profiles;
   profiles.push_back(new AutofillProfile);
   autofill_test::SetProfileInfo(profiles[0],
@@ -491,7 +511,7 @@ TEST(AutofillProfileTest, CreateInferredLabelsSkipsEmptyFields) {
   EXPECT_EQ(ASCIIToUTF16("John Doe, john.doe@example.com"), labels[2]);
 }
 
-TEST(AutofillProfileTest, IsSubsetOf) {
+TEST_F(AutofillProfileTest, IsSubsetOf) {
   scoped_ptr<AutofillProfile> a, b;
 
   // |a| is a subset of |b|.
@@ -523,7 +543,7 @@ TEST(AutofillProfileTest, IsSubsetOf) {
   EXPECT_FALSE(a->IsSubsetOf(*b));
 }
 
-TEST(AutofillProfileTest, IntersectionOfTypesHasEqualValues) {
+TEST_F(AutofillProfileTest, IntersectionOfTypesHasEqualValues) {
   scoped_ptr<AutofillProfile> a, b;
 
   // Intersection of types contains the fields NAME_FIRST, NAME_LAST,
@@ -563,7 +583,7 @@ TEST(AutofillProfileTest, IntersectionOfTypesHasEqualValues) {
   EXPECT_FALSE(a->IntersectionOfTypesHasEqualValues(*b));
 }
 
-TEST(AutofillProfileTest, MergeWith) {
+TEST_F(AutofillProfileTest, MergeWith) {
   scoped_ptr<AutofillProfile> a, b;
 
   // Merge |b| into |a|.
@@ -586,7 +606,7 @@ TEST(AutofillProfileTest, MergeWith) {
   EXPECT_EQ(0, expected_b.Compare(*b));
 }
 
-TEST(AutofillProfileTest, AssignmentOperator){
+TEST_F(AutofillProfileTest, AssignmentOperator){
   AutofillProfile a, b;
 
   // Result of assignment should be logically equal to the original profile.
@@ -602,7 +622,7 @@ TEST(AutofillProfileTest, AssignmentOperator){
   EXPECT_TRUE(a == b);
 }
 
-TEST(AutofillProfileTest, Copy) {
+TEST_F(AutofillProfileTest, Copy) {
   AutofillProfile a;
 
   // Clone should be logically equal to the original.
@@ -614,7 +634,7 @@ TEST(AutofillProfileTest, Copy) {
   EXPECT_TRUE(a == b);
 }
 
-TEST(AutofillProfileTest, Compare) {
+TEST_F(AutofillProfileTest, Compare) {
   AutofillProfile a, b;
 
   // Empty profiles are the same.
@@ -634,7 +654,7 @@ TEST(AutofillProfileTest, Compare) {
   EXPECT_LT(0, b.Compare(a));
 }
 
-TEST(AutofillProfileTest, CountryCode) {
+TEST_F(AutofillProfileTest, CountryCode) {
   AutofillProfile profile;
   EXPECT_EQ(std::string(), profile.CountryCode());
 
@@ -642,7 +662,7 @@ TEST(AutofillProfileTest, CountryCode) {
   EXPECT_EQ("US", profile.CountryCode());
 }
 
-TEST(AutofillProfileTest, MultiValueNames) {
+TEST_F(AutofillProfileTest, MultiValueNames) {
   AutofillProfile p;
   const string16 kJohnDoe(ASCIIToUTF16("John Doe"));
   const string16 kJohnPDoe(ASCIIToUTF16("John P. Doe"));
@@ -686,7 +706,7 @@ TEST(AutofillProfileTest, MultiValueNames) {
   EXPECT_EQ(string16(), p.GetInfo(NAME_FULL));
 }
 
-TEST(AutofillProfileTest, MultiValueEmails) {
+TEST_F(AutofillProfileTest, MultiValueEmails) {
   AutofillProfile p;
   const string16 kJohnDoe(ASCIIToUTF16("john@doe.com"));
   const string16 kJohnPDoe(ASCIIToUTF16("john_p@doe.com"));
@@ -730,7 +750,7 @@ TEST(AutofillProfileTest, MultiValueEmails) {
   EXPECT_EQ(string16(), p.GetInfo(EMAIL_ADDRESS));
 }
 
-TEST(AutofillProfileTest, MultiValuePhone) {
+TEST_F(AutofillProfileTest, MultiValuePhone) {
   AutofillProfile p;
   const string16 kJohnDoe(ASCIIToUTF16("4151112222"));
   const string16 kJohnPDoe(ASCIIToUTF16("4151113333"));
@@ -774,7 +794,7 @@ TEST(AutofillProfileTest, MultiValuePhone) {
   EXPECT_EQ(string16(), p.GetInfo(PHONE_HOME_WHOLE_NUMBER));
 }
 
-TEST(AutofillProfileTest, MultiValueFax) {
+TEST_F(AutofillProfileTest, MultiValueFax) {
   AutofillProfile p;
   const string16 kJohnDoe(ASCIIToUTF16("4152112222"));
   const string16 kJohnPDoe(ASCIIToUTF16("4153113333"));

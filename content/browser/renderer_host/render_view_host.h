@@ -41,6 +41,7 @@ struct ViewHostMsg_ShowPopup_Params;
 struct ViewMsg_Navigate_Params;
 struct WebDropData;
 struct UserMetricsAction;
+struct ViewHostMsg_RunFileChooser_Params;
 
 namespace base {
 class ListValue;
@@ -319,8 +320,10 @@ class RenderViewHost : public RenderWidgetHost {
                                     const std::vector<FilePath>& files);
 
   // Notifies the RenderViewHost that its load state changed.
-  void LoadStateChanged(const GURL& url, net::LoadState load_state,
-                        uint64 upload_position, uint64 upload_size);
+  void LoadStateChanged(const GURL& url,
+                        const net::LoadStateWithParam& load_state,
+                        uint64 upload_position,
+                        uint64 upload_size);
 
   bool SuddenTerminationAllowed() const;
   void set_sudden_termination_allowed(bool enabled) {
@@ -357,6 +360,8 @@ class RenderViewHost : public RenderWidgetHost {
   void DidSelectPopupMenuItem(int selected_index);
   void DidCancelPopupMenu();
 #endif
+
+  void ToggleSpeechInput();
 
 #if defined(UNIT_TEST)
   // These functions shouldn't be necessary outside of testing.
@@ -412,7 +417,9 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgNavigate(const IPC::Message& msg);
   void OnMsgUpdateState(int32 page_id,
                         const std::string& state);
-  void OnMsgUpdateTitle(int32 page_id, const std::wstring& title);
+  void OnMsgUpdateTitle(int32 page_id,
+                        const string16& title,
+                        WebKit::WebTextDirection title_direction);
   void OnMsgUpdateEncoding(const std::string& encoding);
   void OnMsgUpdateTargetURL(int32 page_id, const GURL& url);
   void OnMsgClose();
@@ -423,10 +430,17 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgDocumentAvailableInMainFrame();
   void OnMsgDocumentOnLoadCompletedInMainFrame(int32 page_id);
   void OnMsgContextMenu(const ContextMenuParams& params);
+  void OnMsgToggleFullscreen(bool enter_fullscreen);
   void OnMsgOpenURL(const GURL& url, const GURL& referrer,
                     WindowOpenDisposition disposition);
   void OnMsgDidContentsPreferredSizeChange(const gfx::Size& new_size);
-  void OnMsgSelectionChanged(const std::string& text, const ui::Range& range);
+  void OnMsgDidChangeScrollbarsForMainFrame(bool has_horizontal_scrollbar,
+                                            bool has_vertical_scrollbar);
+  void OnMsgDidChangeScrollOffsetPinningForMainFrame(bool is_pinned_to_left,
+                                                     bool is_pinned_to_right);
+  void OnMsgDidChangeNumWheelEvents(int count);
+  void OnMsgSelectionChanged(const std::string& text, const ui::Range& range,
+                             const gfx::Point& start, const gfx::Point& end);
   void OnMsgPasteFromSelectionClipboard();
   void OnMsgRunJavaScriptMessage(const string16& message,
                                  const string16& default_prompt,
@@ -444,9 +458,9 @@ class RenderViewHost : public RenderWidgetHost {
   void OnTargetDropACK();
   void OnTakeFocus(bool reverse);
   void OnAddMessageToConsole(int32 level,
-                             const std::wstring& message,
+                             const string16& message,
                              int32 line_no,
-                             const std::wstring& source_id);
+                             const string16& source_id);
   void OnUpdateInspectorSetting(const std::string& key,
                                 const std::string& value);
   void OnMsgShouldCloseACK(bool proceed);
@@ -464,6 +478,8 @@ class RenderViewHost : public RenderWidgetHost {
 #if defined(OS_MACOSX)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
 #endif
+
+  void OnRunFileChooser(const ViewHostMsg_RunFileChooser_Params& params);
 
  private:
   friend class TestRenderViewHost;

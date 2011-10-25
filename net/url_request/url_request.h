@@ -19,7 +19,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_request_headers.h"
@@ -78,6 +78,7 @@ class BlobURLRequestJobTest;
 
 namespace net {
 
+class CookieList;
 class CookieOptions;
 class HostPortPair;
 class IOBuffer;
@@ -103,7 +104,7 @@ typedef std::vector<std::string> ResponseCookies;
 //
 // NOTE: All usage of all instances of this class should be on the same thread.
 //
-class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
+class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   // Callback function implemented by protocol handlers to create new jobs.
   // The factory may return NULL to indicate an error, which will cause other
@@ -130,7 +131,7 @@ class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
 
   // This class handles network interception.  Use with
   // (Un)RegisterRequestInterceptor.
-  class NET_API Interceptor {
+  class NET_EXPORT Interceptor {
   public:
     virtual ~Interceptor() {}
 
@@ -162,7 +163,7 @@ class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // Deprecated interfaces in net::URLRequest. They have been moved to
   // URLRequest's private section to prevent new uses. Existing uses are
   // explicitly friended here and should be removed over time.
-  class NET_API Deprecated {
+  class NET_EXPORT Deprecated {
    private:
     // TODO(willchan): Kill off these friend declarations.
     friend class ::AutoUpdateInterceptor;
@@ -219,7 +220,7 @@ class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // if an error occurred, or if the IO is just pending.  When Read() returns
   // true with zero bytes read, it indicates the end of the response.
   //
-  class NET_API Delegate {
+  class NET_EXPORT Delegate {
    public:
     virtual ~Delegate() {}
 
@@ -273,14 +274,15 @@ class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
     // Called when reading cookies to allow the delegate to block access to the
     // cookie. This method will never be invoked when LOAD_DO_NOT_SEND_COOKIES
     // is specified.
-    virtual bool CanGetCookies(URLRequest* request);
+    virtual bool CanGetCookies(const URLRequest* request,
+                               const CookieList& cookie_list) const;
 
     // Called when a cookie is set to allow the delegate to block access to the
     // cookie. This method will never be invoked when LOAD_DO_NOT_SAVE_COOKIES
     // is specified.
-    virtual bool CanSetCookie(URLRequest* request,
+    virtual bool CanSetCookie(const URLRequest* request,
                               const std::string& cookie_line,
-                              CookieOptions* options);
+                              CookieOptions* options) const;
 
     // After calling Start(), the delegate will receive an OnResponseStarted
     // callback when the request has completed.  If an error occurred, the
@@ -429,8 +431,13 @@ class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
     return extra_request_headers_;
   }
 
-  // Returns the current load state for the request.
-  LoadState GetLoadState() const;
+  // Returns the current load state for the request. |param| is an optional
+  // parameter describing details related to the load state. Not all load states
+  // have a parameter.
+  LoadStateWithParam GetLoadState() const;
+  void SetLoadStateParam(const string16& param) {
+    load_state_param_ = param;
+  }
 
   // Returns the current upload progress in bytes.
   uint64 GetUploadProgress() const;
@@ -708,9 +715,15 @@ class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   void NotifyAuthRequired(AuthChallengeInfo* auth_info);
   void NotifyCertificateRequested(SSLCertRequestInfo* cert_request_info);
   void NotifySSLCertificateError(int cert_error, X509Certificate* cert);
-  bool CanGetCookies();
-  bool CanSetCookie(const std::string& cookie_line, CookieOptions* options);
+  bool CanGetCookies(const CookieList& cookie_list) const;
+  bool CanSetCookie(const std::string& cookie_line,
+                    CookieOptions* options) const;
   void NotifyReadCompleted(int bytes_read);
+
+  // Called when the delegate blocks or unblocks this request when intercepting
+  // certain requests.
+  void SetBlockedOnDelegate();
+  void SetUnblockedOnDelegate();
 
   // Contextual information used for this request (can be NULL). This contains
   // most of the dependencies which are shared between requests (disk cache,
@@ -771,6 +784,14 @@ class NET_API URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // identifier should be deleted here. http://crbug.com/89321
   // A globally unique identifier for this request.
   const uint64 identifier_;
+
+  // True if this request is blocked waiting for the network delegate to resume
+  // it.
+  bool blocked_on_delegate_;
+
+  // An optional parameter that provides additional information about the load
+  // state. Only used with the LOAD_STATE_WAITING_FOR_DELEGATE state.
+  string16 load_state_param_;
 
   base::debug::LeakTracker<URLRequest> leak_tracker_;
 

@@ -14,7 +14,6 @@
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/gfx/size.h"
 #include "views/focus/focus_manager.h"
-#include "views/ime/input_method_delegate.h"
 #include "views/widget/native_widget_private.h"
 #include "views/widget/widget.h"
 
@@ -25,6 +24,7 @@ class Rect;
 namespace ui {
 class OSExchangeData;
 class OSExchangeDataProviderGtk;
+class GtkSignalRegistrar;
 }
 using ui::OSExchangeData;
 using ui::OSExchangeDataProviderGtk;
@@ -41,9 +41,8 @@ class NativeWidgetDelegate;
 }
 
 // Widget implementation for GTK.
-class NativeWidgetGtk : public internal::NativeWidgetPrivate,
-                        public ui::ActiveWindowWatcherX::Observer,
-                        public internal::InputMethodDelegate {
+class VIEWS_EXPORT NativeWidgetGtk : public internal::NativeWidgetPrivate,
+                                     public ui::ActiveWindowWatcherX::Observer {
  public:
   explicit NativeWidgetGtk(internal::NativeWidgetDelegate* delegate);
   virtual ~NativeWidgetGtk();
@@ -166,14 +165,11 @@ class NativeWidgetGtk : public internal::NativeWidgetPrivate,
   virtual void SetMouseCapture() OVERRIDE;
   virtual void ReleaseMouseCapture() OVERRIDE;
   virtual bool HasMouseCapture() const OVERRIDE;
-  virtual void SetKeyboardCapture() OVERRIDE;
-  virtual void ReleaseKeyboardCapture() OVERRIDE;
-  virtual bool HasKeyboardCapture() const OVERRIDE;
-  virtual InputMethod* GetInputMethodNative() OVERRIDE;
-  virtual void ReplaceInputMethod(InputMethod* input_method) OVERRIDE;
+  virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
-  virtual void GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
-                                                bool* maximized) const OVERRIDE;
+  virtual void GetWindowPlacement(
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE;
   virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
   virtual void SetWindowIcons(const SkBitmap& window_icon,
                               const SkBitmap& app_icon) OVERRIDE;
@@ -198,7 +194,7 @@ class NativeWidgetGtk : public internal::NativeWidgetPrivate,
   virtual void Hide() OVERRIDE;
   virtual void ShowMaximizedWithBounds(
       const gfx::Rect& restored_bounds) OVERRIDE;
-  virtual void ShowWithState(ShowState state) OVERRIDE;
+  virtual void ShowWithWindowState(ui::WindowShowState window_state) OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
@@ -221,6 +217,8 @@ class NativeWidgetGtk : public internal::NativeWidgetPrivate,
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
+  virtual bool ConvertPointFromAncestor(
+      const Widget* ancestor, gfx::Point* point) const OVERRIDE;
 
  protected:
   // Modifies event coordinates to the targeted widget contained by this widget.
@@ -292,6 +290,9 @@ class NativeWidgetGtk : public internal::NativeWidgetPrivate,
   // Invoked when gtk grab is stolen by other GtkWidget in the same
   // application.
   virtual void HandleGtkGrabBroke();
+
+  const internal::NativeWidgetDelegate* delegate() const { return delegate_; }
+  internal::NativeWidgetDelegate* delegate() { return delegate_; }
 
  private:
   class DropObserver;
@@ -432,8 +433,6 @@ class NativeWidgetGtk : public internal::NativeWidgetPrivate,
   // that window manager shows the window only after the window is painted.
   bool painted_;
 
-  scoped_ptr<InputMethod> input_method_;
-
   // The compositor for accelerated drawing.
   scoped_refptr<ui::Compositor> compositor_;
 
@@ -449,6 +448,8 @@ class NativeWidgetGtk : public internal::NativeWidgetPrivate,
 
   // If we were created for a menu.
   bool is_menu_;
+
+  scoped_ptr<ui::GtkSignalRegistrar> signal_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetGtk);
 };

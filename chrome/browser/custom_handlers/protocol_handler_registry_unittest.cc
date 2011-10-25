@@ -8,15 +8,13 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
-#include "chrome/test/testing_browser_process.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_pref_service.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/common/notification_observer.h"
@@ -142,18 +140,12 @@ ShellIntegration::DefaultProtocolClientWorker* FakeDelegate::CreateShellWorker(
 
 class NotificationCounter : public NotificationObserver {
  public:
-  NotificationCounter()
+  explicit NotificationCounter(Profile* profile)
       : events_(0),
         notification_registrar_() {
     notification_registrar_.Add(this,
         chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-        NotificationService::AllSources());
-  }
-
-  ~NotificationCounter() {
-    notification_registrar_.Remove(this,
-        chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-        NotificationService::AllSources());
+        Source<Profile>(profile));
   }
 
   int events() { return events_; }
@@ -171,13 +163,14 @@ class NotificationCounter : public NotificationObserver {
 
 class QueryProtocolHandlerOnChange : public NotificationObserver {
  public:
-  explicit QueryProtocolHandlerOnChange(ProtocolHandlerRegistry* registry)
+  QueryProtocolHandlerOnChange(Profile* profile,
+                               ProtocolHandlerRegistry* registry)
     : registry_(registry),
       called_(false),
       notification_registrar_() {
     notification_registrar_.Add(this,
         chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-        NotificationService::AllSources());
+        Source<Profile>(profile));
   }
 
   virtual void Observe(int type,
@@ -490,7 +483,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestIsHandledProtocol) {
 
 TEST_F(ProtocolHandlerRegistryTest, TestNotifications) {
   ProtocolHandler ph1 = CreateProtocolHandler("test", "test1");
-  NotificationCounter counter;
+  NotificationCounter counter(profile());
 
   registry()->OnAcceptRegisterProtocolHandler(ph1);
   ASSERT_TRUE(counter.notified());
@@ -510,7 +503,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestNotifications) {
 }
 
 TEST_F(ProtocolHandlerRegistryTest, TestReentrantNotifications) {
-  QueryProtocolHandlerOnChange queryer(registry());
+  QueryProtocolHandlerOnChange queryer(profile(), registry());
   ProtocolHandler ph1 = CreateProtocolHandler("test", "test1");
   registry()->OnAcceptRegisterProtocolHandler(ph1);
   ASSERT_TRUE(queryer.called_);
@@ -584,7 +577,8 @@ static void MakeRequest(const GURL& url, ProtocolHandlerRegistry* registry) {
   net::URLRequest request(url, NULL);
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           new MessageLoop::QuitTask());
-  ASSERT_TRUE(registry->MaybeCreateJob(&request) != NULL);
+  scoped_refptr<net::URLRequestJob> job(registry->MaybeCreateJob(&request));
+  ASSERT_TRUE(job.get() != NULL);
 }
 
 TEST_F(ProtocolHandlerRegistryTest, TestMaybeCreateTaskWorksFromIOThread) {

@@ -6,8 +6,14 @@
 
 namespace printing {
 
+// True if this is the first preview request.
+const char kIsFirstRequest[] = "isFirstRequest";
+
 // Unique ID sent along every preview request.
 const char kPreviewRequestID[] = "requestID";
+
+// Unique ID to identify a print preview UI.
+const char kPreviewUIAddr[] = "previewUIAddr";
 
 // Print using cloud print: true if selected, false if not.
 const char kSettingCloudPrintId[] = "cloudPrintID";
@@ -18,8 +24,18 @@ const char kSettingCollate[] = "collate";
 // Print out color: true for color, false for grayscale.
 const char kSettingColor[] = "color";
 
+// Key that specifies the height of the content area of the page.
+const char kSettingContentHeight[] = "contentHeight";
+
+// Key that specifies the width of the content area of the page.
+const char kSettingContentWidth[] = "contentWidth";
+
 // Number of copies.
 const char kSettingCopies[] = "copies";
+
+// Key that specifies if the default margins have been selected or not.
+// True if selected, false if not.
+const char kSettingDefaultMarginsSelected[] = "defaultMarginsSelected";
 
 // Device name: Unique printer identifier.
 const char kSettingDeviceName[] = "deviceName";
@@ -27,8 +43,61 @@ const char kSettingDeviceName[] = "deviceName";
 // Print job duplex mode.
 const char kSettingDuplexMode[] = "duplex";
 
+// True, when a new set of draft preview data is required.
+const char kSettingGenerateDraftData[] = "generateDraftData";
+
+// Option to print headers and Footers: true if selected, false if not.
+const char kSettingHeaderFooterEnabled[] = "headerFooterEnabled";
+
+// Default character spacing for text while printing headers and footers.
+// (For CoreGraphics only).
+const int kSettingHeaderFooterCharacterSpacing = 0;
+
+// Default font family name for printing the headers and footers.
+const char kSettingHeaderFooterFontFamilyName[] = "sans";
+
+// Default font name for printing the headers and footers.
+const char kSettingHeaderFooterFontName[] = "Helvetica";
+
+// Default font size for printing the headers and footers.
+const int kSettingHeaderFooterFontSize = 8;
+
+// Number of horizontal regions for headers and footers.
+const float kSettingHeaderFooterHorizontalRegions = 3;
+
+// Interstice or gap between different header footer components. Hardcoded to
+// about 0.5cm, match the value in PrintSettings::SetPrinterPrintableArea.
+const float kSettingHeaderFooterInterstice = 14.2f;
+
+// Key that specifies the date of the page that will be printed in the headers
+// and footers.
+const char kSettingHeaderFooterDate[] = "date";
+
+// Key that specifies the title of the page that will be printed in the headers
+// and footers.
+const char kSettingHeaderFooterTitle[] = "title";
+
+// Key that specifies the URL of the page that will be printed in the headers
+// and footers.
+const char kSettingHeaderFooterURL[] = "url";
+
 // Page orientation: true for landscape, false for portrait.
 const char kSettingLandscape[] = "landscape";
+
+// Key that specifies the bottom margin of the page.
+const char kSettingMarginBottom[] = "marginBottom";
+
+// Key that specifies the left margin of the page.
+const char kSettingMarginLeft[] = "marginLeft";
+
+// Key that specifies the right margin of the page.
+const char kSettingMarginRight[] = "marginRight";
+
+// Key that specifies the top margin of the page.
+const char kSettingMarginTop[] = "marginTop";
+
+// Key that specifies the array of custom margins as set by the user.
+const char kSettingMargins[] = "margins";
 
 // A page range.
 const char kSettingPageRange[] = "pageRange";
@@ -45,10 +114,8 @@ const char kSettingPrinterName[] = "printerName";
 // Print to PDF option: true if selected, false if not.
 const char kSettingPrintToPDF[] = "printToPDF";
 
-// Indices used to represent first page, invalid page and complete
-// preview document.
+// Indices used to represent first preview page and complete preview document.
 const int FIRST_PAGE_INDEX = 0;
 const int COMPLETE_PREVIEW_DOCUMENT_INDEX = -1;
-const int INVALID_PAGE_INDEX = -2;
 
 }  // namespace printing

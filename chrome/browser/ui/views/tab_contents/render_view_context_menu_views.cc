@@ -16,6 +16,13 @@
 #include "views/controls/menu/menu_model_adapter.h"
 #include "views/controls/menu/menu_runner.h"
 
+#if defined(TOUCH_UI)
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_touch.h"
+#include "views/widget/widget.h"
+#else
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // RenderViewContextMenuViews, public:
 
@@ -30,10 +37,22 @@ RenderViewContextMenuViews::~RenderViewContextMenuViews() {
 }
 
 void RenderViewContextMenuViews::RunMenuAt(int x, int y) {
-  menu_runner_->RunMenuAt(
-      source_tab_contents_->view()->GetTopLevelNativeWindow(),
-      NULL, gfx::Rect(gfx::Point(x, y), gfx::Size()),
-      views::MenuItemView::TOPLEFT, true);
+#if defined(TOUCH_UI)
+  // TODO(oshima): Eliminate this once TabContentsViewTouch is replaced
+  // with TabContentsViewViews.
+  TabContentsViewTouch* touch =
+      static_cast<TabContentsViewTouch*>(source_tab_contents_->view());
+  views::Widget* parent = touch->GetWidget()->GetTopLevelWidget();
+#else
+  TabContentsViewViews* tab =
+      static_cast<TabContentsViewViews*>(source_tab_contents_->view());
+  views::Widget* parent = tab->GetTopLevelWidget();
+#endif
+  if (menu_runner_->RunMenuAt(parent, NULL,
+          gfx::Rect(gfx::Point(x, y), gfx::Size()),
+          views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED)
+    return;
 }
 
 #if defined(OS_WIN)
@@ -90,4 +109,21 @@ bool RenderViewContextMenuViews::GetAcceleratorForCommandId(
     default:
       return false;
   }
+}
+
+void RenderViewContextMenuViews::UpdateMenuItem(int command_id,
+                                                bool enabled,
+                                                const string16& title) {
+  views::MenuItemView* item = menu_->GetMenuItemByID(command_id);
+  if (!item)
+    return;
+
+  item->SetEnabled(enabled);
+  item->SetTitle(UTF16ToWide(title));
+
+  views::MenuItemView* parent = item->GetParentMenuItem();
+  if (!parent)
+    return;
+
+  parent->ChildrenChanged();
 }

@@ -5,19 +5,23 @@
 #ifndef PPAPI_THUNK_PPB_GRAPHICS_3D_API_H_
 #define PPAPI_THUNK_PPB_GRAPHICS_3D_API_H_
 
-#include "ppapi/c/dev/ppb_graphics_3d_dev.h"
-#include "ppapi/c/dev/ppb_graphics_3d_trusted_dev.h"
+#include "ppapi/c/ppb_graphics_3d.h"
+#include "ppapi/c/trusted/ppb_graphics_3d_trusted.h"
+#include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
+#include "ppapi/thunk/ppapi_thunk_export.h"
 
 namespace ppapi {
 namespace thunk {
 
-class PPB_Graphics3D_API {
+class PPAPI_THUNK_EXPORT PPB_Graphics3D_API {
  public:
   virtual ~PPB_Graphics3D_API() {}
 
   // Graphics3D API.
   virtual int32_t GetAttribs(int32_t* attrib_list) = 0;
   virtual int32_t SetAttribs(int32_t* attrib_list) = 0;
+  virtual int32_t GetError() = 0;
+  virtual int32_t ResizeBuffers(int32_t width, int32_t height) = 0;
   virtual int32_t SwapBuffers(PP_CompletionCallback callback) = 0;
 
   // Graphics3DTrusted API.
@@ -35,8 +39,17 @@ class PPB_Graphics3D_API {
   virtual PP_Graphics3DTrustedState FlushSyncFast(int32_t put_offset,
                                                   int32_t last_known_get) = 0;
 
-  // TODO(alokp): Implement GLESChromiumTextureMapping here after
-  // deprecating Context3D.
+  // GLESChromiumTextureMapping.
+  virtual void* MapTexSubImage2DCHROMIUM(GLenum target,
+                                         GLint level,
+                                         GLint xoffset,
+                                         GLint yoffset,
+                                         GLsizei width,
+                                         GLsizei height,
+                                         GLenum format,
+                                         GLenum type,
+                                         GLenum access) = 0;
+  virtual void UnmapTexSubImage2DCHROMIUM(const void* mem) = 0;
 };
 
 }  // namespace thunk

@@ -35,7 +35,7 @@
 #include "views/window/window_resources.h"
 #include "views/window/window_shape.h"
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include "views/widget/native_widget_win.h"
 #endif
 
@@ -204,8 +204,8 @@ class ConstrainedWindowFrameView
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
 
   SkColor GetTitleColor() const {
-    return container_->owner()->profile()->IsOffTheRecord()
-#if defined(OS_WIN)
+    return container_->owner()->browser_context()->IsOffTheRecord()
+#if defined(OS_WIN) && !defined(USE_AURA)
             || !views::NativeWidgetWin::IsAeroGlassEnabled()
 #endif
             ? SK_ColorWHITE : SK_ColorBLACK;
@@ -545,17 +545,23 @@ gfx::Rect ConstrainedWindowFrameView::CalculateClientAreaBounds(
 }
 
 void ConstrainedWindowFrameView::InitWindowResources() {
+#if !defined(USE_AURA)
   resources_.reset(views::NativeWidgetWin::IsAeroGlassEnabled() ?
-    static_cast<views::WindowResources*>(new VistaWindowResources) :
-    new XPWindowResources);
+      static_cast<views::WindowResources*>(new VistaWindowResources) :
+      new XPWindowResources);
+#endif
 }
 
 // static
 void ConstrainedWindowFrameView::InitClass() {
   static bool initialized = false;
   if (!initialized) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     title_font_ = new gfx::Font(views::NativeWidgetWin::GetWindowTitleFont());
+#elif defined(USE_AURA)
+    // TODO(beng):
+    NOTIMPLEMENTED();
+    title_font_ = NULL;
 #endif
     initialized = true;
   }
@@ -576,6 +582,7 @@ ConstrainedWindowViews::ConstrainedWindowViews(
   params.parent = owner->GetNativeView();
   params.native_widget = native_constrained_window_->AsNativeWidget();
   Init(params);
+  owner->AddConstrainedDialog(this);
 }
 
 ConstrainedWindowViews::~ConstrainedWindowViews() {
@@ -595,12 +602,6 @@ void ConstrainedWindowViews::ShowConstrainedWindow() {
 }
 
 void ConstrainedWindowViews::CloseConstrainedWindow() {
-  // Broadcast to all observers of NOTIFY_CWINDOW_CLOSED.
-  // One example of such an observer is AutomationCWindowTracker in the
-  // automation component.
-  NotificationService::current()->Notify(chrome::NOTIFICATION_CWINDOW_CLOSED,
-                                         Source<ConstrainedWindow>(this),
-                                         NotificationService::NoDetails());
   Close();
 }
 
@@ -636,15 +637,4 @@ void ConstrainedWindowViews::OnNativeConstrainedWindowMouseActivate() {
 views::internal::NativeWidgetDelegate*
     ConstrainedWindowViews::AsNativeWidgetDelegate() {
   return this;
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindow, public:
-
-// static
-ConstrainedWindow* ConstrainedWindow::CreateConstrainedDialog(
-    TabContents* parent,
-    views::WidgetDelegate* widget_delegate) {
-  return new ConstrainedWindowViews(parent, widget_delegate);
 }

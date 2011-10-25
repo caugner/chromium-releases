@@ -21,6 +21,10 @@ using base::Time;
 
 namespace {
 
+// The number of apps per page. This isn't a hard limit, but new apps installed
+// from the webstore will overflow onto a new page if this limit is reached.
+const int kNaturalAppPageSize = 18;
+
 // Additional preferences keys
 
 // Where an extension was installed from. (see Extension::Location)
@@ -106,11 +110,15 @@ const char kBrowserActionVisible[] = "browser_action_visible";
 // Preferences that hold which permissions the user has granted the extension.
 // We explicitly keep track of these so that extensions can contain unknown
 // permissions, for backwards compatibility reasons, and we can still prompt
-// the user to accept them once recognized.
-const char kPrefGrantedAPIs[] = "granted_permissions.api";
-const char kPrefGrantedExplicitHosts[] = "granted_permissions.explicit_host";
-const char kPrefGrantedScriptableHosts[] =
-    "granted_permissions.scriptable_host";
+// the user to accept them once recognized. We store the active permission
+// permissions because they may differ from those defined in the manifest.
+const char kPrefActivePermissions[] = "active_permissions";
+const char kPrefGrantedPermissions[] = "granted_permissions";
+
+// The preference names for ExtensionPermissionSet values.
+const char kPrefAPIs[] = "api";
+const char kPrefExplicitHosts[] = "explicit_host";
+const char kPrefScriptableHosts[] = "scriptable_host";
 
 // The preference names for the old granted permissions scheme.
 const char kPrefOldGrantedFullAccess[] = "granted_permissions.full";
@@ -123,6 +131,10 @@ const char kPrefInstallTime[] = "install_time";
 // A preference that indicates whether the extension was installed from the
 // Chrome Web Store.
 const char kPrefFromWebStore[] = "from_webstore";
+
+// A preference that indicates whether the extension was installed from a
+// mock App created from a bookmark.
+const char kPrefFromBookmark[] = "from_bookmark";
 
 // A preference that contains any extension-controlled preferences.
 const char kPrefPreferences[] = "preferences";
@@ -205,6 +217,10 @@ class ScopedExtensionControlledPrefUpdate : public DictionaryPrefUpdate {
 
   DISALLOW_COPY_AND_ASSIGN(ScopedExtensionControlledPrefUpdate);
 };
+
+std::string JoinPrefs(std::string parent, const char* child) {
+  return parent + "." + child;
+}
 
 }  // namespace
 
@@ -423,6 +439,75 @@ void ExtensionPrefs::SetExtensionPrefURLPatternSet(
   UpdateExtensionPref(extension_id, pref_key, value);
 }
 
+ExtensionPermissionSet* ExtensionPrefs::ReadExtensionPrefPermissionSet(
+    const std::string& extension_id,
+    const std::string& pref_key) {
+  if (!GetExtensionPref(extension_id))
+    return NULL;
+
+  // Retrieve the API permissions.
+  ExtensionAPIPermissionSet apis;
+  const ListValue* api_values = NULL;
+  std::string api_pref = JoinPrefs(pref_key, kPrefAPIs);
+  if (ReadExtensionPrefList(extension_id, api_pref, &api_values)) {
+    ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+    for (size_t i = 0; i < api_values->GetSize(); ++i) {
+      std::string permission_name;
+      if (api_values->GetString(i, &permission_name)) {
+        ExtensionAPIPermission *permission = info->GetByName(permission_name);
+        if (permission)
+          apis.insert(permission->id());
+      }
+    }
+  }
+
+  // Retrieve the explicit host permissions.
+  URLPatternSet explicit_hosts;
+  ReadExtensionPrefURLPatternSet(
+      extension_id, JoinPrefs(pref_key, kPrefExplicitHosts),
+      &explicit_hosts, Extension::kValidHostPermissionSchemes);
+
+  // Retrieve the scriptable host permissions.
+  URLPatternSet scriptable_hosts;
+  ReadExtensionPrefURLPatternSet(
+      extension_id, JoinPrefs(pref_key, kPrefScriptableHosts),
+      &scriptable_hosts, UserScript::kValidUserScriptSchemes);
+
+  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+}
+
+void ExtensionPrefs::SetExtensionPrefPermissionSet(
+    const std::string& extension_id,
+    const std::string& pref_key,
+    const ExtensionPermissionSet* new_value) {
+  // Set the API permissions.
+  ListValue* api_values = new ListValue();
+  ExtensionAPIPermissionSet apis = new_value->apis();
+  ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+  std::string api_pref = JoinPrefs(pref_key, kPrefAPIs);
+  for (ExtensionAPIPermissionSet::const_iterator i = apis.begin();
+       i != apis.end(); ++i) {
+    ExtensionAPIPermission* perm = info->GetByID(*i);
+    if (perm)
+      api_values->Append(Value::CreateStringValue(perm->name()));
+  }
+  UpdateExtensionPref(extension_id, api_pref, api_values);
+
+  // Set the explicit host permissions.
+  if (!new_value->explicit_hosts().is_empty()) {
+    SetExtensionPrefURLPatternSet(extension_id,
+                                  JoinPrefs(pref_key, kPrefExplicitHosts),
+                                  new_value->explicit_hosts());
+  }
+
+  // Set the scriptable host permissions.
+  if (!new_value->scriptable_hosts().is_empty()) {
+    SetExtensionPrefURLPatternSet(extension_id,
+                                  JoinPrefs(pref_key, kPrefScriptableHosts),
+                                  new_value->scriptable_hosts());
+  }
+}
+
 void ExtensionPrefs::SavePrefs() {
   prefs_->ScheduleSavePersistentPrefs();
 }
@@ -638,7 +723,9 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
       ListValue* apis = NULL;
       ListValue* new_apis = NULL;
 
-      if (ext->GetList(kPrefGrantedAPIs, &apis))
+      std::string granted_apis =
+          JoinPrefs(kPrefGrantedPermissions, kPrefAPIs);
+      if (ext->GetList(kPrefOldGrantedAPIs, &apis))
         new_apis = apis->DeepCopy();
       else
         new_apis = new ListValue();
@@ -646,7 +733,7 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
       std::string plugin_name = info->GetByID(
           ExtensionAPIPermission::kPlugin)->name();
       new_apis->Append(Value::CreateStringValue(plugin_name));
-      UpdateExtensionPref(*ext_id, kPrefGrantedAPIs, new_apis);
+      UpdateExtensionPref(*ext_id, granted_apis, new_apis);
     }
 
     // The granted permissions originally only held the effective hosts,
@@ -656,9 +743,11 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
     // new effective hosts will be the same, so we move them to explicit
     // host permissions.
     ListValue* hosts;
+    std::string explicit_hosts =
+        JoinPrefs(kPrefGrantedPermissions, kPrefExplicitHosts);
     if (ext->GetList(kPrefOldGrantedHosts, &hosts)) {
       UpdateExtensionPref(
-          *ext_id, kPrefGrantedExplicitHosts, hosts->DeepCopy());
+          *ext_id, explicit_hosts, hosts->DeepCopy());
 
       // We can get rid of the old one by setting it to an empty list.
       UpdateExtensionPref(*ext_id, kPrefOldGrantedHosts, new ListValue());
@@ -669,39 +758,7 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
 ExtensionPermissionSet* ExtensionPrefs::GetGrantedPermissions(
     const std::string& extension_id) {
   CHECK(Extension::IdIsValid(extension_id));
-
-  const DictionaryValue* ext = GetExtensionPref(extension_id);
-  if (!ext)
-    return NULL;
-
-  // Retrieve the API permissions.
-  ExtensionAPIPermissionSet apis;
-  const ListValue* api_values = NULL;
-  if (ReadExtensionPrefList(extension_id, kPrefGrantedAPIs, &api_values)) {
-    ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
-    for (size_t i = 0; i < api_values->GetSize(); ++i) {
-      std::string permission_name;
-      if (api_values->GetString(i, &permission_name)) {
-        ExtensionAPIPermission *permission = info->GetByName(permission_name);
-        if (permission)
-          apis.insert(permission->id());
-      }
-    }
-  }
-
-  // Retrieve the explicit host permissions.
-  URLPatternSet explicit_hosts;
-  ReadExtensionPrefURLPatternSet(
-      extension_id, kPrefGrantedExplicitHosts,
-      &explicit_hosts, Extension::kValidHostPermissionSchemes);
-
-  // Retrieve the scriptable host permissions.
-  URLPatternSet scriptable_hosts;
-  ReadExtensionPrefURLPatternSet(
-      extension_id, kPrefGrantedScriptableHosts,
-      &scriptable_hosts, UserScript::kValidUserScriptSchemes);
-
-  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+  return ReadExtensionPrefPermissionSet(extension_id, kPrefGrantedPermissions);
 }
 
 void ExtensionPrefs::AddGrantedPermissions(
@@ -709,40 +766,30 @@ void ExtensionPrefs::AddGrantedPermissions(
     const ExtensionPermissionSet* permissions) {
   CHECK(Extension::IdIsValid(extension_id));
 
-  scoped_ptr<ExtensionPermissionSet> granted_permissions(
+  scoped_refptr<ExtensionPermissionSet> granted_permissions(
       GetGrantedPermissions(extension_id));
 
   // The new granted permissions are the union of the already granted
   // permissions and the newly granted permissions.
-  scoped_ptr<ExtensionPermissionSet> new_perms(
+  scoped_refptr<ExtensionPermissionSet> new_perms(
       ExtensionPermissionSet::CreateUnion(
           permissions, granted_permissions.get()));
 
-  // Set the API permissions.
-  ListValue* api_values = new ListValue();
-  ExtensionAPIPermissionSet apis = new_perms->apis();
-  ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
-  for (ExtensionAPIPermissionSet::const_iterator i = apis.begin();
-       i != apis.end(); ++i) {
-    ExtensionAPIPermission* perm = info->GetByID(*i);
-    if (perm)
-      api_values->Append(Value::CreateStringValue(perm->name()));
-  }
-  UpdateExtensionPref(extension_id, kPrefGrantedAPIs, api_values);
+  SetExtensionPrefPermissionSet(
+      extension_id, kPrefGrantedPermissions, new_perms.get());
+}
 
-  // Set the explicit host permissions.
-  if (!new_perms->explicit_hosts().is_empty()) {
-    SetExtensionPrefURLPatternSet(extension_id,
-                                  kPrefGrantedExplicitHosts,
-                                  new_perms->explicit_hosts());
-  }
+ExtensionPermissionSet* ExtensionPrefs::GetActivePermissions(
+    const std::string& extension_id) {
+  CHECK(Extension::IdIsValid(extension_id));
+  return ReadExtensionPrefPermissionSet(extension_id, kPrefActivePermissions);
+}
 
-  // Set the scriptable host permissions.
-  if (!new_perms->scriptable_hosts().is_empty()) {
-    SetExtensionPrefURLPatternSet(extension_id,
-                                  kPrefGrantedScriptableHosts,
-                                  new_perms->scriptable_hosts());
-  }
+void ExtensionPrefs::SetActivePermissions(
+    const std::string& extension_id,
+    const ExtensionPermissionSet* permissions) {
+  SetExtensionPrefPermissionSet(
+      extension_id, kPrefActivePermissions, permissions);
 }
 
 bool ExtensionPrefs::IsIncognitoEnabled(const std::string& extension_id) {
@@ -853,14 +900,29 @@ void ExtensionPrefs::SetLaunchType(const std::string& extension_id,
       Value::CreateIntegerValue(static_cast<int>(launch_type)));
 }
 
+bool ExtensionPrefs::DoesExtensionHaveState(
+    const std::string& id, Extension::State check_state) const {
+  const DictionaryValue* extension = GetExtensionPref(id);
+  int state = -1;
+  if (!extension || !extension->GetInteger(kPrefState, &state))
+    return false;
+
+  if (state < 0 || state >= Extension::NUM_STATES) {
+    LOG(ERROR) << "Bad pref 'state' for extension '" << id << "'";
+    return false;
+  }
+
+  return state == check_state;
+}
+
 bool ExtensionPrefs::IsExternalExtensionUninstalled(
     const std::string& id) const {
-  const DictionaryValue* extension = GetExtensionPref(id);
-  if (!extension)
-    return false;
-  int state = 0;
-  return extension->GetInteger(kPrefState, &state) &&
-         state == static_cast<int>(Extension::EXTERNAL_EXTENSION_UNINSTALLED);
+  return DoesExtensionHaveState(id, Extension::EXTERNAL_EXTENSION_UNINSTALLED);
+}
+
+bool ExtensionPrefs::IsExtensionDisabled(
+    const std::string& id) const {
+  return DoesExtensionHaveState(id, Extension::DISABLED);
 }
 
 std::vector<std::string> ExtensionPrefs::GetToolbarOrder() {
@@ -891,7 +953,8 @@ void ExtensionPrefs::SetToolbarOrder(
 void ExtensionPrefs::OnExtensionInstalled(
     const Extension* extension,
     Extension::State initial_state,
-    bool from_webstore) {
+    bool from_webstore,
+    int page_index) {
   const std::string& id = extension->id();
   CHECK(Extension::IdIsValid(id));
   ScopedExtensionPrefUpdate update(prefs_, id);
@@ -902,6 +965,8 @@ void ExtensionPrefs::OnExtensionInstalled(
                       Value::CreateIntegerValue(extension->location()));
   extension_dict->Set(kPrefFromWebStore,
                       Value::CreateBooleanValue(from_webstore));
+  extension_dict->Set(kPrefFromBookmark,
+                      Value::CreateBooleanValue(extension->from_bookmark()));
   extension_dict->Set(kPrefInstallTime,
                       Value::CreateStringValue(
                           base::Int64ToString(install_time.ToInternalValue())));
@@ -919,8 +984,15 @@ void ExtensionPrefs::OnExtensionInstalled(
     extension_dict->Set(kPrefManifest,
                         extension->manifest_value()->DeepCopy());
   }
-  extension_dict->Set(kPrefAppLaunchIndex,
-                      Value::CreateIntegerValue(GetNextAppLaunchIndex()));
+
+  if (extension->is_app()) {
+    if (page_index == -1)
+      page_index = GetNaturalAppPageIndex();
+    extension_dict->Set(kPrefPageIndex,
+                        Value::CreateIntegerValue(page_index));
+    extension_dict->Set(kPrefAppLaunchIndex,
+        Value::CreateIntegerValue(GetNextAppLaunchIndex(page_index)));
+  }
   extension_pref_value_map_->RegisterExtension(
       id, install_time, initial_state == Extension::ENABLED);
   content_settings_store_->RegisterExtension(
@@ -943,20 +1015,6 @@ void ExtensionPrefs::OnExtensionUninstalled(const std::string& extension_id,
   } else {
     DeleteExtensionPrefs(extension_id);
   }
-}
-
-Extension::State ExtensionPrefs::GetExtensionState(
-    const std::string& extension_id) const {
-  const DictionaryValue* extension = GetExtensionPref(extension_id);
-
-  int state = -1;
-  if (!extension || !extension->GetInteger(kPrefState, &state) ||
-      state < 0 || state >= Extension::NUM_STATES) {
-    LOG(ERROR) << "Bad or missing pref 'state' for extension '"
-               << extension_id << "'";
-    return Extension::ENABLED;
-  }
-  return static_cast<Extension::State>(state);
 }
 
 void ExtensionPrefs::SetExtensionState(const std::string& extension_id,
@@ -1042,18 +1100,21 @@ void ExtensionPrefs::UpdateExtensionPref(const std::string& extension_id,
     return;
   }
   ScopedExtensionPrefUpdate update(prefs_, extension_id);
-  update->Set(key, data_value);
+  if (data_value)
+    update->Set(key, data_value);
+  else
+    update->Remove(key, NULL);
 }
 
 void ExtensionPrefs::DeleteExtensionPrefs(const std::string& extension_id) {
+  extension_pref_value_map_->UnregisterExtension(extension_id);
+  content_settings_store_->UnregisterExtension(extension_id);
   DictionaryPrefUpdate update(prefs_, kExtensionsPref);
   DictionaryValue* dict = update.Get();
   if (dict->HasKey(extension_id)) {
     dict->Remove(extension_id, NULL);
     SavePrefs();
   }
-  extension_pref_value_map_->UnregisterExtension(extension_id);
-  content_settings_store_->UnregisterExtension(extension_id);
 }
 
 const DictionaryValue* ExtensionPrefs::GetExtensionPref(
@@ -1273,12 +1334,11 @@ int ExtensionPrefs::GetAppLaunchIndex(const std::string& extension_id) {
 
 void ExtensionPrefs::SetAppLaunchIndex(const std::string& extension_id,
                                        int index) {
-  DCHECK_GE(index, 0);
   UpdateExtensionPref(extension_id, kPrefAppLaunchIndex,
                       Value::CreateIntegerValue(index));
 }
 
-int ExtensionPrefs::GetNextAppLaunchIndex() {
+int ExtensionPrefs::GetNextAppLaunchIndex(int on_page) {
   const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
   if (!extensions)
     return 0;
@@ -1287,10 +1347,30 @@ int ExtensionPrefs::GetNextAppLaunchIndex() {
   for (DictionaryValue::key_iterator extension_id = extensions->begin_keys();
        extension_id != extensions->end_keys(); ++extension_id) {
     int value = GetAppLaunchIndex(*extension_id);
-    if (value > max_value)
+    int page = GetPageIndex(*extension_id);
+    if (page == on_page && value > max_value)
       max_value = value;
   }
   return max_value + 1;
+}
+
+int ExtensionPrefs::GetNaturalAppPageIndex() {
+  const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
+  if (!extensions)
+    return 0;
+
+  std::map<int, int> page_counts;
+  for (DictionaryValue::key_iterator extension_id = extensions->begin_keys();
+       extension_id != extensions->end_keys(); ++extension_id) {
+    int page_index = GetPageIndex(*extension_id);
+    if (page_index >= 0)
+      page_counts[page_index] = page_counts[page_index] + 1;
+  }
+  for (int i = 0; ; i++) {
+    std::map<int, int>::const_iterator it = page_counts.find(i);
+    if (it == page_counts.end() || it->second < kNaturalAppPageSize)
+      return i;
+  }
 }
 
 void ExtensionPrefs::SetAppLauncherOrder(
@@ -1311,7 +1391,6 @@ int ExtensionPrefs::GetPageIndex(const std::string& extension_id) {
 }
 
 void ExtensionPrefs::SetPageIndex(const std::string& extension_id, int index) {
-  CHECK_GE(index, 0);
   UpdateExtensionPref(extension_id, kPrefPageIndex,
                       Value::CreateIntegerValue(index));
 }
@@ -1366,6 +1445,15 @@ bool ExtensionPrefs::IsFromWebStore(
   const DictionaryValue* dictionary = GetExtensionPref(extension_id);
   bool result = false;
   if (dictionary && dictionary->GetBoolean(kPrefFromWebStore, &result))
+    return result;
+  return false;
+}
+
+bool ExtensionPrefs::IsFromBookmark(
+    const std::string& extension_id) const {
+  const DictionaryValue* dictionary = GetExtensionPref(extension_id);
+  bool result = false;
+  if (dictionary && dictionary->GetBoolean(kPrefFromBookmark, &result))
     return result;
   return false;
 }
@@ -1456,11 +1544,11 @@ void ExtensionPrefs::InitPrefStore() {
     extension_pref_value_map_->RegisterExtension(
         *ext_id,
         GetInstallTime(*ext_id),
-        GetExtensionState(*ext_id) == Extension::ENABLED);
+        !IsExtensionDisabled(*ext_id));
     content_settings_store_->RegisterExtension(
         *ext_id,
         GetInstallTime(*ext_id),
-        GetExtensionState(*ext_id) == Extension::ENABLED);
+        !IsExtensionDisabled(*ext_id));
 
     // Set regular extension controlled prefs.
     const DictionaryValue* prefs = GetExtensionControlledPrefs(*ext_id, false);

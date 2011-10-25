@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 
 namespace net {
 
@@ -23,6 +23,7 @@ class HttpAuthHandlerFactory;
 class HttpTransactionFactory;
 class NetLog;
 class NetworkDelegate;
+class OriginBoundCertService;
 class ProxyService;
 class SSLConfigService;
 class TransportSecurityState;
@@ -31,7 +32,7 @@ class URLRequestJobFactory;
 
 // URLRequestContextStorage is a helper class that provides storage for unowned
 // member variables of URLRequestContext.
-class NET_API URLRequestContextStorage {
+class NET_EXPORT URLRequestContextStorage {
  public:
   // Note that URLRequestContextStorage does not acquire a reference to
   // URLRequestContext, since it is often designed to be embedded in a
@@ -45,6 +46,8 @@ class NET_API URLRequestContextStorage {
   void set_net_log(NetLog* net_log);
   void set_host_resolver(HostResolver* host_resolver);
   void set_cert_verifier(CertVerifier* cert_verifier);
+  void set_origin_bound_cert_service(
+      OriginBoundCertService* origin_bound_cert_service);
   void set_dnsrr_resolver(DnsRRResolver* dnsrr_resolver);
   void set_dns_cert_checker(DnsCertProvenanceChecker* dns_cert_checker);
   void set_http_auth_handler_factory(
@@ -71,6 +74,7 @@ class NET_API URLRequestContextStorage {
   scoped_ptr<NetLog> net_log_;
   scoped_ptr<HostResolver> host_resolver_;
   scoped_ptr<CertVerifier> cert_verifier_;
+  scoped_ptr<OriginBoundCertService> origin_bound_cert_service_;
   scoped_ptr<DnsRRResolver> dnsrr_resolver_;
   scoped_ptr<DnsCertProvenanceChecker> dns_cert_checker_;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;

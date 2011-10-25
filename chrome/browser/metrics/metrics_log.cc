@@ -20,13 +20,15 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/display_utils.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/gpu/gpu_data_manager.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #define OPEN_ELEMENT_FOR_SCOPE(name) ScopedElement scoped_element(this, name)
 
@@ -270,12 +272,18 @@ void MetricsLog::WriteRealtimeStabilityAttributes(PrefService* pref) {
 }
 
 void MetricsLog::WritePluginList(
-    const std::vector<webkit::npapi::WebPluginInfo>& plugin_list) {
+    const std::vector<webkit::WebPluginInfo>& plugin_list) {
   DCHECK(!locked_);
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  std::vector<Profile*> profiles = profile_manager->GetLoadedProfiles();
+  PluginPrefs* plugin_prefs = NULL;
+  if (!profiles.empty())
+    plugin_prefs = PluginPrefs::GetForProfile(profiles.front());
 
   OPEN_ELEMENT_FOR_SCOPE("plugins");
 
-  for (std::vector<webkit::npapi::WebPluginInfo>::const_iterator iter =
+  for (std::vector<webkit::WebPluginInfo>::const_iterator iter =
            plugin_list.begin();
        iter != plugin_list.end(); ++iter) {
     OPEN_ELEMENT_FOR_SCOPE("plugin");
@@ -291,7 +299,8 @@ void MetricsLog::WritePluginList(
 #endif
     WriteAttribute("filename", CreateBase64Hash(filename_bytes));
     WriteAttribute("version", UTF16ToUTF8(iter->version));
-    WriteIntAttribute("disabled", !webkit::npapi::IsPluginEnabled(*iter));
+    if (plugin_prefs)
+      WriteIntAttribute("disabled", !plugin_prefs->IsPluginEnabled(*iter));
   }
 }
 
@@ -302,7 +311,7 @@ void MetricsLog::WriteInstallElement() {
 }
 
 void MetricsLog::RecordEnvironment(
-         const std::vector<webkit::npapi::WebPluginInfo>& plugin_list,
+         const std::vector<webkit::WebPluginInfo>& plugin_list,
          const DictionaryValue* profile_metrics) {
   DCHECK(!locked_);
 

@@ -6,6 +6,8 @@
 #define VIEWS_WIDGET_NATIVE_WIDGET_DELEGATE_H_
 #pragma once
 
+#include "views/views_export.h"
+
 namespace gfx {
 class Canvas;
 class Size;
@@ -18,6 +20,8 @@ enum TouchStatus;
 #endif
 
 namespace views {
+class InputMethod;
+
 namespace internal {
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -26,7 +30,7 @@ namespace internal {
 //  An interface implemented by the object that handles events sent by a
 //  NativeWidget implementation.
 //
-class NativeWidgetDelegate {
+class VIEWS_EXPORT NativeWidgetDelegate {
  public:
   virtual ~NativeWidgetDelegate() {}
 
@@ -96,6 +100,11 @@ class NativeWidgetDelegate {
 
   // Runs the specified native command. Returns true if the command is handled.
   virtual bool ExecuteCommand(int command_id) = 0;
+
+  // Returns the input method of the widget this delegate is associated with.
+  // Note that this does not use the top level widget, so may return NULL
+  // if the widget doesn't have input method.
+  virtual InputMethod* GetInputMethodDirect() = 0;
 
   //
   virtual Widget* AsWidget() = 0;

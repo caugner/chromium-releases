@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/extensions_ui.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
-#include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/geolocation/geolocation_prefs.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/instant/instant_controller.h"
@@ -28,7 +27,6 @@
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/net_pref_observer.h"
-#include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
@@ -36,14 +34,16 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/page_info_model.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/plugin_updater.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
+#include "chrome/browser/policy/url_blacklist_manager.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/remoting/firewall_traversal_tab_helper.h"
+#include "chrome/browser/remoting/firewall_traversal_observer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -52,7 +52,6 @@
 #include "chrome/browser/tabs/pinned_tab_codec.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
-#include "chrome/browser/ui/autologin_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -95,6 +94,7 @@ namespace browser {
 
 void RegisterLocalState(PrefService* local_state) {
   // Prefs in Local State
+  local_state->RegisterIntegerPref(prefs::kMultipleProfilePrefMigration, 0);
   AppsPromo::RegisterPrefs(local_state);
   Browser::RegisterPrefs(local_state);
   FlagsUI::RegisterPrefs(local_state);
@@ -117,7 +117,6 @@ void RegisterLocalState(PrefService* local_state) {
   UpgradeDetector::RegisterPrefs(local_state);
   TaskManager::RegisterPrefs(local_state);
   geolocation::RegisterPrefs(local_state);
-  AutofillManager::RegisterBrowserPrefs(local_state);
   BackgroundModeManager::RegisterPrefs(local_state);
   NotificationUIManager::RegisterPrefs(local_state);
   PrefProxyConfigService::RegisterPrefs(local_state);
@@ -143,7 +142,6 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   // User prefs
   AppsPromo::RegisterUserPrefs(user_prefs);
   AutofillManager::RegisterUserPrefs(user_prefs);
-  AutoLoginInfoBarDelegate::RegisterUserPrefs(user_prefs);
   SessionStartupPref::RegisterUserPrefs(user_prefs);
   BookmarkModel::RegisterUserPrefs(user_prefs);
   Browser::RegisterUserPrefs(user_prefs);
@@ -155,18 +153,17 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
   ExtensionWebUI::RegisterUserPrefs(user_prefs);
   ExtensionsUI::RegisterUserPrefs(user_prefs);
+  IncognitoModePrefs::RegisterUserPrefs(user_prefs);
   NewTabUI::RegisterUserPrefs(user_prefs);
+  PluginPrefs::RegisterPrefs(user_prefs);
   PluginsUI::RegisterUserPrefs(user_prefs);
-  PluginUpdater::RegisterPrefs(user_prefs);
   ProfileImpl::RegisterUserPrefs(user_prefs);
   PromoResourceService::RegisterUserPrefs(user_prefs);
   HostContentSettingsMap::RegisterUserPrefs(user_prefs);
   DevToolsWindow::RegisterUserPrefs(user_prefs);
   PinnedTabCodec::RegisterUserPrefs(user_prefs);
   ExtensionPrefs::RegisterUserPrefs(user_prefs);
-  GeolocationContentSettingsMap::RegisterUserPrefs(user_prefs);
   TranslatePrefs::RegisterUserPrefs(user_prefs);
-  DesktopNotificationService::RegisterUserPrefs(user_prefs);
   PrefProxyConfigService::RegisterPrefs(user_prefs);
 #if defined(TOOLKIT_VIEWS)
   BrowserActionsContainer::RegisterUserPrefs(user_prefs);
@@ -182,9 +179,12 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   InstantController::RegisterUserPrefs(user_prefs);
   NetPrefObserver::RegisterPrefs(user_prefs);
   ProtocolHandlerRegistry::RegisterPrefs(user_prefs);
-  FirewallTraversalTabHelper::RegisterUserPrefs(user_prefs);
+  FirewallTraversalObserver::RegisterUserPrefs(user_prefs);
 #if defined(OS_MACOSX)
   PresentationModePrefs::RegisterUserPrefs(user_prefs);
+#endif
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  policy::URLBlacklistManager::RegisterPrefs(user_prefs);
 #endif
 }
 
@@ -197,7 +197,6 @@ void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {
   if ((current_version & WINDOWS_PREFS) == 0) {
     // Migrate the devtools split location preference.
     local_state->RegisterIntegerPref(prefs::kDevToolsSplitLocation, -1);
-    DCHECK(user_prefs->FindPreference(prefs::kDevToolsSplitLocation));
     if (local_state->HasPrefPath(prefs::kDevToolsSplitLocation)) {
       user_prefs->SetInteger(prefs::kDevToolsSplitLocation,
           local_state->GetInteger(prefs::kDevToolsSplitLocation));
@@ -206,7 +205,6 @@ void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {
 
     // Migrate the browser window placement preference.
     local_state->RegisterDictionaryPref(prefs::kBrowserWindowPlacement);
-    DCHECK(user_prefs->FindPreference(prefs::kBrowserWindowPlacement));
     if (local_state->HasPrefPath(prefs::kBrowserWindowPlacement)) {
       const PrefService::Preference* pref =
           local_state->FindPreference(prefs::kBrowserWindowPlacement);

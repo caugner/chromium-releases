@@ -11,9 +11,9 @@
 #include "base/memory/singleton.h"
 #include "base/values.h"
 #include "chrome/test/webdriver/commands/response.h"
-#include "chrome/test/webdriver/session.h"
-#include "chrome/test/webdriver/session_manager.h"
 #include "chrome/test/webdriver/webdriver_error.h"
+#include "chrome/test/webdriver/webdriver_session.h"
+#include "chrome/test/webdriver/webdriver_session_manager.h"
 
 namespace webdriver {
 
@@ -41,21 +41,21 @@ bool WebDriverCommand::Init(Response* const response) {
     return false;
   }
 
-  LOG(INFO) << "Waiting for the page to stop loading";
-  Error* error = session_->WaitForAllTabsToStopLoading();
+  Error* error = session_->BeforeExecuteCommand();
   if (error) {
     response->SetError(error);
     return false;
   }
-  LOG(INFO) << "Done waiting for the page to stop loading";
-  error = session_->SwitchToTopFrameIfCurrentFrameInvalid();
-  if (error) {
-    response->SetError(error);
-    return false;
-  }
-
   response->SetField("sessionId", Value::CreateStringValue(session_id));
   return true;
+}
+
+void WebDriverCommand::Finish() {
+  scoped_ptr<Error> error(session_->AfterExecuteCommand());
+  if (error.get()) {
+    LOG(WARNING) << "Command did not finish successfully: "
+                 << error->GetErrorMessage();
+  }
 }
 
 }  // namespace webdriver

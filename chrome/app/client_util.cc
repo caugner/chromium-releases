@@ -11,10 +11,10 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/win/registry.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
+#include "base/win/registry.h"
 #include "chrome/app/breakpad_win.h"
 #include "chrome/app/client_util.h"
 #include "chrome/common/chrome_constants.h"
@@ -29,7 +29,7 @@
 
 namespace {
 // The entry point signature of chrome.dll.
-typedef int (*DLL_MAIN)(HINSTANCE, sandbox::SandboxInterfaceInfo*, wchar_t*);
+typedef int (*DLL_MAIN)(HINSTANCE, sandbox::SandboxInterfaceInfo*);
 
 typedef void (*RelaunchChromeBrowserWithNewCommandLineIfNeededFunc)();
 
@@ -126,6 +126,9 @@ HMODULE LoadChromeWithDirectory(std::wstring* dir) {
     DWORD pre_read_step_size = kStepSize;
     DWORD pre_read = 1;
 
+    // TODO(chrisha): This path should not be ChromeFrame specific, and it
+    //     should not be hard-coded with 'Google' in the path. Rather, it should
+    //     use the product name.
     base::win::RegKey key(HKEY_CURRENT_USER, L"Software\\Google\\ChromeFrame",
                           KEY_QUERY_VALUE);
     if (key.Valid()) {
@@ -134,6 +137,7 @@ HMODULE LoadChromeWithDirectory(std::wstring* dir) {
       key.ReadValueDW(L"PreRead", &pre_read);
       key.Close();
     }
+
     if (pre_read) {
       TRACE_EVENT_BEGIN_ETW("PreReadImage", 0, "");
       file_util::PreReadImage(dir->c_str(), pre_read_size, pre_read_step_size);
@@ -164,11 +168,6 @@ MainDllLoader::MainDllLoader() : dll_(NULL) {
 }
 
 MainDllLoader::~MainDllLoader() {
-#ifdef PURIFY
-  // We should never unload the dll. There is only risk and no gain from
-  // doing so. The singleton dtors have been already run by AtExitManager.
-  ::FreeLibrary(dll_);
-#endif
 }
 
 // Loading chrome is an interesting affair. First we try loading from the
@@ -256,7 +255,7 @@ int MainDllLoader::Launch(HINSTANCE instance,
   if (!entry_point)
     return chrome::RESULT_CODE_BAD_PROCESS_TYPE;
 
-  int rc = entry_point(instance, sbox_info, ::GetCommandLineW());
+  int rc = entry_point(instance, sbox_info);
   return OnBeforeExit(rc, file);
 }
 

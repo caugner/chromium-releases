@@ -12,9 +12,9 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/browser_with_test_window_test.h"
-#include "chrome/test/test_browser_window.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/test_browser_window.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -64,7 +64,7 @@ TEST_F(HtmlDialogTabContentsDelegateTest, DoNothingMethodsTest) {
   test_tab_contents_delegate_->ActivateContents(NULL);
   test_tab_contents_delegate_->LoadingStateChanged(NULL);
   test_tab_contents_delegate_->CloseContents(NULL);
-  test_tab_contents_delegate_->UpdateTargetURL(NULL, GURL());
+  test_tab_contents_delegate_->UpdateTargetURL(NULL, 0, GURL());
   test_tab_contents_delegate_->MoveContents(NULL, gfx::Rect());
   EXPECT_EQ(0, browser()->tab_count());
   EXPECT_EQ(1U, BrowserList::size());

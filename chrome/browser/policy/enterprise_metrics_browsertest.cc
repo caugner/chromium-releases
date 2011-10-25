@@ -76,7 +76,9 @@ class DeviceManagementBackendTestHelper {
     DevicePolicyResponseDelegateMock delegate;
     EXPECT_CALL(delegate, OnError(_)).Times(AnyNumber());
     EXPECT_CALL(delegate, HandlePolicyResponse(_)).Times(AnyNumber());
-    backend_->ProcessPolicyRequest("token", "testid", request, &delegate);
+    backend_->ProcessPolicyRequest("token", "testid",
+                                   CloudPolicyDataStore::USER_AFFILIATION_NONE,
+                                   request, &delegate);
   }
 
   void UnmockCreateBackend() {
@@ -89,7 +91,7 @@ class DeviceManagementBackendTestHelper {
                       const std::string& data) {
     net::ResponseCookies cookies;
     net::URLRequestStatus url_request_status(status, 0);
-    EXPECT_CALL(service_, StartJob(_))
+    EXPECT_CALL(service_, StartJob(_,_))
         .WillOnce(MockDeviceManagementServiceRespondToJob(
             url_request_status, response_code, cookies, data));
   }
@@ -257,6 +259,8 @@ TEST_F(EnterpriseMetricsTest, TokenFetchErrors) {
     { 401, kMetricTokenFetchServerFailed },
     { 403, kMetricTokenFetchManagementNotSupported },
     { 404, kMetricTokenFetchServerFailed },
+    { 405, kMetricTokenFetchInvalidSerialNumber },
+    { 409, kMetricTokenFetchDeviceIdConflict },
     { 410, kMetricTokenFetchDeviceNotFound },
     { 412, kMetricTokenFetchServerFailed },
     { 500, kMetricTokenFetchServerFailed },
@@ -412,6 +416,8 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchErrors) {
     { 401, kMetricPolicyFetchInvalidToken },
     { 403, kMetricPolicyFetchServerFailed },
     { 404, kMetricPolicyFetchServerFailed },
+    { 405, kMetricPolicyFetchServerFailed },
+    { 409, kMetricPolicyFetchServerFailed },
     { 410, kMetricPolicyFetchServerFailed },
     { 412, kMetricPolicyFetchServerFailed },
     { 500, kMetricPolicyFetchServerFailed },
@@ -453,7 +459,8 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchInvalidPolicy) {
 
   em::CachedCloudPolicyResponse response;
   response.mutable_cloud_policy()->set_policy_data("\xff");
-  cache_as_delegate->OnDiskCacheLoaded(response);
+  cache_as_delegate->OnDiskCacheLoaded(UserPolicyDiskCache::LOAD_RESULT_SUCCESS,
+                                       response);
   ExpectSample(kMetricPolicyFetchInvalidPolicy);
   EXPECT_TRUE(CheckSamples());
 }
@@ -474,7 +481,8 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchTimestampInFuture) {
   policy_data.SerializeToString(&data);
   em::CachedCloudPolicyResponse response;
   response.mutable_cloud_policy()->set_policy_data(data);
-  cache_as_delegate->OnDiskCacheLoaded(response);
+  cache_as_delegate->OnDiskCacheLoaded(UserPolicyDiskCache::LOAD_RESULT_SUCCESS,
+                                       response);
   ExpectSample(kMetricPolicyFetchTimestampInFuture);
   EXPECT_TRUE(CheckSamples());
 }
@@ -492,7 +500,8 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchNotModified) {
   policy_data.SerializeToString(&data);
   em::CachedCloudPolicyResponse response;
   response.mutable_cloud_policy()->set_policy_data(data);
-  cache_as_delegate->OnDiskCacheLoaded(response);
+  cache_as_delegate->OnDiskCacheLoaded(UserPolicyDiskCache::LOAD_RESULT_SUCCESS,
+                                       response);
   ExpectSample(kMetricPolicyFetchNotModified);
   EXPECT_TRUE(CheckSamples());
 }

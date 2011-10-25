@@ -8,9 +8,9 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/threading/thread.h"
-#include "base/timer.h"
+#include "base/time.h"
 
 namespace remoting {
 
@@ -22,12 +22,13 @@ class Curtain;
 class DisconnectWindow;
 class EventExecutor;
 class LocalInputMonitor;
+class UIThreadProxy;
 
 class DesktopEnvironment {
  public:
   static DesktopEnvironment* Create(ChromotingHostContext* context);
 
-  // DesktopEnvironment takes ownership of all the objects passed the ctor.
+  // DesktopEnvironment takes ownership of all the objects passed in.
   DesktopEnvironment(ChromotingHostContext* context,
                      Capturer* capturer,
                      EventExecutor* event_executor,
@@ -36,6 +37,10 @@ class DesktopEnvironment {
                      ContinueWindow* continue_window,
                      LocalInputMonitor* monitor);
   virtual ~DesktopEnvironment();
+
+  // Shuts down the object and all its resources synchronously. Must
+  // be called on the UI thread.
+  void Shutdown();
 
   void set_host(ChromotingHost* host) { host_ = host; }
 
@@ -53,6 +58,16 @@ class DesktopEnvironment {
   void OnPause(bool pause);
 
  private:
+  enum ContinueTimerState {
+    INACTIVE,      // The timer is not running or has been cancelled.
+    SHOW_DIALOG,   // Show the continue dialog when the timer expires.
+    SHUTDOWN_HOST  // Shutdown the Chromoting host when the timer expires.
+  };
+
+  void ProcessOnConnect(const std::string& username);
+  void ProcessOnLastDisconnect();
+  void ProcessOnPause(bool pause);
+
   void MonitorLocalInputs(bool enable);
 
   // Show or hide the Disconnect window on the UI thread.  If |show| is false,
@@ -95,16 +110,15 @@ class DesktopEnvironment {
 
   bool is_monitoring_local_inputs_;
 
-  // Timer controlling the "continue session" dialog. The timer is started when
-  // a connection is made or re-confirmed. On expiry, inputs to the host are
-  // blocked and the dialog is shown.
-  base::OneShotTimer<DesktopEnvironment> continue_window_timer_;
+  // Timer controlling the "continue session" dialog.
+  ContinueTimerState continue_timer_state_;
+  base::Time continue_timer_target_time_;
+
+  scoped_refptr<UIThreadProxy> proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopEnvironment);
 };
 
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::DesktopEnvironment);
 
 #endif  // REMOTING_HOST_DESKTOP_ENVIRONMENT_H_

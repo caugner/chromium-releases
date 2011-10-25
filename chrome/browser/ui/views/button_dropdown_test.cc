@@ -6,7 +6,7 @@
 #include "base/utf_string_conversions.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "chrome/browser/automation/ui_controls.h"
-#include "chrome/test/interactive_ui/view_event_test_base.h"
+#include "chrome/test/base/view_event_test_base.h"
 #include "views/controls/button/button_dropdown.h"
 
 class ButtonDropDownDragTest : public ViewEventTestBase,
@@ -81,8 +81,10 @@ class ButtonDropDownDragTest : public ViewEventTestBase,
     // Drag to invoke the menu.
     gfx::Point view_center;
     views::View::ConvertPointToScreen(button_, &view_center);
+    // The 50 is a bit arbitrary. We just need a value greater than the drag
+    // threshold.
     ui_controls::SendMouseMoveNotifyWhenDone(
-        view_center.x(), view_center.y() + button_->height(),
+        view_center.x(), view_center.y() + 50,
         CreateEventTask(this, &ButtonDropDownDragTest::Step2));
   }
 

@@ -146,6 +146,14 @@ typedef void* GLeglImageOES;
 #define GL_INT_10_10_10_2_OES                                   0x8DF7
 #endif
 
+/* GL_OES_EGL_image_external */
+#ifndef GL_OES_EGL_image_external
+#define GL_TEXTURE_EXTERNAL_OES                                 0x8D65
+#define GL_SAMPLER_EXTERNAL_OES                                 0x8D66
+#define GL_TEXTURE_BINDING_EXTERNAL_OES                         0x8D67
+#define GL_REQUIRED_TEXTURE_IMAGE_UNITS_OES                     0x8D68
+#endif
+
 /*------------------------------------------------------------------------*
  * AMD extension tokens
  *------------------------------------------------------------------------*/
@@ -541,6 +549,11 @@ typedef GLboolean (GL_APIENTRYP PFNGLISVERTEXARRAYOESPROC) (GLuint array);
 /* GL_OES_vertex_type_10_10_10_2 */
 #ifndef GL_OES_vertex_type_10_10_10_2
 #define GL_OES_vertex_type_10_10_10_2 1
+#endif
+
+/* GL_OES_EGL_image_external */
+#ifndef GL_OES_EGL_image_external
+#define GL_OES_EGL_image_external 1
 #endif
 
 /*------------------------------------------------------------------------*
@@ -1019,6 +1032,31 @@ typedef void (GL_APIENTRYP PFNGLGETPROGRAMINFOCHROMIUM) ();
 #ifndef GL_CHROMIUM_flipy
 #define GL_CHROMIUM_flipy 1
 #define GL_UNPACK_FLIP_Y_CHROMIUM 0x9240
+#endif
+
+/* GL_CHROMIUM_texture_compression_dxt3 */
+#ifndef GL_CHROMIUM_texture_compression_dxt3
+#define GL_CHROMIUM_texture_compression_dxt3 1
+#define GL_COMPRESSED_RGBA_S3TC_DXT3_EXT  0x83F2
+#endif
+
+/* GL_CHROMIUM_texture_compression_dxt5 */
+#ifndef GL_CHROMIUM_texture_compression_dxt5
+#define GL_CHROMIUM_texture_compression_dxt5 1
+#define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT  0x83F3
+#endif
+
+/* GL_CHROMIUM_enable_feature */
+#ifndef GL_CHROMIUM_enable_feature
+#define GL_CHROMIUM_enable_feature 1
+#ifdef GL_GLEXT_PROTOTYPES
+#define glEnableFeatureCHROMIUM GLES2_GET_FUN(EnableFeatureCHROMIUM)
+#if !defined(GLES2_USE_CPP_BINDINGS)
+GL_APICALL void GL_APIENTRY glEnableFeatureCHROMIUM (const GLchar *feature);
+#endif
+#else
+typedef void (GL_APIENTRYP PFNGLENABLEFEATURECHROMIUM) (const GLchar *feature);
+#endif
 #endif
 
 /* GL_ARB_robustness */

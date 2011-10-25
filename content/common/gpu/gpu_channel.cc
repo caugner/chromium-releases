@@ -61,28 +61,6 @@ void GpuChannel::DestroyTransportTexture(int32 route_id) {
   router_.RemoveRoute(route_id);
 }
 
-void GpuChannel::OnLatchCallback(int route_id, bool is_set_latch) {
-#if defined(ENABLE_GPU)
-  if (is_set_latch) {
-    // Wake up any waiting contexts. If they are still blocked, they will re-add
-    // themselves to the set.
-    for (std::set<int32>::iterator i = latched_routes_.begin();
-         i != latched_routes_.end(); ++i) {
-      GpuCommandBufferStub* stub = stubs_.Lookup(*i);
-      if (stub)
-        stub->scheduler()->SetScheduled(true);
-    }
-    latched_routes_.clear();
-  } else {
-    // Add route_id context to a set to be woken upon any set latch.
-    latched_routes_.insert(route_id);
-    GpuCommandBufferStub* stub = stubs_.Lookup(route_id);
-    if (stub)
-      stub->scheduler()->SetScheduled(false);
-  }
-#endif
-}
-
 bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
   if (log_messages_) {
     VLOG(1) << "received message @" << &message << " on channel @" << this
@@ -194,14 +172,6 @@ void GpuChannel::OnDestroy() {
   gpu_channel_manager_->RemoveChannel(renderer_id_);
 }
 
-gfx::GLSurface* GpuChannel::LookupSurface(int surface_id) {
-  GpuSurfaceStub *surface_stub = surfaces_.Lookup(surface_id);
-  if (!surface_stub)
-    return NULL;
-
-  return surface_stub->surface();
-}
-
 void GpuChannel::CreateViewCommandBuffer(
     gfx::PluginWindowHandle window,
     int32 render_view_id,
@@ -211,12 +181,22 @@ void GpuChannel::CreateViewCommandBuffer(
   content::GetContentClient()->SetActiveURL(init_params.active_url);
 
 #if defined(ENABLE_GPU)
+  GpuCommandBufferStub* share_group = stubs_.Lookup(init_params.share_group_id);
+
   *route_id = GenerateRouteID();
   scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
-      this, window, gfx::Size(), disallowed_extensions_,
+      this,
+      share_group,
+      window,
+      gfx::Size(),
+      disallowed_extensions_,
       init_params.allowed_extensions,
-      init_params.attribs, *route_id, renderer_id_, render_view_id,
-      watchdog_, software_));
+      init_params.attribs,
+      *route_id,
+      renderer_id_,
+      render_view_id,
+      watchdog_,
+      software_));
   router_.AddRoute(*route_id, stub.get());
   stubs_.AddWithID(stub.release(), *route_id);
 #endif  // ENABLE_GPU
@@ -267,11 +247,9 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
                                     OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_DestroyCommandBuffer,
                                     OnDestroyCommandBuffer)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_CreateOffscreenSurface,
-                                    OnCreateOffscreenSurface)
-    IPC_MESSAGE_HANDLER(GpuChannelMsg_DestroySurface, OnDestroySurface)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_CreateTransportTexture,
         OnCreateTransportTexture)
+    IPC_MESSAGE_HANDLER(GpuChannelMsg_Echo, OnEcho);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   DCHECK(handled) << msg.type();
@@ -298,6 +276,14 @@ int GpuChannel::GenerateRouteID() {
   return ++last_id;
 }
 
+void GpuChannel::AddRoute(int32 route_id, IPC::Channel::Listener* listener) {
+  router_.AddRoute(route_id, listener);
+}
+
+void GpuChannel::RemoveRoute(int32 route_id) {
+  router_.RemoveRoute(route_id);
+}
+
 void GpuChannel::OnInitialize(base::ProcessHandle renderer_process) {
   // Initialize should only happen once.
   DCHECK(!renderer_process_);
@@ -315,10 +301,13 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(
 
   content::GetContentClient()->SetActiveURL(init_params.active_url);
 #if defined(ENABLE_GPU)
+  GpuCommandBufferStub* share_group = stubs_.Lookup(init_params.share_group_id);
+
   route_id = GenerateRouteID();
 
   scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
       this,
+      share_group,
       gfx::kNullPluginWindow,
       size,
       disallowed_extensions_,
@@ -360,40 +349,6 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id,
     Send(reply_message);
 }
 
-void GpuChannel::OnCreateOffscreenSurface(const gfx::Size& size,
-                                          IPC::Message* reply_message) {
-  int route_id = MSG_ROUTING_NONE;
-
-#if defined(ENABLE_GPU)
-  scoped_refptr<gfx::GLSurface> surface(
-       gfx::GLSurface::CreateOffscreenGLSurface(software_, size));
-  if (!surface.get())
-    return;
-
-  route_id = GenerateRouteID();
-
-  scoped_ptr<GpuSurfaceStub> stub (new GpuSurfaceStub(this,
-                                                      route_id,
-                                                      surface.release()));
-
-  router_.AddRoute(route_id, stub.get());
-  surfaces_.AddWithID(stub.release(), route_id);
-#endif
-
-  GpuChannelMsg_CreateOffscreenSurface::WriteReplyParams(reply_message,
-                                                         route_id);
-  Send(reply_message);
-}
-
-void GpuChannel::OnDestroySurface(int route_id) {
-#if defined(ENABLE_GPU)
-  if (router_.ResolveRoute(route_id)) {
-    router_.RemoveRoute(route_id);
-    surfaces_.Remove(route_id);
-  }
-#endif
-}
-
 void GpuChannel::OnCreateTransportTexture(int32 context_route_id,
                                           int32 host_id) {
  #if defined(ENABLE_GPU)
@@ -410,6 +365,11 @@ void GpuChannel::OnCreateTransportTexture(int32 context_route_id,
        host_id, route_id);
    Send(msg);
  #endif
+}
+
+void GpuChannel::OnEcho(const IPC::Message& message) {
+  TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnEcho");
+  Send(new IPC::Message(message));
 }
 
 bool GpuChannel::Init(base::MessageLoopProxy* io_message_loop,

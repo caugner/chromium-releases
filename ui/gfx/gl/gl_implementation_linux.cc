@@ -7,9 +7,11 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
+#include "base/synchronization/lock.h"
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_implementation.h"
 
@@ -43,9 +45,18 @@ base::NativeLibrary LoadLibrary(const char* filename) {
   return LoadLibrary(FilePath(filename));
 }
 
+// TODO(backer): Find a more principled (less heavy handed) way to prevent a
+// race in the bindings initialization.
+#if (defined(TOOLKIT_VIEWS) && !defined(OS_CHROMEOS)) || defined(TOUCH_UI)
+base::LazyInstance<base::Lock> g_lock(base::LINKER_INITIALIZED);
+#endif
+
 }  // namespace anonymous
 
 bool InitializeGLBindings(GLImplementation implementation) {
+#if (defined(TOOLKIT_VIEWS) && !defined(OS_CHROMEOS)) || defined(TOUCH_UI)
+  base::AutoLock locked(g_lock.Get());
+#endif
   // Prevent reinitialization with a different implementation. Once the gpu
   // unit tests have initialized with kGLImplementationMock, we don't want to
   // later switch to another GL implementation.
@@ -53,6 +64,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
     return true;
 
   switch (implementation) {
+#if !defined(USE_WAYLAND)
     case kGLImplementationOSMesaGL: {
       FilePath module_path;
       if (!PathService::Get(base::DIR_MODULE, &module_path)) {
@@ -106,6 +118,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
       InitializeGLBindingsGLX();
       break;
     }
+#endif  // !defined(USE_WAYLAND)
     case kGLImplementationEGLGLES2: {
       base::NativeLibrary gles_library = LoadLibrary("libGLESv2.so");
       if (!gles_library)
@@ -158,8 +171,10 @@ bool InitializeGLBindings(GLImplementation implementation) {
 void InitializeDebugGLBindings() {
   InitializeDebugGLBindingsEGL();
   InitializeDebugGLBindingsGL();
+#if !defined(USE_WAYLAND)
   InitializeDebugGLBindingsGLX();
   InitializeDebugGLBindingsOSMESA();
+#endif
 }
 
 }  // namespace gfx

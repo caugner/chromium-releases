@@ -38,6 +38,7 @@ class WorkerTask : public HistoryDBTask {
 
 HistoryModelWorker::HistoryModelWorker(HistoryService* history_service)
   : history_service_(history_service) {
+  CHECK(history_service);
 }
 
 HistoryModelWorker::~HistoryModelWorker() {
@@ -52,11 +53,6 @@ void HistoryModelWorker::DoWorkAndWaitUntilDone(Callback0::Type* work) {
 
 ModelSafeGroup HistoryModelWorker::GetModelSafeGroup() {
   return GROUP_HISTORY;
-}
-
-bool HistoryModelWorker::CurrentThreadIsWorkThread() {
-  // TODO(ncarter): How to determine this?
-  return true;
 }
 
 }  // namespace browser_sync

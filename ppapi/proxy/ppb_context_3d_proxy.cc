@@ -13,7 +13,6 @@
 #include "ppapi/c/dev/ppb_context_3d_trusted_dev.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_surface_3d_proxy.h"
 #include "ppapi/thunk/enter.h"
@@ -26,7 +25,7 @@ using ppapi::thunk::PPB_Context3D_API;
 using ppapi::thunk::PPB_Surface3D_API;
 using ppapi::thunk::ResourceCreationAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -339,7 +338,7 @@ void PepperCommandBuffer::UpdateState(const gpu::CommandBuffer::State& state) {
 // Context3D -------------------------------------------------------------------
 
 Context3D::Context3D(const HostResource& resource)
-    : PluginResource(resource),
+    : Resource(resource),
       draw_(NULL),
       read_(NULL),
       transfer_buffer_id_(0) {
@@ -355,7 +354,7 @@ PPB_Context3D_API* Context3D::AsPPB_Context3D_API() {
 }
 
 bool Context3D::CreateImplementation() {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance());
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForResource(this);
   if (!dispatcher)
     return false;
 
@@ -383,7 +382,8 @@ bool Context3D::CreateImplementation() {
       transfer_buffer.size,
       transfer_buffer.ptr,
       transfer_buffer_id_,
-      false));
+      false,
+      true));
 
   return true;
 }
@@ -397,7 +397,7 @@ int32_t Context3D::BindSurfaces(PP_Resource pp_draw, PP_Resource pp_read) {
   // TODO(alokp): Support separate draw-read surfaces.
   DCHECK_EQ(pp_draw, pp_read);
   if (pp_draw != pp_read)
-    return PP_GRAPHICS3DERROR_BAD_MATCH;
+    return PP_ERROR_BADARGUMENT;
 
   EnterResourceNoLock<PPB_Surface3D_API> enter_draw(pp_draw, false);
   EnterResourceNoLock<PPB_Surface3D_API> enter_read(pp_read, false);
@@ -416,9 +416,10 @@ int32_t Context3D::BindSurfaces(PP_Resource pp_draw, PP_Resource pp_read) {
       read_surface ? read_surface->host_resource() : HostResource();
 
   int32_t result;
-  GetDispatcher()->Send(new PpapiHostMsg_PPBContext3D_BindSurfaces(
-      INTERFACE_ID_PPB_CONTEXT_3D,
-      host_resource(), host_draw, host_read, &result));
+  PluginDispatcher::GetForResource(this)->Send(
+      new PpapiHostMsg_PPBContext3D_BindSurfaces(
+          INTERFACE_ID_PPB_CONTEXT_3D,
+          host_resource(), host_draw, host_read, &result));
   if (result != PP_OK)
     return result;
 
@@ -430,7 +431,9 @@ int32_t Context3D::BindSurfaces(PP_Resource pp_draw, PP_Resource pp_read) {
       // Resize the backing texture to the size of the instance when it is
       // bound.
       // TODO(alokp): This should be the responsibility of plugins.
-      InstanceData* data = GetDispatcher()->GetInstanceData(instance());
+      InstanceData* data =
+          PluginDispatcher::GetForResource(this)->GetInstanceData(
+              pp_instance());
       gles2_impl()->ResizeCHROMIUM(data->position.size.width,
                                    data->position.size.height);
     }
@@ -441,8 +444,8 @@ int32_t Context3D::BindSurfaces(PP_Resource pp_draw, PP_Resource pp_read) {
 }
 
 int32_t Context3D::GetBoundSurfaces(PP_Resource* draw, PP_Resource* read) {
-  *draw = draw_ ? draw_->resource() : 0;
-  *read = read_ ? read_->resource() : 0;
+  *draw = draw_ ? draw_->pp_resource() : 0;
+  *read = read_ ? read_->pp_resource() : 0;
   return PP_OK;
 }
 
@@ -529,7 +532,7 @@ PPB_Context3D_Proxy::~PPB_Context3D_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_Context3D_Proxy::GetInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_Context3D_Thunk(),
+    thunk::GetPPB_Context3D_Thunk(),
     PPB_CONTEXT_3D_DEV_INTERFACE,
     INTERFACE_ID_PPB_CONTEXT_3D,
     false,
@@ -541,7 +544,7 @@ const InterfaceProxy::Info* PPB_Context3D_Proxy::GetInfo() {
 // static
 const InterfaceProxy::Info* PPB_Context3D_Proxy::GetTextureMappingInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_GLESChromiumTextureMapping_Thunk(),
+    thunk::GetPPB_GLESChromiumTextureMapping_Thunk(),
     PPB_GLES_CHROMIUM_TEXTURE_MAPPING_DEV_INTERFACE,
     INTERFACE_ID_NONE,  // CONTEXT_3D is the canonical one.
     false,
@@ -578,10 +581,10 @@ PP_Resource PPB_Context3D_Proxy::Create(PP_Instance instance,
 
   if (result.is_null())
     return 0;
-  linked_ptr<Context3D> context_3d(new Context3D(result));
+  scoped_refptr<Context3D> context_3d(new Context3D(result));
   if (!context_3d->CreateImplementation())
     return 0;
-  return PluginResourceTracker::GetInstance()->AddResource(context_3d);
+  return context_3d->GetReference();
 }
 
 bool PPB_Context3D_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -725,4 +728,4 @@ void PPB_Context3D_Proxy::OnMsgGetTransferBuffer(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

@@ -11,6 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/web_ui.h"
@@ -92,7 +93,7 @@ void WizardWebPageViewTabContents::DidFinishLoad(
 
 void WebPageDomView::SetTabContentsDelegate(
     TabContentsDelegate* delegate) {
-  tab_contents_->set_delegate(delegate);
+  dom_contents_->tab_contents()->set_delegate(delegate);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -122,7 +123,8 @@ void WebPageView::Init() {
   connecting_label_->SetVisible(false);
   AddChildView(connecting_label_ );
 
-  start_timer_.Start(TimeDelta::FromMilliseconds(kStartDelayMs),
+  start_timer_.Start(FROM_HERE,
+                     TimeDelta::FromMilliseconds(kStartDelayMs),
                      this,
                      &WebPageView::ShowWaitingControls);
 }
@@ -149,7 +151,8 @@ void WebPageView::ShowPageContent() {
   // TODO(nkostylev): Show throbber as an overlay until page has been rendered.
   start_timer_.Stop();
   if (!stop_timer_.IsRunning()) {
-    stop_timer_.Start(TimeDelta::FromMilliseconds(kStopDelayMs),
+    stop_timer_.Start(FROM_HERE,
+                      TimeDelta::FromMilliseconds(kStopDelayMs),
                       this,
                       &WebPageView::ShowRenderedPage);
   }

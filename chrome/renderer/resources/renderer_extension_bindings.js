@@ -17,6 +17,7 @@ var chrome = chrome || {};
   native function PostMessage(portId, msg);
   native function GetChromeHidden();
   native function GetL10nMessage();
+  native function Print();
 
   var chromeHidden = GetChromeHidden();
 
@@ -44,6 +45,13 @@ var chrome = chrome || {};
   };
 
   chromeHidden.Port = {};
+
+  // Returns true if the specified port id is in this context. This is used by
+  // the C++ to avoid creating the javascript message for all the contexts that
+  // don't care about a particular message.
+  chromeHidden.Port.hasPort = function(portId) {
+    return portId in ports;
+  };
 
   // Hidden port creation function.  We don't want to expose an API that lets
   // people add arbitrary port IDs to the port list.
@@ -172,9 +180,8 @@ var chrome = chrome || {};
 
   // This function is called on context initialization for both content scripts
   // and extension contexts.
-  chrome.initExtension = function(extensionId, warnOnPrivilegedApiAccess,
-                                  inIncognitoContext) {
-    delete chrome.initExtension;
+  chromeHidden.onLoad.addListener(function(extensionId, isExtensionProcess,
+                                           inIncognitoContext) {
     chromeHidden.extensionId = extensionId;
 
     chrome.extension = chrome.extension || {};
@@ -258,12 +265,11 @@ var chrome = chrome || {};
       return GetL10nMessage(message_name, placeholders, extensionId);
     };
 
-    if (warnOnPrivilegedApiAccess) {
+    if (!isExtensionProcess)
       setupApiStubs();
-    }
-  };
+  });
 
-  var notSupportedSuffix = " is not supported in content scripts. " +
+  var notSupportedSuffix = " can only be used in extension processes. " +
       "See the content scripts documentation for more details.";
 
   // Setup to throw an error message when trying to access |name| on the chrome
@@ -303,15 +309,20 @@ var chrome = chrome || {};
       "experimental.accessibility",
       "experimental.app",
       "experimental.bookmarkManager",
+      "experimental.clear",
       "experimental.contentSettings",
       "experimental.debugger",
+      "experimental.downloads",
       "experimental.extension",
       "experimental.infobars",
       "experimental.input",
       "experimental.inputUI",
       "experimental.metrics",
+      "experimental.permissions",
+      "experimental.settings",
       "experimental.popup",
       "experimental.processes",
+      "experimental.privacy",
       "experimental.rlz",
       "experimental.sidebar",
       "experimental.webNavigation",

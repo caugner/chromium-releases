@@ -5,7 +5,9 @@
 #ifndef MEDIA_FILTERS_CHUNK_DEMUXER_FACTORY_H_
 #define MEDIA_FILTERS_CHUNK_DEMUXER_FACTORY_H_
 
-#include "base/scoped_ptr.h"
+#include <string>
+
+#include "base/memory/scoped_ptr.h"
 #include "media/base/filter_factories.h"
 
 namespace media {
@@ -18,7 +20,7 @@ class ChunkDemuxerClient;
 // All other URLs are delegated to |delegate_factory_|. The url passed to
 // the constructor represents the "special" URL that indicates that the
 // ChunkDemuxer should be used for playback.
-class ChunkDemuxerFactory : public DemuxerFactory {
+class MEDIA_EXPORT ChunkDemuxerFactory : public DemuxerFactory {
  public:
   // Takes ownership of |delegate_factory|.
   ChunkDemuxerFactory(const std::string& url, DemuxerFactory* delegate_factory,

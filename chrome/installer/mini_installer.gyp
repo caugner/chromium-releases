@@ -110,6 +110,7 @@
               },
               'VCLinkerTool': {
                 'SubSystem': '2',     # Set /SUBSYSTEM:WINDOWS
+                'Profile': 'false',   # Conflicts with /FIXED
                 'AdditionalOptions': [
                   '/SAFESEH:NO',
                   '/NXCOMPAT',
@@ -192,7 +193,7 @@
                 '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.dll',
                 '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
                 '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
-                '<(PRODUCT_DIR)/locales/en-US.dll',
+                '<(PRODUCT_DIR)/locales/en-US.pak',
                 '<(PRODUCT_DIR)/icudt.dll',
               ],
               'outputs': [

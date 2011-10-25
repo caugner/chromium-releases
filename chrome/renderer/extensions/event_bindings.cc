@@ -12,11 +12,14 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_base.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
+#include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/renderer/render_thread.h"
 #include "content/renderer/render_view.h"
 #include "content/renderer/v8_value_converter.h"
@@ -29,14 +32,13 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "v8/include/v8.h"
 
 using bindings_utils::CallFunctionInContext;
 using bindings_utils::ContextInfo;
 using bindings_utils::ContextList;
 using bindings_utils::GetContexts;
 using bindings_utils::GetInfoForCurrentContext;
-using bindings_utils::GetStringResource;
-using bindings_utils::ExtensionBase;
 using bindings_utils::GetPendingRequestMap;
 using bindings_utils::PendingRequestMap;
 using WebKit::WebDataSource;
@@ -109,7 +111,7 @@ class ExtensionImpl : public ExtensionBase {
       std::string event_name(*v8::String::AsciiValue(args[0]));
 
       ExtensionImpl* v8_extension = GetFromArguments<ExtensionImpl>(args);
-      if (!v8_extension->CheckPermissionForCurrentContext(event_name))
+      if (!v8_extension->CheckPermissionForCurrentRenderView(event_name))
         return v8::Undefined();
 
       if (++listener_counts[event_name] == 1) {
@@ -188,21 +190,15 @@ class ExtensionImpl : public ExtensionBase {
 
 // Returns true if the extension running in the given |context| has sufficient
 // permissions to access the data.
-static bool HasSufficientPermissions(ContextInfo* context,
+static bool HasSufficientPermissions(RenderView* render_view,
                                      const GURL& event_url) {
-  v8::Context::Scope context_scope(context->context);
-
   // During unit tests, we might be invoked without a v8 context. In these
   // cases, we only allow empty event_urls and short-circuit before retrieving
   // the render view from the current context.
   if (!event_url.is_valid())
     return true;
 
-  RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
-  if (!renderview)
-    return false;
-
-  WebDocument document = renderview->webview()->mainFrame()->document();
+  WebDocument document = render_view->webview()->mainFrame()->document();
   return GURL(document.url()).SchemeIs(chrome::kExtensionScheme) &&
        document.securityOrigin().canRequest(event_url);
 }
@@ -287,69 +283,63 @@ static void ContextWeakReferenceCallback(v8::Persistent<v8::Value> context,
 
 void EventBindings::HandleContextCreated(
     WebFrame* frame,
-    bool content_script,
-    ExtensionDispatcher* extension_dispatcher) {
+    v8::Handle<v8::Context> context,
+    ExtensionDispatcher* extension_dispatcher,
+    int isolated_world_id) {
   if (!bindings_registered)
     return;
 
-  v8::HandleScope handle_scope;
+  bool content_script = isolated_world_id != 0;
   ContextList& contexts = GetContexts();
-  v8::Local<v8::Context> frame_context = frame->mainWorldScriptContext();
-  v8::Local<v8::Context> context = v8::Context::GetCurrent();
-  DCHECK(!context.IsEmpty());
-  DCHECK(bindings_utils::FindContext(context) == contexts.end());
 
-  // Figure out the frame's URL.  If the frame is loading, use its provisional
-  // URL, since we get this notification before commit.
-  WebDataSource* ds = frame->provisionalDataSource();
-  if (!ds)
-    ds = frame->dataSource();
-  GURL url = ds->request().url();
-  const ExtensionSet* extensions = extension_dispatcher->extensions();
-  std::string extension_id = extensions->GetIdByURL(url);
-
-  if (!extensions->ExtensionBindingsAllowed(url) &&
-      !content_script) {
-    // This context is a regular non-extension web page or an unprivileged
-    // chrome app. Ignore it. We only care about content scripts and extension
-    // frames.
-    // (Unless we're in unit tests, in which case we don't care what the URL
-    // is).
-    DCHECK(frame_context.IsEmpty() || frame_context == context);
-    if (!in_unit_tests)
-      return;
-
-    // For tests, we want the dispatchOnLoad to actually setup our bindings,
-    // so we give a fake extension id;
-    extension_id = kTestingExtensionId;
-  }
-
-  v8::Persistent<v8::Context> persistent_context =
-      v8::Persistent<v8::Context>::New(context);
-  WebFrame* parent_frame = NULL;
+  v8::Persistent<v8::Context> persistent_context;
+  std::string extension_id;
 
   if (content_script) {
-    DCHECK(frame_context != context);
-    parent_frame = frame;
     // Content script contexts can get GCed before their frame goes away, so
     // set up a GC callback.
+    persistent_context = v8::Persistent<v8::Context>::New(context);
     persistent_context.MakeWeak(NULL, &ContextWeakReferenceCallback);
-  }
+    extension_id =
+        extension_dispatcher->user_script_slave()->
+            GetExtensionIdForIsolatedWorld(isolated_world_id);
+  } else {
+    // Figure out the frame's URL.  If the frame is loading, use its provisional
+    // URL, since we get this notification before commit.
+    WebDataSource* ds = frame->provisionalDataSource();
+    if (!ds)
+      ds = frame->dataSource();
+    GURL url = ds->request().url();
+    const ExtensionSet* extensions = extension_dispatcher->extensions();
+    extension_id = extensions->GetIdByURL(url);
 
-  RenderView* render_view = NULL;
-  if (frame->view())
-    render_view = RenderView::FromWebView(frame->view());
+    if (!extensions->ExtensionBindingsAllowed(url)) {
+      // This context is a regular non-extension web page or an unprivileged
+      // chrome app. Ignore it. We only care about content scripts and extension
+      // frames.
+      // (Unless we're in unit tests, in which case we don't care what the URL
+      // is).
+      if (!in_unit_tests)
+        return;
+
+      // For tests, we want the dispatchOnLoad to actually setup our bindings,
+      // so we give a fake extension id;
+      extension_id = kTestingExtensionId;
+    }
+
+    persistent_context = v8::Persistent<v8::Context>::New(context);
+  }
 
   contexts.push_back(linked_ptr<ContextInfo>(
-      new ContextInfo(persistent_context, extension_id, parent_frame,
-                      render_view)));
+      new ContextInfo(persistent_context, extension_id, frame)));
 
-  // Content scripts get initialized in user_script_slave.cc.
-  if (!content_script) {
-    v8::Handle<v8::Value> argv[1];
-    argv[0] = v8::String::New(extension_id.c_str());
-    CallFunctionInContext(context, "dispatchOnLoad", arraysize(argv), argv);
-  }
+  v8::HandleScope handle_scope;
+  v8::Handle<v8::Value> argv[3];
+  argv[0] = v8::String::New(extension_id.c_str());
+  argv[1] = v8::Boolean::New(extension_dispatcher->is_extension_process());
+  argv[2] = v8::Boolean::New(
+      ChromeRenderProcessObserver::is_incognito_process());
+  CallFunctionInContext(context, "dispatchOnLoad", arraysize(argv), argv);
 }
 
 // static
@@ -369,7 +359,7 @@ void EventBindings::HandleContextDestroyed(WebFrame* frame) {
   // itself might not be registered, but can still be a parent frame.
   for (ContextList::iterator it = GetContexts().begin();
        it != GetContexts().end(); ) {
-    if ((*it)->parent_frame == frame) {
+    if ((*it)->unsafe_frame == frame) {
       UnregisterContext(it, false);
       // UnregisterContext will remove |it| from the list, but may also
       // modify the rest of the list as a result of calling into javascript.
@@ -396,16 +386,20 @@ void EventBindings::CallFunction(const std::string& extension_id,
   V8ValueConverter converter;
   for (ContextList::iterator it = contexts.begin();
        it != contexts.end(); ++it) {
-    if (render_view && render_view != (*it)->render_view)
+    if ((*it)->context.IsEmpty())
       continue;
 
     if (!extension_id.empty() && extension_id != (*it)->extension_id)
       continue;
 
-    if ((*it)->context.IsEmpty())
+    RenderView* context_render_view = (*it)->GetRenderView();
+    if (!context_render_view)
       continue;
 
-    if (!HasSufficientPermissions(it->get(), event_url))
+    if (render_view && render_view != context_render_view)
+      continue;
+
+    if (!HasSufficientPermissions(context_render_view, event_url))
       continue;
 
     v8::Local<v8::Context> context(*((*it)->context));

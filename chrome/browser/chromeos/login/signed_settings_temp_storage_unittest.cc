@@ -18,7 +18,7 @@
 
 namespace chromeos {
 
-class SignedSettingsTempStorageTest : public ::testing::Test {
+class SignedSettingsTempStorageTest : public testing::Test {
  protected:
   virtual void SetUp() {
     ref_map_["some_stuff"] = "a=35;code=64";

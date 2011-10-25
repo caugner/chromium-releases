@@ -11,7 +11,7 @@
 //
 namespace content {
 
-enum {
+enum NotificationType {
   NOTIFICATION_CONTENT_START = 0,
 
   // General -----------------------------------------------------------------
@@ -30,7 +30,7 @@ enum {
 
   // This is sent when the user does a gesture resulting in a noteworthy
   // action taking place. This is typically used for logging. The source is
-  // the profile, and the details is a string identifying the action.
+  // the browser context, and the details is a string identifying the action.
   NOTIFICATION_USER_ACTION,
 
   // NavigationController ----------------------------------------------------
@@ -43,8 +43,8 @@ enum {
   //
   // This notification is called after the pending entry is created, but
   // before we actually try to navigate. The source will be the
-  // NavigationController that owns the pending entry, and there are no
-  // details.
+  // NavigationController that owns the pending entry, and the details
+  // will be a NavigationEntry.
   NOTIFICATION_NAV_ENTRY_PENDING,
 
   // A new non-pending navigation entry has been created. This will
@@ -121,9 +121,10 @@ enum {
   NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
 
   // A new tab is created from an existing tab to serve as a target of a
-  // navigation that is about to happen. The source will be a Source<Profile>
-  // corresponding to the profile in which the new tab will live.  Details in
-  // the form of a RetargetingDetails object are provided.
+  // navigation that is about to happen. The source will be a
+  // Source<BrowserContext> corresponding to the browser context in which the
+  // new tab will live. Details in the form of a RetargetingDetails object are
+  // provided.
   NOTIFICATION_RETARGETING,
 
   // A new window was requested but was not created. The source will be a
@@ -162,8 +163,8 @@ enum {
   // or a secure origin might have included some insecure content.  Listen to
   // this notifiation if you need to keep track of our internal SSL state.
   //
-  // The source will be the navigation controller associated with the state
-  // change.  There are no details.
+  // The source will be the browser context. The details will be the navigation
+  // controller associated with the state change.
   NOTIFICATION_SSL_INTERNAL_STATE_CHANGED,
 
   // The user accepted or dismissed a SSL client authentication request.
@@ -172,16 +173,6 @@ enum {
   // SSLCertRequestInfo the request was for and which X509Certificate was
   // selected (if any).
   NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
-
-  // Notification that a view was removed from a view hierarchy.  The source
-  // is the view, the details is the parent view.
-  NOTIFICATION_VIEW_REMOVED,
-
-  // This message is sent when the last window considered to be an
-  // "application window" has been closed. Dependent/dialog/utility windows
-  // can use this as a way to know that they should also close. No source or
-  // details are passed.
-  NOTIFICATION_ALL_APPWINDOWS_CLOSED,
 
 #if defined(OS_MACOSX)
   // This message is sent when the application is made active (Mac OS X only
@@ -214,8 +205,8 @@ enum {
   //  The source and details are unspecified.
   NOTIFICATION_APP_EXITING,
 
-  // Indicates that a devtools window is closing. The source is the Profile*
-  // and the details is the inspected RenderViewHost*.
+  // Indicates that a devtools window is closing. The source is the
+  // content::BrowserContext* and the details is the inspected RenderViewHost*.
   NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
 
   // Tabs --------------------------------------------------------------------
@@ -323,10 +314,6 @@ enum {
   // the RenderWidgetHost, the details are not used.
   NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
 
-  // Sent when the widget is about to paint. The source is the
-  // RenderWidgetHost, the details are not used.
-  NOTIFICATION_RENDER_WIDGET_HOST_WILL_PAINT,
-
   // Sent after the widget has painted. The source is the RenderWidgetHost,
   // the details are not used.
   NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
@@ -424,10 +411,6 @@ enum {
   // register for AllSources() to receive this notification.  The details are
   // in a Details<ChildProcessInfo>.
   NOTIFICATION_CHILD_INSTANCE_CREATED,
-
-  // Sent by the PluginUpdater when there is a change of plugin
-  // enable/disable status.
-  NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
 
   // Download Notifications --------------------------------------------------
 

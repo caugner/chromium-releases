@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_VIEWS_REPOST_FORM_WARNING_VIEW_H_
 #pragma once
 
-#include "content/browser/tab_contents/constrained_window.h"
 #include "ui/gfx/native_widget_types.h"
 #include "views/window/dialog_delegate.h"
 
@@ -24,7 +23,7 @@ class MessageBoxView;
 // To display the dialog, allocate this object on the heap. It will open the
 // dialog from its constructor and then delete itself when the user dismisses
 // the dialog.
-class RepostFormWarningView : public ConstrainedDialogDelegate {
+class RepostFormWarningView : public views::DialogDelegate {
  public:
   // Use BrowserWindow::ShowRepostFormWarningDialog to use.
   RepostFormWarningView(gfx::NativeWindow parent_window,
@@ -47,10 +46,10 @@ class RepostFormWarningView : public ConstrainedDialogDelegate {
  private:
   virtual ~RepostFormWarningView();
 
+  scoped_ptr<RepostFormWarningController> controller_;
+
   // The message box view whose commands we handle.
   views::MessageBoxView* message_box_view_;
-
-  scoped_ptr<RepostFormWarningController> controller_;
 
   DISALLOW_COPY_AND_ASSIGN(RepostFormWarningView);
 };

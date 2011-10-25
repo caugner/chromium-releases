@@ -8,6 +8,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -19,8 +20,9 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/signaling_task.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/signaling_task.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_observer_mock.h"
 #include "content/common/notification_registrar.h"
@@ -244,9 +246,11 @@ class LoginDatabaseQueryTask : public Task {
 void InitExpectedForms(bool autofillable, size_t count, VectorOfForms* forms) {
   const char* domain = autofillable ? "example" : "blacklisted";
   for (size_t i = 0; i < count; ++i) {
-    std::string realm = StringPrintf("http://%zu.%s.com", i, domain);
-    std::string origin = StringPrintf("http://%zu.%s.com/origin", i, domain);
-    std::string action = StringPrintf("http://%zu.%s.com/action", i, domain);
+    std::string realm = base::StringPrintf("http://%zu.%s.com", i, domain);
+    std::string origin = base::StringPrintf("http://%zu.%s.com/origin",
+                                            i, domain);
+    std::string action = base::StringPrintf("http://%zu.%s.com/action",
+                                            i, domain);
     PasswordFormData data = {
       PasswordForm::SCHEME_HTML,
       realm.c_str(),

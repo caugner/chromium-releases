@@ -8,14 +8,34 @@
 
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"  // IDC_*
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#import "chrome/browser/ui/cocoa/browser_window_utils.h"
+#import "chrome/browser/ui/cocoa/event_utils.h"
+#import "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
+#import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_browser_window_cocoa.h"
 #import "chrome/browser/ui/panels/panel_titlebar_view_cocoa.h"
+#include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
 
 const int kMinimumWindowSize = 1;
-static BOOL gIsMockTabContentsViewEnabled = NO;
+
+// Replicate specific 10.6 SDK declarations for building with prior SDKs.
+#if !defined(MAC_OS_X_VERSION_10_6) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
+
+enum {
+  NSWindowCollectionBehaviorParticipatesInCycle = 1 << 5
+};
+
+#endif  // MAC_OS_X_VERSION_10_6
 
 @implementation PanelWindowControllerCocoa
 
@@ -25,6 +45,22 @@ static BOOL gIsMockTabContentsViewEnabled = NO;
   if ((self = [super initWithWindowNibPath:nibpath owner:self]))
     windowShim_.reset(window);
   return self;
+}
+
+- (ui::ThemeProvider*)themeProvider {
+  return ThemeServiceFactory::GetForProfile(windowShim_->browser()->profile());
+}
+
+- (ThemedWindowStyle)themedWindowStyle {
+  ThemedWindowStyle style = THEMED_POPUP;
+  if (windowShim_->browser()->profile()->IsOffTheRecord())
+    style |= THEMED_INCOGNITO;
+  return style;
+}
+
+- (NSPoint)themePatternPhase {
+  NSView* windowView = [[[self window] contentView] superview];
+  return [BrowserWindowUtils themePatternPhaseFor:windowView withTabStrip:nil];
 }
 
 - (void)awakeFromNib {
@@ -40,6 +76,11 @@ static BOOL gIsMockTabContentsViewEnabled = NO;
   // drop-out, which is at NSStatusWindowLevel-2 (23) for OSX 10.6/7.
   // See http://crbug.com/59878.
   [window setLevel:NSModalPanelWindowLevel];
+
+  if (base::mac::IsOSSnowLeopardOrLater()) {
+    [window setCollectionBehavior:
+        NSWindowCollectionBehaviorParticipatesInCycle];
+  }
 
   [titlebar_view_ attach];
 
@@ -86,37 +127,139 @@ static BOOL gIsMockTabContentsViewEnabled = NO;
   [self enableTabContentsViewAutosizing];
 }
 
-- (void)closePanel {
-  windowShim_->panel()->Close();
+- (void)updateTitleBar {
+  NSString* newTitle = base::SysUTF16ToNSString(
+      windowShim_->browser()->GetWindowTitleForCurrentTab());
+  pendingWindowTitle_.reset(
+      [BrowserWindowUtils scheduleReplaceOldTitle:pendingWindowTitle_.get()
+                                     withNewTitle:newTitle
+                                        forWindow:[self window]]);
+  [titlebar_view_ setTitle:newTitle];
 }
 
-- (void)windowWillClose:(NSNotification*)notification {
-  [self autorelease];
+- (void)addFindBar:(FindBarCocoaController*)findBarCocoaController {
+  NSView* contentView = [[self window] contentView];
+  [contentView addSubview:[findBarCocoaController view]];
+
+  CGFloat maxY = NSMaxY([contentView frame]);
+  CGFloat maxWidth = NSWidth([contentView frame]);
+  [findBarCocoaController positionFindBarViewAtMaxY:maxY maxWidth:maxWidth];
 }
 
 - (NSView*)tabContentsView {
   TabContents* contents = windowShim_->browser()->GetSelectedTabContents();
-  if (contents) {
-    NSView* tabContentView = contents->GetNativeView();
-    DCHECK(tabContentView);
-    return tabContentView;
-  } else {
-    // This is the UNIT_TEST situation. In unit_tests, there is no navigation
-    // and no TabContents created. Lets make sure we are in a unit_test by
-    // checking the flag set only by the unit_tests, and then return an NSView
-    // which will mock the tab_content_view.
-    CHECK(gIsMockTabContentsViewEnabled);
-    if (!mockTabContentsView_)
-      mockTabContentsView_ = [[NSView alloc] initWithFrame:NSZeroRect];
-    return mockTabContentsView_;
-  }
+  CHECK(contents);
+  NSView* tabContentView = contents->GetNativeView();
+  CHECK(tabContentView);
+  return tabContentView;
 }
 
 - (PanelTitlebarViewCocoa*)titlebarView {
   return titlebar_view_;
 }
 
-+ (void)enableMockTabContentsView {
-  gIsMockTabContentsViewEnabled = YES;
+// Called to validate menu and toolbar items when this window is key. All the
+// items we care about have been set with the |-commandDispatch:| or
+// |-commandDispatchUsingKeyModifiers:| actions and a target of FirstResponder
+// in IB. If it's not one of those, let it continue up the responder chain to be
+// handled elsewhere.
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
+  SEL action = [item action];
+  BOOL enable = NO;
+  if (action == @selector(commandDispatch:) ||
+      action == @selector(commandDispatchUsingKeyModifiers:)) {
+    NSInteger tag = [item tag];
+    CommandUpdater* command_updater = windowShim_->browser()->command_updater();
+    if (command_updater->SupportsCommand(tag)) {
+      enable = command_updater->IsCommandEnabled(tag);
+      // Disable commands that do not apply to Panels.
+      switch (tag) {
+        case IDC_CLOSE_TAB:
+        case IDC_FULLSCREEN:
+        case IDC_PRESENTATION_MODE:
+        case IDC_SYNC_BOOKMARKS:
+          enable = NO;
+          break;
+        default:
+          // Special handling for the contents of the Text Encoding submenu. On
+          // Mac OS, instead of enabling/disabling the top-level menu item, we
+          // enable/disable the submenu's contents (per Apple's HIG).
+          EncodingMenuController encoding_controller;
+          if (encoding_controller.DoesCommandBelongToEncodingMenu(tag)) {
+            enable &= command_updater->IsCommandEnabled(IDC_ENCODING_MENU) ?
+                YES : NO;
+          }
+      }
+    }
+  }
+  return enable;
 }
+
+// Called when the user picks a menu or toolbar item when this window is key.
+// Calls through to the browser object to execute the command. This assumes that
+// the command is supported and doesn't check, otherwise it would have been
+// disabled in the UI in validateUserInterfaceItem:.
+- (void)commandDispatch:(id)sender {
+  DCHECK(sender);
+  windowShim_->browser()->ExecuteCommand([sender tag]);
+}
+
+// Same as |-commandDispatch:|, but executes commands using a disposition
+// determined by the key flags.
+- (void)commandDispatchUsingKeyModifiers:(id)sender {
+  DCHECK(sender);
+  NSEvent* event = [NSApp currentEvent];
+  WindowOpenDisposition disposition =
+      event_utils::WindowOpenDispositionFromNSEventWithFlags(
+          event, [event modifierFlags]);
+  windowShim_->browser()->ExecuteCommandWithDisposition(
+      [sender tag], disposition);
+}
+
+- (void)executeCommand:(int)command {
+  windowShim_->browser()->ExecuteCommandIfEnabled(command);
+}
+
+// Handler for the custom Close button.
+- (void)closePanel {
+  windowShim_->panel()->Close();
+}
+
+// Called when the user wants to close the panel or from the shutdown process.
+// The Browser object is in control of whether or not we're allowed to close. It
+// may defer closing due to several states, such as onbeforeUnload handlers
+// needing to be fired. If closing is deferred, the Browser will handle the
+// processing required to get us to the closing state and (by watching for
+// all the tabs going away) will again call to close the window when it's
+// finally ready.
+// This callback is only called if the standard Close button is enabled in XIB.
+- (BOOL)windowShouldClose:(id)sender {
+  Browser* browser = windowShim_->browser();
+  // Give beforeunload handlers the chance to cancel the close before we hide
+  // the window below.
+  if (!browser->ShouldCloseWindow())
+    return NO;
+
+  if (!browser->tabstrip_model()->empty()) {
+    // Tab strip isn't empty. Make browser to close all the tabs, allowing the
+    // renderer to shut down and call us back again.
+    // The tab strip of Panel is not visible and contains only one tab but
+    // it still has to be closed.
+    browser->OnWindowClosing();
+    return NO;
+  }
+
+  // the tab strip is empty, it's ok to close the window
+  return YES;
+}
+
+// When windowShouldClose returns YES (or if controller receives direct 'close'
+// signal), window will be unconditionally closed. Clean up.
+- (void)windowWillClose:(NSNotification*)notification {
+  DCHECK(windowShim_->browser()->tabstrip_model()->empty());
+
+  windowShim_->didCloseNativeWindow();
+  [self autorelease];
+}
+
 @end

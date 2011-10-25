@@ -219,12 +219,13 @@ void WebPluginDelegateProxy::PluginDestroyed() {
   }
 
   if (window_script_object_) {
-    // The ScriptController deallocates this object independent of its ref count
-    // to avoid leaks if the plugin forgets to release it.  So mark the object
-    // invalid to avoid accessing it past this point.  Note: only do this after
-    // the DestroyInstance message in case the window object is scripted by the
-    // plugin in NPP_Destroy.
-    window_script_object_->DeleteSoon(false);
+    // Release the window script object, if the plugin didn't already.
+    // If we don't do this then it will linger until the last plugin instance is
+    // destroyed.  In the meantime, though, the frame that it refers to may have
+    // been destroyed by WebKit, at which point WebKit will forcibly deallocate
+    // the window script object.  The window script object stub is unique to the
+    // plugin instance, so this won't affect other instances.
+    window_script_object_->DeleteSoon();
   }
 
   plugin_ = NULL;
@@ -283,8 +284,8 @@ bool WebPluginDelegateProxy::Initialize(
     bool load_manually) {
   IPC::ChannelHandle channel_handle;
   if (!RenderThread::current()->Send(new ViewHostMsg_OpenChannelToPlugin(
-          render_view_->routing_id(), url, mime_type_, &channel_handle,
-          &info_))) {
+          render_view_->routing_id(), url, page_url_, mime_type_,
+          &channel_handle, &info_))) {
     return false;
   }
 
@@ -413,10 +414,6 @@ void WebPluginDelegateProxy::DidManualLoadFail() {
   Send(new PluginMsg_DidManualLoadFail(instance_id_));
 }
 
-void WebPluginDelegateProxy::InstallMissingPlugin() {
-  Send(new PluginMsg_InstallMissingPlugin(instance_id_));
-}
-
 bool WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
   content::GetContentClient()->SetActiveURL(page_url_);
 
@@ -433,10 +430,9 @@ bool WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
                         OnGetWindowScriptNPObject)
     IPC_MESSAGE_HANDLER(PluginHostMsg_GetPluginElement,
                         OnGetPluginElement)
+    IPC_MESSAGE_HANDLER(PluginHostMsg_ResolveProxy, OnResolveProxy)
     IPC_MESSAGE_HANDLER(PluginHostMsg_SetCookie, OnSetCookie)
     IPC_MESSAGE_HANDLER(PluginHostMsg_GetCookies, OnGetCookies)
-    IPC_MESSAGE_HANDLER(PluginHostMsg_MissingPluginStatus,
-                        OnMissingPluginStatus)
     IPC_MESSAGE_HANDLER(PluginHostMsg_URLRequest, OnHandleURLRequest)
     IPC_MESSAGE_HANDLER(PluginHostMsg_CancelDocumentLoad, OnCancelDocumentLoad)
     IPC_MESSAGE_HANDLER(PluginHostMsg_InitiateHTTPRangeRequest,
@@ -1099,6 +1095,14 @@ void WebPluginDelegateProxy::OnGetWindowScriptNPObject(
   *success = true;
 }
 
+void WebPluginDelegateProxy::OnResolveProxy(const GURL& url,
+                                            bool* result,
+                                            std::string* proxy_list) {
+  *result = false;
+  RenderThread::current()->Send(
+      new ViewHostMsg_ResolveProxy(url, result, proxy_list));
+}
+
 void WebPluginDelegateProxy::OnGetPluginElement(int route_id, bool* success) {
   *success = false;
   NPObject* npobject = NULL;
@@ -1127,11 +1131,6 @@ void WebPluginDelegateProxy::OnGetCookies(const GURL& url,
   DCHECK(cookies);
   if (plugin_)
     *cookies = plugin_->GetCookies(url, first_party_for_cookies);
-}
-
-void WebPluginDelegateProxy::OnMissingPluginStatus(int status) {
-  if (render_view_)
-    render_view_->OnMissingPluginStatus(this, status);
 }
 
 void WebPluginDelegateProxy::PaintSadPlugin(WebKit::WebCanvas* native_context,
@@ -1376,7 +1375,7 @@ bool WebPluginDelegateProxy::UseSynchronousGeometryUpdates() {
 
   // The move networks plugin needs to be informed of geometry updates
   // synchronously.
-  std::vector<webkit::npapi::WebPluginMimeType>::iterator index;
+  std::vector<webkit::WebPluginMimeType>::iterator index;
   for (index = info_.mime_types.begin(); index != info_.mime_types.end();
        index++) {
     if (index->mime_type == "application/x-vnd.moveplayer.qm" ||

@@ -59,6 +59,9 @@ so we include the original license below:
     <output filename="inspectorStrings_da.js" type="js_map_format" lang="da" />
     <output filename="inspectorStrings_de.js" type="js_map_format" lang="de" />
     <output filename="inspectorStrings_el.js" type="js_map_format" lang="el" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="inspectorStrings_en-AU.js" type="js_map_format" lang="en-AU" />
+    </if>
     <output filename="inspectorStrings_en-GB.js" type="js_map_format" lang="en-GB" />
     <output filename="inspectorStrings_en-US.js" type="js_map_format" lang="en" />
     <if expr="pp_ifdef('use_third_party_translations')">
@@ -71,6 +74,7 @@ so we include the original license below:
       <output filename="inspectorStrings_eu.js" type="js_map_format" lang="eu" />
     </if>
     <output filename="inspectorStrings_fa.js" type="js_map_format" lang="fa" />
+    <output filename="inspectorStrings_fake-bidi.js" type="js_map_format" lang="fake-bidi" />
     <output filename="inspectorStrings_fi.js" type="js_map_format" lang="fi" />
     <output filename="inspectorStrings_fil.js" type="js_map_format" lang="fil" />
     <output filename="inspectorStrings_fr.js" type="js_map_format" lang="fr" />
@@ -84,6 +88,7 @@ so we include the original license below:
     <output filename="inspectorStrings_hu.js" type="js_map_format" lang="hu" />
     <if expr="pp_ifdef('use_third_party_translations')">
       <output filename="inspectorStrings_hy.js" type="js_map_format" lang="hy" />
+      <output filename="inspectorStrings_ia.js" type="js_map_format" lang="ia" />
     </if>
     <output filename="inspectorStrings_id.js" type="js_map_format" lang="id" />
     <output filename="inspectorStrings_it.js" type="js_map_format" lang="it" />
@@ -101,6 +106,9 @@ so we include the original license below:
     <output filename="inspectorStrings_lv.js" type="js_map_format" lang="lv" />
     <output filename="inspectorStrings_ml.js" type="js_map_format" lang="ml" />
     <output filename="inspectorStrings_mr.js" type="js_map_format" lang="mr" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="inspectorStrings_ms.js" type="js_map_format" lang="ms" />
+    </if>
     <output filename="inspectorStrings_nl.js" type="js_map_format" lang="nl" />
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
@@ -126,16 +134,17 @@ so we include the original license below:
     <output filename="inspectorStrings_vi.js" type="js_map_format" lang="vi" />
     <output filename="inspectorStrings_zh-CN.js" type="js_map_format" lang="zh-CN" />
     <output filename="inspectorStrings_zh-TW.js" type="js_map_format" lang="zh-TW" />
-    <output filename="inspectorStrings_fake-bidi.js" type="js_map_format" lang="fake-bidi" />
   </outputs>
   <translations>
     <if expr="pp_ifdef('use_third_party_translations')">
       <file path="../../third_party/launchpad_translations/inspector_strings_ast.xtb" lang="ast" />
+      <file path="../../third_party/launchpad_translations/inspector_strings_bn.xtb" lang="bn" />
       <file path="../../third_party/launchpad_translations/inspector_strings_bs.xtb" lang="bs" />
       <file path="../../third_party/launchpad_translations/inspector_strings_ca.xtb" lang="ca" />
       <file path="../../third_party/launchpad_translations/inspector_strings_ca-valencia.xtb" lang="ca@valencia" />
       <file path="../../third_party/launchpad_translations/inspector_strings_da.xtb" lang="da" />
       <file path="../../third_party/launchpad_translations/inspector_strings_de.xtb" lang="de" />
+      <file path="../../third_party/launchpad_translations/inspector_strings_en-AU.xtb" lang="en-AU" />
       <file path="../../third_party/launchpad_translations/inspector_strings_es.xtb" lang="es" />
       <file path="../../third_party/launchpad_translations/inspector_strings_et.xtb" lang="et" />
       <file path="../../third_party/launchpad_translations/inspector_strings_eu.xtb" lang="eu" />
@@ -149,6 +158,7 @@ so we include the original license below:
       <file path="../../third_party/launchpad_translations/inspector_strings_ka.xtb" lang="ka" />
       <file path="../../third_party/launchpad_translations/inspector_strings_ku.xtb" lang="ku" />
       <file path="../../third_party/launchpad_translations/inspector_strings_kw.xtb" lang="kw" />
+      <file path="../../third_party/launchpad_translations/inspector_strings_ms.xtb" lang="ms" />
       <file path="../../third_party/launchpad_translations/inspector_strings_nl.xtb" lang="nl" />
       <file path="../../third_party/launchpad_translations/inspector_strings_no.xtb" lang="no" />
       <file path="../../third_party/launchpad_translations/inspector_strings_pt-BR.xtb" lang="pt-BR" />

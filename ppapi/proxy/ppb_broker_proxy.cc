@@ -8,13 +8,14 @@
 #include "ppapi/c/trusted/ppb_broker_trusted.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/thunk/ppb_broker_api.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/thunk.h"
 
-namespace pp {
+using ppapi::thunk::PPB_Broker_API;
+
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -46,14 +47,13 @@ InterfaceProxy* CreateBrokerProxy(Dispatcher* dispatcher,
 
 }  // namespace
 
-class Broker : public ppapi::thunk::PPB_Broker_API,
-               public PluginResource {
+class Broker : public PPB_Broker_API, public Resource {
  public:
   explicit Broker(const HostResource& resource);
   virtual ~Broker();
 
-  // ResourceObjectBase overries.
-  virtual ppapi::thunk::PPB_Broker_API* AsPPB_Broker_API() OVERRIDE;
+  // Resource overries.
+  virtual PPB_Broker_API* AsPPB_Broker_API() OVERRIDE;
 
   // PPB_Broker_API implementation.
   virtual int32_t Connect(PP_CompletionCallback connect_callback) OVERRIDE;
@@ -76,8 +76,7 @@ class Broker : public ppapi::thunk::PPB_Broker_API,
   DISALLOW_COPY_AND_ASSIGN(Broker);
 };
 
-Broker::Broker(const HostResource& resource)
-    : PluginResource(resource),
+Broker::Broker(const HostResource& resource) : Resource(resource),
       called_connect_(false),
       current_connect_callback_(PP_MakeCompletionCallback(NULL, NULL)),
       socket_handle_(base::kInvalidPlatformFileValue) {
@@ -96,7 +95,7 @@ Broker::~Broker() {
   socket_handle_ = base::kInvalidPlatformFileValue;
 }
 
-ppapi::thunk::PPB_Broker_API* Broker::AsPPB_Broker_API() {
+PPB_Broker_API* Broker::AsPPB_Broker_API() {
   return this;
 }
 
@@ -114,8 +113,9 @@ int32_t Broker::Connect(PP_CompletionCallback connect_callback) {
   current_connect_callback_ = connect_callback;
   called_connect_ = true;
 
-  bool success = GetDispatcher()->Send(new PpapiHostMsg_PPBBroker_Connect(
-      INTERFACE_ID_PPB_BROKER, host_resource()));
+  bool success = PluginDispatcher::GetForResource(this)->Send(
+      new PpapiHostMsg_PPBBroker_Connect(
+          INTERFACE_ID_PPB_BROKER, host_resource()));
   return success ?  PP_OK_COMPLETIONPENDING : PP_ERROR_FAILED;
 }
 
@@ -179,9 +179,7 @@ PP_Resource PPB_Broker_Proxy::CreateProxyResource(PP_Instance instance) {
       INTERFACE_ID_PPB_BROKER, instance, &result));
   if (result.is_null())
     return 0;
-
-  linked_ptr<Broker> object(new Broker(result));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return (new Broker(result))->GetReference();
 }
 
 bool PPB_Broker_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -204,14 +202,11 @@ void PPB_Broker_Proxy::OnMsgCreate(PP_Instance instance,
 }
 
 void PPB_Broker_Proxy::OnMsgConnect(const HostResource& broker) {
-  CompletionCallback callback = callback_factory_.NewOptionalCallback(
+  EnterHostFromHostResourceForceCallback<PPB_Broker_API> enter(
+      broker, callback_factory_,
       &PPB_Broker_Proxy::ConnectCompleteInHost, broker);
-
-  int32_t result = ppb_broker_target()->Connect(
-      broker.host_resource(),
-      callback.pp_completion_callback());
-  if (result !=  PP_OK_COMPLETIONPENDING)
-    callback.Run(result);
+  if (enter.succeeded())
+    enter.SetResult(enter.object()->Connect(enter.callback()));
 }
 
 // Called in the plugin to handle the connect callback.
@@ -225,7 +220,7 @@ void PPB_Broker_Proxy::OnMsgConnectComplete(
   DCHECK(result == PP_OK ||
          socket_handle == IPC::InvalidPlatformFileForTransit());
 
-  EnterPluginFromHostResource<ppapi::thunk::PPB_Broker_API> enter(resource);
+  EnterPluginFromHostResource<PPB_Broker_API> enter(resource);
   if (enter.failed()) {
     // As in Broker::ConnectComplete, we need to close the resource on error.
     base::SyncSocket temp_socket(
@@ -278,4 +273,4 @@ void PPB_Broker_Proxy::ConnectCompleteInHost(int32_t result,
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

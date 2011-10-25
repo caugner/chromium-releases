@@ -72,10 +72,10 @@ bool PanelBrowserWindowGtk::HandleTitleBarLeftMousePress(
     guint32 last_click_time,
     gfx::Point last_click_position) {
   // In theory we should never enter this function as we have a handler for
-  // button press on title bar where we handle this.  Not putting NOTREACHED()
-  // here because we don't want to crash if hit-testing for title bar in window
+  // button press on titlebar where we handle this.  Not putting NOTREACHED()
+  // here because we don't want to crash if hit-testing for titlebar in window
   // button press handler in BrowserWindowGtk is off by a pixel or two.
-  DLOG(WARNING) << "Hit-testing for title bar off by a pixel or two?";
+  DLOG(WARNING) << "Hit-testing for titlebar off by a pixel or two?";
   return TRUE;
 }
 
@@ -122,7 +122,7 @@ void PanelBrowserWindowGtk::OnPanelExpansionStateChanged(
   NOTIMPLEMENTED();
 }
 
-bool PanelBrowserWindowGtk::ShouldBringUpPanelTitleBar(int mouse_x,
+bool PanelBrowserWindowGtk::ShouldBringUpPanelTitlebar(int mouse_x,
                                                        int mouse_y) const {
   NOTIMPLEMENTED();
   return false;
@@ -156,6 +156,10 @@ void PanelBrowserWindowGtk::ShowTaskManagerForPanel() {
   ShowTaskManager();
 }
 
+FindBar* PanelBrowserWindowGtk::CreatePanelFindBar() {
+  return CreateFindBar();
+}
+
 void PanelBrowserWindowGtk::NotifyPanelOnUserChangedTheme() {
   UserChangedTheme();
 }
@@ -169,12 +173,37 @@ bool PanelBrowserWindowGtk::IsDrawingAttention() const {
   return false;
 }
 
+bool PanelBrowserWindowGtk::PreHandlePanelKeyboardEvent(
+    const NativeWebKeyboardEvent& event,
+    bool* is_keyboard_shortcut) {
+  return PreHandleKeyboardEvent(event, is_keyboard_shortcut);
+}
+
+void PanelBrowserWindowGtk::HandlePanelKeyboardEvent(
+    const NativeWebKeyboardEvent& event) {
+  HandleKeyboardEvent(event);
+}
+
+Browser* PanelBrowserWindowGtk::GetPanelBrowser() const {
+  return browser();
+}
+
 void PanelBrowserWindowGtk::DestroyPanelBrowser() {
   DestroyBrowser();
 }
 
-NativePanelTesting* PanelBrowserWindowGtk::GetNativePanelTesting() {
-  return this;
+gfx::Size PanelBrowserWindowGtk::GetNonClientAreaExtent() const {
+  NOTIMPLEMENTED();
+  return gfx::Size();
+}
+
+int PanelBrowserWindowGtk::GetRestoredHeight() const {
+  NOTIMPLEMENTED();
+  return 0;
+}
+
+void PanelBrowserWindowGtk::SetRestoredHeight(int height) {
+  NOTIMPLEMENTED();
 }
 
 void PanelBrowserWindowGtk::SetBoundsImpl() {
@@ -193,12 +222,15 @@ void PanelBrowserWindowGtk::DidProcessEvent(GdkEvent* event) {
 
   gdouble new_x_double;
   gdouble new_y_double;
+  gdouble old_x_double;
+  gdouble old_y_double;
   gdk_event_get_root_coords(event, &new_x_double, &new_y_double);
+  gdk_event_get_root_coords(last_mouse_down_, &old_x_double, &old_y_double);
 
   gint new_x = static_cast<gint>(new_x_double);
   gint new_y = static_cast<gint>(new_y_double);
-  gint old_x = static_cast<gint>(last_mouse_down_->button.x_root);
-  gint old_y = static_cast<gint>(last_mouse_down_->button.y_root);
+  gint old_x = static_cast<gint>(old_x_double);
+  gint old_y = static_cast<gint>(old_y_double);
 
   if (drag_widget_) {
     panel_->manager()->Drag(new_x - old_x);
@@ -306,4 +338,80 @@ gboolean PanelBrowserWindowGtk::OnDragButtonReleased(GtkWidget* widget,
       drag_end_factory_.NewRunnableMethod(
           &PanelBrowserWindowGtk::EndDrag, false));
   return TRUE;
+}
+
+// NativePanelTesting implementation.
+class NativePanelTestingGtk : public NativePanelTesting {
+ public:
+  explicit NativePanelTestingGtk(
+      PanelBrowserWindowGtk* panel_browser_window_gtk);
+
+ private:
+  virtual void PressLeftMouseButtonTitlebar(
+      const gfx::Point& point) OVERRIDE;
+  virtual void ReleaseMouseButtonTitlebar() OVERRIDE;
+  virtual void DragTitlebar(int delta_x, int delta_y) OVERRIDE;
+  virtual void CancelDragTitlebar() OVERRIDE;
+  virtual void FinishDragTitlebar() OVERRIDE;
+
+  PanelBrowserWindowGtk* panel_browser_window_gtk_;
+};
+
+// static
+NativePanelTesting* NativePanelTesting::Create(NativePanel* native_panel) {
+  return new NativePanelTestingGtk(static_cast<PanelBrowserWindowGtk*>(
+      native_panel));
+}
+
+NativePanelTestingGtk::NativePanelTestingGtk(
+    PanelBrowserWindowGtk* panel_browser_window_gtk) :
+    panel_browser_window_gtk_(panel_browser_window_gtk) {
+}
+
+void NativePanelTestingGtk::PressLeftMouseButtonTitlebar(
+    const gfx::Point& point) {
+  GdkEvent* event = gdk_event_new(GDK_BUTTON_PRESS);
+  event->button.button = 1;
+  event->button.x_root = point.x();
+  event->button.y_root = point.y();
+  panel_browser_window_gtk_->OnTitlebarButtonPressEvent(
+      panel_browser_window_gtk_->titlebar_widget(),
+      reinterpret_cast<GdkEventButton*>(event));
+  gdk_event_free(event);
+  MessageLoopForUI::current()->RunAllPending();
+}
+
+void NativePanelTestingGtk::ReleaseMouseButtonTitlebar() {
+  panel_browser_window_gtk_->OnTitlebarButtonReleaseEvent(NULL, NULL);
+  MessageLoopForUI::current()->RunAllPending();
+}
+
+void NativePanelTestingGtk::DragTitlebar(int delta_x, int delta_y) {
+  if (!panel_browser_window_gtk_->drag_widget_) {
+    panel_browser_window_gtk_->CreateDragWidget();
+    panel_browser_window_gtk_->panel_->manager()->StartDragging(
+        panel_browser_window_gtk_->panel_.get());
+  }
+  GdkEvent* event = gdk_event_new(GDK_MOTION_NOTIFY);
+  gdk_event_get_root_coords(panel_browser_window_gtk_->last_mouse_down_,
+      &event->motion.x_root, &event->motion.y_root);
+  event->motion.x_root += delta_x;
+  event->motion.y_root += delta_y;
+  panel_browser_window_gtk_->DidProcessEvent(event);
+  gdk_event_free(event);
+  MessageLoopForUI::current()->RunAllPending();
+}
+
+void NativePanelTestingGtk::CancelDragTitlebar() {
+  panel_browser_window_gtk_->OnDragFailed(
+      panel_browser_window_gtk_->drag_widget_, NULL,
+      GTK_DRAG_RESULT_USER_CANCELLED);
+  MessageLoopForUI::current()->RunAllPending();
+}
+
+void NativePanelTestingGtk::FinishDragTitlebar() {
+  panel_browser_window_gtk_->OnDragFailed(
+      panel_browser_window_gtk_->drag_widget_, NULL,
+      GTK_DRAG_RESULT_NO_TARGET);
+  MessageLoopForUI::current()->RunAllPending();
 }

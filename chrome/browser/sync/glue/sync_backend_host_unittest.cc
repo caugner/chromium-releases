@@ -9,14 +9,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
-#include "chrome/browser/sync/engine/syncapi.h"
-#include "chrome/browser/sync/glue/data_type_controller.h"
+#include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/test/testing_profile.h"
-#include "chrome/test/test_url_request_context_getter.h"
+#include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/test_url_request_context_getter.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/url_fetcher.h"
-#include "content/common/test_url_fetcher_factory.h"
+#include "content/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -33,7 +32,7 @@ class MockSyncFrontend : public SyncFrontend {
  public:
   virtual ~MockSyncFrontend() {}
 
-  MOCK_METHOD1(OnBackendInitialized, void(bool));
+  MOCK_METHOD2(OnBackendInitialized, void(const WeakHandle<JsBackend>&, bool));
   MOCK_METHOD0(OnSyncCycleCompleted, void());
   MOCK_METHOD0(OnAuthError, void());
   MOCK_METHOD0(OnStopSyncingPermanently, void());
@@ -43,6 +42,9 @@ class MockSyncFrontend : public SyncFrontend {
   MOCK_METHOD0(OnPassphraseAccepted, void());
   MOCK_METHOD1(OnEncryptionComplete, void(const syncable::ModelTypeSet&));
   MOCK_METHOD1(OnMigrationNeededForTypes, void(const syncable::ModelTypeSet&));
+  MOCK_METHOD1(OnDataTypesChanged, void(const syncable::ModelTypeSet&));
+  MOCK_METHOD1(OnActionableError,
+      void(const browser_sync::SyncProtocolError& sync_error));
 };
 
 }  // namespace
@@ -81,12 +83,11 @@ TEST_F(SyncBackendHostTest, InitShutdown) {
   FakeURLFetcherFactory test_factory_;
   test_factory_.SetFakeResponse(k_mock_url + "/time?command=get_time", "",
       false);
-  URLFetcher::set_factory(&test_factory_);
 
   TestingProfile profile;
   profile.CreateRequestContext();
 
-  SyncBackendHost backend(&profile);
+  SyncBackendHost backend(profile.GetDebugName(), &profile);
 
   // TODO(akalin): Handle this in SyncBackendHost instead of in
   // ProfileSyncService, or maybe figure out a way to share the
@@ -102,171 +103,12 @@ TEST_F(SyncBackendHostTest, InitShutdown) {
   credentials.email = "user@example.com";
   credentials.sync_token = "sync_token";
   backend.Initialize(&mock_frontend,
+                     WeakHandle<JsEventHandler>(),
                      GURL(k_mock_url),
                      syncable::ModelTypeSet(),
                      credentials,
                      true);
   backend.Shutdown(false);
-  URLFetcher::set_factory(NULL);
-}
-
-TEST_F(SyncBackendHostTest, GetPendingConfigModeState) {
-  SyncBackendHost::PendingConfigureDataTypesState state;
-  bool deleted_type = false;
-
-  // Empty.
-  {
-    DataTypeController::TypeMap data_type_controllers;
-    syncable::ModelTypeSet types;
-    ModelSafeRoutingInfo routing_info;
-
-    SyncBackendHost::GetPendingConfigModeState(
-        data_type_controllers, types, base::Callback<void(bool)>(),
-        &routing_info, sync_api::CONFIGURE_REASON_RECONFIGURATION,
-        false, &state, &deleted_type);
-
-    EXPECT_TRUE(routing_info.empty());
-    EXPECT_TRUE(state.ready_task.is_null());
-    EXPECT_EQ(types, state.initial_types);
-    EXPECT_FALSE(deleted_type);
-    EXPECT_TRUE(state.added_types.none());
-  }
-
-  // No enabled types.
-  {
-    DataTypeController::TypeMap data_type_controllers;
-    data_type_controllers[syncable::BOOKMARKS] = NULL;
-    syncable::ModelTypeSet types;
-    ModelSafeRoutingInfo routing_info;
-
-    types.insert(syncable::NIGORI);
-    SyncBackendHost::GetPendingConfigModeState(
-        data_type_controllers, types, base::Callback<void(bool)>(),
-        &routing_info, sync_api::CONFIGURE_REASON_RECONFIGURATION,
-        true, &state, &deleted_type);
-
-    EXPECT_TRUE(routing_info.empty());
-    EXPECT_TRUE(state.ready_task.is_null());
-    EXPECT_EQ(types, state.initial_types);
-    EXPECT_TRUE(deleted_type);
-    EXPECT_TRUE(state.added_types.none());
-  }
-
-  // Add type.
-  {
-    DataTypeController::TypeMap data_type_controllers;
-    data_type_controllers[syncable::BOOKMARKS] = NULL;
-    syncable::ModelTypeSet types;
-    types.insert(syncable::BOOKMARKS);
-    types.insert(syncable::NIGORI);
-    ModelSafeRoutingInfo routing_info;
-
-    SyncBackendHost::GetPendingConfigModeState(
-        data_type_controllers, types, base::Callback<void(bool)>(),
-        &routing_info, sync_api::CONFIGURE_REASON_RECONFIGURATION,
-        true, &state, &deleted_type);
-
-    ModelSafeRoutingInfo expected_routing_info;
-    expected_routing_info[syncable::BOOKMARKS] = GROUP_PASSIVE;
-    EXPECT_EQ(expected_routing_info, routing_info);
-    EXPECT_TRUE(state.ready_task.is_null());
-    EXPECT_EQ(types, state.initial_types);
-    EXPECT_FALSE(deleted_type);
-
-    syncable::ModelTypeBitSet expected_added_types;
-    expected_added_types.set(syncable::BOOKMARKS);
-    EXPECT_EQ(expected_added_types, state.added_types);
-  }
-
-  // Add existing type.
-  {
-    DataTypeController::TypeMap data_type_controllers;
-    data_type_controllers[syncable::BOOKMARKS] = NULL;
-    syncable::ModelTypeSet types;
-    types.insert(syncable::BOOKMARKS);
-    types.insert(syncable::NIGORI);
-    ModelSafeRoutingInfo routing_info;
-    routing_info[syncable::BOOKMARKS] = GROUP_PASSIVE;
-    ModelSafeRoutingInfo expected_routing_info = routing_info;
-
-    SyncBackendHost::GetPendingConfigModeState(
-        data_type_controllers, types, base::Callback<void(bool)>(),
-        &routing_info, sync_api::CONFIGURE_REASON_RECONFIGURATION,
-        true, &state, &deleted_type);
-
-    EXPECT_EQ(expected_routing_info, routing_info);
-    EXPECT_TRUE(state.ready_task.is_null());
-    EXPECT_EQ(types, state.initial_types);
-    EXPECT_FALSE(deleted_type);
-    EXPECT_TRUE(state.added_types.none());
-  }
-
-  // Delete type.
-  {
-    DataTypeController::TypeMap data_type_controllers;
-    data_type_controllers[syncable::BOOKMARKS] = NULL;
-    syncable::ModelTypeSet types;
-    types.insert(syncable::NIGORI);
-    ModelSafeRoutingInfo routing_info;
-    routing_info[syncable::BOOKMARKS] = GROUP_PASSIVE;
-
-    SyncBackendHost::GetPendingConfigModeState(
-        data_type_controllers, types, base::Callback<void(bool)>(),
-        &routing_info, sync_api::CONFIGURE_REASON_RECONFIGURATION,
-        true, &state, &deleted_type);
-
-    ModelSafeRoutingInfo expected_routing_info;
-    EXPECT_EQ(expected_routing_info, routing_info);
-    EXPECT_TRUE(state.ready_task.is_null());
-    EXPECT_EQ(types, state.initial_types);
-    EXPECT_TRUE(deleted_type);
-    EXPECT_TRUE(state.added_types.none());
-  }
-
-  // Add Nigori.
-  {
-    DataTypeController::TypeMap data_type_controllers;
-    syncable::ModelTypeSet types;
-    types.insert(syncable::NIGORI);
-    ModelSafeRoutingInfo routing_info;
-
-    SyncBackendHost::GetPendingConfigModeState(
-        data_type_controllers, types, base::Callback<void(bool)>(),
-        &routing_info, sync_api::CONFIGURE_REASON_RECONFIGURATION,
-        false, &state, &deleted_type);
-
-    ModelSafeRoutingInfo expected_routing_info;
-    expected_routing_info[syncable::NIGORI] = GROUP_PASSIVE;
-    EXPECT_EQ(expected_routing_info, routing_info);
-    EXPECT_TRUE(state.ready_task.is_null());
-    EXPECT_EQ(types, state.initial_types);
-    EXPECT_FALSE(deleted_type);
-
-    syncable::ModelTypeBitSet expected_added_types;
-    expected_added_types.set(syncable::NIGORI);
-    EXPECT_EQ(expected_added_types, state.added_types);
-  }
-
-  // Delete Nigori.
-  {
-    DataTypeController::TypeMap data_type_controllers;
-    syncable::ModelTypeSet types;
-    ModelSafeRoutingInfo routing_info;
-    routing_info[syncable::NIGORI] = GROUP_PASSIVE;
-
-    SyncBackendHost::GetPendingConfigModeState(
-        data_type_controllers, types, base::Callback<void(bool)>(),
-        &routing_info, sync_api::CONFIGURE_REASON_RECONFIGURATION,
-        true, &state, &deleted_type);
-
-    ModelSafeRoutingInfo expected_routing_info;
-    EXPECT_EQ(expected_routing_info, routing_info);
-    EXPECT_TRUE(state.ready_task.is_null());
-    EXPECT_EQ(types, state.initial_types);
-    EXPECT_TRUE(deleted_type);
-
-    EXPECT_TRUE(state.added_types.none());
-  }
 }
 
 // TODO(akalin): Write more SyncBackendHost unit tests.

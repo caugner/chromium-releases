@@ -11,6 +11,9 @@
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -88,18 +91,11 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
     const history::URLRow& url, sync_api::WriteTransaction* trans) {
   // Get the visits for this node.
   history::VisitVector visit_vector;
-  if (!history_backend_->GetVisitsForURL(url.id(), &visit_vector)) {
+  if (!TypedUrlModelAssociator::GetVisitsForURL(
+          history_backend_, url, &visit_vector)) {
     error_handler()->OnUnrecoverableError(FROM_HERE,
                                           "Could not get the url's visits.");
     return false;
-  }
-
-  // Make sure our visit vector is not empty by ensuring at least the most
-  // recent visit is found. Workaround for http://crbug.com/84258.
-  if (visit_vector.empty()) {
-    history::VisitRow visit(
-        url.id(), url.last_visit(), 0, PageTransition::TYPED, 0);
-    visit_vector.push_back(visit);
   }
 
   sync_api::ReadNode typed_url_root(trans);
@@ -263,13 +259,13 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
                 changes[i].action);
       history::URLRow old_url;
       if (!history_backend_->GetURL(url, &old_url)) {
-        error_handler()->OnUnrecoverableError(FROM_HERE,
-            "TypedUrl db lookup failed.");
-        return;
+        LOG(ERROR) << "Could not fetch history row for " << url;
+        continue;
       }
 
       history::VisitVector visits;
-      if (!history_backend_->GetVisitsForURL(old_url.id(), &visits)) {
+      if (!TypedUrlModelAssociator::GetVisitsForURL(
+              history_backend_, old_url, &visits)) {
         error_handler()->OnUnrecoverableError(FROM_HERE,
             "Could not get the url's visits.");
         return;

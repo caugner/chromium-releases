@@ -14,6 +14,7 @@
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_surface_3d_impl.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_Context3D_API;
@@ -66,9 +67,8 @@ PP_Context3DTrustedState PPStateFromGPUState(
 
 }  // namespace
 
-PPB_Context3D_Impl::PPB_Context3D_Impl(PluginInstance* instance)
+PPB_Context3D_Impl::PPB_Context3D_Impl(PP_Instance instance)
     : Resource(instance),
-      instance_(instance),
       transfer_buffer_id_(0),
       draw_surface_(NULL),
       read_surface_(NULL),
@@ -80,7 +80,7 @@ PPB_Context3D_Impl::~PPB_Context3D_Impl() {
 }
 
 // static
-PP_Resource PPB_Context3D_Impl::Create(PP_Instance pp_instance,
+PP_Resource PPB_Context3D_Impl::Create(PP_Instance instance,
                                        PP_Config3D_Dev config,
                                        PP_Resource share_context,
                                        const int32_t* attrib_list) {
@@ -89,12 +89,7 @@ PP_Resource PPB_Context3D_Impl::Create(PP_Instance pp_instance,
   if (share_context != 0)
     return 0;
 
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
-  if (!instance)
-    return 0;
-
-  scoped_refptr<PPB_Context3D_Impl> context(
-      new PPB_Context3D_Impl(instance));
+  scoped_refptr<PPB_Context3D_Impl> context(new PPB_Context3D_Impl(instance));
   if (!context->Init(config, share_context, attrib_list))
     return 0;
 
@@ -102,7 +97,7 @@ PP_Resource PPB_Context3D_Impl::Create(PP_Instance pp_instance,
 }
 
 // static
-PP_Resource PPB_Context3D_Impl::CreateRaw(PP_Instance pp_instance,
+PP_Resource PPB_Context3D_Impl::CreateRaw(PP_Instance instance,
                                           PP_Config3D_Dev config,
                                           PP_Resource share_context,
                                           const int32_t* attrib_list) {
@@ -111,12 +106,7 @@ PP_Resource PPB_Context3D_Impl::CreateRaw(PP_Instance pp_instance,
   if (share_context != 0)
     return 0;
 
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
-  if (!instance)
-    return 0;
-
-  scoped_refptr<PPB_Context3D_Impl> context(
-      new PPB_Context3D_Impl(instance));
+  scoped_refptr<PPB_Context3D_Impl> context(new PPB_Context3D_Impl(instance));
   if (!context->InitRaw(config, share_context, attrib_list))
     return 0;
 
@@ -152,13 +142,13 @@ int32_t PPB_Context3D_Impl::BindSurfacesImpl(PPB_Surface3D_Impl* new_draw,
   // TODO(alokp): Support separate draw-read surfaces.
   DCHECK_EQ(new_draw, new_read);
   if (new_draw != new_read)
-    return PP_GRAPHICS3DERROR_BAD_MATCH;
+    return PP_ERROR_NOTSUPPORTED;
 
   if (new_draw == draw_surface_)
     return PP_OK;
 
   if (new_draw && new_draw->context())
-    return PP_GRAPHICS3DERROR_BAD_ACCESS;  // Already bound.
+    return PP_ERROR_BADARGUMENT;  // Already bound.
 
   if (draw_surface_)
     draw_surface_->BindToContext(NULL);
@@ -287,16 +277,32 @@ bool PPB_Context3D_Impl::Init(PP_Config3D_Dev config,
 bool PPB_Context3D_Impl::InitRaw(PP_Config3D_Dev config,
                                  PP_Resource share_context,
                                  const int32_t* attrib_list) {
+  PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
+  if (!plugin_instance)
+    return false;
+
   // Create and initialize the objects required to issue GLES2 calls.
-  platform_context_.reset(instance()->CreateContext3D());
+  platform_context_.reset(plugin_instance->CreateContext3D());
   if (!platform_context_.get()) {
     Destroy();
     return false;
   }
-  if (!platform_context_->Init()) {
+
+  static const int32 kAttribs[] = {
+    PP_GRAPHICS3DATTRIB_ALPHA_SIZE, 8,
+    PP_GRAPHICS3DATTRIB_DEPTH_SIZE, 24,
+    PP_GRAPHICS3DATTRIB_STENCIL_SIZE, 8,
+    PP_GRAPHICS3DATTRIB_SAMPLES, 0,
+    PP_GRAPHICS3DATTRIB_SAMPLE_BUFFERS, 0,
+    PP_GRAPHICS3DATTRIB_HEIGHT, 1,
+    PP_GRAPHICS3DATTRIB_WIDTH, 1,
+    PP_GRAPHICS3DATTRIB_NONE,
+  };
+  if (!platform_context_->Init(kAttribs)) {
     Destroy();
     return false;
   }
+
   platform_context_->SetContextLostCallback(
       callback_factory_.NewCallback(&PPB_Context3D_Impl::OnContextLost));
   return true;
@@ -333,7 +339,8 @@ bool PPB_Context3D_Impl::CreateImplementation() {
       transfer_buffer.size,
       transfer_buffer.ptr,
       transfer_buffer_id_,
-      false));
+      false,
+      true));
 
   return true;
 }

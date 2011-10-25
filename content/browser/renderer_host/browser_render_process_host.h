@@ -42,7 +42,7 @@ class SharedMemory;
 class BrowserRenderProcessHost : public RenderProcessHost,
                                  public ChildProcessLauncher::Client {
  public:
-  explicit BrowserRenderProcessHost(Profile* profile);
+  explicit BrowserRenderProcessHost(content::BrowserContext* browser_context);
   virtual ~BrowserRenderProcessHost();
 
   // RenderProcessHost implementation (public portion).
@@ -69,9 +69,9 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual bool Send(IPC::Message* msg);
 
   // IPC::Channel::Listener via RenderProcessHost.
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void OnChannelConnected(int32 peer_pid);
-  virtual void OnChannelError();
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
 
   // ChildProcessLauncher::Client implementation.
   virtual void OnProcessLaunched();

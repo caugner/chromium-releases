@@ -120,7 +120,7 @@ BookmarkModel::BookmarkModel(Profile* profile)
       synced_node_(NULL),
       next_node_id_(1),
       observers_(ObserverList<BookmarkModelObserver>::NOTIFY_EXISTING_ONLY),
-      loaded_signal_(TRUE, FALSE) {
+      loaded_signal_(true, false) {
   if (!profile_) {
     // Profile is null during testing.
     DoneLoading(CreateLoadDetails());
@@ -140,8 +140,20 @@ BookmarkModel::~BookmarkModel() {
 
 // static
 void BookmarkModel::RegisterUserPrefs(PrefService* prefs) {
+  // Don't sync this, as otherwise, due to a limitation in sync, it
+  // will cause a deadlock (see http://crbug.com/97955).  If we truly
+  // want to sync the expanded state of folders, it should be part of
+  // bookmark sync itself (i.e., a property of the sync folder nodes).
   prefs->RegisterListPref(prefs::kBookmarkEditorExpandedNodes, new ListValue,
-                          PrefService::SYNCABLE_PREF);
+                          PrefService::UNSYNCABLE_PREF);
+}
+
+void BookmarkModel::Cleanup() {
+  if (loaded_)
+    return;
+
+  // See comment in Profile shutdown code where this is invoked for details.
+  loaded_signal_.Signal();
 }
 
 void BookmarkModel::Load() {
@@ -194,7 +206,7 @@ void BookmarkModel::EndImportMode() {
 }
 
 void BookmarkModel::Remove(const BookmarkNode* parent, int index) {
-  if (!loaded_ || !IsValidIndex(parent, index, false) || is_root(parent)) {
+  if (!loaded_ || !IsValidIndex(parent, index, false) || is_root_node(parent)) {
     NOTREACHED();
     return;
   }
@@ -205,7 +217,7 @@ void BookmarkModel::Move(const BookmarkNode* node,
                          const BookmarkNode* new_parent,
                          int index) {
   if (!loaded_ || !node || !IsValidIndex(new_parent, index, true) ||
-      is_root(new_parent) || is_permanent_node(node)) {
+      is_root_node(new_parent) || is_permanent_node(node)) {
     NOTREACHED();
     return;
   }
@@ -244,7 +256,7 @@ void BookmarkModel::Copy(const BookmarkNode* node,
                          const BookmarkNode* new_parent,
                          int index) {
   if (!loaded_ || !node || !IsValidIndex(new_parent, index, true) ||
-      is_root(new_parent) || is_permanent_node(node)) {
+      is_root_node(new_parent) || is_permanent_node(node)) {
     NOTREACHED();
     return;
   }
@@ -400,7 +412,7 @@ const BookmarkNode* BookmarkModel::GetNodeByID(int64 id) {
 const BookmarkNode* BookmarkModel::AddFolder(const BookmarkNode* parent,
                                              int index,
                                              const string16& title) {
-  if (!loaded_ || parent == &root_ || !IsValidIndex(parent, index, true)) {
+  if (!loaded_ || is_root_node(parent) || !IsValidIndex(parent, index, true)) {
     // Can't add to the root.
     NOTREACHED();
     return NULL;
@@ -427,7 +439,7 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTime(
     const string16& title,
     const GURL& url,
     const Time& creation_time) {
-  if (!loaded_ || !url.is_valid() || is_root(parent) ||
+  if (!loaded_ || !url.is_valid() || is_root_node(parent) ||
       !IsValidIndex(parent, index, true)) {
     NOTREACHED();
     return NULL;
@@ -452,7 +464,7 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTime(
 }
 
 void BookmarkModel::SortChildren(const BookmarkNode* parent) {
-  if (!parent || !parent->is_folder() || is_root(parent) ||
+  if (!parent || !parent->is_folder() || is_root_node(parent) ||
       parent->child_count() <= 1) {
     return;
   }
@@ -474,30 +486,6 @@ void BookmarkModel::SortChildren(const BookmarkNode* parent) {
 
   FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
                     BookmarkNodeChildrenReordered(this, parent));
-}
-
-void BookmarkModel::SetURLStarred(const GURL& url,
-                                  const string16& title,
-                                  bool is_starred) {
-  std::vector<const BookmarkNode*> bookmarks;
-  GetNodesByURL(url, &bookmarks);
-  bool bookmarks_exist = !bookmarks.empty();
-  if (is_starred == bookmarks_exist)
-    return;  // Nothing to do, state already matches.
-
-  if (is_starred) {
-    // Create a bookmark.
-    const BookmarkNode* parent = GetParentForNewNodes();
-    AddURL(parent, parent->child_count(), title, url);
-  } else {
-    // Remove all the bookmarks.
-    for (size_t i = 0; i < bookmarks.size(); ++i) {
-      const BookmarkNode* node = bookmarks[i];
-      int index = node->parent()->GetIndexOf(node);
-      if (index > -1)
-        Remove(node->parent(), index);
-    }
-  }
 }
 
 void BookmarkModel::SetDateFolderModified(const BookmarkNode* parent,
@@ -722,13 +710,13 @@ BookmarkNode* BookmarkModel::CreatePermanentNode(BookmarkNode::Type type) {
   BookmarkNode* node = new BookmarkNode(generate_next_node_id(), GURL());
   node->set_type(type);
   if (type == BookmarkNode::BOOKMARK_BAR) {
-    node->set_title(l10n_util::GetStringUTF16(IDS_BOOMARK_BAR_FOLDER_NAME));
+    node->set_title(l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_FOLDER_NAME));
   } else if (type == BookmarkNode::OTHER_NODE) {
     node->set_title(
-        l10n_util::GetStringUTF16(IDS_BOOMARK_BAR_OTHER_FOLDER_NAME));
+        l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_OTHER_FOLDER_NAME));
   } else {
     node->set_title(
-        l10n_util::GetStringUTF16(IDS_BOOMARK_BAR_SYNCED_FOLDER_NAME));
+        l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_SYNCED_FOLDER_NAME));
   }
   return node;
 }
@@ -832,5 +820,5 @@ BookmarkLoadDetails* BookmarkModel::CreateLoadDetails() {
   BookmarkNode* other_node = CreatePermanentNode(BookmarkNode::OTHER_NODE);
   BookmarkNode* synced_node = CreatePermanentNode(BookmarkNode::SYNCED);
   return new BookmarkLoadDetails(bb_node, other_node, synced_node,
-                                 new BookmarkIndex(profile()), next_node_id_);
+                                 new BookmarkIndex(profile_), next_node_id_);
 }

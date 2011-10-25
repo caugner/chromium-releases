@@ -122,7 +122,8 @@ class CarbonIdleEventSource {
     // Adds |delegate| to this visibility group.
     void RegisterDelegate(WebPluginDelegateImpl* delegate) {
       if (delegates_.empty()) {
-        timer_.Start(base::TimeDelta::FromMilliseconds(timer_period_),
+        timer_.Start(FROM_HERE,
+                     base::TimeDelta::FromMilliseconds(timer_period_),
                      this, &VisibilityGroup::SendIdleEvents);
       }
       delegates_.insert(delegate);
@@ -262,6 +263,7 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       instance_(instance),
       parent_(containing_view),
       quirks_(0),
+      use_buffer_context_(true),
       buffer_context_(NULL),
       layer_(nil),
       surface_(NULL),
@@ -639,10 +641,6 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
   return handled;
 }
 
-void WebPluginDelegateImpl::InstallMissingPlugin() {
-  NOTIMPLEMENTED();
-}
-
 #pragma mark -
 
 void WebPluginDelegateImpl::WindowlessUpdateGeometry(
@@ -692,18 +690,24 @@ void WebPluginDelegateImpl::WindowlessPaint(gfx::NativeDrawingContext context,
                                             const gfx::Rect& damage_rect) {
   // If we get a paint event before we are completely set up (e.g., a nested
   // call while the plugin is still in NPP_SetWindow), bail.
-  if (!have_called_set_window_ || !buffer_context_)
+  if (!have_called_set_window_ || (use_buffer_context_ && !buffer_context_))
     return;
-  DCHECK(buffer_context_ == context);
+  DCHECK(!use_buffer_context_ || buffer_context_ == context);
 
   static base::StatsRate plugin_paint("Plugin.Paint");
   base::StatsScope<base::StatsRate> scope(plugin_paint);
 
-  // Plugin invalidates trigger asynchronous paints with the original
-  // invalidation rect; the plugin may be resized before the paint is handled,
-  // so we need to ensure that the damage rect is still sane.
-  const gfx::Rect paint_rect(damage_rect.Intersect(
-      gfx::Rect(0, 0, window_rect_.width(), window_rect_.height())));
+  gfx::Rect paint_rect;
+  if (use_buffer_context_) {
+    // Plugin invalidates trigger asynchronous paints with the original
+    // invalidation rect; the plugin may be resized before the paint is handled,
+    // so we need to ensure that the damage rect is still sane.
+    paint_rect = damage_rect.Intersect(
+        gfx::Rect(0, 0, window_rect_.width(), window_rect_.height()));
+  } else {
+    // Use the actual window region when drawing directly to the window context.
+    paint_rect = damage_rect.Intersect(window_rect_);
+  }
 
   ScopedActiveDelegate active_delegate(this);
 
@@ -713,6 +717,13 @@ void WebPluginDelegateImpl::WindowlessPaint(gfx::NativeDrawingContext context,
 #endif
 
   CGContextSaveGState(context);
+
+  if (!use_buffer_context_) {
+    // Reposition the context origin so that plugins will draw at the correct
+    // location in the window.
+    CGContextClipToRect(context, paint_rect.ToCGRect());
+    CGContextTranslateCTM(context, window_rect_.x(), window_rect_.y());
+  }
 
   switch (instance()->event_model()) {
 #ifndef NP_NO_CARBON
@@ -739,10 +750,15 @@ void WebPluginDelegateImpl::WindowlessPaint(gfx::NativeDrawingContext context,
     }
   }
 
-  // The backing buffer can change during the call to NPP_HandleEvent, in which
-  // case the old context is (or is about to be) invalid.
-  if (context == buffer_context_)
+  if (use_buffer_context_) {
+    // The backing buffer can change during the call to NPP_HandleEvent, in
+    // which case the old context is (or is about to be) invalid.
+    if (context == buffer_context_)
+      CGContextRestoreGState(context);
+  } else {
+    // Always restore the context to the saved state.
     CGContextRestoreGState(context);
+  }
 }
 
 void WebPluginDelegateImpl::WindowlessSetWindow() {
@@ -1008,7 +1024,7 @@ void WebPluginDelegateImpl::PluginVisibilityChanged() {
   if (instance()->drawing_model() == NPDrawingModelCoreAnimation) {
     bool plugin_visible = container_is_visible_ && !clip_rect_.IsEmpty();
     if (plugin_visible && !redraw_timer_->IsRunning() && windowed_handle()) {
-      redraw_timer_->Start(
+      redraw_timer_->Start(FROM_HERE,
           base::TimeDelta::FromMilliseconds(kCoreAnimationRedrawPeriodMs),
           this, &WebPluginDelegateImpl::DrawLayerInSurface);
     } else if (!plugin_visible) {
@@ -1113,6 +1129,10 @@ void WebPluginDelegateImpl::UpdateIdleEventRate() {
   bool plugin_visible = container_is_visible_ && !clip_rect_.IsEmpty();
   CarbonIdleEventSource::SharedInstance()->RegisterDelegate(this,
                                                             plugin_visible);
+}
+
+void WebPluginDelegateImpl::SetNoBufferContext() {
+  use_buffer_context_ = false;
 }
 
 void WebPluginDelegateImpl::FireIdleEvent() {

@@ -13,7 +13,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
@@ -219,7 +219,11 @@ TEST_F(UserScriptMasterTest, SkipBOMAtTheBeginning) {
   UserScriptList user_scripts;
   user_scripts.push_back(user_script);
 
-  UserScriptMaster::ScriptReloader::LoadUserScripts(&user_scripts);
+  UserScriptMaster::ScriptReloader* script_reloader =
+      new UserScriptMaster::ScriptReloader(NULL);
+  script_reloader->AddRef();
+  script_reloader->LoadUserScripts(&user_scripts);
+  script_reloader->Release();
 
   EXPECT_EQ(content.substr(3),
             user_scripts[0].js_scripts()[0].GetContent().as_string());
@@ -238,7 +242,11 @@ TEST_F(UserScriptMasterTest, LeaveBOMNotAtTheBeginning) {
   UserScriptList user_scripts;
   user_scripts.push_back(user_script);
 
-  UserScriptMaster::ScriptReloader::LoadUserScripts(&user_scripts);
+  UserScriptMaster::ScriptReloader* script_reloader =
+      new UserScriptMaster::ScriptReloader(NULL);
+  script_reloader->AddRef();
+  script_reloader->LoadUserScripts(&user_scripts);
+  script_reloader->Release();
 
   EXPECT_EQ(content, user_scripts[0].js_scripts()[0].GetContent().as_string());
 }

@@ -9,6 +9,7 @@
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
+#include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "chrome/common/web_apps.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -23,7 +24,8 @@ struct LoadCommittedDetails;
 // Per-tab extension helper. Also handles non-extension apps.
 class ExtensionTabHelper : public TabContentsObserver,
                            public ExtensionFunctionDispatcher::Delegate,
-                           public ImageLoadingTracker::Observer {
+                           public ImageLoadingTracker::Observer,
+                           public WebstoreInlineInstaller::Delegate {
  public:
   explicit ExtensionTabHelper(TabContentsWrapper* wrapper);
   virtual ~ExtensionTabHelper();
@@ -73,7 +75,7 @@ class ExtensionTabHelper : public TabContentsObserver,
   }
 
   TabContents* tab_contents() const {
-      return TabContentsObserver::tab_contents();
+    return TabContentsObserver::tab_contents();
   }
 
   // Sets a non-extension app icon associated with TabContents and fires an
@@ -85,17 +87,19 @@ class ExtensionTabHelper : public TabContentsObserver,
   virtual void DidNavigateMainFramePostCommit(
       const content::LoadCommittedDetails& details,
       const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // ExtensionFunctionDispatcher::Delegate overrides.
-  virtual Browser* GetBrowser();
-  virtual gfx::NativeView GetNativeViewOfHost();
-  virtual gfx::NativeWindow GetCustomFrameNativeWindow();
-  virtual TabContents* GetAssociatedTabContents() const;
+  virtual Browser* GetBrowser() OVERRIDE;
+  virtual gfx::NativeView GetNativeViewOfHost() OVERRIDE;
+  virtual TabContents* GetAssociatedTabContents() const OVERRIDE;
 
   // Message handlers.
   void OnDidGetApplicationInfo(int32 page_id, const WebApplicationInfo& info);
   void OnInstallApplication(const WebApplicationInfo& info);
+  void OnInlineWebstoreInstall(int install_id,
+                               const std::string& webstore_item_id,
+                               const GURL& requestor_url);
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
 
   // App extensions related methods:
@@ -106,7 +110,12 @@ class ExtensionTabHelper : public TabContentsObserver,
 
   // ImageLoadingTracker::Observer.
   virtual void OnImageLoaded(SkBitmap* image, const ExtensionResource& resource,
-                             int index);
+                             int index) OVERRIDE;
+
+  // WebstoreInlineInstaller::Delegate.
+  virtual void OnInlineInstallSuccess(int install_id) OVERRIDE;
+  virtual void OnInlineInstallFailure(int install_id,
+                                      const std::string& error) OVERRIDE;
 
   // Data for app extensions ---------------------------------------------------
 

@@ -15,7 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/string_piece.h"
 #include "base/time.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/x509_cert_types.h"
 
 #if defined(OS_WIN)
@@ -52,7 +52,7 @@ typedef std::vector<scoped_refptr<X509Certificate> > CertificateList;
 // particular identity or end-entity certificate, such as an SSL server
 // identity or an SSL client certificate, and zero or more intermediate
 // certificates that may be used to build a path to a root certificate.
-class NET_API X509Certificate
+class NET_EXPORT X509Certificate
     : public base::RefCountedThreadSafe<X509Certificate> {
  public:
   // A handle to the certificate object in the underlying crypto library.
@@ -74,7 +74,7 @@ class NET_API X509Certificate
   typedef std::vector<OSCertHandle> OSCertHandles;
 
   // Predicate functor used in maps when X509Certificate is used as the key.
-  class NET_API LessThan {
+  class NET_EXPORT LessThan {
    public:
     bool operator() (X509Certificate* lhs,  X509Certificate* rhs) const;
   };
@@ -255,15 +255,6 @@ class NET_API X509Certificate
   // |*policy| and ownership transferred to the caller.
   static OSStatus CreateSSLClientPolicy(SecPolicyRef* policy);
 
-  // Creates a security policy for certificates used by SSL servers.
-  // |hostname| is an optionally-supplied string indicating the name to verify
-  // the server certificate as; if it is empty, no hostname verification will
-  // happen.
-  // If a policy is successfully created, it will be stored in |*policy| and
-  // ownership transferred to the caller.
-  static OSStatus CreateSSLServerPolicy(const std::string& hostname,
-                                        SecPolicyRef* policy);
-
   // Creates a security policy for basic X.509 validation. If the policy is
   // successfully created, it will be stored in |*policy| and ownership
   // transferred to the caller.
@@ -302,6 +293,12 @@ class NET_API X509Certificate
   //    this store so that we can close the system store when we finish
   //    searching for client certificates.
   static HCERTSTORE cert_store();
+#endif
+
+#if defined(OS_ANDROID)
+  // |chain_bytes| will contain the chain (including this certificate) encoded
+  // using GetChainDEREncodedBytes below.
+  void GetChainDEREncodedBytes(std::vector<std::string>* chain_bytes) const;
 #endif
 
 #if defined(USE_OPENSSL)
@@ -369,6 +366,7 @@ class NET_API X509Certificate
   FRIEND_TEST_ALL_PREFIXES(X509CertificateTest, Cache);
   FRIEND_TEST_ALL_PREFIXES(X509CertificateTest, IntermediateCertificates);
   FRIEND_TEST_ALL_PREFIXES(X509CertificateTest, SerialNumbers);
+  FRIEND_TEST_ALL_PREFIXES(X509CertificateTest, DigiNotarCerts);
   FRIEND_TEST_ALL_PREFIXES(X509CertificateNameVerifyTest, VerifyHostname);
 
   // Construct an X509Certificate from a handle to the certificate object
@@ -430,6 +428,11 @@ class NET_API X509Certificate
 
   // IsBlacklisted returns true if this certificate is explicitly blacklisted.
   bool IsBlacklisted() const;
+
+  // IsPublicKeyBlacklisted returns true iff one of |public_key_hashes| (which
+  // are SHA1 hashes of SubjectPublicKeyInfo structures) is explicitly blocked.
+  static bool IsPublicKeyBlacklisted(
+      const std::vector<SHA1Fingerprint>& public_key_hashes);
 
   // IsSHA1HashInSortedArray returns true iff |hash| is in |array|, a sorted
   // array of SHA1 hashes.

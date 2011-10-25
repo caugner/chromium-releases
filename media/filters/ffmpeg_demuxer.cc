@@ -9,6 +9,7 @@
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "media/base/data_buffer.h"
 #include "media/base/filter_host.h"
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
@@ -137,6 +138,10 @@ void FFmpegDemuxerStream::Stop() {
   DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
   base::AutoLock auto_lock(lock_);
   buffer_queue_.clear();
+  for (ReadQueue::iterator it = read_queue_.begin();
+       it != read_queue_.end(); ++it) {
+    it->Run(scoped_refptr<Buffer>(new DataBuffer(0)));
+  }
   read_queue_.clear();
   stopped_ = true;
 }
@@ -153,6 +158,15 @@ void FFmpegDemuxerStream::Read(const ReadCallback& read_callback) {
   DCHECK(!read_callback.is_null());
 
   base::AutoLock auto_lock(lock_);
+  // Don't accept any additional reads if we've been told to stop.
+  // The demuxer_ may have been destroyed in the pipleine thread.
+  //
+  // TODO(scherkus): it would be cleaner if we replied with an error message.
+  if (stopped_) {
+    read_callback.Run(scoped_refptr<Buffer>(new DataBuffer(0)));
+    return;
+  }
+
   if (!buffer_queue_.empty()) {
     // Dequeue a buffer send back.
     scoped_refptr<Buffer> buffer = buffer_queue_.front();
@@ -178,6 +192,7 @@ void FFmpegDemuxerStream::ReadTask(const ReadCallback& read_callback) {
   //
   // TODO(scherkus): it would be cleaner if we replied with an error message.
   if (stopped_) {
+    read_callback.Run(scoped_refptr<Buffer>(new DataBuffer(0)));
     return;
   }
 
@@ -331,7 +346,7 @@ void FFmpegDemuxer::set_host(FilterHost* filter_host) {
 }
 
 void FFmpegDemuxer::Initialize(DataSource* data_source,
-                               PipelineStatusCallback* callback) {
+                               const PipelineStatusCB& callback) {
   message_loop_->PostTask(
       FROM_HERE,
       NewRunnableMethod(this,
@@ -426,9 +441,8 @@ MessageLoop* FFmpegDemuxer::message_loop() {
 }
 
 void FFmpegDemuxer::InitializeTask(DataSource* data_source,
-                                   PipelineStatusCallback* callback) {
+                                   const PipelineStatusCB& callback) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
-  scoped_ptr<PipelineStatusCallback> callback_deleter(callback);
 
   data_source_ = data_source;
   if (host())
@@ -446,7 +460,7 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
   FFmpegGlue::GetInstance()->RemoveProtocol(this);
 
   if (result < 0) {
-    callback->Run(DEMUXER_ERROR_COULD_NOT_OPEN);
+    callback.Run(DEMUXER_ERROR_COULD_NOT_OPEN);
     return;
   }
 
@@ -456,7 +470,7 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
   // Fully initialize AVFormatContext by parsing the stream a little.
   result = av_find_stream_info(format_context_);
   if (result < 0) {
-    callback->Run(DEMUXER_ERROR_COULD_NOT_PARSE);
+    callback.Run(DEMUXER_ERROR_COULD_NOT_PARSE);
     return;
   }
 
@@ -472,7 +486,7 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
       AVStream* stream = format_context_->streams[i];
       // WebM is currently strictly VP8 and Vorbis.
       if (kDemuxerIsWebm && (stream->codec->codec_id != CODEC_ID_VP8 &&
-        stream->codec->codec_id != CODEC_ID_VORBIS)) {
+                             stream->codec->codec_id != CODEC_ID_VORBIS)) {
         packet_streams_.push_back(NULL);
         continue;
       }
@@ -486,7 +500,7 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
 
         if (stream->first_dts != static_cast<int64_t>(AV_NOPTS_VALUE)) {
           const base::TimeDelta first_dts = ConvertFromTimeBase(
-            stream->time_base, stream->first_dts);
+              stream->time_base, stream->first_dts);
           if (start_time_ == kNoTimestamp || first_dts < start_time_)
             start_time_ = first_dts;
         }
@@ -497,7 +511,7 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
     }
   }
   if (no_supported_streams) {
-    callback->Run(DEMUXER_ERROR_NO_SUPPORTED_STREAMS);
+    callback.Run(DEMUXER_ERROR_NO_SUPPORTED_STREAMS);
     return;
   }
   if (format_context_->duration != static_cast<int64_t>(AV_NOPTS_VALUE)) {
@@ -508,8 +522,8 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
         std::max(max_duration,
                  ConvertFromTimeBase(av_time_base, format_context_->duration));
   } else {
-    // If the duration is not a valid value. Assume that this is a live stream
-    // and we set duration to the maximum int64 number to represent infinity.
+    // The duration is not a valid value. Assume that this is a live stream
+    // and set duration to the maximum int64 number to represent infinity.
     max_duration = base::TimeDelta::FromMicroseconds(
         Limits::kMaxTimeInMicroseconds);
   }
@@ -519,11 +533,46 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
   if (start_time_ == kNoTimestamp)
     start_time_ = base::TimeDelta();
 
-  // Good to go: set the duration and notify we're done initializing.
+  // Good to go: set the duration and bitrate and notify we're done
+  // initializing.
   if (host())
     host()->SetDuration(max_duration);
   max_duration_ = max_duration;
-  callback->Run(PIPELINE_OK);
+
+  int bitrate = GetBitrate();
+  if (bitrate > 0)
+    data_source_->SetBitrate(bitrate);
+
+  callback.Run(PIPELINE_OK);
+}
+
+int FFmpegDemuxer::GetBitrate() {
+  DCHECK(format_context_);
+
+  // If there is a bitrate set on the container, use it.
+  if (format_context_->bit_rate > 0)
+    return format_context_->bit_rate;
+
+  // Then try to sum the bitrates individually per stream.
+  int bitrate = 0;
+  for (size_t i = 0; i < format_context_->nb_streams; ++i) {
+    AVCodecContext* codec_context = format_context_->streams[i]->codec;
+    bitrate += codec_context->bit_rate;
+  }
+  if (bitrate > 0)
+    return bitrate;
+
+  // If there isn't a bitrate set in the container or streams, but there is a
+  // valid duration, approximate the bitrate using the duration.
+  if (max_duration_.InMilliseconds() > 0 &&
+      max_duration_.InMicroseconds() < Limits::kMaxTimeInMicroseconds) {
+    int64 filesize_in_bytes;
+    if (GetSize(&filesize_in_bytes))
+      return 8000 * filesize_in_bytes / max_duration_.InMilliseconds();
+  }
+
+  // Bitrate could not be determined.
+  return 0;
 }
 
 void FFmpegDemuxer::SeekTask(base::TimeDelta time, const FilterStatusCB& cb) {

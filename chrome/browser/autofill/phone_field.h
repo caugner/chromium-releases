@@ -25,8 +25,7 @@ class PhoneField : public FormField {
  public:
   virtual ~PhoneField();
 
-  static FormField* Parse(AutofillScanner* scanner, bool is_ecml);
-  static FormField* ParseECML(AutofillScanner* scanner);
+  static FormField* Parse(AutofillScanner* scanner);
 
  protected:
   // FormField:
@@ -34,10 +33,7 @@ class PhoneField : public FormField {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseOneLinePhone);
-  FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseOneLinePhoneEcml);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseTwoLinePhone);
-  FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseTwoLinePhoneEcmlShipTo);
-  FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseTwoLinePhoneEcmlBillTo);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ThreePartPhoneNumber);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ThreePartPhoneNumberPrefixSuffix);
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ThreePartPhoneNumberPrefixSuffix2);
@@ -128,7 +124,7 @@ class PhoneField : public FormField {
   static struct Parser {
     RegexType regex;       // Field matching reg-ex.
     PhonePart phone_part;  // Index of the field.
-    int max_size;          // Max size of the field to match. 0 means any.
+    size_t max_size;       // Max size of the field to match. 0 means any.
   } phone_field_grammars_[];
 
   DISALLOW_COPY_AND_ASSIGN(PhoneField);

@@ -17,10 +17,11 @@ namespace media {
 
 class ChunkDemuxerClient;
 class ChunkDemuxerStream;
+class FFmpegURLProtocol;
 
 // Demuxer implementation that allows chunks of WebM media data to be passed
 // from JavaScript to the media stack.
-class ChunkDemuxer : public Demuxer {
+class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
  public:
   explicit ChunkDemuxer(ChunkDemuxerClient* client);
   virtual ~ChunkDemuxer();
@@ -40,6 +41,9 @@ class ChunkDemuxer : public Demuxer {
 
   // Methods used by an external object to control this demuxer.
   void FlushData();
+
+  // Appends media data to the stream. Returns false if this method
+  // is called in an invalid state.
   bool AppendData(const uint8* data, unsigned length);
   void EndOfStream(PipelineStatus status);
   bool HasEnded();
@@ -51,7 +55,7 @@ class ChunkDemuxer : public Demuxer {
     INITIALIZING,
     INITIALIZED,
     ENDED,
-    INIT_ERROR,
+    PARSE_ERROR,
     SHUTDOWN,
   };
 
@@ -64,7 +68,7 @@ class ChunkDemuxer : public Demuxer {
 
   // Generates an AVFormatContext for the INFO & TRACKS elements contained
   // in |data|. Returns NULL if parsing |data| fails.
-  AVFormatContext* CreateFormatContext(const uint8* data, int size) const;
+  AVFormatContext* CreateFormatContext(const uint8* data, int size);
 
   // Sets up |audio_| & |video_| DemuxerStreams based on the data in
   // |format_context_|. Returns false if no valid audio or video stream were
@@ -75,8 +79,9 @@ class ChunkDemuxer : public Demuxer {
   // contain one or more WebM Clusters. Returns false if parsing the data fails.
   bool ParseAndAppendData_Locked(const uint8* data, int length);
 
-  // Called when initialization fails. Handles calling & clearing init_cb_.
-  void InitFailed_Locked();
+  // Reports an error and puts the demuxer in a state where it won't accept more
+  // data.
+  void ReportError_Locked(PipelineStatus error);
 
   base::Lock lock_;
   State state_;
@@ -88,6 +93,15 @@ class ChunkDemuxer : public Demuxer {
   scoped_refptr<ChunkDemuxerStream> audio_;
   scoped_refptr<ChunkDemuxerStream> video_;
 
+  // Backing buffer for |url_protocol_|.
+  scoped_array<uint8> url_protocol_buffer_;
+
+  // Protocol used by |format_context_|. It must outlive the context object.
+  scoped_ptr<FFmpegURLProtocol> url_protocol_;
+
+  // FFmpeg format context for this demuxer. It is created by
+  // av_open_input_file() during demuxer initialization and cleaned up with
+  // DestroyAVFormatContext() in the destructor.
   AVFormatContext* format_context_;
 
   int64 buffered_bytes_;

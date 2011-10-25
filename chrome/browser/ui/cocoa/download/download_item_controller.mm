@@ -10,7 +10,7 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/download/download_item.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_shelf_context_menu.h"
 #include "chrome/browser/download/download_util.h"
@@ -21,6 +21,7 @@
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/ui_localizer.h"
+#include "content/browser/download/download_item.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
@@ -184,7 +185,8 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
       DCHECK_EQ(downloadModel->download()->GetDangerType(),
                 DownloadItem::DANGEROUS_FILE);
       alertIcon = rb.GetNativeImageNamed(IDR_WARNING);
-      if (downloadModel->download()->is_extension_install()) {
+      if (ChromeDownloadManagerDelegate::IsExtensionDownload(
+              downloadModel->download())) {
         dangerousWarning = l10n_util::GetNSStringWithFixup(
             IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
         confirmButtonTitle = l10n_util::GetNSStringWithFixup(

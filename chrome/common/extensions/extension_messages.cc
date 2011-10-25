@@ -8,26 +8,29 @@
 #include "content/common/common_param_traits.h"
 
 ExtensionMsg_Loaded_Params::ExtensionMsg_Loaded_Params()
-    : location(Extension::INVALID) {
-}
+    : location(Extension::INVALID) {}
 
-ExtensionMsg_Loaded_Params::~ExtensionMsg_Loaded_Params() {
-}
+ExtensionMsg_Loaded_Params::~ExtensionMsg_Loaded_Params() {}
 
 ExtensionMsg_Loaded_Params::ExtensionMsg_Loaded_Params(
     const ExtensionMsg_Loaded_Params& other)
     : manifest(other.manifest->DeepCopy()),
       location(other.location),
       path(other.path),
+      apis(other.apis),
+      explicit_hosts(other.explicit_hosts),
+      scriptable_hosts(other.scriptable_hosts),
       id(other.id),
-      creation_flags(other.creation_flags) {
-}
+      creation_flags(other.creation_flags) {}
 
 ExtensionMsg_Loaded_Params::ExtensionMsg_Loaded_Params(
     const Extension* extension)
     : manifest(new DictionaryValue()),
       location(extension->location()),
       path(extension->path()),
+      apis(extension->GetActivePermissions()->apis()),
+      explicit_hosts(extension->GetActivePermissions()->explicit_hosts()),
+      scriptable_hosts(extension->GetActivePermissions()->scriptable_hosts()),
       id(extension->id()),
       creation_flags(extension->creation_flags()) {
   // As we need more bits of extension data in the renderer, add more keys to
@@ -61,6 +64,9 @@ scoped_refptr<Extension>
                         &error));
   if (!extension.get())
     LOG(ERROR) << "Error deserializing extension: " << error;
+  else
+    extension->SetActivePermissions(
+        new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts));
 
   return extension;
 }
@@ -101,8 +107,15 @@ bool ParamTraits<URLPattern>::Read(const Message* m, void** iter,
       !ReadParam(m, iter, &spec))
     return false;
 
+  // TODO(jstritar): We don't want the URLPattern to fail parsing when the
+  // scheme is invalid. Instead, the pattern should parse but it should not
+  // match the invalid patterns. We get around this by setting the valid
+  // schemes after parsing the pattern. Update these method calls once we can
+  // ignore scheme validation with URLPattern parse options. crbug.com/90544
+  p->SetValidSchemes(URLPattern::SCHEME_ALL);
+  URLPattern::ParseResult result = p->Parse(spec, URLPattern::IGNORE_PORTS);
   p->SetValidSchemes(valid_schemes);
-  return URLPattern::PARSE_SUCCESS == p->Parse(spec, URLPattern::IGNORE_PORTS);
+  return URLPattern::PARSE_SUCCESS == result;
 }
 
 void ParamTraits<URLPattern>::Log(const param_type& p, std::string* l) {
@@ -116,9 +129,7 @@ void ParamTraits<URLPatternSet>::Write(Message* m, const param_type& p) {
 bool ParamTraits<URLPatternSet>::Read(const Message* m, void** iter,
                                         param_type* p) {
   std::set<URLPattern> patterns;
-  bool success =
-      ReadParam(m, iter, &patterns);
-  if (!success)
+  if (!ReadParam(m, iter, &patterns))
     return false;
 
   for (std::set<URLPattern>::iterator i = patterns.begin();
@@ -131,12 +142,35 @@ void ParamTraits<URLPatternSet>::Log(const param_type& p, std::string* l) {
   LogParam(p.patterns(), l);
 }
 
+void ParamTraits<ExtensionAPIPermission::ID>::Write(
+    Message* m, const param_type& p) {
+  WriteParam(m, static_cast<int>(p));
+}
+
+bool ParamTraits<ExtensionAPIPermission::ID>::Read(
+    const Message* m, void** iter, param_type* p) {
+  int api_id = -2;
+  if (!ReadParam(m, iter, &api_id))
+    return false;
+
+  *p = static_cast<ExtensionAPIPermission::ID>(api_id);
+  return true;
+}
+
+void ParamTraits<ExtensionAPIPermission::ID>::Log(
+    const param_type& p, std::string* l) {
+  LogParam(static_cast<int>(p), l);
+}
+
 void ParamTraits<ExtensionMsg_Loaded_Params>::Write(Message* m,
                                                     const param_type& p) {
   WriteParam(m, p.location);
   WriteParam(m, p.path);
   WriteParam(m, *(p.manifest));
   WriteParam(m, p.creation_flags);
+  WriteParam(m, p.apis);
+  WriteParam(m, p.explicit_hosts);
+  WriteParam(m, p.scriptable_hosts);
 }
 
 bool ParamTraits<ExtensionMsg_Loaded_Params>::Read(const Message* m,
@@ -146,7 +180,10 @@ bool ParamTraits<ExtensionMsg_Loaded_Params>::Read(const Message* m,
   return ReadParam(m, iter, &p->location) &&
          ReadParam(m, iter, &p->path) &&
          ReadParam(m, iter, p->manifest.get()) &&
-         ReadParam(m, iter, &p->creation_flags);
+         ReadParam(m, iter, &p->creation_flags) &&
+         ReadParam(m, iter, &p->apis) &&
+         ReadParam(m, iter, &p->explicit_hosts) &&
+         ReadParam(m, iter, &p->scriptable_hosts);
 }
 
 void ParamTraits<ExtensionMsg_Loaded_Params>::Log(const param_type& p,

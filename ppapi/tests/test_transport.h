@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "ppapi/tests/test_case.h"
 
 struct PPB_Transport_Dev;
@@ -31,6 +31,7 @@ class TestTransport : public TestCase {
 
   std::string TestCreate();
   std::string TestConnect();
+  std::string TestSetProperty();
   std::string TestSendDataTcp();
   std::string TestSendDataUdp();
   std::string TestConnectAndCloseTcp();

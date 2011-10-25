@@ -12,6 +12,7 @@
 #include "chrome/browser/autofill/autofill_common_test.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -22,12 +23,12 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/translate_helper.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/test_url_fetcher_factory.h"
+#include "content/test/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
@@ -68,10 +69,6 @@ class AutofillTest : public InProcessBrowserTest {
   AutofillTest() {
     set_show_window(true);
     EnableDOMAutomation();
-  }
-
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    URLFetcher::set_factory(&url_fetcher_factory_);
   }
 
   void CreateTestProfile() {
@@ -466,7 +463,7 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_AutofillAfterReload) {
   TryBasicFormFill();
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_CHROMEOS)
 // Test that autofill works after page translation.
 // http://crbug.com/81451
 IN_PROC_BROWSER_TEST_F(AutofillTest, DISABLED_AutofillAfterTranslate) {
@@ -510,11 +507,11 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, AutofillAfterTranslate) {
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(browser(), url));
 
   // Get translation bar.
-  render_view_host()->OnMessageReceived(ViewHostMsg_TranslateLanguageDetermined(
-      0, "ja", true));
+  render_view_host()->OnMessageReceived(
+      ChromeViewHostMsg_TranslateLanguageDetermined(0, "ja", true));
   TranslateInfoBarDelegate* infobar =
-      browser()->GetSelectedTabContentsWrapper()->
-        GetInfoBarDelegateAt(0)->AsTranslateInfoBarDelegate();
+      browser()->GetSelectedTabContentsWrapper()->infobar_tab_helper()->
+          GetInfoBarDelegateAt(0)->AsTranslateInfoBarDelegate();
 
   ASSERT_TRUE(infobar != NULL);
   EXPECT_EQ(TranslateInfoBarDelegate::BEFORE_TRANSLATE, infobar->type());

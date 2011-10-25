@@ -15,29 +15,28 @@
 #include "base/i18n/rtl.h"
 #include "base/i18n/time_formatting.h"
 #include "base/lazy_instance.h"
-#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
-#include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/download/download_create_info.h"
 #include "chrome/browser/download/download_extensions.h"
-#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/download/download_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/time_format.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/download_create_info.h"
+#include "content/browser/download/download_file.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -72,7 +71,7 @@
 #endif  // defined(TOOLKIT_GTK)
 #endif  // defined(TOOLKIT_USES_GTK)
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include "base/win/scoped_comptr.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -90,81 +89,7 @@ namespace download_util {
 // so that the animation ends faded out.
 static const int kCompleteAnimationCycles = 5;
 
-// The maximum number of 'uniquified' files we will try to create.
-// This is used when the filename we're trying to download is already in use,
-// so we create a new unique filename by appending " (nnn)" before the
-// extension, where 1 <= nnn <= kMaxUniqueFiles.
-// Also used by code that cleans up said files.
-static const int kMaxUniqueFiles = 100;
-
 namespace {
-
-#if defined(OS_WIN)
-// Returns whether the specified extension is automatically integrated into the
-// windows shell.
-bool IsShellIntegratedExtension(const string16& extension) {
-  string16 extension_lower = StringToLowerASCII(extension);
-
-  static const wchar_t* const integrated_extensions[] = {
-    // See <http://msdn.microsoft.com/en-us/library/ms811694.aspx>.
-    L"local",
-    // Right-clicking on shortcuts can be magical.
-    L"lnk",
-  };
-
-  for (int i = 0; i < arraysize(integrated_extensions); ++i) {
-    if (extension_lower == integrated_extensions[i])
-      return true;
-  }
-
-  // See <http://www.juniper.net/security/auto/vulnerabilities/vuln2612.html>.
-  // That vulnerability report is not exactly on point, but files become magical
-  // if their end in a CLSID.  Here we block extensions that look like CLSIDs.
-  if (!extension_lower.empty() && extension_lower[0] == L'{' &&
-      extension_lower[extension_lower.length() - 1] == L'}')
-    return true;
-
-  return false;
-}
-
-// Returns whether the specified file name is a reserved name on windows.
-// This includes names like "com2.zip" (which correspond to devices) and
-// desktop.ini and thumbs.db which have special meaning to the windows shell.
-bool IsReservedName(const string16& filename) {
-  // This list is taken from the MSDN article "Naming a file"
-  // http://msdn2.microsoft.com/en-us/library/aa365247(VS.85).aspx
-  // I also added clock$ because GetSaveFileName seems to consider it as a
-  // reserved name too.
-  static const wchar_t* const known_devices[] = {
-    L"con", L"prn", L"aux", L"nul", L"com1", L"com2", L"com3", L"com4", L"com5",
-    L"com6", L"com7", L"com8", L"com9", L"lpt1", L"lpt2", L"lpt3", L"lpt4",
-    L"lpt5", L"lpt6", L"lpt7", L"lpt8", L"lpt9", L"clock$"
-  };
-  string16 filename_lower = StringToLowerASCII(filename);
-
-  for (int i = 0; i < arraysize(known_devices); ++i) {
-    // Exact match.
-    if (filename_lower == known_devices[i])
-      return true;
-    // Starts with "DEVICE.".
-    if (filename_lower.find(string16(known_devices[i]) + L".") == 0)
-      return true;
-  }
-
-  static const wchar_t* const magic_names[] = {
-    // These file names are used by the "Customize folder" feature of the shell.
-    L"desktop.ini",
-    L"thumbs.db",
-  };
-
-  for (int i = 0; i < arraysize(magic_names); ++i) {
-    if (filename_lower == magic_names[i])
-      return true;
-  }
-
-  return false;
-}
-#endif  // OS_WIN
 
 void GenerateFileNameInternal(const GURL& url,
                               const std::string& content_disposition,
@@ -172,39 +97,13 @@ void GenerateFileNameInternal(const GURL& url,
                               const std::string& suggested_name,
                               const std::string& mime_type,
                               FilePath* generated_name) {
-
   string16 default_file_name(
       l10n_util::GetStringUTF16(IDS_DEFAULT_DOWNLOAD_FILENAME));
 
-  string16 new_name = net::GetSuggestedFilename(GURL(url),
-                                                content_disposition,
-                                                referrer_charset,
-                                                suggested_name,
-                                                default_file_name);
-
-  // TODO(evan): this code is totally wrong -- we should just generate
-  // Unicode filenames and do all this encoding switching at the end.
-  // However, I'm just shuffling wrong code around, at least not adding
-  // to it.
-#if defined(OS_WIN)
-  *generated_name = FilePath(new_name);
-#else
-  *generated_name = FilePath(
-      base::SysWideToNativeMB(UTF16ToWide(new_name)));
-#endif
-
-  DCHECK(!generated_name->empty());
-
-  GenerateSafeFileName(mime_type, generated_name);
+  *generated_name = net::GenerateFileName(url, content_disposition,
+                                          referrer_charset, suggested_name,
+                                          mime_type, default_file_name);
 }
-
-// All possible error codes from the network module. Note that the error codes
-// are all positive (since histograms expect positive sample values).
-const int kAllNetErrorCodes[] = {
-#define NET_ERROR(label, value) -(value),
-#include "net/base/net_error_list.h"
-#undef NET_ERROR
-};
 
 }  // namespace
 
@@ -235,13 +134,6 @@ const FilePath& GetDefaultDownloadDirectory() {
   return g_default_download_directory.Get().path();
 }
 
-bool CreateTemporaryFileForDownload(FilePath* temp_file) {
-  if (file_util::CreateTemporaryFileInDir(GetDefaultDownloadDirectory(),
-                                          temp_file))
-    return true;
-  return file_util::CreateTemporaryFile(temp_file);
-}
-
 bool DownloadPathIsDangerous(const FilePath& download_path) {
   FilePath desktop_dir;
   if (!PathService::Get(chrome::DIR_USER_DESKTOP, &desktop_dir)) {
@@ -249,43 +141,6 @@ bool DownloadPathIsDangerous(const FilePath& download_path) {
     return false;
   }
   return (download_path == desktop_dir);
-}
-
-void GenerateExtension(const FilePath& file_name,
-                       const std::string& mime_type,
-                       FilePath::StringType* generated_extension) {
-  // We're worried about two things here:
-  //
-  // 1) Usability.  If the site fails to provide a file extension, we want to
-  //    guess a reasonable file extension based on the content type.
-  //
-  // 2) Shell integration.  Some file extensions automatically integrate with
-  //    the shell.  We block these extensions to prevent a malicious web site
-  //    from integrating with the user's shell.
-
-  // See if our file name already contains an extension.
-  FilePath::StringType extension = file_name.Extension();
-  if (!extension.empty())
-    extension.erase(extension.begin());  // Erase preceding '.'.
-
-#if defined(OS_WIN)
-  static const FilePath::CharType default_extension[] =
-      FILE_PATH_LITERAL("download");
-
-  // Rename shell-integrated extensions.
-  if (IsShellIntegratedExtension(extension))
-    extension.assign(default_extension);
-#endif
-
-  if (extension.empty()) {
-    // The GetPreferredExtensionForMimeType call will end up going to disk.  Do
-    // this on another thread to avoid slowing the IO thread.
-    // http://crbug.com/61827
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
-    net::GetPreferredExtensionForMimeType(mime_type, &extension);
-  }
-
-  generated_extension->swap(extension);
 }
 
 void GenerateFileNameFromRequest(const DownloadItem& download_item,
@@ -302,94 +157,9 @@ void GenerateFileNameFromSuggestedName(const GURL& url,
                                        const std::string& suggested_name,
                                        const std::string& mime_type,
                                        FilePath* generated_name) {
+  // TODO(asanka): We should pass in a valid referrer_charset here.
   GenerateFileNameInternal(url, std::string(), std::string(),
                            suggested_name, mime_type, generated_name);
-}
-
-void GenerateFileName(const GURL& url,
-                      const std::string& content_disposition,
-                      const std::string& referrer_charset,
-                      const std::string& mime_type,
-                      FilePath* generated_name) {
-  GenerateFileNameInternal(url, content_disposition, referrer_charset,
-                           std::string(), mime_type, generated_name);
-}
-
-void GenerateSafeFileName(const std::string& mime_type, FilePath* file_name) {
-  // Make sure we get the right file extension
-  FilePath::StringType extension;
-  GenerateExtension(*file_name, mime_type, &extension);
-  *file_name = file_name->ReplaceExtension(extension);
-
-#if defined(OS_WIN)
-  // Prepend "_" to the file name if it's a reserved name
-  FilePath::StringType leaf_name = file_name->BaseName().value();
-  DCHECK(!leaf_name.empty());
-  if (IsReservedName(leaf_name)) {
-    leaf_name = FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
-    *file_name = file_name->DirName();
-    if (file_name->value() == FilePath::kCurrentDirectory) {
-      *file_name = FilePath(leaf_name);
-    } else {
-      *file_name = file_name->Append(leaf_name);
-    }
-  }
-#endif
-}
-
-void RecordDownloadCount(DownloadCountTypes type) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "Download.Counts", type, DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
-}
-
-void RecordDownloadCompleted(const base::TimeTicks& start) {
-  download_util::RecordDownloadCount(download_util::COMPLETED_COUNT);
-  UMA_HISTOGRAM_LONG_TIMES("Download.Time", (base::TimeTicks::Now() - start));
-}
-
-void RecordDownloadInterrupted(int error, int64 received, int64 total) {
-  download_util::RecordDownloadCount(download_util::INTERRUPTED_COUNT);
-  UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-      "Download.InterruptedError",
-      -error,
-      base::CustomHistogram::ArrayToCustomRanges(
-          kAllNetErrorCodes, arraysize(kAllNetErrorCodes)));
-
-  // The maximum should be 2^kBuckets, to have the logarithmic bucket
-  // boundaries fall on powers of 2.
-  static const int kBuckets = 30;
-  static const int64 kMaxKb = 1 << kBuckets;  // One Terabyte, in Kilobytes.
-  int64 delta_bytes = total - received;
-  bool unknown_size = total <= 0;
-  int64 received_kb = received / 1024;
-  int64 total_kb = total / 1024;
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedReceivedSizeK",
-                              received_kb,
-                              1,
-                              kMaxKb,
-                              kBuckets);
-  if (!unknown_size) {
-    UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedTotalSizeK",
-                                total_kb,
-                                1,
-                                kMaxKb,
-                                kBuckets);
-    if (delta_bytes >= 0) {
-      UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedOverrunBytes",
-                                  delta_bytes,
-                                  1,
-                                  kMaxKb,
-                                  kBuckets);
-    } else {
-      UMA_HISTOGRAM_CUSTOM_COUNTS("Download.InterruptedUnderrunBytes",
-                                  -delta_bytes,
-                                  1,
-                                  kMaxKb,
-                                  kBuckets);
-    }
-  }
-
-  UMA_HISTOGRAM_BOOLEAN("Download.InterruptedUnknownSize", unknown_size);
 }
 
 // Download progress painting --------------------------------------------------
@@ -621,7 +391,10 @@ void DragDownload(const DownloadItem* download,
                 download->GetFileNameToReportUser().LossyDisplayName());
   }
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
 
   // Run the drag and drop loop
@@ -769,7 +542,10 @@ string16 GetProgressStatusText(DownloadItem* download) {
 void UpdateAppIconDownloadProgress(int download_count,
                                    bool progress_known,
                                    float progress) {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   // Taskbar progress bar is only supported on Win7.
   if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
@@ -810,109 +586,14 @@ void UpdateAppIconDownloadProgress(int download_count,
 }
 #endif
 
-// Appends the passed the number between parenthesis the path before the
-// extension.
-void AppendNumberToPath(FilePath* path, int number) {
-  *path = path->InsertBeforeExtensionASCII(StringPrintf(" (%d)", number));
-}
-
-// Attempts to find a number that can be appended to that path to make it
-// unique. If |path| does not exist, 0 is returned.  If it fails to find such
-// a number, -1 is returned.
-int GetUniquePathNumber(const FilePath& path) {
-  if (!file_util::PathExists(path))
-    return 0;
-
-  FilePath new_path;
-  for (int count = 1; count <= kMaxUniqueFiles; ++count) {
-    new_path = FilePath(path);
-    AppendNumberToPath(&new_path, count);
-
-    if (!file_util::PathExists(new_path))
-      return count;
-  }
-
-  return -1;
-}
-
-void DownloadUrl(
-    const GURL& url,
-    const GURL& referrer,
-    const std::string& referrer_charset,
-    const DownloadSaveInfo& save_info,
-    ResourceDispatcherHost* rdh,
-    int render_process_host_id,
-    int render_view_id,
-    const content::ResourceContext* context) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  rdh->BeginDownload(url,
-                     referrer,
-                     save_info,
-                     true,  // Show "Save as" UI.
-                     render_process_host_id,
-                     render_view_id,
-                     *context);
-}
-
-void NotifyDownloadInitiated(int render_process_id, int render_view_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  RenderViewHost* rvh = RenderViewHost::FromID(render_process_id,
-                                               render_view_id);
-  if (!rvh)
-    return;
-
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_DOWNLOAD_INITIATED, Source<RenderViewHost>(rvh),
-      NotificationService::NoDetails());
-}
-
 int GetUniquePathNumberWithCrDownload(const FilePath& path) {
-  if (!file_util::PathExists(path) &&
-      !file_util::PathExists(GetCrDownloadPath(path)))
-    return 0;
-
-  FilePath new_path;
-  for (int count = 1; count <= kMaxUniqueFiles; ++count) {
-    new_path = FilePath(path);
-    AppendNumberToPath(&new_path, count);
-
-    if (!file_util::PathExists(new_path) &&
-        !file_util::PathExists(GetCrDownloadPath(new_path)))
-      return count;
-  }
-
-  return -1;
-}
-
-namespace {
-
-// NOTE: If index is 0, deletes files that do not have the " (nnn)" appended.
-void DeleteUniqueDownloadFile(const FilePath& path, int index) {
-  FilePath new_path(path);
-  if (index > 0)
-    AppendNumberToPath(&new_path, index);
-  file_util::Delete(new_path, false);
-}
-
-}  // namespace
-
-void EraseUniqueDownloadFiles(const FilePath& path) {
-  FilePath cr_path = GetCrDownloadPath(path);
-
-  for (int index = 0; index <= kMaxUniqueFiles; ++index) {
-    DeleteUniqueDownloadFile(path, index);
-    DeleteUniqueDownloadFile(cr_path, index);
-  }
+  return DownloadFile::GetUniquePathNumberWithSuffix(
+      path, FILE_PATH_LITERAL(".crdownload"));
 }
 
 FilePath GetCrDownloadPath(const FilePath& suggested_path) {
-  FilePath::StringType file_name;
-  base::SStringPrintf(
-      &file_name,
-      PRFilePathLiteral FILE_PATH_LITERAL(".crdownload"),
-      suggested_path.value().c_str());
-  return FilePath(file_name);
+  return DownloadFile::AppendSuffixToPath(
+      suggested_path, FILE_PATH_LITERAL(".crdownload"));
 }
 
 }  // namespace download_util

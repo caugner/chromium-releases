@@ -6,9 +6,11 @@
 
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_var.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
+#include "ppapi/shared_impl/var.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -16,26 +18,22 @@ namespace {
 // PPP_Var plugin --------------------------------------------------------------
 
 void AddRefVar(PP_Var var) {
-  PluginVarTracker::GetInstance()->AddRef(var);
+  PluginResourceTracker::GetInstance()->var_tracker().AddRefVar(var);
 }
 
 void ReleaseVar(PP_Var var) {
-  PluginVarTracker::GetInstance()->Release(var);
+  PluginResourceTracker::GetInstance()->var_tracker().ReleaseVar(var);
 }
 
 PP_Var VarFromUtf8(PP_Module module, const char* data, uint32_t len) {
-  PP_Var ret = {};
-  ret.type = PP_VARTYPE_STRING;
-  ret.value.as_id = PluginVarTracker::GetInstance()->MakeString(data, len);
-  return ret;
+  return StringVar::StringToPPVar(module, data, len);
 }
 
 const char* VarToUtf8(PP_Var var, uint32_t* len) {
-  const std::string* str =
-      PluginVarTracker::GetInstance()->GetExistingString(var);
+  StringVar* str = StringVar::FromPPVar(var);
   if (str) {
-    *len = static_cast<uint32_t>(str->size());
-    return str->c_str();
+    *len = static_cast<uint32_t>(str->value().size());
+    return str->value().c_str();
   }
   *len = 0;
   return NULL;
@@ -82,4 +80,4 @@ bool PPB_Var_Proxy::OnMessageReceived(const IPC::Message& msg) {
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/tab_contents/infobar_container.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 
 class InfoBar;
 class InfoBarGtk;
@@ -38,8 +38,7 @@ typedef struct _GtkWidget GtkWidget;
 // we can't just overlap the widgets.
 class InfoBarContainerGtk : public InfoBarContainer {
  public:
-  explicit InfoBarContainerGtk(InfoBarContainer::Delegate* delegate,
-                               Profile* profile);
+  InfoBarContainerGtk(InfoBarContainer::Delegate* delegate, Profile* profile);
   virtual ~InfoBarContainerGtk();
 
   // Get the native widget.
@@ -87,7 +86,7 @@ class InfoBarContainerGtk : public InfoBarContainer {
   std::vector<InfoBarGtk*> infobars_gtk_;
 
   // VBox that holds the info bars.
-  OwnedWidgetGtk container_;
+  ui::OwnedWidgetGtk container_;
 
   DISALLOW_COPY_AND_ASSIGN(InfoBarContainerGtk);
 };

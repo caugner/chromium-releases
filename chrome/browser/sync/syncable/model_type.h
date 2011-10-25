@@ -20,6 +20,7 @@
 namespace base {
 class ListValue;
 class StringValue;
+class Value;
 }
 
 namespace sync_pb {
@@ -112,6 +113,8 @@ ModelType GetModelTypeFromExtensionFieldNumber(int field_number);
 // a model type.
 int GetExtensionFieldNumberFromModelType(ModelType model_type);
 
+// TODO(sync): The functions below badly need some cleanup.
+
 // Returns a string that represents the name of |model_type|.
 std::string ModelTypeToString(ModelType model_type);
 
@@ -120,6 +123,9 @@ std::string ModelTypeToString(ModelType model_type);
 // Caller takes ownership of returned value.
 base::StringValue* ModelTypeToValue(ModelType model_type);
 
+// Converts a Value into a ModelType - complement to ModelTypeToValue().
+ModelType ModelTypeFromValue(const base::Value& value);
+
 std::string ModelTypeSetToString(const ModelTypeSet& model_types);
 
 // Returns the ModelType corresponding to the name |model_type_string|.
@@ -127,20 +133,18 @@ ModelType ModelTypeFromString(const std::string& model_type_string);
 
 std::string ModelTypeBitSetToString(const ModelTypeBitSet& model_types);
 
-// Converts a string into a model type bitset. If successful, returns true. If
-// failed to parse string, returns false and model_types is unspecified.
-bool ModelTypeBitSetFromString(
-    const std::string& model_type_bitset_string,
-    ModelTypeBitSet* model_types);
-
 // Convert a ModelTypeSet to a ModelTypeBitSet.
 ModelTypeBitSet ModelTypeBitSetFromSet(const ModelTypeSet& set);
 
 // Caller takes ownership of returned list.
 base::ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types);
 
+ModelTypeBitSet ModelTypeBitSetFromValue(const base::ListValue& value);
+
 // Caller takes ownership of returned list.
 base::ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types);
+
+ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value);
 
 // Returns a string corresponding to the syncable tag for this datatype.
 std::string ModelTypeToRootTag(ModelType type);
@@ -153,14 +157,20 @@ void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time);
 // subscribing to server-issued notifications).  Returns true iff
 // |model_type| was a real model type and |notification_type| was
 // filled in.
-bool RealModelTypeToint(ModelType model_type,
+bool RealModelTypeToNotificationType(ModelType model_type,
                                      std::string* notification_type);
 
 // Converts a notification type to a real model type.  Returns true
 // iff |notification_type| was the notification type of a real model
 // type and |model_type| was filled in.
-bool intToRealModelType(const std::string& notification_type,
+bool NotificationTypeToRealModelType(const std::string& notification_type,
                                      ModelType* model_type);
+
+// Returns a ModelTypeSet with all real model types.
+ModelTypeSet GetAllRealModelTypes();
+
+// Returns true if |model_type| is a real datatype
+bool IsRealDataType(ModelType model_type);
 
 }  // namespace syncable
 

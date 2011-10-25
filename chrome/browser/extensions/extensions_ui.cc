@@ -138,14 +138,14 @@ ChromeWebUIDataSource* CreateExtensionsUIHTMLSource() {
       l10n_util::GetStringFUTF16(IDS_EXTENSIONS_NONE_INSTALLED_SUGGEST_GALLERY,
           ASCIIToUTF16("<a href='") +
               ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
-                  GURL(Extension::ChromeStoreLaunchURL())).spec()) +
+                  GURL(extension_urls::GetWebstoreLaunchURL())).spec()) +
               ASCIIToUTF16("'>"),
           ASCIIToUTF16("</a>")));
 
   source->AddString("getMoreExtensions",
       ASCIIToUTF16("<a href='") +
       ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
-          GURL(Extension::ChromeStoreLaunchURL())).spec()) +
+          GURL(extension_urls::GetWebstoreLaunchURL())).spec()) +
       ASCIIToUTF16("'>") +
       l10n_util::GetStringUTF16(IDS_GET_MORE_EXTENSIONS) +
       ASCIIToUTF16("</a>"));
@@ -242,8 +242,8 @@ void ExtensionsDOMHandler::HandleRequestExtensionsData(const ListValue* args) {
   }
   results.Set("extensions", extensions_list);
 
-  bool developer_mode = web_ui_->GetProfile()->GetPrefs()
-      ->GetBoolean(prefs::kExtensionsUIDeveloperMode);
+  bool developer_mode = Profile::FromWebUI(web_ui_)->GetPrefs()->
+      GetBoolean(prefs::kExtensionsUIDeveloperMode);
   results.SetBoolean("developerMode", developer_mode);
 
   web_ui_->CallJavascriptFunction("returnExtensionsData", results);
@@ -282,16 +282,17 @@ void ExtensionsDOMHandler::RegisterForNotifications() {
 ExtensionUninstallDialog* ExtensionsDOMHandler::GetExtensionUninstallDialog() {
   if (!extension_uninstall_dialog_.get()) {
     extension_uninstall_dialog_.reset(
-        new ExtensionUninstallDialog(web_ui_->GetProfile()));
+        new ExtensionUninstallDialog(Profile::FromWebUI(web_ui_)));
   }
   return extension_uninstall_dialog_.get();
 }
 
 void ExtensionsDOMHandler::HandleToggleDeveloperMode(const ListValue* args) {
-  bool developer_mode = web_ui_->GetProfile()->GetPrefs()
-      ->GetBoolean(prefs::kExtensionsUIDeveloperMode);
-  web_ui_->GetProfile()->GetPrefs()->SetBoolean(
-      prefs::kExtensionsUIDeveloperMode, !developer_mode);
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  bool developer_mode =
+      profile->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
+  profile->GetPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode,
+                                  !developer_mode);
 }
 
 void ExtensionsDOMHandler::HandleInspectMessage(const ListValue* args) {
@@ -338,7 +339,7 @@ void ExtensionsDOMHandler::HandleEnableMessage(const ListValue* args) {
     ExtensionPrefs* prefs = extension_service_->extension_prefs();
     if (prefs->DidExtensionEscalatePermissions(extension_id)) {
       ShowExtensionDisabledDialog(extension_service_,
-                                  web_ui_->GetProfile(), extension);
+                                  Profile::FromWebUI(web_ui_), extension);
     } else {
       extension_service_->EnableExtension(extension_id);
     }
@@ -450,7 +451,7 @@ void ExtensionsDOMHandler::HandleOptionsMessage(const ListValue* args) {
   const Extension* extension = GetExtension(args);
   if (!extension || extension->options_url().is_empty())
     return;
-  web_ui_->GetProfile()->GetExtensionProcessManager()->OpenOptionsPage(
+  Profile::FromWebUI(web_ui_)->GetExtensionProcessManager()->OpenOptionsPage(
       extension, NULL);
 }
 
@@ -643,7 +644,7 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
       ExtensionIconSource::GetIconURL(extension,
                                       Extension::EXTENSION_ICON_MEDIUM,
                                       ExtensionIconSet::MATCH_BIGGER,
-                                      !enabled);
+                                      !enabled, NULL);
   extension_data->SetString("id", extension->id());
   extension_data->SetString("name", extension->name());
   extension_data->SetString("description", extension->description());
@@ -757,8 +758,9 @@ void ExtensionsDOMHandler::GetActivePagesForExtensionProcess(
       continue;
     }
 
-    result->push_back(ExtensionPage(url, process->id(), host->routing_id(),
-                                    process->profile()->IsOffTheRecord()));
+    result->push_back(
+        ExtensionPage(url, process->id(), host->routing_id(),
+                      process->browser_context()->IsOffTheRecord()));
   }
 }
 
@@ -777,15 +779,16 @@ ExtensionsDOMHandler::~ExtensionsDOMHandler() {
 // ExtensionsDOMHandler, public: -----------------------------------------------
 
 ExtensionsUI::ExtensionsUI(TabContents* contents) : ChromeWebUI(contents) {
-  ExtensionService *exstension_service =
+  ExtensionService *extension_service =
       GetProfile()->GetOriginalProfile()->GetExtensionService();
 
-  ExtensionsDOMHandler* handler = new ExtensionsDOMHandler(exstension_service);
+  ExtensionsDOMHandler* handler = new ExtensionsDOMHandler(extension_service);
   AddMessageHandler(handler);
   handler->Attach(this);
 
   // Set up the chrome://extensions/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(
       CreateExtensionsUIHTMLSource());
 }
 

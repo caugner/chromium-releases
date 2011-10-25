@@ -45,7 +45,7 @@ ChromeWebUIDataSource* CreateConflictsUIHTMLSource() {
                              IDS_CONFLICTS_CHECK_WARNING_SUSPECTED);
   source->AddLocalizedString("moduleConfirmedBad",
                      IDS_CONFLICTS_CHECK_WARNING_CONFIRMED);
-  source->AddLocalizedString("helpCenterLink", IDS_CONFLICTS_HELP_CENTER_LINK);
+  source->AddLocalizedString("helpCenterLink", IDS_LEARN_MORE);
   source->AddLocalizedString("investigatingText",
                              IDS_CONFLICTS_CHECK_INVESTIGATING);
   source->AddLocalizedString("modulesNoneLoaded",
@@ -157,7 +157,8 @@ ConflictsUI::ConflictsUI(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new ConflictsDOMHandler())->Attach(this));
 
   // Set up the about:conflicts source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(
       CreateConflictsUIHTMLSource());
 }
 

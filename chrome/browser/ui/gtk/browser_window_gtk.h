@@ -18,6 +18,7 @@
 #include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/rect.h"
@@ -76,6 +77,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual gfx::Rect GetRestoredBounds() const;
   virtual gfx::Rect GetBounds() const;
   virtual bool IsMaximized() const;
+  virtual bool IsMinimized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
   virtual bool IsFullscreenBubbleVisible() const;
@@ -104,11 +106,11 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual bool IsDownloadShelfVisible() const;
   virtual DownloadShelf* GetDownloadShelf();
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
-  virtual void ShowCollectedCookiesDialog(TabContents* tab_contents);
+  virtual void ShowCollectedCookiesDialog(TabContentsWrapper* tab_contents);
   virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
-  virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                              gfx::NativeWindow parent_window);
+  virtual gfx::NativeWindow ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
+                                           gfx::NativeWindow parent_window);
   virtual void UserChangedTheme();
   virtual int GetExtraRenderViewHeight() const;
   virtual void TabContentsFocused(TabContents* tab_contents);
@@ -135,6 +137,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual gfx::Rect GetInstantBounds();
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds);
+  virtual FindBar* CreateFindBar() OVERRIDE;
 
   // Overridden from NotificationObserver:
   virtual void Observe(int type,
@@ -380,10 +383,6 @@ class BrowserWindowGtk : public BrowserWindow,
   CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnButtonPressEvent,
                        GdkEventButton*);
 
-  // Maps and Unmaps the xid of |widget| to |window|.
-  static void MainWindowMapped(GtkWidget* widget);
-  static void MainWindowUnMapped(GtkWidget* widget);
-
   // Tracks focus state of browser.
   CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnFocusIn,
                        GdkEventFocus*);
@@ -473,9 +472,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // not.
   BooleanPrefMember use_custom_frame_pref_;
 
-  // A map which translates an X Window ID into its respective GtkWindow.
-  static std::map<XID, GtkWindow*> xid_map_;
-
   // The current window cursor.  We set it to a resize cursor when over the
   // custom frame border.  We set it to NULL if we want the default cursor.
   GdkCursor* frame_cursor_;
@@ -490,9 +486,10 @@ class BrowserWindowGtk : public BrowserWindow,
   guint32 last_click_time_;
   gfx::Point last_click_position_;
 
-  // If true, maximize the window after we call BrowserWindow::Show for the
-  // first time.  This is to work around a compiz bug.
-  bool maximize_after_show_;
+  // Optionally maximize or minimize the window after we call
+  // BrowserWindow::Show for the first time.  This is to work around a compiz
+  // bug.
+  ui::WindowShowState show_state_after_show_;
 
   // If true, don't call gdk_window_raise() when we get a click in the title
   // bar or window border.  This is to work around a compiz bug.

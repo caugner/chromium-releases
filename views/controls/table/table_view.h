@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,38 +6,34 @@
 #define VIEWS_CONTROLS_TABLE_TABLE_VIEW_H_
 #pragma once
 
-#include "build/build_config.h"
-
-#if defined(OS_WIN)
-#include <windows.h>
-typedef struct tagNMLVCUSTOMDRAW NMLVCUSTOMDRAW;
-#endif  // defined(OS_WIN)
-
 #include <map>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/models/table_model_observer.h"
+#include "views/views_export.h"
 
 #if defined(OS_WIN)
+#include <windows.h>
+
 // TODO(port): remove the ifdef when native_control.h is ported.
 #include "views/controls/native_control.h"
+
+typedef struct tagNMLVCUSTOMDRAW NMLVCUSTOMDRAW;
 #endif  // defined(OS_WIN)
 
 class SkBitmap;
 
+namespace gfx {
+class Font;
+}
+
 namespace ui {
 struct TableColumn;
 class TableModel;
-}
-using ui::TableColumn;
-using ui::TableModel;
-using ui::TableModelObserver; // TODO(beng): remove these.
-
-namespace gfx {
-class Font;
 }
 
 // A TableView is a view that displays multiple rows with any number of columns.
@@ -80,7 +76,7 @@ enum TableTypes {
 };
 
 // Returned from SelectionBegin/SelectionEnd
-class TableSelectionIterator {
+class VIEWS_EXPORT TableSelectionIterator {
  public:
   TableSelectionIterator(TableView* view, int view_index);
   TableSelectionIterator& operator=(const TableSelectionIterator& other);
@@ -102,8 +98,8 @@ class TableSelectionIterator {
 
 #if defined(OS_WIN)
 // TODO(port): Port TableView.
-class TableView : public NativeControl,
-                  public TableModelObserver {
+class VIEWS_EXPORT TableView : public NativeControl,
+                               public ui::TableModelObserver {
  public:
   typedef TableSelectionIterator iterator;
 
@@ -144,7 +140,7 @@ class TableView : public NativeControl,
   // Note that setting both resizable_columns and autosize_columns to false is
   // probably not a good idea, as there is no way for the user to increase a
   // column's size in that case.
-  TableView(TableModel* model, const std::vector<TableColumn>& columns,
+  TableView(ui::TableModel* model, const std::vector<ui::TableColumn>& columns,
             TableTypes table_type, bool single_selection,
             bool resizable_columns, bool autosize_columns);
   virtual ~TableView();
@@ -153,8 +149,8 @@ class TableView : public NativeControl,
   // If |model| is NULL, the table view cannot be used after this call. This
   // should be called in the containing view's destructor to avoid destruction
   // issues when the model needs to be deleted before the table.
-  void SetModel(TableModel* model);
-  TableModel* model() const { return model_; }
+  void SetModel(ui::TableModel* model);
+  ui::TableModel* model() const { return model_; }
 
   // Resorts the contents.
   void SetSortDescriptors(const SortDescriptors& sort_descriptors);
@@ -196,7 +192,7 @@ class TableView : public NativeControl,
   iterator SelectionBegin();
   iterator SelectionEnd();
 
-  // TableModelObserver methods.
+  // ui::TableModelObserver methods.
   virtual void OnModelChanged();
   virtual void OnItemsChanged(int start, int length);
   virtual void OnItemsAdded(int start, int length);
@@ -209,8 +205,8 @@ class TableView : public NativeControl,
 
   // Replaces the set of known columns without changing the current visible
   // columns.
-  void SetColumns(const std::vector<TableColumn>& columns);
-  void AddColumn(const TableColumn& col);
+  void SetColumns(const std::vector<ui::TableColumn>& columns);
+  void AddColumn(const ui::TableColumn& col);
   bool HasColumn(int id);
 
   // Sets which columns (by id) are displayed.  All transient size and position
@@ -373,7 +369,7 @@ class TableView : public NativeControl,
   void ResetColumnSortImage(int column_id, SortDirection direction);
 
   // Adds a new column.
-  void InsertColumn(const TableColumn& tc, int index);
+  void InsertColumn(const ui::TableColumn& tc, int index);
 
   // Update headers and internal state after columns have changed
   void OnColumnsChanged();
@@ -403,7 +399,7 @@ class TableView : public NativeControl,
   int LastSelectedViewIndex();
 
   // The TableColumn visible at position pos.
-  const TableColumn& GetColumnAtPosition(int pos);
+  const ui::TableColumn& GetColumnAtPosition(int pos);
 
   // Window procedure of the list view class. We subclass the list view to
   // ignore WM_ERASEBKGND, which gives smoother painting during resizing.
@@ -433,16 +429,16 @@ class TableView : public NativeControl,
   // accurately when the native control is available.
   virtual void VisibilityChanged(View* starting_from, bool is_visible);
 
-  TableModel* model_;
+  ui::TableModel* model_;
   TableTypes table_type_;
   TableViewObserver* table_view_observer_;
 
-  // An ordered list of id's into all_columns_ representing current visible
+  // An ordered list of id's into |all_columns_| representing current visible
   // columns.
   std::vector<int> visible_columns_;
 
   // Mapping of an int id to a TableColumn representing all possible columns.
-  std::map<int, TableColumn> all_columns_;
+  std::map<int, ui::TableColumn> all_columns_;
 
   // Cached value of columns_.size()
   int column_count_;

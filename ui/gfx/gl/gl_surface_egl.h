@@ -20,6 +20,8 @@ typedef void* EGLSurface;
 
 #if defined(OS_WIN)
 typedef HDC EGLNativeDisplayType;
+#elif defined(USE_WAYLAND)
+typedef struct wl_display* EGLNativeDisplayType;
 #else
 typedef struct _XDisplay* EGLNativeDisplayType;
 #endif
@@ -27,7 +29,7 @@ typedef struct _XDisplay* EGLNativeDisplayType;
 namespace gfx {
 
 // Interface for EGL surface.
-class GLSurfaceEGL : public GLSurface {
+class GL_EXPORT GLSurfaceEGL : public GLSurface {
  public:
   GLSurfaceEGL();
   virtual ~GLSurfaceEGL();
@@ -49,8 +51,7 @@ protected:
 // Encapsulates an EGL surface bound to a view.
 class NativeViewGLSurfaceEGL : public GLSurfaceEGL {
  public:
-  explicit NativeViewGLSurfaceEGL(bool software,
-                                  gfx::PluginWindowHandle window);
+  NativeViewGLSurfaceEGL(bool software, gfx::PluginWindowHandle window);
   virtual ~NativeViewGLSurfaceEGL();
 
   // Implement GLSurface.
@@ -69,9 +70,9 @@ class NativeViewGLSurfaceEGL : public GLSurfaceEGL {
 };
 
 // Encapsulates a pbuffer EGL surface.
-class PbufferGLSurfaceEGL : public GLSurfaceEGL {
+class GL_EXPORT PbufferGLSurfaceEGL : public GLSurfaceEGL {
  public:
-  explicit PbufferGLSurfaceEGL(bool software, const gfx::Size& size);
+  PbufferGLSurfaceEGL(bool software, const gfx::Size& size);
   virtual ~PbufferGLSurfaceEGL();
 
   // Implement GLSurface.

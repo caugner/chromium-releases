@@ -26,7 +26,7 @@ namespace remoting {
 class ChromotingHostContext {
  public:
   // Create a context.
-  ChromotingHostContext();
+  ChromotingHostContext(base::MessageLoopProxy* ui_message_loop);
   virtual ~ChromotingHostContext();
 
   // TODO(ajwong): Move the Start/Stop methods out of this class. Then
@@ -38,17 +38,11 @@ class ChromotingHostContext {
 
   virtual JingleThread* jingle_thread();
 
+  virtual base::MessageLoopProxy* ui_message_loop();
   virtual MessageLoop* main_message_loop();
   virtual MessageLoop* encode_message_loop();
-  virtual MessageLoop* network_message_loop();
+  virtual base::MessageLoopProxy* network_message_loop();
   virtual MessageLoop* desktop_message_loop();
-
-  // Must be called from the main GUI thread.
-  void SetUITaskPostFunction(const base::Callback<void(
-      const tracked_objects::Location& from_here, Task* task)>& poster);
-
-  void PostToUIThread(const tracked_objects::Location& from_here, Task* task);
-  bool IsUIThread() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromotingHostContextTest, StartAndStop);
@@ -66,17 +60,11 @@ class ChromotingHostContext {
   // This is NOT a Chrome-style UI thread.
   base::Thread desktop_thread_;
 
-  base::Callback<void(const tracked_objects::Location& from_here, Task* task)>
-      ui_poster_;
-  // This IS the main Chrome GUI thread that |ui_poster_| will post to.
-  base::PlatformThreadId ui_main_thread_id_;
-
+  scoped_refptr<base::MessageLoopProxy> ui_message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHostContext);
 };
 
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::ChromotingHostContext);
 
 #endif  // REMOTING_HOST_CHROMOTING_HOST_CONTEXT_H_

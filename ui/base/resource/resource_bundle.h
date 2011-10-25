@@ -22,8 +22,8 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "ui/base/ui_export.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/ui_api.h"
 
 class SkBitmap;
 typedef uint32 SkColor;
@@ -57,7 +57,7 @@ class DataPack;
 // ResourceBundle is a central facility to load images and other resources,
 // such as theme graphics.
 // Every resource is loaded only once.
-class UI_API ResourceBundle {
+class UI_EXPORT ResourceBundle {
  public:
   // An enumeration of the various font styles used throughout Chrome.
   // The following holds true for the font sizes:
@@ -83,6 +83,10 @@ class UI_API ResourceBundle {
   // Initialize the ResourceBundle using given data pack path for testing.
   static void InitSharedInstanceForTest(const FilePath& path);
 
+  // Load a .pak file.  Returns NULL if we fail to load |path|.  The caller
+  // is responsible for deleting up this pointer.
+  static DataPack* LoadResourcesDataPak(const FilePath& path);
+
   // Changes the locale for an already-initialized ResourceBundle.  Future
   // calls to get strings will return the strings for this new locale.  This
   // has no effect on existing or future image resources.  This has no effect
@@ -102,6 +106,9 @@ class UI_API ResourceBundle {
 
   // Return the global resource loader instance.
   static ResourceBundle& GetSharedInstance();
+
+  // Check if the .pak for the given locale exists.
+  static bool LocaleDataPakExists(const std::string& locale);
 
   // Gets the bitmap with the specified resource_id from the current module
   // data. Returns a pointer to a shared instance of the SkBitmap. This shared
@@ -207,8 +214,8 @@ class UI_API ResourceBundle {
 #if defined(OS_WIN)
   // Windows stores resources in DLLs, which are managed by HINSTANCE.
   typedef HINSTANCE DataHandle;
-#elif defined(USE_BASE_DATA_PACK)
-  // Linux uses base::DataPack.
+#elif defined(OS_POSIX)
+  // Everyone else uses base::DataPack.
   typedef DataPack* DataHandle;
 #endif
 
@@ -236,7 +243,7 @@ class UI_API ResourceBundle {
   // Initialize all the gfx::Font members if they haven't yet been initialized.
   void LoadFontsIfNecessary();
 
-#if defined(USE_BASE_DATA_PACK)
+#if defined(OS_POSIX)
   // Returns the full pathname of the main resources file to load.  May return
   // an empty string if no main resources data files are found.
   static FilePath GetResourcesFilePath();
@@ -271,7 +278,9 @@ class UI_API ResourceBundle {
   // Handles for data sources.
   DataHandle resources_data_;
   DataHandle large_icon_resources_data_;
-  DataHandle locale_resources_data_;
+#if !defined(NACL_WIN64)
+  scoped_ptr<DataPack> locale_resources_data_;
+#endif
 
   // References to extra data packs loaded via AddDataPackToSharedInstance.
   std::vector<LoadedDataPack*> data_packs_;

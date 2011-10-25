@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_url_request_info.idl modified Sat Jul 16 16:50:26 2011. */
+/* From ppb_url_request_info.idl modified Mon Aug 29 10:11:34 2011. */
 
 #ifndef PPAPI_C_PPB_URL_REQUEST_INFO_H_
 #define PPAPI_C_PPB_URL_REQUEST_INFO_H_
@@ -15,6 +15,9 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_time.h"
 #include "ppapi/c/pp_var.h"
+
+#define PPB_URLREQUESTINFO_INTERFACE_1_0 "PPB_URLRequestInfo;1.0"
+#define PPB_URLREQUESTINFO_INTERFACE PPB_URLREQUESTINFO_INTERFACE_1_0
 
 /**
  * @file
@@ -72,9 +75,10 @@ typedef enum {
    */
   PP_URLREQUESTPROPERTY_RECORDDOWNLOADPROGRESS,
   /**
-   * This corresponds to a <code>PP_Bool (default=<code>PP_FALSE</code>).
-   * Set this value to <code>PP_TRUE</code> if you want to be able to poll the
-   * upload progress using PPB_URLLoader.GetUplaodProgress().
+   * This corresponds to a <code>PP_Bool</code>
+   * (default=<code>PP_FALSE</code>). Set this value to <code>PP_TRUE</code> if
+   * you want to be able to poll the upload progress using
+   * PPB_URLLoader.GetUplaodProgress().
    */
   PP_URLREQUESTPROPERTY_RECORDUPLOADPROGRESS,
   /**
@@ -155,18 +159,14 @@ PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_URLRequestProperty, 4);
 /**
  * The <code>PPB_URLRequestInfo</code> interface is used to create
  * and handle URL requests. This API is used in conjunction with
- * <code>PPB_URLLoader</code>. Refer to <code>PPB_URLLoader for further
+ * <code>PPB_URLLoader</code>. Refer to <code>PPB_URLLoader</code> for further
  * information.
  */
-#define PPB_URLREQUESTINFO_INTERFACE_0_2 "PPB_URLRequestInfo;0.2"
-#define PPB_URLREQUESTINFO_INTERFACE_1_0 "PPB_URLRequestInfo;1.0"
-#define PPB_URLREQUESTINFO_INTERFACE PPB_URLREQUESTINFO_INTERFACE_1_0
-
 struct PPB_URLRequestInfo {
   /**
    * Create() creates a new <code>URLRequestInfo</code> object.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    *
    * @return A <code>PP_Resource</code> identifying the
@@ -224,7 +224,7 @@ struct PPB_URLRequestInfo {
    *
    * @param[in] request A <code>PP_Resource</code> corresponding to a
    * <code>URLRequestInfo</code>.
-   * @param[in] file_ref A <code>PP_Resource</code> containing the file
+   * @param[in] file_ref A <code>PP_Resource</code> corresponding to a file
    * reference.
    * @param[in] start_offset An optional starting point offset within the
    * file.

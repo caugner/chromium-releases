@@ -4,37 +4,89 @@
 
 #include "chrome/browser/ui/webui/print_preview_ui.h"
 
+#include <map>
+
+#include "base/lazy_instance.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
+#include "base/synchronization/lock.h"
 #include "base/values.h"
 #include "chrome/browser/printing/print_preview_data_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/print_preview_data_source.h"
 #include "chrome/browser/ui/webui/print_preview_handler.h"
+#include "chrome/common/print_messages.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "printing/page_size_margins.h"
+#include "printing/print_job_constants.h"
+
+using printing::PageSizeMargins;
+
+namespace {
+
+// Thread-safe wrapper around a std::map to keep track of mappings from
+// PrintPreviewUI addresses to most recent print preview request ids.
+class PrintPreviewRequestIdMapWithLock {
+ public:
+  PrintPreviewRequestIdMapWithLock() {}
+  ~PrintPreviewRequestIdMapWithLock() {}
+
+  // Get the value for |addr|. Returns true and sets |out_value| on success.
+  bool Get(const std::string& addr, int* out_value) {
+    base::AutoLock lock(lock_);
+    PrintPreviewRequestIdMap::const_iterator it = map_.find(addr);
+    if (it == map_.end())
+      return false;
+    *out_value = it->second;
+    return true;
+  }
+
+  // Sets the |value| for |addr|.
+  void Set(const std::string& addr, int value) {
+    base::AutoLock lock(lock_);
+    map_[addr] = value;
+  }
+
+  // Erase the entry for |addr|.
+  void Erase(const std::string& addr) {
+    base::AutoLock lock(lock_);
+    map_.erase(addr);
+  }
+
+ private:
+  typedef std::map<std::string, int> PrintPreviewRequestIdMap;
+
+  PrintPreviewRequestIdMap map_;
+  base::Lock lock_;
+};
+
+// Written to on the UI thread, read from any thread.
+base::LazyInstance<PrintPreviewRequestIdMapWithLock>
+    g_print_preview_request_id_map(base::LINKER_INITIALIZED);
+
+}  // namespace
 
 PrintPreviewUI::PrintPreviewUI(TabContents* contents)
     : ChromeWebUI(contents),
-      initial_preview_start_time_(base::TimeTicks::Now()),
-      request_count_(0U),
-      document_cookie_(0) {
+      initial_preview_start_time_(base::TimeTicks::Now()) {
   // WebUI owns |handler_|.
   handler_ = new PrintPreviewHandler();
   AddMessageHandler(handler_->Attach(this));
 
   // Set up the chrome://print/ data source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(
       new PrintPreviewDataSource());
 
-  // Store the PrintPreviewUIAddress as a string.
-  // "0x" + deadc0de + '\0' = 2 + 2 * sizeof(this) + 1;
-  char preview_ui_addr[2 + (2 * sizeof(this)) + 1];
-  base::snprintf(preview_ui_addr, sizeof(preview_ui_addr), "%p", this);
-  preview_ui_addr_str_ = preview_ui_addr;
+  preview_ui_addr_str_ = GetPrintPreviewUIAddress();
+
+  g_print_preview_request_id_map.Get().Set(preview_ui_addr_str_, -1);
 }
 
 PrintPreviewUI::~PrintPreviewUI() {
   print_preview_data_service()->RemoveEntry(preview_ui_addr_str_);
+
+  g_print_preview_request_id_map.Get().Erase(preview_ui_addr_str_);
 }
 
 void PrintPreviewUI::GetPrintPreviewDataForIndex(
@@ -52,48 +104,112 @@ void PrintPreviewUI::ClearAllPreviewData() {
   print_preview_data_service()->RemoveEntry(preview_ui_addr_str_);
 }
 
-void PrintPreviewUI::OnInitiatorTabClosed(
-    const std::string& initiator_url) {
-  StringValue initiator_tab_url(initiator_url);
+int PrintPreviewUI::GetAvailableDraftPageCount() {
+  return print_preview_data_service()->GetAvailableDraftPageCount(
+      preview_ui_addr_str_);
+}
+
+void PrintPreviewUI::SetInitiatorTabURLAndTitle(
+    const std::string& initiator_url,
+    const string16& job_title) {
+  initiator_url_ = initiator_url;
+  initiator_tab_title_ = job_title;
+}
+
+void PrintPreviewUI::SendInitiatorTabTitle() {
+  base::StringValue tab_title(initiator_tab_title_);
+  CallJavascriptFunction("setInitiatorTabTitle", tab_title);
+}
+
+// static
+void PrintPreviewUI::GetCurrentPrintPreviewStatus(
+    const std::string& preview_ui_addr,
+    int request_id,
+    bool* cancel) {
+  int current_id = -1;
+  if (!g_print_preview_request_id_map.Get().Get(preview_ui_addr, &current_id)) {
+    *cancel = true;
+    return;
+  }
+  *cancel = (request_id != current_id);
+}
+
+std::string PrintPreviewUI::GetPrintPreviewUIAddress() const {
+  // Store the PrintPreviewUIAddress as a string.
+  // "0x" + deadc0de + '\0' = 2 + 2 * sizeof(this) + 1;
+  char preview_ui_addr[2 + (2 * sizeof(this)) + 1];
+  base::snprintf(preview_ui_addr, sizeof(preview_ui_addr), "%p", this);
+  return preview_ui_addr;
+}
+
+void PrintPreviewUI::OnInitiatorTabCrashed() {
+  StringValue initiator_tab_url(initiator_url_);
+  CallJavascriptFunction("onInitiatorTabCrashed", initiator_tab_url);
+}
+
+void PrintPreviewUI::OnInitiatorTabClosed() {
+  StringValue initiator_tab_url(initiator_url_);
   CallJavascriptFunction("onInitiatorTabClosed", initiator_tab_url);
 }
 
-void PrintPreviewUI::OnPrintPreviewRequest() {
-  request_count_++;
+void PrintPreviewUI::OnPrintPreviewRequest(int request_id) {
+  g_print_preview_request_id_map.Get().Set(preview_ui_addr_str_, request_id);
 }
 
-void PrintPreviewUI::OnDidGetPreviewPageCount(int document_cookie,
-                                              int page_count,
-                                              bool is_modifiable) {
-  DCHECK_GT(page_count, 0);
-  document_cookie_ = document_cookie;
-  FundamentalValue count(page_count);
-  FundamentalValue modifiable(is_modifiable);
-  CallJavascriptFunction("onDidGetPreviewPageCount", count, modifiable);
+void PrintPreviewUI::OnShowSystemDialog() {
+  CallJavascriptFunction("onSystemDialogLinkClicked");
 }
 
-void PrintPreviewUI::OnDidPreviewPage(int page_number) {
+void PrintPreviewUI::OnDidGetPreviewPageCount(
+    const PrintHostMsg_DidGetPreviewPageCount_Params& params) {
+  DCHECK_GT(params.page_count, 0);
+  base::FundamentalValue count(params.page_count);
+  base::FundamentalValue modifiable(params.is_modifiable);
+  base::FundamentalValue request_id(params.preview_request_id);
+  CallJavascriptFunction("onDidGetPreviewPageCount", count, modifiable,
+                         request_id);
+}
+
+void PrintPreviewUI::OnDidGetDefaultPageLayout(
+    const PageSizeMargins& page_layout) {
+  if (page_layout.margin_top < 0 || page_layout.margin_left < 0 ||
+      page_layout.margin_bottom < 0 || page_layout.margin_right < 0 ||
+      page_layout.content_width < 0 || page_layout.content_height < 0) {
+    NOTREACHED();
+    return;
+  }
+
+  base::DictionaryValue layout;
+  layout.SetDouble(printing::kSettingMarginTop, page_layout.margin_top);
+  layout.SetDouble(printing::kSettingMarginLeft, page_layout.margin_left);
+  layout.SetDouble(printing::kSettingMarginBottom, page_layout.margin_bottom);
+  layout.SetDouble(printing::kSettingMarginRight, page_layout.margin_right);
+  layout.SetDouble(printing::kSettingContentWidth, page_layout.content_width);
+  layout.SetDouble(printing::kSettingContentHeight, page_layout.content_height);
+
+  CallJavascriptFunction("onDidGetDefaultPageLayout", layout);
+}
+
+void PrintPreviewUI::OnDidPreviewPage(int page_number,
+                                      int preview_request_id) {
   DCHECK_GE(page_number, 0);
-  FundamentalValue number(page_number);
+  base::FundamentalValue number(page_number);
   StringValue ui_identifier(preview_ui_addr_str_);
-  CallJavascriptFunction("onDidPreviewPage", number, ui_identifier);
+  base::FundamentalValue request_id(preview_request_id);
+  CallJavascriptFunction("onDidPreviewPage", number, ui_identifier, request_id);
 }
 
 void PrintPreviewUI::OnReusePreviewData(int preview_request_id) {
-  DecrementRequestCount();
-
-  StringValue ui_identifier(preview_ui_addr_str_);
-  FundamentalValue ui_preview_request_id(preview_request_id);
+  base::StringValue ui_identifier(preview_ui_addr_str_);
+  base::FundamentalValue ui_preview_request_id(preview_request_id);
   CallJavascriptFunction("reloadPreviewPages", ui_identifier,
                          ui_preview_request_id);
 }
 
 void PrintPreviewUI::OnPreviewDataIsAvailable(int expected_pages_count,
-                                              const string16& job_title,
                                               int preview_request_id) {
   VLOG(1) << "Print preview request finished with "
           << expected_pages_count << " pages";
-  DecrementRequestCount();
 
   if (!initial_preview_start_time_.is_null()) {
     UMA_HISTOGRAM_TIMES("PrintPreview.InitalDisplayTime",
@@ -102,43 +218,33 @@ void PrintPreviewUI::OnPreviewDataIsAvailable(int expected_pages_count,
                          expected_pages_count);
     initial_preview_start_time_ = base::TimeTicks();
   }
-  StringValue title(job_title);
-  StringValue ui_identifier(preview_ui_addr_str_);
-  FundamentalValue ui_preview_request_id(preview_request_id);
-  CallJavascriptFunction("updatePrintPreview", title, ui_identifier,
+  base::StringValue ui_identifier(preview_ui_addr_str_);
+  base::FundamentalValue ui_preview_request_id(preview_request_id);
+  CallJavascriptFunction("updatePrintPreview", ui_identifier,
                          ui_preview_request_id);
 }
 
-void PrintPreviewUI::OnNavigation() {
-  handler_->OnNavigation();
+void PrintPreviewUI::OnTabDestroyed() {
+  handler_->OnTabDestroyed();
 }
 
 void PrintPreviewUI::OnFileSelectionCancelled() {
   CallJavascriptFunction("fileSelectionCancelled");
 }
 
+void PrintPreviewUI::OnCancelPendingPreviewRequest() {
+  g_print_preview_request_id_map.Get().Set(preview_ui_addr_str_, -1);
+}
+
 void PrintPreviewUI::OnPrintPreviewFailed() {
-  DecrementRequestCount();
+  handler_->OnPrintPreviewFailed();
   CallJavascriptFunction("printPreviewFailed");
 }
 
-void PrintPreviewUI::OnPrintPreviewCancelled() {
-  DecrementRequestCount();
-}
-
-bool PrintPreviewUI::HasPendingRequests() {
-  return request_count_ > 1;
+void PrintPreviewUI::OnInvalidPrinterSettings() {
+  CallJavascriptFunction("invalidPrinterSettings");
 }
 
 PrintPreviewDataService* PrintPreviewUI::print_preview_data_service() {
   return PrintPreviewDataService::GetInstance();
-}
-
-void PrintPreviewUI::DecrementRequestCount() {
-  if (request_count_ > 0)
-    request_count_--;
-}
-
-int PrintPreviewUI::document_cookie() {
-  return document_cookie_;
 }

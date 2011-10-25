@@ -4,6 +4,11 @@
 
 #include "ppapi/shared_impl/input_event_impl.h"
 
+#include "ppapi/shared_impl/tracker_base.h"
+#include "ppapi/shared_impl/var.h"
+
+using ppapi::thunk::PPB_InputEvent_API;
+
 namespace ppapi {
 
 InputEventData::InputEventData()
@@ -14,6 +19,7 @@ InputEventData::InputEventData()
       mouse_button(PP_INPUTEVENT_MOUSEBUTTON_NONE),
       mouse_position(PP_MakePoint(0, 0)),
       mouse_click_count(0),
+      mouse_movement(PP_MakePoint(0, 0)),
       wheel_delta(PP_MakeFloatPoint(0.0f, 0.0f)),
       wheel_ticks(PP_MakeFloatPoint(0.0f, 0.0f)),
       wheel_scroll_by_page(false),
@@ -24,7 +30,22 @@ InputEventData::InputEventData()
 InputEventData::~InputEventData() {
 }
 
-InputEventImpl::InputEventImpl(const InputEventData& data) : data_(data) {
+InputEventImpl::InputEventImpl(const InitAsImpl&,
+                               PP_Instance instance,
+                               const InputEventData& data)
+    : Resource(instance),
+      data_(data) {
+}
+
+InputEventImpl::InputEventImpl(const InitAsProxy&,
+                               PP_Instance instance,
+                               const InputEventData& data)
+    : Resource(HostResource::MakeInstanceOnly(instance)),
+      data_(data) {
+}
+
+PPB_InputEvent_API* InputEventImpl::AsPPB_InputEvent_API() {
+  return this;
 }
 
 const InputEventData& InputEventImpl::GetInputEventData() const {
@@ -55,6 +76,10 @@ int32_t InputEventImpl::GetMouseClickCount() {
   return data_.mouse_click_count;
 }
 
+PP_Point InputEventImpl::GetMouseMovement() {
+  return data_.mouse_movement;
+}
+
 PP_FloatPoint InputEventImpl::GetWheelDelta() {
   return data_.wheel_delta;
 }
@@ -72,7 +97,9 @@ uint32_t InputEventImpl::GetKeyCode() {
 }
 
 PP_Var InputEventImpl::GetCharacterText() {
-  return StringToPPVar(data_.character_text);
+  return StringVar::StringToPPVar(
+      TrackerBase::Get()->GetModuleForInstance(pp_instance()),
+      data_.character_text);
 }
 
 }  // namespace ppapi

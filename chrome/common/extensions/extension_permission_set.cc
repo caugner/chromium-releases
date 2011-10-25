@@ -16,6 +16,7 @@
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/extensions/url_pattern_set.h"
+#include "content/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "net/base/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -68,6 +69,7 @@ const size_t kNumNonPermissionModuleNames =
 // without asking for the module permission. In other words, functions you can
 // use with no permissions specified.
 const char* kNonPermissionFunctionNames[] = {
+  "management.getPermissionWarningsByManifest",
   "tabs.create",
   "tabs.onRemoved",
   "tabs.remove",
@@ -88,7 +90,7 @@ void AddPatternsAndRemovePaths(const URLPatternSet& set, URLPatternSet* out) {
   }
 }
 
-} // namespace
+}  // namespace
 
 //
 // PermissionMessage
@@ -98,7 +100,7 @@ void AddPatternsAndRemovePaths(const URLPatternSet& set, URLPatternSet* out) {
 ExtensionPermissionMessage ExtensionPermissionMessage::CreateFromHostList(
     const std::set<std::string>& hosts) {
   std::vector<std::string> host_list(hosts.begin(), hosts.end());
-  CHECK(host_list.size() > 0);
+  CHECK_GT(host_list.size(), 0UL);
   ID message_id;
   string16 message;
 
@@ -154,18 +156,12 @@ ExtensionPermissionMessage ExtensionAPIPermission::GetMessage() const {
 ExtensionAPIPermission::ExtensionAPIPermission(
     ID id,
     const char* name,
-    bool is_hosted_app,
-    bool is_component_only,
     int l10n_message_id,
     ExtensionPermissionMessage::ID message_id,
-    bool implies_full_access,
-    bool implies_full_url_access)
+    int flags)
     : id_(id),
       name_(name),
-      implies_full_access_(implies_full_access),
-      implies_full_url_access_(implies_full_url_access),
-      is_hosted_app_(is_hosted_app),
-      is_component_only_(is_component_only),
+      flags_(flags),
       l10n_message_id_(l10n_message_id),
       message_id_(message_id) {
 }
@@ -220,121 +216,128 @@ ExtensionPermissionsInfo::~ExtensionPermissionsInfo() {
 ExtensionPermissionsInfo::ExtensionPermissionsInfo()
     : hosted_app_permission_count_(0),
       permission_count_(0) {
+  // Map the permissions flags to shorter names for convenience.
+  int none = ExtensionAPIPermission::kFlagNone;
+  int hosted_app = ExtensionAPIPermission::kFlagHostedApp;
+  int component_only = ExtensionAPIPermission::kFlagComponentOnly;
+  int full_access = ExtensionAPIPermission::kFlagImpliesFullAccess;
+  int all_urls = ExtensionAPIPermission::kFlagImpliesFullURLAccess;
+  int optional = ExtensionAPIPermission::kFlagSupportsOptional;
+
   // Hosted app permissions
-  RegisterHostedAppPermission(
+  RegisterPermission(
       ExtensionAPIPermission::kBackground, "background", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterHostedAppPermission(
+      ExtensionPermissionMessage::kNone, hosted_app | optional);
+  RegisterPermission(
       ExtensionAPIPermission::kClipboardRead, "clipboardRead",
       IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD,
-      ExtensionPermissionMessage::kClipboard);
-  RegisterHostedAppPermission(
+      ExtensionPermissionMessage::kClipboard, hosted_app | optional);
+  RegisterPermission(
       ExtensionAPIPermission::kClipboardWrite, "clipboardWrite",  0,
-      ExtensionPermissionMessage::kNone);
-  RegisterHostedAppPermission(
+      ExtensionPermissionMessage::kNone, hosted_app | optional);
+  RegisterPermission(
       ExtensionAPIPermission::kChromePrivate, "chromePrivate", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterHostedAppPermission(
+      ExtensionPermissionMessage::kNone, hosted_app);
+  RegisterPermission(
       ExtensionAPIPermission::kExperimental, "experimental", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterHostedAppPermission(
+      ExtensionPermissionMessage::kNone, hosted_app);
+  RegisterPermission(
       ExtensionAPIPermission::kGeolocation, "geolocation",
       IDS_EXTENSION_PROMPT_WARNING_GEOLOCATION,
-      ExtensionPermissionMessage::kGeolocation);
-  RegisterHostedAppPermission(
+      ExtensionPermissionMessage::kGeolocation, hosted_app);
+  RegisterPermission(
       ExtensionAPIPermission::kNotification, "notifications", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterHostedAppPermission(
+      ExtensionPermissionMessage::kNone, hosted_app | optional);
+  RegisterPermission(
       ExtensionAPIPermission::kUnlimitedStorage, "unlimitedStorage", 0,
-      ExtensionPermissionMessage::kNone);
+      ExtensionPermissionMessage::kNone, hosted_app);
+  RegisterPermission(
+      ExtensionAPIPermission::kPermissions, "permissions", 0,
+      ExtensionPermissionMessage::kNone, hosted_app);
 
   // Hosted app and private permissions.
   RegisterPermission(
       ExtensionAPIPermission::kChromeAuthPrivate, "chromeAuthPrivate", 0,
-      ExtensionPermissionMessage::kNone,
-      true, true, false, false);
+      ExtensionPermissionMessage::kNone, hosted_app | component_only);
   RegisterPermission(
       ExtensionAPIPermission::kWebstorePrivate, "webstorePrivate", 0,
-      ExtensionPermissionMessage::kNone,
-      true, true, false, false);
+      ExtensionPermissionMessage::kNone, hosted_app | component_only);
 
   // Extension permissions.
-  RegisterExtensionPermission(
+  RegisterPermission(
       ExtensionAPIPermission::kBookmark, "bookmarks",
       IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS,
-      ExtensionPermissionMessage::kBookmarks);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kBookmarks, optional);
+  RegisterPermission(
       ExtensionAPIPermission::kContentSettings, "contentSettings", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kNone, none);
+  RegisterPermission(
       ExtensionAPIPermission::kContextMenus, "contextMenus", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kNone, optional);
+  RegisterPermission(
       ExtensionAPIPermission::kCookie, "cookies", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kNone, optional);
+  RegisterPermission(
       ExtensionAPIPermission::kDebugger, "debugger",
       IDS_EXTENSION_PROMPT_WARNING_DEBUGGER,
-      ExtensionPermissionMessage::kDebugger);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kDebugger, optional);
+  RegisterPermission(
       ExtensionAPIPermission::kFileBrowserHandler, "fileBrowserHandler", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kNone, none);
+  RegisterPermission(
       ExtensionAPIPermission::kHistory, "history",
       IDS_EXTENSION_PROMPT_WARNING_BROWSING_HISTORY,
-      ExtensionPermissionMessage::kBrowsingHistory);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kBrowsingHistory, optional);
+  RegisterPermission(
       ExtensionAPIPermission::kIdle, "idle", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterExtensionPermission(
-      ExtensionAPIPermission::kInputMethodPrivate,
-      "inputMethodPrivate", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kNone, optional);
+  RegisterPermission(
+      ExtensionAPIPermission::kInputMethodPrivate, "inputMethodPrivate", 0,
+      ExtensionPermissionMessage::kNone, none);
+  RegisterPermission(
       ExtensionAPIPermission::kManagement, "management",
       IDS_EXTENSION_PROMPT_WARNING_MANAGEMENT,
-      ExtensionPermissionMessage::kManagement);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kManagement, optional);
+  RegisterPermission(
       ExtensionAPIPermission::kTab, "tabs",
       IDS_EXTENSION_PROMPT_WARNING_TABS,
-      ExtensionPermissionMessage::kTabs);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kTabs, optional);
+  RegisterPermission(
       ExtensionAPIPermission::kTts, "tts", 0,
-      ExtensionPermissionMessage::kNone);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kNone, none);
+  RegisterPermission(
       ExtensionAPIPermission::kTtsEngine, "ttsEngine",
       IDS_EXTENSION_PROMPT_WARNING_TTS_ENGINE,
-      ExtensionPermissionMessage::kTtsEngine);
-  RegisterExtensionPermission(
+      ExtensionPermissionMessage::kTtsEngine, none);
+  RegisterPermission(
       ExtensionAPIPermission::kWebSocketProxyPrivate,
       "webSocketProxyPrivate", 0,
-      ExtensionPermissionMessage::kNone);
+      ExtensionPermissionMessage::kNone, none);
 
   // Private permissions
-  RegisterPrivatePermission(
-      ExtensionAPIPermission::kChromeosInfoPrivate, "chromeosInfoPrivate");
-  RegisterPrivatePermission(
-      ExtensionAPIPermission::kFileBrowserPrivate, "fileBrowserPrivate");
-  RegisterPrivatePermission(
-      ExtensionAPIPermission::kMediaPlayerPrivate, "mediaPlayerPrivate");
+  RegisterPermission(
+      ExtensionAPIPermission::kChromeosInfoPrivate, "chromeosInfoPrivate", 0,
+      ExtensionPermissionMessage::kNone, component_only);
+  RegisterPermission(
+      ExtensionAPIPermission::kFileBrowserPrivate, "fileBrowserPrivate", 0,
+      ExtensionPermissionMessage::kNone, component_only);
+  RegisterPermission(
+      ExtensionAPIPermission::kMediaPlayerPrivate, "mediaPlayerPrivate", 0,
+      ExtensionPermissionMessage::kNone, component_only);
 
   // Full url access permissions.
   RegisterPermission(
       ExtensionAPIPermission::kProxy, "proxy", 0,
-      ExtensionPermissionMessage::kNone, false, false, false, true);
+      ExtensionPermissionMessage::kNone, all_urls);
 
   RegisterPermission(
       ExtensionAPIPermission::kDevtools, "devtools", 0,
-      ExtensionPermissionMessage::kNone, false, false, false, true);
+      ExtensionPermissionMessage::kNone, all_urls);
 
   RegisterPermission(
       ExtensionAPIPermission::kPlugin, "plugin",
       IDS_EXTENSION_PROMPT_WARNING_FULL_ACCESS,
-      ExtensionPermissionMessage::kFullAccess, false, false, true, true);
-
-  RegisterPermission(
-      ExtensionAPIPermission::kDefault, "default", 0,
-      ExtensionPermissionMessage::kNone, false, false, false, false);
+      ExtensionPermissionMessage::kFullAccess, all_urls | full_access);
 
   // Register Aliases
   RegisterAlias("unlimitedStorage", kOldUnlimitedStoragePermission);
@@ -348,51 +351,18 @@ void ExtensionPermissionsInfo::RegisterAlias(
   name_map_[alias] = name_map_[name];
 }
 
-void ExtensionPermissionsInfo::RegisterExtensionPermission(
-    ExtensionAPIPermission::ID id,
-    const char* name,
-    int l10n_message_id,
-    ExtensionPermissionMessage::ID message_id) {
-  RegisterPermission(id, name, l10n_message_id, message_id,
-                     false, false, false, false);
-}
-
-void ExtensionPermissionsInfo::RegisterHostedAppPermission(
-    ExtensionAPIPermission::ID id,
-    const char* name,
-    int l10n_message_id,
-    ExtensionPermissionMessage::ID message_id) {
-  RegisterPermission(id, name, l10n_message_id, message_id,
-                     true, false, false, false);
-}
-
-void ExtensionPermissionsInfo::RegisterPrivatePermission(
-    ExtensionAPIPermission::ID id, const char* name) {
-  RegisterPermission(id, name, 0, ExtensionPermissionMessage::kNone,
-                     false, true, false, false);
-}
-
 void ExtensionPermissionsInfo::RegisterPermission(
     ExtensionAPIPermission::ID id,
     const char* name,
     int l10n_message_id,
     ExtensionPermissionMessage::ID message_id,
-    bool is_hosted_app,
-    bool is_component_only,
-    bool implies_full_access,
-    bool implies_full_url_access) {
+    int flags) {
   CHECK(id_map_.find(id) == id_map_.end());
   CHECK(name_map_.find(name) == name_map_.end());
 
   ExtensionAPIPermission* permission =
-      new ExtensionAPIPermission(id,
-                                 name,
-                                 is_hosted_app,
-                                 is_component_only,
-                                 l10n_message_id,
-                                 message_id,
-                                 implies_full_access,
-                                 implies_full_url_access);
+      new ExtensionAPIPermission(id, name, l10n_message_id, message_id, flags);
+
   id_map_[id] = permission;
   name_map_[name] = permission;
 
@@ -433,12 +403,62 @@ ExtensionPermissionSet::~ExtensionPermissionSet() {
 }
 
 // static
+ExtensionPermissionSet* ExtensionPermissionSet::CreateDifference(
+    const ExtensionPermissionSet* set1,
+    const ExtensionPermissionSet* set2) {
+  scoped_refptr<ExtensionPermissionSet> empty = new ExtensionPermissionSet();
+  const ExtensionPermissionSet* set1_safe = (set1 == NULL) ? empty : set1;
+  const ExtensionPermissionSet* set2_safe = (set2 == NULL) ? empty : set2;
+
+  ExtensionAPIPermissionSet apis;
+  std::set_difference(set1_safe->apis().begin(), set1_safe->apis().end(),
+                      set2_safe->apis().begin(), set2_safe->apis().end(),
+                      std::insert_iterator<ExtensionAPIPermissionSet>(
+                          apis, apis.begin()));
+
+  URLPatternSet explicit_hosts;
+  URLPatternSet::CreateDifference(set1_safe->explicit_hosts(),
+                                  set2_safe->explicit_hosts(),
+                                  &explicit_hosts);
+
+  URLPatternSet scriptable_hosts;
+  URLPatternSet::CreateDifference(set1_safe->scriptable_hosts(),
+                                  set2_safe->scriptable_hosts(),
+                                  &scriptable_hosts);
+  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+}
+
+// static
+ExtensionPermissionSet* ExtensionPermissionSet::CreateIntersection(
+    const ExtensionPermissionSet* set1,
+    const ExtensionPermissionSet* set2) {
+  scoped_refptr<ExtensionPermissionSet> empty = new ExtensionPermissionSet();
+  const ExtensionPermissionSet* set1_safe = (set1 == NULL) ? empty : set1;
+  const ExtensionPermissionSet* set2_safe = (set2 == NULL) ? empty : set2;
+
+  ExtensionAPIPermissionSet apis;
+  std::set_intersection(set1_safe->apis().begin(), set1_safe->apis().end(),
+                        set2_safe->apis().begin(), set2_safe->apis().end(),
+                        std::insert_iterator<ExtensionAPIPermissionSet>(
+                            apis, apis.begin()));
+  URLPatternSet explicit_hosts;
+  URLPatternSet::CreateIntersection(set1_safe->explicit_hosts(),
+                                    set2_safe->explicit_hosts(),
+                                    &explicit_hosts);
+
+  URLPatternSet scriptable_hosts;
+  URLPatternSet::CreateIntersection(set1_safe->scriptable_hosts(),
+                                    set2_safe->scriptable_hosts(),
+                                    &scriptable_hosts);
+  return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+}
+// static
 ExtensionPermissionSet* ExtensionPermissionSet::CreateUnion(
     const ExtensionPermissionSet* set1,
     const ExtensionPermissionSet* set2) {
-  ExtensionPermissionSet empty;
-  const ExtensionPermissionSet* set1_safe = (set1 == NULL) ? &empty : set1;
-  const ExtensionPermissionSet* set2_safe = (set2 == NULL) ? &empty : set2;
+  scoped_refptr<ExtensionPermissionSet> empty = new ExtensionPermissionSet();
+  const ExtensionPermissionSet* set1_safe = (set1 == NULL) ? empty : set1;
+  const ExtensionPermissionSet* set2_safe = (set2 == NULL) ? empty : set2;
 
   ExtensionAPIPermissionSet apis;
   std::set_union(set1_safe->apis().begin(), set1_safe->apis().end(),
@@ -447,15 +467,41 @@ ExtensionPermissionSet* ExtensionPermissionSet::CreateUnion(
                      apis, apis.begin()));
 
   URLPatternSet explicit_hosts;
-  URLPatternSet scriptable_hosts;
   URLPatternSet::CreateUnion(set1_safe->explicit_hosts(),
                              set2_safe->explicit_hosts(),
                              &explicit_hosts);
+
+  URLPatternSet scriptable_hosts;
   URLPatternSet::CreateUnion(set1_safe->scriptable_hosts(),
                              set2_safe->scriptable_hosts(),
                              &scriptable_hosts);
 
   return new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+}
+
+bool ExtensionPermissionSet::operator==(
+    const ExtensionPermissionSet& rhs) const {
+  return apis_ == rhs.apis_ &&
+      scriptable_hosts_ == rhs.scriptable_hosts_ &&
+      explicit_hosts_ == rhs.explicit_hosts_;
+}
+
+bool ExtensionPermissionSet::Contains(const ExtensionPermissionSet& set) const {
+  // Every set includes the empty set.
+  if (set.IsEmpty())
+    return true;
+
+  if (!std::includes(apis_.begin(), apis_.end(),
+                     set.apis().begin(), set.apis().end()))
+    return false;
+
+  if (!explicit_hosts().Contains(set.explicit_hosts()))
+    return false;
+
+  if (!scriptable_hosts().Contains(set.scriptable_hosts()))
+    return false;
+
+  return true;
 }
 
 std::set<std::string> ExtensionPermissionSet::GetAPIsAsStrings() const {
@@ -472,7 +518,7 @@ std::set<std::string> ExtensionPermissionSet::GetAPIsAsStrings() const {
 
 std::set<std::string>
     ExtensionPermissionSet::GetDistinctHostsForDisplay() const {
-  return GetDistinctHosts(effective_hosts_, true);
+  return GetDistinctHosts(effective_hosts_, true, true);
 }
 
 ExtensionPermissionMessages
@@ -642,7 +688,9 @@ bool ExtensionPermissionSet::HasLessPrivilegesThan(
 
 // static
 std::set<std::string> ExtensionPermissionSet::GetDistinctHosts(
-    const URLPatternSet& host_patterns, bool include_rcd) {
+    const URLPatternSet& host_patterns,
+    bool include_rcd,
+    bool exclude_file_scheme) {
   // Use a vector to preserve order (also faster than a map on small sets).
   // Each item is a host split into two parts: host without RCDs and
   // current best RCD.
@@ -650,6 +698,9 @@ std::set<std::string> ExtensionPermissionSet::GetDistinctHosts(
   HostVector hosts_best_rcd;
   for (URLPatternSet::const_iterator i = host_patterns.begin();
        i != host_patterns.end(); ++i) {
+    if (exclude_file_scheme && i->scheme() == chrome::kFileScheme)
+      continue;
+
     std::string host = i->host();
 
     // Add the subdomain wildcard back to the host, if necessary.
@@ -779,8 +830,8 @@ bool ExtensionPermissionSet::HasLessHostPrivilegesThan(
   // TODO(jstritar): This is overly conservative with respect to subdomains.
   // For example, going from *.google.com to www.google.com will be
   // considered an elevation, even though it is not (http://crbug.com/65337).
-  std::set<std::string> new_hosts_set = GetDistinctHosts(new_list, false);
-  std::set<std::string> old_hosts_set = GetDistinctHosts(old_list, false);
+  std::set<std::string> new_hosts_set(GetDistinctHosts(new_list, false, false));
+  std::set<std::string> old_hosts_set(GetDistinctHosts(old_list, false, false));
   std::set<std::string> new_hosts_only;
 
   std::set_difference(new_hosts_set.begin(), new_hosts_set.end(),

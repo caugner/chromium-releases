@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback_old.h"
+#include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
 #include "base/values.h"
 #include "chrome/browser/accessibility_events.h"
@@ -23,9 +24,6 @@ class ExtensionAccessibilityEventRouter : public NotificationObserver {
  public:
   // Single instance of the event router.
   static ExtensionAccessibilityEventRouter* GetInstance();
-
-  // Safe to call multiple times.
-  void ObserveProfile(Profile* profile);
 
   // Get the dict representing the last control that received an
   // OnControlFocus event.
@@ -53,7 +51,7 @@ class ExtensionAccessibilityEventRouter : public NotificationObserver {
   // NotificationObserver::Observe.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   void OnWindowOpened(const AccessibilityWindowInfo* details);
   void OnWindowClosed(const AccessibilityWindowInfo* details);
@@ -62,6 +60,7 @@ class ExtensionAccessibilityEventRouter : public NotificationObserver {
   void OnTextChanged(const AccessibilityControlInfo* details);
   void OnMenuOpened(const AccessibilityMenuInfo* details);
   void OnMenuClosed(const AccessibilityMenuInfo* details);
+  void OnVolumeChanged(const AccessibilityVolumeInfo* details);
 
   void DispatchEvent(Profile* profile,
                      const char* event_name,
@@ -84,7 +83,7 @@ class ExtensionAccessibilityEventRouter : public NotificationObserver {
 // minimize the impact.
 class SetAccessibilityEnabledFunction : public SyncExtensionFunction {
   virtual ~SetAccessibilityEnabledFunction() {}
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME(
       "experimental.accessibility.setAccessibilityEnabled")
 };
@@ -92,7 +91,7 @@ class SetAccessibilityEnabledFunction : public SyncExtensionFunction {
 // API function that returns the most recent focused control.
 class GetFocusedControlFunction : public SyncExtensionFunction {
   virtual ~GetFocusedControlFunction() {}
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME(
       "experimental.accessibility.getFocusedControl")
 };

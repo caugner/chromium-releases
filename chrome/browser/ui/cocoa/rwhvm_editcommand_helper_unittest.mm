@@ -7,7 +7,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/message_loop.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/common/view_messages.h"
@@ -88,7 +88,8 @@ class RenderWidgetHostEditCommandCounter : public RenderWidgetHost {
 
 // Tests that editing commands make it through the pipeline all the way to
 // RenderWidgetHost.
-TEST_F(RWHVMEditCommandHelperTest, TestEditingCommandDelivery) {
+// Disabled, http://crbug.com/93286.
+TEST_F(RWHVMEditCommandHelperTest, DISABLED_TestEditingCommandDelivery) {
   RWHVMEditCommandHelper helper;
   NSArray* edit_command_strings = helper.GetEditSelectorNames();
 

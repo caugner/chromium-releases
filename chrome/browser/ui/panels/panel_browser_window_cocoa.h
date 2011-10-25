@@ -19,8 +19,7 @@ class Panel;
 // Bridges between C++ and the Cocoa NSWindow. Cross-platform code will
 // interact with this object when it needs to manipulate the window.
 
-class PanelBrowserWindowCocoa : public NativePanel,
-                                public NativePanelTesting {
+class PanelBrowserWindowCocoa : public NativePanel {
  public:
   PanelBrowserWindowCocoa(Browser* browser, Panel* panel,
                           const gfx::Rect& bounds);
@@ -33,7 +32,7 @@ class PanelBrowserWindowCocoa : public NativePanel,
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void OnPanelExpansionStateChanged(
       Panel::ExpansionState expansion_state) OVERRIDE;
-  virtual bool ShouldBringUpPanelTitleBar(int mouse_x,
+  virtual bool ShouldBringUpPanelTitlebar(int mouse_x,
                                           int mouse_y) const OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
@@ -42,14 +41,28 @@ class PanelBrowserWindowCocoa : public NativePanel,
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void ShowTaskManagerForPanel() OVERRIDE;
+  virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
   virtual void DrawAttention() OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
+  virtual bool PreHandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event,
+      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
-  virtual NativePanelTesting* GetNativePanelTesting() OVERRIDE;
+  virtual gfx::Size GetNonClientAreaExtent() const OVERRIDE;
+  virtual int GetRestoredHeight() const OVERRIDE;
+  virtual void SetRestoredHeight(int height) OVERRIDE;
 
   Panel* panel() { return panel_.get(); }
-  Browser* browser() { return browser_.get(); }
+  Browser* browser() const { return browser_.get(); }
+
+  // Callback from PanelWindowControllerCocoa that native window was actually
+  // closed. The window may not close right away because of onbeforeunload
+  // handlers.
+  void didCloseNativeWindow();
 
  private:
   friend class PanelBrowserWindowCocoaTest;
@@ -58,6 +71,10 @@ class PanelBrowserWindowCocoa : public NativePanel,
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, TitlebarViewCreate);
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, TitlebarViewSizing);
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, TitlebarViewClose);
+  FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, MenuItems);
+  FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, KeyEvent);
+  FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, ThemeProvider);
+  FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, SetTitle);
 
   bool isClosed();
 
@@ -66,6 +83,7 @@ class PanelBrowserWindowCocoa : public NativePanel,
   gfx::Rect bounds_;
   PanelWindowControllerCocoa* controller_;  // Weak, owns us.
   bool is_shown_;  // Panel is hidden on creation, Show() changes that forever.
+  bool has_find_bar_; // Find bar should only be created once per panel.
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserWindowCocoa);
 };

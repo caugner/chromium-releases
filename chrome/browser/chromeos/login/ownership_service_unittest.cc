@@ -30,7 +30,7 @@ using ::testing::_;
 
 namespace chromeos {
 
-class OwnershipServiceTest : public ::testing::Test {
+class OwnershipServiceTest : public testing::Test {
  public:
   OwnershipServiceTest()
       : message_loop_(MessageLoop::TYPE_UI),

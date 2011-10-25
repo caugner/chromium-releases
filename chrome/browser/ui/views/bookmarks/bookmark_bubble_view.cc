@@ -91,7 +91,7 @@ void BookmarkBubbleView::Show(views::Widget* parent,
   bookmark_bubble_ = new BookmarkBubbleView(delegate, profile, url,
                                             newly_bookmarked);
   Bubble* bubble = Bubble::Show(
-      parent, bounds, BubbleBorder::TOP_RIGHT, bookmark_bubble_,
+      parent, bounds, views::BubbleBorder::TOP_RIGHT, bookmark_bubble_,
       bookmark_bubble_);
   // |bubble_| can be set to NULL in BubbleClosing when we close the bubble
   // asynchronously. However, that can happen during the Show call above if the
@@ -187,18 +187,19 @@ void BookmarkBubbleView::Init() {
   }
 
   remove_link_ = new views::Link(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_BOOMARK_BUBBLE_REMOVE_BOOKMARK)));
+      IDS_BOOKMARK_BUBBLE_REMOVE_BOOKMARK)));
   remove_link_->set_listener(this);
 
   edit_button_ = new views::NativeTextButton(
-      this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOMARK_BUBBLE_OPTIONS)));
+      this,
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_OPTIONS)));
 
   close_button_ = new views::NativeTextButton(
       this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_DONE)));
   close_button_->SetIsDefault(true);
 
   views::Label* combobox_label = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOMARK_BUBBLE_FOLDER_TEXT)));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_FOLDER_TEXT)));
 
   parent_combobox_ = new views::Combobox(&parent_model_);
   parent_combobox_->SetSelectedItem(parent_model_.node_parent_index());
@@ -208,8 +209,8 @@ void BookmarkBubbleView::Init() {
 
   views::Label* title_label = new views::Label(
       UTF16ToWide(l10n_util::GetStringUTF16(
-          newly_bookmarked_ ? IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED :
-                              IDS_BOOMARK_BUBBLE_PAGE_BOOKMARK)));
+          newly_bookmarked_ ? IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARKED :
+                              IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARK)));
   title_label->SetFont(
       ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
   title_label->SetColor(kTitleColor);
@@ -253,7 +254,7 @@ void BookmarkBubbleView::Init() {
   layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
   layout->StartRow(0, 2);
   layout->AddView(new views::Label(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_BOOMARK_BUBBLE_TITLE_TEXT))));
+      l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_TITLE_TEXT))));
   title_tf_ = new views::Textfield();
   title_tf_->SetText(GetTitle());
   layout->AddView(title_tf_);
@@ -340,7 +341,7 @@ bool BookmarkBubbleView::FadeInOnShow() {
 
 std::wstring BookmarkBubbleView::accessible_name() {
   return UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_BOOMARK_BUBBLE_ADD_BOOKMARK));
+      l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_ADD_BOOKMARK));
 }
 
 void BookmarkBubbleView::Close() {
@@ -362,16 +363,14 @@ void BookmarkBubbleView::HandleButtonPressed(views::Button* sender) {
 }
 
 void BookmarkBubbleView::ShowEditor() {
-#if defined(TOUCH_UI)
-  // TODO(saintlou): this brings up a modal window that can't be dismissed
-  // on touch and is tracked in chromium-os by crosbug.com/13899
-  bubble_->set_fade_away_on_close(true);
-  Close();
-#else
   const BookmarkNode* node =
       profile_->GetBookmarkModel()->GetMostRecentlyAddedNodeForURL(url_);
 
-#if defined(OS_WIN)
+#if !defined(WEBUI_DIALOGS)
+#if defined(USE_AURA)
+  NOTIMPLEMENTED();
+  gfx::NativeView parent = NULL;
+#elif defined(OS_WIN)
   // Parent the editor to our root ancestor (not the root we're in, as that
   // is the info bubble and will close shortly).
   HWND parent = GetAncestor(GetWidget()->GetNativeView(), GA_ROOTOWNER);
@@ -389,17 +388,23 @@ void BookmarkBubbleView::ShowEditor() {
       static_cast<views::NativeWidgetGtk*>(GetWidget()->native_widget())->
           GetTransientParent());
 #endif
+#endif
 
   // Even though we just hid the window, we need to invoke Close to schedule
   // the delete and all that.
   Close();
 
   if (node) {
+#if defined(WEBUI_DIALOGS)
+    Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+    DCHECK(browser);
+    browser->OpenBookmarkManagerEditNode(node->id());
+#else
     BookmarkEditor::Show(parent, profile_, NULL,
                          BookmarkEditor::EditDetails(node),
                          BookmarkEditor::SHOW_TREE);
-  }
 #endif
+  }
 }
 
 void BookmarkBubbleView::ApplyEdits() {

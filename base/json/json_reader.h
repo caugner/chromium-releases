@@ -24,9 +24,6 @@
 // TODO(tc): Add a parsing option to to relax object keys being wrapped in
 //   double quotes
 // TODO(tc): Add an option to disable comment stripping
-// TODO(aa): Consider making the constructor public and the static Read() method
-// only a convenience for the common uses with more complex configuration going
-// on the instance.
 
 #ifndef BASE_JSON_JSON_READER_H_
 #define BASE_JSON_JSON_READER_H_
@@ -34,7 +31,7 @@
 
 #include <string>
 
-#include "base/base_api.h"
+#include "base/base_export.h"
 #include "base/basictypes.h"
 
 // Chromium and Chromium OS check out gtest to different places, so we're
@@ -47,7 +44,7 @@ namespace base {
 
 class Value;
 
-class BASE_API JSONReader {
+class BASE_EXPORT JSONReader {
  public:
   // A struct to hold a JS token.
   class Token {
@@ -67,12 +64,17 @@ class BASE_API JSONReader {
      END_OF_INPUT,
      INVALID_TOKEN,
     };
+
     Token(Type t, const wchar_t* b, int len)
-      : type(t), begin(b), length(len) {}
+        : type(t), begin(b), length(len) {}
 
     // Get the character that's one past the end of this token.
     wchar_t NextChar() {
       return *(begin + length);
+    }
+
+    static Token CreateInvalidToken() {
+      return Token(INVALID_TOKEN, 0, 0);
     }
 
     Type type;
@@ -190,7 +192,7 @@ class BASE_API JSONReader {
   bool EatComment();
 
   // Checks if |json_pos_| matches str.
-  bool NextStringMatch(const std::wstring& str);
+  bool NextStringMatch(const wchar_t* str, size_t length);
 
   // Sets the error code that will be returned to the caller. The current
   // line and column are determined and added into the final message.

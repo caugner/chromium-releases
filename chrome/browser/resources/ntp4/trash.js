@@ -29,7 +29,11 @@ cr.define('ntp4', function() {
      * @return {bool}
      */
     shouldAcceptDrag: function(e) {
-      return !!ntp4.getCurrentlyDraggingTile().querySelector('.app');
+      var tile = ntp4.getCurrentlyDraggingTile();
+      if (!tile)
+        return false;
+
+      return tile.firstChild.canBeRemoved();
     },
 
     /**
@@ -37,6 +41,8 @@ cr.define('ntp4', function() {
      * @param {Event} e The drag event.
      */
     doDragOver: function(e) {
+      ntp4.getCurrentlyDraggingTile().dragClone.classList.add(
+          'hovering-on-trash');
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
     },
@@ -57,14 +63,9 @@ cr.define('ntp4', function() {
       e.preventDefault();
 
       var tile = ntp4.getCurrentlyDraggingTile();
-      var app = tile.querySelector('.app');
-      if (!app)
-        return;
-
-      chrome.send('uninstallApp', [app.appData.id, true]);
-
       var page = tile.tilePage;
-      tile.parentNode.removeChild(tile);
+      tile.firstChild.removeFromChrome();
+      tile.landedOnTrash = true;
       page.cleanupDrag();
     },
 
@@ -73,6 +74,8 @@ cr.define('ntp4', function() {
      * @param {Event} e The drag event.
      */
     doDragLeave: function(e) {
+      ntp4.getCurrentlyDraggingTile().dragClone.classList.remove(
+          'hovering-on-trash');
     },
   };
 

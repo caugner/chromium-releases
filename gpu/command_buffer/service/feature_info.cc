@@ -6,7 +6,6 @@
 #include <string>
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/gl_utils.h"
-#include "gpu/GLES2/gles2_command_buffer.h"
 #include "ui/gfx/gl/gl_implementation.h"
 
 namespace gpu {
@@ -102,11 +101,9 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
 
   bool npot_ok = false;
 
-  AddExtensionString("GL_CHROMIUM_copy_texture_to_parent_texture");
   AddExtensionString("GL_CHROMIUM_resource_safe");
   AddExtensionString("GL_CHROMIUM_resize");
   AddExtensionString("GL_CHROMIUM_strict_attribs");
-  AddExtensionString("GL_CHROMIUM_latch");
   AddExtensionString("GL_CHROMIUM_swapbuffers_complete_callback");
   AddExtensionString("GL_CHROMIUM_rate_limit_offscreen_context");
 
@@ -122,15 +119,17 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
   bool enable_dxt3 = false;
   bool enable_dxt5 = false;
   bool have_s3tc = ext.Have("GL_EXT_texture_compression_s3tc");
+  bool have_dxt3 = have_s3tc || ext.Have("GL_ANGLE_texture_compression_dxt3");
+  bool have_dxt5 = have_s3tc || ext.Have("GL_ANGLE_texture_compression_dxt5");
 
   if (ext.Desire("GL_EXT_texture_compression_dxt1") &&
       (ext.Have("GL_EXT_texture_compression_dxt1") || have_s3tc)) {
     enable_dxt1 = true;
   }
-  if (have_s3tc && ext.Desire("GL_CHROMIUM_texture_compression_dxt3")) {
+  if (have_dxt3 && ext.Desire("GL_CHROMIUM_texture_compression_dxt3")) {
     enable_dxt3 = true;
   }
-  if (have_s3tc && ext.Desire("GL_CHROMIUM_texture_compression_dxt5")) {
+  if (have_dxt5 && ext.Desire("GL_CHROMIUM_texture_compression_dxt5")) {
     enable_dxt5 = true;
   }
 
@@ -330,6 +329,15 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
     feature_flags_.oes_standard_derivatives = true;
     validators_.hint_target.AddValue(GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES);
     validators_.g_l_state.AddValue(GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES);
+  }
+
+  if (ext.HaveAndDesire("GL_OES_EGL_image_external")) {
+    AddExtensionString("GL_OES_EGL_image_external");
+    feature_flags_.oes_egl_image_external = true;
+    validators_.texture_bind_target.AddValue(GL_TEXTURE_EXTERNAL_OES);
+    validators_.get_tex_param_target.AddValue(GL_TEXTURE_EXTERNAL_OES);
+    validators_.texture_parameter.AddValue(GL_REQUIRED_TEXTURE_IMAGE_UNITS_OES);
+    validators_.g_l_state.AddValue(GL_TEXTURE_BINDING_EXTERNAL_OES);
   }
 
   // TODO(gman): Add support for these extensions.

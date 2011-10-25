@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "chrome/browser/ui/webui/screenshot_source.h"
 #include "chrome/browser/userfeedback/proto/common.pb.h"
 #include "chrome/browser/userfeedback/proto/extension.pb.h"
 #include "chrome/browser/userfeedback/proto/math.pb.h"
@@ -54,35 +55,35 @@ class BugReportUtil {
   //     all the call sites or making it a wrapper around another util.
   static void SetOSVersion(std::string *os_version);
 
-  // This sets the address of the feedback server to be used by SendReport
-  static void SetFeedbackServer(const std::string& server);
-
   // Send the feedback report after the specified delay
   static void DispatchFeedback(Profile* profile, std::string* feedback_data,
                                int64 delay);
 
 
   // Generates bug report data.
-  static void SendReport(Profile* profile,
-      int problem_type,
-      const std::string& page_url_text,
-      const std::string& description,
-      const char* png_data,
-      int png_data_length,
-      int png_width,
+  static void SendReport(
+      Profile* profile
+      , int problem_type
+      , const std::string& page_url_text
+      , const std::string& description
+      , ScreenshotDataPtr png_data
+      , int png_width
+      , int png_height
 #if defined(OS_CHROMEOS)
-      int png_height,
-      const std::string& user_email_text,
-      const char* zipped_logs_data,
-      int zipped_logs_length,
-      const chromeos::system::LogDictionaryType* const sys_info);
-#else
-      int png_height);
+      , const std::string& user_email_text
+      , const char* zipped_logs_data
+      , int zipped_logs_length
+      , const chromeos::system::LogDictionaryType* const sys_info
 #endif
-
+  );
   // Redirects the user to Google's phishing reporting page.
   static void ReportPhishing(TabContents* currentTab,
                              const std::string& phishing_url);
+  // Maintains a single vector of bytes to store the last screenshot taken.
+  static std::vector<unsigned char>* GetScreenshotPng();
+  static void ClearScreenshotPng();
+  static void SetScreenshotSize(const gfx::Rect& rect);
+  static gfx::Rect& GetScreenshotSize();
 
   class PostCleanup;
 
@@ -99,8 +100,6 @@ class BugReportUtil {
 #if defined(OS_CHROMEOS)
   static bool ValidFeedbackSize(const std::string& content);
 #endif
-
-  static std::string feedback_server_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(BugReportUtil);
 };

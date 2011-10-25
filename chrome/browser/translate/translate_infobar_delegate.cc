@@ -89,6 +89,7 @@ void TranslateInfoBarDelegate::SetOriginalLanguage(size_t language_index) {
 
 void TranslateInfoBarDelegate::SetTargetLanguage(size_t language_index) {
   DCHECK_LT(language_index, GetLanguageCount());
+  DCHECK_GE(language_index, 0U);
   target_language_index_ = language_index;
   if (infobar_view_)
     infobar_view_->TargetLanguageChanged();
@@ -98,7 +99,7 @@ void TranslateInfoBarDelegate::SetTargetLanguage(size_t language_index) {
 
 void TranslateInfoBarDelegate::Translate() {
   const std::string& original_language_code = GetOriginalLanguageCode();
-  if (!tab_contents()->profile()->IsOffTheRecord()) {
+  if (!tab_contents()->browser_context()->IsOffTheRecord()) {
     prefs_.ResetTranslationDeniedCount(original_language_code);
     prefs_.IncrementTranslationAcceptedCount(original_language_code);
   }
@@ -119,7 +120,7 @@ void TranslateInfoBarDelegate::ReportLanguageDetectionError() {
 
 void TranslateInfoBarDelegate::TranslationDeclined() {
   const std::string& original_language_code = GetOriginalLanguageCode();
-  if (!tab_contents()->profile()->IsOffTheRecord()) {
+  if (!tab_contents()->browser_context()->IsOffTheRecord()) {
     prefs_.ResetTranslationAcceptedCount(original_language_code);
     prefs_.IncrementTranslationDeniedCount(original_language_code);
   }
@@ -256,13 +257,13 @@ bool TranslateInfoBarDelegate::ShouldShowMessageInfoBarButton() {
 
 bool TranslateInfoBarDelegate::ShouldShowNeverTranslateButton() {
   DCHECK_EQ(BEFORE_TRANSLATE, type_);
-  return !tab_contents()->profile()->IsOffTheRecord() &&
+  return !tab_contents()->browser_context()->IsOffTheRecord() &&
       (prefs_.GetTranslationDeniedCount(GetOriginalLanguageCode()) >= 3);
 }
 
 bool TranslateInfoBarDelegate::ShouldShowAlwaysTranslateButton() {
   DCHECK_EQ(BEFORE_TRANSLATE, type_);
-  return !tab_contents()->profile()->IsOffTheRecord() &&
+  return !tab_contents()->browser_context()->IsOffTheRecord() &&
       (prefs_.GetTranslationAcceptedCount(GetOriginalLanguageCode()) >= 3);
 }
 
@@ -317,7 +318,8 @@ TranslateInfoBarDelegate::TranslateInfoBarDelegate(
       target_language_index_(kNoIndex),
       error_(error),
       infobar_view_(NULL),
-      prefs_(tab_contents_->profile()->GetPrefs()) {
+      prefs_(Profile::FromBrowserContext(
+          tab_contents_->browser_context())->GetPrefs()) {
   DCHECK_NE((type_ == TRANSLATION_ERROR), (error == TranslateErrors::NONE));
 
   std::vector<std::string> language_codes;
@@ -347,6 +349,7 @@ TranslateInfoBarDelegate::TranslateInfoBarDelegate(
     if (language_code == target_language)
       target_language_index_ = iter - languages_.begin();
   }
+  DCHECK_NE(kNoIndex, target_language_index_);
 }
 
 bool TranslateInfoBarDelegate::ShouldExpire(

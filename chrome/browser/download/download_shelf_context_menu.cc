@@ -4,8 +4,11 @@
 
 #include "chrome/browser/download/download_shelf_context_menu.h"
 
-#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
+#include "chrome/browser/download/download_prefs.h"
+#include "chrome/common/extensions/extension.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -28,7 +31,8 @@ bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
     case OPEN_WHEN_COMPLETE:
       return download_item_->CanShowInFolder();
     case ALWAYS_OPEN_TYPE:
-      return download_item_->CanOpenDownload();
+      return download_item_->CanOpenDownload() &&
+          !Extension::IsExtension(download_item_->state_info().target_name);
     case CANCEL:
       return download_item_->IsPartialDownload();
     case TOGGLE_PAUSE:
@@ -59,8 +63,13 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
       download_item_->OpenDownload();
       break;
     case ALWAYS_OPEN_TYPE: {
-      download_item_->OpenFilesBasedOnExtension(
-          !IsCommandIdChecked(ALWAYS_OPEN_TYPE));
+      DownloadPrefs* prefs = DownloadPrefs::FromDownloadManager(
+          download_item_->download_manager());
+      FilePath path = download_item_->GetUserVerifiedFilePath();
+      if (!IsCommandIdChecked(ALWAYS_OPEN_TYPE))
+        prefs->EnableAutoOpenBasedOnExtension(path);
+      else
+        prefs->DisableAutoOpenBasedOnExtension(path);
       break;
     }
     case CANCEL:

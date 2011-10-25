@@ -13,6 +13,7 @@
 #include <GLES2/gl2ext.h>
 
 #include <algorithm>
+#include <set>
 
 #include "base/string_tokenizer.h"
 #include "base/command_line.h"
@@ -24,9 +25,9 @@
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
-#include "gpu/GLES2/gles2_command_buffer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -96,16 +97,10 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
   //
   static GLInProcessContext* CreateViewContext(
       gfx::PluginWindowHandle render_surface,
+      GLInProcessContext* context_group,
       const char* allowed_extensions,
       const int32* attrib_list,
       const GURL& active_arl);
-
-#if defined(OS_MACOSX)
-  // On Mac OS X only, view GLInProcessContexts actually behave like offscreen
-  // GLInProcessContexts, and require an explicit resize operation which is
-  // slightly different from that of offscreen GLInProcessContexts.
-  void ResizeOnscreen(const gfx::Size& size);
-#endif
 
   // Create a GLInProcessContext that renders to an offscreen frame buffer. If
   // parent is not NULL, that GLInProcessContext can access a copy of the
@@ -118,16 +113,10 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
   static GLInProcessContext* CreateOffscreenContext(
       GLInProcessContext* parent,
       const gfx::Size& size,
+      GLInProcessContext* context_group,
       const char* allowed_extensions,
       const int32* attrib_list,
       const GURL& active_url);
-
-  // Resize an offscreen frame buffer. The resize occurs on the next call to
-  // SwapBuffers. This is to avoid waiting until all pending GL calls have been
-  // executed by the GPU process. Everything rendered up to the call to
-  // SwapBuffers will be lost. A lost GLInProcessContext will be reported if the
-  // resize fails.
-  void ResizeOffscreen(const gfx::Size& size);
 
   // For an offscreen frame buffer GLInProcessContext, return the texture ID
   // with respect to the parent GLInProcessContext. Returns zero if
@@ -172,27 +161,13 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
 
   CommandBufferService* GetCommandBufferService();
 
-  // Create a latch for synchronization between contexts using glSetLatch and
-  // glWaitLatch.
-  // CreateLatch will only fail if there is a generally unrecoverable
-  // error, in which case 0 is returned. Returns latch_id on success.
-  bool CreateLatch(uint32* ret_latch);
-
-  // Destroy a latch.
-  bool DestroyLatch(uint32 latch);
-
-  // All child contexts get a latch pair automatically. These latches are used
-  // for synchronization with parent context. If *this* context does not have a
-  // parent context, these methods will return false.
-  bool GetParentToChildLatch(uint32* parent_to_child_latch);
-  bool GetChildToParentLatch(uint32* child_to_parent_latch);
-
  private:
   GLInProcessContext(GLInProcessContext* parent);
 
   bool Initialize(bool onscreen,
                   gfx::PluginWindowHandle render_surface,
                   const gfx::Size& size,
+                  GLInProcessContext* context_group,
                   const char* allowed_extensions,
                   const int32* attrib_list,
                   const GURL& active_url);
@@ -205,15 +180,11 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
   scoped_ptr<Callback0::Type> swap_buffers_callback_;
   scoped_ptr<Callback0::Type> context_lost_callback_;
   uint32 parent_texture_id_;
-  uint32 child_to_parent_latch_;
-  uint32 parent_to_child_latch_;
-  int32 latch_transfer_buffer_id_;
   scoped_ptr<CommandBufferService> command_buffer_;
   GpuScheduler* gpu_scheduler_;
   GLES2CmdHelper* gles2_helper_;
   int32 transfer_buffer_id_;
   GLES2Implementation* gles2_implementation_;
-  gfx::Size size_;
   Error last_error_;
 
   DISALLOW_COPY_AND_ASSIGN(GLInProcessContext);
@@ -226,8 +197,9 @@ const int32 kCommandBufferSize = 1024 * 1024;
 // creation attributes.
 const int32 kTransferBufferSize = 1024 * 1024;
 
-const uint32 kMaxLatchesPerRenderer = 2048;
-const uint32 kInvalidLatchId = 0xffffffffu;
+static base::LazyInstance<
+    std::set<WebGraphicsContext3DInProcessCommandBufferImpl*> >
+        g_all_shared_contexts(base::LINKER_INITIALIZED);
 
 // Singleton used to initialize and terminate the gles2 library.
 class GLES2Initializer {
@@ -244,73 +216,6 @@ class GLES2Initializer {
   DISALLOW_COPY_AND_ASSIGN(GLES2Initializer);
 };
 
-// Allocator for latches.
-class LatchAllocator {
- public:
-  static LatchAllocator* GetInstance();
-  static uint32 size() { return kMaxLatchesPerRenderer*sizeof(uint32); }
-  static const uint32_t kFreeLatch = 0xffffffffu;
-
-  LatchAllocator();
-  ~LatchAllocator();
-
-  base::SharedMemoryHandle handle() const { return shm_->handle(); }
-  base::SharedMemory* shared_memory() { return shm_.get(); }
-
-  bool AllocateLatch(uint32* latch_id);
-  bool FreeLatch(uint32 latch_id);
-
- private:
-  friend struct DefaultSingletonTraits<LatchAllocator>;
-
-  scoped_ptr<base::SharedMemory> shm_;
-  // Pointer to mapped shared memory.
-  volatile uint32* latches_;
-
-  DISALLOW_COPY_AND_ASSIGN(LatchAllocator);
-};
-
-////////////////////////////////////////////////////////////////////////////////
-/// LatchAllocator implementation
-
-LatchAllocator* LatchAllocator::GetInstance() {
-  return Singleton<LatchAllocator>::get();
-}
-
-LatchAllocator::LatchAllocator() {
-  shm_.reset(new base::SharedMemory());
-  shm_->CreateAndMapAnonymous(size());
-
-  latches_ = static_cast<uint32*>(shm_->memory());
-  // Mark all latches as unallocated.
-  for (uint32 i = 0; i < kMaxLatchesPerRenderer; ++i)
-    latches_[i] = kFreeLatch;
-}
-
-LatchAllocator::~LatchAllocator() {
-}
-
-bool LatchAllocator::AllocateLatch(uint32* latch_id) {
-  for (uint32 i = 0; i < kMaxLatchesPerRenderer; ++i) {
-    if (latches_[i] == kFreeLatch) {
-      // mark latch as taken and blocked.
-      // 0 means waiter will block, 1 means waiter will pass.
-      latches_[i] = 0;
-      *latch_id = i;
-      return true;
-    }
-  }
-  return false;
-}
-
-bool LatchAllocator::FreeLatch(uint32 latch_id) {
-  if (latch_id < kMaxLatchesPerRenderer && latches_[latch_id] != kFreeLatch) {
-    latches_[latch_id] = kFreeLatch;
-    return true;
-  }
-  return false;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 static base::LazyInstance<GLES2Initializer> g_gles2_initializer(
@@ -324,6 +229,7 @@ GLInProcessContext::~GLInProcessContext() {
 
 GLInProcessContext* GLInProcessContext::CreateViewContext(
     gfx::PluginWindowHandle render_surface,
+    GLInProcessContext* context_group,
     const char* allowed_extensions,
     const int32* attrib_list,
     const GURL& active_url) {
@@ -333,6 +239,7 @@ GLInProcessContext* GLInProcessContext::CreateViewContext(
       true,
       render_surface,
       gfx::Size(),
+      context_group,
       allowed_extensions,
       attrib_list,
       active_url))
@@ -344,16 +251,10 @@ GLInProcessContext* GLInProcessContext::CreateViewContext(
 #endif
 }
 
-#if defined(OS_MACOSX)
-void GLInProcessContext::ResizeOnscreen(const gfx::Size& size) {
-  DCHECK(size.width() > 0 && size.height() > 0);
-  size_ = size;
-}
-#endif
-
 GLInProcessContext* GLInProcessContext::CreateOffscreenContext(
     GLInProcessContext* parent,
     const gfx::Size& size,
+    GLInProcessContext* context_group,
     const char* allowed_extensions,
     const int32* attrib_list,
     const GURL& active_url) {
@@ -363,6 +264,7 @@ GLInProcessContext* GLInProcessContext::CreateOffscreenContext(
       false,
       gfx::kNullPluginWindow,
       size,
+      context_group,
       allowed_extensions,
       attrib_list,
       active_url))
@@ -374,23 +276,10 @@ GLInProcessContext* GLInProcessContext::CreateOffscreenContext(
 #endif
 }
 
-void GLInProcessContext::ResizeOffscreen(const gfx::Size& size) {
-  DCHECK(size.width() > 0 && size.height() > 0);
-  if (size_ != size) {
-    gpu_scheduler_->ResizeOffscreenFrameBuffer(size);
-    // TODO(gman): See if the next line is needed.
-    gles2_implementation_->ResizeCHROMIUM(size.width(),  size.height());
-    size_ = size;
-  }
-}
-
 void GLInProcessContext::PumpCommands() {
-  ::gpu::CommandBuffer::State state;
-  do {
-    gpu_scheduler_->PutChanged();
-    MessageLoop::current()->RunAllPending();
-    state = command_buffer_->GetState();
-  } while (state.get_offset != state.put_offset);
+  gpu_scheduler_->PutChanged();
+  ::gpu::CommandBuffer::State state = command_buffer_->GetState();
+  CHECK(state.error == ::gpu::error::kNoError);
 }
 
 uint32 GLInProcessContext::GetParentTextureId() {
@@ -398,45 +287,14 @@ uint32 GLInProcessContext::GetParentTextureId() {
 }
 
 uint32 GLInProcessContext::CreateParentTexture(const gfx::Size& size) {
-  // Allocate a texture ID with respect to the parent.
-  if (parent_.get()) {
-    if (!MakeCurrent(parent_.get()))
-      return 0;
-    uint32 texture_id = parent_->gles2_implementation_->MakeTextureId();
-    parent_->gles2_implementation_->BindTexture(GL_TEXTURE_2D, texture_id);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    parent_->gles2_implementation_->TexImage2D(GL_TEXTURE_2D,
-        0,  // mip level
-        GL_RGBA,
-        size.width(),
-        size.height(),
-        0,  // border
-        GL_RGBA,
-        GL_UNSIGNED_BYTE,
-        NULL);
-    // Make sure that the parent texture's storage is allocated before we let
-    // the caller attempt to use it.
-    int32 token = parent_->gles2_helper_->InsertToken();
-    parent_->gles2_helper_->WaitForToken(token);
-    return texture_id;
-  }
-  return 0;
+  uint32 texture = 0;
+  gles2_implementation_->GenTextures(1, &texture);
+  gles2_implementation_->Flush();
+  return texture;
 }
 
 void GLInProcessContext::DeleteParentTexture(uint32 texture) {
-  if (parent_.get()) {
-    if (!MakeCurrent(parent_.get()))
-      return;
-    parent_->gles2_implementation_->DeleteTextures(1, &texture);
-  }
+  gles2_implementation_->DeleteTextures(1, &texture);
 }
 
 void GLInProcessContext::SetSwapBuffersCallback(Callback0::Type* callback) {
@@ -500,8 +358,7 @@ CommandBufferService* GLInProcessContext::GetCommandBufferService() {
 
 // TODO(gman): Remove This
 void GLInProcessContext::DisableShaderTranslation() {
-  gles2_implementation_->CommandBufferEnableCHROMIUM(
-      PEPPER3D_SKIP_GLSL_TRANSLATION);
+  NOTREACHED();
 }
 
 GLES2Implementation* GLInProcessContext::GetImplementation() {
@@ -512,9 +369,6 @@ GLInProcessContext::GLInProcessContext(GLInProcessContext* parent)
     : parent_(parent ?
           parent->AsWeakPtr() : base::WeakPtr<GLInProcessContext>()),
       parent_texture_id_(0),
-      child_to_parent_latch_(kInvalidLatchId),
-      parent_to_child_latch_(kInvalidLatchId),
-      latch_transfer_buffer_id_(-1),
       gpu_scheduler_(NULL),
       gles2_helper_(NULL),
       transfer_buffer_id_(-1),
@@ -525,6 +379,7 @@ GLInProcessContext::GLInProcessContext(GLInProcessContext* parent)
 bool GLInProcessContext::Initialize(bool onscreen,
                                     gfx::PluginWindowHandle render_surface,
                                     const gfx::Size& size,
+                                    GLInProcessContext* context_group,
                                     const char* allowed_extensions,
                                     const int32* attrib_list,
                                     const GURL& active_url) {
@@ -577,9 +432,13 @@ bool GLInProcessContext::Initialize(bool onscreen,
   if (!command_buffer_->Initialize(kCommandBufferSize))
     return false;
 
-  gpu_scheduler_ = GpuScheduler::Create(command_buffer_.get(),
-                                        NULL,
-                                        NULL);
+  // TODO(gman): This needs to be true if this is Pepper.
+  bool bind_generates_resource = false;
+  gpu_scheduler_ = GpuScheduler::Create(
+      command_buffer_.get(),
+      context_group ?
+          context_group->gpu_scheduler_->decoder()->GetContextGroup() :
+              new ::gpu::gles2::ContextGroup(bind_generates_resource));
 
   if (onscreen) {
     if (render_surface == gfx::kNullPluginWindow) {
@@ -647,35 +506,14 @@ bool GLInProcessContext::Initialize(bool onscreen,
     return false;
   }
 
-  // Register transfer buffer so that the context can access latches.
-  LatchAllocator* latch_shm = LatchAllocator::GetInstance();
-  latch_transfer_buffer_id_ = command_buffer_->RegisterTransferBuffer(
-      latch_shm->shared_memory(), LatchAllocator::size(),
-      ::gpu::kLatchSharedMemoryId);
-  if (latch_transfer_buffer_id_ != ::gpu::kLatchSharedMemoryId) {
-    Destroy();
-    return false;
-  }
-
-  // If this is a child context, setup latches for synchronization between child
-  // and parent.
-  if (parent_.get()) {
-    if (!CreateLatch(&child_to_parent_latch_) ||
-        !CreateLatch(&parent_to_child_latch_)) {
-      Destroy();
-      return false;
-    }
-  }
-
   // Create the object exposing the OpenGL API.
   gles2_implementation_ = new GLES2Implementation(
       gles2_helper_,
       transfer_buffer.size,
       transfer_buffer.ptr,
       transfer_buffer_id_,
+      true,
       false);
-
-  size_ = size;
 
   return true;
 }
@@ -686,20 +524,16 @@ void GLInProcessContext::Destroy() {
     parent_texture_id_ = 0;
   }
 
-  delete gles2_implementation_;
-  gles2_implementation_ = NULL;
+  if (gles2_implementation_) {
+    // First flush the context to ensure that any pending frees of resources
+    // are completed. Otherwise, if this context is part of a share group,
+    // those resources might leak. Also, any remaining side effects of commands
+    // issued on this context might not be visible to other contexts in the
+    // share group.
+    gles2_implementation_->Flush();
 
-  if (child_to_parent_latch_ != kInvalidLatchId) {
-    DestroyLatch(child_to_parent_latch_);
-    child_to_parent_latch_ = kInvalidLatchId;
-  }
-  if (parent_to_child_latch_ != kInvalidLatchId) {
-    DestroyLatch(parent_to_child_latch_);
-    parent_to_child_latch_ = kInvalidLatchId;
-  }
-  if (command_buffer_.get() && latch_transfer_buffer_id_ != -1) {
-    command_buffer_->DestroyTransferBuffer(latch_transfer_buffer_id_);
-    latch_transfer_buffer_id_ = -1;
+    delete gles2_implementation_;
+    gles2_implementation_ = NULL;
   }
 
   if (command_buffer_.get() && transfer_buffer_id_ != -1) {
@@ -723,30 +557,6 @@ void GLInProcessContext::OnContextLost() {
     context_lost_callback_->Run();
 }
 
-bool GLInProcessContext::CreateLatch(uint32* ret_latch) {
-  return LatchAllocator::GetInstance()->AllocateLatch(ret_latch);
-}
-
-bool GLInProcessContext::DestroyLatch(uint32 latch) {
-  return LatchAllocator::GetInstance()->FreeLatch(latch);
-}
-
-bool GLInProcessContext::GetParentToChildLatch(uint32* parent_to_child_latch) {
-  if (parent_.get()) {
-    *parent_to_child_latch = parent_to_child_latch_;
-    return true;
-  }
-  return false;
-}
-
-bool GLInProcessContext::GetChildToParentLatch(uint32* child_to_parent_latch) {
-  if (parent_.get()) {
-    *child_to_parent_latch = child_to_parent_latch_;
-    return true;
-  }
-  return false;
-}
-
 WebGraphicsContext3DInProcessCommandBufferImpl::
     WebGraphicsContext3DInProcessCommandBufferImpl()
     : context_(NULL),
@@ -764,6 +574,7 @@ WebGraphicsContext3DInProcessCommandBufferImpl::
 
 WebGraphicsContext3DInProcessCommandBufferImpl::
     ~WebGraphicsContext3DInProcessCommandBufferImpl() {
+  g_all_shared_contexts.Pointer()->erase(this);
 }
 
 // This string should only be passed for WebGL contexts. Nothing ELSE!!!
@@ -778,7 +589,6 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
     WebGraphicsContext3D::Attributes attributes,
     WebKit::WebView* web_view,
     bool render_directly_to_web_view) {
-  webkit_glue::BindSkiaToCommandBufferGL();
 
   // Convert WebGL context creation attributes into GLInProcessContext / EGL
   // size requests.
@@ -806,7 +616,7 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
   GLInProcessContext* parent_context = NULL;
   if (!render_directly_to_web_view) {
     WebKit::WebGraphicsContext3D* view_context =
-        web_view->graphicsContext3D();
+        web_view ? web_view->graphicsContext3D() : NULL;
     if (view_context) {
       WebGraphicsContext3DInProcessCommandBufferImpl* context_impl =
           static_cast<WebGraphicsContext3DInProcessCommandBufferImpl*>(
@@ -815,9 +625,15 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
     }
   }
 
+  WebGraphicsContext3DInProcessCommandBufferImpl* context_group = NULL;
+  if (attributes.shareResources)
+    context_group = g_all_shared_contexts.Pointer()->empty() ?
+        NULL : *g_all_shared_contexts.Pointer()->begin();
+
   context_ = GLInProcessContext::CreateOffscreenContext(
       parent_context,
       gfx::Size(1, 1),
+      context_group ? context_group->context_ : NULL,
       preferred_extensions,
       attribs,
       active_url);
@@ -849,6 +665,9 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
     attributes_.antialias = samples > 0;
   }
   makeContextCurrent();
+
+  if (attributes.shareResources)
+    g_all_shared_contexts.Pointer()->insert(this);
 
   return true;
 }
@@ -907,17 +726,7 @@ void WebGraphicsContext3DInProcessCommandBufferImpl::reshape(
   // TODO(gmam): See if we can comment this in.
   // ClearContext();
 
-  if (web_view_) {
-#if defined(OS_MACOSX)
-    context_->ResizeOnscreen(gfx::Size(width, height));
-#else
-    gl_->ResizeCHROMIUM(width, height);
-#endif
-  } else {
-    context_->ResizeOffscreen(gfx::Size(width, height));
-    // Force a SwapBuffers to get the framebuffer to resize.
-    context_->SwapBuffers();
-  }
+  gl_->ResizeCHROMIUM(width, height);
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   scanline_.reset(new uint8[width * 4]);
@@ -1059,42 +868,7 @@ void WebGraphicsContext3DInProcessCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
 
 void WebGraphicsContext3DInProcessCommandBufferImpl::
     copyTextureToParentTextureCHROMIUM(WebGLId texture, WebGLId parentTexture) {
-  // TODO(gmam): See if we can comment this in.
-  // ClearContext();
-  copyTextureToCompositor(texture, parentTexture);
-}
-
-void WebGraphicsContext3DInProcessCommandBufferImpl::
-    getParentToChildLatchCHROMIUM(WGC3Duint* latch_id)
-{
-  ClearContext();
-  if (!context_->GetParentToChildLatch(latch_id)) {
-    LOG(ERROR) << "getLatch must only be called on child context";
-    synthesizeGLError(GL_INVALID_OPERATION);
-    *latch_id = ::gpu::kInvalidLatchId;
-  }
-}
-
-void WebGraphicsContext3DInProcessCommandBufferImpl::
-    getChildToParentLatchCHROMIUM(WGC3Duint* latch_id)
-{
-  ClearContext();
-  if (!context_->GetChildToParentLatch(latch_id)) {
-    LOG(ERROR) << "getLatch must only be called on child context";
-    synthesizeGLError(GL_INVALID_OPERATION);
-    *latch_id = ::gpu::kInvalidLatchId;
-  }
-}
-
-void WebGraphicsContext3DInProcessCommandBufferImpl::waitLatchCHROMIUM(
-    WGC3Duint latch_id)
-{
-}
-
-void WebGraphicsContext3DInProcessCommandBufferImpl::setLatchCHROMIUM(
-    WGC3Duint latch_id)
-{
-  gl_->Flush();
+  NOTIMPLEMENTED();
 }
 
 void WebGraphicsContext3DInProcessCommandBufferImpl::
@@ -1785,10 +1559,7 @@ void WebGraphicsContext3DInProcessCommandBufferImpl::deleteTexture(
 
 void WebGraphicsContext3DInProcessCommandBufferImpl::copyTextureToCompositor(
     WebGLId texture, WebGLId parentTexture) {
-  // TODO(gmam): See if we can comment this in.
-  // ClearContext();
-  gl_->CopyTextureToParentTextureCHROMIUM(texture, parentTexture);
-  gl_->Flush();
+  NOTIMPLEMENTED();
 }
 
 void WebGraphicsContext3DInProcessCommandBufferImpl::OnSwapBuffersComplete() {
@@ -1805,6 +1576,13 @@ WGC3Denum WebGraphicsContext3DInProcessCommandBufferImpl::
   return context_lost_reason_;
 }
 
+#if WEBKIT_USING_SKIA
+GrGLInterface* WebGraphicsContext3DInProcessCommandBufferImpl::
+    onCreateGrGLInterface() {
+  return webkit_glue::CreateCommandBufferSkiaGLBinding();
+}
+#endif
+
 void WebGraphicsContext3DInProcessCommandBufferImpl::OnContextLost() {
   // TODO(kbr): improve the precision here.
   context_lost_reason_ = GL_UNKNOWN_CONTEXT_RESET_ARB;
@@ -1817,4 +1595,3 @@ void WebGraphicsContext3DInProcessCommandBufferImpl::OnContextLost() {
 }  // namespace webkit
 
 #endif  // defined(ENABLE_GPU)
-

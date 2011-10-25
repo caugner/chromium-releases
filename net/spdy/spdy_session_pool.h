@@ -17,8 +17,8 @@
 #include "net/base/cert_database.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
-#include "net/base/net_api.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/ssl_config_service.h"
 #include "net/proxy/proxy_config.h"
@@ -35,13 +35,13 @@ class HttpNetworkSession;
 class SpdySession;
 
 // This is a very simple pool for open SpdySessions.
-class NET_API SpdySessionPool
+class NET_EXPORT SpdySessionPool
     : public NetworkChangeNotifier::IPAddressObserver,
       public SSLConfigService::Observer,
       public CertDatabase::Observer {
  public:
-  explicit SpdySessionPool(HostResolver* host_resolver,
-                           SSLConfigService* ssl_config_service);
+  SpdySessionPool(HostResolver* host_resolver,
+                  SSLConfigService* ssl_config_service);
   virtual ~SpdySessionPool();
 
   // Either returns an existing SpdySession or creates a new SpdySession for
@@ -163,7 +163,7 @@ class NET_API SpdySessionPool
   bool LookupAddresses(const HostPortProxyPair& pair,
                        AddressList* addresses) const;
 
-  // Add |endpoint| as an IP-equivalent address for |pair|.
+  // Add |address| as an IP-equivalent address for |pair|.
   void AddAlias(const addrinfo* address, const HostPortProxyPair& pair);
 
   // Remove all aliases for |pair| from the aliases table.

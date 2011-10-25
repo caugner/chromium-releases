@@ -18,7 +18,6 @@
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
-#include "ppapi/c/dev/ppb_opengles_dev.h"
 #include "ppapi/c/dev/ppb_surface_3d_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_url_util_dev.h"
@@ -30,6 +29,7 @@
 #include "ppapi/c/ppb_graphics_2d.h"
 #include "ppapi/c/ppb_image_data.h"
 #include "ppapi/c/ppb_instance.h"
+#include "ppapi/c/ppb_opengles.h"
 #include "ppapi/c/ppb_url_loader.h"
 #include "ppapi/c/ppb_url_request_info.h"
 #include "ppapi/c/ppb_url_response_info.h"
@@ -65,6 +65,7 @@
 #include "ppapi/proxy/ppb_flash_tcp_socket_proxy.h"
 #include "ppapi/proxy/ppb_font_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
+#include "ppapi/proxy/ppb_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
 #include "ppapi/proxy/ppb_input_event_proxy.h"
 #include "ppapi/proxy/ppb_instance_proxy.h"
@@ -79,14 +80,18 @@
 #include "ppapi/proxy/ppb_url_util_proxy.h"
 #include "ppapi/proxy/ppb_var_deprecated_proxy.h"
 #include "ppapi/proxy/ppb_var_proxy.h"
+#include "ppapi/proxy/ppb_video_capture_proxy.h"
+#include "ppapi/proxy/ppb_video_decoder_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/ppp_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppp_input_event_proxy.h"
 #include "ppapi/proxy/ppp_instance_private_proxy.h"
 #include "ppapi/proxy/ppp_instance_proxy.h"
+#include "ppapi/proxy/ppp_messaging_proxy.h"
+#include "ppapi/proxy/ppp_video_decoder_proxy.h"
 #include "ppapi/proxy/var_serialization_rules.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -127,6 +132,7 @@ InterfaceList::InterfaceList() {
   AddPPB(PPB_Crypto_Proxy::GetInfo());
   AddPPB(PPB_CursorControl_Proxy::GetInfo());
   AddPPB(PPB_FileChooser_Proxy::GetInfo());
+  AddPPB(PPB_FileChooser_Proxy::GetInfo0_4());
   AddPPB(PPB_FileRef_Proxy::GetInfo());
   AddPPB(PPB_FileSystem_Proxy::GetInfo());
   AddPPB(PPB_Flash_Clipboard_Proxy::GetInfo());
@@ -137,10 +143,12 @@ InterfaceList::InterfaceList() {
   AddPPB(PPB_Flash_TCPSocket_Proxy::GetInfo());
   AddPPB(PPB_Font_Proxy::GetInfo());
   AddPPB(PPB_Graphics2D_Proxy::GetInfo());
+  AddPPB(PPB_Graphics3D_Proxy::GetInfo());
   AddPPB(PPB_ImageData_Proxy::GetInfo());
   AddPPB(PPB_InputEvent_Proxy::GetInputEventInfo());
   AddPPB(PPB_InputEvent_Proxy::GetKeyboardInputEventInfo());
-  AddPPB(PPB_InputEvent_Proxy::GetMouseInputEventInfo());
+  AddPPB(PPB_InputEvent_Proxy::GetMouseInputEventInfo1_0());
+  AddPPB(PPB_InputEvent_Proxy::GetMouseInputEventInfo1_1());
   AddPPB(PPB_InputEvent_Proxy::GetWheelInputEventInfo());
   AddPPB(PPB_Instance_Proxy::GetInfo0_5());
   AddPPB(PPB_Instance_Proxy::GetInfo1_0());
@@ -159,6 +167,8 @@ InterfaceList::InterfaceList() {
   AddPPB(PPB_URLUtil_Proxy::GetInfo());
   AddPPB(PPB_Var_Deprecated_Proxy::GetInfo());
   AddPPB(PPB_Var_Proxy::GetInfo());
+  AddPPB(PPB_VideoCapture_Proxy::GetInfo());
+  AddPPB(PPB_VideoDecoder_Proxy::GetInfo());
 
 #ifdef ENABLE_FLAPPER_HACKS
   AddPPB(PPB_Flash_NetConnector_Proxy::GetInfo());
@@ -169,6 +179,9 @@ InterfaceList::InterfaceList() {
   AddPPP(PPP_InputEvent_Proxy::GetInfo());
   AddPPP(PPP_Instance_Private_Proxy::GetInfo());
   AddPPP(PPP_Instance_Proxy::GetInfo1_0());
+  AddPPP(PPP_Messaging_Proxy::GetInfo());
+  AddPPP(PPP_VideoCapture_Proxy::GetInfo());
+  AddPPP(PPP_VideoDecoder_Proxy::GetInfo());
 }
 
 void InterfaceList::AddPPP(const InterfaceProxy::Info* info) {
@@ -272,4 +285,4 @@ void Dispatcher::AddIOThreadMessageFilter(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

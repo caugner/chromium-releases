@@ -27,33 +27,30 @@
 #include <set>
 #include <string>
 
-#include "base/hash_tables.h"
 #include "base/file_util.h"
+#include "base/hash_tables.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/stl_util.h"
 #include "base/time.h"
 #include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/sync/engine/syncer.h"
-#include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/protocol/proto_value_conversions.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
 #include "chrome/browser/sync/syncable/directory_backing_store.h"
 #include "chrome/browser/sync/syncable/directory_change_delegate.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/syncable_changes_version.h"
 #include "chrome/browser/sync/syncable/syncable_columns.h"
 #include "chrome/browser/sync/syncable/syncable_enum_conversions.h"
+#include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/transaction_observer.h"
 #include "chrome/browser/sync/util/logging.h"
-#include "chrome/common/deprecated/event_sys-inl.h"
 #include "net/base/escape.h"
 
 namespace {
@@ -67,9 +64,11 @@ static const InvariantCheckLevel kInvariantCheckLevel = VERIFY_IN_MEMORY;
 
 // Max number of milliseconds to spend checking syncable entry invariants
 static const int kInvariantCheckMaxMs = 50;
+
+// Max number of mutations in a mutation set we permit passing to observers.
+static const size_t kMutationObserverLimit = 1000;
 }  // namespace
 
-using browser_sync::SyncerUtil;
 using std::string;
 
 
@@ -387,7 +386,6 @@ Directory::Kernel::Kernel(const FilePath& db_path,
       unsynced_metahandles(new MetahandleSet),
       dirty_metahandles(new MetahandleSet),
       metahandles_to_purge(new MetahandleSet),
-      channel(new Directory::Channel(syncable::DIRECTORY_DESTROYED)),
       info_status(Directory::KERNEL_SHARE_INFO_VALID),
       persisted_info(info.kernel_info),
       cache_guid(info.cache_guid),
@@ -408,7 +406,6 @@ void Directory::Kernel::Release() {
 
 Directory::Kernel::~Kernel() {
   CHECK_EQ(0, refcount);
-  delete channel;
   delete unsynced_metahandles;
   delete unapplied_update_metahandles;
   delete dirty_metahandles;
@@ -1263,9 +1260,21 @@ ModelTypeBitSet WriteTransaction::NotifyTransactionChangingAndEnding(
   ModelTypeBitSet models_with_changes =
       delegate->HandleTransactionEndingChangeEvent(this);
 
-  dirkernel_->observers->Notify(
-      &TransactionObserver::OnTransactionMutate,
-      from_here_, writer_, mutations, models_with_changes);
+  // These notifications pass the mutation list around by value, which when we
+  // rewrite all sync data can be extremely large and result in out of memory
+  // errors (see crbug.com/90169). As a result, when there are more than
+  // kMutationObserverLimit mutations, we pass around an empty mutation set.
+  if (mutations.size() < kMutationObserverLimit) {
+    dirkernel_->observers->Notify(
+        &TransactionObserver::OnTransactionMutate,
+        from_here_, writer_, mutations, models_with_changes);
+  } else {
+    EntryKernelMutationSet dummy_mutations;  // Empty set.
+    dirkernel_->observers->Notify(
+        &TransactionObserver::OnTransactionMutate,
+        from_here_, writer_, dummy_mutations, models_with_changes);
+  }
+
   return models_with_changes;
 }
 

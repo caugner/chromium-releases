@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_IO_THREAD_H_
 #pragma once
 
-#include <list>
 #include <string>
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -37,14 +36,15 @@ class Predictor;
 
 namespace net {
 class CertVerifier;
+class CookieStore;
 class DnsRRResolver;
 class FtpTransactionFactory;
 class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpTransactionFactory;
 class NetworkDelegate;
+class OriginBoundCertService;
 class ProxyConfigService;
-class ProxyScriptFetcher;
 class ProxyService;
 class SSLConfigService;
 class URLRequestContext;
@@ -89,6 +89,10 @@ class IOThread : public BrowserProcessSubThread {
     scoped_ptr<net::HttpTransactionFactory> system_http_transaction_factory;
     scoped_ptr<net::FtpTransactionFactory> system_ftp_transaction_factory;
     scoped_refptr<net::URLRequestContext> system_request_context;
+    // |cookie_store| and |origin_bound_cert_service| are shared between
+    // |proxy_script_fetcher_context| and |system_request_context|.
+    scoped_refptr<net::CookieStore> system_cookie_store;
+    scoped_ptr<net::OriginBoundCertService> system_origin_bound_cert_service;
     scoped_refptr<ExtensionEventRouterForwarder>
         extension_event_router_forwarder;
   };
@@ -116,21 +120,6 @@ class IOThread : public BrowserProcessSubThread {
                             const chrome_common_net::UrlList& startup_urls,
                             base::ListValue* referral_list,
                             bool preconnect_enabled);
-
-  // Registers |url_request_context_getter| into the IO thread.  During
-  // IOThread::CleanUp(), IOThread will iterate through known getters and
-  // release their URLRequestContexts.  Only called on the IO thread.  It does
-  // not acquire a refcount for |url_request_context_getter|.  If
-  // |url_request_context_getter| is being deleted before IOThread::CleanUp() is
-  // invoked, then this needs to be balanced with a call to
-  // UnregisterURLRequestContextGetter().
-  void RegisterURLRequestContextGetter(
-      ChromeURLRequestContextGetter* url_request_context_getter);
-
-  // Unregisters |url_request_context_getter| from the IO thread.  Only called
-  // on the IO thread.
-  void UnregisterURLRequestContextGetter(
-      ChromeURLRequestContextGetter* url_request_context_getter);
 
   // Handles changing to On The Record mode, discarding confidential data.
   void ChangedToOnTheRecord();
@@ -233,11 +222,6 @@ class IOThread : public BrowserProcessSubThread {
 
   scoped_refptr<net::URLRequestContextGetter>
       system_url_request_context_getter_;
-
-  // Keeps track of all live ChromeURLRequestContextGetters, so the
-  // ChromeURLRequestContexts can be released during
-  // IOThread::CleanUp().
-  std::list<ChromeURLRequestContextGetter*> url_request_context_getters_;
 
   ScopedRunnableMethodFactory<IOThread> method_factory_;
 

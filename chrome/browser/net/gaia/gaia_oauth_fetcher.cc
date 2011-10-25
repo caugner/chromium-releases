@@ -49,6 +49,9 @@ static const char kOAuth1LoginScope[] =
 static const char kUserInfoUrl[] =
     "https://www.googleapis.com/oauth2/v1/userinfo";
 
+static const char kRevokeTokenUrl[] =
+    "https://www.google.com/accounts/AuthSubRevokeToken";
+
 static const char kOAuthTokenCookie[] = "oauth_token";
 
 GaiaOAuthFetcher::GaiaOAuthFetcher(GaiaOAuthConsumer* consumer,
@@ -58,8 +61,8 @@ GaiaOAuthFetcher::GaiaOAuthFetcher(GaiaOAuthConsumer* consumer,
     : consumer_(consumer),
       getter_(getter),
       profile_(profile),
-      service_scope_(service_scope),
       popup_(NULL),
+      service_scope_(service_scope),
       fetch_pending_(false),
       auto_fetch_limit_(ALL_OAUTH_STEPS) {}
 
@@ -126,7 +129,7 @@ std::string GaiaOAuthFetcher::MakeOAuthLoginBody(
   parameters["service"] = service;
   parameters["source"] = source;
   std::string signed_request;
-  bool is_signed = OAuthRequestSigner::Sign(
+  bool is_signed = OAuthRequestSigner::SignURL(
       GURL(kOAuth1LoginScope),
       parameters,
       OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
@@ -145,7 +148,7 @@ std::string GaiaOAuthFetcher::MakeOAuthGetAccessTokenBody(
     const std::string& oauth1_request_token) {
   OAuthRequestSigner::Parameters empty_parameters;
   std::string signed_request;
-  bool is_signed = OAuthRequestSigner::Sign(
+  bool is_signed = OAuthRequestSigner::SignURL(
       GURL(kOAuthGetAccessTokenUrl),
       empty_parameters,
       OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
@@ -169,7 +172,7 @@ std::string GaiaOAuthFetcher::MakeOAuthWrapBridgeBody(
   parameters["wrap_token_duration"] = wrap_token_duration;
   parameters["wrap_scope"] = oauth2_scope;
   std::string signed_request;
-  bool is_signed = OAuthRequestSigner::Sign(
+  bool is_signed = OAuthRequestSigner::SignURL(
       GURL(kOAuthWrapBridgeUrl),
       parameters,
       OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
@@ -203,6 +206,7 @@ void GaiaOAuthFetcher::ParseGetOAuthTokenResponse(
     }
   }
 }
+
 // Helper method that extracts tokens from a successful reply.
 // static
 void GaiaOAuthFetcher::ParseOAuthLoginResponse(
@@ -334,8 +338,7 @@ void GaiaOAuthFetcher::StartGetOAuthToken() {
 
   OpenGetOAuthTokenURL(browser,
       MakeGetOAuthTokenUrl(kOAuth1LoginScope,
-                           OAuthRequestSigner::Encode(
-                               l10n_util::GetStringUTF8(IDS_PRODUCT_NAME))),
+                           l10n_util::GetStringUTF8(IDS_PRODUCT_NAME)),
       GURL("chrome://settings/personal"),
       NEW_POPUP,
       PageTransition::AUTO_BOOKMARK);
@@ -374,8 +377,8 @@ void GaiaOAuthFetcher::StartGetOAuthTokenRequest() {
   request_body_ = "";
   request_headers_ = "";
   fetcher_.reset(CreateGaiaFetcher(getter_,
-      MakeGetOAuthTokenUrl(kOAuth1LoginScope, OAuthRequestSigner::Encode(
-                               l10n_util::GetStringUTF8(IDS_PRODUCT_NAME))),
+      MakeGetOAuthTokenUrl(kOAuth1LoginScope,
+                           l10n_util::GetStringUTF8(IDS_PRODUCT_NAME)),
       std::string(),
       std::string(),
       true,           // send_cookies
@@ -405,18 +408,20 @@ void GaiaOAuthFetcher::StartOAuthWrapBridge(
     const std::string& oauth1_access_token,
     const std::string& oauth1_access_token_secret,
     const std::string& wrap_token_duration,
-    const std::string& oauth2_scope) {
+    const std::string& service_scope) {
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
-  std::string combined_oauth2_scope = oauth2_scope + " " +
+  VLOG(1) << "Starting OAuthWrapBridge for: " << service_scope;
+  std::string combined_scope = service_scope + " " +
       kOAuthWrapBridgeUserInfoScope;
+  service_scope_ = service_scope;
 
   // Must outlive fetcher_.
   request_body_ = MakeOAuthWrapBridgeBody(
       oauth1_access_token,
       oauth1_access_token_secret,
       wrap_token_duration,
-      combined_oauth2_scope);
+      combined_scope);
 
   request_headers_ = "";
   fetcher_.reset(CreateGaiaFetcher(getter_,
@@ -441,6 +446,48 @@ void GaiaOAuthFetcher::StartUserInfo(const std::string& oauth2_access_token) {
                                    request_headers_,
                                    false,
                                    this));
+  fetch_pending_ = true;
+  fetcher_->Start();
+}
+
+void GaiaOAuthFetcher::StartOAuthRevokeAccessToken(const std::string& token,
+                                                   const std::string& secret) {
+  DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
+
+  // Must outlive fetcher_.
+  request_body_ = "";
+
+  OAuthRequestSigner::Parameters empty_parameters;
+  std::string auth_header;
+  GURL url(kRevokeTokenUrl);
+  bool is_signed = OAuthRequestSigner::SignAuthHeader(
+      url,
+      empty_parameters,
+      OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
+      OAuthRequestSigner::GET_METHOD,
+      "anonymous",
+      "anonymous",
+      token,
+      secret,
+      &auth_header);
+  DCHECK(is_signed);
+  request_headers_ = "Authorization: " + auth_header;
+  fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
+                                   request_headers_, false, this));
+  fetch_pending_ = true;
+  fetcher_->Start();
+}
+
+void GaiaOAuthFetcher::StartOAuthRevokeWrapToken(const std::string& token) {
+  DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
+
+  // Must outlive fetcher_.
+  request_body_ = "";
+
+  request_headers_ = "Authorization: Bearer " + token;
+  GURL url(kRevokeTokenUrl);
+  fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
+                                   request_headers_, false, this));
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -509,7 +556,8 @@ namespace {
 void GaiaOAuthFetcher::OnBrowserClosing(Browser* browser,
                                         bool detail) {
   if (browser == popup_) {
-    consumer_->OnGetOAuthTokenFailure();
+    consumer_->OnGetOAuthTokenFailure(
+        GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
   }
   popup_ = NULL;
 }
@@ -519,13 +567,14 @@ void GaiaOAuthFetcher::OnCookieChanged(Profile* profile,
   const net::CookieMonster::CanonicalCookie* canonical_cookie =
       cookie_details->cookie;
   if (canonical_cookie->Name() == kOAuthTokenCookie) {
+    VLOG(1) << "OAuth1 request token cookie changed.";
     fetch_pending_ = false;
     OnGetOAuthTokenFetched(canonical_cookie->Value());
   }
 }
 
 void GaiaOAuthFetcher::OnGetOAuthTokenFetched(const std::string& token) {
-  // DCHECK (popup_);
+  VLOG(1) << "OAuth1 request token fetched.";
   if (popup_) {
     Browser* popped_up = popup_;
     popup_ = NULL;
@@ -553,7 +602,8 @@ void GaiaOAuthFetcher::OnGetOAuthTokenUrlFetched(
       }
     }
   } else {
-    consumer_->OnGetOAuthTokenFailure();
+    consumer_->OnGetOAuthTokenFailure(
+        GoogleServiceAuthError(GoogleServiceAuthError::SERVICE_UNAVAILABLE));
   }
 }
 
@@ -581,12 +631,14 @@ void GaiaOAuthFetcher::OnOAuthGetAccessTokenFetched(
     const net::URLRequestStatus& status,
     int response_code) {
   if (status.is_success() && response_code == RC_REQUEST_OK) {
+    VLOG(1) << "OAuth1 access token fetched.";
     std::string secret;
     std::string token;
     ParseOAuthGetAccessTokenResponse(data, &token, &secret);
     consumer_->OnOAuthGetAccessTokenSuccess(token, secret);
     if (ShouldAutoFetch(OAUTH2_SERVICE_ACCESS_TOKEN))
-      StartOAuthWrapBridge(token, secret, "3600", service_scope_);
+      StartOAuthWrapBridge(
+          token, secret, GaiaConstants::kGaiaOAuthDuration, service_scope_);
   } else {
     consumer_->OnOAuthGetAccessTokenFailure(GenerateAuthError(data, status));
   }
@@ -597,14 +649,28 @@ void GaiaOAuthFetcher::OnOAuthWrapBridgeFetched(
     const net::URLRequestStatus& status,
     int response_code) {
   if (status.is_success() && response_code == RC_REQUEST_OK) {
+    VLOG(1) << "OAuth2 access token fetched.";
     std::string token;
     std::string expires_in;
     ParseOAuthWrapBridgeResponse(data, &token, &expires_in);
-    consumer_->OnOAuthWrapBridgeSuccess(token, expires_in);
+    consumer_->OnOAuthWrapBridgeSuccess(service_scope_, token, expires_in);
     if (ShouldAutoFetch(USER_INFO))
       StartUserInfo(token);
   } else {
-    consumer_->OnOAuthWrapBridgeFailure(GenerateAuthError(data, status));
+    consumer_->OnOAuthWrapBridgeFailure(service_scope_,
+                                        GenerateAuthError(data, status));
+  }
+}
+
+void GaiaOAuthFetcher::OnOAuthRevokeTokenFetched(
+    const std::string& data,
+    const net::URLRequestStatus& status,
+    int response_code) {
+  if (status.is_success() && response_code == RC_REQUEST_OK) {
+    consumer_->OnOAuthRevokeTokenSuccess();
+  } else {
+    LOG(ERROR) << "Token revocation failure " << response_code << ": " << data;
+    consumer_->OnOAuthRevokeTokenFailure(GenerateAuthError(data, status));
   }
 }
 
@@ -615,6 +681,7 @@ void GaiaOAuthFetcher::OnUserInfoFetched(
   if (status.is_success() && response_code == RC_REQUEST_OK) {
     std::string email;
     ParseUserInfoResponse(data, &email);
+    VLOG(1) << "GAIA user info fetched for " << email << ".";
     consumer_->OnUserInfoSuccess(email);
   } else {
     consumer_->OnUserInfoFailure(GenerateAuthError(data, status));
@@ -627,6 +694,8 @@ void GaiaOAuthFetcher::OnURLFetchComplete(const URLFetcher* source,
                                           int response_code,
                                           const net::ResponseCookies& cookies,
                                           const std::string& data) {
+  // Keep |fetcher_| around to avoid invalidating its |status| (accessed below).
+  scoped_ptr<URLFetcher> current_fetcher(fetcher_.release());
   fetch_pending_ = false;
   if (StartsWithASCII(url.spec(), kGetOAuthTokenUrl, true)) {
     OnGetOAuthTokenUrlFetched(cookies, status, response_code);
@@ -638,6 +707,8 @@ void GaiaOAuthFetcher::OnURLFetchComplete(const URLFetcher* source,
     OnOAuthWrapBridgeFetched(data, status, response_code);
   } else if (url.spec() == kUserInfoUrl) {
     OnUserInfoFetched(data, status, response_code);
+  } else if (StartsWithASCII(url.spec(), kRevokeTokenUrl, true)) {
+    OnOAuthRevokeTokenFetched(data, status, response_code);
   } else {
     NOTREACHED();
   }

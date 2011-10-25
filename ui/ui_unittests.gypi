@@ -14,6 +14,8 @@
         '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
         'ui',
         'gfx_resources',
       ],
@@ -23,6 +25,7 @@
         'base/animation/multi_animation_unittest.cc',
         'base/animation/slide_animation_unittest.cc',
         'base/clipboard/clipboard_unittest.cc',
+        'base/gtk/gtk_expanded_container_unittest.cc',
         'base/gtk/gtk_im_context_util_unittest.cc',
         'base/l10n/l10n_util_mac_unittest.mm',
         'base/l10n/l10n_util_unittest.cc',
@@ -31,6 +34,7 @@
         'base/range/range_unittest.cc',
         'base/range/range_mac_unittest.mm',
         'base/range/range_win_unittest.cc',
+        'base/resource/data_pack_literal.cc',
         'base/resource/data_pack_unittest.cc',
         'base/resource/resource_bundle_unittest.cc',
         'base/text/bytes_formatting_unittest.cc',
@@ -123,6 +127,11 @@
                'dependencies': [
                  '../base/allocator/allocator.gyp:allocator',
                ],
+            }],
+            ['toolkit_views==1', {
+              'sources!': [
+                'browser/ui/gtk/gtk_expanded_container_unittest.cc',
+              ],
             }],
           ],
         }],

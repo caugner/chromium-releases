@@ -61,7 +61,7 @@ class ProfileSyncFactory {
   // the caller.
   virtual browser_sync::DataTypeManager* CreateDataTypeManager(
       browser_sync::SyncBackendHost* backend,
-      const browser_sync::DataTypeController::TypeMap& controllers) = 0;
+      const browser_sync::DataTypeController::TypeMap* controllers) = 0;
 
   // Instantiates both a model associator and change processor for the
   // app data type.  The pointers in the return struct are
@@ -136,6 +136,13 @@ class ProfileSyncFactory {
   // session data type.  The pointers in the return struct are
   // owned by the caller.
   virtual SyncComponents CreateSessionSyncComponents(
+      ProfileSyncService* profile_sync_service,
+      browser_sync::UnrecoverableErrorHandler* error_handler) = 0;
+
+  // Instantiates both a model associator and change processor for the search
+  // engine data type.  The pointers in the return struct are owned by the
+  // caller.
+  virtual SyncComponents CreateSearchEngineSyncComponents(
       ProfileSyncService* profile_sync_service,
       browser_sync::UnrecoverableErrorHandler* error_handler) = 0;
 };

@@ -112,8 +112,8 @@ bool DeleteReparsePoint(HANDLE source) {
 
 const wchar_t bogus_content[] = L"I'm cannon fodder.";
 
-const file_util::FileEnumerator::FILE_TYPE FILES_AND_DIRECTORIES =
-    static_cast<file_util::FileEnumerator::FILE_TYPE>(
+const file_util::FileEnumerator::FileType FILES_AND_DIRECTORIES =
+    static_cast<file_util::FileEnumerator::FileType>(
         file_util::FileEnumerator::FILES |
         file_util::FileEnumerator::DIRECTORIES);
 
@@ -1611,7 +1611,7 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
 
   // Test an empty directory, non-recursively, including "..".
   file_util::FileEnumerator f0_dotdot(temp_dir_.path(), false,
-      static_cast<file_util::FileEnumerator::FILE_TYPE>(
+      static_cast<file_util::FileEnumerator::FileType>(
           FILES_AND_DIRECTORIES | file_util::FileEnumerator::INCLUDE_DOT_DOT));
   EXPECT_EQ(temp_dir_.path().Append(FILE_PATH_LITERAL("..")).value(),
             f0_dotdot.Next().value());
@@ -1669,7 +1669,7 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
   // Only enumerate directories, non-recursively, including "..".
   file_util::FileEnumerator f2_dotdot(
       temp_dir_.path(), false,
-      static_cast<file_util::FileEnumerator::FILE_TYPE>(
+      static_cast<file_util::FileEnumerator::FileType>(
           file_util::FileEnumerator::DIRECTORIES |
           file_util::FileEnumerator::INCLUDE_DOT_DOT));
   FindResultCollector c2_dotdot(f2_dotdot);
@@ -1779,13 +1779,13 @@ TEST_F(FileUtilTest, TouchFile) {
   base::Time access_time;
   // This timestamp is divisible by one day (in local timezone),
   // to make it work on FAT too.
-  ASSERT_TRUE(base::Time::FromString(L"Wed, 16 Nov 1994, 00:00:00",
+  ASSERT_TRUE(base::Time::FromString("Wed, 16 Nov 1994, 00:00:00",
                                      &access_time));
 
   base::Time modification_time;
   // Note that this timestamp is divisible by two (seconds) - FAT stores
   // modification times with 2s resolution.
-  ASSERT_TRUE(base::Time::FromString(L"Tue, 15 Nov 1994, 12:45:26 GMT",
+  ASSERT_TRUE(base::Time::FromString("Tue, 15 Nov 1994, 12:45:26 GMT",
               &modification_time));
 
   ASSERT_TRUE(file_util::TouchFile(foobar, access_time, modification_time));

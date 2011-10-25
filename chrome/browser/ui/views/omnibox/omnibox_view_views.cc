@@ -12,8 +12,6 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
-#include "chrome/browser/ui/views/autocomplete/touch_autocomplete_popup_contents_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -24,6 +22,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/ime/text_input_type.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
@@ -31,6 +30,12 @@
 #include "views/border.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/layout/fill_layout.h"
+
+#if defined(TOUCH_UI)
+#include "chrome/browser/ui/views/autocomplete/touch_autocomplete_popup_contents_view.h"
+#else
+#include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
+#endif
 
 namespace {
 
@@ -112,6 +117,7 @@ void ApplyURLStyle(views::Textfield* textfield,
                    SkColor color,
                    bool strike) {
   gfx::StyleRange style;
+  style.font = textfield->font();
   style.foreground = color;
   style.range = ui::Range(start, end);
   style.strike = strike;
@@ -139,9 +145,9 @@ OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
                                    Profile* profile,
                                    CommandUpdater* command_updater,
                                    bool popup_window_mode,
-                                   const views::View* location_bar)
+                                   views::View* location_bar)
     : model_(new AutocompleteEditModel(this, controller, profile)),
-      popup_view_(CreatePopupView(profile, location_bar)),
+      popup_view_(CreatePopupView(location_bar)),
       controller_(controller),
       toolbar_model_(toolbar_model),
       command_updater_(command_updater),
@@ -154,9 +160,6 @@ OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
 }
 
 OmniboxViewViews::~OmniboxViewViews() {
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_OMNIBOX_DESTROYED, Source<OmniboxViewViews>(this),
-      NotificationService::NoDetails());
   // Explicitly teardown members which have a reference to us.  Just to be safe
   // we want them to be destroyed before destroying any other internal state.
   popup_view_.reset();
@@ -172,6 +175,7 @@ void OmniboxViewViews::Init() {
   // TODO(oshima): make sure the above happens with views.
   textfield_ = new AutocompleteTextfield(this);
   textfield_->SetController(this);
+  textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_URL);
 
 #if defined(TOUCH_UI)
   textfield_->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
@@ -320,7 +324,7 @@ void OmniboxViewViews::SaveStateToTab(TabContents* tab) {
 void OmniboxViewViews::Update(const TabContents* contents) {
   // NOTE: We're getting the URL text here from the ToolbarModel.
   bool visibly_changed_permanent_text =
-      model_->UpdatePermanentText(WideToUTF16Hack(toolbar_model_->GetText()));
+      model_->UpdatePermanentText(toolbar_model_->GetText());
   ToolbarModel::SecurityLevel security_level =
         toolbar_model_->GetSecurityLevel();
   bool changed_security_level = (security_level != security_level_);
@@ -640,8 +644,8 @@ void OmniboxViewViews::EmphasizeURLComponents() {
   // And Go system uses.
   string16 text = GetText();
   url_parse::Component scheme, host;
-  AutocompleteInput::ParseForEmphasizeComponents(
-      text, model_->GetDesiredTLD(), &scheme, &host);
+  AutocompleteInput::ParseForEmphasizeComponents(text, model_->GetDesiredTLD(),
+                                                 &scheme, &host);
   const bool emphasize = model_->CurrentTextIsURL() && (host.len > 0);
   SkColor base_color = emphasize ? kFadedTextColor : kNormalTextColor;
   ApplyURLStyle(textfield_, 0, text.length(), base_color, false);
@@ -691,13 +695,12 @@ void OmniboxViewViews::SelectRange(size_t caret, size_t end) {
 }
 
 AutocompletePopupView* OmniboxViewViews::CreatePopupView(
-    Profile* profile,
-    const View* location_bar) {
+    View* location_bar) {
 #if defined(TOUCH_UI)
   typedef TouchAutocompletePopupContentsView AutocompleteContentsView;
 #else
   typedef AutocompletePopupContentsView AutocompleteContentsView;
 #endif
-  return new AutocompleteContentsView(
-      gfx::Font(), this, model_.get(), profile, location_bar);
+  return new AutocompleteContentsView(gfx::Font(), this, model_.get(),
+                                      location_bar);
 }

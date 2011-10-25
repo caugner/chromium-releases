@@ -20,6 +20,19 @@ namespace {
 // The default logo for the promo.
 const char kDefaultPromoLogo[] = "chrome://theme/IDR_WEBSTORE_ICON";
 
+// Returns the string pref at |path|, using |fallback| as the default (if there
+// is no pref value present). |fallback| is used for debugging in concert with
+// --force-apps-promo-visible.
+std::string GetStringPref(const char* path, const std::string& fallback) {
+  PrefService* local_state = g_browser_process->local_state();
+  std::string retval(local_state->GetString(path));
+  if (retval.empty() && CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kForceAppsPromoVisible)) {
+    retval = fallback;
+  }
+  return retval;
+}
+
 } // namespace
 
 // static
@@ -47,6 +60,9 @@ void AppsPromo::RegisterUserPrefs(PrefService* prefs) {
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterStringPref(prefs::kNTPWebStorePromoLastId,
                             std::string(),
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kNTPHideWebStorePromo,
+                            false,
                             PrefService::UNSYNCABLE_PREF);
 }
 
@@ -85,26 +101,23 @@ bool AppsPromo::IsWebStoreSupportedForLocale() {
 
 // static
 std::string AppsPromo::GetPromoButtonText() {
-  PrefService* local_state = g_browser_process->local_state();
-  return local_state->GetString(prefs::kNTPWebStorePromoButton);
+  return GetStringPref(prefs::kNTPWebStorePromoButton, "Click here now");
 }
 
 // static
 std::string AppsPromo::GetPromoId() {
-  PrefService* local_state = g_browser_process->local_state();
-  return local_state->GetString(prefs::kNTPWebStorePromoId);
+  return GetStringPref(prefs::kNTPWebStorePromoId, "");
 }
 
 // static
 std::string AppsPromo::GetPromoHeaderText() {
-  PrefService* local_state = g_browser_process->local_state();
-  return local_state->GetString(prefs::kNTPWebStorePromoHeader);
+  return GetStringPref(prefs::kNTPWebStorePromoHeader, "Get great apps!");
 }
 
 // static
 GURL AppsPromo::GetPromoLink() {
-  PrefService* local_state = g_browser_process->local_state();
-  return GURL(local_state->GetString(prefs::kNTPWebStorePromoLink));
+  return GURL(GetStringPref(prefs::kNTPWebStorePromoLink,
+                            "https://chrome.google.com/webstore"));
 }
 
 // static
@@ -118,8 +131,7 @@ GURL AppsPromo::GetPromoLogo() {
 
 // static
 std::string AppsPromo::GetPromoExpireText() {
-  PrefService* local_state = g_browser_process->local_state();
-  return local_state->GetString(prefs::kNTPWebStorePromoExpire);
+  return GetStringPref(prefs::kNTPWebStorePromoExpire, "No thanks.");
 }
 
 // static
@@ -170,6 +182,12 @@ bool AppsPromo::ShouldShowPromo(const ExtensionIdSet& installed_ids,
     return true;
   }
 
+  // Don't show the promo if the policy says not to.
+  if (prefs_->GetBoolean(prefs::kNTPHideWebStorePromo)) {
+    ExpireDefaultApps();
+    return false;
+  }
+
   // Don't show the promo if one wasn't served to this locale.
   if (!IsPromoSupportedForLocale())
     return false;
@@ -195,11 +213,10 @@ bool AppsPromo::ShouldShowPromo(const ExtensionIdSet& installed_ids,
                                 extension_misc::PROMO_BUCKET_BOUNDARY);
 
       ExpireDefaultApps();
-      return true;
     } else {
       SetPromoCounter(++promo_counter);
-      return true;
     }
+    return true;
   } else if (installed_ids.empty()) {
     return true;
   }
@@ -210,7 +227,7 @@ bool AppsPromo::ShouldShowPromo(const ExtensionIdSet& installed_ids,
 bool AppsPromo::ShouldShowAppLauncher(const ExtensionIdSet& installed_ids) {
   // On Chrome OS the default apps are installed via a separate mechanism that
   // is always enabled. Therefore we always show the launcher.
-#if defined(OS_CHROME)
+#if defined(OS_CHROMEOS)
   return true;
 #else
 

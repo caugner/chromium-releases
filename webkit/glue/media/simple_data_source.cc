@@ -7,24 +7,28 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "media/base/filter_host.h"
+#include "media/base/media_log.h"
 #include "net/base/data_url.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/url_request_status.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
 #include "webkit/glue/media/web_data_source_factory.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebString;
+using WebKit::WebURLLoaderOptions;
 
 namespace webkit_glue {
 
 static const char kDataScheme[] = "data";
 
 static WebDataSource* NewSimpleDataSource(MessageLoop* render_loop,
-                                          WebKit::WebFrame* frame) {
+                                          WebKit::WebFrame* frame,
+                                          media::MediaLog* media_log) {
   return new SimpleDataSource(render_loop, frame);
 }
 
@@ -32,9 +36,10 @@ static WebDataSource* NewSimpleDataSource(MessageLoop* render_loop,
 media::DataSourceFactory* SimpleDataSource::CreateFactory(
     MessageLoop* render_loop,
     WebKit::WebFrame* frame,
+    media::MediaLog* media_log,
     WebDataSourceBuildObserverHack* build_observer) {
-  return new WebDataSourceFactory(render_loop, frame, &NewSimpleDataSource,
-                                  build_observer);
+  return new WebDataSourceFactory(render_loop, frame, media_log,
+                                  &NewSimpleDataSource, build_observer);
 }
 
 SimpleDataSource::SimpleDataSource(
@@ -78,17 +83,17 @@ void SimpleDataSource::Stop(media::FilterCallback* callback) {
 
 void SimpleDataSource::Initialize(
     const std::string& url,
-    media::PipelineStatusCallback* callback) {
-  // Reference to prevent destruction while inside the |initialize_callback_|
+    const media::PipelineStatusCB& callback) {
+  // Reference to prevent destruction while inside the |initialize_cb_|
   // call. This is a temporary fix to prevent crashes caused by holding the
   // lock and running the destructor.
   scoped_refptr<SimpleDataSource> destruction_guard(this);
   {
     base::AutoLock auto_lock(lock_);
     DCHECK_EQ(state_, UNINITIALIZED);
-    DCHECK(callback);
+    DCHECK(!callback.is_null());
     state_ = INITIALIZING;
-    initialize_callback_.reset(callback);
+    initialize_cb_ = callback;
 
     // Validate the URL.
     url_ = GURL(url);
@@ -105,9 +110,9 @@ void SimpleDataSource::Initialize(
 
 void SimpleDataSource::CancelInitialize() {
   base::AutoLock auto_lock(lock_);
-  DCHECK(initialize_callback_.get());
+  DCHECK(!initialize_cb_.is_null());
   state_ = STOPPED;
-  initialize_callback_.reset();
+  initialize_cb_.Reset();
 
   // Post a task to the render thread to cancel loading the resource.
   render_loop_->PostTask(FROM_HERE,
@@ -139,7 +144,11 @@ bool SimpleDataSource::IsStreaming() {
   return false;
 }
 
-void SimpleDataSource::SetPreload(media::Preload preload) {}
+void SimpleDataSource::SetPreload(media::Preload preload) {
+}
+
+void SimpleDataSource::SetBitrate(int bitrate) {
+}
 
 void SimpleDataSource::SetURLLoaderForTest(WebKit::WebURLLoader* mock_loader) {
   url_loader_.reset(mock_loader);
@@ -200,7 +209,7 @@ void SimpleDataSource::didFinishLoading(
     WebKit::WebURLLoader* loader,
     double finishTime) {
   DCHECK(MessageLoop::current() == render_loop_);
-  // Reference to prevent destruction while inside the |initialize_callback_|
+  // Reference to prevent destruction while inside the |initialize_cb_|
   // call. This is a temporary fix to prevent crashes caused by holding the
   // lock and running the destructor.
   scoped_refptr<SimpleDataSource> destruction_guard(this);
@@ -228,7 +237,7 @@ void SimpleDataSource::didFail(
     WebKit::WebURLLoader* loader,
     const WebKit::WebURLError& error) {
   DCHECK(MessageLoop::current() == render_loop_);
-  // Reference to prevent destruction while inside the |initialize_callback_|
+  // Reference to prevent destruction while inside the |initialize_cb_|
   // call. This is a temporary fix to prevent crashes caused by holding the
   // lock and running the destructor.
   scoped_refptr<SimpleDataSource> destruction_guard(this);
@@ -264,7 +273,7 @@ void SimpleDataSource::Abort() {
 
 void SimpleDataSource::StartTask() {
   DCHECK(MessageLoop::current() == render_loop_);
-  // Reference to prevent destruction while inside the |initialize_callback_|
+  // Reference to prevent destruction while inside the |initialize_cb_|
   // call. This is a temporary fix to prevent crashes caused by holding the
   // lock and running the destructor.
   scoped_refptr<SimpleDataSource> destruction_guard(this);
@@ -300,8 +309,13 @@ void SimpleDataSource::StartTask() {
           WebString::fromUTF8("identity;q=1, *;q=0"));
 
       // This flag is for unittests as we don't want to reset |url_loader|
-      if (!keep_test_loader_)
-        url_loader_.reset(frame_->createAssociatedURLLoader());
+      if (!keep_test_loader_) {
+        WebURLLoaderOptions options;
+        options.allowCredentials = true;
+        options.crossOriginRequestPolicy =
+            WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+        url_loader_.reset(frame_->createAssociatedURLLoader(options));
+      }
 
       // Start the resource loading.
       url_loader_->loadAsynchronously(request, this);
@@ -334,9 +348,8 @@ void SimpleDataSource::DoneInitialization_Locked(bool success) {
     url_loader_.reset();
   }
 
-  scoped_ptr<media::PipelineStatusCallback> initialize_callback(
-      initialize_callback_.release());
-  initialize_callback->Run(status);
+  initialize_cb_.Run(status);
+  initialize_cb_.Reset();
 }
 
 void SimpleDataSource::UpdateHostState() {

@@ -17,6 +17,7 @@ using testing::Invoke;
 using testing::ReturnRef;
 
 const char* kTestSystemPath = "/this/system/path";
+const char* kTestSystemPathPrefix = "/this/system";
 const char* kTestDevicePath = "/this/device/path";
 const char* kTestMountPath = "/media/foofoo";
 const char* kTestFilePath = "/this/file/path";
@@ -56,6 +57,7 @@ void MockMountLibrary::FireDeviceInsertEvents() {
       std::string(),
       std::string(kTestDriveLabel),
       std::string(kTestParentPath),
+      std::string(kTestSystemPathPrefix),
       FLASH,
       4294967295U,
       false,
@@ -85,6 +87,7 @@ void MockMountLibrary::FireDeviceInsertEvents() {
       std::string(kTestDeviceLabel),
       std::string(kTestDriveLabel),
       std::string(kTestParentPath),
+      std::string(kTestSystemPathPrefix),
       FLASH,
       1073741824,
       false,
@@ -107,6 +110,7 @@ void MockMountLibrary::FireDeviceRemoveEvents() {
       std::string(kTestDeviceLabel),
       std::string(kTestDriveLabel),
       std::string(kTestParentPath),
+      std::string(kTestSystemPathPrefix),
       FLASH,
       1073741824,
       false,
@@ -131,6 +135,10 @@ void MockMountLibrary::SetupDefaultReplies() {
   EXPECT_CALL(*this, MountPath(_, _, _))
       .Times(AnyNumber());
   EXPECT_CALL(*this, UnmountPath(_))
+      .Times(AnyNumber());
+  EXPECT_CALL(*this, FormatUnmountedDevice(_))
+      .Times(AnyNumber());
+  EXPECT_CALL(*this, FormatMountedDevice(_))
       .Times(AnyNumber());
   EXPECT_CALL(*this, UnmountDeviceRecursive(_, _, _))
       .Times(AnyNumber());

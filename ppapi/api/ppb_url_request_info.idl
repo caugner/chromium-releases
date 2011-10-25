@@ -9,7 +9,6 @@
  */
 
 label Chrome {
-  M13 = 0.2,
   M14 = 1.0
 };
 
@@ -65,9 +64,10 @@ enum PP_URLRequestProperty {
   PP_URLREQUESTPROPERTY_RECORDDOWNLOADPROGRESS,
 
   /**
-   * This corresponds to a <code>PP_Bool (default=<code>PP_FALSE</code>).
-   * Set this value to <code>PP_TRUE</code> if you want to be able to poll the
-   * upload progress using PPB_URLLoader.GetUplaodProgress().
+   * This corresponds to a <code>PP_Bool</code>
+   * (default=<code>PP_FALSE</code>). Set this value to <code>PP_TRUE</code> if
+   * you want to be able to poll the upload progress using
+   * PPB_URLLoader.GetUplaodProgress().
    */
   PP_URLREQUESTPROPERTY_RECORDUPLOADPROGRESS,
 
@@ -146,14 +146,14 @@ enum PP_URLRequestProperty {
 /**
  * The <code>PPB_URLRequestInfo</code> interface is used to create
  * and handle URL requests. This API is used in conjunction with
- * <code>PPB_URLLoader</code>. Refer to <code>PPB_URLLoader for further
+ * <code>PPB_URLLoader</code>. Refer to <code>PPB_URLLoader</code> for further
  * information.
  */
 interface PPB_URLRequestInfo {
   /**
    * Create() creates a new <code>URLRequestInfo</code> object.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    *
    * @return A <code>PP_Resource</code> identifying the
@@ -219,7 +219,7 @@ interface PPB_URLRequestInfo {
    *
    * @param[in] request A <code>PP_Resource</code> corresponding to a
    * <code>URLRequestInfo</code>.
-   * @param[in] file_ref A <code>PP_Resource</code> containing the file
+   * @param[in] file_ref A <code>PP_Resource</code> corresponding to a file
    * reference.
    * @param[in] start_offset An optional starting point offset within the
    * file.

@@ -236,7 +236,9 @@ TEST(ValuesTest, ListRemoval) {
     DeletionTestValue* value = new DeletionTestValue(&deletion_flag);
     list.Append(value);
     EXPECT_FALSE(deletion_flag);
-    EXPECT_EQ(0, list.Remove(*value));
+    size_t index = 0;
+    list.Remove(*value, &index);
+    EXPECT_EQ(0U, index);
     EXPECT_TRUE(deletion_flag);
     EXPECT_EQ(0U, list.GetSize());
   }
@@ -341,7 +343,7 @@ TEST(ValuesTest, DeepCopy) {
 
   char* original_buffer = new char[42];
   memset(original_buffer, '!', 42);
-  BinaryValue* original_binary = Value::CreateBinaryValue(original_buffer, 42);
+  BinaryValue* original_binary = BinaryValue::Create(original_buffer, 42);
   original_dict.Set("binary", original_binary);
 
   ListValue* original_list = new ListValue();
@@ -533,7 +535,7 @@ TEST(ValuesTest, DeepCopyCovariantReturnTypes) {
 
   char* original_buffer = new char[42];
   memset(original_buffer, '!', 42);
-  BinaryValue* original_binary = Value::CreateBinaryValue(original_buffer, 42);
+  BinaryValue* original_binary = BinaryValue::Create(original_buffer, 42);
   original_dict.Set("binary", original_binary);
 
   ListValue* original_list = new ListValue();

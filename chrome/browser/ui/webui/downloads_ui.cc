@@ -9,13 +9,13 @@
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/downloads_dom_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/download_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
@@ -36,6 +36,8 @@ ChromeWebUIDataSource *CreateDownloadsUIHTMLSource() {
   source->AddLocalizedString("searchresultsfor", IDS_DOWNLOAD_SEARCHRESULTSFOR);
   source->AddLocalizedString("downloads", IDS_DOWNLOAD_TITLE);
   source->AddLocalizedString("clear_all", IDS_DOWNLOAD_LINK_CLEAR_ALL);
+  source->AddLocalizedString("open_downloads_folder",
+                             IDS_DOWNLOAD_LINK_OPEN_DOWNLOADS_FOLDER);
 
   // Status.
   source->AddLocalizedString("status_cancelled", IDS_DOWNLOAD_TAB_CANCELED);
@@ -85,7 +87,8 @@ DownloadsUI::DownloadsUI(TabContents* contents) : ChromeWebUI(contents) {
   handler->Init();
 
   // Set up the chrome://downloads/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(
       CreateDownloadsUIHTMLSource());
 }
 

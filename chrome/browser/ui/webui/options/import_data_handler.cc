@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
 #include "chrome/browser/importer/importer_host.h"
+#include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -95,7 +96,7 @@ void ImportDataHandler::ImportData(const ListValue* args) {
 
   uint16 import_services = (selected_items & supported_items);
   if (import_services) {
-    FundamentalValue state(true);
+    base::FundamentalValue state(true);
     web_ui_->CallJavascriptFunction("ImportDataOverlay.setImportingState",
                                     state);
     import_did_succeed_ = false;
@@ -110,7 +111,7 @@ void ImportDataHandler::ImportData(const ListValue* args) {
     importer_host_ = new ImporterHost;
 #endif
     importer_host_->SetObserver(this);
-    Profile* profile = web_ui_->GetProfile();
+    Profile* profile = Profile::FromWebUI(web_ui_);
     importer_host_->StartImportSettings(source_profile, profile,
                                         import_services,
                                         new ProfileWriter(profile), false);
@@ -165,7 +166,7 @@ void ImportDataHandler::ImportEnded() {
   if (import_did_succeed_) {
     web_ui_->CallJavascriptFunction("ImportDataOverlay.confirmSuccess");
   } else {
-    FundamentalValue state(false);
+    base::FundamentalValue state(false);
     web_ui_->CallJavascriptFunction("ImportDataOverlay.setImportingState",
                                     state);
     web_ui_->CallJavascriptFunction("ImportDataOverlay.dismiss");

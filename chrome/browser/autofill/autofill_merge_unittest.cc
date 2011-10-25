@@ -112,7 +112,8 @@ const std::vector<AutofillProfile*>& PersonalDataManagerMock::web_profiles()
 // corresponding output file is a dump of the saved profiles that result from
 // importing the input profiles. The output file format is identical to the
 // input format.
-class AutofillMergeTest : public testing::Test, public DataDrivenTest {
+class AutofillMergeTest : public testing::Test,
+                          public DataDrivenTest {
  protected:
   AutofillMergeTest();
   virtual ~AutofillMergeTest();
@@ -177,12 +178,11 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
       string16 field_type = UTF8ToUTF16(line.substr(0, separator_pos));
       string16 value = UTF8ToUTF16(line.substr(separator_pos + kFieldOffset));
 
-      webkit_glue::FormField field(field_type,
-                                   field_type,
-                                   value,
-                                   ASCIIToUTF16("text"),
-                                   WebKit::WebInputElement::defaultMaxLength(),
-                                   false);
+      webkit_glue::FormField field;
+      field.label = field_type;
+      field.name = field_type;
+      field.value = value;
+      field.form_control_type = ASCIIToUTF16("text");
       form.fields.push_back(field);
     }
 

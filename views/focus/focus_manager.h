@@ -79,7 +79,7 @@ class Widget;
 
 // The FocusTraversable interface is used by components that want to process
 // focus traversal events (due to Tab/Shift-Tab key events).
-class FocusTraversable {
+class VIEWS_EXPORT FocusTraversable {
  public:
   // Return a FocusSearch object that implements the algorithm to find
   // the next or previous focusable view.
@@ -101,7 +101,7 @@ class FocusTraversable {
 // This interface should be implemented by classes that want to be notified when
 // the focus is about to change.  See the Add/RemoveFocusChangeListener methods.
 // No change to focus state has occurred yet when this function is called.
-class FocusChangeListener {
+class VIEWS_EXPORT FocusChangeListener {
  public:
   virtual void FocusWillChange(View* focused_before, View* focused_now) = 0;
 
@@ -123,9 +123,9 @@ class WidgetFocusChangeListener {
   virtual ~WidgetFocusChangeListener() {}
 };
 
-class FocusManager {
+class VIEWS_EXPORT FocusManager {
  public:
-  class WidgetFocusManager {
+  class VIEWS_EXPORT WidgetFocusManager {
    public:
     // Returns the singleton instance.
     static WidgetFocusManager* GetInstance();
@@ -225,6 +225,9 @@ class FocusManager {
   // Clears the stored focused view.
   void ClearStoredFocusedView();
 
+  // Returns true if in the process of changing the focused view.
+  bool is_changing_focus() const { return is_changing_focus_; }
+
   // Register a keyboard accelerator for the specified target. If multiple
   // targets are registered for an accelerator, a target registered later has
   // higher priority.
@@ -280,14 +283,6 @@ class FocusManager {
   // pressed).
   static bool IsTabTraversalKeyEvent(const KeyEvent& key_event);
 
-  // Retrieves the FocusManager associated with the passed native view.
-  static FocusManager* GetFocusManagerForNativeView(
-      gfx::NativeView native_view);
-
-  // Retrieves the FocusManager associated with the passed native view.
-  static FocusManager* GetFocusManagerForNativeWindow(
-      gfx::NativeWindow native_window);
-
  private:
   // Returns the next focusable view.
   View* GetNextFocusableView(View* starting_view, bool reverse, bool dont_loop);
@@ -320,6 +315,9 @@ class FocusManager {
 
   // The list of registered FocusChange listeners.
   ObserverList<FocusChangeListener, true> focus_change_listeners_;
+
+  // See description above getter.
+  bool is_changing_focus_;
 
   DISALLOW_COPY_AND_ASSIGN(FocusManager);
 };

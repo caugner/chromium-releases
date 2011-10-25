@@ -13,10 +13,10 @@
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
 #include "printing/metafile_skia_wrapper.h"
+#include "printing/page_size_margins.h"
 #include "skia/ext/vector_canvas.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "ui/gfx/point.h"
 
 #if !defined(OS_CHROMEOS)
 #include "base/process_util.h"
@@ -25,27 +25,33 @@
 using WebKit::WebFrame;
 using WebKit::WebNode;
 
-void PrintWebViewHelper::RenderPreviewPage(int page_number) {
+bool PrintWebViewHelper::RenderPreviewPage(int page_number) {
   PrintMsg_PrintPage_Params page_params;
   page_params.params = print_preview_context_.print_params();
   page_params.page_number = page_number;
-  page_params.page_slot =
-      print_preview_context_.GetPageSlotForPage(page_number);
+  scoped_ptr<printing::Metafile> draft_metafile;
+  printing::Metafile* initial_render_metafile =
+      print_preview_context_.metafile();
+  if (print_preview_context_.IsModifiable() && is_print_ready_metafile_sent_) {
+    draft_metafile.reset(new printing::PreviewMetafile);
+    initial_render_metafile = draft_metafile.get();
+  }
 
   base::TimeTicks begin_time = base::TimeTicks::Now();
   PrintPageInternal(page_params,
                     print_preview_context_.GetPrintCanvasSize(),
-                    print_preview_context_.frame(),
-                    print_preview_context_.metafile());
-
+                    print_preview_context_.frame(), initial_render_metafile);
   print_preview_context_.RenderedPreviewPage(
       base::TimeTicks::Now() - begin_time);
-  scoped_ptr<printing::Metafile> page_metafile;
-  if (print_preview_context_.IsModifiable()) {
-    page_metafile.reset(reinterpret_cast<printing::PreviewMetafile*>(
-        print_preview_context_.metafile())->GetMetafileForCurrentPage());
+  if (draft_metafile.get()) {
+    draft_metafile->FinishDocument();
+  } else if (print_preview_context_.IsModifiable() &&
+             print_preview_context_.generate_draft_pages()){
+    DCHECK(!draft_metafile.get());
+    draft_metafile.reset(
+        print_preview_context_.metafile()->GetMetafileForCurrentPage());
   }
-  PreviewPageRendered(page_number, page_metafile.get());
+  return PreviewPageRendered(page_number, draft_metafile.get());
 }
 
 bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
@@ -162,13 +168,11 @@ bool PrintWebViewHelper::RenderPages(const PrintMsg_PrintPages_Params& params,
   if (params.pages.empty()) {
     for (int i = 0; i < *page_count; ++i) {
       page_params.page_number = i;
-      page_params.page_slot = i;
       PrintPageInternal(page_params, canvas_size, frame, metafile);
     }
   } else {
     for (size_t i = 0; i < params.pages.size(); ++i) {
       page_params.page_number = params.pages[i];
-      page_params.page_slot = i;
       PrintPageInternal(page_params, canvas_size, frame, metafile);
     }
   }
@@ -185,7 +189,7 @@ void PrintWebViewHelper::PrintPageInternal(
     const gfx::Size& canvas_size,
     WebFrame* frame,
     printing::Metafile* metafile) {
-  PageSizeMargins page_layout_in_points;
+  printing::PageSizeMargins page_layout_in_points;
   GetPageSizeAndMarginsInPoints(frame, params.page_number, params.params,
                                 &page_layout_in_points);
 
@@ -202,7 +206,7 @@ void PrintWebViewHelper::PrintPageInternal(
                          page_layout_in_points.content_height);
 
   SkDevice* device = metafile->StartPageForVectorCanvas(
-      params.page_slot, page_size, content_area, 1.0f);
+      page_size, content_area, 1.0f);
   if (!device)
     return;
 
@@ -211,9 +215,17 @@ void PrintWebViewHelper::PrintPageInternal(
   SkRefPtr<skia::VectorCanvas> canvas = new skia::VectorCanvas(device);
   canvas->unref();  // SkRefPtr and new both took a reference.
   printing::MetafileSkiaWrapper::SetMetafileOnCanvas(canvas.get(), metafile);
+  printing::MetafileSkiaWrapper::SetDraftMode(canvas.get(),
+                                              is_print_ready_metafile_sent_);
   frame->printPage(params.page_number, canvas.get());
 
-  // TODO(myhuang): We should render the header and the footer.
+  if (params.params.display_header_footer) {
+    // |page_number| is 0-based, so 1 is added.
+    // The scale factor on Linux is 1.
+    PrintHeaderAndFooter(canvas.get(), params.page_number + 1,
+                         print_preview_context_.total_page_count(), 1,
+                         page_layout_in_points, *header_footer_info_);
+  }
 
   // Done printing. Close the device context to retrieve the compiled metafile.
   if (!metafile->FinishPage())

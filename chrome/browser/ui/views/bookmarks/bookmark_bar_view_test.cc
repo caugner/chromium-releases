@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/compiler_specific.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -10,12 +11,14 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/interactive_ui/view_event_test_base.h"
-#include "chrome/test/testing_profile.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/base/view_event_test_base.h"
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
@@ -71,13 +74,11 @@ class ViewsDelegateImpl : public views::ViewsDelegate {
   virtual void SaveWindowPlacement(const views::Widget* window,
                                    const std::wstring& window_name,
                                    const gfx::Rect& bounds,
-                                   bool maximized) OVERRIDE {}
-  virtual bool GetSavedWindowBounds(const std::wstring& window_name,
-                                    gfx::Rect* bounds) const OVERRIDE {
-    return false;
-  }
-  virtual bool GetSavedMaximizedState(const std::wstring& window_name,
-                                      bool* maximized) const OVERRIDE {
+                                   ui::WindowShowState show_state) OVERRIDE {}
+  virtual bool GetSavedWindowPlacement(
+      const std::wstring& window_name,
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE {
     return false;
   }
 
@@ -112,11 +113,18 @@ class ViewsDelegateImpl : public views::ViewsDelegate {
 // PageNavigator implementation that records the URL.
 class TestingPageNavigator : public PageNavigator {
  public:
+  // Deprecated. Please use the one-argument variant.
+  // TODO(adriansc): Remove this function once refactoring has changed
+  // all call sites.
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
-                               PageTransition::Type transition) {
-    url_ = url;
+                               PageTransition::Type transition) OVERRIDE {
+    return OpenURL(OpenURLParams(url, referrer, disposition, transition));
+  }
+
+  virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
+    url_ = params.url;
     return NULL;
   }
 
@@ -172,10 +180,12 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     profile_->BlockUntilBookmarkModelLoaded();
     profile_->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
 
+    browser_.reset(new Browser(Browser::TYPE_TABBED, profile_.get()));
+
     model_ = profile_->GetBookmarkModel();
     model_->ClearStore();
 
-    bb_view_ = new BookmarkBarView(profile_.get(), NULL);
+    bb_view_.reset(new BookmarkBarView(browser_.get()));
     bb_view_->SetPageNavigator(&navigator_);
 
     AddTestData(CreateBigMenu());
@@ -192,7 +202,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     // we brute force search for a size that triggers the overflow button.
     views::View tmp_parent;
 
-    tmp_parent.AddChildView(bb_view_);
+    tmp_parent.AddChildView(bb_view_.get());
 
     bb_view_pref_ = bb_view_->GetPreferredSize();
     bb_view_pref_.set_width(1000);
@@ -203,12 +213,21 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
       bb_view_->Layout();
     }
 
-    tmp_parent.RemoveChildView(bb_view_);
+    tmp_parent.RemoveChildView(bb_view_.get());
 
     ViewEventTestBase::SetUp();
   }
 
   virtual void TearDown() {
+    // Destroy everything, then run the message loop to ensure we delete all
+    // Tasks and fully shut down.
+    browser_->CloseAllTabs();
+    bb_view_.reset();
+    browser_.reset();
+    profile_.reset();
+    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->Run();
+
     ViewEventTestBase::TearDown();
     BookmarkBarView::testing_ = false;
     views::ViewsDelegate::views_delegate = NULL;
@@ -220,7 +239,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   }
 
   virtual views::View* CreateContentsView() {
-    return bb_view_;
+    return bb_view_.get();
   }
 
   virtual gfx::Size GetPreferredSize() { return bb_view_pref_; }
@@ -233,7 +252,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   virtual bool CreateBigMenu() { return false; }
 
   BookmarkModel* model_;
-  BookmarkBarView* bb_view_;
+  scoped_ptr<BookmarkBarView> bb_view_;
   TestingPageNavigator navigator_;
 
  private:
@@ -268,6 +287,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
 
   gfx::Size bb_view_pref_;
   scoped_ptr<TestingProfile> profile_;
+  scoped_ptr<Browser> browser_;
   BrowserThread ui_thread_;
   BrowserThread file_thread_;
   ViewsDelegateImpl views_delegate_;
@@ -350,7 +370,7 @@ class BookmarkBarViewTest2 : public BookmarkBarViewEventTestBase {
     // true. If that changes, this code will need to find another empty space
     // to press the mouse on.
     gfx::Point mouse_loc;
-    views::View::ConvertPointToScreen(bb_view_, &mouse_loc);
+    views::View::ConvertPointToScreen(bb_view_.get(), &mouse_loc);
     ui_controls::SendMouseMove(0, 0);
     ui_controls::SendMouseEventsNotifyWhenDone(
         ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
@@ -1035,7 +1055,7 @@ class BookmarkBarViewTest11 : public BookmarkBarViewEventTestBase {
 
     // Now click on empty space.
     gfx::Point mouse_loc;
-    views::View::ConvertPointToScreen(bb_view_, &mouse_loc);
+    views::View::ConvertPointToScreen(bb_view_.get(), &mouse_loc);
     ui_controls::SendMouseMove(mouse_loc.x(), mouse_loc.y());
     ui_controls::SendMouseEventsNotifyWhenDone(
         ui_controls::LEFT, ui_controls::UP | ui_controls::DOWN,
@@ -1488,3 +1508,75 @@ class BookmarkBarViewTest18 : public BookmarkBarViewEventTestBase {
 };
 
 VIEW_TEST(BookmarkBarViewTest18, SiblingMenu)
+
+// Verifies mousing over an already open sibling menu doesn't prematurely cancel
+// the menu.
+class BookmarkBarViewTest19 : public BookmarkBarViewEventTestBase {
+ protected:
+  virtual void DoTestOnMessageLoop() {
+    // Move the mouse to the other folder on the bookmark bar and press the
+    // left mouse button.
+    views::TextButton* button = bb_view_->other_bookmarked_button();
+    ui_controls::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
+        ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest19::Step2));
+  }
+
+ private:
+  void Step2() {
+    // Menu should be showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Click on the first folder.
+    views::MenuItemView* child_menu = menu->GetSubmenu()->GetMenuItemAt(1);
+    ASSERT_TRUE(child_menu != NULL);
+    ui_controls::MoveMouseToCenterAndPress(
+        child_menu, ui_controls::LEFT,
+        ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest19::Step3));
+  }
+
+  void Step3() {
+    // Make sure the menu is showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Move the mouse back to the other bookmark button.
+    views::TextButton* button = bb_view_->other_bookmarked_button();
+    gfx::Point button_center(button->width() / 2, button->height() / 2);
+    views::View::ConvertPointToScreen(button, &button_center);
+    ui_controls::SendMouseMoveNotifyWhenDone(
+        button_center.x() + 1, button_center.y() + 1,
+        CreateEventTask(this, &BookmarkBarViewTest19::Step4));
+  }
+
+  void Step4() {
+    // Menu should be showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Click on the first folder.
+    views::MenuItemView* child_menu = menu->GetSubmenu()->GetMenuItemAt(1);
+    ASSERT_TRUE(child_menu != NULL);
+    ui_controls::MoveMouseToCenterAndPress(child_menu, ui_controls::LEFT,
+        ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest19::Step5));
+  }
+
+  void Step5() {
+    // Make sure the menu is showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    menu->GetMenuController()->CancelAll();
+
+    Done();
+  }
+};
+
+VIEW_TEST(BookmarkBarViewTest19, SiblingMenu)

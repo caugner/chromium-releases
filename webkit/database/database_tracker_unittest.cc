@@ -15,28 +15,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/database/database_util.h"
+#include "webkit/quota/mock_special_storage_policy.h"
 #include "webkit/quota/quota_manager.h"
-#include "webkit/quota/special_storage_policy.h"
 
 namespace {
 
 const char kOrigin1Url[] = "http://origin1";
 const char kOrigin2Url[] = "http://protected_origin2";
-
-class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
- public:
-  virtual bool IsStorageProtected(const GURL& origin) {
-    return origin == GURL(kOrigin2Url);
-  }
-
-  virtual bool IsStorageUnlimited(const GURL& origin) {
-    return false;
-  }
-
-  virtual bool IsFileHandler(const std::string& extension_id) {
-    return false;
-  }
-};
 
 class TestObserver : public webkit_database::DatabaseTracker::Observer {
  public:
@@ -185,10 +170,12 @@ class DatabaseTracker_TestHelper_Test {
     // Initialize the tracker database.
     ScopedTempDir temp_dir;
     ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+    scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+        new quota::MockSpecialStoragePolicy;
+    special_storage_policy->AddProtected(GURL(kOrigin2Url));
     scoped_refptr<DatabaseTracker> tracker(
         new DatabaseTracker(temp_dir.path(), incognito_mode, false,
-                            new TestSpecialStoragePolicy,
-                            NULL, NULL));
+                            special_storage_policy, NULL, NULL));
 
     // Create and open three databases.
     int64 database_size = 0;
@@ -288,10 +275,12 @@ class DatabaseTracker_TestHelper_Test {
     // Initialize the tracker database.
     ScopedTempDir temp_dir;
     ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+    scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+        new quota::MockSpecialStoragePolicy;
+    special_storage_policy->AddProtected(GURL(kOrigin2Url));
     scoped_refptr<DatabaseTracker> tracker(
         new DatabaseTracker(temp_dir.path(), incognito_mode, false,
-                            new TestSpecialStoragePolicy,
-                            NULL, NULL));
+                            special_storage_policy, NULL, NULL));
 
     // Add two observers.
     TestObserver observer1;
@@ -535,12 +524,14 @@ class DatabaseTracker_TestHelper_Test {
     ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
     FilePath origin1_db_dir;
     {
+      scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+          new quota::MockSpecialStoragePolicy;
+      special_storage_policy->AddProtected(GURL(kOrigin2Url));
       scoped_refptr<DatabaseTracker> tracker(
           new DatabaseTracker(
               temp_dir.path(), false, true,
-              new TestSpecialStoragePolicy,
-              NULL,
-              base::MessageLoopProxy::CreateForCurrentThread()));
+              special_storage_policy, NULL,
+              base::MessageLoopProxy::current()));
 
       // Open three new databases.
       tracker->DatabaseOpened(kOrigin1, kDB1, kDescription, 0,
@@ -596,10 +587,12 @@ class DatabaseTracker_TestHelper_Test {
     }
 
     // At this point, the database tracker should be gone. Create a new one.
+    scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+        new quota::MockSpecialStoragePolicy;
+    special_storage_policy->AddProtected(GURL(kOrigin2Url));
     scoped_refptr<DatabaseTracker> tracker(
         new DatabaseTracker(temp_dir.path(), false, false,
-                            new TestSpecialStoragePolicy,
-                            NULL, NULL));
+                            special_storage_policy, NULL, NULL));
 
     // Get all data for all origins.
     std::vector<OriginInfo> origins_info;
@@ -613,6 +606,52 @@ class DatabaseTracker_TestHelper_Test {
 
     // The origin directory should be gone as well.
     EXPECT_FALSE(file_util::PathExists(origin1_db_dir));
+  }
+
+  static void EmptyDatabaseNameIsValid() {
+    const GURL kOrigin(kOrigin1Url);
+    const string16 kOriginId = DatabaseUtil::GetOriginIdentifier(kOrigin);
+    const string16 kEmptyName;
+    const string16 kDescription(ASCIIToUTF16("description"));
+    const string16 kChangedDescription(ASCIIToUTF16("changed_description"));
+
+    // Initialize a tracker database, no need to put it on disk.
+    const bool kUseInMemoryTrackerDatabase = true;
+    ScopedTempDir temp_dir;
+    ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+    scoped_refptr<DatabaseTracker> tracker(
+        new DatabaseTracker(temp_dir.path(), kUseInMemoryTrackerDatabase,
+                            false, NULL, NULL, NULL));
+
+    // Starts off with no databases.
+    std::vector<OriginInfo> infos;
+    EXPECT_TRUE(tracker->GetAllOriginsInfo(&infos));
+    EXPECT_TRUE(infos.empty());
+
+    // Create a db with an empty name.
+    int64 database_size = -1;
+    tracker->DatabaseOpened(kOriginId, kEmptyName, kDescription, 0,
+                            &database_size);
+    EXPECT_EQ(0, database_size);
+    tracker->DatabaseModified(kOriginId, kEmptyName);
+    EXPECT_TRUE(tracker->GetAllOriginsInfo(&infos));
+    EXPECT_EQ(1u, infos.size());
+    EXPECT_EQ(kDescription, infos[0].GetDatabaseDescription(kEmptyName));
+    EXPECT_FALSE(tracker->GetFullDBFilePath(kOriginId, kEmptyName).empty());
+    tracker->DatabaseOpened(kOriginId, kEmptyName, kChangedDescription, 0,
+                            &database_size);
+    infos.clear();
+    EXPECT_TRUE(tracker->GetAllOriginsInfo(&infos));
+    EXPECT_EQ(1u, infos.size());
+    EXPECT_EQ(kChangedDescription, infos[0].GetDatabaseDescription(kEmptyName));
+    tracker->DatabaseClosed(kOriginId, kEmptyName);
+    tracker->DatabaseClosed(kOriginId, kEmptyName);
+
+    // Deleting it should return to the initial state.
+    EXPECT_EQ(net::OK, tracker->DeleteDatabase(kOriginId, kEmptyName, NULL));
+    infos.clear();
+    EXPECT_TRUE(tracker->GetAllOriginsInfo(&infos));
+    EXPECT_TRUE(infos.empty());
   }
 };
 
@@ -640,6 +679,10 @@ TEST(DatabaseTrackerTest, DatabaseTrackerQuotaIntegration) {
 TEST(DatabaseTrackerTest, DatabaseTrackerClearLocalStateOnExit) {
   // Only works for regular mode.
   DatabaseTracker_TestHelper_Test::DatabaseTrackerClearLocalStateOnExit();
+}
+
+TEST(DatabaseTrackerTest, EmptyDatabaseNameIsValid) {
+  DatabaseTracker_TestHelper_Test::EmptyDatabaseNameIsValid();
 }
 
 }  // namespace webkit_database

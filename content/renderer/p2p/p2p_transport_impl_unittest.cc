@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/renderer/p2p/p2p_transport_impl.h"
+
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
-#include "content/renderer/p2p/p2p_transport_impl.h"
 #include "jingle/glue/fake_network_manager.h"
 #include "jingle/glue/fake_socket_factory.h"
 #include "jingle/glue/thread_wrapper.h"
@@ -31,8 +32,6 @@ const char kTestAddress2[] = "192.168.15.33";
 
 const char kTransportName1[] = "tr1";
 const char kTransportName2[] = "tr2";
-
-const char kTestConfig[] = "";
 
 // Send 10 packets 10 bytes each. Packets are sent with 10ms delay
 // between packets (about 100 ms for 10 messages).
@@ -323,6 +322,8 @@ class TcpChannelTester : public base::RefCountedThreadSafe<TcpChannelTester> {
 
 }  // namespace
 
+namespace content {
+
 class MockP2PEventHandler : public P2PTransport::EventHandler {
  public:
   MOCK_METHOD1(OnCandidateReady, void(const std::string& address));
@@ -350,10 +351,11 @@ class P2PTransportImplTest : public testing::Test {
   }
 
   void Init(P2PTransport::Protocol protocol) {
+    P2PTransport::Config config;
     ASSERT_TRUE(transport1_->Init(
-        kTransportName1, protocol, kTestConfig, &event_handler1_));
+        kTransportName1, protocol, config, &event_handler1_));
     ASSERT_TRUE(transport2_->Init(
-        kTransportName2, protocol, kTestConfig, &event_handler2_));
+        kTransportName2, protocol, config, &event_handler2_));
   }
 
   MessageLoop message_loop_;
@@ -483,3 +485,5 @@ TEST_F(P2PTransportImplTest, SendDataTcp) {
   message_loop_.Run();
   channel_tester->CheckResults();
 }
+
+}  // namespace content

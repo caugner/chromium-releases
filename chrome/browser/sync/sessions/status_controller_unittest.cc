@@ -1,9 +1,9 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/sessions/sync_session.h"
-#include "chrome/test/sync/engine/test_id_factory.h"
+#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
@@ -60,9 +60,9 @@ TEST_F(StatusControllerTest, GetsDirty) {
   status.set_syncer_stuck(false);
   EXPECT_TRUE(status.TestAndClearIsDirty());
 
-  status.set_syncing(true);
+  status.SetSyncInProgressAndUpdateStartTime(true);
   EXPECT_TRUE(status.TestAndClearIsDirty());
-  status.set_syncing(false);
+  status.SetSyncInProgressAndUpdateStartTime(false);
   EXPECT_TRUE(status.TestAndClearIsDirty());
 
   status.increment_num_successful_commits();
@@ -108,21 +108,21 @@ TEST_F(StatusControllerTest, StaysClean) {
 TEST_F(StatusControllerTest, ReadYourWrites) {
   StatusController status(routes_);
   status.increment_num_conflicting_commits_by(1);
-  EXPECT_EQ(1, status.error_counters().num_conflicting_commits);
+  EXPECT_EQ(1, status.error().num_conflicting_commits);
 
   status.set_num_consecutive_transient_error_commits(6);
-  EXPECT_EQ(6, status.error_counters().consecutive_transient_error_commits);
+  EXPECT_EQ(6, status.error().consecutive_transient_error_commits);
   status.increment_num_consecutive_transient_error_commits_by(1);
-  EXPECT_EQ(7, status.error_counters().consecutive_transient_error_commits);
+  EXPECT_EQ(7, status.error().consecutive_transient_error_commits);
   status.increment_num_consecutive_transient_error_commits_by(0);
-  EXPECT_EQ(7, status.error_counters().consecutive_transient_error_commits);
+  EXPECT_EQ(7, status.error().consecutive_transient_error_commits);
 
   status.set_num_consecutive_errors(8);
-  EXPECT_EQ(8, status.error_counters().consecutive_errors);
+  EXPECT_EQ(8, status.error().consecutive_errors);
   status.increment_num_consecutive_errors();
-  EXPECT_EQ(9, status.error_counters().consecutive_errors);
+  EXPECT_EQ(9, status.error().consecutive_errors);
   status.increment_num_consecutive_errors_by(2);
-  EXPECT_EQ(11, status.error_counters().consecutive_errors);
+  EXPECT_EQ(11, status.error().consecutive_errors);
 
   status.set_num_server_changes_remaining(13);
   EXPECT_EQ(13, status.num_server_changes_remaining());
@@ -135,9 +135,9 @@ TEST_F(StatusControllerTest, ReadYourWrites) {
   status.set_syncer_stuck(true);
   EXPECT_TRUE(status.syncer_status().syncer_stuck);
 
-  EXPECT_FALSE(status.syncer_status().syncing);
-  status.set_syncing(true);
-  EXPECT_TRUE(status.syncer_status().syncing);
+  EXPECT_FALSE(status.syncer_status().sync_in_progress);
+  status.SetSyncInProgressAndUpdateStartTime(true);
+  EXPECT_TRUE(status.syncer_status().sync_in_progress);
 
   for (int i = 0; i < 14; i++)
     status.increment_num_successful_commits();
@@ -211,7 +211,7 @@ TEST_F(StatusControllerTest, Unrestricted) {
   status.mutable_commit_response();
   status.updates_response();
   status.mutable_updates_response();
-  status.error_counters();
+  status.error();
   status.syncer_status();
   status.num_server_changes_remaining();
   status.commit_ids();

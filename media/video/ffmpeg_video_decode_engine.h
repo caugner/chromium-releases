@@ -17,7 +17,7 @@ struct AVFrame;
 
 namespace media {
 
-class FFmpegVideoDecodeEngine : public VideoDecodeEngine {
+class MEDIA_EXPORT FFmpegVideoDecodeEngine : public VideoDecodeEngine {
  public:
   FFmpegVideoDecodeEngine();
   virtual ~FFmpegVideoDecodeEngine();
@@ -32,8 +32,6 @@ class FFmpegVideoDecodeEngine : public VideoDecodeEngine {
   virtual void Uninitialize();
   virtual void Flush();
   virtual void Seek();
-
-  VideoFrame::Format GetSurfaceFormat() const;
 
  private:
   void DecodeFrame(scoped_refptr<Buffer> buffer);

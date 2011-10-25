@@ -179,13 +179,10 @@ TEST_F(AsyncHostResolverTest, IPv6LiteralLookup) {
 }
 
 TEST_F(AsyncHostResolverTest, CachedLookup) {
-  info0_.set_only_use_cached_response(true);
-  int rv = resolver_->Resolve(info0_, &addrlist0_, NULL, NULL,
-                              BoundNetLog());
-  EXPECT_EQ(ERR_NAME_NOT_RESOLVED, rv);
+  int rv = resolver_->ResolveFromCache(info0_, &addrlist0_, BoundNetLog());
+  EXPECT_EQ(ERR_DNS_CACHE_MISS, rv);
 
   // Cache the result of |info0_| lookup.
-  info0_.set_only_use_cached_response(false);
   rv = resolver_->Resolve(info0_, &addrlist0_, &callback0_, NULL,
                           BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
@@ -195,9 +192,7 @@ TEST_F(AsyncHostResolverTest, CachedLookup) {
 
   // Now lookup |info0_| from cache only, store results in |addrlist1_|,
   // should succeed synchronously.
-  info0_.set_only_use_cached_response(true);
-  rv = resolver_->Resolve(info0_, &addrlist1_, NULL, NULL,
-                              BoundNetLog());
+  rv = resolver_->ResolveFromCache(info0_, &addrlist1_, BoundNetLog());
   EXPECT_EQ(OK, rv);
   VerifyAddressList(ip_addresses0_, kPortNum, addrlist1_);
 }
@@ -553,7 +548,7 @@ TEST_F(AsyncHostResolverTest, Observers) {
   // Unregister observer.
   resolver_->RemoveObserver(&observer);
 
-  // We will do lookup 2 again but will not be cancel it this time.
+  // We will do lookup 2 again but will not cancel it this time.
   rv2 = resolver_->Resolve(info2_, &addrlist2_, &callback2_, NULL,
                            BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv2);
@@ -582,7 +577,7 @@ TEST_F(AsyncHostResolverTest, Observers) {
 
   EXPECT_EQ(4u, observer.start_log.size()); // Was incremented by 1.
   EXPECT_EQ(2u, observer.finish_log.size());
-  EXPECT_EQ(1u, observer.cancel_log.size());
+  EXPECT_EQ(2u, observer.cancel_log.size());
 
   EXPECT_TRUE(observer.start_log[3] ==
               TestHostResolverObserver::StartOrCancelEntry(4, info3_));

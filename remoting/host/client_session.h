@@ -8,6 +8,7 @@
 #include <list>
 #include <set>
 
+#include "base/time.h"
 #include "remoting/protocol/connection_to_client.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_stub.h"
@@ -15,6 +16,7 @@
 
 namespace remoting {
 
+class Capturer;
 class UserAuthenticator;
 
 // A ClientSession keeps a reference to a connection to a client, and maintains
@@ -39,22 +41,24 @@ class ClientSession : public protocol::HostStub,
   };
 
   // Takes ownership of |user_authenticator|. Does not take ownership of
-  // |event_handler| or |input_stub|.
+  // |event_handler|, |input_stub| or |capturer|.
   ClientSession(EventHandler* event_handler,
                 UserAuthenticator* user_authenticator,
                 scoped_refptr<protocol::ConnectionToClient> connection,
-                protocol::InputStub* input_stub);
+                protocol::InputStub* input_stub,
+                Capturer* capturer);
 
   // protocol::HostStub interface.
   virtual void BeginSessionRequest(
       const protocol::LocalLoginCredentials* credentials, Task* done);
 
   // protocol::InputStub interface.
-  virtual void InjectKeyEvent(const protocol::KeyEvent* event, Task* done);
-  virtual void InjectMouseEvent(const protocol::MouseEvent* event, Task* done);
+  virtual void InjectKeyEvent(const protocol::KeyEvent& event);
+  virtual void InjectMouseEvent(const protocol::MouseEvent& event);
 
-  // Disconnect this client session.
-  void Disconnect();
+  // Notifier called when the client is being disconnected.
+  // This should only be called by ChromotingHost.
+  void OnDisconnected();
 
   // Set the authenticated flag or log a failure message as appropriate.
   void OnAuthorizationComplete(bool success);
@@ -76,22 +80,22 @@ class ClientSession : public protocol::HostStub,
   // have the upper hand in 'pointer wars'.
   void LocalMouseMoved(const gfx::Point& new_pos);
 
-  bool ShouldIgnoreRemoteMouseInput(const protocol::MouseEvent* event) const;
-  bool ShouldIgnoreRemoteKeyboardInput(const protocol::KeyEvent* event) const;
+  bool ShouldIgnoreRemoteMouseInput(const protocol::MouseEvent& event) const;
+  bool ShouldIgnoreRemoteKeyboardInput(const protocol::KeyEvent& event) const;
 
  private:
   friend class base::RefCountedThreadSafe<ClientSession>;
-  friend class ClientSessionTest_UnpressKeys_Test;
+  friend class ClientSessionTest_RestoreEventState_Test;
   virtual ~ClientSession();
 
-  // Keep track of keydowns and keyups so that we can clean up the keyboard
-  // state when the user disconnects.
-  void RecordKeyEvent(const protocol::KeyEvent* event);
+  // Keep track of input state so that we can clean up the event queue when
+  // the user disconnects.
+  void RecordKeyEvent(const protocol::KeyEvent& event);
+  void RecordMouseButtonState(const protocol::MouseEvent& event);
 
-  // Synthesize KeyUp events for keys that have been pressed but not released.
-  // This should be used when the client has disconnected to clear out any
-  // pending key events.
-  void UnpressKeys();
+  // Synthesize KeyUp and MouseUp events so that we can undo these events
+  // when the user disconnects.
+  void RestoreEventState();
 
   EventHandler* event_handler_;
 
@@ -104,6 +108,12 @@ class ClientSession : public protocol::HostStub,
   // The input stub to which this object delegates.
   protocol::InputStub* input_stub_;
 
+  // Capturer, used to determine current screen size for ensuring injected
+  // mouse events fall within the screen area.
+  // TODO(lambroslambrou): Move floor-control logic, and clamping to screen
+  // area, out of this class (crbug.com/96508).
+  Capturer* capturer_;
+
   // Whether this client is authenticated.
   bool authenticated_;
 
@@ -113,8 +123,20 @@ class ClientSession : public protocol::HostStub,
 
   // State to control remote input blocking while the local pointer is in use.
   uint32 remote_mouse_button_state_;
-  std::list<gfx::Point> recent_remote_mouse_positions_;
+
+  // Current location of the mouse pointer. This is used to provide appropriate
+  // coordinates when we release the mouse buttons after a user disconnects.
+  gfx::Point remote_mouse_pos_;
+
+  // Queue of recently-injected mouse positions.  This is used to detect whether
+  // mouse events from the local input monitor are echoes of injected positions,
+  // or genuine mouse movements of a local input device.
+  std::list<gfx::Point> injected_mouse_positions_;
+
   base::Time latest_local_input_time_;
+
+  // Set of keys that are currently pressed down by the user. This is used so
+  // we can release them if the user disconnects.
   std::set<int> pressed_keys_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSession);

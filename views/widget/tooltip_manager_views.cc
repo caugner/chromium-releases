@@ -4,8 +4,14 @@
 
 #include "views/widget/tooltip_manager_views.h"
 
+#if defined(USE_X11)
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput2.h>
+#endif
+
+#if defined(OS_WIN)
+#include <windowsx.h>
+#endif
 
 #include "base/logging.h"
 #include "base/time.h"
@@ -16,10 +22,15 @@
 #include "ui/gfx/screen.h"
 #include "views/background.h"
 #include "views/border.h"
+#include "views/events/event.h"
 #include "views/focus/focus_manager.h"
 #include "views/view.h"
 #include "views/widget/native_widget.h"
 #include "views/widget/root_view.h"
+
+#if defined(USE_WAYLAND)
+#include "ui/wayland/events/wayland_event.h"
+#endif
 
 namespace {
 SkColor kTooltipBackground = 0xFF7F7F00;
@@ -73,7 +84,8 @@ TooltipManagerViews::TooltipManagerViews(internal::RootView* root_view)
   tooltip_widget_->SetContentsView(&tooltip_label_);
   tooltip_widget_->Activate();
   tooltip_widget_->SetAlwaysOnTop(true);
-  tooltip_timer_.Start(base::TimeDelta::FromMilliseconds(kTooltipTimeoutMs),
+  tooltip_timer_.Start(FROM_HERE,
+      base::TimeDelta::FromMilliseconds(kTooltipTimeoutMs),
       this, &TooltipManagerViews::TooltipTimerFired);
   MessageLoopForUI::current()->AddObserver(this);
 }
@@ -100,21 +112,33 @@ void TooltipManagerViews::HideKeyboardTooltip() {
   NOTREACHED();
 }
 
+#if defined(USE_WAYLAND)
+base::MessagePumpObserver::EventStatus TooltipManagerViews::WillProcessEvent(
+      ui::WaylandEvent* event) {
+  if (event->type == ui::WAYLAND_MOTION)
+    OnMouseMoved(event->motion.x, event->motion.y);
+  return base::MessagePumpObserver::EVENT_CONTINUE;
+}
+#elif defined(USE_X11)
 base::MessagePumpObserver::EventStatus TooltipManagerViews::WillProcessXEvent(
     XEvent* xevent) {
   XGenericEventCookie* cookie = &xevent->xcookie;
   if (cookie->evtype == XI_Motion) {
     XIDeviceEvent* xievent = static_cast<XIDeviceEvent*>(cookie->data);
-    if (tooltip_timer_.IsRunning())
-      tooltip_timer_.Reset();
-    curr_mouse_pos_.SetPoint((int) xievent->event_x, (int) xievent->event_y);
-
-    // If tooltip is visible, we may want to hide it. If it is not, we are ok.
-    if (tooltip_widget_->IsVisible())
-      UpdateIfRequired(curr_mouse_pos_.x(), curr_mouse_pos_.y(), false);
+    OnMouseMoved(static_cast<int>(xievent->event_x),
+                 static_cast<int>(xievent->event_y));
   }
   return base::MessagePumpObserver::EVENT_CONTINUE;
 }
+#elif defined(OS_WIN)
+void TooltipManagerViews::WillProcessMessage(const MSG& msg) {
+  if (msg.message == WM_MOUSEMOVE)
+    OnMouseMoved(GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam));
+}
+
+void TooltipManagerViews::DidProcessMessage(const MSG& msg) {
+}
+#endif
 
 void TooltipManagerViews::TooltipTimerFired() {
   if (tooltip_widget_->IsVisible()) {
@@ -193,6 +217,16 @@ Widget* TooltipManagerViews::CreateTooltip() {
   widget->Init(params);
   widget->SetOpacity(0x00);
   return widget;
+}
+
+void TooltipManagerViews::OnMouseMoved(int x, int y) {
+  if (tooltip_timer_.IsRunning())
+    tooltip_timer_.Reset();
+  curr_mouse_pos_.SetPoint(x, y);
+
+  // If tooltip is visible, we may want to hide it. If it is not, we are ok.
+  if (tooltip_widget_->IsVisible())
+    UpdateIfRequired(curr_mouse_pos_.x(), curr_mouse_pos_.y(), false);
 }
 
 }  // namespace views

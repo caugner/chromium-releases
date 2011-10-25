@@ -107,14 +107,14 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
     bool render_directly_to_web_view) {
   if (!gfx::GLSurface::InitializeOneOff())
     return false;
-  gfx::BindSkiaToInProcessGL();
 
   render_directly_to_web_view_ = render_directly_to_web_view;
   gfx::GLShareGroup* share_group = 0;
 
   if (!render_directly_to_web_view) {
     // Pick up the compositor's context to share resources with.
-    WebGraphicsContext3D* view_context = webView->graphicsContext3D();
+    WebGraphicsContext3D* view_context = webView ?
+                                         webView->graphicsContext3D() : NULL;
     if (view_context) {
       WebGraphicsContext3DInProcessImpl* contextImpl =
           static_cast<WebGraphicsContext3DInProcessImpl*>(view_context);
@@ -148,7 +148,7 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
     // a page unload event, iterate down any live WebGraphicsContext3D instances
     // and force them to drop their contexts, sending a context lost event if
     // necessary.
-    webView->mainFrame()->collectGarbage();
+    if (webView) webView->mainFrame()->collectGarbage();
 
     gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
                                                            gfx::Size(1, 1));
@@ -169,7 +169,7 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
     // a page unload event, iterate down any live WebGraphicsContext3D instances
     // and force them to drop their contexts, sending a context lost event if
     // necessary.
-    webView->mainFrame()->collectGarbage();
+    if (webView) webView->mainFrame()->collectGarbage();
 
     gl_context_ = gfx::GLContext::CreateGLContext(share_group,
                                                   gl_surface_.get());
@@ -681,50 +681,7 @@ void WebGraphicsContext3DInProcessImpl::unmapTexSubImage2DCHROMIUM(
 
 void WebGraphicsContext3DInProcessImpl::copyTextureToParentTextureCHROMIUM(
     WebGLId id, WebGLId id2) {
-  if (!glGetTexLevelParameteriv)
-    return;
-
-  makeContextCurrent();
-  glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, copy_texture_to_parent_texture_fbo_);
-  glFramebufferTexture2DEXT(GL_FRAMEBUFFER,
-                            GL_COLOR_ATTACHMENT0,
-                            GL_TEXTURE_2D,
-                            id,
-                            0);  // level
-  glBindTexture(GL_TEXTURE_2D, id2);
-  GLsizei width, height;
-  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
-  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
-  glCopyTexImage2D(GL_TEXTURE_2D,
-                   0,  // level
-                   GL_RGBA,
-                   0, 0,  // x, y
-                   width,
-                   height,
-                   0);  // border
-  glBindTexture(GL_TEXTURE_2D, bound_texture_);
-  glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, bound_fbo_);
-}
-
-void WebGraphicsContext3DInProcessImpl::getParentToChildLatchCHROMIUM(
-    WGC3Duint* latch_id)
-{
-}
-
-void WebGraphicsContext3DInProcessImpl::getChildToParentLatchCHROMIUM(
-    WGC3Duint* latch_id)
-{
-}
-
-void WebGraphicsContext3DInProcessImpl::waitLatchCHROMIUM(
-    WGC3Duint latch_id)
-{
-}
-
-void WebGraphicsContext3DInProcessImpl::setLatchCHROMIUM(
-    WGC3Duint latch_id)
-{
-  glFlush();
+  NOTIMPLEMENTED();
 }
 
 WebString WebGraphicsContext3DInProcessImpl::
@@ -1372,10 +1329,6 @@ void WebGraphicsContext3DInProcessImpl::texImage2D(
     WGC3Denum target, WGC3Dint level, WGC3Denum internalFormat,
     WGC3Dsizei width, WGC3Dsizei height, WGC3Dint border,
     WGC3Denum format, WGC3Denum type, const void* pixels) {
-  if (width && height && !pixels) {
-    synthesizeGLError(GL_INVALID_VALUE);
-    return;
-  }
   makeContextCurrent();
   glTexImage2D(target, level, internalFormat,
                width, height, border, format, type, pixels);
@@ -1597,6 +1550,12 @@ WGC3Denum WebGraphicsContext3DInProcessImpl::getGraphicsResetStatusARB() {
   // TODO(kbr): this implementation doesn't support lost contexts yet.
   return GL_NO_ERROR;
 }
+
+#if WEBKIT_USING_SKIA
+GrGLInterface* WebGraphicsContext3DInProcessImpl::onCreateGrGLInterface() {
+  return gfx::CreateInProcessSkiaGLBinding();
+}
+#endif
 
 bool WebGraphicsContext3DInProcessImpl::AngleCreateCompilers() {
   if (!ShInitialize())

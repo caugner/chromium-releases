@@ -17,7 +17,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -330,7 +330,8 @@ TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
 
   // Notify that the extension was unloaded, and make sure the right item is
   // gone.
-  UnloadedExtensionInfo details(extension1, UnloadedExtensionInfo::DISABLE);
+  UnloadedExtensionInfo details(
+      extension1, extension_misc::UNLOAD_REASON_DISABLE);
   notifier->Notify(chrome::NOTIFICATION_EXTENSION_UNLOADED,
                    Source<Profile>(NULL),
                    Details<UnloadedExtensionInfo>(&details));
@@ -346,12 +347,12 @@ class MockExtensionEventRouter : public ExtensionEventRouter {
   explicit MockExtensionEventRouter(Profile* profile) :
       ExtensionEventRouter(profile) {}
 
-  MOCK_METHOD6(DispatchEventImpl, void(const std::string& extension_id,
-                                       const std::string& event_name,
-                                       const std::string& event_args,
-                                       Profile* source_profile,
-                                       const std::string& cross_incognito_args,
-                                       const GURL& event_url));
+  MOCK_METHOD5(DispatchEventToExtension, void(const std::string& extension_id,
+                                              const std::string& event_name,
+                                              const std::string& event_args,
+                                              Profile* source_profile,
+                                              const GURL& event_url));
+
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockExtensionEventRouter);
@@ -444,12 +445,11 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   std::string event_args;
   std::string expected_event_name = "contextMenus";
   EXPECT_CALL(*mock_event_router.get(),
-              DispatchEventImpl(item->extension_id(),
-                                expected_event_name,
-                                _,
-                                &profile,
-                                "",
-                                GURL()))
+              DispatchEventToExtension(item->extension_id(),
+                                       expected_event_name,
+                                       _,
+                                       &profile,
+                                       GURL()))
       .Times(1)
       .WillOnce(SaveArg<2>(&event_args));
 

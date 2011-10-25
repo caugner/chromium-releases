@@ -348,13 +348,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -664,13 +664,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -1249,13 +1249,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -1529,13 +1529,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -2391,13 +2391,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -4780,13 +4780,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -5051,13 +5051,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -5330,13 +5330,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -5901,13 +5901,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -6259,13 +6259,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -6548,13 +6548,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -6843,13 +6843,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -7414,13 +7414,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -8325,13 +8325,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -8590,13 +8590,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -9129,13 +9129,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -9426,13 +9426,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -10273,13 +10273,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -10316,7 +10316,7 @@ var keyboardOverlayData = {
         },
         "E0 38": {
           "format": "smaller",
-          "label": "alt"
+          "label": "alt gr"
         },
         "E0 48": {
           "label": "up"
@@ -10898,13 +10898,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -11193,13 +11193,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -11477,13 +11477,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -11755,13 +11755,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -12387,13 +12387,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -12706,13 +12706,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -12959,13 +12959,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -13229,13 +13229,13 @@ var keyboardOverlayData = {
           "label": "forward"
         },
         "3D": {
-          "label": "maximize"
+          "label": "reload"
         },
         "3E": {
           "label": "full screen"
         },
         "3F": {
-          "label": "tools"
+          "label": "maximize"
         },
         "40": {
           "label": "bright down"
@@ -13772,16 +13772,16 @@ var keyboardOverlayData = {
       [
         "E0 4D",
         815.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 4B",
         695.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 5B",
@@ -14306,16 +14306,16 @@ var keyboardOverlayData = {
       [
         "E0 4D",
         815.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 4B",
         695.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 5B",
@@ -14861,16 +14861,16 @@ var keyboardOverlayData = {
       [
         "E0 4D",
         815.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 4B",
         695.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 5B",
@@ -15381,16 +15381,16 @@ var keyboardOverlayData = {
       [
         "E0 4D",
         815.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 4B",
         695.0,
-        318.0,
+        287.0,
         60.0,
-        29.0
+        60.0
       ],
       [
         "E0 5B",
@@ -15825,7 +15825,7 @@ var keyboardOverlayData = {
     "k<>CTRL": "keyboardOverlayFocusAddressBarInSearchMode",
     "l<>CTRL": "keyboardOverlayFocusAddressBar",
     "left<>ALT": "keyboardOverlayGoBack",
-    "left<>CTRL": "keyboardOverlayMoveToStartOfPreviousWord",
+    "left<>CTRL": "keyboardOverlayPreviousWord",
     "left<>CTRL<>SHIFT": "keyboardOverlaySelectWordAtATime",
     "m<>CTRL": "keyboardOverlayOpenFileManager",
     "maximize<>CTRL": "keyboardOverlayTakeScreenshot",
@@ -15840,7 +15840,7 @@ var keyboardOverlayData = {
     "r<>CTRL": "keyboardOverlayReloadCurrentPage",
     "r<>CTRL<>SHIFT": "keyboardOverlayReloadIgnoringCache",
     "right<>ALT": "keyboardOverlayGoForward",
-    "right<>CTRL": "keyboardOverlayMoveToEndOfNextWord",
+    "right<>CTRL": "keyboardOverlayNextWord",
     "right<>CTRL<>SHIFT": "keyboardOverlaySelectWordAtATime",
     "s<>ALT<>SHIFT": "keyboardOverlayFocusStatusIcon",
     "s<>CTRL": "keyboardOverlaySave",

@@ -42,6 +42,7 @@ namespace {
 HttpNetworkSession* CreateNetworkSession(
     HostResolver* host_resolver,
     CertVerifier* cert_verifier,
+    OriginBoundCertService* origin_bound_cert_service,
     DnsRRResolver* dnsrr_resolver,
     DnsCertProvenanceChecker* dns_cert_checker,
     ProxyService* proxy_service,
@@ -53,6 +54,7 @@ HttpNetworkSession* CreateNetworkSession(
   HttpNetworkSession::Params params;
   params.host_resolver = host_resolver;
   params.cert_verifier = cert_verifier;
+  params.origin_bound_cert_service = origin_bound_cert_service;
   params.dnsrr_resolver = dnsrr_resolver;
   params.dns_cert_checker = dns_cert_checker;
   params.proxy_service = proxy_service;
@@ -311,6 +313,7 @@ class HttpCache::SSLHostInfoFactoryAdaptor : public SSLHostInfoFactory {
 //-----------------------------------------------------------------------------
 HttpCache::HttpCache(HostResolver* host_resolver,
                      CertVerifier* cert_verifier,
+                     OriginBoundCertService* origin_bound_cert_service,
                      DnsRRResolver* dnsrr_resolver,
                      DnsCertProvenanceChecker* dns_cert_checker_,
                      ProxyService* proxy_service,
@@ -331,6 +334,7 @@ HttpCache::HttpCache(HostResolver* host_resolver,
               CreateNetworkSession(
                   host_resolver,
                   cert_verifier,
+                  origin_bound_cert_service,
                   dnsrr_resolver,
                   dns_cert_checker_,
                   proxy_service,
@@ -426,7 +430,7 @@ int HttpCache::GetBackend(disk_cache::Backend** backend,
   return CreateBackend(backend, callback);
 }
 
-disk_cache::Backend* HttpCache::GetCurrentBackend() {
+disk_cache::Backend* HttpCache::GetCurrentBackend() const {
   return disk_cache_.get();
 }
 
@@ -461,6 +465,18 @@ void HttpCache::CloseAllConnections() {
   HttpNetworkSession* session = network->GetSession();
   if (session)
     session->CloseAllConnections();
+}
+
+void HttpCache::OnExternalCacheHit(const GURL& url,
+                                   const std::string& http_method) {
+  if (!disk_cache_.get())
+    return;
+
+  HttpRequestInfo request_info;
+  request_info.url = url;
+  request_info.method = http_method;
+  std::string key = GenerateCacheKey(&request_info);
+  disk_cache_->OnExternalCacheHit(key);
 }
 
 int HttpCache::CreateTransaction(scoped_ptr<HttpTransaction>* trans) {

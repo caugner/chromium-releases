@@ -277,8 +277,7 @@ void NetworkMenuButton::OnLinkActivated(size_t index) {
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkMenuButton, private methods:
 
-const ServicesCustomizationDocument::CarrierDeal*
-NetworkMenuButton::GetCarrierDeal(
+const MobileConfig::Carrier* NetworkMenuButton::GetCarrier(
     NetworkLibrary* cros) {
   std::string carrier_id = cros->GetCellularHomeCarrierId();
   if (carrier_id.empty()) {
@@ -286,13 +285,16 @@ NetworkMenuButton::GetCarrierDeal(
     return NULL;
   }
 
-  ServicesCustomizationDocument* customization =
-      ServicesCustomizationDocument::GetInstance();
-  if (!customization->IsReady())
+  MobileConfig* config = MobileConfig::GetInstance();
+  if (!config->IsReady())
     return NULL;
 
-  const ServicesCustomizationDocument::CarrierDeal* deal =
-      customization->GetCarrierDeal(carrier_id, true);
+  return config->GetCarrier(carrier_id);
+}
+
+const MobileConfig::CarrierDeal* NetworkMenuButton::GetCarrierDeal(
+    const MobileConfig::Carrier* carrier) {
+  const MobileConfig::CarrierDeal* deal = carrier->GetDefaultDeal();
   if (deal) {
     // Check deal for validity.
     int carrier_deal_promo_pref = GetCarrierDealPromoShown();
@@ -354,16 +356,18 @@ void NetworkMenuButton::ShowOptionalMobileDataPromoNotification(
       check_for_promo_ && BrowserList::GetLastActive() &&
       cros->cellular_connected() && !cros->ethernet_connected() &&
       !cros->wifi_connected()) {
-    const ServicesCustomizationDocument::CarrierDeal* deal =
-        GetCarrierDeal(cros);
     std::string deal_text;
     int carrier_deal_promo_pref = -1;
+    const MobileConfig::CarrierDeal* deal = NULL;
+    const MobileConfig::Carrier* carrier = GetCarrier(cros);
+    if (carrier)
+      deal = GetCarrierDeal(carrier);
     if (deal) {
       carrier_deal_promo_pref = GetCarrierDealPromoShown();
       const std::string locale = g_browser_process->GetApplicationLocale();
       deal_text = deal->GetLocalizedString(locale, "notification_text");
       deal_info_url_ = deal->info_url();
-      deal_topup_url_ = deal->top_up_url();
+      deal_topup_url_ = carrier->top_up_url();
     } else if (!ShouldShow3gPromoNotification()) {
       check_for_promo_ = false;
       return;
@@ -417,7 +421,7 @@ void NetworkMenuButton::ShowOptionalMobileDataPromoNotification(
     mobile_data_bubble_ = MessageBubble::ShowWithLinks(
         GetWidget(),
         button_bounds,
-        BubbleBorder::TOP_RIGHT ,
+        views::BubbleBorder::TOP_RIGHT ,
         ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_NOTIFICATION_3G),
         notification_text,
         links,

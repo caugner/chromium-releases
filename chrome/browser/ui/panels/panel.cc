@@ -8,12 +8,16 @@
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/content_notification_types.h"
+#include "content/common/view_messages.h"
 #include "ui/gfx/rect.h"
 
 // static
@@ -27,10 +31,15 @@ const Extension* Panel::GetExtension(Browser* browser) {
 }
 
 Panel::Panel(Browser* browser, const gfx::Rect& bounds)
-    : browser_(browser),
+    : min_size_(bounds.size()),
+      max_size_(bounds.size()),
       native_panel_(NULL),
       expansion_state_(EXPANDED) {
   native_panel_ = CreateNativePanel(browser, this, bounds);
+
+  registrar_.Add(this,
+                 content::NOTIFICATION_TAB_ADDED,
+                 Source<TabContentsDelegate>(browser));
 }
 
 Panel::~Panel() {
@@ -43,6 +52,18 @@ PanelManager* Panel::manager() const {
 
 void Panel::SetPanelBounds(const gfx::Rect& bounds) {
   native_panel_->SetPanelBounds(bounds);
+}
+
+void Panel::SetMaxSize(const gfx::Size& max_size) {
+  if (max_size_ == max_size)
+    return;
+  max_size_ = max_size;
+
+  // Note: |render_view_host| might be NULL if the tab has not been created.
+  // If so, we will do it when NOTIFICATION_TAB_ADDED is received.
+  RenderViewHost* render_view_host = GetRenderViewHost();
+  if (render_view_host)
+    RequestRenderViewHostToDisableScrollbars(render_view_host);
 }
 
 void Panel::SetExpansionState(ExpansionState new_expansion_state) {
@@ -58,17 +79,30 @@ void Panel::SetExpansionState(ExpansionState new_expansion_state) {
     Deactivate();
 }
 
-bool Panel::ShouldBringUpTitleBar(int mouse_x, int mouse_y) const {
+bool Panel::ShouldBringUpTitlebar(int mouse_x, int mouse_y) const {
   // Skip the expanded panel.
   if (expansion_state_ == Panel::EXPANDED)
     return false;
 
+  // If the panel is showing titlebar only, we want to keep it up when it is
+  // being dragged.
+  if (expansion_state_ == Panel::TITLE_ONLY && manager()->is_dragging_panel())
+    return true;
+
   // Let the native panel decide.
-  return native_panel_->ShouldBringUpPanelTitleBar(mouse_x, mouse_y);
+  return native_panel_->ShouldBringUpPanelTitlebar(mouse_x, mouse_y);
 }
 
 bool Panel::IsDrawingAttention() const {
   return native_panel_->IsDrawingAttention();
+}
+
+int Panel::GetRestoredHeight() const {
+  return native_panel_->GetRestoredHeight();
+}
+
+void Panel::SetRestoredHeight(int height) {
+  native_panel_->SetRestoredHeight(height);
 }
 
 void Panel::Show() {
@@ -88,7 +122,14 @@ void Panel::SetBounds(const gfx::Rect& bounds) {
 // close on the first attempt.
 void Panel::Close() {
   native_panel_->ClosePanel();
+
+// TODO(dimich): Only implemented fully async on Mac. Need to update other
+// platforms. The panel should be removed from PanelManager when and if it
+// was actually closed. The closing can be cancelled because of onbeforeunload
+// handler on the web page.
+#if !defined(OS_MACOSX)
   manager()->Remove(this);
+#endif
 }
 
 void Panel::Activate() {
@@ -155,6 +196,11 @@ gfx::Rect Panel::GetBounds() const {
 }
 
 bool Panel::IsMaximized() const {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool Panel::IsMinimized() const {
   NOTIMPLEMENTED();
   return false;
 }
@@ -275,31 +321,32 @@ bool Panel::IsDownloadShelfVisible() const {
 }
 
 DownloadShelf* Panel::GetDownloadShelf() {
-  Profile* profile = browser_->GetProfile();
-  Browser* browser = Browser::GetTabbedBrowser(profile, true);
+  Browser* panel_browser = native_panel_->GetPanelBrowser();
+  Profile* profile = panel_browser->GetProfile();
+  Browser* tabbed_browser = Browser::GetTabbedBrowser(profile, true);
 
-  if (!browser) {
+  if (!tabbed_browser) {
     // Set initial bounds so window will not be positioned at an offset
     // to this panel as panels are at the bottom of the screen.
     gfx::Rect window_bounds;
     bool maximized;
-    WindowSizer::GetBrowserWindowBounds(std::string(), gfx::Rect(),
-                                        browser_, &window_bounds, &maximized);
+    WindowSizer::GetBrowserWindowBounds(
+        std::string(), gfx::Rect(), panel_browser, &window_bounds, &maximized);
     Browser::CreateParams params(Browser::TYPE_TABBED, profile);
     params.initial_bounds = window_bounds;
-    browser = Browser::CreateWithParams(params);
-    browser->NewTab();
+    tabbed_browser = Browser::CreateWithParams(params);
+    tabbed_browser->NewTab();
   }
 
-  browser->window()->Show();  // Ensure download shelf is visible.
-  return browser->window()->GetDownloadShelf();
+  tabbed_browser->window()->Show();  // Ensure download shelf is visible.
+  return tabbed_browser->window()->GetDownloadShelf();
 }
 
 void Panel::ShowRepostFormWarningDialog(TabContents* tab_contents) {
   NOTIMPLEMENTED();
 }
 
-void Panel::ShowCollectedCookiesDialog(TabContents* tab_contents) {
+void Panel::ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) {
   NOTIMPLEMENTED();
 }
 
@@ -311,9 +358,10 @@ void Panel::ConfirmBrowserCloseWithPendingDownloads() {
   NOTIMPLEMENTED();
 }
 
-void Panel::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                           gfx::NativeWindow parent_window) {
+gfx::NativeWindow Panel::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
+                                        gfx::NativeWindow parent_window) {
   NOTIMPLEMENTED();
+  return NULL;
 }
 
 void Panel::UserChangedTheme() {
@@ -342,12 +390,12 @@ void Panel::ShowAppMenu() {
 
 bool Panel::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                    bool* is_keyboard_shortcut) {
-  NOTIMPLEMENTED();
-  return false;
+  return native_panel_->PreHandlePanelKeyboardEvent(event,
+                                                    is_keyboard_shortcut);
 }
 
 void Panel::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-  NOTIMPLEMENTED();
+  native_panel_->HandlePanelKeyboardEvent(event);
 }
 
 void Panel::ShowCreateWebAppShortcutsDialog(TabContentsWrapper* tab_contents) {
@@ -417,11 +465,65 @@ WindowOpenDisposition Panel::GetDispositionForPopupBounds(
   return NEW_POPUP;
 }
 
+FindBar* Panel::CreateFindBar() {
+  return native_panel_->CreatePanelFindBar();
+}
+
 #if defined(OS_CHROMEOS)
 void Panel::ShowKeyboardOverlay(gfx::NativeWindow owning_window) {
   NOTIMPLEMENTED();
 }
 #endif
+
+void Panel::UpdatePreferredSize(TabContents* tab_contents,
+                                const gfx::Size& pref_size) {
+  gfx::Size non_client_size = native_panel_->GetNonClientAreaExtent();
+  return manager()->OnPreferredWindowSizeChanged(this,
+      gfx::Size(pref_size.width() + non_client_size.width(),
+                pref_size.height() + non_client_size.height()));
+}
+
+void Panel::Observe(int type,
+                    const NotificationSource& source,
+                    const NotificationDetails& details) {
+  switch (type) {
+    case content::NOTIFICATION_TAB_ADDED:
+    case content::NOTIFICATION_TAB_CONTENTS_SWAPPED: {
+      RenderViewHost* render_view_host = GetRenderViewHost();
+      DCHECK(render_view_host);
+      render_view_host->Send(new ViewMsg_EnablePreferredSizeChangedMode(
+          render_view_host->routing_id(),
+          kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow));
+      RequestRenderViewHostToDisableScrollbars(render_view_host);
+      break;
+    }
+    default:
+      NOTREACHED() << "Got a notification we didn't register for!";
+      break;
+  }
+}
+
+RenderViewHost* Panel::GetRenderViewHost() const {
+  TabContents* tab_contents = browser()->GetSelectedTabContents();
+  if (!tab_contents)
+    return NULL;
+  return tab_contents->render_view_host();
+}
+
+void Panel::RequestRenderViewHostToDisableScrollbars(
+    RenderViewHost* render_view_host) {
+  DCHECK(render_view_host);
+
+  gfx::Size non_client_size = native_panel_->GetNonClientAreaExtent();
+  render_view_host->Send(new ViewMsg_DisableScrollbarsForSmallWindows(
+      render_view_host->routing_id(),
+      gfx::Size(max_size_.width() - non_client_size.width(),
+                max_size_.height() - non_client_size.height())));
+}
+
+Browser* Panel::browser() const {
+  return native_panel_->GetPanelBrowser();
+}
 
 void Panel::DestroyBrowser() {
   native_panel_->DestroyPanelBrowser();

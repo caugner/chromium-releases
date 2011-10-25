@@ -61,7 +61,7 @@ void URLRequestJob::DetachRequest() {
 bool URLRequestJob::Read(IOBuffer* buf, int buf_size, int *bytes_read) {
   bool rv = false;
 
-  DCHECK_LT(buf_size, 1000000);  // sanity check
+  DCHECK_LT(buf_size, 1000000);  // Sanity check.
   DCHECK(buf);
   DCHECK(bytes_read);
   DCHECK(filtered_read_buffer_ == NULL);
@@ -69,7 +69,7 @@ bool URLRequestJob::Read(IOBuffer* buf, int buf_size, int *bytes_read) {
 
   *bytes_read = 0;
 
-  // Skip Filter if not present
+  // Skip Filter if not present.
   if (!filter_.get()) {
     rv = ReadRawDataHelper(buf, buf_size, bytes_read);
   } else {
@@ -79,9 +79,15 @@ bool URLRequestJob::Read(IOBuffer* buf, int buf_size, int *bytes_read) {
     filtered_read_buffer_len_ = buf_size;
 
     if (ReadFilteredData(bytes_read)) {
-      rv = true;   // we have data to return
+      rv = true;   // We have data to return.
+
+      // It is fine to call DoneReading even if ReadFilteredData receives 0
+      // bytes from the net, but we avoid making that call if we know for
+      // sure that's the case (ReadRawDataHelper path).
+      if (*bytes_read == 0)
+        DoneReading();
     } else {
-      rv = false;  // error, or a new IO is pending
+      rv = false;  // Error, or a new IO is pending.
     }
   }
   if (rv && *bytes_read == 0)
@@ -230,15 +236,15 @@ void URLRequestJob::NotifySSLCertificateError(int cert_error,
   request_->NotifySSLCertificateError(cert_error, cert);
 }
 
-bool URLRequestJob::CanGetCookies() {
+bool URLRequestJob::CanGetCookies(const CookieList& cookie_list) const {
   if (!request_)
     return false;  // The request was destroyed, so there is no more work to do.
 
-  return request_->CanGetCookies();
+  return request_->CanGetCookies(cookie_list);
 }
 
 bool URLRequestJob::CanSetCookie(const std::string& cookie_line,
-                                 CookieOptions* options) {
+                                 CookieOptions* options) const {
   if (!request_)
     return false;  // The request was destroyed, so there is no more work to do.
 
@@ -358,6 +364,8 @@ void URLRequestJob::NotifyReadComplete(int bytes_read) {
     // Filter the data.
     int filter_bytes_read = 0;
     if (ReadFilteredData(&filter_bytes_read)) {
+      if (!filter_bytes_read)
+        DoneReading();
       request_->NotifyReadCompleted(filter_bytes_read);
     }
   } else {
@@ -399,8 +407,15 @@ void URLRequestJob::NotifyDone(const URLRequestStatus &status) {
     // an error, we do not change the status back to success.  To
     // enforce this, only set the status if the job is so far
     // successful.
-    if (request_->status().is_success())
+    if (request_->status().is_success()) {
+      if (status.status() == URLRequestStatus::FAILED) {
+        request_->net_log().AddEvent(
+            NetLog::TYPE_FAILED,
+            make_scoped_refptr(new NetLogIntegerParameter("net_error",
+                                                          status.os_error())));
+      }
       request_->set_status(status);
+    }
   }
 
   // Complete this notification later.  This prevents us from re-entering the
@@ -439,11 +454,23 @@ void URLRequestJob::NotifyRestartRequired() {
     request_->Restart();
 }
 
+void URLRequestJob::SetBlockedOnDelegate() {
+  request_->SetBlockedOnDelegate();
+}
+
+void URLRequestJob::SetUnblockedOnDelegate() {
+  request_->SetUnblockedOnDelegate();
+}
+
 bool URLRequestJob::ReadRawData(IOBuffer* buf, int buf_size,
                                 int *bytes_read) {
   DCHECK(bytes_read);
   *bytes_read = 0;
   return true;
+}
+
+void URLRequestJob::DoneReading() {
+  // Do nothing.
 }
 
 void URLRequestJob::FilteredDataRead(int bytes_read) {

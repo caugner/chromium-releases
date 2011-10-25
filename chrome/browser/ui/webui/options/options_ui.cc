@@ -26,11 +26,14 @@
 #include "chrome/browser/ui/webui/options/handler_options_handler.h"
 #include "chrome/browser/ui/webui/options/cookies_view_handler.h"
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
+#include "chrome/browser/ui/webui/options/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/options/font_settings_handler.h"
 #include "chrome/browser/ui/webui/options/import_data_handler.h"
+#include "chrome/browser/ui/webui/options/intents_settings_handler.h"
 #include "chrome/browser/ui/webui/options/language_options_handler.h"
 #include "chrome/browser/ui/webui/options/manage_profile_handler.h"
 #include "chrome/browser/ui/webui/options/options_sync_setup_handler.h"
+#include "chrome/browser/ui/webui/options/pack_extension_handler.h"
 #include "chrome/browser/ui/webui/options/password_manager_handler.h"
 #include "chrome/browser/ui/webui/options/personal_options_handler.h"
 #include "chrome/browser/ui/webui/options/search_engine_manager_handler.h"
@@ -70,6 +73,7 @@
 #include "chrome/browser/ui/webui/options/chromeos/stats_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/system_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
+#include "chrome/browser/ui/webui/options/chromeos/virtual_keyboard_manager_handler.h"
 #endif
 
 #if defined(USE_NSS)
@@ -160,11 +164,6 @@ bool OptionsPageUIHandler::IsEnabled() {
   return true;
 }
 
-void OptionsPageUIHandler::UserMetricsRecordAction(
-    const UserMetricsAction& action) {
-  UserMetrics::RecordAction(action);
-}
-
 // static
 void OptionsPageUIHandler::RegisterStrings(
     DictionaryValue* localized_strings,
@@ -213,7 +212,9 @@ OptionsUI::OptionsUI(TabContents* contents)
   AddOptionsPageUIHandler(localized_strings, new ClearBrowserDataHandler());
   AddOptionsPageUIHandler(localized_strings, new ContentSettingsHandler());
   AddOptionsPageUIHandler(localized_strings, new CookiesViewHandler());
+  AddOptionsPageUIHandler(localized_strings, new ExtensionSettingsHandler());
   AddOptionsPageUIHandler(localized_strings, new FontSettingsHandler());
+  AddOptionsPageUIHandler(localized_strings, new IntentsSettingsHandler());
 #if defined(OS_CHROMEOS)
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::CrosLanguageOptionsHandler());
@@ -221,6 +222,7 @@ OptionsUI::OptionsUI(TabContents* contents)
   AddOptionsPageUIHandler(localized_strings, new LanguageOptionsHandler());
 #endif
   AddOptionsPageUIHandler(localized_strings, new ManageProfileHandler());
+  AddOptionsPageUIHandler(localized_strings, new PackExtensionHandler());
   AddOptionsPageUIHandler(localized_strings, new PasswordManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new PersonalOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new SearchEngineManagerHandler());
@@ -243,6 +245,8 @@ OptionsUI::OptionsUI(TabContents* contents)
                           new chromeos::LanguageMozcHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::LanguagePinyinHandler());
+  AddOptionsPageUIHandler(localized_strings,
+                          new chromeos::VirtualKeyboardManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new chromeos::ProxyHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::ChangePictureOptionsHandler());
@@ -260,18 +264,18 @@ OptionsUI::OptionsUI(TabContents* contents)
       new OptionsUIHTMLSource(localized_strings);
 
   // Set up the chrome://settings/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 
   // Set up the chrome://theme/ source.
-  ThemeSource* theme = new ThemeSource(contents->profile());
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(theme);
+  ThemeSource* theme = new ThemeSource(profile);
+  profile->GetChromeURLDataManager()->AddDataSource(theme);
 
 #if defined(OS_CHROMEOS)
   // Set up the chrome://userimage/ source.
   chromeos::UserImageSource* user_image_source =
       new chromeos::UserImageSource();
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
-      user_image_source);
+  profile->GetChromeURLDataManager()->AddDataSource(user_image_source);
 #endif
 }
 

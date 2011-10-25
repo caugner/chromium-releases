@@ -24,18 +24,18 @@ class SyncBackendHost;
 class DataTypeManagerImpl : public DataTypeManager {
  public:
   DataTypeManagerImpl(SyncBackendHost* backend,
-                       const DataTypeController::TypeMap& controllers);
+                      const DataTypeController::TypeMap* controllers);
   virtual ~DataTypeManagerImpl();
 
   // DataTypeManager interface.
   virtual void Configure(const TypeSet& desired_types,
                          sync_api::ConfigureReason reason);
 
+  // Needed only for backend migration.
   virtual void ConfigureWithoutNigori(const TypeSet& desired_types,
                                       sync_api::ConfigureReason reason);
 
   virtual void Stop();
-  virtual const DataTypeController::TypeMap& controllers();
   virtual State state();
 
  private:
@@ -50,19 +50,23 @@ class DataTypeManagerImpl : public DataTypeManager {
 
   // Stops all data types.
   void FinishStop();
-  void FinishStopAndNotify(ConfigureResult result,
-       const tracked_objects::Location& location);
+  void Abort(ConfigureStatus status,
+             const tracked_objects::Location& location,
+             syncable::ModelType last_attempted_type);
 
   // Returns true if any last_requested_types_ currently needs to start model
   // association.  If non-null, fills |needs_start| with all such controllers.
   bool GetControllersNeedingStart(
       std::vector<DataTypeController*>* needs_start);
 
+  // If there's a pending reconfigure, processes it and returns true.
+  // Otherwise, returns false.
+  bool ProcessReconfigure();
+
   void Restart(sync_api::ConfigureReason reason, bool enable_nigori);
   void DownloadReady(bool success);
   void NotifyStart();
-  void NotifyDone(ConfigureResult result,
-      const tracked_objects::Location& location);
+  void NotifyDone(const ConfigureResult& result);
   void SetBlockedAndNotify();
 
   // Add to |configure_time_delta_| the time since we last called
@@ -76,7 +80,7 @@ class DataTypeManagerImpl : public DataTypeManager {
   SyncBackendHost* backend_;
   // Map of all data type controllers that are available for sync.
   // This list is determined at startup by various command line flags.
-  const DataTypeController::TypeMap controllers_;
+  const DataTypeController::TypeMap* controllers_;
   State state_;
   std::map<syncable::ModelType, int> start_order_;
   TypeSet last_requested_types_;
@@ -88,8 +92,12 @@ class DataTypeManagerImpl : public DataTypeManager {
   bool needs_reconfigure_;
 
   // The reason for the last reconfigure attempt. Not this will be set to a
-  // valid value only if needs_reconfigure_ is set.
+  // valid value only when |needs_reconfigure_| is set.
   sync_api::ConfigureReason last_configure_reason_;
+  // Whether enable_nigori was set on the last reconfigure attempt.
+  // Like |last_configure_reason_|, set to a valid value only when
+  // |needs_reconfigure_| is set.
+  bool last_enable_nigori_;
 
   base::WeakPtrFactory<DataTypeManagerImpl> weak_ptr_factory_;
 

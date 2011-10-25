@@ -20,32 +20,24 @@ class SpecialTabsTest(pyauto.PyUITest):
   }
 
   special_url_redirects = {
-    'about:': 'chrome://version',
-    'about:about': 'chrome://about',
-    'about:appcache-internals': 'chrome://appcache-internals',
-    'about:credits': 'chrome://credits',
-    'about:dns': 'chrome://dns',
-    'about:histograms': 'chrome://histograms',
-    'about:plugins': 'chrome://plugins',
-    'about:sync': 'chrome://sync-internals',
-    'about:sync-internals': 'chrome://sync-internals',
-    'about:version': 'chrome://version',
+   'about:': 'chrome://version',
+   'about:about': 'chrome://about',
+   'about:appcache-internals': 'chrome://appcache-internals',
+   'about:credits': 'chrome://credits',
+   'about:dns': 'chrome://dns',
+   'about:histograms': 'chrome://histograms',
+   'about:plugins': 'chrome://plugins',
+   'about:sync': 'chrome://sync-internals',
+   'about:sync-internals': 'chrome://sync-internals',
+   'about:version': 'chrome://version',
   }
 
   special_url_tabs = {
     'chrome://about': { 'title': 'Chrome URLs' },
-    'chrome://appcache-internals': {
-      'title': 'AppCache Internals',
-      'CSP': False
-    },
-    'chrome://blob-internals': {
-      'title': 'Blob Storage Internals',
-      'CSP': False
-    },
-    'chrome://bugreport': {
-      'title': 'Whoops. Let\'s fix that.',
-      'CSP': False
-    },
+    'chrome://appcache-internals': { 'title': 'AppCache Internals' },
+    'chrome://blob-internals': { 'title': 'Blob Storage Internals' },
+    'chrome://bugreport': {},
+    'chrome://bugreport/#0': { 'title': 'Feedback' },
     'chrome://chrome-urls': { 'title': 'Chrome URLs' },
     'chrome://crashes': { 'title': 'Crashes' },
     'chrome://credits': { 'title': 'Credits', 'CSP': False },
@@ -57,33 +49,28 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://gpu-internals': {},
     'chrome://histograms': { 'title': 'About Histograms' },
     'chrome://history': { 'title': 'History' },
-    'chrome://history2': { 'title': 'History', 'CSP': False },
-    'chrome://media-internals': { 'title': 'Media Internals', 'CSP': False },
+    'chrome://history2': { 'title': 'History' },
+    'chrome://media-internals': { 'title': 'Media Internals' },
     'chrome://memory-redirect': { 'title': 'About Memory' },
     'chrome://net-internals': {},
     'chrome://net-internals/help.html': {},
     'chrome://newtab': { 'title': 'New Tab', 'CSP': False },
     'chrome://plugins': { 'title': 'Plug-ins' },
-    'chrome://sessions': { 'title': 'Sessions', 'CSP': False },
+    'chrome://sessions': { 'title': 'Sessions' },
     'chrome://settings': { 'title': 'Preferences - Basics' },
     'chrome://stats': { 'CSP': False },
-    'chrome://sync': { 'title': 'Sync Internals', 'CSP': False },
-    'chrome://sync-internals': { 'title': 'Sync Internals', 'CSP': False },
+    'chrome://sync': { 'title': 'Sync Internals' },
+    'chrome://sync-internals': { 'title': 'Sync Internals' },
+    'chrome://tasks': { 'title': 'Task Manager - Chromium' },
     'chrome://terms': { 'CSP': False },
     'chrome://textfields': { 'title': 'chrome://textfields', 'CSP': False },
     'chrome://version': { 'title': 'About Version' },
     'chrome://view-http-cache': {},
+    'chrome://workers': { 'title': 'Workers' },
   }
-
   broken_special_url_tabs = {
-    # crashes under debug, bad include of locale.js (bug 88220).
-    'chrome://taskmanager': { 'CSP': False },
-
     # crashed under debug when invoked from location bar (bug 88223).
     'chrome://devtools': { 'CSP': False },
-
-    # intermittent crash on cromeos=1 on linux
-    'chrome://tasks': { 'title': 'About Histograms' },
 
     # returns "not available" despite having an URL constant.
     'chrome://dialog': { 'CSP': False },
@@ -129,7 +116,6 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://settings/proxy': { 'title': 'Proxy' },
     'chrome://settings/system': { 'title': 'Settings - System' },
   }
-
   broken_chromeos_special_url_tabs = {
     # returns "not available" page on chromeos=1 linux but has an URL constant.
     'chrome://activationmessage': { 'CSP': False },
@@ -150,6 +136,7 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://cryptohome': { 'CSP': False},
     'chrome://mobilesetup': { 'CSP': False },
     'chrome://print': { 'CSP': False },
+    'chrome://tasks': {},
   }
 
   linux_special_url_tabs = {
@@ -157,15 +144,10 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://tcmalloc': { 'title': 'About tcmalloc' },
     'chrome://sandbox': { 'title': 'Sandbox Status' },
   }
+  broken_linux_special_url_tabs = {}
 
-  broken_linux_special_url_tabs = {
-  }
-
-  mac_special_url_tabs = {
-  }
-
-  broken_mac_special_url_tabs = {
-  }
+  mac_special_url_tabs = {}
+  broken_mac_special_url_tabs = {}
 
   win_special_url_tabs = {
     'chrome://conflicts': {},
@@ -173,22 +155,19 @@ class SpecialTabsTest(pyauto.PyUITest):
     # OVERRIDE - different title for page.
     'chrome://settings': { 'title': 'Options - Basics' },
   }
-
   broken_win_special_url_tabs = {
     # Sync on windows badly broken at the moment.
     'chrome://sync': {},
   }
 
-  google_chrome_special_url_tabs = {
+  google_special_url_tabs = {
     # OVERRIDE - different title for Google Chrome vs. Chromium.
     'chrome://terms': {
       'title': 'Google Chrome Terms of Service',
       'CSP': False
     },
   }
-
-  broken_google_chrome_special_url_tabs = {
-  }
+  broken_google_special_url_tabs = {}
 
   google_chromeos_special_url_tabs = {
     # OVERRIDE - different title for Google Chrome OS vs. Chromium OS.
@@ -197,9 +176,16 @@ class SpecialTabsTest(pyauto.PyUITest):
       'CSP': False
     },
   }
+  broken_google_chromeos_special_url_tabs = {}
 
-  broken_google_chromeos_special_url_tabs = {
-  }
+  google_win_special_url_tabs = {}
+  broken_google_win_special_url_tabs = {}
+
+  google_mac_special_url_tabs = {}
+  broken_google_mac_special_url_tabs = {}
+
+  google_linux_special_url_tabs = {}
+  broken_google_linux_special_url_tabs = {}
 
   def _VerifyAppCacheInternals(self):
     """Confirm about:appcache-internals contains expected content for Caches.
@@ -242,15 +228,28 @@ class SpecialTabsTest(pyauto.PyUITest):
     elif self.IsWin():
       tabs.update(self.win_special_url_tabs)
       broken_tabs.update(self.broken_win_special_url_tabs)
-    if self.GetBrowserInfo()['properties']['branding'] == 'Google Chrome':
-      tabs.update(self.google_chrome_special_url_tabs)
-      broken_tabs.update(self.broken_google_chrome_special_url_tabs)
-      if self.IsChromeOS():
-        tabs.update(self.google_chromeos_special_url_tabs)
-        broken_tabs.update(self.broken_google_chromeos_special_url_tabs)
     for key, value in broken_tabs.iteritems():
       if key in tabs:
        del tabs[key]
+    broken_tabs = {}
+    if self.GetBrowserInfo()['properties']['branding'] == 'Google Chrome':
+      tabs.update(self.google_special_url_tabs)
+      broken_tabs.update(self.broken_google_special_url_tabs)
+      if self.IsChromeOS():
+        tabs.update(self.google_chromeos_special_url_tabs)
+        broken_tabs.update(self.broken_google_chromeos_special_url_tabs)
+      elif self.IsLinux():
+        tabs.update(self.google_linux_special_url_tabs)
+        broken_tabs.update(self.broken_google_linux_special_url_tabs)
+      elif self.IsMac():
+        tabs.update(self.google_mac_special_url_tabs)
+        broken_tabs.update(self.broken_google_mac_special_url_tabs)
+      elif self.IsWin():
+        tabs.update(self.google_win_special_url_tabs)
+        broken_tabs.update(self.broken_google_win_special_url_tabs)
+      for key, value in broken_tabs.iteritems():
+        if key in tabs:
+         del tabs[key]
     return tabs
 
   def testSpecialURLRedirects(self):
@@ -312,7 +311,9 @@ class SpecialTabsTest(pyauto.PyUITest):
        IDC_SHOW_DOWNLOADS."""
     for accel, title in self.special_accelerator_tabs.iteritems():
       self.RunCommand(accel)
-      self.assertEqual(title, self.GetActiveTabTitle())
+      self.assertTrue(self.WaitUntil(
+            self.GetActiveTabTitle, expect_retval=title),
+          msg='Expected "%s"' % title)
 
 
 if __name__ == '__main__':

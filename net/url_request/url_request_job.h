@@ -19,11 +19,12 @@
 #include "net/base/filter.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_states.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 
 namespace net {
 
 class AuthChallengeInfo;
+class CookieList;
 class CookieOptions;
 class HttpRequestHeaders;
 class HttpResponseInfo;
@@ -34,8 +35,8 @@ class UploadData;
 class URLRequestStatus;
 class X509Certificate;
 
-class NET_API URLRequestJob : public base::RefCounted<URLRequestJob>,
-                              public base::SystemMonitor::PowerObserver {
+class NET_EXPORT URLRequestJob : public base::RefCounted<URLRequestJob>,
+                                 public base::SystemMonitor::PowerObserver {
  public:
   explicit URLRequestJob(URLRequest* request);
 
@@ -199,10 +200,11 @@ class NET_API URLRequestJob : public base::RefCounted<URLRequestJob>,
   void NotifySSLCertificateError(int cert_error, X509Certificate* cert);
 
   // Delegates to URLRequest::Delegate.
-  bool CanGetCookies();
+  bool CanGetCookies(const CookieList& cookie_list) const;
 
   // Delegates to URLRequest::Delegate.
-  bool CanSetCookie(const std::string& cookie_line, CookieOptions* options);
+  bool CanSetCookie(const std::string& cookie_line,
+                    CookieOptions* options) const;
 
   // Notifies the job that headers have been received.
   void NotifyHeadersComplete();
@@ -232,6 +234,11 @@ class NET_API URLRequestJob : public base::RefCounted<URLRequestJob>,
   // Should only be called if the job has not started a resposne.
   void NotifyRestartRequired();
 
+  // Called when the delegate blocks or unblocks this request when intercepting
+  // certain requests.
+  void SetBlockedOnDelegate();
+  void SetUnblockedOnDelegate();
+
   // Called to read raw (pre-filtered) data from this Job.
   // If returning true, data was read from the job.  buf will contain
   // the data, and bytes_read will receive the number of bytes read.
@@ -243,6 +250,10 @@ class NET_API URLRequestJob : public base::RefCounted<URLRequestJob>,
   // operation is completed.  See comments on URLRequest::Read for more
   // info.
   virtual bool ReadRawData(IOBuffer* buf, int buf_size, int *bytes_read);
+
+  // Called to tell the job that a filter has successfully reached the end of
+  // the stream.
+  virtual void DoneReading();
 
   // Informs the filter that data has been read into its buffer
   void FilteredDataRead(int bytes_read);

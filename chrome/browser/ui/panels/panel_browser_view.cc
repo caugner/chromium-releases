@@ -17,10 +17,7 @@
 
 namespace {
 // This value is experimental and subjective.
-const int kSetBoundsAnimationMs = 200;
-
-// The panel can be fully minimized to 3-pixel lines.
-const int kFullyMinimizedHeight = 3;
+const int kSetBoundsAnimationMs = 180;
 
 // Delay before click-to-minimize is allowed after the attention has been
 // cleared.
@@ -40,7 +37,7 @@ PanelBrowserView::PanelBrowserView(Browser* browser, Panel* panel,
   : BrowserView(browser),
     panel_(panel),
     bounds_(bounds),
-    original_height_(bounds.height()),
+    restored_height_(bounds.height()),
     closed_(false),
     focused_(false),
     mouse_pressed_(false),
@@ -71,7 +68,7 @@ void PanelBrowserView::Close() {
 
   // Stop the global mouse watcher only if we do not have any panels up.
 #if defined(OS_WIN)
-  if (panel_->manager()->active_count() == 1)
+  if (panel_->manager()->num_panels() == 1)
     StopMouseWatcher();
 #endif
 }
@@ -85,9 +82,14 @@ bool PanelBrowserView::CanMaximize() const {
 }
 
 void PanelBrowserView::SetBounds(const gfx::Rect& bounds) {
+  if (bounds_ == bounds)
+    return;
   bounds_ = bounds;
 
-  //// No animation if the panel is being dragged.
+  if (panel_->expansion_state() == Panel::EXPANDED)
+    restored_height_ = bounds.height();
+
+  // No animation if the panel is being dragged.
   if (mouse_dragging_) {
     ::BrowserView::SetBounds(bounds);
     return;
@@ -110,8 +112,11 @@ void PanelBrowserView::UpdateTitleBar() {
   GetFrameView()->UpdateTitleBar();
 }
 
-bool PanelBrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
+bool PanelBrowserView::GetSavedWindowPlacement(
+    gfx::Rect* bounds,
+    ui::WindowShowState* show_state) const {
   *bounds = GetPanelBounds();
+  *show_state = ui::SHOW_STATE_NORMAL;
   return true;
 }
 
@@ -119,7 +124,11 @@ void PanelBrowserView::OnWidgetActivationChanged(views::Widget* widget,
                                                  bool active) {
   ::BrowserView::OnWidgetActivationChanged(widget, active);
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+  bool focused = active;
+#elif defined(OS_WIN)
   // The panel window is in focus (actually accepting keystrokes) if it is
   // active and belongs to a foreground application.
   bool focused = active &&
@@ -143,7 +152,7 @@ void PanelBrowserView::OnWidgetActivationChanged(views::Widget* widget,
 bool PanelBrowserView::AcceleratorPressed(
     const views::Accelerator& accelerator) {
   if (mouse_pressed_ && accelerator.key_code() == ui::VKEY_ESCAPE) {
-    OnTitleBarMouseCaptureLost();
+    OnTitlebarMouseCaptureLost();
     return true;
   }
   return BrowserView::AcceleratorPressed(accelerator);
@@ -190,13 +199,13 @@ void PanelBrowserView::OnPanelExpansionStateChanged(
   int height;
   switch (expansion_state) {
     case Panel::EXPANDED:
-      height = original_height_;
+      height = restored_height_;
       break;
     case Panel::TITLE_ONLY:
       height = GetFrameView()->NonClientTopBorderHeight();
       break;
     case Panel::MINIMIZED:
-      height = kFullyMinimizedHeight;
+      height = PanelBrowserFrameView::MinimizedPanelHeight();
 
       // Start the mouse watcher so that we can bring up the minimized panels.
       // TODO(jianli): Need to support mouse watching in ChromeOS.
@@ -206,17 +215,19 @@ void PanelBrowserView::OnPanelExpansionStateChanged(
       break;
     default:
       NOTREACHED();
-      height = original_height_;
+      height = restored_height_;
       break;
   }
 
+  int bottom = panel_->manager()->GetBottomPositionForExpansionState(
+      expansion_state);
   gfx::Rect bounds = bounds_;
-  bounds.set_y(bounds.y() + bounds.height() - height);
+  bounds.set_y(bottom - height);
   bounds.set_height(height);
   SetBounds(bounds);
 }
 
-bool PanelBrowserView::ShouldBringUpPanelTitleBar(int mouse_x,
+bool PanelBrowserView::ShouldBringUpPanelTitlebar(int mouse_x,
                                                   int mouse_y) const {
   // We do not want to bring up other minimized panels if the mouse is over the
   // panel that pops up the title-bar to attract attention.
@@ -255,6 +266,10 @@ void PanelBrowserView::ShowTaskManagerForPanel() {
   ShowTaskManager();
 }
 
+FindBar* PanelBrowserView::CreatePanelFindBar() {
+  return CreateFindBar();
+}
+
 void PanelBrowserView::NotifyPanelOnUserChangedTheme() {
   UserChangedTheme();
 }
@@ -265,7 +280,7 @@ void PanelBrowserView::DrawAttention() {
     return;
   is_drawing_attention_ = true;
 
-  // Bring up the title bar to get people's attention.
+  // Bring up the titlebar to get people's attention.
   if (panel_->expansion_state() == Panel::MINIMIZED)
     panel_->SetExpansionState(Panel::TITLE_ONLY);
 
@@ -274,10 +289,6 @@ void PanelBrowserView::DrawAttention() {
 
 bool PanelBrowserView::IsDrawingAttention() const {
   return is_drawing_attention_;
-}
-
-void PanelBrowserView::DestroyPanelBrowser() {
-  DestroyBrowser();
 }
 
 void PanelBrowserView::StopDrawingAttention() {
@@ -294,37 +305,62 @@ void PanelBrowserView::StopDrawingAttention() {
   // user clicks on it to mean to clear the attention.
   attention_cleared_time_ = base::TimeTicks::Now();
 
-  // Bring up the title bar.
+  // Bring up the titlebar.
   if (panel_->expansion_state() == Panel::TITLE_ONLY)
     panel_->SetExpansionState(Panel::EXPANDED);
 
   GetFrameView()->SchedulePaint();
 }
 
-NativePanelTesting* PanelBrowserView::GetNativePanelTesting() {
-  return this;
+bool PanelBrowserView::PreHandlePanelKeyboardEvent(
+    const NativeWebKeyboardEvent& event,
+    bool* is_keyboard_shortcut) {
+  return PreHandleKeyboardEvent(event, is_keyboard_shortcut);
+}
+
+void PanelBrowserView::HandlePanelKeyboardEvent(
+    const NativeWebKeyboardEvent& event) {
+  HandleKeyboardEvent(event);
+}
+
+gfx::Size PanelBrowserView::GetNonClientAreaExtent() const {
+  return GetFrameView()->NonClientAreaSize();
+}
+
+int PanelBrowserView::GetRestoredHeight() const {
+  return restored_height_;
+}
+
+void PanelBrowserView::SetRestoredHeight(int height) {
+  restored_height_ = height;
+}
+
+Browser* PanelBrowserView::GetPanelBrowser() const {
+  return browser();
+}
+
+void PanelBrowserView::DestroyPanelBrowser() {
+  DestroyBrowser();
 }
 
 PanelBrowserFrameView* PanelBrowserView::GetFrameView() const {
   return static_cast<PanelBrowserFrameView*>(frame()->GetFrameView());
 }
 
-bool PanelBrowserView::OnTitleBarMousePressed(const views::MouseEvent& event) {
-  if (!event.IsOnlyLeftMouseButton())
-    return false;
+bool PanelBrowserView::OnTitlebarMousePressed(const gfx::Point& location) {
   mouse_pressed_ = true;
-  mouse_pressed_point_ = event.location();
+  mouse_pressed_point_ = location;
   mouse_dragging_ = false;
   return true;
 }
 
-bool PanelBrowserView::OnTitleBarMouseDragged(const views::MouseEvent& event) {
+bool PanelBrowserView::OnTitlebarMouseDragged(const gfx::Point& location) {
   if (!mouse_pressed_)
     return false;
 
-  // We do not allow dragging vertically.
-  int delta_x = event.location().x() - mouse_pressed_point_.x();
-  if (!mouse_dragging_ && ExceededDragThreshold(delta_x, 0)) {
+  int delta_x = location.x() - mouse_pressed_point_.x();
+  int delta_y = location.y() - mouse_pressed_point_.y();
+  if (!mouse_dragging_ && ExceededDragThreshold(delta_x, delta_y)) {
     panel_->manager()->StartDragging(panel_.get());
     mouse_dragging_ = true;
   }
@@ -333,7 +369,7 @@ bool PanelBrowserView::OnTitleBarMouseDragged(const views::MouseEvent& event) {
   return true;
 }
 
-bool PanelBrowserView::OnTitleBarMouseReleased(const views::MouseEvent& event) {
+bool PanelBrowserView::OnTitlebarMouseReleased() {
   if (mouse_dragging_)
     return EndDragging(false);
 
@@ -353,8 +389,10 @@ bool PanelBrowserView::OnTitleBarMouseReleased(const views::MouseEvent& event) {
   return true;
 }
 
-bool PanelBrowserView::OnTitleBarMouseCaptureLost() {
-  return EndDragging(true);
+bool PanelBrowserView::OnTitlebarMouseCaptureLost() {
+  if (mouse_dragging_)
+    return EndDragging(true);
+  return true;
 }
 
 bool PanelBrowserView::EndDragging(bool cancelled) {
@@ -368,4 +406,57 @@ bool PanelBrowserView::EndDragging(bool cancelled) {
   mouse_dragging_ = false;
   panel_->manager()->EndDragging(cancelled);
   return true;
+}
+
+// NativePanelTesting implementation.
+class NativePanelTestingWin : public NativePanelTesting {
+ public:
+  explicit NativePanelTestingWin(PanelBrowserView* panel_browser_view);
+
+ private:
+  virtual void PressLeftMouseButtonTitlebar(
+      const gfx::Point& point) OVERRIDE;
+  virtual void ReleaseMouseButtonTitlebar() OVERRIDE;
+  virtual void DragTitlebar(int delta_x, int delta_y) OVERRIDE;
+  virtual void CancelDragTitlebar() OVERRIDE;
+  virtual void FinishDragTitlebar() OVERRIDE;
+
+  PanelBrowserView* panel_browser_view_;
+};
+
+// static
+NativePanelTesting* NativePanelTesting::Create(NativePanel* native_panel) {
+  return new NativePanelTestingWin(static_cast<PanelBrowserView*>(
+      native_panel));
+}
+
+NativePanelTestingWin::NativePanelTestingWin(
+    PanelBrowserView* panel_browser_view) :
+    panel_browser_view_(panel_browser_view) {
+}
+
+void NativePanelTestingWin::PressLeftMouseButtonTitlebar(
+    const gfx::Point& point) {
+  panel_browser_view_->OnTitlebarMousePressed(point);
+}
+
+void NativePanelTestingWin::ReleaseMouseButtonTitlebar() {
+  panel_browser_view_->OnTitlebarMouseReleased();
+}
+
+void NativePanelTestingWin::DragTitlebar(int delta_x, int delta_y) {
+  // TODO(jianli): Need a comment here that explains why we use
+  // mouse_pressed_point_ and not current bounds as obtained by
+  // GetRestoredBounds().
+  panel_browser_view_->OnTitlebarMouseDragged(gfx::Point(
+      panel_browser_view_->mouse_pressed_point_.x() + delta_x,
+      panel_browser_view_->mouse_pressed_point_.y() + delta_y));
+}
+
+void NativePanelTestingWin::CancelDragTitlebar() {
+  panel_browser_view_->OnTitlebarMouseCaptureLost();
+}
+
+void NativePanelTestingWin::FinishDragTitlebar() {
+  panel_browser_view_->OnTitlebarMouseReleased();
 }

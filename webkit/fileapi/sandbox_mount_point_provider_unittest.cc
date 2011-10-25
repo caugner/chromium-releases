@@ -22,13 +22,14 @@
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/quota/mock_special_storage_policy.h"
 
 namespace fileapi {
 
 class MockFileSystemPathManager : public FileSystemPathManager {
  public:
   explicit MockFileSystemPathManager(const FilePath& profile_path)
-      : FileSystemPathManager(base::MessageLoopProxy::CreateForCurrentThread(),
+      : FileSystemPathManager(base::MessageLoopProxy::current(),
                               profile_path, NULL, false, true) {}
 };
 
@@ -127,27 +128,6 @@ const MigrationTestCaseRecord kMigrationTestRecords[] = {
   { GURL("file:///"), false, true },
 };
 
-class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
- public:
-  explicit TestSpecialStoragePolicy(bool unlimited_quota)
-      : unlimited_quota_(unlimited_quota) {}
-
-  virtual bool IsStorageProtected(const GURL& origin) {
-    return false;
-  }
-
-  virtual bool IsStorageUnlimited(const GURL& origin) {
-    return unlimited_quota_;
-  }
-
-  virtual bool IsFileHandler(const std::string& extension_id) {
-    return true;
-  }
-
- private:
-  bool unlimited_quota_;
-};
-
 }  // anonymous namespace
 
 class SandboxMountPointProviderMigrationTest : public testing::Test {
@@ -160,10 +140,13 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     path_manager_ = new MockFileSystemPathManager(data_dir_.path());
 
+    scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+        new quota::MockSpecialStoragePolicy;
+    special_storage_policy->SetAllUnlimited(true);
     file_system_context_ = new FileSystemContext(
-        base::MessageLoopProxy::CreateForCurrentThread(),
-        base::MessageLoopProxy::CreateForCurrentThread(),
-        new TestSpecialStoragePolicy(true /* unlimited quota */),
+        base::MessageLoopProxy::current(),
+        base::MessageLoopProxy::current(),
+        special_storage_policy,
         NULL,
         data_dir_.path(),
         false,  // incognito
@@ -181,7 +164,7 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
   }
 
   FileSystemFileUtil* file_util() {
-    return sandbox_provider()->GetFileSystemFileUtil();
+    return sandbox_provider()->GetFileUtil();
   }
 
   void OnGetRootPath(bool success, const FilePath& unused,

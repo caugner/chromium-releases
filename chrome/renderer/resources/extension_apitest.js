@@ -71,7 +71,7 @@ var chrome = chrome || {};
       if (pendingCallbacks == 0) {
         chrome.test.succeed();
       }
-    }
+    };
   };
 
   chrome.test.runNextTest = function() {
@@ -123,6 +123,9 @@ var chrome = chrome || {};
   };
 
   chrome.test.checkDeepEq = function (expected, actual) {
+    if ((expected === null) != (actual === null))
+      return false;
+
     if (expected === actual)
       return true;
 

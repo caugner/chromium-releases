@@ -17,240 +17,227 @@ found in the LICENSE file.
     <link rel="stylesheet" href="toolbar.css" />
     <script src="client_session.js"></script>
     <script src="debug_log.js"></script>
+    <script src="l10n.js"></script>
     <script src="oauth2.js"></script>
     <script src="plugin_settings.js"></script>
     <script src="remoting.js"></script>
     <script src="xhr.js"></script>
-    <title>Chromoting</title>
+    <script src="wcs.js"></script>
+    <script src="wcs_loader.js"></script>
+    <title i18n-content="PRODUCT_NAME"></title>
   </head>
 
-  <body onLoad="remoting.init();"
+  <body onBeforeUnload="return remoting.promptClose();"
+        onLoad="remoting.init();"
+        onResize="remoting.onResize();"
         onUnload="remoting.disconnect();">
-    <div id="control-panel" class="client-element host-element">
+
+    <!-- loading-mode is initially visible, but becomes hidden as soon as an
+         AppMode is selected by remoting.init. All other divs are initially
+         hidden, but are shown appropriately when the mode changes. -->
+    <!-- TODO(jamiewalch): This string is not localized because by the time we
+         get around to running localize(), it's hidden anyway. -->
+    <section id="loading-mode" data-ui-mode="">
+      <em>Loading&hellip;</em>
+    </section> <!-- loading-mode -->
+
+    <div class="top-primary"
+         data-ui-mode="client host"
+         hidden>
       <span id="email-status">
-        <span class="auth-status-label">Email:</span>
         <span id="current-email"></span>
-      </span> <!-- email-status -->
+        <span data-ui-mode="client.unconnected host.unshared">
+        (<a href="#" onclick="remoting.clearOAuth2();"
+                i18n-content="SIGN_OUT_BUTTON"></a>)
+        </span>
+      </span>
+    </div>
 
-      <span id="oauth2-entry">
-        <form>
-          <span class="auth-status-label">OAuth2 Token:</span>
-          <input id="oauth2-token-button" type="button"
-                 onclick="remoting.oauth2.doAuthRedirect();"
-                 value="Get OAuth2 Token&hellip;" />
-          <input id="oauth2-clear-button" type="button"
-                 onclick="remoting.clearOAuth2();"
-                 value="Revoke" />
-        </form>
-      </span> <!-- oauth2-entry -->
-
-      <span id="debug-enable">
-        <form>
-          <input id="debug-log-toggle" type="button" value="Debug log"
-                 onclick="remoting.toggleDebugLog();"/>
-        </form>
-      </span> <!-- debug-enable -->
-    </div> <!-- control-panel -->
+    <div class="top-secondary" data-ui-mode="auth client host">
+      <a href="https://www.google.com/support/chrome/bin/answer.py?answer=1649523"
+         target="_blank" i18n-content="HELP"></a>
+    </div>
 
     <div id="session-toolbar"
-         class="toolbar-container in-session-element"
+         data-ui-mode="in-session"
+         class="toolbar-container"
          hidden>
       <div class="toolbar-border">
-        <span id="session-status-message">Initialising...</span>
+        <span id="session-status-message" i18n-content="LABEL_CONNECTED"></span>
         <strong id="connected-to"></strong>
-        <button type="button" onclick="remoting.disconnect();">
-          Disconnect
-        </button>
-        <span class="right-align">
-          <button type="button"
-                  onclick="remoting.toggleDebugLog();">
-            Debug log
-          </button>
-          <button type="button"
-                  onclick="remoting.toggleScaleToFit();">
-            Fit screen
+        <button type="button" onclick="remoting.disconnect();"
+                i18n-content="DISCONNECT_BUTTON"></button>
+        <span class="end-align">
+          <button id="toggle-scaling"
+                  onClick="remoting.toggleScaleToFit(this);">
+            <img src="scale-to-fit.png">
           </button>
         </span>
       </div>
       <div class="toolbar-stub">
-        <img src="toolbar-stub.png">
+        <div class="arrow-down"></div>
       </div>
     </div> <!-- session-toolbar -->
 
-    <section id="choice-mode" class="mode host-element client-element" hidden>
+    <div id="main" data-ui-mode="auth host client" hidden>
+
       <header class="choice-header">
         <img id="icon" src="chromoting128.png">
-        <h1 class="icon-label host-element">
-          Chromoting&nbsp;&rsaquo;&nbsp;Share
+        <h1 class="icon-label">
+          <span i18n-content="PRODUCT_NAME">
+          </span>&nbsp;&rsaquo;&nbsp;<span i18n-content="MODE_AUTHORIZE"
+                                           data-ui-mode="auth">
+          </span><span i18n-content="MODE_CONNECT" data-ui-mode="client">
+          </span><span i18n-content="MODE_SHARE" data-ui-mode="host">
+          </span>
         </h1>
-        <h1 class="icon-label client-element">
-          Chromoting&nbsp;&rsaquo;&nbsp;Connect
-        </h1>
-        <img id="divider-top" src="dividertop.png">
       </header>
 
-      <div id="host-panel" class="host-element">
-        <div id="unshared" class="mode">
-          <div class="description">
-            With Chromoting you can easily let another Chrome user see and
-            control your computer.
-          </div>
+      <img id="divider-top" src="dividertop.png">
+
+      <div id="auth-panel" data-ui-mode="auth">
+        <div class="description" i18n-content="DESCRIPTION_AUTHORIZE"></div>
+        <div class="centered-button">
+          <button id="auth-button" class="big-button"
+                  type="button" onclick="remoting.oauth2.doAuthRedirect();"
+                  i18n-content="CONTINUE_BUTTON"></button>
+        </div>
+      </div> <!-- auth-panel -->
+
+      <div id="host-panel" data-ui-mode="host">
+
+        <div data-ui-mode="host.unshared">
+          <div class="description" i18n-content="DESCRIPTION_SHARE"></div>
           <div class="centered-button">
-            <button id="share-button" class="auth-status-control big-button"
-                    type="button" onclick="remoting.tryShare();">
-              Share this computer
-            </button>
+            <button id="share-button" class="big-button"
+                    type="button" onclick="remoting.tryShare();"
+                    i18n-content="SHARE_BUTTON"></button>
           </div>
-        </div> <!-- unshared -->
+        </div> <!-- host.unshared -->
 
-        <div id="preparing-to-share" class="mode">
-          <div class="message">
-            Generating access code&hellip;
-          </div>
-        </div> <!-- preparing-to-share -->
+        <div data-ui-mode="host.waiting-for-code" class="message"
+             i18n-content="MESSAGE_GENERATING">
+        </div> <!-- host.waiting-for-code -->
 
-        <div id="ready-to-share" class="mode">
-          <div class="description">
-            To begin sharing your desktop, read out the access code below to the
-            person who will be assisting you.
-          </div>
-          <div id="access-code-display">
-          </div>
+        <div data-ui-mode="host.waiting-for-connection">
+          <div class="description" i18n-content="INSTRUCTIONS_SHARE_ABOVE"></div>
+          <div id="access-code-display" dir="ltr"></div>
           <div id="access-code-countdown-container">
             <div id="access-code-countdown" class="expiring" hidden>
-              This access code will expire in
-              0:<span id="seconds-remaining"></span>
+              <span id="seconds-remaining" i18n-content="ACCESS_CODE_TIMER"></span>
             </div>
           </div>
-          <div class="description">
-            Once they enter the code your sharing session will begin.
-          </div>
-        </div> <!-- ready-to-share -->
+          <div class="description" i18n-content="INSTRUCTIONS_SHARE_BELOW"></div>
+        </div> <!-- host.waiting-for-connection -->
 
-        <div id="shared" class="mode">
-          <div class="message">
-            Your desktop is currently being shared.
-          </div>
+        <div data-ui-mode="host.shared">
+          <div id="host-shared-message" class="message"
+               i18n-content="MESSAGE_SHARED"></div>
           <div class="centered-button">
             <button type="button" class="big-button"
-                    onclick="remoting.cancelShare();">
-              Stop sharing
+                    onclick="remoting.cancelShare();"
+                    i18n-content="STOP_SHARING_BUTTON">
             </button>
           </div>
-        </div> <!-- shared -->
+        </div> <!-- host.shared -->
 
-        <div id="share-failed" class="mode">
-          <div id="unable-to-get-token" class="message">
-            Unable to get access token.
-          </div>
-          <div class="centered-button">
-            <button type="button" class="auth-status-control big-button"
-                    onclick="remoting.setHostMode('unshared');">
-              OK
-            </button>
-          </div>
-        </div> <!-- share-failed -->
+        <div data-ui-mode="host.share-failed" class="message">
+          <span id="host-plugin-error" class="error-state"></span>
+        </div> <!-- host.share-failed -->
+
+        <div data-ui-mode="host.share-finished" class="message"
+             i18n-content="MESSAGE_SESSION_FINISHED">
+        </div> <!-- host.share-finished -->
+
+        <div class="centered-button"
+             data-ui-mode="host.share-failed host.share-finished">
+          <button type="button" class="big-button"
+                  onclick="remoting.setMode('host.unshared');"
+                  i18n-content="OK">
+          </button>
+        </div>
+
+        <div id="host-plugin-container"></div>
+
       </div> <!-- host-panel -->
 
-      <div id="client-panel" class="client-element">
-        <div id="unconnected"  class="mode">
-          <div class="description">
-            Have the user whose computer you wish to access click
-            ‘Share this computer’ and then have them read
-            their access code to you.
-          </div>
+      <div id="client-panel" data-ui-mode="client">
+        <div data-ui-mode="client.unconnected">
+          <div class="description" i18n-content="DESCRIPTION_CONNECT"></div>
           <div id="access-code-entry-row">
             <form action="" onsubmit="remoting.tryConnect(); return false;">
-              <label class="auth-status-control" for="access-code-entry">
-                Access code
-              </label>
-              <input id="access-code-entry" class="auth-status-control"
-                     type="text"/>
-              <button id="connect-button" class="auth-status-control big-button"
-                      type="submit">
-                Connect
-              </button>
+              <label for="access-code-entry" i18n-content="ACCESS_CODE"></label>
+              <input id="access-code-entry" type="text"/>
+              <button id="connect-button" class="big-button"
+                      type="submit" i18n-content="CONNECT_BUTTON"></button>
             </form>
           </div> <!-- code-entry-row -->
-        </div> <!-- unconnected -->
+        </div> <!-- client.unconnected -->
 
-        <div id="connecting" class="mode">
-          <div class="message">
-            Verifying access code...
-            <!-- TODO(jamiewalch): Implement Cancel, being careful when ignoring
-                 the eventual server response not to ignore responses for any
-                 subsequent requests. This should be unified with the host-side
-                 Cancel button in the footer.
-            -->
-          </div>
-        </div> <!-- connecting -->
+        <!-- TODO(jamiewalch): Implement Cancel, being careful when ignoring
+             the eventual server response not to ignore responses for any
+             subsequent requests. This should be unified with the host-side
+             Cancel button in the footer.
+          -->
+        <div data-ui-mode="client.connecting" class="message"
+             i18n-content="VERIFYING_CODE">
+        </div> <!-- client.connecting -->
 
-        <div id="connect-failed" class="mode">
-          <div id="no-response" class="message">
-            Failed to get response from server.
-          </div>
-          <div id="invalid-access-code" class="message">
-            Invalid access code.
-          </div>
-          <div id="other-connect-error" class="message">
-            An error occurred. The server response was
-            <div id="server-response"></div>.
-          </div>
-          <div class="centered-button">
-            <button type="button" class="auth-status-control big-button"
-                    onclick="remoting.setClientMode('unconnected');">
-              OK
-            </button>
-          </div>
-        </div> <!-- connect-failed -->
+        <div data-ui-mode="client.connect-failed"
+             class="message">
+          <span id="connect-error-message" class="error-state"></span>
+        </div> <!-- client.connect-failed -->
+
+        <div data-ui-mode="client.session-finished"
+             class="message" i18n-content="MESSAGE_SESSION_FINISHED">
+        </div> <!-- client.session-finished -->
+
+        <div data-ui-mode="client.connect-failed client.session-finished"
+             class="centered-button">
+          <button type="button" class="big-button" i18n-content="OK"
+                  onclick="remoting.setMode(
+                               remoting.AppMode.CLIENT_UNCONNECTED);">
+          </button>
+        </div>
+
       </div> <!-- client-panel -->
 
+      <img id="divider-bottom" src="dividerbottom.png">
+
       <footer class="choice-footer">
-        <img id="divider-bottom" src="dividerbottom.png">
-        <div id="client-footer-text" class="client-element">
-          Click here to
-          <a class="switch-mode"
-             href="#"
-             onclick="remoting.setAppMode(remoting.AppMode.HOST);">
-            share this computer</a>
-          with another user.
+        <div id="client-footer-text" data-ui-mode="client.unconnected">
+          <span i18n-content="FOOTER_CLIENT"
+                i18n-value-1="<a href='#' onclick='remoting.setAppMode(remoting.AppMode.HOST);'>"
+                i18n-value-2="</a>"></span>
         </div> <!-- client-footer-text -->
 
-        <div id="client-footer-text-cros" class="client-element">
-          Currently Hosting is not supported on Chromebooks. Hosting is
-          supported on Win, Mac and Linux.
+        <div id="client-footer-text-cros" data-ui-mode="client.unconnected"
+             i18n-content="FOOTER_CHROME_OS">
         </div> <!-- client-footer-text-cros -->
 
-        <div id="host-footer-text" class="host-element">
-          Click here to <a class="switch-mode"
-             href="#"
-             onclick="remoting.setAppMode(remoting.AppMode.CLIENT);">
-            access a shared computer</a>.
+        <div id="host-footer-text" data-ui-mode="host.unshared">
+          <span i18n-content="FOOTER_HOST"
+                i18n-value-1="<a href='#' onclick='remoting.setAppMode(remoting.AppMode.CLIENT);'>"
+                i18n-value-2="</a>"></span>
         </div> <!-- host-footer-text -->
 
-        <div id="waiting-footer">
+        <div id="waiting-footer"
+             data-ui-mode="host.waiting-for-connection host.waiting-for-code">
           <img src="spinner.gif">
-          <span class="waiting icon-label">waiting for connection&hellip;</span>
+          <span class="waiting icon-label" i18n-content="FOOTER_WAITING"></span>
           <button id="cancel-button" class="big-button"
-                  onclick="remoting.cancelPendingOperation();">
-            Cancel
+                  onclick="remoting.cancelPendingOperation();"
+                  i18n-content="CANCEL">
           </button>
         </div> <!-- waiting-footer -->
       </footer>
-    </section> <!-- choice-mode -->
 
-    <section id="session-mode" class="mode in-session-element">
-    </section> <!-- session-mode -->
+    </div> <!-- main -->
 
+    <div id="session-mode" data-ui-mode="in-session client" hidden>
+    </div> <!-- session-mode -->
 
-    <section id="loading-mode">
-      <em>Loading&hellip;</em>
-    </section> <!-- loading-mode -->
-
-    <div id="host-plugin-container">
-    </div> <!-- host-plugin-container -->
-
-    <section id="debug-log" hidden>
+    <section id="debug-log" dir="ltr" hidden>
       <div id="statistics">
       </div>
       <div id="debug-messages">

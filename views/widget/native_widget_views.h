@@ -6,12 +6,18 @@
 #define VIEWS_WIDGET_NATIVE_WIDGET_VIEWS_H_
 #pragma once
 
+#include <map>
+
 #include "base/message_loop.h"
 #include "ui/gfx/transform.h"
-#include "views/ime/input_method_delegate.h"
 #include "views/widget/native_widget_private.h"
+#include "views/widget/widget.h"
 
 namespace views {
+namespace desktop {
+class DesktopWindowView;
+}
+
 namespace internal {
 class NativeWidgetView;
 }
@@ -21,8 +27,7 @@ class NativeWidgetView;
 //
 //  A NativeWidget implementation that uses another View as its native widget.
 //
-class NativeWidgetViews : public internal::NativeWidgetPrivate,
-                          public internal::InputMethodDelegate {
+class VIEWS_EXPORT NativeWidgetViews : public internal::NativeWidgetPrivate {
  public:
   explicit NativeWidgetViews(internal::NativeWidgetDelegate* delegate);
   virtual ~NativeWidgetViews();
@@ -39,9 +44,11 @@ class NativeWidgetViews : public internal::NativeWidgetPrivate,
     delete_native_view_ = delete_native_view;
   }
 
-  internal::NativeWidgetDelegate* delegate() { return delegate_; }
+  internal::NativeWidgetDelegate* delegate() const { return delegate_; }
 
  protected:
+  friend class NativeWidgetView;
+
   // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
@@ -69,14 +76,11 @@ class NativeWidgetViews : public internal::NativeWidgetPrivate,
   virtual void SetMouseCapture() OVERRIDE;
   virtual void ReleaseMouseCapture() OVERRIDE;
   virtual bool HasMouseCapture() const OVERRIDE;
-  virtual void SetKeyboardCapture() OVERRIDE;
-  virtual void ReleaseKeyboardCapture() OVERRIDE;
-  virtual bool HasKeyboardCapture() const OVERRIDE;
-  virtual InputMethod* GetInputMethodNative() OVERRIDE;
-  virtual void ReplaceInputMethod(InputMethod* input_method) OVERRIDE;
+  virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
-  virtual void GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
-                                                bool* maximized) const OVERRIDE;
+  virtual void GetWindowPlacement(
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE;
   virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
   virtual void SetWindowIcons(const SkBitmap& window_icon,
                               const SkBitmap& app_icon) OVERRIDE;
@@ -101,7 +105,7 @@ class NativeWidgetViews : public internal::NativeWidgetPrivate,
   virtual void Hide() OVERRIDE;
   virtual void ShowMaximizedWithBounds(
       const gfx::Rect& restored_bounds) OVERRIDE;
-  virtual void ShowWithState(ShowState state) OVERRIDE;
+  virtual void ShowWithWindowState(ui::WindowShowState window_state) OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
@@ -124,11 +128,15 @@ class NativeWidgetViews : public internal::NativeWidgetPrivate,
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
+  virtual bool ConvertPointFromAncestor(
+      const Widget* ancestor, gfx::Point* point) const OVERRIDE;
 
   // Overridden from internal::InputMethodDelegate
   virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;
 
  private:
+  friend class desktop::DesktopWindowView;
+
   // These functions may return NULL during Widget destruction.
   internal::NativeWidgetPrivate* GetParentNativeWidget();
   const internal::NativeWidgetPrivate* GetParentNativeWidget() const;
@@ -155,7 +163,7 @@ class NativeWidgetViews : public internal::NativeWidgetPrivate,
 
   bool delete_native_view_;
 
-  scoped_ptr<InputMethod> input_method_;
+  std::map<const char*, void*> window_properties_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetViews);
 };

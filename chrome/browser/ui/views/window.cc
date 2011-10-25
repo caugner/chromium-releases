@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/views/window.h"
 
-#include "ui/gfx/rect.h"
 #include "views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
@@ -14,13 +13,10 @@
 namespace browser {
 
 views::Widget* CreateViewsWindow(gfx::NativeWindow parent,
-                                 const gfx::Rect& bounds,
                                  views::WidgetDelegate* delegate) {
 #if defined(OS_CHROMEOS)
   return chromeos::BubbleWindow::Create(parent,
-                                        gfx::Rect(),
-                                        chromeos::BubbleWindow::STYLE_GENERIC,
-                                        delegate);
+      chromeos::STYLE_GENERIC, delegate);
 #else
   return views::Widget::CreateWindowWithParent(delegate, parent);
 #endif

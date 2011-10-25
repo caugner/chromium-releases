@@ -12,6 +12,7 @@
 #include "base/observer_list.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "base/time.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/cancelable_request.h"
 #include "content/common/notification_observer.h"
@@ -56,14 +57,25 @@ class BrowsingDataRemover : public NotificationObserver,
 
   // Mask used for Remove.
   enum RemoveDataMask {
-    // In addition to visits, this removes keywords and the last session.
-    REMOVE_HISTORY = 1 << 0,
-    REMOVE_DOWNLOADS = 1 << 1,
+    REMOVE_APPCACHE = 1 << 0,
+    REMOVE_CACHE = 1 << 1,
     REMOVE_COOKIES = 1 << 2,
-    REMOVE_PASSWORDS = 1 << 3,
-    REMOVE_FORM_DATA = 1 << 4,
-    REMOVE_CACHE = 1 << 5,
-    REMOVE_LSO_DATA = 1 << 6,
+    REMOVE_DOWNLOADS = 1 << 3,
+    REMOVE_FILE_SYSTEMS = 1 << 4,
+    REMOVE_FORM_DATA = 1 << 5,
+    // In addition to visits, REMOVE_HISTORY removes keywords and last session.
+    REMOVE_HISTORY = 1 << 6,
+    REMOVE_INDEXEDDB = 1 << 7,
+    REMOVE_LOCAL_STORAGE = 1 << 8,
+    REMOVE_LSO_DATA = 1 << 9,
+    REMOVE_PASSWORDS = 1 << 10,
+    REMOVE_WEBSQL = 1 << 11,
+
+    // "Site data" includes cookies, appcache, file systems, indexedDBs, local
+    // storage, webSQL, and LSO data.
+    REMOVE_SITE_DATA = REMOVE_APPCACHE | REMOVE_COOKIES | REMOVE_FILE_SYSTEMS |
+                       REMOVE_INDEXEDDB | REMOVE_LOCAL_STORAGE |
+                       REMOVE_LSO_DATA | REMOVE_WEBSQL
   };
 
   // Observer is notified when the removal is done. Done means keywords have
@@ -98,6 +110,10 @@ class BrowsingDataRemover : public NotificationObserver,
   static bool is_removing() { return removing_; }
 
  private:
+  // The clear API needs to be able to toggle removing_ in order to test that
+  // only one BrowsingDataRemover instance can be called at a time.
+  FRIEND_TEST_ALL_PREFIXES(ExtensionApiTest, ClearOneAtATime);
+
   enum CacheState {
     STATE_NONE,
     STATE_CREATE_MAIN,
@@ -151,11 +167,8 @@ class BrowsingDataRemover : public NotificationObserver,
 
   // Callback to respond to QuotaManager::GetOriginsModifiedSince, which is the
   // core of 'ClearQuotaManagedDataOnIOThread'.
-  void OnGotTemporaryQuotaManagedOrigins(const std::set<GURL>&);
-
-  // Callback to respond to QuotaManager::GetOriginsModifiedSince, which is the
-  // core of `ClearQuotaManagedDataOnIOThread`
-  void OnGotPersistentQuotaManagedOrigins(const std::set<GURL>&);
+  void OnGotQuotaManagedOrigins(const std::set<GURL>& origins,
+                                quota::StorageType type);
 
   // Callback responding to deletion of a single quota managed origin's
   // persistent data
@@ -163,8 +176,18 @@ class BrowsingDataRemover : public NotificationObserver,
 
   // Called to check whether all temporary and persistent origin data that
   // should be deleted has been deleted. If everything's good to go, invokes
-  // NotifyAndDeleteIfDone on the UI thread.
+  // OnQuotaManagedDataDeleted on the UI thread.
   void CheckQuotaManagedDataDeletionStatus();
+
+  // Completion handler that runs on the UI thread once persistent data has been
+  // deleted. Updates the waiting flag and invokes NotifyAndDeleteIfDone.
+  void OnQuotaManagedDataDeleted();
+
+  // Callback when Cookies has been deleted. Invokes NotifyAndDeleteIfDone.
+  void OnClearedCookies(int num_deleted);
+
+  // Invoked on the IO thread to delete cookies.
+  void ClearCookiesOnIOThread(net::URLRequestContextGetter* rq_context);
 
   // Calculate the begin time for the deletion range specified by |time_period|.
   base::Time CalculateBeginDeleteTime(TimePeriod time_period);
@@ -172,11 +195,16 @@ class BrowsingDataRemover : public NotificationObserver,
   // Returns true if we're all done.
   bool all_done() {
     return registrar_.IsEmpty() && !waiting_for_clear_cache_ &&
+           !waiting_for_clear_cookies_&&
            !waiting_for_clear_history_ &&
            !waiting_for_clear_quota_managed_data_ &&
            !waiting_for_clear_networking_history_ &&
            !waiting_for_clear_lso_data_;
   }
+
+  // Setter for removing_; DCHECKs that we can only start removing if we're not
+  // already removing, and vice-versa.
+  static void set_removing(bool removing);
 
   NotificationRegistrar registrar_;
 
@@ -213,9 +241,11 @@ class BrowsingDataRemover : public NotificationObserver,
   base::WaitableEventWatcher watcher_;
 
   // True if we're waiting for various data to be deleted.
+  // These may only be accessed from UI thread in order to avoid races!
   bool waiting_for_clear_history_;
   bool waiting_for_clear_quota_managed_data_;
   bool waiting_for_clear_networking_history_;
+  bool waiting_for_clear_cookies_;
   bool waiting_for_clear_cache_;
   bool waiting_for_clear_lso_data_;
 
@@ -228,6 +258,9 @@ class BrowsingDataRemover : public NotificationObserver,
 
   // Used if we need to clear history.
   CancelableRequestConsumer request_consumer_;
+
+  // Keeps track of whether clearing LSO data is supported.
+  BooleanPrefMember clear_plugin_lso_data_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataRemover);
 };

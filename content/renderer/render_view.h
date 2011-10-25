@@ -21,6 +21,7 @@
 #include "base/observer_list.h"
 #include "base/timer.h"
 #include "build/build_config.h"
+#include "content/renderer/render_view_selection.h"
 #include "content/renderer/renderer_webcookiejar_impl.h"
 #include "content/common/edit_command.h"
 #include "content/common/navigation_gesture.h"
@@ -53,6 +54,7 @@
 
 class AudioMessageFilter;
 class DeviceOrientationDispatcher;
+class DevToolsAgent;
 class ExternalPopupMenu;
 class FilePath;
 class GeolocationDispatcher;
@@ -61,7 +63,6 @@ class LoadProgressTracker;
 class MediaStreamImpl;
 class NavigationState;
 class NotificationProvider;
-class P2PSocketDispatcher;
 class PepperDeviceTest;
 class PrintWebViewHelper;
 class RenderViewObserver;
@@ -69,7 +70,6 @@ class RenderViewVisitor;
 class RenderWidgetFullscreenPepper;
 class SkBitmap;
 class SpeechInputDispatcher;
-class WebPluginDelegatePepper;
 class WebPluginDelegateProxy;
 class WebUIBindings;
 struct ContextMenuMediaParams;
@@ -82,22 +82,18 @@ struct WebDropData;
 
 namespace base {
 class WaitableEvent;
-}
+}  // namespace base
 
-namespace chrome {
-class ChromeContentRendererClient;
-}
+namespace content {
+class P2PSocketDispatcher;
+}  // namespace content
 
 namespace gfx {
 class Point;
 class Rect;
-}
+}  // namespace gfx
 
 namespace webkit {
-
-namespace npapi {
-class PluginGroup;
-}  // namespace npapi
 
 namespace ppapi {
 class PluginInstance;
@@ -137,6 +133,7 @@ class WebPlugin;
 class WebSpeechInputController;
 class WebSpeechInputListener;
 class WebStorageNamespace;
+class WebURLLoader;
 class WebURLRequest;
 class WebView;
 struct WebContextMenuData;
@@ -235,7 +232,7 @@ class RenderView : public RenderWidget,
   const WebKit::WebNode& context_menu_node() { return context_menu_node_; }
 
   // Current P2PSocketDispatcher. Set to NULL if P2P API is disabled.
-  P2PSocketDispatcher* p2p_socket_dispatcher() {
+  content::P2PSocketDispatcher* p2p_socket_dispatcher() {
     return p2p_socket_dispatcher_;
   }
 
@@ -279,11 +276,6 @@ class RenderView : public RenderWidget,
 
   // Notification that the given plugin has crashed.
   void PluginCrashed(const FilePath& plugin_path);
-
-  // Notification that the default plugin has done something about a missing
-  // plugin. See default_plugin_shared.h for possible values of |status|.
-  void OnMissingPluginStatus(WebPluginDelegateProxy* delegate,
-                             int status);
 
   // Create a new NPAPI plugin.
   WebKit::WebPlugin* CreateNPAPIPlugin(WebKit::WebFrame* frame,
@@ -404,6 +396,8 @@ class RenderView : public RenderWidget,
   virtual bool supportsFullscreen();
   virtual void enterFullscreenForNode(const WebKit::WebNode&);
   virtual void exitFullscreenForNode(const WebKit::WebNode&);
+  virtual void enterFullscreen() OVERRIDE;
+  virtual void exitFullscreen() OVERRIDE;
   virtual void setStatusText(const WebKit::WebString& text);
   virtual void setMouseOverURL(const WebKit::WebURL& url);
   virtual void setKeyboardFocusURL(const WebKit::WebURL& url);
@@ -433,7 +427,15 @@ class RenderView : public RenderWidget,
                                        const WebKit::WebString& base_url,
                                        const WebKit::WebString& url,
                                        const WebKit::WebString& title);
+  virtual void registerIntentHandler(const WebKit::WebString& action,
+                                     const WebKit::WebString& type,
+                                     const WebKit::WebString& href,
+                                     const WebKit::WebString& title);
   virtual WebKit::WebPageVisibilityState visibilityState() const;
+  virtual void startActivity(const WebKit::WebString& action,
+                             const WebKit::WebString& type,
+                             const WebKit::WebString& data,
+                             int intent_id);
 
   // WebKit::WebFrameClient implementation -------------------------------------
 
@@ -542,18 +544,18 @@ class RenderView : public RenderWidget,
       WebKit::WebFrame* frame,
       const WebKit::WebSecurityOrigin& origin,
       const WebKit::WebURL& target);
+  virtual void didAdoptURLLoader(WebKit::WebURLLoader* loader);
   virtual void didExhaustMemoryAvailableForScript(WebKit::WebFrame* frame);
   virtual void didCreateScriptContext(WebKit::WebFrame* frame);
   virtual void didDestroyScriptContext(WebKit::WebFrame* frame);
-  virtual void didCreateIsolatedScriptContext(WebKit::WebFrame* frame);
-  virtual void logCrossFramePropertyAccess(
-      WebKit::WebFrame* frame,
-      WebKit::WebFrame* target,
-      bool cross_origin,
-      const WebKit::WebString& property_name,
-      unsigned long long event_id);
+  virtual void didCreateIsolatedScriptContext(WebKit::WebFrame* frame,
+                                              int world_id,
+                                              v8::Handle<v8::Context> context);
   virtual void didUpdateLayout(WebKit::WebFrame* frame);
   virtual void didChangeScrollOffset(WebKit::WebFrame* frame);
+  virtual void numberOfWheelEventHandlersChanged(unsigned num_handlers);
+  virtual void didChangeContentsSize(WebKit::WebFrame* frame,
+                                     const WebKit::WebSize& size);
   virtual void reportFindInPageMatchCount(int request_id,
                                           int count,
                                           bool final_update);
@@ -652,6 +654,7 @@ class RenderView : public RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnImeStateChanged);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnNavStateChanged);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnSetTextDirection);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnUpdateWebPreferences);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, StaleNavigationsIgnored);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, UpdateTargetURLWithInvalidURL);
 #if defined(OS_MACOSX)
@@ -693,7 +696,8 @@ class RenderView : public RenderWidget,
   virtual ~RenderView();
 
   void UpdateURL(WebKit::WebFrame* frame);
-  void UpdateTitle(WebKit::WebFrame* frame, const string16& title);
+  void UpdateTitle(WebKit::WebFrame* frame, const string16& title,
+                   WebKit::WebTextDirection title_direction);
   void UpdateSessionHistory(WebKit::WebFrame* frame);
 
   // Update current main frame's encoding and send it to browser window.
@@ -727,6 +731,9 @@ class RenderView : public RenderWidget,
   // Send queued accessibility notifications from the renderer to the browser.
   void SendPendingAccessibilityNotifications();
 
+  // Called when the "pinned to left/right edge" state needs to be updated.
+  void UpdateScrollState(WebKit::WebFrame* frame);
+
   // IPC message handlers ------------------------------------------------------
   //
   // The documentation for these functions should be in
@@ -759,9 +766,8 @@ class RenderView : public RenderWidget,
   void OnCopyToFindPboard();
 #endif
   void OnCut();
-  void OnCSSInsertRequest(const std::wstring& frame_xpath,
-                          const std::string& css,
-                          const std::string& id);
+  void OnCSSInsertRequest(const string16& frame_xpath,
+                          const std::string& css);
   void OnCustomContextMenuAction(
       const webkit_glue::CustomContextMenuContext& custom_context,
       unsigned action);
@@ -797,7 +803,6 @@ class RenderView : public RenderWidget,
       const std::vector<GURL>& links,
       const std::vector<FilePath>& local_paths,
       const FilePath& local_directory_name);
-  void OnInstallMissingPlugin();
   void OnMediaPlayerActionAt(const gfx::Point& location,
                              const WebKit::WebMediaPlayerAction& action);
   void OnMoveOrResizeStarted();
@@ -816,6 +821,7 @@ class RenderView : public RenderWidget,
                            int id,
                            bool notify_result);
   void OnSelectAll();
+  void OnSelectRange(const gfx::Point& start, const gfx::Point& end);
   void OnSetAccessibilityFocus(int acc_obj_id);
   void OnSetActive(bool active);
   void OnSetAltErrorPageURL(const GURL& gurl);
@@ -835,6 +841,7 @@ class RenderView : public RenderWidget,
 #endif
   void OnSetZoomLevel(double zoom_level);
   void OnSetZoomLevelForLoadingURL(const GURL& url, double zoom_level);
+  void OnExitFullscreen();
   void OnShouldClose();
   void OnStop();
   void OnStopFinding(const ViewMsg_StopFinding_Params& params);
@@ -851,6 +858,7 @@ class RenderView : public RenderWidget,
   void OnSelectPopupMenuItem(int selected_index);
 #endif
   void OnZoom(PageZoom::Function function);
+  void OnEnableViewSourceMode();
 
   // Adding a new message handler? Please add it in alphabetical order above
   // and put it in the same position in the .cc file.
@@ -883,7 +891,7 @@ class RenderView : public RenderWidget,
                                 ErrorPageType error_type);
 
   // Locates a sub frame with given xpath
-  WebKit::WebFrame* GetChildFrame(const std::wstring& frame_xpath) const;
+  WebKit::WebFrame* GetChildFrame(const string16& frame_xpath) const;
 
   WebUIBindings* GetWebUIBindings();
 
@@ -910,6 +918,12 @@ class RenderView : public RenderWidget,
   // Dispatches the current navigation state to the browser. Called on a
   // periodic timer so we don't send too many messages.
   void SyncNavigationState();
+
+  // Dispatches the current state of selection on the webpage to the browser if
+  // it has changed.
+  // TODO(varunjain): delete this method once we figure out how to keep
+  // selection handles in sync with the webpage.
+  void SyncSelectionIfRequired();
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   void UpdateFontRenderingFromRendererPrefs();
@@ -1067,7 +1081,7 @@ class RenderView : public RenderWidget,
   GURL pending_target_url_;
 
   // The text selection the last time DidChangeSelection got called.
-  std::string last_selection_;
+  RenderViewSelection last_selection_;
 
   // View ----------------------------------------------------------------------
 
@@ -1079,6 +1093,15 @@ class RenderView : public RenderWidget,
   // states for the sizes).
   base::OneShotTimer<RenderView> check_preferred_size_timer_;
 
+  // These store the "is main frame is scrolled all the way to the left
+  // or right" state that was last sent to the browser.
+  bool cached_is_main_frame_pinned_to_left_;
+  bool cached_is_main_frame_pinned_to_right_;
+
+  // These store the "has scrollbars" state last sent to the browser.
+  bool cached_has_main_frame_horizontal_scrollbar_;
+  bool cached_has_main_frame_vertical_scrollbar_;
+
 #if defined(OS_MACOSX)
   // Track the fake plugin window handles allocated on the browser side for
   // the accelerated compositor and (currently) accelerated plugins so that
@@ -1087,10 +1110,6 @@ class RenderView : public RenderWidget,
 #endif
 
   // Plugins -------------------------------------------------------------------
-
-  // Remember the first uninstalled plugin, so that we can ask the plugin
-  // to install itself when user clicks on the info bar.
-  base::WeakPtr<webkit::npapi::WebPluginDelegate> first_default_plugin_;
 
   PepperPluginDelegateImpl pepper_delegate_;
 
@@ -1136,8 +1155,13 @@ class RenderView : public RenderWidget,
   // Set if we are waiting for a accessibility notification ack.
   bool accessibility_ack_pending_;
 
+  // True if verbose logging of accessibility events is on.
+  bool accessibility_logging_;
+
   // Dispatches all P2P socket used by the renderer.
-  P2PSocketDispatcher* p2p_socket_dispatcher_;
+  content::P2PSocketDispatcher* p2p_socket_dispatcher_;
+
+  DevToolsAgent* devtools_agent_;
 
   // Misc ----------------------------------------------------------------------
 
@@ -1192,6 +1216,10 @@ class RenderView : public RenderWidget,
   // All the registered observers.  We expect this list to be small, so vector
   // is fine.
   ObserverList<RenderViewObserver> observers_;
+
+  // Used to inform didChangeSelection() when it is called in the context
+  // of handling a ViewMsg_SelectRange IPC.
+  bool handling_select_range_;
 
   // ---------------------------------------------------------------------------
   // ADDING NEW DATA? Please see if it fits appropriately in one of the above

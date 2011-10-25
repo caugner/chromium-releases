@@ -5,7 +5,7 @@
 #include "remoting/protocol/jingle_session.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "crypto/hmac.h"
@@ -24,61 +24,12 @@
 using cricket::BaseSession;
 
 namespace remoting {
-
 namespace protocol {
-
-const char JingleSession::kChromotingContentName[] = "chromoting";
 
 namespace {
 
 const char kControlChannelName[] = "control";
 const char kEventChannelName[] = "event";
-const char kVideoChannelName[] = "video";
-
-const int kMasterKeyLength = 16;
-const int kChannelKeyLength = 16;
-
-std::string GenerateRandomMasterKey() {
-  std::string result;
-  result.resize(kMasterKeyLength);
-  base::RandBytes(&result[0], result.size());
-  return result;
-}
-
-std::string EncryptMasterKey(const std::string& host_public_key,
-                             const std::string& master_key) {
-  // TODO(sergeyu): Implement RSA public key encryption in src/crypto
-  // and actually encrypt the key here.
-  return master_key;
-}
-
-bool DecryptMasterKey(const crypto::RSAPrivateKey* private_key,
-                      const std::string& encrypted_master_key,
-                      std::string* master_key) {
-  // TODO(sergeyu): Implement RSA public key encryption in src/crypto
-  // and actually encrypt the key here.
-  *master_key = encrypted_master_key;
-  return true;
-}
-
-// Generates channel key from master key and channel name. Must be
-// used to generate channel key so that we don't use the same key for
-// different channels. The key is calculated as
-//   HMAC_SHA256(master_key, channel_name)
-bool GetChannelKey(const std::string& channel_name,
-                   const std::string& master_key,
-                   std::string* channel_key) {
-  crypto::HMAC hmac(crypto::HMAC::SHA256);
-  hmac.Init(channel_name);
-  channel_key->resize(kChannelKeyLength);
-  if (!hmac.Sign(master_key,
-                 reinterpret_cast<unsigned char*>(&(*channel_key)[0]),
-                 channel_key->size())) {
-    *channel_key = "";
-    return false;
-  }
-  return true;
-}
 
 }  // namespace
 
@@ -103,9 +54,7 @@ JingleSession::JingleSession(
     const std::string& peer_public_key)
     : jingle_session_manager_(jingle_session_manager),
       local_cert_(local_cert),
-      master_key_(GenerateRandomMasterKey()),
       state_(INITIALIZING),
-      closed_(false),
       closing_(false),
       cricket_session_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
@@ -137,27 +86,14 @@ void JingleSession::Init(cricket::Session* cricket_session) {
       this, &JingleSession::OnSessionError);
 }
 
-std::string JingleSession::GetEncryptedMasterKey() const {
-  DCHECK(CalledOnValidThread());
-  return EncryptMasterKey(peer_public_key_, master_key_);
-}
-
 void JingleSession::CloseInternal(int result, bool failed) {
   DCHECK(CalledOnValidThread());
 
-  if (!closed_ && !closing_) {
+  if (state_ != FAILED && state_ != CLOSED && !closing_) {
     closing_ = true;
-
-    // Inform the StateChangeCallback, so calling code knows not to touch any
-    // channels.
-    if (failed)
-      SetState(FAILED);
-    else
-      SetState(CLOSED);
 
     control_channel_socket_.reset();
     event_channel_socket_.reset();
-    video_channel_socket_.reset();
     STLDeleteContainerPairSecondPointers(channel_connectors_.begin(),
                                          channel_connectors_.end());
 
@@ -167,7 +103,13 @@ void JingleSession::CloseInternal(int result, bool failed) {
       cricket_session_->SignalState.disconnect(this);
     }
 
-    closed_ = true;
+    // Inform the StateChangeCallback, so calling code knows not to
+    // touch any channels. Needs to be done in the end because the
+    // session may be deleted in response to this event.
+    if (failed)
+      SetState(FAILED);
+    else
+      SetState(CLOSED);
   }
 }
 
@@ -180,7 +122,7 @@ cricket::Session* JingleSession::ReleaseSession() {
   DCHECK(CalledOnValidThread());
 
   // Session may be destroyed only after it is closed.
-  DCHECK(closed_);
+  DCHECK(state_ == FAILED || state_ == CLOSED);
 
   cricket::Session* session = cricket_session_;
   if (cricket_session_)
@@ -219,23 +161,6 @@ net::Socket* JingleSession::control_channel() {
 net::Socket* JingleSession::event_channel() {
   DCHECK(CalledOnValidThread());
   return event_channel_socket_.get();
-}
-
-net::Socket* JingleSession::video_channel() {
-  DCHECK(CalledOnValidThread());
-  return video_channel_socket_.get();
-}
-
-net::Socket* JingleSession::video_rtp_channel() {
-  DCHECK(CalledOnValidThread());
-  NOTREACHED();
-  return NULL;
-}
-
-net::Socket* JingleSession::video_rtcp_channel() {
-  DCHECK(CalledOnValidThread());
-  NOTREACHED();
-  return NULL;
 }
 
 const std::string& JingleSession::jid() {
@@ -323,7 +248,7 @@ void JingleSession::OnSessionState(
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(cricket_session_, session);
 
-  if (closed_) {
+  if (state_ == FAILED || state_ == CLOSED) {
     // Don't do anything if we already closed.
     return;
   }
@@ -376,13 +301,6 @@ void JingleSession::OnInitiate() {
         static_cast<const protocol::ContentDescription*>(
             GetContentInfo()->description);
     CHECK(content_description);
-
-    if (!DecryptMasterKey(local_private_key_.get(),
-                          content_description->master_key(), &master_key_)) {
-      LOG(ERROR) << "Failed to decrypt master-key";
-      CloseInternal(net::ERR_CONNECTION_FAILED, true);
-      return;
-    }
   }
 
   if (cricket_session_->initiator()) {
@@ -394,11 +312,11 @@ void JingleSession::OnInitiate() {
     // P2PTransportChannel is created only after we return from this
     // method.
     // TODO(sergeyu): Add set_incoming_only() in TransportChannelProxy.
-    MessageLoop::current()->PostTask(
+    jingle_session_manager_->message_loop_->PostTask(
         FROM_HERE, task_factory_.NewRunnableMethod(
             &JingleSession::SetState, CONNECTING));
   } else {
-    MessageLoop::current()->PostTask(
+    jingle_session_manager_->message_loop_->PostTask(
         FROM_HERE, task_factory_.NewRunnableMethod(
             &JingleSession::AcceptConnection));
   }
@@ -450,6 +368,8 @@ void JingleSession::OnAccept() {
   }
 
   CreateChannels();
+
+  SetState(CONNECTED);
 }
 
 void JingleSession::OnTerminate() {
@@ -458,6 +378,8 @@ void JingleSession::OnTerminate() {
 }
 
 void JingleSession::AcceptConnection() {
+  SetState(CONNECTING);
+
   if (!jingle_session_manager_->AcceptConnection(this, cricket_session_)) {
     Close();
     // Release session so that JingleSessionManager::SessionDestroyed()
@@ -466,9 +388,6 @@ void JingleSession::AcceptConnection() {
     delete this;
     return;
   }
-
-  // Set state to CONNECTING if the session is being accepted.
-  SetState(CONNECTING);
 }
 
 void JingleSession::AddChannelConnector(
@@ -504,44 +423,30 @@ void JingleSession::OnChannelConnectorFinished(
 }
 
 void JingleSession::CreateChannels() {
-  StreamChannelCallback stream_callback(
-      base::Bind(&JingleSession::OnStreamChannelConnected,
-                 base::Unretained(this)));
-  CreateStreamChannel(kControlChannelName, stream_callback);
-  CreateStreamChannel(kEventChannelName, stream_callback);
-  CreateStreamChannel(kVideoChannelName, stream_callback);
+  CreateStreamChannel(
+      kControlChannelName,
+      base::Bind(&JingleSession::OnChannelConnected,
+                 base::Unretained(this), &control_channel_socket_));
+  CreateStreamChannel(
+      kEventChannelName,
+      base::Bind(&JingleSession::OnChannelConnected,
+                 base::Unretained(this), &event_channel_socket_));
 }
 
-void JingleSession::OnStreamChannelConnected(const std::string& name,
-                                             net::StreamSocket* socket) {
-  OnChannelConnected(name, socket);
-}
-
-void JingleSession::OnChannelConnected(const std::string& name,
-                                       net::Socket* socket) {
+void JingleSession::OnChannelConnected(
+    scoped_ptr<net::Socket>* socket_container,
+    net::StreamSocket* socket) {
   if (!socket) {
-    LOG(ERROR) << "Failed to connect channel " << name
-               << ". Terminating connection";
+    LOG(ERROR) << "Failed to connect control or events channel. "
+               << "Terminating connection";
     CloseInternal(net::ERR_CONNECTION_CLOSED, true);
     return;
   }
 
-  if (name == kControlChannelName) {
-    control_channel_socket_.reset(socket);
-  } else if (name == kEventChannelName) {
-    event_channel_socket_.reset(socket);
-  } else if (name == kVideoChannelName) {
-    video_channel_socket_.reset(socket);
-  } else {
-    NOTREACHED();
-  }
+  socket_container->reset(socket);
 
-  if (control_channel_socket_.get() && event_channel_socket_.get() &&
-      video_channel_socket_.get()) {
-    // TODO(sergeyu): State should be set to CONNECTED in OnAccept
-    // independent of the channels state.
-    SetState(CONNECTED);
-  }
+  if (control_channel_socket_.get() && event_channel_socket_.get())
+    SetState(CONNECTED_CHANNELS);
 }
 
 const cricket::ContentInfo* JingleSession::GetContentInfo() const {
@@ -567,11 +472,10 @@ void JingleSession::SetState(State new_state) {
     DCHECK_NE(state_, FAILED);
 
     state_ = new_state;
-    if (!closed_ && state_change_callback_.get())
+    if (state_change_callback_.get())
       state_change_callback_->Run(new_state);
   }
 }
 
 }  // namespace protocol
-
 }  // namespace remoting

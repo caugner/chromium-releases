@@ -69,6 +69,18 @@ NET_ERROR(UPLOAD_FILE_CHANGED, -14)
 // The socket is not connected.
 NET_ERROR(SOCKET_NOT_CONNECTED, -15)
 
+// The file already exists.
+NET_ERROR(FILE_EXISTS, -16)
+
+// The path or file name is too long.
+NET_ERROR(FILE_PATH_TOO_LONG, -17)
+
+// Not enough room left on the disk.
+NET_ERROR(FILE_NO_SPACE, -18)
+
+// The file has a virus.
+NET_ERROR(FILE_VIRUS_INFECTED, -19)
+
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -254,6 +266,14 @@ NET_ERROR(ADDRESS_IN_USE, -147)
 
 // An operation failed because the SSL handshake has not completed.
 NET_ERROR(SSL_HANDSHAKE_NOT_COMPLETED, -148)
+
+// SSL peer's public key is invalid.
+NET_ERROR(SSL_BAD_PEER_PUBLIC_KEY, -149)
+
+// The certificate didn't match the built-in public key pins for the host name.
+// The pins are set in net/base/transport_security_state.cc and require that
+// one of a set of public keys exist on the path from the leaf to the root.
+NET_ERROR(SSL_PINNED_KEY_NOT_IN_CERT_CHAIN, -150)
 
 // Certificate error codes
 //
@@ -571,6 +591,18 @@ NET_ERROR(PKCS12_IMPORT_INVALID_FILE, -708)
 // PKCS #12 import failed due to unsupported features.
 NET_ERROR(PKCS12_IMPORT_UNSUPPORTED, -709)
 
+// Key generation failed.
+NET_ERROR(KEY_GENERATION_FAILED, -710)
+
+// Origin-bound certificate generation failed.
+NET_ERROR(ORIGIN_BOUND_CERT_GENERATION_FAILED, -711)
+
+// Failure to export private key.
+NET_ERROR(PRIVATE_KEY_EXPORT_FAILED, -712)
+
+// Failure to get certificate bytes.
+NET_ERROR(GET_CERT_BYTES_FAILED, -713)
+
 // DNS error codes.
 
 // DNS resolver received a malformed response.
@@ -592,3 +624,6 @@ NET_ERROR(DNS_SERVER_FAILED, -802)
 
 // DNS transaction timed out.
 NET_ERROR(DNS_TIMED_OUT, -803)
+
+// The entry was not found in cache, for cache-only lookups.
+NET_ERROR(DNS_CACHE_MISS, -804)

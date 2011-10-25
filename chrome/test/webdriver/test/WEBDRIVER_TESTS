@@ -19,8 +19,6 @@
 # Tests beginning with '-' will be excluded.  This can be used to enforce
 # exclusions for a particular platform.
 
-# Most of these tests are disabled because they involve not yet implemented
-# features. See bug 71237.
 {
   'all': [
     'alerts_tests',
@@ -70,7 +68,8 @@
   ],
 
   'mac': [
-
+    # See crbug.com/90519.
+    '-alerts_tests.AlertsTest.testShouldAllowUsersToDismissAnAlertManually',
   ],
 
   'linux': [

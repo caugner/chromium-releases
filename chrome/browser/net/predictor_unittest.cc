@@ -85,7 +85,7 @@ class PredictorTest : public testing::Test {
 
   void WaitForResolution(Predictor* predictor, const UrlList& hosts) {
     HelperTimer* timer = new HelperTimer();
-    timer->Start(TimeDelta::FromMilliseconds(100),
+    timer->Start(FROM_HERE, TimeDelta::FromMilliseconds(100),
                  new WaitForResolutionHelper(predictor, hosts, timer),
                  &WaitForResolutionHelper::Run);
     MessageLoop::current()->Run();
@@ -263,12 +263,12 @@ TEST_F(PredictorTest, MassiveConcurrentLookupTest) {
 
 // Return a motivation_list if we can find one for the given motivating_host (or
 // NULL if a match is not found).
-static ListValue* FindSerializationMotivation(
-    const GURL& motivation, const ListValue& referral_list) {
+static ListValue* FindSerializationMotivation(const GURL& motivation,
+                                              const ListValue& referral_list) {
   CHECK_LT(0u, referral_list.GetSize());  // Room for version.
   int format_version = -1;
   CHECK(referral_list.GetInteger(0, &format_version));
-  CHECK_EQ(Predictor::PREDICTOR_REFERRER_VERSION, format_version);
+  CHECK_EQ(Predictor::kPredictorReferrerVersion, format_version);
   ListValue* motivation_list(NULL);
   for (size_t i = 1; i < referral_list.GetSize(); ++i) {
     referral_list.GetList(i, &motivation_list);
@@ -282,8 +282,9 @@ static ListValue* FindSerializationMotivation(
 
 // Create a new empty serialization list.
 static ListValue* NewEmptySerializationList() {
-  ListValue* list = new ListValue;
-  list->Append(new FundamentalValue(Predictor::PREDICTOR_REFERRER_VERSION));
+  base::ListValue* list = new base::ListValue;
+  list->Append(
+      new base::FundamentalValue(Predictor::kPredictorReferrerVersion));
   return list;
 }
 
@@ -316,8 +317,8 @@ static void AddToSerializedList(const GURL& motivation,
   // case, during deserialization, the latency value we supply plus the
   // existing value(s) will be added to the referrer.
 
-  subresource_list->Append(new StringValue(subresource.spec()));
-  subresource_list->Append(new FundamentalValue(use_rate));
+  subresource_list->Append(new base::StringValue(subresource.spec()));
+  subresource_list->Append(new base::FundamentalValue(use_rate));
 }
 
 static const int kLatencyNotFound = -1;

@@ -12,6 +12,7 @@
 #include "content/browser/renderer_host/media/media_observer.h"
 #include "content/browser/resource_context.h"
 #include "content/common/media/audio_messages.h"
+#include "media/audio/audio_util.h"
 #include "ipc/ipc_logging.h"
 
 
@@ -27,7 +28,8 @@ AudioRendererHost::AudioEntry::~AudioEntry() {}
 // AudioRendererHost implementations.
 AudioRendererHost::AudioRendererHost(
     const content::ResourceContext* resource_context)
-    : resource_context_(resource_context) {
+    : resource_context_(resource_context),
+      media_observer_(NULL) {
 }
 
 AudioRendererHost::~AudioRendererHost() {
@@ -143,8 +145,10 @@ void AudioRendererHost::DoCompleteCreation(
     }
 
     Send(new AudioMsg_NotifyLowLatencyStreamCreated(
-        entry->stream_id, foreign_memory_handle,
-        foreign_socket_handle, entry->shared_memory.created_size()));
+        entry->stream_id,
+        foreign_memory_handle,
+        foreign_socket_handle,
+        media::PacketSizeSizeInBytes(entry->shared_memory.created_size())));
     return;
   }
 
@@ -241,7 +245,12 @@ void AudioRendererHost::OnCreateStream(
 
   scoped_ptr<AudioEntry> entry(new AudioEntry());
   // Create the shared memory and share with the renderer process.
-  if (!entry->shared_memory.CreateAndMapAnonymous(packet_size)) {
+  uint32 shared_memory_size = packet_size;
+  if (low_latency) {
+    shared_memory_size =
+        media::TotalSharedMemorySizeInBytes(shared_memory_size);
+  }
+  if (!entry->shared_memory.CreateAndMapAnonymous(shared_memory_size)) {
     // If creation of shared memory failed then send an error message.
     SendErrorMessage(stream_id);
     return;
@@ -280,8 +289,7 @@ void AudioRendererHost::OnCreateStream(
   // to the map.
   entry->stream_id = stream_id;
   audio_entries_.insert(std::make_pair(stream_id, entry.release()));
-  resource_context_->media_observer()->OnSetAudioStreamStatus(
-      this, stream_id, "created");
+  media_observer()->OnSetAudioStreamStatus(this, stream_id, "created");
 }
 
 void AudioRendererHost::OnPlayStream(int stream_id) {
@@ -294,8 +302,7 @@ void AudioRendererHost::OnPlayStream(int stream_id) {
   }
 
   entry->controller->Play();
-  resource_context_->media_observer()->OnSetAudioStreamPlaying(
-      this, stream_id, true);
+  media_observer()->OnSetAudioStreamPlaying(this, stream_id, true);
 }
 
 void AudioRendererHost::OnPauseStream(int stream_id) {
@@ -308,8 +315,7 @@ void AudioRendererHost::OnPauseStream(int stream_id) {
   }
 
   entry->controller->Pause();
-  resource_context_->media_observer()->OnSetAudioStreamPlaying(
-      this, stream_id, false);
+  media_observer()->OnSetAudioStreamPlaying(this, stream_id, false);
 }
 
 void AudioRendererHost::OnFlushStream(int stream_id) {
@@ -322,15 +328,13 @@ void AudioRendererHost::OnFlushStream(int stream_id) {
   }
 
   entry->controller->Flush();
-  resource_context_->media_observer()->OnSetAudioStreamStatus(
-      this, stream_id, "flushed");
+  media_observer()->OnSetAudioStreamStatus(this, stream_id, "flushed");
 }
 
 void AudioRendererHost::OnCloseStream(int stream_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  resource_context_->media_observer()->OnSetAudioStreamStatus(
-      this, stream_id, "closed");
+  media_observer()->OnSetAudioStreamStatus(this, stream_id, "closed");
 
   AudioEntry* entry = LookupById(stream_id);
 
@@ -351,8 +355,7 @@ void AudioRendererHost::OnSetVolume(int stream_id, double volume) {
   if (volume < 0 || volume > 1.0)
     return;
   entry->controller->SetVolume(volume);
-  resource_context_->media_observer()->OnSetAudioStreamVolume(
-      this, stream_id, volume);
+  media_observer()->OnSetAudioStreamVolume(this, stream_id, volume);
 }
 
 void AudioRendererHost::OnGetVolume(int stream_id) {
@@ -421,8 +424,7 @@ void AudioRendererHost::DeleteEntry(AudioEntry* entry) {
   audio_entries_.erase(entry->stream_id);
 
   // Notify the media observer.
-  resource_context_->media_observer()->OnDeleteAudioStream(
-      this, entry->stream_id);
+  media_observer()->OnDeleteAudioStream(this, entry->stream_id);
 }
 
 void AudioRendererHost::DeleteEntryOnError(AudioEntry* entry) {
@@ -432,8 +434,7 @@ void AudioRendererHost::DeleteEntryOnError(AudioEntry* entry) {
   // |entry| is destroyed in DeleteEntry().
   SendErrorMessage(entry->stream_id);
 
-  resource_context_->media_observer()->OnSetAudioStreamStatus(
-      this, entry->stream_id, "error");
+  media_observer()->OnSetAudioStreamStatus(this, entry->stream_id, "error");
   CloseAndDeleteStream(entry);
 }
 
@@ -458,4 +459,11 @@ AudioRendererHost::AudioEntry* AudioRendererHost::LookupByController(
       return i->second;
   }
   return NULL;
+}
+
+MediaObserver* AudioRendererHost::media_observer() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (!media_observer_)
+    media_observer_ = resource_context_->media_observer();
+  return media_observer_;
 }

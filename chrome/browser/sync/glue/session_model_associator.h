@@ -14,6 +14,7 @@
 #include "base/format_macros.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/stringprintf.h"
 #include "base/threading/non_thread_safe.h"
@@ -21,18 +22,19 @@
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_types.h"
-#include "chrome/browser/sync/engine/syncapi.h"
-#include "chrome/browser/sync/glue/synced_session_tracker.h"
 #include "chrome/browser/sync/glue/model_associator.h"
+#include "chrome/browser/sync/glue/synced_session_tracker.h"
+#include "chrome/browser/sync/glue/synced_tab_delegate.h"
+#include "chrome/browser/sync/glue/synced_window_delegate.h"
 #include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/sync/weak_handle.h"
 
 class Profile;
 class ProfileSyncService;
 
 namespace sync_api {
+class BaseTransaction;
 class ReadNode;
 class WriteNode;
 class WriteTransaction;
@@ -49,7 +51,8 @@ static const char kSessionsTag[] = "google_chrome_sessions";
 // Contains all logic for associating the Chrome sessions model and
 // the sync sessions model.
 class SessionModelAssociator
-    : public PerDataTypeAssociatorInterface<TabContentsWrapper, size_t>,
+    : public PerDataTypeAssociatorInterface<SyncedTabDelegate, size_t>,
+      public base::SupportsWeakPtr<SessionModelAssociator>,
       public base::NonThreadSafe {
  public:
   // Does not take ownership of sync_service.
@@ -82,7 +85,7 @@ class SessionModelAssociator
   virtual int64 GetSyncIdFromSessionTag(const std::string& tag);
 
   // Not used.
-  virtual const TabContentsWrapper* GetChromeNodeFromSyncId(int64 sync_id);
+  virtual const SyncedTabDelegate* GetChromeNodeFromSyncId(int64 sync_id);
 
   // Not used.
   virtual bool InitSyncNodeFromChromeId(const size_t& id,
@@ -98,15 +101,15 @@ class SessionModelAssociator
   void ReassociateWindows(bool reload_tabs);
 
   // Loads and reassociates the local tabs referenced in |tabs|.
-  void ReassociateTabs(const std::vector<TabContentsWrapper*>& tabs);
+  void ReassociateTabs(const std::vector<SyncedTabDelegate*>& tabs);
 
   // Reassociates a single tab with the sync model. Will check if the tab
   // already is associated with a sync node and allocate one if necessary.
-  void ReassociateTab(const TabContentsWrapper& tab);
+  void ReassociateTab(const SyncedTabDelegate& tab);
 
   // Associate a local tab and it's sync node. Will overwrite the contents of
   // the sync node with new specifics built from the tab.
-  virtual void Associate(const TabContentsWrapper* tab, int64 sync_id);
+  virtual void Associate(const SyncedTabDelegate* tab, int64 sync_id);
 
   // Looks up the specified sync node, and marks that tab as closed, then marks
   // the node as free and deletes association.
@@ -116,7 +119,7 @@ class SessionModelAssociator
   // with local client data. Processes/reuses any sync nodes owned by this
   // client and creates any further sync nodes needed to store local header and
   // tab info.
-  virtual bool AssociateModels();
+  virtual bool AssociateModels(SyncError* error);
 
   // Initializes the given sync node from the given chrome node id.
   // Returns false if no sync node was found for the given chrome node id or
@@ -126,7 +129,7 @@ class SessionModelAssociator
 
   // Clear local sync data buffers. Does not delete sync nodes to avoid
   // tombstones. TODO(zea): way to eventually delete orphaned nodes.
-  virtual bool DisassociateModels();
+  virtual bool DisassociateModels(SyncError* error);
 
   // Returns the tag used to uniquely identify this machine's session in the
   // sync model.
@@ -169,7 +172,7 @@ class SessionModelAssociator
   // Control which local tabs we're interested in syncing.
   // Ensures the profile matches sync's profile and that the tab has at least
   // one navigation entry and is not an empty tab.
-  bool IsValidTab(const TabContentsWrapper& tab);
+  bool IsValidTab(const SyncedTabDelegate& tab);
 
   // Control which foreign tabs we're interested in displaying.
   // Checks that the tab has navigations and is not a new tab.
@@ -183,6 +186,23 @@ class SessionModelAssociator
   // when a local change is made, or when timeout_milli occurs, whichever is
   // first.
   void BlockUntilLocalChangeForTest(int64 timeout_milli);
+
+  // Callback for when the session name has been computed.
+  void OnSessionNameInitialized(const std::string name);
+
+#if defined(OS_WIN)
+  // Returns the computer name or the empty string an error occurred.
+  static std::string GetComputerName();
+#endif
+
+#if defined(OS_MACOSX)
+  // Returns the Hardware model name, without trailing numbers, if possible.
+  // See http://www.cocoadev.com/index.pl?MacintoshModels for an example list of
+  // models. If an error occurs trying to read the model, this simply returns
+  // "Unknown".
+  static std::string GetHardwareModelName();
+#endif
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, WriteSessionToNode);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest,
@@ -191,8 +211,11 @@ class SessionModelAssociator
                            WriteForeignSessionToNode);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, TabNodePoolEmpty);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, TabNodePoolNonEmpty);
+  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionHeader);
   FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionWindow);
   FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionTab);
+  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest,
+                           InitializeCurrentSessionName);
 
   // Keep all the links to local tab data in one place.
   class TabLinks {
@@ -206,10 +229,10 @@ class SessionModelAssociator
 
     // We only ever have either a SessionTab (for foreign tabs), or a
     // TabContents (for local tabs).
-    TabLinks(int64 sync_id, const TabContentsWrapper* tab)
+    TabLinks(int64 sync_id, const SyncedTabDelegate* tab)
       : sync_id_(sync_id),
         session_tab_(NULL) {
-      tab_ = const_cast<TabContentsWrapper*>(tab);
+      tab_ = const_cast<SyncedTabDelegate*>(tab);
     }
     TabLinks(int64 sync_id, const SessionTab* session_tab)
       : sync_id_(sync_id),
@@ -219,11 +242,11 @@ class SessionModelAssociator
 
     inline int64 sync_id() const { return sync_id_; }
     inline const SessionTab* session_tab() const { return session_tab_; }
-    inline const TabContentsWrapper* tab() const { return tab_; }
+    inline const SyncedTabDelegate* tab() const { return tab_; }
    private:
     int64 sync_id_;
     SessionTab* session_tab_;
-    TabContentsWrapper* tab_;
+    SyncedTabDelegate* tab_;
   };
 
   // A pool for managing free/used tab sync nodes. Performs lazy creation
@@ -309,7 +332,7 @@ class SessionModelAssociator
   void DeleteForeignSessions();
 
   // Determine if a window is of a type we're interested in syncing.
-  static bool ShouldSyncWindow(const Browser* browser);
+  static bool ShouldSyncWindow(const SyncedWindowDelegate* window);
 
   // Build a sync tag from tab_node_id.
   static inline std::string TabIdToTag(
@@ -320,6 +343,9 @@ class SessionModelAssociator
 
   // Initializes the tag corresponding to this machine.
   void InitializeCurrentMachineTag(sync_api::WriteTransaction* trans);
+
+  // Initializes the user visible name for this session
+  void InitializeCurrentSessionName();
 
   // Updates the server data based upon the current client session.  If no node
   // corresponding to this machine exists in the sync model, one is created.
@@ -333,10 +359,16 @@ class SessionModelAssociator
 
   // Fills a tab sync node with data from a TabContents object.
   // (from a local navigation event)
-  bool WriteTabContentsToSyncModel(const Browser& browser,
-                                   const TabContentsWrapper& tab,
+  bool WriteTabContentsToSyncModel(const SyncedWindowDelegate& window,
+                                   const SyncedTabDelegate& tab,
                                    const int64 sync_id,
                                    sync_api::WriteTransaction* trans);
+
+  // Used to populate a session header from the session specifics header
+  // provided.
+  static void PopulateSessionHeaderFromSpecifics(
+    const sync_pb::SessionHeader& header_specifics,
+    SyncedSession* session_header);
 
   // Used to populate a session window from the session specifics window
   // provided. Tracks any foreign session data created through |tracker|.
@@ -395,8 +427,11 @@ class SessionModelAssociator
   // For testing only.
   void QuitLoopForTest();
 
-  // Local client name.
+  // Unique client tag.
   std::string current_machine_tag_;
+
+  // User-visible machine name.
+  std::string current_session_name_;
 
   // Pool of all used/available sync nodes associated with tabs.
   TabNodePool tab_pool_;

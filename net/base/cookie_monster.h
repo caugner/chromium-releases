@@ -21,7 +21,7 @@
 #include "base/task.h"
 #include "base/time.h"
 #include "net/base/cookie_store.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 
 class GURL;
 
@@ -50,7 +50,7 @@ class CookieList;
 //
 // TODO(deanm) Implement CookieMonster, the cookie database.
 //  - Verify that our domain enforcement and non-dotted handling is correct
-class NET_API CookieMonster : public CookieStore {
+class NET_EXPORT CookieMonster : public CookieStore {
  public:
   class CanonicalCookie;
   class Delegate;
@@ -163,7 +163,7 @@ class NET_API CookieMonster : public CookieStore {
 
   // Helper function that adds all cookies from |cookie_monster| into this
   // instance.
-  bool InitializeFrom(CookieMonster* cookie_monster);
+  bool InitializeFrom(const CookieList& list);
 
   // Returns all the cookies, for use in management UI, etc. This does not mark
   // the cookies as having been accessed.
@@ -586,7 +586,7 @@ class NET_API CookieMonster : public CookieStore {
   DISALLOW_COPY_AND_ASSIGN(CookieMonster);
 };
 
-class NET_API CookieMonster::CanonicalCookie {
+class NET_EXPORT CookieMonster::CanonicalCookie {
  public:
 
   // These constructors do no validation or canonicalization of their inputs;
@@ -616,6 +616,12 @@ class NET_API CookieMonster::CanonicalCookie {
   ~CanonicalCookie();
 
   // Supports the default copy constructor.
+
+  // Creates a canonical cookie from parsed cookie.
+  // Canonicalizes and validates inputs.  May return NULL if an attribute
+  // value is invalid.
+  static CanonicalCookie* Create(const GURL& url,
+                                 const ParsedCookie& pc);
 
   // Creates a canonical cookie from unparsed attribute values.
   // Canonicalizes and validates inputs.  May return NULL if an attribute
@@ -746,7 +752,7 @@ class CookieMonster::Delegate
   virtual ~Delegate() {}
 };
 
-class NET_API CookieMonster::ParsedCookie {
+class NET_EXPORT CookieMonster::ParsedCookie {
  public:
   typedef std::pair<std::string, std::string> TokenValuePair;
   typedef std::vector<TokenValuePair> PairList;

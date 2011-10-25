@@ -4,6 +4,13 @@
 
 #include "chrome/common/extensions/extension_constants.h"
 
+#include <vector>
+
+#include "base/command_line.h"
+#include "base/string_util.h"
+#include "chrome/common/chrome_switches.h"
+#include "net/base/escape.h"
+
 namespace extension_manifest_keys {
 
 const char* kAllFrames = "all_frames";
@@ -48,8 +55,10 @@ const char* kName = "name";
 const char* kNaClModules = "nacl_modules";
 const char* kNaClModulesMIMEType = "mime_type";
 const char* kNaClModulesPath = "path";
+const char* kOfflineEnabled = "offline_enabled";
 const char* kOmnibox = "omnibox";
 const char* kOmniboxKeyword = "omnibox.keyword";
+const char* kOptionalPermissions = "optional_permissions";
 const char* kOptionsPage = "options_page";
 const char* kPageAction = "page_action";
 const char* kPageActionDefaultIcon = "default_icon";
@@ -66,6 +75,7 @@ const char* kPlugins = "plugins";
 const char* kPluginsPath = "path";
 const char* kPluginsPublic = "public";
 const char* kPublicKey = "key";
+const char* kRequirements = "requirements";
 const char* kRunAt = "run_at";
 const char* kShiftKey = "shiftKey";
 const char* kShortcutKey = "shortcutKey";
@@ -260,6 +270,8 @@ const char* kInvalidNaClModulesPath =
     "Invalid value for 'nacl_modules[*].path'.";
 const char* kInvalidNaClModulesMIMEType =
     "Invalid value for 'nacl_modules[*].mime_type'.";
+const char* kInvalidOfflineEnabled =
+    "Invalid value for 'offline_enabled'.";
 const char* kInvalidOmniboxKeyword =
     "Invalid value for 'omnibox.keyword'.";
 const char* kInvalidOptionsPage =
@@ -306,6 +318,10 @@ const char* kInvalidPluginsPath =
     "Invalid value for 'plugins[*].path'.";
 const char* kInvalidPluginsPublic =
     "Invalid value for 'plugins[*].public'.";
+const char* kInvalidRequirement =
+    "Invalid value for requirement \"*\"";
+const char* kInvalidRequirements =
+    "Invalid value for 'requirements'";
 const char* kInvalidRunAt =
     "Invalid value for 'content_scripts[*].run_at'.";
 const char* kInvalidSidebar =
@@ -400,6 +416,52 @@ const char* kIllegalPlugins =
 }  // namespace extension_manifest_errors
 
 namespace extension_urls {
+std::string GetWebstoreLaunchURL() {
+  std::string gallery_prefix = kGalleryBrowsePrefix;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppsGalleryURL))
+    gallery_prefix = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kAppsGalleryURL);
+  if (EndsWith(gallery_prefix, "/", true))
+    gallery_prefix = gallery_prefix.substr(0, gallery_prefix.length() - 1);
+  return gallery_prefix;
+}
+
+std::string GetWebstoreItemDetailURLPrefix() {
+  return GetWebstoreLaunchURL() + "/detail/";
+}
+
+GURL GetWebstoreItemJsonDataURL(const std::string& extension_id) {
+  return GURL(GetWebstoreLaunchURL() + "/inlineinstall/detail/" + extension_id);
+}
+
+const char* kGalleryUpdateHttpUrl =
+    "http://clients2.google.com/service/update2/crx";
+const char* kGalleryUpdateHttpsUrl =
+    "https://clients2.google.com/service/update2/crx";
+
+GURL GetWebstoreUpdateUrl(bool secure) {
+  CommandLine* cmdline = CommandLine::ForCurrentProcess();
+  if (cmdline->HasSwitch(switches::kAppsGalleryUpdateURL))
+    return GURL(cmdline->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL));
+  else
+    return GURL(secure ? kGalleryUpdateHttpsUrl : kGalleryUpdateHttpUrl);
+}
+
+GURL GetWebstoreInstallUrl(const std::string& extension_id,
+                           const std::string& locale) {
+  std::vector<std::string> params;
+  params.push_back("id=" + extension_id);
+  params.push_back("lang=" + locale);
+  params.push_back("uc");
+  std::string url_string = extension_urls::GetWebstoreUpdateUrl(true).spec();
+
+  GURL url(url_string + "?response=redirect&x=" +
+      EscapeQueryParamValue(JoinString(params, '&'), true));
+  DCHECK(url.is_valid());
+
+  return url;
+}
+
 const char* kGalleryBrowsePrefix = "https://chrome.google.com/webstore";
 const char* kMiniGalleryBrowsePrefix = "https://tools.google.com/chrome/";
 const char* kMiniGalleryDownloadPrefix = "https://dl-ssl.google.com/chrome/";
@@ -427,4 +489,5 @@ const char* kAccessExtensionPath =
     "/usr/share/chromeos-assets/accessibility/extensions";
 const char* kChromeVoxDirectoryName = "access_chromevox";
 #endif
+
 }

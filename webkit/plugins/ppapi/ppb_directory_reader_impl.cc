@@ -18,6 +18,7 @@
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_file_ref_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_system_impl.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
 
 using ::ppapi::thunk::EnterResourceNoLock;
@@ -53,7 +54,7 @@ FilePath::StringType UTF8StringToFilePathString(const std::string& str) {
 
 PPB_DirectoryReader_Impl::PPB_DirectoryReader_Impl(
     PPB_FileRef_Impl* directory_ref)
-    : Resource(directory_ref->instance()),
+    : Resource(directory_ref->pp_instance()),
       directory_ref_(directory_ref),
       has_more_(true),
       entry_(NULL) {
@@ -67,10 +68,8 @@ PP_Resource PPB_DirectoryReader_Impl::Create(PP_Resource directory_ref) {
   EnterResourceNoLock<PPB_FileRef_API> enter(directory_ref, true);
   if (enter.failed())
     return 0;
-
-  PPB_DirectoryReader_Impl* reader = new PPB_DirectoryReader_Impl(
-      static_cast<PPB_FileRef_Impl*>(enter.object()));
-  return reader->GetReference();
+  return (new PPB_DirectoryReader_Impl(
+      static_cast<PPB_FileRef_Impl*>(enter.object())))->GetReference();
 }
 
 PPB_DirectoryReader_API* PPB_DirectoryReader_Impl::AsPPB_DirectoryReader_API() {
@@ -88,15 +87,14 @@ int32_t PPB_DirectoryReader_Impl::GetNextEntry(
     entry_ = NULL;
     return PP_OK;
   }
+  PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
+  if (!plugin_instance)
+    return PP_ERROR_FAILED;
 
-  PluginInstance* instance = directory_ref_->instance();
-  PP_Resource resource_id = GetReferenceNoAddRef();
-  DCHECK(resource_id != 0);
-  if (!instance->delegate()->ReadDirectory(
+  if (!plugin_instance->delegate()->ReadDirectory(
           directory_ref_->GetFileSystemURL(),
-          new FileCallbacks(instance->module()->AsWeakPtr(),
-                            resource_id,
-                            callback, NULL, NULL, this)))
+          new FileCallbacks(plugin_instance->module()->AsWeakPtr(),
+                            pp_resource(), callback, NULL, NULL, this)))
     return PP_ERROR_FAILED;
 
   return PP_OK_COMPLETIONPENDING;
@@ -106,7 +104,8 @@ void PPB_DirectoryReader_Impl::AddNewEntries(
     const std::vector<base::FileUtilProxy::Entry>& entries, bool has_more) {
   DCHECK(!entries.empty() || !has_more);
   has_more_ = has_more;
-  std::string dir_path = directory_ref_->virtual_path();
+
+  std::string dir_path = directory_ref_->GetCreateInfo().path;
   if (dir_path[dir_path.size() - 1] != '/')
     dir_path += '/';
   FilePath::StringType dir_file_path = UTF8StringToFilePathString(dir_path);
@@ -128,10 +127,13 @@ bool PPB_DirectoryReader_Impl::FillUpEntry() {
     base::FileUtilProxy::Entry dir_entry = entries_.front();
     entries_.pop();
     if (entry_->file_ref)
-      ResourceTracker::Get()->UnrefResource(entry_->file_ref);
-    PPB_FileRef_Impl* file_ref =
-        new PPB_FileRef_Impl(instance(), directory_ref_->file_system(),
-                             FilePathStringToUTF8String(dir_entry.name));
+      ResourceTracker::Get()->ReleaseResource(entry_->file_ref);
+
+    PPB_FileRef_Impl* file_ref = PPB_FileRef_Impl::CreateInternal(
+        directory_ref_->file_system()->pp_resource(),
+        FilePathStringToUTF8String(dir_entry.name));
+    if (!file_ref)
+      return false;
     entry_->file_ref = file_ref->GetReference();
     entry_->file_type =
         (dir_entry.is_directory ? PP_FILETYPE_DIRECTORY : PP_FILETYPE_REGULAR);

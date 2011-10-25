@@ -15,9 +15,8 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/testing_browser_process.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
@@ -127,8 +126,6 @@ class AutocompleteProviderTest : public testing::Test,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  ScopedTestingBrowserProcess browser_process_;
-
   MessageLoopForUI message_loop_;
   scoped_ptr<AutocompleteController> controller_;
   NotificationRegistrar registrar_;
@@ -163,7 +160,7 @@ void AutocompleteProviderTest::ResetControllerWithTestProviders(
   // notifications.
   registrar_.Add(this,
                  chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
-                 NotificationService::AllSources());
+                 Source<AutocompleteController>(controller));
 }
 
 void AutocompleteProviderTest::
@@ -273,7 +270,7 @@ TEST_F(AutocompleteProviderTest, AllowExactKeywordMatch) {
   RunExactKeymatchTest(false);
 }
 
-typedef TestingBrowserProcessTest AutocompleteTest;
+typedef testing::Test AutocompleteTest;
 
 TEST_F(AutocompleteTest, InputType) {
   struct test_data {
@@ -286,12 +283,14 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("?foo bar"), AutocompleteInput::FORCED_QUERY },
     { ASCIIToUTF16("?http://foo.com/bar"), AutocompleteInput::FORCED_QUERY },
     { ASCIIToUTF16("foo"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("localhost"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo.c"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("-foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo-.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo.-com"), AutocompleteInput::QUERY },
-    { ASCIIToUTF16("foo/bar"), AutocompleteInput::URL },
+    { ASCIIToUTF16("foo/bar"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("foo.com/bar"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo;bar"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo/bar baz"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo bar.com"), AutocompleteInput::QUERY },
@@ -300,13 +299,16 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("foo+bar.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("\"foo:bar\""), AutocompleteInput::QUERY },
     { ASCIIToUTF16("link:foo.com"), AutocompleteInput::UNKNOWN },
-    { ASCIIToUTF16("foo:81"), AutocompleteInput::URL },
-    { ASCIIToUTF16("www.foo.com:81"), AutocompleteInput::URL },
+    { ASCIIToUTF16("foo:81"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("localhost:8080"), AutocompleteInput::URL },
+    { ASCIIToUTF16("www.foo.com:81"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo.com:123456"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo.com:abc"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("1.2.3.4:abc"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("user@foo.com"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("user@foo/z"), AutocompleteInput::URL },
+    { ASCIIToUTF16("user@foo/z z"), AutocompleteInput::URL },
+    { ASCIIToUTF16("user@foo.com/z"), AutocompleteInput::URL },
     { ASCIIToUTF16("user:pass@"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("user:pass@!foo.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("user:pass@foo"), AutocompleteInput::URL },
@@ -317,9 +319,13 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("1.2"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("1.2/45"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("1.2:45"), AutocompleteInput::UNKNOWN },
-    { ASCIIToUTF16("user@1.2:45"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("user@1.2:45"), AutocompleteInput::URL },
+    { ASCIIToUTF16("user@foo:45"), AutocompleteInput::URL },
     { ASCIIToUTF16("user:pass@1.2:45"), AutocompleteInput::URL },
-    { ASCIIToUTF16("ps/2 games"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("host?query"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("host#ref"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("host/path?query"), AutocompleteInput::URL },
+    { ASCIIToUTF16("host/path#ref"), AutocompleteInput::URL },
     { ASCIIToUTF16("en.wikipedia.org/wiki/James Bond"),
         AutocompleteInput::URL },
     // In Chrome itself, mailto: will get handled by ShellExecute, but in
@@ -353,11 +359,10 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("http://1.2"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://1.2/45"), AutocompleteInput::URL },
     { ASCIIToUTF16("http:ps/2 games"), AutocompleteInput::URL },
-    { ASCIIToUTF16("http://ps/2 games"), AutocompleteInput::URL },
     { ASCIIToUTF16("https://foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("127.0.0.1"), AutocompleteInput::URL },
     { ASCIIToUTF16("127.0.1"), AutocompleteInput::UNKNOWN },
-    { ASCIIToUTF16("127.0.1/"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("127.0.1/"), AutocompleteInput::URL },
     { ASCIIToUTF16("browser.tabs.closeButtons"), AutocompleteInput::UNKNOWN },
     { WideToUTF16(L"\u6d4b\u8bd5"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("[2001:]"), AutocompleteInput::QUERY },  // Not a valid IP
@@ -383,13 +388,15 @@ TEST_F(AutocompleteTest, InputTypeWithDesiredTLD) {
   } input_cases[] = {
     { ASCIIToUTF16("401k"), AutocompleteInput::REQUESTED_URL },
     { ASCIIToUTF16("999999999999999"), AutocompleteInput::REQUESTED_URL },
+    { ASCIIToUTF16("x@y"), AutocompleteInput::REQUESTED_URL },
+    { ASCIIToUTF16("y/z z"), AutocompleteInput::REQUESTED_URL },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+    SCOPED_TRACE(input_cases[i].input);
     AutocompleteInput input(input_cases[i].input, ASCIIToUTF16("com"), true,
                             false, true, AutocompleteInput::ALL_MATCHES);
-    EXPECT_EQ(input_cases[i].type, input.type()) << "Input: " <<
-        input_cases[i].input;
+    EXPECT_EQ(input_cases[i].type, input.type());
   }
 }
 
@@ -415,8 +422,10 @@ TEST(AutocompleteMatch, MoreRelevant) {
     {  -5, -10, true },
   };
 
-  AutocompleteMatch m1(NULL, 0, false, AutocompleteMatch::URL_WHAT_YOU_TYPED);
-  AutocompleteMatch m2(NULL, 0, false, AutocompleteMatch::URL_WHAT_YOU_TYPED);
+  AutocompleteMatch m1(NULL, 0, false,
+                       AutocompleteMatch::URL_WHAT_YOU_TYPED);
+  AutocompleteMatch m2(NULL, 0, false,
+                       AutocompleteMatch::URL_WHAT_YOU_TYPED);
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
     m1.relevance = cases[i].r1;
@@ -458,9 +467,8 @@ TEST(AutocompleteInput, ParseForEmphasizeComponent) {
         Component(12, 11), kInvalidComponent }
   };
 
-  ScopedTestingBrowserProcess browser_process;
-
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+    SCOPED_TRACE(input_cases[i].input);
     Component scheme, host;
     AutocompleteInput::ParseForEmphasizeComponents(input_cases[i].input,
                                                    string16(),
@@ -468,14 +476,10 @@ TEST(AutocompleteInput, ParseForEmphasizeComponent) {
                                                    &host);
     AutocompleteInput input(input_cases[i].input, string16(), true, false,
                             true, AutocompleteInput::ALL_MATCHES);
-    EXPECT_EQ(input_cases[i].scheme.begin, scheme.begin) << "Input: " <<
-        input_cases[i].input;
-    EXPECT_EQ(input_cases[i].scheme.len, scheme.len) << "Input: " <<
-        input_cases[i].input;
-    EXPECT_EQ(input_cases[i].host.begin, host.begin) << "Input: " <<
-        input_cases[i].input;
-    EXPECT_EQ(input_cases[i].host.len, host.len) << "Input: " <<
-        input_cases[i].input;
+    EXPECT_EQ(input_cases[i].scheme.begin, scheme.begin);
+    EXPECT_EQ(input_cases[i].scheme.len, scheme.len);
+    EXPECT_EQ(input_cases[i].host.begin, host.begin);
+    EXPECT_EQ(input_cases[i].host.len, host.len);
   }
 }
 

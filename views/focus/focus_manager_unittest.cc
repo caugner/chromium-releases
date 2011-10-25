@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "testing/gtest/include/gtest/gtest.h"
-
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
@@ -15,7 +13,6 @@
 #include "views/background.h"
 #include "views/border.h"
 #include "views/controls/button/checkbox.h"
-#include "views/controls/button/native_button.h"
 #include "views/controls/button/radio_button.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/controls/combobox/native_combobox_wrapper.h"
@@ -27,6 +24,8 @@
 #include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/focus/accelerator_handler.h"
+#include "views/focus/focus_manager_factory.h"
+#include "views/test/views_test_base.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 #include "views/widget/widget_delegate.h"
@@ -95,28 +94,24 @@ const int kHelpLinkID = count++;
 const int kThumbnailContainerID = count++;  // 45
 const int kThumbnailStarID = count++;
 const int kThumbnailSuperStarID = count++;
-}
+
+}  // namespace
 
 namespace views {
 
-class FocusManagerTest : public testing::Test, public WidgetDelegate {
+class FocusManagerTest : public ViewsTestBase, public WidgetDelegate {
  public:
   FocusManagerTest()
       : window_(NULL),
         content_view_(NULL),
         focus_change_listener_(NULL) {
-#if defined(OS_WIN)
-    OleInitialize(NULL);
-#endif
   }
 
   ~FocusManagerTest() {
-#if defined(OS_WIN)
-    OleUninitialize();
-#endif
   }
 
   virtual void SetUp() OVERRIDE {
+    ViewsTestBase::SetUp();
     window_ = Widget::CreateWindowWithBounds(this, bounds());
     InitContentView();
     window_->Show();
@@ -127,8 +122,9 @@ class FocusManagerTest : public testing::Test, public WidgetDelegate {
       GetFocusManager()->RemoveFocusChangeListener(focus_change_listener_);
     window_->Close();
 
-    // Flush the message loop to make Purify happy.
-    message_loop()->RunAllPending();
+    // Flush the message loop to make application verifiers happy.
+    RunPendingMessages();
+    ViewsTestBase::TearDown();
   }
 
   FocusManager* GetFocusManager() {
@@ -136,8 +132,10 @@ class FocusManagerTest : public testing::Test, public WidgetDelegate {
   }
 
   void FocusNativeView(gfx::NativeView native_view) {
-#if defined(OS_WIN)
-  ::SendMessage(native_view, WM_SETFOCUS, NULL, NULL);
+#if defined(USE_AURA)
+    NOTIMPLEMENTED();
+#elif defined(OS_WIN)
+    ::SendMessage(native_view, WM_SETFOCUS, NULL, NULL);
 #else
     gint return_val;
     GdkEventFocus event;
@@ -174,7 +172,9 @@ class FocusManagerTest : public testing::Test, public WidgetDelegate {
 
   // Mocks activating/deactivating the window.
   void SimulateActivateWindow() {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+    NOTIMPLEMENTED();
+#elif defined(OS_WIN)
     ::SendMessage(window_->GetNativeWindow(), WM_ACTIVATE, WA_ACTIVE, NULL);
 #else
     gboolean result;
@@ -183,7 +183,9 @@ class FocusManagerTest : public testing::Test, public WidgetDelegate {
 #endif
   }
   void SimulateDeactivateWindow() {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+    NOTIMPLEMENTED();
+#elif defined(OS_WIN)
     ::SendMessage(window_->GetNativeWindow(), WM_ACTIVATE, WA_INACTIVE, NULL);
 #else
     gboolean result;
@@ -191,8 +193,6 @@ class FocusManagerTest : public testing::Test, public WidgetDelegate {
                           "focus_out_event", 0, & result);
 #endif
   }
-
-  MessageLoopForUI* message_loop() { return &message_loop_; }
 
   Widget* window_;
   View* content_view_;
@@ -203,7 +203,15 @@ class FocusManagerTest : public testing::Test, public WidgetDelegate {
     GetFocusManager()->AddFocusChangeListener(listener);
   }
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  void PostKeyDown(ui::KeyboardCode key_code) {
+    NOTIMPLEMENTED();
+  }
+
+  void PostKeyUp(ui::KeyboardCode key_code) {
+    NOTIMPLEMENTED();
+  }
+#elif defined(OS_WIN)
   void PostKeyDown(ui::KeyboardCode key_code) {
     ::PostMessage(window_->GetNativeWindow(), WM_KEYDOWN, key_code, 0);
   }
@@ -255,7 +263,6 @@ class FocusManagerTest : public testing::Test, public WidgetDelegate {
 
  private:
   FocusChangeListener* focus_change_listener_;
-  MessageLoopForUI message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(FocusManagerTest);
 };
@@ -291,6 +298,8 @@ class BorderView : public NativeViewHost {
         params.parent = parent->GetWidget()->GetNativeView();
 #elif defined(TOOLKIT_USES_GTK)
         params.parent = native_view();
+#else
+        NOTREACHED();
 #endif
         widget_->Init(params);
         widget_->SetFocusTraversableParentView(this);
@@ -373,7 +382,8 @@ class FocusTraversalTest : public FocusManagerTest {
     View* view = GetContentsView()->GetViewByID(id);
     if (view)
       return view;
-    view = style_tab_->GetSelectedTab()->GetViewByID(id);
+    if (style_tab_)
+      view = style_tab_->GetSelectedTab()->GetViewByID(id);
     if (view)
       return view;
     view = search_border_view_->GetContentsRootView()->GetViewByID(id);
@@ -466,7 +476,7 @@ void FocusTraversalTest::InitContentView() {
   content_view_->set_background(
       Background::CreateSolidBackground(SK_ColorWHITE));
 
-  NativeCheckbox* cb = new NativeCheckbox(L"This is a checkbox");
+  Checkbox* cb = new Checkbox(L"This is a checkbox");
   content_view_->AddChildView(cb);
   // In this fast paced world, who really has time for non hard-coded layout?
   cb->SetBounds(10, 10, 200, 20);
@@ -539,13 +549,13 @@ void FocusTraversalTest::InitContentView() {
 
   y += label_height + gap_between_labels;
 
-  NativeButton* button = new NativeButton(NULL, L"Click me");
+  NativeTextButton* button = new NativeTextButton(NULL, L"Click me");
   button->SetBounds(label_x, y + 10, 80, 30);
   button->set_id(kFruitButtonID);
   left_container_->AddChildView(button);
   y += 40;
 
-  cb =  new NativeCheckbox(L"This is another check box");
+  cb =  new Checkbox(L"This is another check box");
   cb->SetBounds(label_x + label_width + 5, y, 180, 20);
   cb->set_id(kFruitCheckBoxID);
   left_container_->AddChildView(cb);
@@ -634,19 +644,19 @@ void FocusTraversalTest::InitContentView() {
 
   y = 250;
   int width = 60;
-  button = new NativeButton(NULL, L"OK");
+  button = new NativeTextButton(NULL, L"OK");
   button->set_id(kOKButtonID);
   button->SetIsDefault(true);
 
   content_view_->AddChildView(button);
   button->SetBounds(150, y, width, 30);
 
-  button = new NativeButton(NULL, L"Cancel");
+  button = new NativeTextButton(NULL, L"Cancel");
   button->set_id(kCancelButtonID);
   content_view_->AddChildView(button);
   button->SetBounds(220, y, width, 30);
 
-  button = new NativeButton(NULL, L"Help");
+  button = new NativeTextButton(NULL, L"Help");
   button->set_id(kHelpButtonID);
   content_view_->AddChildView(button);
   button->SetBounds(290, y, width, 30);
@@ -656,17 +666,17 @@ void FocusTraversalTest::InitContentView() {
   // Left bottom box with style checkboxes.
   View* contents = new View();
   contents->set_background(Background::CreateSolidBackground(SK_ColorWHITE));
-  cb = new NativeCheckbox(L"Bold");
+  cb = new Checkbox(L"Bold");
   contents->AddChildView(cb);
   cb->SetBounds(10, 10, 50, 20);
   cb->set_id(kBoldCheckBoxID);
 
-  cb = new NativeCheckbox(L"Italic");
+  cb = new Checkbox(L"Italic");
   contents->AddChildView(cb);
   cb->SetBounds(70, 10, 50, 20);
   cb->set_id(kItalicCheckBoxID);
 
-  cb = new NativeCheckbox(L"Underlined");
+  cb = new Checkbox(L"Underlined");
   contents->AddChildView(cb);
   cb->SetBounds(130, 10, 70, 20);
   cb->set_id(kUnderlinedCheckBoxID);
@@ -696,7 +706,7 @@ void FocusTraversalTest::InitContentView() {
   text_field->SetBounds(10, 10, 100, 20);
   text_field->set_id(kSearchTextfieldID);
 
-  button = new NativeButton(NULL, L"Search");
+  button = new NativeTextButton(NULL, L"Search");
   contents->AddChildView(button);
   button->SetBounds(112, 5, 60, 30);
   button->set_id(kSearchButtonID);
@@ -719,11 +729,11 @@ void FocusTraversalTest::InitContentView() {
   contents->set_focusable(true);
   contents->set_background(Background::CreateSolidBackground(SK_ColorBLUE));
   contents->set_id(kThumbnailContainerID);
-  button = new NativeButton(NULL, L"Star");
+  button = new NativeTextButton(NULL, L"Star");
   contents->AddChildView(button);
   button->SetBounds(5, 5, 50, 30);
   button->set_id(kThumbnailStarID);
-  button = new NativeButton(NULL, L"SuperStar");
+  button = new NativeTextButton(NULL, L"SuperStar");
   contents->AddChildView(button);
   button->SetBounds(60, 5, 100, 30);
   button->set_id(kThumbnailSuperStarID);
@@ -856,36 +866,32 @@ TEST_F(FocusManagerTest, FocusChangeListener) {
   EXPECT_TRUE(listener.focus_changes()[0] == ViewPair(view2, null_view));
 }
 
-class TestNativeButton : public NativeButton {
+class TestNativeButton : public NativeTextButton {
  public:
   explicit TestNativeButton(const std::wstring& text)
-      : NativeButton(NULL, text) {
+      : NativeTextButton(NULL, text) {
   };
   virtual gfx::NativeView TestGetNativeControlView() {
-#if defined(TOUCH_UI)
     return GetWidget()->GetNativeView();
-#else
-    return native_wrapper_->GetTestingHandle();
-#endif
   }
 };
 
-class TestCheckbox : public NativeCheckbox {
+class TestCheckbox : public Checkbox {
  public:
-  explicit TestCheckbox(const std::wstring& text) : NativeCheckbox(text) {
+  explicit TestCheckbox(const std::wstring& text) : Checkbox(text) {
   };
   virtual gfx::NativeView TestGetNativeControlView() {
-    return native_wrapper_->GetTestingHandle();
+    return GetWidget()->GetNativeView();
   }
 };
 
-class TestRadioButton : public NativeRadioButton {
+class TestRadioButton : public RadioButton {
  public:
   explicit TestRadioButton(const std::wstring& text)
-      : NativeRadioButton(text, 1) {
+      : RadioButton(text, 1) {
   }
   virtual gfx::NativeView TestGetNativeControlView() {
-    return native_wrapper_->GetTestingHandle();
+    return GetWidget()->GetNativeView();
   }
 };
 
@@ -919,47 +925,32 @@ class TestTabbedPane : public TabbedPane {
   }
 };
 
+#if !defined(TOUCH_UI)
+// TODO(oshima):  replace TOUCH_UI with PURE_VIEWS
+
 // Tests that NativeControls do set the focus View appropriately on the
 // FocusManager.
-TEST_F(FocusManagerTest, FocusNativeControls) {
-  TestNativeButton* button = new TestNativeButton(L"Press me");
-  TestCheckbox* checkbox = new TestCheckbox(L"Checkbox");
-  TestRadioButton* radio_button = new TestRadioButton(L"RadioButton");
+TEST_F(FocusManagerTest, FAILS_FocusNativeControls) {
   TestTextfield* textfield = new TestTextfield();
-  TestCombobox* combobox = new TestCombobox();
   TestTabbedPane* tabbed_pane = new TestTabbedPane();
-  TestNativeButton* tab_button = new TestNativeButton(L"tab button");
+  TestTextfield* textfield2 = new TestTextfield();
 
-  content_view_->AddChildView(button);
-  content_view_->AddChildView(checkbox);
-  content_view_->AddChildView(radio_button);
   content_view_->AddChildView(textfield);
-  content_view_->AddChildView(combobox);
   content_view_->AddChildView(tabbed_pane);
-  tabbed_pane->AddTab(L"Awesome tab", tab_button);
+
+  tabbed_pane->AddTab(L"Awesome textfield", textfield2);
 
   // Simulate the native view getting the native focus (such as by user click).
-  FocusNativeView(button->TestGetNativeControlView());
-  EXPECT_EQ(button, GetFocusManager()->GetFocusedView());
-
-  FocusNativeView(checkbox->TestGetNativeControlView());
-  EXPECT_EQ(checkbox, GetFocusManager()->GetFocusedView());
-
-  FocusNativeView(radio_button->TestGetNativeControlView());
-  EXPECT_EQ(radio_button, GetFocusManager()->GetFocusedView());
-
   FocusNativeView(textfield->TestGetNativeControlView());
   EXPECT_EQ(textfield, GetFocusManager()->GetFocusedView());
-
-  FocusNativeView(combobox->TestGetNativeControlView());
-  EXPECT_EQ(combobox, GetFocusManager()->GetFocusedView());
 
   FocusNativeView(tabbed_pane->TestGetNativeControlView());
   EXPECT_EQ(tabbed_pane, GetFocusManager()->GetFocusedView());
 
-  FocusNativeView(tab_button->TestGetNativeControlView());
-  EXPECT_EQ(tab_button, GetFocusManager()->GetFocusedView());
+  FocusNativeView(textfield2->TestGetNativeControlView());
+  EXPECT_EQ(textfield2, GetFocusManager()->GetFocusedView());
 }
+#endif
 
 // On linux, we don't store/restore focused view because gtk handles
 // this (and pure views will be the same).
@@ -971,20 +962,20 @@ TEST_F(FocusManagerTest, FocusStoreRestore) {
   // Simulate an activate, otherwise the deactivate isn't going to do anything.
   SimulateActivateWindow();
 
-  NativeButton* button = new NativeButton(NULL, L"Press me");
+  NativeTextButton* button = new NativeTextButton(NULL, L"Press me");
   View* view = new View();
   view->set_focusable(true);
 
   content_view_->AddChildView(button);
   button->SetBounds(10, 10, 200, 30);
   content_view_->AddChildView(view);
-  message_loop()->RunAllPending();
+  RunPendingMessages();
 
   TestFocusChangeListener listener;
   AddFocusChangeListener(&listener);
 
   view->RequestFocus();
-  message_loop()->RunAllPending();
+  RunPendingMessages();
   //  MessageLoopForUI::current()->Run(new AcceleratorHandler());
 
   // Visual Studio 2010 has problems converting NULL to the null pointer for
@@ -1043,12 +1034,16 @@ TEST_F(FocusManagerTest, FocusStoreRestore) {
 }
 #endif
 
+#if !defined(TOUCH_UI)
+// TODO(oshima): There is no tabbed pane in pure views. Replace it
+// with different implementation.
+
 TEST_F(FocusManagerTest, ContainsView) {
   View* view = new View();
   scoped_ptr<View> detached_view(new View());
   TabbedPane* tabbed_pane = new TabbedPane();
   TabbedPane* nested_tabbed_pane = new TabbedPane();
-  NativeButton* tab_button = new NativeButton(NULL, L"tab button");
+  NativeTextButton* tab_button = new NativeTextButton(NULL, L"tab button");
 
   content_view_->AddChildView(view);
   content_view_->AddChildView(tabbed_pane);
@@ -1063,6 +1058,7 @@ TEST_F(FocusManagerTest, ContainsView) {
   EXPECT_TRUE(GetFocusManager()->ContainsView(tab_button));
   EXPECT_FALSE(GetFocusManager()->ContainsView(detached_view.get()));
 }
+#endif
 
 TEST_F(FocusTraversalTest, NormalTraversal) {
   const int kTraversalIDs[] = { kTopCheckBoxID,  kAppleTextfieldID,
@@ -1577,7 +1573,7 @@ TEST_F(FocusManagerTest, IgnoreKeyupForAccelerators) {
 }
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 // Test that the focus manager is created successfully for the first view
 // window parented to a native dialog.
 TEST_F(FocusManagerTest, CreationForNativeRoot) {
@@ -1602,36 +1598,44 @@ TEST_F(FocusManagerTest, CreationForNativeRoot) {
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent = hwnd;
   params.bounds = gfx::Rect(0, 0, 100, 100);
+  params.top_level = true;  // This is top level in views hierarchy.
   widget1->Init(params);
 
   // Get the focus manager directly from the first window.  Should exist
   // because the first window is the root widget.
-  views::FocusManager* focus_manager_member1 = widget1->GetFocusManager();
-  EXPECT_TRUE(focus_manager_member1);
+  views::FocusManager* focus_manager1 = widget1->GetFocusManager();
+  EXPECT_TRUE(focus_manager1);
 
   // Create another view window parented to the first view window.
   scoped_ptr<Widget> widget2(new Widget);
   params.parent = widget1->GetNativeView();
+  params.top_level = false;  // This is child widget.
   widget2->Init(params);
 
-  // Get the focus manager directly from the second window. Should return the
-  // first window's focus manager.
-  views::FocusManager* focus_manager_member2 = widget2->GetFocusManager();
-  EXPECT_EQ(focus_manager_member2, focus_manager_member1);
+  // Access the shared focus manager directly from the second window.
+  views::FocusManager* focus_manager2 = widget2->GetFocusManager();
+  EXPECT_EQ(focus_manager2, focus_manager1);
 
-  // Get the focus manager indirectly using the first window handle. Should
-  // return the first window's focus manager.
-  views::FocusManager* focus_manager_indirect =
-      views::FocusManager::GetFocusManagerForNativeView(
-          widget1->GetNativeView());
-  EXPECT_EQ(focus_manager_indirect, focus_manager_member1);
+  // Access the shared focus manager indirectly from the first window handle.
+  gfx::NativeWindow native_window = widget1->GetNativeWindow();
+  views::Widget* widget =
+      views::Widget::GetWidgetForNativeWindow(native_window);
+  EXPECT_EQ(widget->GetFocusManager(), focus_manager1);
 
-  // Get the focus manager indirectly using the second window handle. Should
-  // return the first window's focus manager.
-  focus_manager_indirect =
-      views::FocusManager::GetFocusManagerForNativeView(
-          widget2->GetNativeView());
-  EXPECT_EQ(focus_manager_indirect, focus_manager_member1);
+  // Access the shared focus manager indirectly from the second window handle.
+  native_window = widget2->GetNativeWindow();
+  widget = views::Widget::GetWidgetForNativeWindow(native_window);
+  EXPECT_EQ(widget->GetFocusManager(), focus_manager1);
+
+  // Access the shared focus manager indirectly from the first view handle.
+  gfx::NativeView native_view = widget1->GetNativeView();
+  widget = views::Widget::GetTopLevelWidgetForNativeView(native_view);
+  EXPECT_EQ(widget->GetFocusManager(), focus_manager1);
+
+  // Access the shared focus manager indirectly from the second view handle.
+  native_view = widget2->GetNativeView();
+  widget = views::Widget::GetTopLevelWidgetForNativeView(native_view);
+  EXPECT_EQ(widget->GetFocusManager(), focus_manager1);
 
   DestroyWindow(hwnd);
 }
@@ -1653,13 +1657,31 @@ class FocusManagerDtorTest : public FocusManagerTest {
     }
 
     DtorTrackVector* dtor_tracker_;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(FocusManagerDtorTracked);
   };
 
-  class NativeButtonDtorTracked : public NativeButton {
+  class TestFocusManagerFactory : public FocusManagerFactory {
+   public:
+    TestFocusManagerFactory(DtorTrackVector* dtor_tracker)
+        : dtor_tracker_(dtor_tracker) {
+    }
+
+    FocusManager* CreateFocusManager(Widget* widget) OVERRIDE {
+      return new FocusManagerDtorTracked(widget, dtor_tracker_);
+    }
+
+   private:
+    DtorTrackVector* dtor_tracker_;
+    DISALLOW_COPY_AND_ASSIGN(TestFocusManagerFactory);
+  };
+
+  class NativeButtonDtorTracked : public NativeTextButton {
    public:
     NativeButtonDtorTracked(const std::wstring& text,
                             DtorTrackVector* dtor_tracker)
-        : NativeButton(NULL, text),
+        : NativeTextButton(NULL, text),
           dtor_tracker_(dtor_tracker) {
     };
     virtual ~NativeButtonDtorTracked() {
@@ -1671,41 +1693,42 @@ class FocusManagerDtorTest : public FocusManagerTest {
 
   class WindowDtorTracked : public Widget {
    public:
-    WindowDtorTracked(WidgetDelegate* widget_delegate,
-                      DtorTrackVector* dtor_tracker)
+    WindowDtorTracked(DtorTrackVector* dtor_tracker)
         : dtor_tracker_(dtor_tracker) {
-      tracked_focus_manager_ = new FocusManagerDtorTracked(this, dtor_tracker_);
-      Widget::InitParams params;
-      params.delegate = widget_delegate;
-      params.bounds = gfx::Rect(0, 0, 100, 100);
-      Init(params);
-      ReplaceFocusManager(tracked_focus_manager_);
     }
 
     virtual ~WindowDtorTracked() {
       dtor_tracker_->push_back("WindowDtorTracked");
     }
 
-    FocusManagerDtorTracked* tracked_focus_manager_;
     DtorTrackVector* dtor_tracker_;
   };
 
- public:
   virtual void SetUp() {
+    ViewsTestBase::SetUp();
+    FocusManagerFactory::Install(new TestFocusManagerFactory(&dtor_tracker_));
     // Create WindowDtorTracked that uses FocusManagerDtorTracked.
-    window_ = new WindowDtorTracked(this, &dtor_tracker_);
-    ASSERT_TRUE(GetFocusManager() == static_cast<WindowDtorTracked*>(
-        window_)->tracked_focus_manager_);
+    window_ = new WindowDtorTracked(&dtor_tracker_);
+    Widget::InitParams params;
+    params.delegate = this;
+    params.bounds = gfx::Rect(0, 0, 100, 100);
+    window_->Init(params);
+
+    tracked_focus_manager_ =
+        static_cast<FocusManagerDtorTracked*>(GetFocusManager());
     window_->Show();
   }
 
   virtual void TearDown() {
     if (window_) {
       window_->Close();
-      message_loop()->RunAllPending();
+      RunPendingMessages();
     }
+    FocusManagerFactory::Install(NULL);
+    ViewsTestBase::TearDown();
   }
 
+  FocusManager* tracked_focus_manager_;
   DtorTrackVector dtor_tracker_;
 };
 
@@ -1720,7 +1743,7 @@ TEST_F(FocusManagerDtorTest, FocusManagerDestructedLast) {
 
   // Close the window.
   window_->Close();
-  message_loop()->RunAllPending();
+  RunPendingMessages();
 
   // Test window, button and focus manager should all be destructed.
   ASSERT_EQ(3, static_cast<int>(dtor_tracker_.size()));

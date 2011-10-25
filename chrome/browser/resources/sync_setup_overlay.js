@@ -42,11 +42,9 @@ cr.define('options', function() {
       var translated_text = acct_text.textContent;
       var posGoogle = translated_text.indexOf('Google');
       if (posGoogle != -1) {
-        var ltr = templateData['textdirection'] == 'ltr';
         var googleIsAtEndOfSentence = posGoogle != 0;
-        if (googleIsAtEndOfSentence == ltr) {
-          // We're in ltr and in the translation the word 'Google' is AFTER the
-          // word 'Account' OR we're in rtl and 'Google' is BEFORE 'Account'.
+
+        if (googleIsAtEndOfSentence) {
           var logo_td = $('gaia-logo');
           logo_td.parentNode.appendChild(logo_td);
         }
@@ -220,10 +218,14 @@ cr.define('options', function() {
 
       var usePassphrase;
       var customPassphrase;
+      var googlePassphrase = false;
       if (!$('sync-existing-passphrase-container').hidden) {
         // If we were prompted for an existing passphrase, use it.
         customPassphrase = f.passphrase.value;
         usePassphrase = true;
+        // If we were displaying the "enter your old google password" prompt,
+        // then that means this is the user's google password.
+        googlePassphrase = !$('google-passphrase-needed-body').hidden;
         // We allow an empty passphrase, in case the user has disabled
         // all their encrypted datatypes. In that case, the PSS will accept
         // the passphrase and finish configuration. If the user has enabled
@@ -258,9 +260,11 @@ cr.define('options', function() {
           "syncExtensions": syncAll || $('extensions-checkbox').checked,
           "syncTypedUrls": syncAll || $('typed-urls-checkbox').checked,
           "syncApps": syncAll || $('apps-checkbox').checked,
+          "syncSearchEngines": syncAll || $('search-engines-checkbox').checked,
           "syncSessions": syncAll || $('sessions-checkbox').checked,
           "encryptAllData": encryptAllData,
           "usePassphrase": usePassphrase,
+          "isGooglePassphrase": googlePassphrase,
           "passphrase": customPassphrase
       });
       chrome.send('SyncSetupConfigure', [result]);
@@ -351,14 +355,20 @@ cr.define('options', function() {
       } else {
         $('apps-item').className = "sync-item-hide";
       }
-
-      this.setCheckboxesToKeepEverythingSynced_(args.keepEverythingSynced);
+      if (args.searchEnginesRegistered) {
+        $('search-engines-checkbox').checked = args.syncSearchEngines;
+        $('search-engines-item').className = "sync-item-show";
+      } else {
+        $('search-engines-item').className = "sync-item-hide";
+      }
       if (args.sessionsRegistered) {
         $('sessions-checkbox').checked = args.syncSessions;
         $('sessions-item').className = "sync-item-show";
       } else {
         $('sessions-item').className = "sync-item-hide";
       }
+
+      this.setCheckboxesToKeepEverythingSynced_(args.keepEverythingSynced);
     },
 
     setEncryptionRadios_: function(args) {
@@ -469,13 +479,19 @@ cr.define('options', function() {
       $('sync-custom-passphrase-container').hidden = true;
       $('sync-existing-passphrase-container').hidden = false;
 
-      if (args["passphrase_creation_rejected"])
+      $('passphrase-rejected-body').hidden = true;
+      $('normal-body').hidden = true;
+      $('google-passphrase-needed-body').hidden = true;
+      // Display the correct prompt to the user depending on what type of
+      // passphrase is needed.
+      if (args["need_google_passphrase"])
+        $('google-passphrase-needed-body').hidden = false;
+      else if (args["passphrase_creation_rejected"])
         $('passphrase-rejected-body').hidden = false;
       else
         $('normal-body').hidden = false;
 
-      if (args["passphrase_setting_rejected"])
-        $('incorrect-passphrase').hidden = false;
+      $('incorrect-passphrase').hidden = !args["passphrase_setting_rejected"];
 
       $('sync-passphrase-warning').hidden = false;
 

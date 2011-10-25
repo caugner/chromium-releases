@@ -17,6 +17,7 @@
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/fileapi/obfuscated_file_util.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/fileapi/quota_file_util.h"
 #include "webkit/quota/quota_types.h"
@@ -35,7 +36,7 @@ const quota::StorageType kPersistent = quota::kStorageTypePersistent;
 class MockFileSystemPathManager : public FileSystemPathManager {
  public:
   explicit MockFileSystemPathManager(const FilePath& filesystem_path)
-      : FileSystemPathManager(base::MessageLoopProxy::CreateForCurrentThread(),
+      : FileSystemPathManager(base::MessageLoopProxy::current(),
                               filesystem_path, NULL, false, true) {}
 };
 
@@ -53,8 +54,8 @@ class FileSystemQuotaClientTest : public testing::Test {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     file_system_context_ =
         new FileSystemContext(
-            base::MessageLoopProxy::CreateForCurrentThread(),
-            base::MessageLoopProxy::CreateForCurrentThread(),
+            base::MessageLoopProxy::current(),
+            base::MessageLoopProxy::current(),
             NULL, NULL,
             FilePath(), false /* is_incognito */,
             false, true,
@@ -72,7 +73,7 @@ class FileSystemQuotaClientTest : public testing::Test {
  protected:
   FileSystemQuotaClient* NewQuotaClient(bool is_incognito) {
     return new FileSystemQuotaClient(
-        base::MessageLoopProxy::CreateForCurrentThread(),
+        base::MessageLoopProxy::current(),
         file_system_context_, is_incognito);
   }
 
@@ -138,7 +139,6 @@ class FileSystemQuotaClientTest : public testing::Test {
     FileSystemOperationContext* context =
         new FileSystemOperationContext(file_system_context_, file_util);
     context->set_src_origin_url(GURL(origin_url));
-    context->set_src_virtual_path(virtual_path);
     context->set_src_type(QuotaStorageTypeToFileSystemType(type));
     context->set_allowed_bytes_growth(100000000);
     return context;
@@ -147,9 +147,8 @@ class FileSystemQuotaClientTest : public testing::Test {
   bool CreateFileSystemDirectory(const FilePath& path,
                                  const std::string& origin_url,
                                  quota::StorageType type) {
-    FileSystemFileUtil* file_util =
-        file_system_context_->path_manager()->GetFileSystemFileUtil(
-            QuotaStorageTypeToFileSystemType(type));
+    FileSystemFileUtil* file_util = file_system_context_->path_manager()->
+        GetFileUtil(QuotaStorageTypeToFileSystemType(type));
 
     scoped_ptr<FileSystemOperationContext> context(
         CreateFileSystemOperationContext(file_util, path, origin_url, type));
@@ -169,7 +168,7 @@ class FileSystemQuotaClientTest : public testing::Test {
       return false;
 
     FileSystemFileUtil* file_util = file_system_context_->path_manager()->
-        sandbox_provider()->GetFileSystemFileUtil();
+        sandbox_provider()->GetFileUtil();
 
     scoped_ptr<FileSystemOperationContext> context(
         CreateFileSystemOperationContext(file_util, path, origin_url, type));
@@ -195,6 +194,10 @@ class FileSystemQuotaClientTest : public testing::Test {
             path, files[i].origin_url, files[i].type));
         if (path.empty()) {
           // Create the usage cache.
+          // HACK--we always create the root [an empty path] first.  If we
+          // create it later, this will fail due to a quota mismatch.  If we
+          // call this before we create the root, it succeeds, but hasn't
+          // actually created the cache.
           ASSERT_EQ(0, GetOriginUsage(
               quota_client, files[i].origin_url, files[i].type));
         }
@@ -205,6 +208,10 @@ class FileSystemQuotaClientTest : public testing::Test {
     }
   }
 
+  // This is a bit fragile--it depends on the test data always creating a
+  // directory before adding a file or directory to it, so that we can just
+  // count the basename of each addition.  A recursive creation of a path, which
+  // created more than one directory in a single shot, would break this.
   int64 ComputeFilePathsCostForOriginAndType(const TestFile* files,
                                              int num_files,
                                              const std::string& origin_url,
@@ -215,9 +222,7 @@ class FileSystemQuotaClientTest : public testing::Test {
           GURL(files[i].origin_url) == GURL(origin_url)) {
         FilePath path = FilePath().AppendASCII(files[i].name);
         if (!path.empty()) {
-          // TODO(dmikurube): Use QuotaFileUtil in the actual -FileUtil stack.
-          file_paths_cost +=
-              QuotaFileUtil::GetInstance()->ComputeFilePathCost(path);
+          file_paths_cost += ObfuscatedFileUtil::ComputeFilePathCost(path);
         }
       }
     }
@@ -246,8 +251,10 @@ class FileSystemQuotaClientTest : public testing::Test {
     usage_ = usage;
   }
 
-  void OnGetOrigins(const std::set<GURL>& origins) {
+  void OnGetOrigins(const std::set<GURL>& origins,
+      quota::StorageType type) {
     origins_ = origins;
+    type_ = type;
   }
 
   void OnGetAdditionalUsage(int64 usage_unused) {
@@ -264,6 +271,7 @@ class FileSystemQuotaClientTest : public testing::Test {
   int64 usage_;
   int additional_callback_count_;
   std::set<GURL> origins_;
+  quota::StorageType type_;
   quota::QuotaStatusCode deletion_status_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemQuotaClientTest);
@@ -283,8 +291,7 @@ TEST_F(FileSystemQuotaClientTest, NoFileTest) {
   InitializeOriginFiles(quota_client.get(), kFiles, ARRAYSIZE_UNSAFE(kFiles));
 
   for (int i = 0; i < 2; i++) {
-    EXPECT_EQ(0,
-        GetOriginUsage(quota_client.get(), kDummyURL1, kTemporary));
+    EXPECT_EQ(0, GetOriginUsage(quota_client.get(), kDummyURL1, kTemporary));
   }
 }
 

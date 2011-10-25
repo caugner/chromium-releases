@@ -107,9 +107,12 @@ HttpNetworkTransaction::HttpNetworkTransaction(HttpNetworkSession* session)
       read_buf_len_(0),
       next_state_(STATE_NONE),
       establishing_tunnel_(false) {
-  session->ssl_config_service()->GetSSLConfig(&ssl_config_);
-  if (session->http_stream_factory()->next_protos())
-    ssl_config_.next_protos = *session->http_stream_factory()->next_protos();
+  session->ssl_config_service()->GetSSLConfig(&server_ssl_config_);
+  if (session->http_stream_factory()->next_protos()) {
+    server_ssl_config_.next_protos =
+        *session->http_stream_factory()->next_protos();
+  }
+  proxy_ssl_config_ = server_ssl_config_;
 }
 
 HttpNetworkTransaction::~HttpNetworkTransaction() {
@@ -156,8 +159,10 @@ int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
   request_ = request_info;
   start_time_ = base::Time::Now();
 
-  if (request_->load_flags & LOAD_DISABLE_CERT_REVOCATION_CHECKING)
-    ssl_config_.rev_checking_enabled = false;
+  if (request_->load_flags & LOAD_DISABLE_CERT_REVOCATION_CHECKING) {
+    server_ssl_config_.rev_checking_enabled = false;
+    proxy_ssl_config_.rev_checking_enabled = false;
+  }
 
   next_state_ = STATE_CREATE_STREAM;
   int rv = DoLoop(OK);
@@ -189,10 +194,12 @@ int HttpNetworkTransaction::RestartWithCertificate(
   DCHECK(!stream_.get());
   DCHECK_EQ(STATE_NONE, next_state_);
 
-  ssl_config_.client_cert = client_cert;
+  SSLConfig* ssl_config = response_.cert_request_info->is_proxy ?
+      &proxy_ssl_config_ : &server_ssl_config_;
+  ssl_config->send_client_cert = true;
+  ssl_config->client_cert = client_cert;
   session_->ssl_client_auth_cache()->Add(
       response_.cert_request_info->host_and_port, client_cert);
-  ssl_config_.send_client_cert = true;
   // Reset the other member variables.
   // Note: this is necessary only with SSL renegotiation.
   ResetStateForRestart();
@@ -375,7 +382,7 @@ void HttpNetworkTransaction::OnStreamReady(const SSLConfig& used_ssl_config,
   DCHECK(stream_request_.get());
 
   stream_.reset(stream);
-  ssl_config_ = used_ssl_config;
+  server_ssl_config_ = used_ssl_config;
   proxy_info_ = used_proxy_info;
   response_.was_npn_negotiated = stream_request_->was_npn_negotiated();
   response_.was_fetched_via_spdy = stream_request_->using_spdy();
@@ -390,7 +397,7 @@ void HttpNetworkTransaction::OnStreamFailed(int result,
   DCHECK_NE(OK, result);
   DCHECK(stream_request_.get());
   DCHECK(!stream_.get());
-  ssl_config_ = used_ssl_config;
+  server_ssl_config_ = used_ssl_config;
 
   OnIOComplete(result);
 }
@@ -405,7 +412,7 @@ void HttpNetworkTransaction::OnCertificateError(
   DCHECK(!stream_.get());
 
   response_.ssl_info = ssl_info;
-  ssl_config_ = used_ssl_config;
+  server_ssl_config_ = used_ssl_config;
 
   // TODO(mbelshe):  For now, we're going to pass the error through, and that
   // will close the stream_request in all cases.  This means that we're always
@@ -428,7 +435,7 @@ void HttpNetworkTransaction::OnNeedsProxyAuth(
   response_.headers = proxy_response.headers;
   response_.auth_challenge = proxy_response.auth_challenge;
   headers_valid_ = true;
-  ssl_config_ = used_ssl_config;
+  server_ssl_config_ = used_ssl_config;
   proxy_info_ = used_proxy_info;
 
   auth_controllers_[HttpAuth::AUTH_PROXY] = auth_controller;
@@ -442,7 +449,7 @@ void HttpNetworkTransaction::OnNeedsClientAuth(
     SSLCertRequestInfo* cert_info) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
 
-  ssl_config_ = used_ssl_config;
+  server_ssl_config_ = used_ssl_config;
   response_.cert_request_info = cert_info;
   OnIOComplete(ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
 }
@@ -456,7 +463,7 @@ void HttpNetworkTransaction::OnHttpsProxyTunnelResponse(
 
   headers_valid_ = true;
   response_ = response_info;
-  ssl_config_ = used_ssl_config;
+  server_ssl_config_ = used_ssl_config;
   proxy_info_ = used_proxy_info;
   stream_.reset(stream);
   stream_request_.reset();  // we're done with the stream request
@@ -583,7 +590,8 @@ int HttpNetworkTransaction::DoCreateStream() {
   stream_request_.reset(
       session_->http_stream_factory()->RequestStream(
           *request_,
-          ssl_config_,
+          server_ssl_config_,
+          proxy_ssl_config_,
           this,
           net_log_));
   DCHECK(stream_request_.get());
@@ -964,16 +972,16 @@ void HttpNetworkTransaction::LogTransactionConnectedMetrics() {
 
   base::TimeDelta total_duration = response_.response_time - start_time_;
 
-  UMA_HISTOGRAM_CLIPPED_TIMES(
-      "Net.Transaction_Connected_Under_10",
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+      "Net.Transaction_Connected",
       total_duration,
       base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
       100);
 
   bool reused_socket = stream_->IsConnectionReused();
   if (!reused_socket) {
-    UMA_HISTOGRAM_CLIPPED_TIMES(
-        "Net.Transaction_Connected_New",
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "Net.Transaction_Connected_New_b",
         total_duration,
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
         100);
@@ -981,8 +989,8 @@ void HttpNetworkTransaction::LogTransactionConnectedMetrics() {
   static const bool use_conn_impact_histogram =
       base::FieldTrialList::TrialExists("ConnCountImpact");
   if (use_conn_impact_histogram) {
-    UMA_HISTOGRAM_CLIPPED_TIMES(
-        base::FieldTrial::MakeName("Net.Transaction_Connected_New",
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        base::FieldTrial::MakeName("Net.Transaction_Connected_New_b",
             "ConnCountImpact"),
         total_duration,
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
@@ -993,15 +1001,15 @@ void HttpNetworkTransaction::LogTransactionConnectedMetrics() {
   static const bool use_spdy_histogram =
       base::FieldTrialList::TrialExists("SpdyImpact");
   if (use_spdy_histogram && response_.was_npn_negotiated) {
-    UMA_HISTOGRAM_CLIPPED_TIMES(
-      base::FieldTrial::MakeName("Net.Transaction_Connected_Under_10",
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+      base::FieldTrial::MakeName("Net.Transaction_Connected",
                                  "SpdyImpact"),
         total_duration, base::TimeDelta::FromMilliseconds(1),
         base::TimeDelta::FromMinutes(10), 100);
 
     if (!reused_socket) {
-      UMA_HISTOGRAM_CLIPPED_TIMES(
-          base::FieldTrial::MakeName("Net.Transaction_Connected_New",
+      UMA_HISTOGRAM_CUSTOM_TIMES(
+          base::FieldTrial::MakeName("Net.Transaction_Connected_New_b",
                                      "SpdyImpact"),
           total_duration, base::TimeDelta::FromMilliseconds(1),
           base::TimeDelta::FromMinutes(10), 100);
@@ -1012,14 +1020,14 @@ void HttpNetworkTransaction::LogTransactionConnectedMetrics() {
   // types.  This will change when we also prioritize certain subresources like
   // css, js, etc.
   if (request_->priority) {
-    UMA_HISTOGRAM_CLIPPED_TIMES(
-        "Net.Priority_High_Latency",
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "Net.Priority_High_Latency_b",
         total_duration,
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
         100);
   } else {
-    UMA_HISTOGRAM_CLIPPED_TIMES(
-        "Net.Priority_Low_Latency",
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "Net.Priority_Low_Latency_b",
         total_duration,
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
         100);
@@ -1034,18 +1042,36 @@ void HttpNetworkTransaction::LogTransactionMetrics() const {
 
   base::TimeDelta total_duration = base::Time::Now() - start_time_;
 
-  UMA_HISTOGRAM_LONG_TIMES("Net.Transaction_Latency", duration);
-  UMA_HISTOGRAM_CLIPPED_TIMES("Net.Transaction_Latency_Under_10", duration,
-                              base::TimeDelta::FromMilliseconds(1),
-                              base::TimeDelta::FromMinutes(10),
-                              100);
-  UMA_HISTOGRAM_CLIPPED_TIMES("Net.Transaction_Latency_Total_Under_10",
-                              total_duration,
-                              base::TimeDelta::FromMilliseconds(1),
-                              base::TimeDelta::FromMinutes(10), 100);
+  UMA_HISTOGRAM_CUSTOM_TIMES("Net.Transaction_Latency_b", duration,
+                             base::TimeDelta::FromMilliseconds(1),
+                             base::TimeDelta::FromMinutes(10),
+                             100);
+  UMA_HISTOGRAM_CUSTOM_TIMES("Net.Transaction_Latency_Total",
+                             total_duration,
+                             base::TimeDelta::FromMilliseconds(1),
+                             base::TimeDelta::FromMinutes(10), 100);
+
+  static const bool use_warm_socket_impact_histogram =
+      base::FieldTrialList::TrialExists("WarmSocketImpact");
+  if (use_warm_socket_impact_histogram) {
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        base::FieldTrial::MakeName("Net.Transaction_Latency_b",
+                                   "WarmSocketImpact"),
+        duration,
+        base::TimeDelta::FromMilliseconds(1),
+        base::TimeDelta::FromMinutes(10),
+        100);
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        base::FieldTrial::MakeName("Net.Transaction_Latency_Total",
+                                   "WarmSocketImpact"),
+        total_duration,
+        base::TimeDelta::FromMilliseconds(1),
+        base::TimeDelta::FromMinutes(10), 100);
+  }
+
   if (!stream_->IsConnectionReused()) {
-    UMA_HISTOGRAM_CLIPPED_TIMES(
-        "Net.Transaction_Latency_Total_New_Connection_Under_10",
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "Net.Transaction_Latency_Total_New_Connection",
         total_duration, base::TimeDelta::FromMilliseconds(1),
         base::TimeDelta::FromMinutes(10), 100);
   }
@@ -1106,8 +1132,10 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
   // TODO(davidben): Add a unit test which covers this path; we need to be
   // able to send a legitimate certificate and also bypass/clear the
   // SSL session cache.
-  ssl_config_.client_cert = client_cert;
-  ssl_config_.send_client_cert = true;
+  SSLConfig* ssl_config = response_.cert_request_info->is_proxy ?
+      &proxy_ssl_config_ : &server_ssl_config_;
+  ssl_config->send_client_cert = true;
+  ssl_config->client_cert = client_cert;
   next_state_ = STATE_CREATE_STREAM;
   // Reset the other member variables.
   // Note: this is necessary only with SSL renegotiation.
@@ -1121,7 +1149,7 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
 // generated by the SSL proxy. http://crbug.com/69329
 int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
   DCHECK(request_);
-  if (ssl_config_.send_client_cert &&
+  if (server_ssl_config_.send_client_cert &&
       (error == ERR_SSL_PROTOCOL_ERROR || IsClientCertificateError(error))) {
     session_->ssl_client_auth_cache()->Remove(
         GetHostAndPort(request_->url));
@@ -1132,7 +1160,7 @@ int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
     case ERR_SSL_VERSION_OR_CIPHER_MISMATCH:
     case ERR_SSL_DECOMPRESSION_FAILURE_ALERT:
     case ERR_SSL_BAD_RECORD_MAC_ALERT:
-      if (ssl_config_.tls1_enabled) {
+      if (server_ssl_config_.tls1_enabled) {
         // This could be a TLS-intolerant server, an SSL 3.0 server that
         // chose a TLS-only cipher suite or a server with buggy DEFLATE
         // support. Turn off TLS 1.0, DEFLATE support and retry.

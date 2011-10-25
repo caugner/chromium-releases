@@ -92,6 +92,12 @@ class PolicyProvider : public ObservableProvider,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier) const;
 
+  virtual Value* GetContentSettingValue(
+      const GURL& primary_url,
+      const GURL& secondary_url,
+      ContentSettingsType content_type,
+      const ResourceIdentifier& resource_identifier) const;
+
   virtual void GetAllContentSettingsRules(
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
@@ -107,18 +113,12 @@ class PolicyProvider : public ObservableProvider,
                        const NotificationSource& source,
                        const NotificationDetails& details);
  private:
-  typedef Tuple5<
-      ContentSettingsPattern,
-      ContentSettingsPattern,
-      ContentSettingsType,
-      ResourceIdentifier,
-      ContentSetting> ContentSettingsRule;
-
-  typedef std::vector<ContentSettingsRule> ContentSettingsRules;
-
   void ReadManagedContentSettings(bool overwrite);
 
-  void GetContentSettingsFromPreferences(ContentSettingsRules* rules);
+  void GetContentSettingsFromPreferences(OriginIdentifierValueMap* rules);
+
+  void GetAutoSelectCertificateSettingsFromPreferences(
+      OriginIdentifierValueMap* value_map);
 
   void ReadManagedContentSettingsTypes(ContentSettingsType content_type);
 

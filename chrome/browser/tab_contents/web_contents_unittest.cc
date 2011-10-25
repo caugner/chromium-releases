@@ -11,8 +11,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/testing_pref_service.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
@@ -129,7 +129,7 @@ class TestInterstitialPage : public ChromeInterstitialPage {
  protected:
   virtual RenderViewHost* CreateRenderViewHost() {
     return new TestRenderViewHost(
-        SiteInstance::CreateSiteInstance(tab()->profile()),
+        SiteInstance::CreateSiteInstance(tab()->browser_context()),
         this, MSG_ROUTING_NONE);
   }
 
@@ -221,7 +221,8 @@ TEST_F(TabContentsTest, UpdateTitle) {
   content::LoadCommittedDetails details;
   controller().RendererDidNavigate(params, &details);
 
-  contents()->UpdateTitle(rvh(), 0, L"    Lots O' Whitespace\n");
+  contents()->UpdateTitle(rvh(), 0, ASCIIToUTF16("    Lots O' Whitespace\n"),
+                          base::i18n::LEFT_TO_RIGHT);
   EXPECT_EQ(ASCIIToUTF16("Lots O' Whitespace"), contents()->GetTitle());
 }
 
@@ -1713,7 +1714,7 @@ TEST_F(TabContentsTest, CopyStateFromAndPruneSourceInterstitial) {
   other_contents->ExpectSetHistoryLengthAndPrune(
       other_controller.GetEntryAtIndex(0)->site_instance(), 1,
       other_controller.GetEntryAtIndex(0)->page_id());
-  other_controller.CopyStateFromAndPrune(&controller(), false);
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // The merged controller should only have two entries: url1 and url2.
   ASSERT_EQ(2, other_controller.entry_count());
@@ -1756,7 +1757,7 @@ TEST_F(TabContentsTest, CopyStateFromAndPruneTargetInterstitial) {
   other_contents->ExpectSetHistoryLengthAndPrune(
       other_controller.GetEntryAtIndex(0)->site_instance(), 1,
       other_controller.GetEntryAtIndex(0)->page_id());
-  other_controller.CopyStateFromAndPrune(&controller(), false);
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // The merged controller should only have two entries: url1 and url2.
   ASSERT_EQ(2, other_controller.entry_count());

@@ -94,7 +94,7 @@ bool CopyTestCache(const std::string& name) {
 
 bool CheckCacheIntegrity(const FilePath& path, bool new_eviction) {
   scoped_ptr<disk_cache::BackendImpl> cache(new disk_cache::BackendImpl(
-      path, base::MessageLoopProxy::CreateForCurrentThread(), NULL));
+      path, base::MessageLoopProxy::current(), NULL));
   if (!cache.get())
     return false;
   if (new_eviction)
@@ -141,7 +141,7 @@ bool MessageLoopHelper::WaitUntilCacheIoFinished(int num_callbacks) {
   ExpectCallbacks(num_callbacks);
   // Create a recurrent timer of 50 mS.
   if (!timer_.IsRunning())
-    timer_.Start(TimeDelta::FromMilliseconds(50), this,
+    timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(50), this,
                  &MessageLoopHelper::TimerExpired);
   MessageLoop::current()->Run();
   return completed_;

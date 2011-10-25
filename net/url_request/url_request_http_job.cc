@@ -75,9 +75,11 @@ void AddAuthorizationHeader(
     }
     if (!signature.AddHttpInfo(method, request_uri, host, port))
       continue;
-    request_info->extra_headers.SetHeader(
-        HttpRequestHeaders::kAuthorization,
-        signature.GenerateAuthorizationHeader());
+    std::string authorization_header;
+    if (!signature.GenerateAuthorizationHeader(&authorization_header))
+      continue;
+    request_info->extra_headers.SetHeader(HttpRequestHeaders::kAuthorization,
+                                          authorization_header);
     return;  // Only add the first valid header.
   }
 }
@@ -264,13 +266,12 @@ URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
       packet_timing_enabled_(false),
       done_(false),
       bytes_observed_in_packets_(0),
-      packet_times_(),
       request_time_snapshot_(),
       final_packet_time_(),
-      observed_packet_count_(0),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           filter_context_(new HttpFilterContext(this))),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   ResetTimer();
 }
 
@@ -350,8 +351,7 @@ void URLRequestHttpJob::StartTransaction() {
     // If an extension blocks the request, we rely on the callback to
     // StartTransactionInternal().
     if (rv == ERR_IO_PENDING) {
-      request_->net_log().BeginEvent(
-          NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
+      SetBlockedOnDelegate();
       return;
     }
   }
@@ -359,14 +359,11 @@ void URLRequestHttpJob::StartTransaction() {
 }
 
 void URLRequestHttpJob::NotifyBeforeSendHeadersCallback(int result) {
-  request_->net_log().EndEvent(
-      NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
+  SetUnblockedOnDelegate();
 
   if (result == OK) {
     StartTransactionInternal();
   } else {
-    // TODO(battre): Allow passing information of the extension that canceled
-    // the event.
     request_->net_log().AddEvent(NetLog::TYPE_CANCELLED,
         make_scoped_refptr(new NetLogStringParameter("source", "delegate")));
     NotifyCanceled();
@@ -398,7 +395,7 @@ void URLRequestHttpJob::StartTransactionInternal() {
         &transaction_);
     if (rv == OK) {
       if (!URLRequestThrottlerManager::GetInstance()->enforce_throttling() ||
-          !throttling_entry_->IsDuringExponentialBackoff()) {
+          !throttling_entry_->ShouldRejectRequest(request_info_.load_flags)) {
         rv = transaction_->Start(
             &request_info_, &start_callback_, request_->net_log());
         start_time_ = base::TimeTicks::Now();
@@ -513,18 +510,33 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
   if (!request_)
     return;
 
+  CookieStore* cookie_store =
+      request_->context()->cookie_store();
+  if (cookie_store) {
+    cookie_store->GetCookieMonster()->GetAllCookiesForURLAsync(
+        request_->url(),
+        base::Bind(&URLRequestHttpJob::CheckCookiePolicyAndLoad,
+                   weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    DoStartTransaction();
+  }
+}
+
+void URLRequestHttpJob::CheckCookiePolicyAndLoad(
+    const CookieList& cookie_list) {
   bool allow = true;
   if ((request_info_.load_flags & LOAD_DO_NOT_SEND_COOKIES) ||
-      !CanGetCookies()) {
+      !CanGetCookies(cookie_list)) {
     allow = false;
   }
 
-  if (request_->context()->cookie_store() && allow) {
+  if (allow) {
     CookieOptions options;
     options.set_include_httponly();
     request_->context()->cookie_store()->GetCookiesWithInfoAsync(
         request_->url(), options,
-        base::Bind(&URLRequestHttpJob::OnCookiesLoaded, this));
+        base::Bind(&URLRequestHttpJob::OnCookiesLoaded,
+                   weak_ptr_factory_.GetWeakPtr()));
   } else {
     DoStartTransaction();
   }
@@ -543,7 +555,7 @@ void URLRequestHttpJob::OnCookiesLoaded(
 }
 
 void URLRequestHttpJob::DoStartTransaction() {
-  // We may have been canceled within CanGetCookies.
+  // We may have been canceled while retrieving cookies.
   if (GetStatus().is_success()) {
     StartTransaction();
   } else {
@@ -588,7 +600,8 @@ void URLRequestHttpJob::SaveNextCookie() {
         response_cookies_[response_cookies_save_index_], &options)) {
       request_->context()->cookie_store()->SetCookieWithOptionsAsync(
           request_->url(), response_cookies_[response_cookies_save_index_],
-          options, base::Bind(&URLRequestHttpJob::OnCookieSaved, this));
+          options, base::Bind(&URLRequestHttpJob::OnCookieSaved,
+                              weak_ptr_factory_.GetWeakPtr()));
       return;
     }
   }
@@ -725,7 +738,12 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
   // Clear the IO_PENDING status
   SetStatus(URLRequestStatus());
 
+#if defined(OFFICIAL_BUILD) && !defined(OS_ANDROID)
   // Take care of any mandates for public key pinning.
+  //
+  // Pinning is only enabled for official builds to make sure that others don't
+  // end up with pins that cannot be easily updated.
+  //
   // TODO(agl): we might have an issue here where a request for foo.example.com
   // merges into a SPDY connection to www.example.com, and gets a different
   // certificate.
@@ -742,13 +760,14 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
                 context_->ssl_config_service()))) {
       if (!domain_state.IsChainOfPublicKeysPermitted(
               ssl_info.public_key_hashes)) {
-        result = ERR_CERT_INVALID;
+        result = ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN;
         UMA_HISTOGRAM_BOOLEAN("Net.CertificatePinSuccess", false);
       } else {
         UMA_HISTOGRAM_BOOLEAN("Net.CertificatePinSuccess", true);
       }
     }
   }
+#endif
 
   if (result == OK) {
     SaveCookiesAndNotifyHeadersComplete();
@@ -878,6 +897,7 @@ void URLRequestHttpJob::Kill() {
   if (!transaction_.get())
     return;
 
+  weak_ptr_factory_.InvalidateWeakPtrs();
   DestroyTransaction();
   URLRequestJob::Kill();
 }
@@ -1187,6 +1207,12 @@ void URLRequestHttpJob::StopCaching() {
     transaction_->StopCaching();
 }
 
+void URLRequestHttpJob::DoneReading() {
+  if (transaction_.get())
+    transaction_->DoneReading();
+  DoneWithRequest(FINISHED);
+}
+
 HostPortPair URLRequestHttpJob::GetSocketAddress() const {
   return response_info_ ? response_info_->socket_address : HostPortPair();
 }
@@ -1230,36 +1256,24 @@ void URLRequestHttpJob::RecordTimer() {
   base::TimeDelta to_start = base::Time::Now() - request_creation_time_;
   request_creation_time_ = base::Time();
 
+  UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpTimeToFirstByte", to_start);
+
+  static const bool use_warm_socket_impact_histogram =
+      base::FieldTrialList::TrialExists("WarmSocketImpact");
+  if (use_warm_socket_impact_histogram) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        base::FieldTrial::MakeName("Net.HttpTimeToFirstByte",
+                                   "WarmSocketImpact"),
+        to_start);
+  }
+
   static const bool use_prefetch_histogram =
       base::FieldTrialList::TrialExists("Prefetch");
-
-  UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpTimeToFirstByte", to_start);
   if (use_prefetch_histogram) {
     UMA_HISTOGRAM_MEDIUM_TIMES(
         base::FieldTrial::MakeName("Net.HttpTimeToFirstByte",
                                    "Prefetch"),
         to_start);
-  }
-
-  const bool is_prerender = !!(request_info_.load_flags & LOAD_PRERENDERING);
-  if (is_prerender) {
-    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpTimeToFirstByte_Prerender",
-                               to_start);
-    if (use_prefetch_histogram) {
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          base::FieldTrial::MakeName("Net.HttpTimeToFirstByte_Prerender",
-                                     "Prefetch"),
-          to_start);
-    }
-  } else {
-    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpTimeToFirstByte_NonPrerender",
-                               to_start);
-    if (use_prefetch_histogram) {
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          base::FieldTrial::MakeName("Net.HttpTimeToFirstByte_NonPrerender",
-                                     "Prefetch"),
-          to_start);
-    }
   }
 }
 
@@ -1281,22 +1295,10 @@ void URLRequestHttpJob::UpdatePacketReadTimes() {
     return;  // No new bytes have arrived.
   }
 
+  final_packet_time_ = base::Time::Now();
   if (!bytes_observed_in_packets_)
     request_time_snapshot_ = request_ ? request_->request_time() : base::Time();
 
-  final_packet_time_ = base::Time::Now();
-  const size_t kTypicalPacketSize = 1430;
-  while (filter_input_byte_count() > bytes_observed_in_packets_) {
-    ++observed_packet_count_;
-    if (packet_times_.size() < kSdchPacketHistogramCount) {
-      packet_times_.push_back(final_packet_time_);
-      DCHECK_EQ(static_cast<size_t>(observed_packet_count_),
-                packet_times_.size());
-    }
-    bytes_observed_in_packets_ += kTypicalPacketSize;
-  }
-  // Since packets may not be full, we'll remember the number of bytes we've
-  // accounted for in packets thus far.
   bytes_observed_in_packets_ = filter_input_byte_count();
 }
 
@@ -1308,116 +1310,28 @@ void URLRequestHttpJob::RecordPacketStats(
   base::TimeDelta duration = final_packet_time_ - request_time_snapshot_;
   switch (statistic) {
     case FilterContext::SDCH_DECODE: {
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_Latency_F_a", duration,
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-      UMA_HISTOGRAM_COUNTS_100("Sdch3.Network_Decode_Packets_b",
-                               static_cast<int>(observed_packet_count_));
       UMA_HISTOGRAM_CUSTOM_COUNTS("Sdch3.Network_Decode_Bytes_Processed_b",
           static_cast<int>(bytes_observed_in_packets_), 500, 100000, 100);
-      if (packet_times_.empty())
-        return;
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_1st_To_Last_a",
-                                  final_packet_time_ - packet_times_[0],
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-
-      DCHECK_GT(kSdchPacketHistogramCount, 4u);
-      if (packet_times_.size() <= 4)
-        return;
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_1st_To_2nd_c",
-                                  packet_times_[1] - packet_times_[0],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_2nd_To_3rd_c",
-                                  packet_times_[2] - packet_times_[1],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_3rd_To_4th_c",
-                                  packet_times_[3] - packet_times_[2],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Decode_4th_To_5th_c",
-                                  packet_times_[4] - packet_times_[3],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
       return;
     }
     case FilterContext::SDCH_PASSTHROUGH: {
       // Despite advertising a dictionary, we handled non-sdch compressed
       // content.
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_Latency_F_a",
-                                  duration,
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-      UMA_HISTOGRAM_COUNTS_100("Sdch3.Network_Pass-through_Packets_b",
-                               observed_packet_count_);
-      if (packet_times_.empty())
-        return;
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_1st_To_Last_a",
-                                  final_packet_time_ - packet_times_[0],
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-      DCHECK_GT(kSdchPacketHistogramCount, 4u);
-      if (packet_times_.size() <= 4)
-        return;
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_1st_To_2nd_c",
-                                  packet_times_[1] - packet_times_[0],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_2nd_To_3rd_c",
-                                  packet_times_[2] - packet_times_[1],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_3rd_To_4th_c",
-                                  packet_times_[3] - packet_times_[2],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Network_Pass-through_4th_To_5th_c",
-                                  packet_times_[4] - packet_times_[3],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
       return;
     }
 
     case FilterContext::SDCH_EXPERIMENT_DECODE: {
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Decode",
+      UMA_HISTOGRAM_CUSTOM_TIMES("Sdch3.Experiment2_Decode",
                                   duration,
                                   base::TimeDelta::FromMilliseconds(20),
                                   base::TimeDelta::FromMinutes(10), 100);
-      // We already provided interpacket histograms above in the SDCH_DECODE
-      // case, so we don't need them here.
       return;
     }
     case FilterContext::SDCH_EXPERIMENT_HOLDBACK: {
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback",
+      UMA_HISTOGRAM_CUSTOM_TIMES("Sdch3.Experiment2_Holdback",
                                   duration,
                                   base::TimeDelta::FromMilliseconds(20),
                                   base::TimeDelta::FromMinutes(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_1st_To_Last_a",
-                                  final_packet_time_ - packet_times_[0],
-                                  base::TimeDelta::FromMilliseconds(20),
-                                  base::TimeDelta::FromMinutes(10), 100);
-
-      DCHECK_GT(kSdchPacketHistogramCount, 4u);
-      if (packet_times_.size() <= 4)
-        return;
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_1st_To_2nd_c",
-                                  packet_times_[1] - packet_times_[0],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_2nd_To_3rd_c",
-                                  packet_times_[2] - packet_times_[1],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_3rd_To_4th_c",
-                                  packet_times_[3] - packet_times_[2],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
-      UMA_HISTOGRAM_CLIPPED_TIMES("Sdch3.Experiment_Holdback_4th_To_5th_c",
-                                  packet_times_[4] - packet_times_[3],
-                                  base::TimeDelta::FromMilliseconds(1),
-                                  base::TimeDelta::FromSeconds(10), 100);
       return;
     }
     default:

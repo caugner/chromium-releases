@@ -11,8 +11,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/webdriver/commands/response.h"
-#include "chrome/test/webdriver/session.h"
-#include "chrome/test/webdriver/session_manager.h"
+#include "chrome/test/webdriver/webdriver_session.h"
 
 namespace webdriver {
 
@@ -56,13 +55,11 @@ void SessionWithID::ExecuteGet(Response* const response) {
 
   // Custom non-standard session info.
   temp_value->SetWithoutPathExpansion(
-      "chrome.chromedriverVersion", Value::CreateStringValue("1.0"));
-  temp_value->SetWithoutPathExpansion(
-      "chrome.automationVersion",
+      "chrome.chromedriverVersion",
       Value::CreateStringValue(chrome::kChromeVersion));
   temp_value->SetWithoutPathExpansion(
       "chrome.nativeEvents",
-      Value::CreateBooleanValue(session_->use_native_events()));
+      Value::CreateBooleanValue(session_->options().use_native_events));
 
   response->SetValue(temp_value);
 }

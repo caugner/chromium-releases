@@ -1031,22 +1031,6 @@
    fun:_ZN13PluginUpdater30GetPreferencesDataOnFileThreadEPv
 }
 {
-   bug_59243_a
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN20BrowserAccessibility6CreateEv
-   fun:_ZN24BrowserAccessibilityTest5SetUpEv
-}
-{
-   bug_59243_b
-   Memcheck:Leak
-   fun:_Znw*
-   ...
-   fun:_ZNSt3mapIiSbItN4base20string16_char_traitsESaItEESt4lessIiESaISt4pairIKiS3_EEEaSERKSA_
-   fun:_ZN20BrowserAccessibility10InitializeEP27BrowserAccessibilityManagerPS_iiRKN11webkit_glue16WebAccessibilityE
-   fun:_ZN24BrowserAccessibilityTest5SetUpEv
-}
-{
    bug_51682a
    Memcheck:Leak
    fun:malloc
@@ -1268,7 +1252,7 @@
    bug_64463
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN4base16MessageLoopProxy22CreateForCurrentThreadEv
+   fun:_ZN4base16MessageLoopProxy22currentEv
    fun:_ZN3net12CertVerifier7RequestC2EPS0_PNS_15X509CertificateERKSsiPNS_16CertVerifyResultEP14CallbackRunnerI6Tuple1IiEE
 }
 {
@@ -1605,7 +1589,7 @@
    fun:_ZN2ui14ResourceBundle18InitSharedInstanceERKSs
 }
 {
-   bug_80239
+   bug_80239_a
    Memcheck:Addr4
    ...
    fun:CGLCreateContext
@@ -1617,6 +1601,18 @@
    fun:_ZN14RenderViewHost16CreateRenderViewERKSbItN4base20string16_char_traitsESaItEE
    fun:_ZN11TabContents32CreateRenderViewForRenderManagerEP14RenderViewHost
    fun:_ZN21RenderViewHostManager14InitRenderViewEP14RenderViewHostRK15NavigationEntry
+}
+{
+   bug_80239_b
+   Memcheck:Addr1
+   ...
+   fun:CVDisplayLinkSetCurrentCGDisplayFromOpenGLContext
+   fun:-[AcceleratedPluginView initWithRenderWidgetHostViewMac:pluginHandle:]
+   fun:_ZN23RenderWidgetHostViewMac30AllocateFakePluginWindowHandleEbb
+   fun:_ZN23RenderWidgetHostViewMac21GetCompositingSurfaceEv
+   fun:_ZN16RenderWidgetHost21GetCompositingSurfaceEv
+   fun:_ZN14RenderViewHost16CreateRenderViewERKSbItN4base20string16_char_traitsESaItEE
+   fun:_ZN11TabContents32CreateRenderViewForRenderManagerEP14RenderViewHost
 }
 {
    bug_80811
@@ -1661,16 +1657,6 @@
    Memcheck:Leak
    ...
    fun:_ZN6webkit5npapi12_GLOBAL__N_119ReadPlistPluginInfoERK8FilePathP10__CFBundlePNS0_13WebPluginInfoE
-}
-{
-   bug_83979
-   Memcheck:Leak
-   fun:*alloc*
-   ...
-   fun:_ZN12_GLOBAL__N_125BookmarkBarFolderViewTest22GetFakeDragInfoForTypeEP8NSString
-   fun:_ZN12_GLOBAL__N_*BookmarkBarFolderViewTest_*_Test8TestBodyEv
-   fun:_ZN7testing8internal38HandleSehExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS4_FS3_vEPKc
-   fun:_ZN7testing8internal35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS4_FS3_vEPKc
 }
 {
    bug_84329
@@ -1730,29 +1716,192 @@
    fun:new_sem_from_pool
 }
 {
-   bug_89827
-   Memcheck:Leak
-   fun:calloc
-   fun:_internal_class_createInstanceFromZone
-   fun:_internal_class_createInstance
-   fun:+[NSObject allocWithZone:]
-   fun:+[NSObject alloc]
-   fun:-[PanelWindowControllerCocoa tabContentsView]
-   fun:-[PanelWindowControllerCocoa awakeFromNib]
-   fun:-[NSIBObjectData nibInstantiateWithOwner:topLevelObjects:]
-   fun:loadNib
-   fun:+[NSBundle(NSNibLoading) _loadNibFile:nameTable:withZone:ownerBundle:]
-   fun:+[NSBundle(NSNibLoading) loadNibFile:externalNameTable:withZone:]
-   fun:-[NSWindowController loadWindow]
-   fun:-[NSWindowController window]
-   fun:-[PanelWindowControllerCocoa revealAnimatedWithFrame:]
-   fun:_ZN23PanelBrowserWindowCocoa9ShowPanelEv
-   fun:_ZN5Panel4ShowEv
+   bug_90976
+   Memcheck:Addr2
+   ...
+   fun:_CFPropertyListCreateFromXMLData
+   fun:CFPropertyListCreateFromStream
+   fun:+[CFXPreferencesPropertyListSource createPlistFromFile:statInfo:]
+   fun:-[CFXPreferencesPropertyListSource synchronize]
+   fun:CFPreferencesSynchronize
+   fun:_CSBackupSettingsIsPathExcluded
+   fun:CSBackupIsItemExcluded
+   fun:pager_open_journal
+   fun:pager_write
+   fun:sqlite3PagerWrite
+   fun:newDatabase
+   fun:sqlite3BtreeBeginTrans
+   fun:sqlite3VdbeExec
+   fun:sqlite3Step
+   fun:sqlite3_step
+   fun:sqlite3_exec
+   fun:_ZN3sql10Connection7ExecuteEPKc
 }
 {
-   bug_89889
+   bug_91889_a
+   Memcheck:Addr4
+   fun:_ZN4base12_GLOBAL__N_122StackDumpSignalHandlerEiP9__siginfoP17__darwin_ucontext
+   obj:*
+   fun:IOCFUnserialize
+   fun:IORegistryEntrySearchCFProperty
+   fun:_ZN12_GLOBAL__N_121SearchPortForPropertyEjPK10__CFString
+   fun:_ZN12_GLOBAL__N_123CollectPCIVideoCardInfoEP7GPUInfo
+   fun:_ZN18gpu_info_collector30CollectPreliminaryGraphicsInfoEP7GPUInfo
+   fun:_ZN14GpuDataManagerC2Ev
+   fun:_ZN14GpuDataManagerC1Ev
+   fun:_ZN22DefaultSingletonTraitsI14GpuDataManagerE3NewEv
+   fun:_ZN9SingletonI14GpuDataManager22DefaultSingletonTraitsIS0_ES0_E3getEv
+   fun:_ZN14GpuDataManager11GetInstanceEv
+   fun:_ZN19GpuBlacklistUpdater17SetupOnFileThreadEv
+}
+{
+   bug_91889_b
+   Memcheck:Addr1
+   fun:IOCFUnserializeparse
+   fun:IOCFUnserialize
+   fun:IORegistryEntrySearchCFProperty
+   fun:_ZN12_GLOBAL__N_121SearchPortForPropertyEjPK10__CFString
+   fun:_ZN12_GLOBAL__N_123CollectPCIVideoCardInfoEP7GPUInfo
+   fun:_ZN18gpu_info_collector30CollectPreliminaryGraphicsInfoEP7GPUInfo
+   fun:_ZN14GpuDataManagerC2Ev
+   fun:_ZN14GpuDataManagerC1Ev
+   fun:_ZN22DefaultSingletonTraitsI14GpuDataManagerE3NewEv
+   fun:_ZN9SingletonI14GpuDataManager22DefaultSingletonTraitsIS0_ES0_E3getEv
+   fun:_ZN14GpuDataManager11GetInstanceEv
+   fun:_ZN19GpuBlacklistUpdater17SetupOnFileThreadEv
+}
+{
+   bug_91889_c
+   Memcheck:Addr4
+   fun:_ZN4base12_GLOBAL__N_122StackDumpSignalHandlerEiP9__siginfoP17__darwin_ucontext
+   obj:*
+   obj:*
+   fun:IOCFUnserialize
+   fun:IORegistryEntrySearchCFProperty
+   fun:_ZN12_GLOBAL__N_121SearchPortForPropertyEjPK10__CFString
+   fun:_ZN12_GLOBAL__N_123CollectPCIVideoCardInfoEP7GPUInfo
+   fun:_ZN18gpu_info_collector30CollectPreliminaryGraphicsInfoEP7GPUInfo
+   fun:_ZN14GpuDataManagerC2Ev
+   fun:_ZN14GpuDataManagerC1Ev
+   fun:_ZN22DefaultSingletonTraitsI14GpuDataManagerE3NewEv
+   fun:_ZN9SingletonI14GpuDataManager22DefaultSingletonTraitsIS0_ES0_E3getEv
+   fun:_ZN14GpuDataManager11GetInstanceEv
+   fun:_ZN19GpuBlacklistUpdater17SetupOnFileThreadEv
+}
+{
+   bug_91892
    Memcheck:Leak
+   fun:_Znw*
+   fun:sendSimpleEventToSelf
+   fun:aeInitializeFromHIToolbox
+   fun:INIT_AppleEvents
+   fun:_FirstEventTime
+   fun:RunCurrentEventLoopInMode
+   fun:ReceiveNextEventCommon
+   fun:BlockUntilNextEventMatchingListInMode
+   fun:_DPSNextEvent
+   fun:-[NSApplication nextEventMatchingMask:untilDate:inMode:dequeue:]
+   fun:-[NSApplication run]
+   fun:_ZN4base24MessagePumpNSApplication5DoRunEPNS_11MessagePump8DelegateE
+   fun:_ZN4base24MessagePumpCFRunLoopBase3RunEPNS_11MessagePump8DelegateE
+   fun:_ZN11MessageLoop11RunInternalEv
+   fun:_ZN11MessageLoop10RunHandlerEv
+   fun:_ZN11MessageLoop13RunAllPendingEv
+   fun:_ZN20InProcessBrowserTest23RunTestOnMainThreadLoopEv
+}
+{
+   bug_92579a
+   Memcheck:Addr4
+   fun:_ZN15CVCGDisplayLink17setCurrentDisplayEj
+   fun:CVDisplayLinkSetCurrentCGDisplayFromOpenGLContext
+}
+{
+   bug_92579b
+   Memcheck:Addr4
+   fun:_ZN15CVCGDisplayLink17setCurrentDisplayEj
+   fun:_ZN15CVCGDisplayLink18initWithCGDisplaysEPjlPi
+   fun:CVDisplayLinkCreateWithCGDisplays
+   fun:CVDisplayLinkCreateWithActiveCGDisplays
+}
+{
+   bug_92579c
+   Memcheck:Addr1
+   fun:IOCFUnserializeparse
+   fun:IOCFUnserialize
+   fun:IORegistryEntryCreateCFProperties
+   fun:_ZN15CVCGDisplayLink17setCurrentDisplayEj
+   fun:_ZN15CVCGDisplayLink18initWithCGDisplaysEPjlPi
+   fun:CVDisplayLinkCreateWithCGDisplays
+   fun:CVDisplayLinkCreateWithActiveCGDisplays
+   fun:-[AcceleratedPluginView initWithRenderWidgetHostViewMac:pluginHandle:]
+}
+{
+   bug_93036
+   Memcheck:Addr2
+   fun:+[NSPICTImageRep _verifyDataIsPICT:]
+   fun:+[NSImageRep imageRepClassForData:]
+   fun:-[NSImage initWithData:]
+   fun:_ZN2ui14ResourceBundle19GetNativeImageNamedEi
+   fun:-[BookmarkBarController initWithBrowser:initialWidth:delegate:resizeDelegate:]
+}
+{
+   bug_93038
+   Memcheck:Cond
+   fun:-[AvatarMenuBubbleController performLayout]
    ...
-   fun:+[NSObject alloc]
-   fun:-[PanelWindowControllerCocoa tabContentsView]
+   fun:*AvatarMenuBubbleControllerTest*
+}
+{
+   bug_93711_a
+   Memcheck:Leak
+   fun:malloc
+   fun:allocateBranchIsland
+   fun:mach_override_ptr
+}
+{
+   bug_93711_b
+   Memcheck:Param
+   msync(start)
+   fun:msync$UNIX2003
+   fun:mach_override_ptr
+}
+{
+   bug_93932_a
+   Memcheck:Overlap
+   fun:memcpy
+   fun:vp8_decode_update_thread_context
+   fun:update_context_from_thread
+   fun:submit_packet
+   fun:ff_thread_decode_frame
+   fun:avcodec_decode_video2
+   fun:_ZN5media23FFmpegVideoDecodeEngine11DecodeFrameE13scoped_refptrINS_6BufferEE
+   fun:_ZN5media23FFmpegVideoDecodeEngine18ConsumeVideoSampleE13scoped_refptrINS_6BufferEE
+   fun:_ZNK5media21DemuxCompleteActionP2IPNS_23FFmpegVideoDecodeEngineE13scoped_refptrINS_6BufferEEE10gmock_ImplIFvS5_EE17gmock_PerformImplIS5_N7testing8internal12ExcessiveArgESD_SD_SD_SD_SD_SD_SD_SD_EEvRKNSt3tr15tupleIS5_NSE_10_NullClassESG_SG_SG_SG_SG_SG_SG_SG_EET_T0_T1_T2_T3_T4_T5_T6_T7_T8_
+   fun:_ZN7testing8internal12ActionHelperIvN5media21DemuxCompleteActionP2IPNS2_23FFmpegVideoDecodeEngineE13scoped_refptrINS2_6BufferEEE10gmock_ImplIFvS8_EEEE7PerformIS8_EEvPSC_RKNSt3tr15tupleIT_NSG_10_NullClassESJ_SJ_SJ_SJ_SJ_SJ_SJ_SJ_EE
+   fun:_ZN5media21DemuxCompleteActionP2IPNS_23FFmpegVideoDecodeEngineE13scoped_refptrINS_6BufferEEE10gmock_ImplIFvS5_EE7PerformERKNSt3tr15tupleIS5_NSA_10_NullClassESC_SC_SC_SC_SC_SC_SC_SC_EE
+   fun:_ZNK7testing6ActionIFv13scoped_refptrIN5media6BufferEEEE7PerformERKNSt3tr15tupleIS4_NS7_10_NullClassES9_S9_S9_S9_S9_S9_S9_S9_EE
+   fun:_ZN7testing8internal18ActionResultHolderIvE13PerformActionIFv13scoped_refptrIN5media6BufferEEEEEPS2_RKNS_6ActionIT_EERKNS0_8FunctionISB_E13ArgumentTupleE
+   fun:_ZNK7testing8internal18FunctionMockerBaseIFv13scoped_refptrIN5media6BufferEEEE20UntypedPerformActionEPKvS9_
+   fun:_ZN7testing8internal25UntypedFunctionMockerBase17UntypedInvokeWithEPKv
+   fun:_ZN7testing8internal18FunctionMockerBaseIFv13scoped_refptrIN5media6BufferEEEE10InvokeWithERKNSt3tr15tupleIS5_NS8_10_NullClassESA_SA_SA_SA_SA_SA_SA_SA_EE
+   fun:_ZN7testing8internal14FunctionMockerIFv13scoped_refptrIN5media6BufferEEEE6InvokeES5_
+   fun:_ZN5media27FFmpegVideoDecodeEngineTest18ProduceVideoSampleE13scoped_refptrINS_6BufferEE
+   fun:_ZN5media23FFmpegVideoDecodeEngine9ReadInputEv
+   fun:_ZN5media23FFmpegVideoDecodeEngine17ProduceVideoFrameE13scoped_refptrINS_10VideoFrameEE
+   fun:_ZN5media27FFmpegVideoDecodeEngineTest21CallProduceVideoFrameEv
+   fun:_ZN5media55FFmpegVideoDecodeEngineTest_DecodeFrame_0ByteFrame_Test8TestBodyEv
+}
+{
+   bug_93932_b
+   Memcheck:Overlap
+   fun:memcpy
+   fun:vp8_decode_update_thread_context
+   fun:update_context_from_thread
+   fun:frame_thread_free
+   fun:avcodec_close
+   fun:_ZN5media23FFmpegVideoDecodeEngineD0Ev
+   fun:_ZN10scoped_ptrIN5media23FFmpegVideoDecodeEngineEE5resetEPS1_
+   fun:_ZN5media27FFmpegVideoDecodeEngineTestD2Ev
+   fun:_ZN5media51FFmpegVideoDecodeEngineTest_DecodeFrame_Normal_TestD0Ev
+   fun:_ZN7testing4Test11DeleteSelf_Ev
 }

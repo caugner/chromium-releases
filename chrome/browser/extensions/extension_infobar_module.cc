@@ -12,6 +12,7 @@
 #include "chrome/browser/extensions/extension_infobar_module_constants.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -33,6 +34,10 @@ bool ShowInfoBarFunction::RunImpl() {
   std::string html_path;
   EXTENSION_FUNCTION_VALIDATE(args->GetString(keys::kHtmlPath, &html_path));
 
+  int height = 0;
+  if (args->HasKey(keys::kHeight))
+    EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kHeight, &height));
+
   const Extension* extension = GetExtension();
   GURL url = extension->GetResourceURL(extension->url(), html_path);
 
@@ -52,9 +57,9 @@ bool ShowInfoBarFunction::RunImpl() {
     return false;
   }
 
-  tab_contents->AddInfoBar(
+  tab_contents->infobar_tab_helper()->AddInfoBar(
       new ExtensionInfoBarDelegate(browser, tab_contents->tab_contents(),
-                                   GetExtension(), url));
+                                   GetExtension(), url, height));
 
   // TODO(finnur): Return the actual DOMWindow object. Bug 26463.
   result_.reset(ExtensionTabUtil::CreateWindowValue(browser, false));

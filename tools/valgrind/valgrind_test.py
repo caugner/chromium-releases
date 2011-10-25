@@ -60,6 +60,7 @@ class BaseTool(object):
     # Defines Chromium-specific flags.
     self._parser = optparse.OptionParser("usage: %prog [options] <program to "
                                          "test>")
+    self._parser.disable_interspersed_args()
     self._parser.add_option("-t", "--timeout",
                       dest="timeout", metavar="TIMEOUT", default=10000,
                       help="timeout in seconds for the run (default 10000)")
@@ -712,17 +713,16 @@ class DrMemory(BaseTool):
                       help="Monitor python child processes.  If off, neither "
                       "python children nor any children of python children "
                       "will be monitored.")
+    parser.add_option("", "--indirect", action="store_true",
+                      default=False,
+                      help="set BROWSER_WRAPPER rather than "
+                           "running Dr. Memory directly on the harness")
     parser.add_option("", "--use_debug", action="store_true",
                       default=False, dest="use_debug",
                       help="Run Dr. Memory debug build")
-    # TODO(bruening): I want to add --extraops that can take extra
-    # args that are passed through to Dr. Memory, but the
-    # chrome_tests.bat and chrome_tests.py layers combined w/
-    # chrome_tests.py parsing makes it not work out in practice.  We
-    # should change chrome_tests.py to pass all unknown options
-    # through to valgrind_test.py so we don't need to use --tool_flags
-    # and quote it, and ditto w/ valgrind_test.py passing unknown
-    # options through to its tool.
+    parser.add_option("", "--trace_children", action="store_true",
+                            default=True,
+                            help="TODO: default value differs from Valgrind")
 
   def ToolCommand(self):
     """Get the tool command to run."""
@@ -733,6 +733,7 @@ class DrMemory(BaseTool):
     # tcmalloc (http://code.google.com/p/drmemory/issues/detail?id=314)
     add_env = {
       "CHROME_ALLOCATOR" : "WINHEAP",
+      "JSIMD_FORCEMMX"   : "1",  # http://code.google.com/p/drmemory/issues/detail?id=540
     }
     for k,v in add_env.iteritems():
       logging.info("export %s=%s", k, v)
@@ -800,7 +801,7 @@ class DrMemory(BaseTool):
 
     # Increase some Dr. Memory constants
     proc += ["-redzone_size", "16"]
-    proc += ["-callstack_max_frames", "30"]
+    proc += ["-callstack_max_frames", "40"]
 
     # Un-comment to ignore uninitialized accesses
     #proc += ["-no_check_uninitialized"]
@@ -808,12 +809,21 @@ class DrMemory(BaseTool):
     # Un-comment to ignore leaks
     #proc += ["-no_check_leaks", "-no_count_leaks"]
 
+    proc += self._tool_flags
+
     # Dr.Memory requires -- to separate tool flags from the executable name.
     proc += ["--"]
+
+    if self._options.indirect:
+      self.CreateBrowserWrapper(" ".join(proc))
+      proc = []
 
     # Note that self._args begins with the name of the exe to be run.
     proc += self._args
     return proc
+
+  def CreateBrowserWrapper(self, command):
+    os.putenv("BROWSER_WRAPPER", command)
 
   def Analyze(self, check_sanity=False):
     # Glob all the results files in the "testing.tmp" directory

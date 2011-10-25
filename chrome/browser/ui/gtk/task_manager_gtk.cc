@@ -29,6 +29,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -366,8 +367,8 @@ void TaskManagerGtk::OnItemsChanged(int start, int length) {
     SetRowDataFromModel(i, &iter);
     if (i != start + length - 1) {
       if (!gtk_tree_model_iter_next(GTK_TREE_MODEL(process_list_), &iter)) {
-        NOTREACHED() << "Can't get next GtkTreeIter object from process_list_ \
-            iterator at position " << i;
+        NOTREACHED() << "Can't get next GtkTreeIter object from process_list_ "
+                        "iterator at position " << i;
       }
     }
   }
@@ -476,7 +477,8 @@ void TaskManagerGtk::Init() {
   }
 
   gtk_dialog_add_button(GTK_DIALOG(dialog_),
-      l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL).c_str(),
+      gfx::ConvertAcceleratorsFromWindowsStyle(
+          l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL)).c_str(),
       kTaskManagerResponseKill);
 
   // The response button should not be sensitive when the dialog is first opened
@@ -497,7 +499,7 @@ void TaskManagerGtk::Init() {
   ConnectAccelerators();
 
   gtk_box_set_spacing(GTK_BOX(GTK_DIALOG(dialog_)->vbox),
-                      gtk_util::kContentAreaSpacing);
+                      ui::kContentAreaSpacing);
 
   destroy_handler_id_ = g_signal_connect(dialog_, "destroy",
                                          G_CALLBACK(OnDestroyThunk), this);

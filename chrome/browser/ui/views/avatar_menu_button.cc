@@ -6,23 +6,79 @@
 
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/profile_menu_model.h"
-#include "chrome/browser/ui/views/avatar_menu.h"
+#include "chrome/browser/ui/views/avatar_menu_bubble_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "ui/gfx/canvas_skia.h"
 #include "views/widget/widget.h"
+
+
+#if defined(OS_WIN)
+#include <shobjidl.h>
+#include "base/win/scoped_comptr.h"
+#include "base/win/windows_version.h"
+#include "skia/ext/image_operations.h"
+#include "ui/gfx/icon_util.h"
+#endif
 
 static inline int Round(double x) {
   return static_cast<int>(x + 0.5);
 }
 
+// The Windows 7 taskbar supports dynamic overlays and effects, we use this
+// to ovelay the avatar icon there. The overlay only applies if the taskbar
+// is in "default large icon mode". This function is a best effort deal so
+// we bail out silently at any error condition.
+// See http://msdn.microsoft.com/en-us/library/dd391696(VS.85).aspx for
+// more information.
+void DrawTaskBarDecoration(const Browser* browser, const SkBitmap* bitmap) {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return;
+  BrowserWindow* bw = browser->window();
+  if (!bw)
+    return;
+  gfx::NativeWindow window = bw->GetNativeHandle();
+  if (!window)
+    return;
+
+  base::win::ScopedComPtr<ITaskbarList3> taskbar;
+  HRESULT result = taskbar.CreateInstance(CLSID_TaskbarList, NULL,
+                                          CLSCTX_INPROC_SERVER);
+  if (FAILED(result) || FAILED(taskbar->HrInit()))
+    return;
+  HICON icon = NULL;
+  if (bitmap) {
+    // Since the target size is so small, we use our best resizer.
+    SkBitmap sk_icon = skia::ImageOperations::Resize(
+        *bitmap,
+        skia::ImageOperations::RESIZE_LANCZOS3,
+        16, 16);
+    icon = IconUtil::CreateHICONFromSkBitmap(sk_icon);
+    if (!icon)
+      return;
+  }
+  taskbar->SetOverlayIcon(window, icon, L"");
+  if (icon)
+    DestroyIcon(icon);
+#endif
+}
+
 AvatarMenuButton::AvatarMenuButton(Browser* browser, bool has_menu)
     : MenuButton(NULL, std::wstring(), this, false),
       browser_(browser),
-      has_menu_(has_menu) {
+      has_menu_(has_menu),
+      set_taskbar_decoration_(false) {
   // In RTL mode, the avatar icon should be looking the opposite direction.
   EnableCanvasFlippingForRTLUI(true);
 }
 
-AvatarMenuButton::~AvatarMenuButton() {}
+AvatarMenuButton::~AvatarMenuButton() {
+  // During destruction of the browser frame, we might not have a window
+  // so the taskbar button will be removed by windows anyway.
+  if (browser_->IsAttemptingToCloseBrowser())
+    return;
+  DrawTaskBarDecoration(browser_, NULL);
+}
 
 void AvatarMenuButton::OnPaint(gfx::Canvas* canvas) {
   const SkBitmap& icon = GetImageToPaint();
@@ -49,6 +105,13 @@ void AvatarMenuButton::OnPaint(gfx::Canvas* canvas) {
 
   canvas->DrawBitmapInt(icon, 0, 0, icon.width(), icon.height(),
       dst_x, dst_y, dst_width, dst_height, false);
+
+  if (set_taskbar_decoration_) {
+    // Drawing the taskbar decoration uses lanczos resizing so we really
+    // want to do it only once.
+    DrawTaskBarDecoration(browser_, &icon);
+    set_taskbar_decoration_ = false;
+  }
 }
 
 bool AvatarMenuButton::HitTest(const gfx::Point& point) const {
@@ -57,14 +120,28 @@ bool AvatarMenuButton::HitTest(const gfx::Point& point) const {
   return views::MenuButton::HitTest(point);
 }
 
+// If the icon changes, we need to set the taskbar decoration again.
+void AvatarMenuButton::SetIcon(const SkBitmap& icon) {
+  views::MenuButton::SetIcon(icon);
+  set_taskbar_decoration_ = true;
+}
+
 // views::ViewMenuDelegate implementation
 void AvatarMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
   if (!has_menu_)
     return;
 
-  menu_model_.reset(new ProfileMenuModel(browser_));
-  // The avatar menu will automatically delete itself when done.
-  AvatarMenu* avatar_menu =
-      new AvatarMenu(menu_model_.get(), browser_->profile());
-  avatar_menu->RunMenu(this);
+  BrowserView* browser_view = BrowserView::GetBrowserViewForNativeWindow(
+      browser_->window()->GetNativeHandle());
+
+  gfx::Point origin;
+  views::View::ConvertPointToScreen(this, &origin);
+  gfx::Rect bounds(0, 0, width(), height());
+  bounds.set_origin(origin);
+
+  AvatarMenuBubbleView* bubble_view = new AvatarMenuBubbleView(browser_);
+  // Bubble::Show() takes ownership of the view.
+  Bubble::Show(browser_view->GetWidget(), bounds,
+               views::BubbleBorder::TOP_LEFT,
+               bubble_view, bubble_view);
 }

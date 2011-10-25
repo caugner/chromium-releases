@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,7 +47,8 @@ class VisitedLinkUpdater {
     base::SharedMemoryHandle handle_for_process;
     table_memory->ShareToProcess(process->GetHandle(), &handle_for_process);
     if (base::SharedMemory::IsHandleValid(handle_for_process))
-      process->Send(new ViewMsg_VisitedLink_NewTable(handle_for_process));
+      process->Send(new ChromeViewMsg_VisitedLink_NewTable(
+          handle_for_process));
   }
 
   // Buffers |links| to update, but doesn't actually relay them.
@@ -83,7 +84,7 @@ class VisitedLinkUpdater {
       return;
 
     if (reset_needed_) {
-      process->Send(new ViewMsg_VisitedLink_Reset());
+      process->Send(new ChromeViewMsg_VisitedLink_Reset());
       reset_needed_ = false;
       return;
     }
@@ -91,7 +92,7 @@ class VisitedLinkUpdater {
     if (pending_.empty())
       return;
 
-    process->Send(new ViewMsg_VisitedLink_Add(pending_));
+    process->Send(new ChromeViewMsg_VisitedLink_Add(pending_));
 
     pending_.clear();
   }
@@ -108,7 +109,7 @@ VisitedLinkEventListener::VisitedLinkEventListener() {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 VisitedLinkEventListener::~VisitedLinkEventListener() {
@@ -122,7 +123,8 @@ void VisitedLinkEventListener::NewTable(base::SharedMemory* table_memory) {
   for (Updaters::iterator i = updaters_.begin(); i != updaters_.end(); ++i) {
     // Make sure to not send to incognito renderers.
     RenderProcessHost* process = RenderProcessHost::FromID(i->first);
-    VisitedLinkMaster* master = process->profile()->GetVisitedLinkMaster();
+    Profile* profile = Profile::FromBrowserContext(process->browser_context());
+    VisitedLinkMaster* master = profile->GetVisitedLinkMaster();
     if (master && master->shared_memory() == table_memory)
       i->second->SendVisitedLinkTable(table_memory);
   }
@@ -132,7 +134,7 @@ void VisitedLinkEventListener::Add(VisitedLinkMaster::Fingerprint fingerprint) {
   pending_visited_links_.push_back(fingerprint);
 
   if (!coalesce_timer_.IsRunning()) {
-    coalesce_timer_.Start(
+    coalesce_timer_.Start(FROM_HERE,
         TimeDelta::FromMilliseconds(kCommitIntervalMs), this,
         &VisitedLinkEventListener::CommitVisitedLinks);
   }
@@ -169,7 +171,9 @@ void VisitedLinkEventListener::Observe(int type,
 
       // Initialize support for visited links. Send the renderer process its
       // initial set of visited links.
-      VisitedLinkMaster* master = process->profile()->GetVisitedLinkMaster();
+      Profile* profile =
+          Profile::FromBrowserContext(process->browser_context());
+      VisitedLinkMaster* master = profile->GetVisitedLinkMaster();
       if (!master)
         return;
 

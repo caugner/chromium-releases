@@ -16,9 +16,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "build/build_config.h"
-#include "gpu/command_buffer/service/surface_manager.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
-#include "content/common/gpu/gpu_surface_stub.h"
 #include "content/common/message_router.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ui/gfx/gl/gl_share_group.h"
@@ -43,7 +41,6 @@ class GLSurface;
 // process. On the renderer side there's a corresponding GpuChannelHost.
 class GpuChannel : public IPC::Channel::Listener,
                    public IPC::Message::Sender,
-                   public gpu::SurfaceManager,
                    public base::RefCountedThreadSafe<GpuChannel> {
  public:
   // Takes ownership of the renderer process handle.
@@ -73,9 +70,9 @@ class GpuChannel : public IPC::Channel::Listener,
   }
 
   // IPC::Channel::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void OnChannelError();
-  virtual void OnChannelConnected(int32 peer_pid);
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
   // IPC::Message::Sender implementation:
   virtual bool Send(IPC::Message* msg);
@@ -112,9 +109,6 @@ class GpuChannel : public IPC::Channel::Listener,
   // Destroy channel and all contained contexts.
   void DestroySoon();
 
-  // Look up a GLSurface by ID. In this case the ID is the IPC routing ID.
-  virtual gfx::GLSurface* LookupSurface(int surface_id);
-
   // Get the TransportTexture by ID.
   TransportTexture* GetTransportTexture(int32 route_id);
 
@@ -122,10 +116,12 @@ class GpuChannel : public IPC::Channel::Listener,
   // TransportTexture to delete and detach itself.
   void DestroyTransportTexture(int32 route_id);
 
-  // A callback which is called after a Set/WaitLatch command is processed.
-  // The bool parameter will be true for SetLatch, and false for a WaitLatch
-  // that is blocked. An unblocked WaitLatch will not trigger a callback.
-  void OnLatchCallback(int route_id, bool is_set_latch);
+  // Generate a route ID guaranteed to be unique for this channel.
+  int GenerateRouteID();
+
+  // Called to add/remove a listener for a particular message routing ID.
+  void AddRoute(int32 route_id, IPC::Channel::Listener* listener);
+  void RemoveRoute(int32 route_id);
 
  private:
   void OnDestroy();
@@ -133,8 +129,6 @@ class GpuChannel : public IPC::Channel::Listener,
   bool OnControlMessageReceived(const IPC::Message& msg);
 
   void HandleDeferredMessages();
-
-  int GenerateRouteID();
 
   // Message handlers.
   void OnInitialize(base::ProcessHandle renderer_process);
@@ -144,11 +138,9 @@ class GpuChannel : public IPC::Channel::Listener,
       IPC::Message* reply_message);
   void OnDestroyCommandBuffer(int32 route_id, IPC::Message* reply_message);
 
-  void OnCreateOffscreenSurface(const gfx::Size& size,
-                                IPC::Message* reply_message);
-  void OnDestroySurface(int route_id);
-
   void OnCreateTransportTexture(int32 context_route_id, int32 host_id);
+
+  void OnEcho(const IPC::Message& message);
 
   // The lifetime of objects of this class is managed by a GpuChannelManager.
   // The GpuChannelManager destroy all the GpuChannels that they own when they
@@ -178,11 +170,6 @@ class GpuChannel : public IPC::Channel::Listener,
 #if defined(ENABLE_GPU)
   typedef IDMap<GpuCommandBufferStub, IDMapOwnPointer> StubMap;
   StubMap stubs_;
-
-  typedef IDMap<GpuSurfaceStub, IDMapOwnPointer> SurfaceMap;
-  SurfaceMap surfaces_;
-
-  std::set<int32> latched_routes_;
 #endif  // defined (ENABLE_GPU)
 
   // A collection of transport textures created.

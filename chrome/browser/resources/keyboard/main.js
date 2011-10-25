@@ -6,22 +6,6 @@
  * @fileoverview A simple virtual keyboard implementation.
  */
 
-// TODO(mazda): Support more virtual keyboards like French VK, German VK, etc.
-var KEYBOARDS = {
-  'us': {
-    'definition': KEYS_US,
-    'aspect': 3.15,
-    // No canvas.
-  },
-  'handwriting-vk': {
-    'definition': KEYS_HANDWRITING_VK,
-    'aspect': 2.1,
-    // TODO(yusukes): Stop special-casing canvas when mazda's i18n keyboard
-    // code is ready.
-    'canvas': null
-  }
-};
-
 /**
  * The keyboard layout name currently in use.
  * @type {string}
@@ -141,10 +125,11 @@ function initKeyboard(layout, element) {
   }
   var keyboardDiv = document.createElement('div');
   keyboardDiv.id = getKeyboardId(layout);
-  keyboardDiv.className = 'nodisplay';
+  keyboardDiv.className = 'keyboard';
   initRows(layout, keyboardDiv);
   initHandwritingCanvas(layout, keyboardDiv);
   keyboard['keyboardDiv'] = keyboardDiv;
+  window.onresize();
   element.appendChild(keyboardDiv);
 }
 
@@ -153,8 +138,7 @@ function initKeyboard(layout, element) {
  * @return {void}
  */
 window.onresize = function() {
-  var keyboardDiv = document.getElementById(getKeyboardId(
-      currentKeyboardLayout));
+  var keyboardDiv = KEYBOARDS[currentKeyboardLayout]['keyboardDiv'];
   var height = getKeyboardHeight();
   keyboardDiv.style.height = height + 'px';
   var mainDiv = document.getElementById('main');
@@ -181,14 +165,27 @@ window.onload = function() {
 
   window.onhashchange();
 
-  // Restore the keyboard to the default state when it is hidden.
-  // Ref: dvcs.w3.org/hg/webperf/raw-file/tip/specs/PageVisibility/Overview.html
-  document.addEventListener("webkitvisibilitychange", function() {
-    if (document.webkitHidden) {
-      currentMode = SHIFT_MODE;
-      setMode(currentMode);
+  chrome.experimental.input.onTextInputTypeChanged.addListener(function(type) {
+    switch(type) {
+      case "text":
+        currentMode = SHIFT_MODE;
+        break;
+      case "email":
+      case "password":
+      case "search":
+      case "url":
+        currentMode = KEY_MODE;
+        break;
+      case "number":
+      case "tel":
+        currentMode = NUMBER_MODE;
+        break;
+      default:
+        currentMode = KEY_MODE;
+        break;
     }
-  }, false);
+    setMode(currentMode);
+  });
 }
 // TODO(bryeung): would be nice to leave less gutter (without causing
 // rendering issues with floated divs wrapping at some sizes).

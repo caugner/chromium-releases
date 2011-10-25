@@ -5,6 +5,7 @@
 #include "chrome/browser/sessions/session_types.h"
 
 #include "base/string_util.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
@@ -65,6 +66,8 @@ NavigationEntry* TabNavigation::ToNavigationEntry(int page_id,
       // Use a transition type of reload so that we don't incorrectly
       // increase the typed count.
       PageTransition::RELOAD,
+      // The extra headers are not sync'ed across sessions.
+      std::string(),
       profile);
 
   entry->set_page_id(page_id);
@@ -113,19 +116,9 @@ SessionWindow::SessionWindow()
     : selected_tab_index(-1),
       type(Browser::TYPE_TABBED),
       is_constrained(true),
-      is_maximized(false) {
+      show_state(ui::SHOW_STATE_DEFAULT) {
 }
 
 SessionWindow::~SessionWindow() {
   STLDeleteElements(&tabs);
 }
-
-// SyncedSession --------------------------------------------------------------
-
-SyncedSession::SyncedSession() : session_tag("invalid") {
-}
-
-SyncedSession::~SyncedSession() {
-  STLDeleteElements(&windows);
-}
-

@@ -28,13 +28,14 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHTTPHeaderVisitor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoader.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/rect.h"
@@ -67,6 +68,7 @@ using WebKit::WebURL;
 using WebKit::WebURLError;
 using WebKit::WebURLLoader;
 using WebKit::WebURLLoaderClient;
+using WebKit::WebURLLoaderOptions;
 using WebKit::WebURLRequest;
 using WebKit::WebURLResponse;
 using WebKit::WebVector;
@@ -452,79 +454,6 @@ void WebPluginImpl::didFailLoadingFrameRequest(
       url, reason, reinterpret_cast<intptr_t>(notify_data));
 }
 
-bool WebPluginImpl::supportsPaginatedPrint() {
-  if (!delegate_)
-    return false;
-  return delegate_->PrintSupportsPrintExtension();
-}
-
-int WebPluginImpl::printBegin(const WebRect& printable_area, int printer_dpi) {
-  if (!delegate_)
-    return 0;
-
-  if (!supportsPaginatedPrint())
-    return 0;
-
-  return delegate_->PrintBegin(printable_area, printer_dpi);
-}
-
-bool WebPluginImpl::printPage(int page_number, WebCanvas* canvas) {
-  if (!delegate_)
-    return false;
-
-  return delegate_->PrintPage(page_number, canvas);
-}
-
-void WebPluginImpl::printEnd() {
-  if (delegate_)
-    delegate_->PrintEnd();
-}
-
-bool WebPluginImpl::hasSelection() const {
-  if (!delegate_)
-    return false;
-
-  return delegate_->HasSelection();
-}
-
-WebKit::WebString WebPluginImpl::selectionAsText() const {
-  if (!delegate_)
-    return WebString();
-
-  return delegate_->GetSelectionAsText();
-}
-
-WebKit::WebString WebPluginImpl::selectionAsMarkup() const {
-  if (!delegate_)
-    return WebString();
-
-  return delegate_->GetSelectionAsMarkup();
-}
-
-void WebPluginImpl::setZoomFactor(float scale, bool text_only) {
-  if (delegate_)
-    delegate_->SetZoomFactor(scale, text_only);
-}
-
-bool WebPluginImpl::startFind(const WebKit::WebString& search_text,
-                         bool case_sensitive,
-                         int identifier) {
-  if (!delegate_)
-    return false;
-  return delegate_->StartFind(search_text, case_sensitive, identifier);
-}
-
-void WebPluginImpl::selectFindResult(bool forward) {
-  if (delegate_)
-    delegate_->SelectFindResult(forward);
-}
-
-void WebPluginImpl::stopFind() {
-  if (delegate_)
-    delegate_->StopFind();
-}
-
-
 // -----------------------------------------------------------------------------
 
 WebPluginImpl::WebPluginImpl(
@@ -773,6 +702,11 @@ NPObject* WebPluginImpl::GetPluginElement() {
   return container_->scriptableObjectForElement();
 }
 
+bool WebPluginImpl::FindProxyForUrl(const GURL& url, std::string* proxy_list) {
+  // Proxy resolving doesn't work in single-process mode.
+  return false;
+}
+
 void WebPluginImpl::SetCookie(const GURL& url,
                               const GURL& first_party_for_cookies,
                               const std::string& cookie) {
@@ -803,10 +737,6 @@ std::string WebPluginImpl::GetCookies(const GURL& url,
   return UTF16ToUTF8(cookie_jar->cookies(url, first_party_for_cookies));
 }
 
-void WebPluginImpl::OnMissingPluginStatus(int status) {
-  NOTREACHED();
-}
-
 void WebPluginImpl::URLRedirectResponse(bool allow, int resource_id) {
   for (size_t i = 0; i < clients_.size(); ++i) {
     if (clients_[i].id == static_cast<unsigned long>(resource_id)) {
@@ -815,7 +745,8 @@ void WebPluginImpl::URLRedirectResponse(bool allow, int resource_id) {
           clients_[i].loader->setDefersLoading(false);
         } else {
           clients_[i].loader->cancel();
-          clients_[i].client->DidFail();
+          if (clients_[i].client)
+            clients_[i].client->DidFail();
         }
       }
       break;
@@ -1249,7 +1180,11 @@ bool WebPluginImpl::InitiateHTTPRequest(unsigned long resource_id,
 
   SetReferrer(&info.request, referrer_flag);
 
-  info.loader.reset(webframe_->createAssociatedURLLoader());
+  WebURLLoaderOptions options;
+  options.allowCredentials = true;
+  options.crossOriginRequestPolicy =
+      WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+  info.loader.reset(webframe_->createAssociatedURLLoader(options));
   if (!info.loader.get())
     return false;
   info.loader->loadAsynchronously(info.request, this);

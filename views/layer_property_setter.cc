@@ -4,7 +4,7 @@
 
 #include "views/layer_property_setter.h"
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/layer_animator.h"
@@ -41,11 +41,11 @@ void DefaultSetter::Uninstalled(ui::Layer* layer) {
 
 void DefaultSetter::SetTransform(ui::Layer* layer,
                                  const ui::Transform& transform) {
-  layer->set_transform(transform);
+  layer->SetTransform(transform);
 }
 
 void DefaultSetter::SetBounds(ui::Layer* layer, const gfx::Rect& bounds) {
-  layer->set_bounds(bounds);
+  layer->SetBounds(bounds);
 }
 
 // AnimatingSetter -------------------------------------------------------------

@@ -276,6 +276,8 @@ static GLES2Util::EnumToString enum_to_string_table[] = {
   { 0x84CF, "GL_TEXTURE15", },
   { 0x84CE, "GL_TEXTURE14", },
   { 0x84CD, "GL_TEXTURE13", },
+  { 0x83F3, "GL_COMPRESSED_RGBA_S3TC_DXT5_EXT", },
+  { 0x83F2, "GL_COMPRESSED_RGBA_S3TC_DXT3_EXT", },
   { 0x83F1, "GL_COMPRESSED_RGBA_S3TC_DXT1_EXT", },
   { 0x83F0, "GL_COMPRESSED_RGB_S3TC_DXT1_EXT", },
   { 0x8C0A, "GL_SGX_BINARY_IMG", },
@@ -344,9 +346,13 @@ static GLES2Util::EnumToString enum_to_string_table[] = {
   { 0x85B5, "GL_VERTEX_ARRAY_BINDING_OES", },
   { 0x8253, "GL_GUILTY_CONTEXT_RESET_ARB", },
   { 0x00200000, "GL_STENCIL_BUFFER_BIT5_QCOM", },
+  { 0x8D68, "GL_REQUIRED_TEXTURE_IMAGE_UNITS_OES", },
   { 0x8D61, "GL_HALF_FLOAT_OES", },
   { 0x8D62, "GL_RGB565", },
   { 0x8D64, "GL_ETC1_RGB8_OES", },
+  { 0x8D65, "GL_TEXTURE_EXTERNAL_OES", },
+  { 0x8D66, "GL_SAMPLER_EXTERNAL_OES", },
+  { 0x8D67, "GL_TEXTURE_BINDING_EXTERNAL_OES", },
   { 0x2800, "GL_TEXTURE_MAG_FILTER", },
   { 0x2801, "GL_TEXTURE_MIN_FILTER", },
   { 0x2802, "GL_TEXTURE_WRAP_S", },
@@ -723,6 +729,20 @@ std::string GLES2Util::GetStringGetMaxIndexType(uint32 value) {
     { GL_UNSIGNED_BYTE, "GL_UNSIGNED_BYTE" },
     { GL_UNSIGNED_SHORT, "GL_UNSIGNED_SHORT" },
     { GL_UNSIGNED_INT, "GL_UNSIGNED_INT" },
+  };
+  return GLES2Util::GetQualifiedEnumString(
+      string_table, arraysize(string_table), value);
+}
+
+std::string GLES2Util::GetStringGetTexParamTarget(uint32 value) {
+  static EnumToString string_table[] = {
+    { GL_TEXTURE_2D, "GL_TEXTURE_2D" },
+    { GL_TEXTURE_CUBE_MAP_POSITIVE_X, "GL_TEXTURE_CUBE_MAP_POSITIVE_X" },
+    { GL_TEXTURE_CUBE_MAP_NEGATIVE_X, "GL_TEXTURE_CUBE_MAP_NEGATIVE_X" },
+    { GL_TEXTURE_CUBE_MAP_POSITIVE_Y, "GL_TEXTURE_CUBE_MAP_POSITIVE_Y" },
+    { GL_TEXTURE_CUBE_MAP_NEGATIVE_Y, "GL_TEXTURE_CUBE_MAP_NEGATIVE_Y" },
+    { GL_TEXTURE_CUBE_MAP_POSITIVE_Z, "GL_TEXTURE_CUBE_MAP_POSITIVE_Z" },
+    { GL_TEXTURE_CUBE_MAP_NEGATIVE_Z, "GL_TEXTURE_CUBE_MAP_NEGATIVE_Z" },
   };
   return GLES2Util::GetQualifiedEnumString(
       string_table, arraysize(string_table), value);

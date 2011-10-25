@@ -26,10 +26,11 @@ namespace protocol {
 // interface does not need to depend on libjingle.
 class ContentDescription : public cricket::ContentDescription {
  public:
-  explicit ContentDescription(const CandidateSessionConfig* config,
-                              const std::string& auth_token,
-                              const std::string& master_key,
-                              const std::string& certificate);
+  static const char kChromotingContentName[];
+
+  ContentDescription(const CandidateSessionConfig* config,
+                     const std::string& auth_token,
+                     const std::string& certificate);
   virtual ~ContentDescription();
 
   const CandidateSessionConfig* config() const {
@@ -37,12 +38,11 @@ class ContentDescription : public cricket::ContentDescription {
   }
 
   const std::string& auth_token() const { return auth_token_; }
-  const std::string& master_key() const { return master_key_; }
   const std::string& certificate() const { return certificate_; }
 
   buzz::XmlElement* ToXml() const;
 
-  static cricket::ContentDescription* ParseXml(const buzz::XmlElement* element);
+  static ContentDescription* ParseXml(const buzz::XmlElement* element);
 
  private:
   scoped_ptr<const CandidateSessionConfig> candidate_config_;
@@ -50,9 +50,6 @@ class ContentDescription : public cricket::ContentDescription {
   // This may contain the initiating, or the accepting token depending on
   // context.
   std::string auth_token_;
-
-  // Master key used for the session encrypted with the hosts key.
-  std::string master_key_;
 
   std::string certificate_;
 };

@@ -15,6 +15,7 @@
 #include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/common/guid.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/browser/user_metrics.h"
@@ -425,7 +426,7 @@ std::string TemplateURLRef::ReplaceSearchTermsUsingTermsData(
         if (use_suggest_prefix) {
           static bool used_www = (base::FieldTrialList::FindFullName(
               "SuggestHostPrefix") == "Www_Prefix");
-          url.insert(i->index, used_www ? "cx=w&" : "cx=c&");
+          url.insert(i->index, used_www ? "gcx=w&" : "gcx=c&");
         }
         break;
       }
@@ -642,7 +643,8 @@ TemplateURL::TemplateURL()
       usage_count_(0),
       search_engine_type_(SEARCH_ENGINE_OTHER),
       logo_id_(kNoSearchEngineLogo),
-      prepopulate_id_(0) {
+      prepopulate_id_(0),
+      sync_guid_(guid::GenerateGUID()) {
 }
 
 TemplateURL::~TemplateURL() {
@@ -730,10 +732,7 @@ GURL TemplateURL::GetFaviconURL() const {
 
 void TemplateURL::SetPrepopulateId(int id) {
   prepopulate_id_ = id;
-  if (id > 0)
-    SetTemplateURLRefsPrepopulated(true);
-  else
-    SetTemplateURLRefsPrepopulated(false);
+  SetTemplateURLRefsPrepopulated(id > 0);
 }
 
 void TemplateURL::InvalidateCachedValues() const {

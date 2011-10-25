@@ -33,7 +33,7 @@ class RendererHistogram;
 class RendererHistogramSnapshots;
 class RenderProcessObserver;
 class RendererNetPredictor;
-class RendererWebKitClientImpl;
+class RendererWebKitPlatformSupportImpl;
 class SkBitmap;
 class VideoCaptureImplManager;
 class WebDatabaseObserverImpl;
@@ -236,6 +236,9 @@ class RenderThread : public RenderThreadBase,
   // Returns true iff the extension is registered.
   bool IsRegisteredExtension(const std::string& v8_extension_name) const;
 
+  // We initialize WebKit as late as possible.
+  void EnsureWebKitInitialized();
+
  private:
   virtual bool OnControlMessageReceived(const IPC::Message& msg);
 
@@ -251,14 +254,11 @@ class RenderThread : public RenderThreadBase,
   void OnNetworkStateChanged(bool online);
   void OnGetAccessibilityTree();
 
-  // We initialize WebKit as late as possible.
-  void EnsureWebKitInitialized();
-
   // These objects live solely on the render thread.
   scoped_ptr<ScopedRunnableMethodFactory<RenderThread> > task_factory_;
   scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;
   scoped_ptr<IndexedDBDispatcher> indexed_db_dispatcher_;
-  scoped_ptr<RendererWebKitClientImpl> webkit_client_;
+  scoped_ptr<RendererWebKitPlatformSupportImpl> webkit_platform_support_;
   scoped_ptr<WebKit::WebStorageEventDispatcher> dom_storage_event_dispatcher_;
 
   // Used on the renderer and IPC threads.

@@ -137,15 +137,6 @@ void WebCacheManager::ObserveStats(int renderer_id,
   entry->second.liveSize = stats.liveSize;
   entry->second.maxDeadCapacity = stats.maxDeadCapacity;
   entry->second.minDeadCapacity = stats.minDeadCapacity;
-
-  // trigger notification
-  WebCache::UsageStats stats_details(stats);
-  // &stats_details is only valid during the notification.
-  // See notification_types.h.
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_WEB_CACHE_STATS_OBSERVED,
-      Source<RenderProcessHost>(RenderProcessHost::FromID(renderer_id)),
-      Details<WebCache::UsageStats>(&stats_details));
 }
 
 void WebCacheManager::SetGlobalSizeLimit(size_t bytes) {
@@ -322,9 +313,9 @@ void WebCacheManager::EnactStrategy(const AllocationStrategy& strategy) {
       // capacity lower.
       size_t max_dead_capacity = capacity;
 
-      host->Send(new ViewMsg_SetCacheCapacities(min_dead_capacity,
-                                                max_dead_capacity,
-                                                capacity));
+      host->Send(new ChromeViewMsg_SetCacheCapacities(min_dead_capacity,
+                                                      max_dead_capacity,
+                                                      capacity));
     }
     ++allocation;
   }
@@ -335,7 +326,7 @@ void WebCacheManager::ClearRendederCache(const std::set<int>& renderers) {
   for (; iter != renderers.end(); ++iter) {
     RenderProcessHost* host = RenderProcessHost::FromID(*iter);
     if (host)
-      host->Send(new ViewMsg_ClearCache());
+      host->Send(new ChromeViewMsg_ClearCache());
   }
 }
 

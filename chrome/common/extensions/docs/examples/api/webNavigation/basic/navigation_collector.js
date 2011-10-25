@@ -109,7 +109,8 @@ NavigationCollector.NavigationQualifier = {
 /**
  * @typedef {{url: string, transitionType: NavigationCollector.NavigationType,
  *     transitionQualifier: Array.<NavigationCollector.NavigationQualifier>,
- *     openedInNewTab: boolean, sourceUrl: ?string, duration: number}}
+ *     openedInNewTab: boolean, source: {frameId: ?number, tabId: ?number},
+ *     duration: number}}
  */
 NavigationCollector.Request;
 
@@ -119,21 +120,22 @@ NavigationCollector.prototype = {
   /**
    * Returns a somewhat unique ID for a given WebNavigation request.
    *
-   * @param {!{tabId: number, frameId: number, url: string}} data Information
+   * @param {!{tabId: ?number, frameId: ?number}} data Information
    *     about the navigation event we'd like an ID for.
-   * @return {!string} ID created by combining the tab ID and frame ID (as the
-   *     API ensures that these will be unique across a single navigation
-   *     event)
+   * @return {!string} ID created by combining the source tab ID and frame ID
+   *     (or target tab/frame IDs if there's no source), as the API ensures
+   *     that these will be unique across a single navigation event.
    * @private
    */
   parseId_: function(data) {
-    return data.tabId + '-' + data.frameId;
+    return data.tabId + '-' + (data.frameId ? data.frameId : 0);
   },
 
 
   /**
-   * Creates an empty entry in the pending array, and prepopulates the
-   * errored and completed arrays for ease of insertion later.
+   * Creates an empty entry in the pending array if one doesn't already exist,
+   * and prepopulates the errored and completed arrays for ease of insertion
+   * later.
    *
    * @param {!string} id The request's ID, as produced by parseId_.
    * @param {!string} url The request's URL.
@@ -141,7 +143,10 @@ NavigationCollector.prototype = {
   prepareDataStorage_: function(id, url) {
     this.pending_[id] = this.pending_[id] || {
       openedInNewTab: false,
-      sourceUrl: null,
+      source: {
+        frameId: null,
+        tabId: null
+      },
       start: null,
       transitionQualifiers: [],
       transitionType: null
@@ -153,7 +158,7 @@ NavigationCollector.prototype = {
 
   /**
    * Handler for the 'onBeforeRetarget' event. Updates the pending request
-   * with a sourceUrl, and notes that it was opened in a new tab.
+   * with a source frame/tab, and notes that it was opened in a new tab.
    *
    * Pushes the request onto the
    * 'pending_' object, and stores it for later use.
@@ -164,8 +169,11 @@ NavigationCollector.prototype = {
   onBeforeRetargetListener_: function(data) {
     var id = this.parseId_(data);
     this.prepareDataStorage_(id, data.url);
-    this.pending_[id].openedInNewTab = true;
-    this.pending_[id].sourceUrl = data.sourceUrl;
+    this.pending_[id].openedInNewTab = data.tabId;
+    this.pending_[id].source = {
+      tabId: data.sourceTabId,
+      frameId: data.sourceFrameId
+    };
     this.pending_[id].start = data.timeStamp;
   },
 
@@ -202,6 +210,7 @@ NavigationCollector.prototype = {
           data.url,
           data);
     } else {
+      this.prepareDataStorage_(id, data.url);
       this.pending_[id].transitionType = data.transitionType;
       this.pending_[id].transitionQualifiers =
           data.transitionQualifiers;
@@ -228,7 +237,7 @@ NavigationCollector.prototype = {
       this.completed_[data.url].push({
         duration: (data.timeStamp - this.pending_[id].start),
         openedInNewWindow: this.pending_[id].openedInNewWindow,
-        sourceUrl: this.pending_[id].sourceUrl,
+        source: this.pending_[id].source,
         transitionQualifiers: this.pending_[id].transitionQualifiers,
         transitionType: this.pending_[id].transitionType,
         url: data.url
@@ -254,10 +263,11 @@ NavigationCollector.prototype = {
           data.url,
           data);
     } else {
+      this.prepareDataStorage_(id, data.url);
       this.errored_[data.url].push({
         duration: (data.timeStamp - this.pending_[id].start),
         openedInNewWindow: this.pending_[id].openedInNewWindow,
-        sourceUrl: this.pending_[id].sourceUrl,
+        source: this.pending_[id].source,
         transitionQualifiers: this.pending_[id].transitionQualifiers,
         transitionType: this.pending_[id].transitionType,
         url: data.url
@@ -348,7 +358,7 @@ NavigationCollector.prototype = {
     // Convert the 'completed_' object to an array.
     for (var x in list) {
       avg = 0;
-      if (list.hasOwnProperty(x)) {
+      if (list.hasOwnProperty(x) && list[x].length) {
         list[x].forEach(function(o) {
           avg += o.duration;
         });

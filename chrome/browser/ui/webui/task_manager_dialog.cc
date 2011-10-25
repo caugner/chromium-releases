@@ -6,12 +6,18 @@
 
 #include "base/memory/singleton.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/url_constants.h"
 #include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "views/widget/widget.h"
+#endif
 
 class TaskManagerDialogImpl : public HtmlDialogUIDelegate {
  public:
@@ -27,38 +33,38 @@ class TaskManagerDialogImpl : public HtmlDialogUIDelegate {
   void OnCloseDialog();
 
   // Overridden from HtmlDialogUIDelegate:
-  virtual bool IsDialogModal() const {
+  virtual bool IsDialogModal() const OVERRIDE {
     return false;
   }
-  virtual std::wstring GetDialogTitle() const {
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_TITLE));
+  virtual string16 GetDialogTitle() const OVERRIDE {
+    return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_TITLE);
   }
-  virtual GURL GetDialogContentURL() const {
+  virtual GURL GetDialogContentURL() const OVERRIDE {
     std::string url_string(chrome::kChromeUITaskManagerURL);
     if (is_background_page_mode_)
       url_string += "#bg";
     return GURL(url_string);
   }
   virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const {
+      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE {
   }
-  virtual void GetDialogSize(gfx::Size* size) const {
+  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE {
     size->SetSize(640, 480);
   }
-  virtual std::string GetDialogArgs() const {
+  virtual std::string GetDialogArgs() const OVERRIDE {
     return std::string();
   }
-  virtual void OnDialogClosed(const std::string& json_retval) {
+  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE {
     OnCloseDialog();
   }
-  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog) {
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog)
+      OVERRIDE {
     *out_close_dialog = true;
-    OnCloseDialog();
   }
-  virtual bool ShouldShowDialogTitle() const {
+  virtual bool ShouldShowDialogTitle() const OVERRIDE {
     return false;
   }
-  virtual bool HandleContextMenu(const ContextMenuParams& params) {
+  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE {
     return true;
   }
 
@@ -66,7 +72,9 @@ class TaskManagerDialogImpl : public HtmlDialogUIDelegate {
   void ShowDialog(bool is_background_page_mode);
   void OpenHtmlDialog();
 
-  bool is_shown_;
+  int show_count_;
+
+  gfx::NativeWindow window_;
   bool is_background_page_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerDialogImpl);
@@ -82,7 +90,9 @@ TaskManagerDialogImpl* TaskManagerDialogImpl::GetInstance() {
 }
 
 TaskManagerDialogImpl::TaskManagerDialogImpl()
-    : is_shown_(false), is_background_page_mode_(false) {
+    : show_count_(0),
+      window_(NULL),
+      is_background_page_mode_(false) {
 }
 
 TaskManagerDialogImpl::~TaskManagerDialogImpl() {
@@ -96,22 +106,29 @@ void TaskManagerDialogImpl::Show(bool is_background_page_mode) {
 }
 
 void TaskManagerDialogImpl::ShowDialog(bool is_background_page_mode) {
-  // TODO(yoshiki): Brings up existing UI when called with is_shown_ == TRUE
-  if (!is_shown_) {
-    is_shown_ = true;
-    is_background_page_mode_ = is_background_page_mode;
-    OpenHtmlDialog();
+  if (show_count_ > 0) {
+#if defined(OS_CHROMEOS)
+    // Closes current TaskManager and Opens new one.
+    views::Widget::GetWidgetForNativeWindow(window_)->Close();
+#else
+    // TODO(yoshiki): Supports the other platforms.
+    platform_util::ActivateWindow(window_);
+    return;
+#endif
   }
+  is_background_page_mode_ = is_background_page_mode;
+  OpenHtmlDialog();
+  ++show_count_;
 }
 
 void TaskManagerDialogImpl::OnCloseDialog() {
-  if (is_shown_)
-    is_shown_ = false;
+  if (show_count_ > 0)
+    --show_count_;
 }
 
 void TaskManagerDialogImpl::OpenHtmlDialog() {
   Browser* browser = BrowserList::GetLastActive();
-  browser->BrowserShowHtmlDialog(this, NULL);
+  window_ = browser->BrowserShowHtmlDialog(this, NULL);
 }
 
 // ****************************************************

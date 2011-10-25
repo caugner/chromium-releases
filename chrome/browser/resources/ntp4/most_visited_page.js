@@ -39,6 +39,10 @@ cr.define('ntp4', function() {
       return this.tile.index;
     },
 
+    get data() {
+      return this.data_;
+    },
+
     /**
      * Clears the DOM hierarchy for this node, setting it back to the default
      * for a blank thumbnail.
@@ -57,9 +61,10 @@ cr.define('ntp4', function() {
           '<div class="color-stripe"></div>' +
           '<span class="title"></span>';
 
-      this.tabIndex = -1;
+      this.removeAttribute('tabIndex');
       this.data_ = null;
       this.removeAttribute('id');
+      this.title = '';
     },
 
     /**
@@ -67,6 +72,12 @@ cr.define('ntp4', function() {
      * @param {Object} data A dictionary of relevant data for the page.
      */
     updateForData: function(data) {
+      if (this.classList.contains('blacklisted') && data) {
+        // Animate appearance of new tile.
+        this.classList.add('new-tile-contents');
+      }
+      this.classList.remove('blacklisted');
+
       if (!data || data.filler) {
         if (this.data_)
           this.reset();
@@ -74,37 +85,42 @@ cr.define('ntp4', function() {
       }
 
       var id = tileID++;
-      this.setAttribute('id', 'tile' + id);
+      this.id = 'most-visited-tile-' + id;
       this.data_ = data;
+      // TODO(estade): this shouldn't be focusable if the page isn't showing.
       this.tabIndex = 0;
-      this.classList.remove('filler');
 
       var faviconDiv = this.querySelector('.favicon');
       var faviconUrl = data.faviconUrl ||
-          'chrome://favicon/size/32/' + data.url;
+          'chrome://favicon/size/16/' + data.url;
       faviconDiv.style.backgroundImage = url(faviconUrl);
       faviconDiv.dir = data.direction;
       if (data.faviconDominantColor)
-        this.setStripeColor(data.faviconDominantColor);
+        this.stripeColor = data.faviconDominantColor;
       else
-        chrome.send('getFaviconDominantColor', [faviconUrl, id]);
+        chrome.send('getFaviconDominantColor', [faviconUrl, this.id]);
 
       var title = this.querySelector('.title');
       title.textContent = data.title;
       title.dir = data.direction;
+
+      // Sets the tooltip.
+      this.title = data.title;
 
       var thumbnailUrl = data.thumbnailUrl || 'chrome://thumb/' + data.url;
       this.querySelector('.thumbnail').style.backgroundImage =
           url(thumbnailUrl);
 
       this.href = data.url;
+
+      this.classList.remove('filler');
     },
 
     /**
      * Sets the color of the favicon dominant color bar.
      * @param {string} color The css-parsable value for the color.
      */
-    setStripeColor: function(color) {
+    set stripeColor(color) {
       this.querySelector('.color-stripe').style.backgroundColor = color;
     },
 
@@ -117,6 +133,14 @@ cr.define('ntp4', function() {
         this.blacklist_();
         e.preventDefault();
       } else {
+        // Records an app launch from the most visited page (Chrome will decide
+        // whether the url is an app). TODO(estade): this only works for clicks;
+        // other actions like "open in new tab" from the context menu won't be
+        // recorded. Can this be fixed?
+        chrome.send('recordAppLaunchByURL',
+                    [encodeURIComponent(this.href),
+                     ntp4.APP_LAUNCH.NTP_MOST_VISITED]);
+        // Records the index of this tile.
         chrome.send('recordInHistogram', ['NTP_MostVisited', this.index, 8]);
       }
     },
@@ -139,6 +163,7 @@ cr.define('ntp4', function() {
       chrome.send('blacklistURLFromMostVisited', [this.data_.url]);
       this.reset();
       chrome.send('getMostVisited');
+      this.classList.add('blacklisted');
     },
 
     showUndoNotification_: function() {
@@ -180,6 +205,41 @@ cr.define('ntp4', function() {
       this.style.right = x + 'px';
       this.style.top = y + 'px';
     },
+
+    /**
+     * Returns whether this element can be 'removed' from chrome (i.e. whether
+     * the user can drag it onto the trash and expect something to happen).
+     * @return {boolean} True, since most visited pages can always be
+     *     blacklisted.
+     */
+    canBeRemoved: function() {
+      return true;
+    },
+
+    /**
+     * Removes this element from chrome, i.e. blacklists it.
+     */
+    removeFromChrome: function() {
+      this.blacklist_();
+      this.parentNode.classList.add('finishing-drag');
+    },
+
+    /**
+     * Called when a drag of this tile has ended (after all animations have
+     * finished).
+     */
+    finalizeDrag: function() {
+      this.parentNode.classList.remove('finishing-drag');
+    },
+
+    /**
+     * Called when a drag is starting on the tile. Updates dataTransfer with
+     * data for this tile (for dragging outside of the NTP).
+     */
+    setDragData: function(dataTransfer) {
+      dataTransfer.setData('Text', this.data_.title);
+      dataTransfer.setData('URL', this.data_.url);
+    },
   };
 
   var mostVisitedPageGridValues = {
@@ -188,11 +248,13 @@ cr.define('ntp4', function() {
     // The most tiles we will show in a row.
     maxColCount: 4,
 
-    // TODO(estade): Change these to real values.
     // The smallest a tile can be.
-    minTileWidth: 200,
-    // The biggest a tile can be.
-    maxTileWidth: 240,
+    minTileWidth: 122,
+    // The biggest a tile can be. 212 (max thumbnail width) + 2.
+    maxTileWidth: 214,
+
+    // The padding between tiles, as a fraction of the tile width.
+    tileSpacingFraction: 1 / 8,
   };
   TilePage.initGridValues(mostVisitedPageGridValues);
 
@@ -202,8 +264,8 @@ cr.define('ntp4', function() {
    * @return {number} The height.
    */
   function heightForWidth(width) {
-    // The 2s are for borders, the 23 is for the title.
-    return (width - 2) * 132 / 212 + 2 + 23;
+    // The 2s are for borders, the 31 is for the title.
+    return (width - 2) * 132 / 212 + 2 + 31;
   }
 
   var THUMBNAIL_COUNT = 8;
@@ -263,6 +325,8 @@ cr.define('ntp4', function() {
       return this.data_;
     },
     set data(data) {
+      var startTime = Date.now();
+
       // The first time data is set, create the tiles.
       if (!this.data_) {
         this.createTiles_();
@@ -272,6 +336,7 @@ cr.define('ntp4', function() {
       }
 
       this.updateTiles_();
+      logEvent('mostVisited.layout: ' + (Date.now() - startTime));
     },
 
     /** @inheritDoc */
@@ -354,15 +419,8 @@ cr.define('ntp4', function() {
     return oldData;
   };
 
-  function setFaviconDominantColor(id, color) {
-    var tile = $('tile' + id);
-    if (tile)
-      tile.setStripeColor(color);
-  };
-
   return {
     MostVisitedPage: MostVisitedPage,
     refreshData: refreshData,
-    setFaviconDominantColor: setFaviconDominantColor,
   };
 });

@@ -16,14 +16,14 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/download/drag_download_file.h"
-#include "chrome/browser/download/drag_download_util.h"
 #include "chrome/browser/tab_contents/web_drag_source_win.h"
 #include "chrome/browser/tab_contents/web_drag_utils_win.h"
 #include "chrome/browser/tab_contents/web_drop_target_win.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_win.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/drag_download_file.h"
+#include "content/browser/download/drag_download_util.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "net/base/net_util.h"
 #include "views/drag_utils.h"
@@ -230,7 +230,7 @@ void TabContentsDragWin::PrepareDragForFileContents(
   if (file_name.value().empty()) {
     // Retrieve the name from the URL.
     file_name = FilePath(
-        net::GetSuggestedFilename(drop_data.url, "", "", "", string16()));
+        net::GetSuggestedFilename(drop_data.url, "", "", "", "", string16()));
     if (file_name.value().size() + drop_data.file_extension.size() + 1 >
         MAX_PATH) {
       file_name = FilePath(file_name.value().substr(

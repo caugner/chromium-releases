@@ -70,15 +70,21 @@ podrow {
 }
 
 .name {
-  -webkit-transition: all .8s ease;
+  -webkit-transition: opacity .8s ease;
   color: #565656;
   font-weight: bold;
   font-size: 15px;
+  overflow: hidden;
   text-align: center;
+  text-overflow: ellipsis;
 }
 
 .name.init {
   opacity: 0;
+}
+
+.pod.focused .name {
+  visibility: hidden;
 }
 
 .pod input[type='password'] {
@@ -117,7 +123,8 @@ podrow {
   outline: none;
 }
 
-.pod .enter-guest-button {
+.pod .enter-guest-button,
+.pod .signin-button {
   box-sizing: border-box;
   height: 24px;
   width: 94px;
@@ -129,7 +136,8 @@ podrow {
   visibility: hidden;
 }
 
-.pod.focused .enter-guest-button {
+.pod.focused .enter-guest-button,
+.pod.focused .signin-button {
   opacity: 1;
   visibility: visible;
 }

@@ -46,7 +46,7 @@ class MockSignedSettingsHelperCallback : public SignedSettingsHelper::Callback {
       const std::string& value));
 };
 
-class SignedSettingsHelperTest : public ::testing::Test,
+class SignedSettingsHelperTest : public testing::Test,
                                  public SignedSettingsHelper::TestDelegate {
  public:
   SignedSettingsHelperTest()

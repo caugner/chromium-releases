@@ -19,6 +19,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
@@ -141,7 +142,7 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
   g_extension_ids_offset = g_custom_entries->size();
   for (int i = 0; i < kMaxReportedActiveExtensions; ++i) {
     g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
-        StringPrintf(L"extension-%i", i + 1).c_str(), L""));
+        base::StringPrintf(L"extension-%i", i + 1).c_str(), L""));
   }
 
   // Add empty values for the gpu_info. We'll put the actual values
@@ -177,7 +178,7 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
     g_url_chunks_offset = g_custom_entries->size();
     for (int i = 0; i < kMaxUrlChunks; ++i) {
       g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
-          StringPrintf(L"url-chunk-%i", i + 1).c_str(), L""));
+          base::StringPrintf(L"url-chunk-%i", i + 1).c_str(), L""));
     }
   } else {
     g_custom_entries->push_back(
@@ -342,7 +343,7 @@ static void SetIntegerValue(size_t offset, int value) {
 
   wcscpy_s((*g_custom_entries)[offset].value,
            google_breakpad::CustomInfoEntry::kValueMaxLength,
-           StringPrintf(L"%d", value).c_str());
+           base::StringPrintf(L"%d", value).c_str());
 }
 
 extern "C" void __declspec(dllexport) __cdecl SetNumberOfExtensions(
@@ -519,7 +520,15 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
   std::wstring pipe_name;
   if (use_crash_service) {
     // Crash reporting is done by crash_service.exe.
-    pipe_name = kChromePipeName;
+    const wchar_t* var_name = L"CHROME_BREAKPAD_PIPE_NAME";
+    DWORD value_length = ::GetEnvironmentVariableW(var_name, NULL, 0);
+    if (value_length == 0) {
+      pipe_name = kChromePipeName;
+    } else {
+      scoped_array<wchar_t> value(new wchar_t[value_length]);
+      ::GetEnvironmentVariableW(var_name, value.get(), value_length);
+      pipe_name = value.get();
+    }
   } else {
     // We want to use the Google Update crash reporting. We need to check if the
     // user allows it first (in case the administrator didn't already decide

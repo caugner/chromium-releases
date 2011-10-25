@@ -32,6 +32,8 @@ using history::InMemoryURLIndex;
 using history::ScoredHistoryMatch;
 using history::ScoredHistoryMatches;
 
+bool HistoryQuickProvider::disabled_ = false;
+
 HistoryQuickProvider::HistoryQuickProvider(ACProviderListener* listener,
                                            Profile* profile)
     : HistoryProvider(listener, profile, "HistoryQuickProvider"),
@@ -42,6 +44,8 @@ HistoryQuickProvider::~HistoryQuickProvider() {}
 void HistoryQuickProvider::Start(const AutocompleteInput& input,
                                  bool minimal_changes) {
   matches_.clear();
+  if (disabled_)
+    return;
 
   // Don't bother with INVALID and FORCED_QUERY.  Also pass when looking for
   // BEST_MATCH and there is no inline autocompletion because none of the HQP
@@ -56,17 +60,8 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
 
   // Do some fixup on the user input before matching against it, so we provide
   // good results for local file paths, input with spaces, etc.
-  // NOTE: This purposefully doesn't take input.desired_tld() into account; if
-  // it did, then holding "ctrl" would change all the results from the
-  // HistoryQuickProvider provider, not just the What You Typed Result.
-  const string16 fixed_text(FixupUserInput(input));
-  if (fixed_text.empty()) {
-    // Conceivably fixup could result in an empty string (although I don't
-    // have cases where this happens offhand).  We can't do anything with
-    // empty input, so just bail; otherwise we'd crash later.
+  if (!FixupUserInput(&autocomplete_input_))
     return;
-  }
-  autocomplete_input_.set_text(fixed_text);
 
   // TODO(pkasting): We should just block here until this loads.  Any time
   // someone unloads the history backend, we'll get inconsistent inline
@@ -106,13 +101,13 @@ void HistoryQuickProvider::DoAutocomplete() {
   // |max_match_score|. Upon use of |max_match_score| it is decremented.
   // All subsequent matches must be clamped to retain match results ordering.
   int max_match_score = autocomplete_input_.prevent_inline_autocomplete() ?
-      kMaxNonInliningScore : -1;
+      (AutocompleteResult::kLowestDefaultScore - 1) : -1;
   for (ScoredHistoryMatches::const_iterator match_iter = matches.begin();
        match_iter != matches.end(); ++match_iter) {
     const ScoredHistoryMatch& history_match(*match_iter);
     if (history_match.raw_score > 0) {
       AutocompleteMatch ac_match = QuickMatchToACMatch(
-          history_match,
+          history_match, matches,
           PreventInlineAutocomplete(autocomplete_input_),
           &max_match_score);
       matches_.push_back(ac_match);
@@ -120,21 +115,17 @@ void HistoryQuickProvider::DoAutocomplete() {
   }
 }
 
-// static
-const int HistoryQuickProvider::kMaxNonInliningScore =
-    AutocompleteResult::kLowestDefaultScore - 1;
-
 AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
     const ScoredHistoryMatch& history_match,
+    const ScoredHistoryMatches& history_matches,
     bool prevent_inline_autocomplete,
     int* max_match_score) {
   DCHECK(max_match_score);
   const history::URLRow& info = history_match.url_info;
   int score = CalculateRelevance(history_match, max_match_score);
   AutocompleteMatch match(this, score, !!info.visit_count(),
-                          history_match.url_matches.empty() ?
-                          AutocompleteMatch::HISTORY_URL :
-                          AutocompleteMatch::HISTORY_TITLE);
+      history_match.url_matches.empty() ?
+          AutocompleteMatch::HISTORY_URL : AutocompleteMatch::HISTORY_TITLE);
   match.destination_url = info.url();
   DCHECK(match.destination_url.is_valid());
 
@@ -194,7 +185,8 @@ int HistoryQuickProvider::CalculateRelevance(
   // at the beginning of the result's URL and there is exactly one substring
   // match in the URL.
   int score = (history_match.can_inline) ? history_match.raw_score :
-      std::min(kMaxNonInliningScore, history_match.raw_score);
+      std::min(AutocompleteResult::kLowestDefaultScore - 1,
+               history_match.raw_score);
   *max_match_score = ((*max_match_score < 0) ?
       score : std::min(score, *max_match_score)) - 1;
   return *max_match_score + 1;

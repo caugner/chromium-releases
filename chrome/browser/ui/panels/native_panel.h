@@ -9,8 +9,8 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "ui/gfx/native_widget_types.h"
 
+class FindBar;
 class NativePanelTesting;
-class Panel;
 
 namespace gfx {
 class Rect;
@@ -40,14 +40,14 @@ class NativePanel {
   // The native panel needs to update the bounds. In addition, it needs to watch
   // for the mouse movement so that it knows when to bring up or down all the
   // minimized panels. To do this, when the mouse moves, the native panel needs
-  // to call PanelManager::ShouldBringUpTitleBarForAllMinimizedPanels to check.
+  // to call PanelManager::ShouldBringUpTitlebarForAllMinimizedPanels to check.
   virtual void OnPanelExpansionStateChanged(
       Panel::ExpansionState expansion_state) = 0;
 
   // When the mouse is at (mouse_x, mouse_y) in screen coordinate system, finds
   // out if the title-bar needs to pop up for the minimized panel that is only
   // shown as 3-pixel lines.
-  virtual bool ShouldBringUpPanelTitleBar(int mouse_x, int mouse_y) const = 0;
+  virtual bool ShouldBringUpPanelTitlebar(int mouse_x, int mouse_y) const = 0;
 
   virtual void ClosePanel() = 0;
   virtual void ActivatePanel() = 0;
@@ -56,22 +56,42 @@ class NativePanel {
   virtual gfx::NativeWindow GetNativePanelHandle() = 0;
   virtual void UpdatePanelTitleBar() = 0;
   virtual void ShowTaskManagerForPanel() = 0;
+  virtual FindBar* CreatePanelFindBar() = 0;
   virtual void NotifyPanelOnUserChangedTheme() = 0;
   virtual void DrawAttention() = 0;
   virtual bool IsDrawingAttention() const = 0;
+  virtual bool PreHandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) = 0;
+  virtual void HandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event) = 0;
+
+  virtual Browser* GetPanelBrowser() const = 0;
   virtual void DestroyPanelBrowser() = 0;
 
-  // Returns a pointer to the testing interface to the native panel.
-  virtual NativePanelTesting* GetNativePanelTesting() = 0;
+  // Returns the extent of the non-client area, that is, the window size minus
+  // the size of the client area.
+  virtual gfx::Size GetNonClientAreaExtent() const = 0;
+
+  // Gets or sets the restored height, which is the full height of the panel
+  // when it is expanded.
+  virtual int GetRestoredHeight() const = 0;
+  virtual void SetRestoredHeight(int height) = 0;
 };
 
 // A NativePanel utility interface used for accessing elements of the
 // native panel used only by test automation.
 class NativePanelTesting {
  public:
+  static NativePanelTesting* Create(NativePanel* native_panel);
 
- protected:
+  // clang gives error on delete if the destructor is not virtual.
   virtual ~NativePanelTesting() {}
+
+  virtual void PressLeftMouseButtonTitlebar(const gfx::Point& point) = 0;
+  virtual void ReleaseMouseButtonTitlebar() = 0;
+  virtual void DragTitlebar(int delta_x, int delta_y) = 0;
+  virtual void CancelDragTitlebar() = 0;
+  virtual void FinishDragTitlebar() = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_H_

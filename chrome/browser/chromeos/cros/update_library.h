@@ -8,9 +8,6 @@
 
 #include <string>
 
-#include "base/memory/singleton.h"
-#include "base/observer_list.h"
-#include "base/time.h"
 #include "third_party/cros/chromeos_update_engine.h"
 
 namespace chromeos {
@@ -18,7 +15,6 @@ namespace chromeos {
 // This interface defines interaction with the ChromeOS update library APIs.
 // Classes can add themselves as observers. Users can get an instance of this
 // library class like this: chromeos::CrosLibrary::Get()->GetUpdateLibrary()
-
 class UpdateLibrary {
  public:
   // TODO(seanparent): Should make the UpdateProgress type copyable.
@@ -26,7 +22,6 @@ class UpdateLibrary {
   // Modifying the cros library just for that, for a single use case,
   // isn't worth it. Instead we define this a local Status struct that
   // is copyable.
-
   struct Status {
     Status()
         : status(UPDATE_STATUS_IDLE),
@@ -35,30 +30,32 @@ class UpdateLibrary {
           new_size(0) {
     }
 
-    explicit Status(const UpdateProgress& x) :
-        status(x.status_),
-        download_progress(x.download_progress_),
-        last_checked_time(x.last_checked_time_),
-        new_version(x.new_version_),
-        new_size(x.new_size_) {
+    explicit Status(const UpdateProgress& o)
+        : status(o.status_),
+          download_progress(o.download_progress_),
+          last_checked_time(o.last_checked_time_),
+          new_version(o.new_version_),
+          new_size(o.new_size_) {
     }
 
     UpdateStatusOperation status;
-    double download_progress;  // 0.0 - 1.0
+    double download_progress;   // 0.0 - 1.0
     int64_t last_checked_time;  // As reported by std::time().
     std::string new_version;
-    int64_t new_size;  // Valid during DOWNLOADING, in bytes.
+    int64_t new_size;           // Valid during DOWNLOADING, in bytes.
   };
 
   class Observer {
    public:
-    virtual ~Observer() { }
+    virtual ~Observer() {}
+
     virtual void UpdateStatusChanged(UpdateLibrary* library) = 0;
   };
 
-//  static UpdateLibrary* GetStubImplementation();
-
   virtual ~UpdateLibrary() {}
+
+  virtual void Init() = 0;
+
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
   virtual bool HasObserver(Observer* observer) = 0;

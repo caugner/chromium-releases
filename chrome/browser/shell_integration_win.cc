@@ -14,6 +14,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
@@ -50,7 +51,7 @@ std::wstring GetProfileIdFromPath(const FilePath& profile_path) {
   if (chrome::GetDefaultUserDataDirectory(&default_user_data_dir) &&
       profile_path.DirName() == default_user_data_dir &&
       profile_path.BaseName().value() ==
-          ASCIIToUTF16(chrome::kNotSignedInProfile)) {
+          ASCIIToUTF16(chrome::kInitialProfile)) {
     return std::wstring();
   }
 
@@ -216,14 +217,14 @@ bool MigrateChromiumShortcutsTask::GetExpectedAppId(
     return false;
 
   // Get expected app id from shortcut command line.
-  CommandLine command_line = CommandLine::FromString(StringPrintf(
+  CommandLine command_line = CommandLine::FromString(base::StringPrintf(
       L"\"%ls\" %ls", source.c_str(), arguments.c_str()));
 
   FilePath profile_path;
   if (command_line.HasSwitch(switches::kUserDataDir)) {
     profile_path =
         command_line.GetSwitchValuePath(switches::kUserDataDir).AppendASCII(
-            chrome::kNotSignedInProfile);
+            chrome::kInitialProfile);
   }
 
   std::wstring app_name;

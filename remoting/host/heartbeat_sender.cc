@@ -4,8 +4,9 @@
 
 #include "remoting/host/heartbeat_sender.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "remoting/base/constants.h"
@@ -33,7 +34,7 @@ const char kSetIntervalTag[] = "set-interval";
 const int64 kDefaultHeartbeatIntervalMs = 5 * 60 * 1000;  // 5 minutes.
 }
 
-HeartbeatSender::HeartbeatSender(MessageLoop* message_loop,
+HeartbeatSender::HeartbeatSender(base::MessageLoopProxy* message_loop,
                                  MutableHostConfig* config)
 
     : state_(CREATED),
@@ -66,21 +67,22 @@ bool HeartbeatSender::Init() {
 
 void HeartbeatSender::OnSignallingConnected(SignalStrategy* signal_strategy,
                                             const std::string& full_jid) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(state_ == INITIALIZED || state_ == STOPPED);
   state_ = STARTED;
 
   full_jid_ = full_jid;
   request_.reset(signal_strategy->CreateIqRequest());
-  request_->set_callback(NewCallback(this, &HeartbeatSender::ProcessResponse));
+  request_->set_callback(base::Bind(&HeartbeatSender::ProcessResponse,
+                                    base::Unretained(this)));
 
   DoSendStanza();
-  timer_.Start(base::TimeDelta::FromMilliseconds(interval_ms_), this,
+  timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(interval_ms_), this,
                &HeartbeatSender::DoSendStanza);
 }
 
 void HeartbeatSender::OnSignallingDisconnected() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   state_ = STOPPED;
   request_.reset(NULL);
 }
@@ -88,19 +90,23 @@ void HeartbeatSender::OnSignallingDisconnected() {
 // Ignore any notifications other than signalling
 // connected/disconnected events.
 void HeartbeatSender::OnAccessDenied() { }
-void HeartbeatSender::OnAuthenticatedClientsChanged(int clients) { }
+void HeartbeatSender::OnClientAuthenticated(
+    remoting::protocol::ConnectionToClient* client) { }
+void HeartbeatSender::OnClientDisconnected(
+    remoting::protocol::ConnectionToClient* client) { }
 void HeartbeatSender::OnShutdown() { }
 
 void HeartbeatSender::DoSendStanza() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STARTED);
 
   VLOG(1) << "Sending heartbeat stanza to " << kChromotingBotJid;
-  request_->SendIq(buzz::STR_SET, kChromotingBotJid, CreateHeartbeatMessage());
+  request_->SendIq(IqRequest::MakeIqStanza(
+      buzz::STR_SET, kChromotingBotJid, CreateHeartbeatMessage()));
 }
 
 void HeartbeatSender::ProcessResponse(const XmlElement* response) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   std::string type = response->Attr(buzz::QN_TYPE);
   if (type == buzz::STR_ERROR) {
@@ -138,8 +144,8 @@ void HeartbeatSender::SetInterval(int interval) {
     // Restart the timer with the new interval.
     if (state_ == STARTED) {
       timer_.Stop();
-      timer_.Start(base::TimeDelta::FromMilliseconds(interval_ms_), this,
-                   &HeartbeatSender::DoSendStanza);
+      timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(interval_ms_),
+                   this, &HeartbeatSender::DoSendStanza);
     }
   }
 }

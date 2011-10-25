@@ -260,6 +260,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Called when a mouse click activates the renderer.
   virtual void OnMouseActivate();
   void ForwardWheelEvent(const WebKit::WebMouseWheelEvent& wheel_event);
+  void ForwardGestureEvent(const WebKit::WebGestureEvent& gesture_event);
   virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
   virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
 
@@ -383,7 +384,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   // Retrieves an id the renderer can use to refer to its view.
   // This is used for various IPC messages, including plugins.
-  gfx::NativeViewId GetNativeViewId();
+  gfx::NativeViewId GetNativeViewId() const;
 
   // Retrieves an id for the surface that the renderer can draw to
   // when accelerated compositing is enabled.
@@ -401,6 +402,10 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Called when a keyboard event was not processed by the renderer. This is
   // overridden by RenderView to send upwards to its delegate.
   virtual void UnhandledKeyboardEvent(const NativeWebKeyboardEvent& event) {}
+
+  // Called when a mousewheel event was not processed by the renderer. This is
+  // overridden by RenderView to send upwards to its delegate.
+  virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) {}
 
   // Notification that the user has made some kind of input that could
   // perform an action. The render view host overrides this to forward the
@@ -444,7 +449,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgRenderViewGone(int status, int error_code);
   void OnMsgClose();
   void OnMsgRequestMove(const gfx::Rect& pos);
-  void OnMsgSetTooltipText(const std::wstring& tooltip_text,
+  void OnMsgSetTooltipText(const string16& tooltip_text,
                            WebKit::WebTextDirection text_direction_hint);
   void OnMsgPaintAtSizeAck(int tag, const gfx::Size& size);
   void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
@@ -508,7 +513,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Called by OnMsgInputEventAck() to process a wheel event ack message.
   // This could result in a task being posted to allow additional wheel
   // input messages to be coalesced.
-  void ProcessWheelAck();
+  void ProcessWheelAck(bool processed);
 
   // True if renderer accessibility is enabled. This should only be set when a
   // screenreader is detected as it can potentially slow down Chrome.
@@ -577,6 +582,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // (Similar to |mouse_move_pending_|.) True if a mouse wheel event was sent
   // and we are waiting for a corresponding ack.
   bool mouse_wheel_pending_;
+  WebKit::WebMouseWheelEvent current_wheel_event_;
 
   typedef std::deque<WebKit::WebMouseWheelEvent> WheelEventQueue;
 

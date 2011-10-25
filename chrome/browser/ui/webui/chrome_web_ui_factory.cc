@@ -30,12 +30,14 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
+#include "chrome/browser/ui/webui/policy_ui.h"
 #include "chrome/browser/ui/webui/print_preview_ui.h"
 #include "chrome/browser/ui/webui/quota_internals_ui.h"
 #include "chrome/browser/ui/webui/sessions_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
 #include "chrome/browser/ui/webui/test_chrome_web_ui_factory.h"
 #include "chrome/browser/ui/webui/textfields_ui.h"
+#include "chrome/browser/ui/webui/tracing_ui.h"
 #include "chrome/browser/ui/webui/workers_ui.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -49,7 +51,6 @@
 #include "chrome/browser/ui/webui/chromeos/enterprise_enrollment_ui.h"
 #include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
 #include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
-#include "chrome/browser/ui/webui/chromeos/login/login_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_ui.h"
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
@@ -57,8 +58,6 @@
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/system_info_ui.h"
 #include "chrome/browser/ui/webui/active_downloads_ui.h"
-#else
-#include "chrome/browser/ui/webui/new_profile_ui.h"
 #endif
 
 #if defined(TOUCH_UI)
@@ -69,8 +68,12 @@
 #include "chrome/browser/ui/webui/conflicts_ui.h"
 #endif
 
-#if defined(WEBUI_CERTIFICATE_VIEWER)
+#if defined(WEBUI_DIALOGS) && defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "chrome/browser/ui/webui/certificate_viewer_ui.h"
+#endif
+
+#if defined(WEBUI_DIALOGS)
+#include "chrome/browser/ui/webui/hung_renderer_dialog_ui.h"
 #endif
 
 namespace {
@@ -91,7 +94,8 @@ template<>
 ChromeWebUI* NewWebUI<ExtensionWebUI>(TabContents* contents, const GURL& url) {
   // Don't use a WebUI for incognito tabs because we require extensions to run
   // within a single process.
-  ExtensionService* service = contents->profile()->GetExtensionService();
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  ExtensionService* service = profile->GetExtensionService();
   if (service && service->ExtensionBindingsAllowed(url))
     return new ExtensionWebUI(contents, url);
   return NULL;
@@ -146,9 +150,14 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<BookmarksUI>;
   if (url.host() == chrome::kChromeUIBugReportHost)
     return &NewWebUI<BugReportUI>;
-#if defined(WEBUI_CERTIFICATE_VIEWER)
+#if defined(WEBUI_DIALOGS) && defined(OS_POSIX) && !defined(OS_MACOSX)
   if (url.host() == chrome::kChromeUICertificateViewerHost)
     return &NewWebUI<CertificateViewerUI>;
+#endif
+#if defined(WEBUI_DIALOGS)
+  if (url.host() == chrome::kChromeUIHungRendererDialogHost) {
+    return &NewWebUI<HungRendererDialogUI>;
+  }
 #endif
   if (url.host() == chrome::kChromeUICrashesHost)
     return &NewWebUI<CrashesUI>;
@@ -186,12 +195,18 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<NetInternalsUI>;
   if (url.host() == chrome::kChromeUIPluginsHost)
     return &NewWebUI<PluginsUI>;
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  if (url.host() == chrome::kChromeUIPolicyHost)
+    return &NewWebUI<PolicyUI>;
+#endif
   if (url.host() == chrome::kChromeUISessionsHost)
     return &NewWebUI<SessionsUI>;
   if (url.host() == chrome::kChromeUISyncInternalsHost)
     return &NewWebUI<SyncInternalsUI>;
   if (url.host() == chrome::kChromeUISettingsHost)
     return &NewWebUI<OptionsUI>;
+  if (url.host() == chrome::kChromeUITracingHost)
+    return &NewWebUI<TracingUI>;
   if (url.host() == chrome::kChromeUIQuotaInternalsHost)
     return &NewWebUI<QuotaInternalsUI>;
   if (url.host() == chrome::kChromeUIWorkersHost)
@@ -212,8 +227,6 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<KeyboardOverlayUI>;
   if (url.host() == chrome::kChromeUIMobileSetupHost)
     return &NewWebUI<MobileSetupUI>;
-  if (url.host() == chrome::kChromeUILoginHost)
-    return &NewWebUI<chromeos::LoginUI>;
   if (url.host() == chrome::kChromeUIOobeHost)
       return &NewWebUI<chromeos::OobeUI>;
   if (url.host() == chrome::kChromeUIProxySettingsHost)
@@ -236,13 +249,6 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
   if (url.spec() == chrome::kChromeUIConstrainedHTMLTestURL)
     return &NewWebUI<ConstrainedHtmlUI>;
 
-#if !defined(OS_CHROMEOS)
-  if (ProfileManager::IsMultipleProfilesEnabled()) {
-    if (url.host() == chrome::kChromeUINewProfileHost)
-      return &NewWebUI<NewProfileUI>;
-  }
-#endif
-
   return NULL;
 }
 
@@ -262,15 +268,16 @@ struct PossibleTestSingletonTraits : public DefaultSingletonTraits<Type> {
 
 }  // namespace
 
-WebUI::TypeID ChromeWebUIFactory::GetWebUIType(Profile* profile,
-                                               const GURL& url) const {
+WebUI::TypeID ChromeWebUIFactory::GetWebUIType(
+      content::BrowserContext* browser_context, const GURL& url) const {
+  Profile* profile = Profile::FromBrowserContext(browser_context);
   WebUIFactoryFunction function = GetWebUIFactoryFunction(profile, url);
   return function ? reinterpret_cast<WebUI::TypeID>(function) : WebUI::kNoWebUI;
 }
 
-bool ChromeWebUIFactory::UseWebUIForURL(Profile* profile,
-                                        const GURL& url) const {
-  return GetWebUIType(profile, url) != WebUI::kNoWebUI;
+bool ChromeWebUIFactory::UseWebUIForURL(
+    content::BrowserContext* browser_context, const GURL& url) const {
+  return GetWebUIType(browser_context, url) != WebUI::kNoWebUI;
 }
 
 bool ChromeWebUIFactory::HasWebUIScheme(const GURL& url) const {
@@ -281,9 +288,9 @@ bool ChromeWebUIFactory::HasWebUIScheme(const GURL& url) const {
 }
 
 bool ChromeWebUIFactory::IsURLAcceptableForWebUI(
-    Profile* profile,
+    content::BrowserContext* browser_context,
     const GURL& url) const {
-  return UseWebUIForURL(profile, url) ||
+  return UseWebUIForURL(browser_context, url) ||
       // javacsript: URLs are allowed to run in Web UI pages
       url.SchemeIs(chrome::kJavaScriptScheme) ||
       // It's possible to load about:blank in a Web UI renderer.
@@ -299,8 +306,9 @@ bool ChromeWebUIFactory::IsURLAcceptableForWebUI(
 WebUI* ChromeWebUIFactory::CreateWebUIForURL(
     TabContents* tab_contents,
     const GURL& url) const {
-  WebUIFactoryFunction function = GetWebUIFactoryFunction(
-      tab_contents->profile(), url);
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents->browser_context());
+  WebUIFactoryFunction function = GetWebUIFactoryFunction(profile, url);
   if (!function)
     return NULL;
   return (*function)(tab_contents, url);

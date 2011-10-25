@@ -20,9 +20,8 @@
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_browser_process.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -72,7 +71,7 @@ struct TestURLInfo {
    "Dogs & Cats & Mice & Other Animals", 1, 1, 0},
 };
 
-class HistoryQuickProviderTest : public TestingBrowserProcessTest,
+class HistoryQuickProviderTest : public testing::Test,
                                  public ACProviderListener {
  public:
   HistoryQuickProviderTest()
@@ -378,49 +377,50 @@ TEST_F(HistoryQuickProviderTest, Relevance) {
   next_score = 1500;
   match.raw_score = 1425;
   match.can_inline = false;
+  const int kMaxNonInliningScore = AutocompleteResult::kLowestDefaultScore - 1;
   EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
-            HistoryQuickProvider::kMaxNonInliningScore);
-  EXPECT_EQ(next_score, HistoryQuickProvider::kMaxNonInliningScore - 1);
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
   // Can inline, clamped.
-  next_score = HistoryQuickProvider::kMaxNonInliningScore;
+  next_score = kMaxNonInliningScore;
   match.raw_score = 1425;
   match.can_inline = true;
   EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
-            HistoryQuickProvider::kMaxNonInliningScore);
-  EXPECT_EQ(next_score, HistoryQuickProvider::kMaxNonInliningScore - 1);
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
   // Can't inline, clamped.
-  next_score = HistoryQuickProvider::kMaxNonInliningScore;
+  next_score = kMaxNonInliningScore;
   match.raw_score = 1425;
   match.can_inline = false;
   EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
-            HistoryQuickProvider::kMaxNonInliningScore);
-  EXPECT_EQ(next_score, HistoryQuickProvider::kMaxNonInliningScore - 1);
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
   // Score just above the clamped limit.
-  next_score = HistoryQuickProvider::kMaxNonInliningScore;
+  next_score = kMaxNonInliningScore;
   match.raw_score = AutocompleteResult::kLowestDefaultScore;
   match.can_inline = false;
   EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
-            HistoryQuickProvider::kMaxNonInliningScore);
-  EXPECT_EQ(next_score, HistoryQuickProvider::kMaxNonInliningScore - 1);
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
   // Score right at the clamped limit.
-  next_score = HistoryQuickProvider::kMaxNonInliningScore;
-  match.raw_score = HistoryQuickProvider::kMaxNonInliningScore;
+  next_score = kMaxNonInliningScore;
+  match.raw_score = kMaxNonInliningScore;
   match.can_inline = true;
   EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
-            HistoryQuickProvider::kMaxNonInliningScore);
-  EXPECT_EQ(next_score, HistoryQuickProvider::kMaxNonInliningScore - 1);
+            kMaxNonInliningScore);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 1);
 
   // Score just below the clamped limit.
-  next_score = HistoryQuickProvider::kMaxNonInliningScore;
-  match.raw_score = HistoryQuickProvider::kMaxNonInliningScore - 1;
+  next_score = kMaxNonInliningScore;
+  match.raw_score = kMaxNonInliningScore - 1;
   match.can_inline = true;
   EXPECT_EQ(HistoryQuickProvider::CalculateRelevance(match, &next_score),
-            HistoryQuickProvider::kMaxNonInliningScore - 1);
-  EXPECT_EQ(next_score, HistoryQuickProvider::kMaxNonInliningScore - 2);
+            kMaxNonInliningScore - 1);
+  EXPECT_EQ(next_score, kMaxNonInliningScore - 2);
 
   // Low score, can inline, not clamped.
   next_score = 1500;

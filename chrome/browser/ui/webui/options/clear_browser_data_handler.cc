@@ -27,7 +27,7 @@ ClearBrowserDataHandler::~ClearBrowserDataHandler() {
 
 void ClearBrowserDataHandler::Initialize() {
   clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      g_browser_process->local_state(),
+                                      Profile::FromWebUI(web_ui_)->GetPrefs(),
                                       NULL);
 }
 
@@ -90,7 +90,7 @@ void ClearBrowserDataHandler::RegisterMessages() {
 }
 
 void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
-  Profile* profile = web_ui_->GetProfile();
+  Profile* profile = Profile::FromWebUI(web_ui_);
   PrefService* prefs = profile->GetPrefs();
 
   int remove_mask = 0;
@@ -100,11 +100,8 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
     remove_mask |= BrowsingDataRemover::REMOVE_DOWNLOADS;
   if (prefs->GetBoolean(prefs::kDeleteCache))
     remove_mask |= BrowsingDataRemover::REMOVE_CACHE;
-  if (prefs->GetBoolean(prefs::kDeleteCookies)) {
-    remove_mask |= BrowsingDataRemover::REMOVE_COOKIES;
-    if (*clear_plugin_lso_data_enabled_)
-      remove_mask |= BrowsingDataRemover::REMOVE_LSO_DATA;
-  }
+  if (prefs->GetBoolean(prefs::kDeleteCookies))
+    remove_mask |= BrowsingDataRemover::REMOVE_SITE_DATA;
   if (prefs->GetBoolean(prefs::kDeletePasswords))
     remove_mask |= BrowsingDataRemover::REMOVE_PASSWORDS;
   if (prefs->GetBoolean(prefs::kDeleteFormData))
@@ -112,7 +109,7 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
 
   int period_selected = prefs->GetInteger(prefs::kDeleteTimePeriod);
 
-  FundamentalValue state(true);
+  base::FundamentalValue state(true);
   web_ui_->CallJavascriptFunction("ClearBrowserDataOverlay.setClearingState",
                                   state);
 

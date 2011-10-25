@@ -9,11 +9,11 @@
 #include <string>
 
 #include "base/callback_old.h"
-#include "base/memory/weak_ptr.h"
 #include "content/common/content_client.h"
 #include "content/common/window_container_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 
+class AccessTokenStore;
 class BrowserRenderProcessHost;
 class BrowserURLHandler;
 class CommandLine;
@@ -22,18 +22,22 @@ class FilePath;
 class GURL;
 class MHTMLGenerationManager;
 class PluginProcessHost;
-class Profile;
 class QuotaPermissionContext;
 class RenderViewHost;
 class ResourceDispatcherHost;
 class SSLCertErrorHandler;
 class SSLClientAuthHandler;
-class SavePackage;
 class SkBitmap;
 class TabContents;
+class TabContentsView;
 class WorkerProcessHost;
 struct DesktopNotificationHostMsg_Show_Params;
+struct MainFunctionParams;
 struct WebPreferences;
+
+namespace content {
+class BrowserMainParts;
+}
 
 namespace crypto {
 class CryptoModuleBlockingPasswordDelegate;
@@ -42,9 +46,15 @@ class CryptoModuleBlockingPasswordDelegate;
 namespace net {
 class CookieList;
 class CookieOptions;
+class NetLog;
 class URLRequest;
 class URLRequestContext;
+class URLRequestContextGetter;
 class X509Certificate;
+}
+
+namespace speech_input {
+class SpeechInputManager;
 }
 
 namespace ui {
@@ -53,6 +63,8 @@ class Clipboard;
 
 namespace content {
 
+class BrowserContext;
+class BrowserMainParts;
 class ResourceContext;
 class WebUIFactory;
 
@@ -66,6 +78,16 @@ class WebUIFactory;
 // the observer interfaces.)
 class ContentBrowserClient {
  public:
+  virtual ~ContentBrowserClient() {}
+
+  // Allows the embedder to return a customed BrowserMainParts implementation
+  // for the browser staratup code. Can return NULL, in which case the default
+  // is used.
+  virtual BrowserMainParts* CreateBrowserMainParts(
+      const MainFunctionParams& parameters) = 0;
+
+  virtual TabContentsView* CreateTabContentsView(TabContents* tab_contents) = 0;
+
   // Notifies that a new RenderHostView has been created.
   virtual void RenderViewHostCreated(RenderViewHost* render_view_host) = 0;
 
@@ -90,11 +112,12 @@ class ContentBrowserClient {
 
   // Get the effective URL for the given actual URL, to allow an embedder to
   // group different url schemes in the same SiteInstance.
-  virtual GURL GetEffectiveURL(Profile* profile, const GURL& url) = 0;
+  virtual GURL GetEffectiveURL(BrowserContext* browser_context,
+                               const GURL& url) = 0;
 
   // Returns whether all instances of the specified effective URL should be
   // rendered by the same process, rather than using process-per-site-instance.
-  virtual bool ShouldUseProcessPerSite(Profile* profile,
+  virtual bool ShouldUseProcessPerSite(BrowserContext* browser_context,
                                        const GURL& effective_url) = 0;
 
   // Returns whether a specified URL is to be considered the same as any
@@ -158,8 +181,11 @@ class ContentBrowserClient {
   // Create and return a new quota permission context.
   virtual QuotaPermissionContext* CreateQuotaPermissionContext() = 0;
 
-  // Shows the given path using the OS file manager.
-  virtual void RevealFolderInOS(const FilePath& path) = 0;
+  // Open the given file in the desktop's default manner.
+  virtual void OpenItem(const FilePath& path) = 0;
+
+  // Show the given file in a file manager. If possible, select the file.
+  virtual void ShowItemInFolder(const FilePath& path) = 0;
 
   // Informs the embedder that a certificate error has occured.  If overridable
   // is true, the user can ignore the error and continue.  If it's false, then
@@ -170,11 +196,9 @@ class ContentBrowserClient {
       bool overridable,
       Callback2<SSLCertErrorHandler*, bool>::Type* callback) = 0;
 
-  // Shows the user a SSL client certificate selection dialog. When the user has
-  // made a selection, the dialog will report back to |delegate|. |delegate| is
-  // notified when the dialog closes in call cases; if the user cancels the
-  // dialog, we call  with a NULL certificate.
-  virtual void ShowClientCertificateRequestDialog(
+  // Selects a SSL client certificate and returns it to the |handler|. If no
+  // certificate was selected NULL is returned to the |handler|.
+  virtual void SelectClientCertificate(
       int render_process_id,
       int render_view_id,
       SSLClientAuthHandler* handler) = 0;
@@ -235,12 +259,18 @@ class ContentBrowserClient {
   virtual ui::Clipboard* GetClipboard() = 0;
   virtual MHTMLGenerationManager* GetMHTMLGenerationManager() = 0;
   virtual DevToolsManager* GetDevToolsManager() = 0;
+  virtual net::NetLog* GetNetLog() = 0;
+  virtual speech_input::SpeechInputManager* GetSpeechInputManager() = 0;
+
+  // Creates a new AccessTokenStore for gelocation.
+  virtual AccessTokenStore* CreateAccessTokenStore() = 0;
 
   // Returns true if fast shutdown is possible.
   virtual bool IsFastShutdownPossible() = 0;
 
   // Returns the WebKit preferences that are used by the renderer.
-  virtual WebPreferences GetWebkitPrefs(Profile* profile, bool is_web_ui) = 0;
+  virtual WebPreferences GetWebkitPrefs(BrowserContext* browser_context,
+                                        bool is_web_ui) = 0;
 
   // Inspector setting was changed and should be persisted.
   virtual void UpdateInspectorSetting(RenderViewHost* rvh,
@@ -260,15 +290,27 @@ class ContentBrowserClient {
   // Clears browser cookies.
   virtual void ClearCookies(RenderViewHost* rvh) = 0;
 
-  // Asks the user for the path to save a page. The embedder calls the tab's
-  // SavePackage::OnPathPicked to give the answer.
-  virtual void ChooseSavePath(const base::WeakPtr<SavePackage>& save_package,
-                              const FilePath& suggested_path,
-                              bool can_save_as_complete) = 0;
+  // Returns the default download directory.
+  // This can be called on any thread.
+  virtual FilePath GetDefaultDownloadDirectory() = 0;
+
+  // Returns the "default" request context. There is no such thing in the world
+  // of multiple profiles, and all calls to this need to be removed.
+  virtual net::URLRequestContextGetter*
+      GetDefaultRequestContextDeprecatedCrBug64339() = 0;
+
+  // Returns the system request context, a context tied to no browser context.
+  // This is called on the UI thread.
+  virtual net::URLRequestContextGetter* GetSystemRequestContext() = 0;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Can return an optional fd for crash handling, otherwise returns -1.
   virtual int GetCrashSignalFD(const std::string& process_type) = 0;
+#endif
+
+#if defined(OS_WIN)
+  // Returns the name of the dll that contains cursors and other resources.
+  virtual const wchar_t* GetResourceDllName() = 0;
 #endif
 
 #if defined(USE_NSS)

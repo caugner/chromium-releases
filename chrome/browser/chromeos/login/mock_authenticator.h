@@ -83,8 +83,8 @@ class MockAuthenticator : public Authenticator {
 
 class MockLoginUtils : public LoginUtils {
  public:
-  explicit MockLoginUtils(const std::string& expected_username,
-                          const std::string& expected_password);
+  MockLoginUtils(const std::string& expected_username,
+                 const std::string& expected_password);
   virtual ~MockLoginUtils();
 
   virtual bool ShouldWaitForWifi();
@@ -96,6 +96,8 @@ class MockLoginUtils : public LoginUtils {
                               bool using_oauth,
                               bool has_cookies,
                               Delegate* delegate);
+
+  virtual void DelegateDeleted(Delegate* delegate);
 
   virtual void CompleteOffTheRecordLogin(const GURL& start_url) {}
 

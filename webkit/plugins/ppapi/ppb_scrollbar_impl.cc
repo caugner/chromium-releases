@@ -18,6 +18,7 @@
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
@@ -48,8 +49,12 @@ PP_Bool IsScrollbar(PP_Resource resource) {
   return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->IsScrollbar(resource);
 }
 
-uint32_t GetThickness() {
+uint32_t GetThickness3() {
   return WebScrollbar::defaultThickness();
+}
+
+uint32_t GetThickness4(PP_Resource resource) {
+  return ::ppapi::thunk::GetPPB_Scrollbar_Thunk()->GetThickness(resource);
 }
 
 uint32_t GetValue(PP_Resource resource) {
@@ -82,7 +87,18 @@ void ScrollBy(PP_Resource resource, PP_ScrollBy_Dev unit, int32_t multiplier) {
 const PPB_Scrollbar_0_3_Dev ppb_scrollbar_0_3 = {
   &Create,
   &IsScrollbar,
-  &GetThickness,
+  &GetThickness3,
+  &GetValue,
+  &SetValue,
+  &SetDocumentSize,
+  &SetTickMarks,
+  &ScrollBy
+};
+
+const PPB_Scrollbar_0_4_Dev ppb_scrollbar_0_4 = {
+  &Create,
+  &IsScrollbar,
+  &GetThickness4,
   &GetValue,
   &SetValue,
   &SetDocumentSize,
@@ -92,18 +108,40 @@ const PPB_Scrollbar_0_3_Dev ppb_scrollbar_0_3 = {
 
 }  // namespace
 
-PPB_Scrollbar_Impl::PPB_Scrollbar_Impl(PluginInstance* instance, bool vertical)
-    : PPB_Widget_Impl(instance) {
-  scrollbar_.reset(WebScrollbar::create(
-      static_cast<WebKit::WebScrollbarClient*>(this),
-      vertical ? WebScrollbar::Vertical : WebScrollbar::Horizontal));
+// static
+PP_Resource PPB_Scrollbar_Impl::Create(PP_Instance instance,
+                                       bool vertical) {
+  scoped_refptr<PPB_Scrollbar_Impl> scrollbar(
+      new PPB_Scrollbar_Impl(instance));
+  scrollbar->Init(vertical);
+  return scrollbar->GetReference();
+}
+
+PPB_Scrollbar_Impl::PPB_Scrollbar_Impl(PP_Instance instance)
+    : PPB_Widget_Impl(instance),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 }
 
 PPB_Scrollbar_Impl::~PPB_Scrollbar_Impl() {
 }
 
+void PPB_Scrollbar_Impl::Init(bool vertical) {
+  PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
+  if (!plugin_instance)
+    return;
+  scrollbar_.reset(WebScrollbar::createForPlugin(
+      vertical ? WebScrollbar::Vertical : WebScrollbar::Horizontal,
+      ResourceHelper::GetPluginInstance(this)->container(),
+      static_cast<WebKit::WebScrollbarClient*>(this)));
+}
+
 PPB_Scrollbar_API* PPB_Scrollbar_Impl::AsPPB_Scrollbar_API() {
   return this;
+}
+
+void PPB_Scrollbar_Impl::InstanceWasDeleted() {
+  Resource::LastPluginRefWasDeleted();
+  scrollbar_.reset();
 }
 
 // static
@@ -111,8 +149,17 @@ const PPB_Scrollbar_0_3_Dev* PPB_Scrollbar_Impl::Get0_3Interface() {
   return &ppb_scrollbar_0_3;
 }
 
+// static
+const PPB_Scrollbar_0_4_Dev* PPB_Scrollbar_Impl::Get0_4Interface() {
+  return &ppb_scrollbar_0_4;
+}
+
 uint32_t PPB_Scrollbar_Impl::GetThickness() {
   return WebScrollbar::defaultThickness();
+}
+
+bool PPB_Scrollbar_Impl::IsOverlay() {
+  return scrollbar_->isOverlay();
 }
 
 uint32_t PPB_Scrollbar_Impl::GetValue() {
@@ -120,15 +167,19 @@ uint32_t PPB_Scrollbar_Impl::GetValue() {
 }
 
 void PPB_Scrollbar_Impl::SetValue(uint32_t value) {
-  scrollbar_->setValue(value);
+  if (scrollbar_.get())
+    scrollbar_->setValue(value);
 }
 
 void PPB_Scrollbar_Impl::SetDocumentSize(uint32_t size) {
-  scrollbar_->setDocumentSize(size);
+  if (scrollbar_.get())
+    scrollbar_->setDocumentSize(size);
 }
 
 void PPB_Scrollbar_Impl::SetTickMarks(const PP_Rect* tick_marks,
                                       uint32_t count) {
+  if (!scrollbar_.get())
+    return;
   tickmarks_.resize(count);
   for (uint32 i = 0; i < count; ++i) {
     tickmarks_[i] = WebRect(tick_marks[i].point.x,
@@ -141,6 +192,9 @@ void PPB_Scrollbar_Impl::SetTickMarks(const PP_Rect* tick_marks,
 }
 
 void PPB_Scrollbar_Impl::ScrollBy(PP_ScrollBy_Dev unit, int32_t multiplier) {
+  if (!scrollbar_.get())
+    return;
+
   WebScrollbar::ScrollDirection direction = multiplier >= 0 ?
       WebScrollbar::ScrollForward : WebScrollbar::ScrollBackward;
   float fmultiplier = 1.0;
@@ -165,7 +219,7 @@ PP_Bool PPB_Scrollbar_Impl::PaintInternal(const gfx::Rect& rect,
                                           PPB_ImageData_Impl* image) {
   ImageDataAutoMapper mapper(image);
   skia::PlatformCanvas* canvas = image->mapped_canvas();
-  if (!canvas)
+  if (!canvas || !scrollbar_.get())
     return PP_FALSE;
   scrollbar_->paint(webkit_glue::ToWebCanvas(canvas), rect);
 
@@ -180,13 +234,15 @@ PP_Bool PPB_Scrollbar_Impl::PaintInternal(const gfx::Rect& rect,
 PP_Bool PPB_Scrollbar_Impl::HandleEventInternal(
     const ::ppapi::InputEventData& data) {
   scoped_ptr<WebInputEvent> web_input_event(CreateWebInputEvent(data));
-  if (!web_input_event.get())
+  if (!web_input_event.get() || !scrollbar_.get())
     return PP_FALSE;
 
   return PP_FromBool(scrollbar_->handleInputEvent(*web_input_event.get()));
 }
 
 void PPB_Scrollbar_Impl::SetLocationInternal(const PP_Rect* location) {
+  if (!scrollbar_.get())
+    return;
   scrollbar_->setLocation(WebRect(location->point.x,
                                   location->point.y,
                                   location->size.width,
@@ -194,14 +250,38 @@ void PPB_Scrollbar_Impl::SetLocationInternal(const PP_Rect* location) {
 }
 
 void PPB_Scrollbar_Impl::valueChanged(WebKit::WebScrollbar* scrollbar) {
+  PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
+  if (!plugin_module)
+    return;
+
   const PPP_Scrollbar_Dev* ppp_scrollbar =
-      static_cast<const PPP_Scrollbar_Dev*>(instance()->module()->
-          GetPluginInterface(PPP_SCROLLBAR_DEV_INTERFACE));
+      static_cast<const PPP_Scrollbar_Dev*>(plugin_module->GetPluginInterface(
+          PPP_SCROLLBAR_DEV_INTERFACE));
+  if (!ppp_scrollbar) {
+    // Try the old version. This is ok because the old interface is a subset of
+    // the new one, and ValueChanged didn't change.
+    ppp_scrollbar =
+        static_cast<const PPP_Scrollbar_Dev*>(plugin_module->GetPluginInterface(
+            PPP_SCROLLBAR_DEV_INTERFACE_0_2));
+    if (!ppp_scrollbar)
+      return;
+  }
+  ppp_scrollbar->ValueChanged(pp_instance(), pp_resource(),
+                              scrollbar_->value());
+}
+
+void PPB_Scrollbar_Impl::overlayChanged(WebScrollbar* scrollbar) {
+  PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
+  if (!plugin_module)
+    return;
+
+  const PPP_Scrollbar_Dev* ppp_scrollbar =
+      static_cast<const PPP_Scrollbar_Dev*>(plugin_module->GetPluginInterface(
+          PPP_SCROLLBAR_DEV_INTERFACE));
   if (!ppp_scrollbar)
     return;
-  ScopedResourceId resource(this);
-  ppp_scrollbar->ValueChanged(
-      instance()->pp_instance(), resource.id, scrollbar_->value());
+  ppp_scrollbar->OverlayChanged(pp_instance(), pp_resource(),
+                                PP_FromBool(IsOverlay()));
 }
 
 void PPB_Scrollbar_Impl::invalidateScrollbarRect(
@@ -215,9 +295,13 @@ void PPB_Scrollbar_Impl::invalidateScrollbarRect(
   // Can't call into the client to tell them about the invalidate right away,
   // since the PPB_Scrollbar_Impl code is still in the middle of updating its
   // internal state.
+  // Note: we use a method factory here instead of NewRunnableMethod because the
+  // latter would modify the lifetime of this object. That might make
+  // WebKit::WebScrollbar outlive WebKit::WebPluginContainer, which is against
+  // its contract.
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &PPB_Scrollbar_Impl::NotifyInvalidate));
+      method_factory_.NewRunnableMethod(&PPB_Scrollbar_Impl::NotifyInvalidate));
 }
 
 void PPB_Scrollbar_Impl::getTickmarks(

@@ -13,16 +13,15 @@
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/cpp/completion_callback.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
+#include "ppapi/shared_impl/host_resource.h"
 
 struct PPB_Graphics2D;
 struct PP_Point;
 struct PP_Rect;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class PPB_Graphics2D_Proxy : public InterfaceProxy {
@@ -45,32 +44,32 @@ class PPB_Graphics2D_Proxy : public InterfaceProxy {
 
  private:
   // Plugin->renderer message handlers.
-  void OnMsgPaintImageData(const HostResource& graphics_2d,
-                           const HostResource& image_data,
+  void OnMsgPaintImageData(const ppapi::HostResource& graphics_2d,
+                           const ppapi::HostResource& image_data,
                            const PP_Point& top_left,
                            bool src_rect_specified,
                            const PP_Rect& src_rect);
-  void OnMsgScroll(const HostResource& graphics_2d,
+  void OnMsgScroll(const ppapi::HostResource& graphics_2d,
                    bool clip_specified,
                    const PP_Rect& clip,
                    const PP_Point& amount);
-  void OnMsgReplaceContents(const HostResource& graphics_2d,
-                            const HostResource& image_data);
-  void OnMsgFlush(const HostResource& graphics_2d);
+  void OnMsgReplaceContents(const ppapi::HostResource& graphics_2d,
+                            const ppapi::HostResource& image_data);
+  void OnMsgFlush(const ppapi::HostResource& graphics_2d);
 
   // Renderer->plugin message handlers.
-  void OnMsgFlushACK(const HostResource& graphics_2d,
+  void OnMsgFlushACK(const ppapi::HostResource& graphics_2d,
                      int32_t pp_error);
 
   // Called in the renderer to send the given flush ACK to the plugin.
   void SendFlushACKToPlugin(int32_t result,
-                            const HostResource& graphics_2d);
+                            const ppapi::HostResource& graphics_2d);
 
-  CompletionCallbackFactory<PPB_Graphics2D_Proxy,
-                            ProxyNonThreadSafeRefCount> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_Graphics2D_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PPB_GRAPHICS_2D_PROXY_H_

@@ -14,7 +14,7 @@
 namespace views {
 
 // A mock InputMethod implementation for testing purpose.
-class MockInputMethod : public InputMethodBase {
+class VIEWS_EXPORT MockInputMethod : public InputMethodBase {
  public:
   MockInputMethod();
   explicit MockInputMethod(internal::InputMethodDelegate* delegate);
@@ -29,6 +29,7 @@ class MockInputMethod : public InputMethodBase {
   virtual std::string GetInputLocale() OVERRIDE;
   virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE;
   virtual bool IsActive() OVERRIDE;
+  virtual bool IsMock() const OVERRIDE;
 
   bool focus_changed() const { return focus_changed_; }
   bool text_input_type_changed() const { return text_input_type_changed_; }

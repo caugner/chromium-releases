@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/memory/ref_counted_memory.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/print_preview_ui.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/browser_with_test_window_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "printing/print_job_constants.h"
 
@@ -24,22 +27,22 @@ typedef BrowserWithTestWindowTest PrintPreviewUITest;
 
 // Create/Get a preview tab for initiator tab.
 TEST_F(PrintPreviewUITest, PrintPreviewData) {
-#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_CHROMEOS)
   CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePrintPreview);
-#endif
   ASSERT_TRUE(browser());
   BrowserList::SetLastActive(browser());
   ASSERT_TRUE(BrowserList::GetLastActive());
 
   browser()->NewTab();
-  TabContents* initiator_tab = browser()->GetSelectedTabContents();
+  TabContentsWrapper* initiator_tab =
+      browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(initiator_tab);
 
   scoped_refptr<printing::PrintPreviewTabController>
       controller(new printing::PrintPreviewTabController());
   ASSERT_TRUE(controller);
 
-  TabContents* preview_tab = controller->GetOrCreatePreviewTab(initiator_tab);
+  TabContentsWrapper* preview_tab =
+      controller->GetOrCreatePreviewTab(initiator_tab);
 
   EXPECT_NE(initiator_tab, preview_tab);
   EXPECT_EQ(2, browser()->tab_count());
@@ -90,14 +93,16 @@ TEST_F(PrintPreviewUITest, PrintPreviewDraftPages) {
   ASSERT_TRUE(BrowserList::GetLastActive());
 
   browser()->NewTab();
-  TabContents* initiator_tab = browser()->GetSelectedTabContents();
+  TabContentsWrapper* initiator_tab =
+      browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(initiator_tab);
 
   scoped_refptr<printing::PrintPreviewTabController>
       controller(new printing::PrintPreviewTabController());
   ASSERT_TRUE(controller);
 
-  TabContents* preview_tab = controller->GetOrCreatePreviewTab(initiator_tab);
+  TabContentsWrapper* preview_tab =
+      controller->GetOrCreatePreviewTab(initiator_tab);
 
   EXPECT_NE(initiator_tab, preview_tab);
   EXPECT_EQ(2, browser()->tab_count());
@@ -143,4 +148,66 @@ TEST_F(PrintPreviewUITest, PrintPreviewDraftPages) {
   preview_ui->ClearAllPreviewData();
   preview_ui->GetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX, &data);
   EXPECT_EQ(NULL, data.get());
+}
+
+// Test the browser-side print preview cancellation functionality.
+TEST_F(PrintPreviewUITest, GetCurrentPrintPreviewStatus) {
+#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_CHROMEOS)
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePrintPreview);
+#endif
+  ASSERT_TRUE(browser());
+  BrowserList::SetLastActive(browser());
+  ASSERT_TRUE(BrowserList::GetLastActive());
+
+  browser()->NewTab();
+  TabContentsWrapper* initiator_tab =
+      browser()->GetSelectedTabContentsWrapper();
+  ASSERT_TRUE(initiator_tab);
+
+  scoped_refptr<printing::PrintPreviewTabController>
+      controller(new printing::PrintPreviewTabController());
+  ASSERT_TRUE(controller);
+
+  TabContentsWrapper* preview_tab =
+      controller->GetOrCreatePreviewTab(initiator_tab);
+
+  EXPECT_NE(initiator_tab, preview_tab);
+  EXPECT_EQ(2, browser()->tab_count());
+
+  PrintPreviewUI* preview_ui =
+      reinterpret_cast<PrintPreviewUI*>(preview_tab->web_ui());
+  ASSERT_TRUE(preview_ui != NULL);
+
+  // Test with invalid |preview_ui_addr|.
+  bool cancel = false;
+  preview_ui->GetCurrentPrintPreviewStatus("invalid", 0, &cancel);
+  EXPECT_TRUE(cancel);
+
+  const int kFirstRequestId = 1000;
+  const int kSecondRequestId = 1001;
+  const std::string preview_ui_addr = preview_ui->GetPrintPreviewUIAddress();
+
+  // Test with kFirstRequestId.
+  preview_ui->OnPrintPreviewRequest(kFirstRequestId);
+  cancel = true;
+  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kFirstRequestId,
+                                           &cancel);
+  EXPECT_FALSE(cancel);
+
+  cancel = false;
+  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kSecondRequestId,
+                                           &cancel);
+  EXPECT_TRUE(cancel);
+
+  // Test with kSecondRequestId.
+  preview_ui->OnPrintPreviewRequest(kSecondRequestId);
+  cancel = false;
+  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kFirstRequestId,
+                                           &cancel);
+  EXPECT_TRUE(cancel);
+
+  cancel = true;
+  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kSecondRequestId,
+                                           &cancel);
+  EXPECT_FALSE(cancel);
 }

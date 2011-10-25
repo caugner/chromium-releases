@@ -14,7 +14,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/completion_callback.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/base/network_change_notifier.h"
 #include "net/proxy/proxy_config_service.h"
@@ -37,9 +37,9 @@ class URLRequestContext;
 // This class can be used to resolve the proxy server to use when loading a
 // HTTP(S) URL.  It uses the given ProxyResolver to handle the actual proxy
 // resolution.  See ProxyResolverV8 for example.
-class NET_API ProxyService : public NetworkChangeNotifier::IPAddressObserver,
-                             public ProxyConfigService::Observer,
-                             NON_EXPORTED_BASE(public base::NonThreadSafe) {
+class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
+                                public ProxyConfigService::Observer,
+                                NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   // The instance takes ownership of |config_service| and |resolver|.
   // |net_log| is a possibly NULL destination to send log events to. It must
@@ -96,6 +96,11 @@ class NET_API ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                                 CompletionCallback* callback,
                                 PacRequest** pac_request,
                                 const BoundNetLog& net_log);
+
+  // Called to report that the last proxy connection succeeded.  If |proxy_info|
+  // has a non empty proxy_retry_info map, the proxies that have been tried (and
+  // failed) for this request will be marked as bad.
+  void ReportSuccess(const ProxyInfo& proxy_info);
 
   // Call this method with a non-null |pac_request| to cancel the PAC request.
   void CancelPacRequest(PacRequest* pac_request);
@@ -362,7 +367,7 @@ class NET_API ProxyService : public NetworkChangeNotifier::IPAddressObserver,
 };
 
 // Wrapper for invoking methods on a ProxyService synchronously.
-class NET_API SyncProxyServiceHelper
+class NET_EXPORT SyncProxyServiceHelper
     : public base::RefCountedThreadSafe<SyncProxyServiceHelper> {
  public:
   SyncProxyServiceHelper(MessageLoop* io_message_loop,

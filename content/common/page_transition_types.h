@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ class PageTransition {
   //
   // A type is made of a core value and a set of qualifiers. A type has one
   // core value and 0 or or more qualifiers.
-  enum {
+  enum TypeEnum {
     // User got to this page by clicking a link on another page.
     LINK = 0,
 
@@ -104,6 +104,12 @@ class PageTransition {
 
     // User used the Forward or Back button to navigate among browsing history.
     FORWARD_BACK = 0x01000000,
+
+    // User used the address bar to trigger this navigation.
+    FROM_ADDRESS_BAR = 0x02000000,
+
+    // User is navigating to the home page.
+    HOME_PAGE = 0x04000000,
 
     // The beginning of a navigation chain.
     CHAIN_START = 0x10000000,

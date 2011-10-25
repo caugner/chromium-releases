@@ -37,7 +37,7 @@ struct ExtensionMessageService::MessagePort {
   IPC::Message::Sender* sender;
   int routing_id;
   explicit MessagePort(IPC::Message::Sender* sender = NULL,
-              int routing_id = MSG_ROUTING_CONTROL)
+                       int routing_id = MSG_ROUTING_CONTROL)
      : sender(sender), routing_id(routing_id) {}
 };
 
@@ -50,8 +50,6 @@ const char ExtensionMessageService::kDispatchOnConnect[] =
     "Port.dispatchOnConnect";
 const char ExtensionMessageService::kDispatchOnDisconnect[] =
     "Port.dispatchOnDisconnect";
-const char ExtensionMessageService::kDispatchOnMessage[] =
-    "Port.dispatchOnMessage";
 
 namespace {
 
@@ -70,8 +68,11 @@ static void DispatchOnConnect(const ExtensionMessageService::MessagePort& port,
   args.Set(3, Value::CreateStringValue(source_extension_id));
   args.Set(4, Value::CreateStringValue(target_extension_id));
   CHECK(port.sender);
-  port.sender->Send(new ExtensionMsg_MessageInvoke(port.routing_id,
-       "", ExtensionMessageService::kDispatchOnConnect, args, GURL()));
+  port.sender->Send(
+      new ExtensionMsg_MessageInvoke(
+          port.routing_id,
+          target_extension_id,
+          ExtensionMessageService::kDispatchOnConnect, args, GURL()));
 }
 
 static void DispatchOnDisconnect(
@@ -85,12 +86,10 @@ static void DispatchOnDisconnect(
 }
 
 static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
-                              const std::string& message, int source_port_id) {
-  ListValue args;
-  args.Set(0, Value::CreateStringValue(message));
-  args.Set(1, Value::CreateIntegerValue(source_port_id));
-  port.sender->Send(new ExtensionMsg_MessageInvoke(port.routing_id,
-      "", ExtensionMessageService::kDispatchOnMessage, args, GURL()));
+                              const std::string& message, int target_port_id) {
+  port.sender->Send(
+      new ExtensionMsg_DeliverMessage(
+          port.routing_id, target_port_id, message));
 }
 
 }  // namespace
@@ -143,12 +142,13 @@ void ExtensionMessageService::OpenChannelToExtension(
   RenderProcessHost* source = RenderProcessHost::FromID(source_process_id);
   if (!source)
     return;
+  Profile* profile = Profile::FromBrowserContext(source->browser_context());
 
   // Note: we use the source's profile here. If the source is an incognito
   // process, we will use the incognito EPM to find the right extension process,
   // which depends on whether the extension uses spanning or split mode.
   MessagePort receiver(
-      source->profile()->GetExtensionProcessManager()->GetExtensionProcess(
+      profile->GetExtensionProcessManager()->GetExtensionProcess(
           target_extension_id),
       MSG_ROUTING_CONTROL);
   TabContents* source_contents = tab_util::GetTabContentsByID(
@@ -173,10 +173,11 @@ void ExtensionMessageService::OpenChannelToTab(
   RenderProcessHost* source = RenderProcessHost::FromID(source_process_id);
   if (!source)
     return;
+  Profile* profile = Profile::FromBrowserContext(source->browser_context());
 
   TabContentsWrapper* contents = NULL;
   MessagePort receiver;
-  if (ExtensionTabUtil::GetTabById(tab_id, source->profile(), true,
+  if (ExtensionTabUtil::GetTabById(tab_id, profile, true,
                                    NULL, NULL, &contents, NULL)) {
     receiver.sender = contents->render_view_host();
     receiver.routing_id = contents->render_view_host()->routing_id();

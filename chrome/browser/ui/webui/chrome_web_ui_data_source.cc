@@ -14,7 +14,14 @@
 
 ChromeWebUIDataSource::ChromeWebUIDataSource(const std::string& source_name)
     : DataSource(source_name, MessageLoop::current()),
-      default_resource_(-1) {}
+      default_resource_(-1) {
+}
+
+ChromeWebUIDataSource::ChromeWebUIDataSource(const std::string& source_name,
+                                             MessageLoop* loop)
+    : DataSource(source_name, loop),
+      default_resource_(-1) {
+}
 
 ChromeWebUIDataSource::~ChromeWebUIDataSource() {
 }
@@ -33,13 +40,19 @@ std::string ChromeWebUIDataSource::GetMimeType(const std::string& path) const {
   if (EndsWith(path, ".js", false))
     return "application/javascript";
 
+  if (EndsWith(path, ".json", false))
+    return "application/json";
+
+  if (EndsWith(path, ".pdf", false))
+    return "application/pdf";
+
   return "text/html";
 }
 
 void ChromeWebUIDataSource::StartDataRequest(const std::string& path,
                                              bool is_incognito,
                                              int request_id) {
-  if (path == json_path_) {
+  if (!json_path_.empty() && path == json_path_) {
     SendLocalizedStringsAsJSON(request_id);
   } else {
     int resource_id = default_resource_;

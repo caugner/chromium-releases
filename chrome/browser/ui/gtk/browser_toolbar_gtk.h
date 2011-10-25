@@ -14,12 +14,12 @@
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/models/accelerator.h"
 #include "ui/base/models/simple_menu_model.h"
 
@@ -31,7 +31,6 @@ class CustomDrawButton;
 class GtkThemeService;
 class LocationBar;
 class LocationBarViewGtk;
-class Profile;
 class ReloadButtonGtk;
 class TabContents;
 class ToolbarModel;
@@ -43,12 +42,12 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
                           public MenuGtk::Delegate,
                           public NotificationObserver {
  public:
-  explicit BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window);
+  BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window);
   virtual ~BrowserToolbarGtk();
 
   // Create the contents of the toolbar. |top_level_window| is the GtkWindow
   // to which we attach our accelerators.
-  void Init(Profile* profile, GtkWindow* top_level_window);
+  void Init(GtkWindow* top_level_window);
 
   // Set the various widgets' ViewIDs.
   void SetViewIDs();
@@ -100,9 +99,6 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
-
-  Profile* profile() { return profile_; }
-  void SetProfile(Profile* profile);
 
   // Message that we should react to a state change.
   void UpdateTabContents(TabContents* contents, bool should_restore_state);
@@ -194,7 +190,6 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   Browser* browser_;
   BrowserWindowGtk* window_;
-  Profile* profile_;
 
   // Controls whether or not a home button should be shown on the toolbar.
   BooleanPrefMember show_home_button_;
@@ -207,7 +202,7 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   // A GtkEntry that isn't part of the hierarchy. We keep this for native
   // rendering.
-  OwnedWidgetGtk offscreen_entry_;
+  ui::OwnedWidgetGtk offscreen_entry_;
 
   // Manages the home button drop signal handler.
   scoped_ptr<ui::GtkSignalRegistrar> drop_handler_;

@@ -73,7 +73,7 @@ void ShownSectionsHandler::Observe(int type,
     std::string* pref_name = Details<std::string>(details).ptr();
     DCHECK(*pref_name == prefs::kNTPShownSections);
     int sections = pref_service_->GetInteger(prefs::kNTPShownSections);
-    FundamentalValue sections_value(sections);
+    base::FundamentalValue sections_value(sections);
     web_ui_->CallJavascriptFunction("setShownSections", sections_value);
   } else {
     NOTREACHED();
@@ -87,7 +87,7 @@ void ShownSectionsHandler::HandleSetShownSections(const ListValue* args) {
   int old_mode = pref_service_->GetInteger(prefs::kNTPShownSections);
 
   if (old_mode != mode) {
-    NotifySectionDisabled(mode, old_mode, web_ui_->GetProfile());
+    NotifySectionDisabled(mode, old_mode, Profile::FromWebUI(web_ui_));
     pref_service_->SetInteger(prefs::kNTPShownSections, mode);
   }
 }

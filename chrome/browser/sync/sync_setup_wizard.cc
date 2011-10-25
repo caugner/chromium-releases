@@ -7,10 +7,13 @@
 #include <stddef.h>
 #include <ostream>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
+#include "chrome/browser/sync/util/oauth.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 
 namespace {
@@ -22,7 +25,8 @@ namespace {
 SyncSetupWizard::State GetEndStateForDiscreteRun(
     SyncSetupWizard::State start_state) {
   SyncSetupWizard::State result = SyncSetupWizard::FATAL_ERROR;
-  if (start_state == SyncSetupWizard::GAIA_LOGIN) {
+  if (start_state == SyncSetupWizard::GAIA_LOGIN ||
+      start_state == SyncSetupWizard::OAUTH_LOGIN) {
     result = SyncSetupWizard::GAIA_SUCCESS;
   } else if (start_state == SyncSetupWizard::ENTER_PASSPHRASE ||
              start_state == SyncSetupWizard::NONFATAL_ERROR ||
@@ -86,6 +90,13 @@ void SyncSetupWizard::Step(State advance_state) {
 bool SyncSetupWizard::IsVisible() const {
   return flow_container_->get_flow() != NULL &&
          flow_container_->get_flow()->IsAttached();
+}
+
+// static
+SyncSetupWizard::State SyncSetupWizard::GetLoginState() {
+  return browser_sync::IsUsingOAuth() ?
+      SyncSetupWizard::OAUTH_LOGIN :
+      SyncSetupWizard::GAIA_LOGIN;
 }
 
 void SyncSetupWizard::Focus() {

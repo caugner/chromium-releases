@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/plugin_process_host.h"
 #include "webkit/database/database_tracker.h"
 
 namespace content {
@@ -23,7 +24,13 @@ ResourceContext::ResourceContext()
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
-ResourceContext::~ResourceContext() {}
+ResourceContext::~ResourceContext() {
+  if (BrowserThread::IsMessageLoopValid(BrowserThread::IO)) {
+    // Band-aid for http://crbug.com/94704 until we change plug-in channel
+    // requests to be owned by the ResourceContext.
+    PluginProcessHost::CancelPendingRequestsForResourceContext(this);
+  }
+}
 
 void* ResourceContext::GetUserData(const void* key) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -145,17 +152,18 @@ void ResourceContext::set_media_observer(MediaObserver* media_observer) {
   media_observer_ = media_observer;
 }
 
-const base::WeakPtr<prerender::PrerenderManager>&
-ResourceContext::prerender_manager() const {
+const base::Callback<prerender::PrerenderManager*(void)>&
+ResourceContext::prerender_manager_getter() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   EnsureInitialized();
-  return prerender_manager_;
+  return prerender_manager_getter_;
 }
 
-void ResourceContext::set_prerender_manager(
-    const base::WeakPtr<prerender::PrerenderManager>& prerender_manager) {
+void ResourceContext::set_prerender_manager_getter(
+      const base::Callback<prerender::PrerenderManager*(void)>&
+          prerender_manager_getter) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  prerender_manager_ = prerender_manager;
+  prerender_manager_getter_ = prerender_manager_getter;
 }
 
 }  // namespace content

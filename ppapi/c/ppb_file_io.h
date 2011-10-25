@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_file_io.idl modified Wed Jul 13 16:41:25 2011. */
+/* From ppb_file_io.idl modified Mon Aug 29 10:11:34 2011. */
 
 #ifndef PPAPI_C_PPB_FILE_IO_H_
 #define PPAPI_C_PPB_FILE_IO_H_
@@ -16,6 +16,9 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_time.h"
+
+#define PPB_FILEIO_INTERFACE_1_0 "PPB_FileIO;1.0"
+#define PPB_FILEIO_INTERFACE PPB_FILEIO_INTERFACE_1_0
 
 /**
  * @file
@@ -70,15 +73,11 @@ PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_FileOpenFlags, 4);
  * The <code>PPB_FileIO</code> struct is used to operate on a regular file
  * (PP_FileType_Regular).
  */
-#define PPB_FILEIO_INTERFACE_0_5 "PPB_FileIO;0.5"
-#define PPB_FILEIO_INTERFACE_1_0 "PPB_FileIO;1.0"
-#define PPB_FILEIO_INTERFACE PPB_FILEIO_INTERFACE_1_0
-
 struct PPB_FileIO {
   /**
    * Create() creates a new FileIO object.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying the instance
+   * @param[in] instance A <code>PP_Instance</code> identifying the instance
    * with the file.
    *
    * @return A <code>PP_Resource</code> corresponding to a FileIO if

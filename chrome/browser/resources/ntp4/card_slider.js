@@ -129,8 +129,8 @@ var CardSlider = (function() {
 
       this.mouseWheelScrollAmount_ = 0;
       this.scrollClearTimeout_ = null;
-      this.container_.addEventListener('mousewheel',
-                                       this.onMouseWheel_.bind(this));
+      this.frame_.addEventListener('mousewheel',
+                                   this.onMouseWheel_.bind(this));
 
       if (document.documentElement.getAttribute('touchui')) {
         this.container_.addEventListener(TouchHandler.EventType.TOUCH_START,
@@ -198,6 +198,15 @@ var CardSlider = (function() {
     },
 
     /**
+     * Allows setting the current card index.
+     * @param {number} index A new index to set the current index to.
+     * @return {number} The new index after having been set.
+     */
+    set currentCard(index) {
+      return (this.currentCard_ = index);
+    },
+
+    /**
      * Returns the number of cards.
      * @return {number} number of cards.
      */
@@ -221,7 +230,15 @@ var CardSlider = (function() {
       if (e.wheelDeltaX == 0)
         return;
 
-      var scrollAmountPerPage = ntp4.isRTL() ? 120 : -120;
+      // Prevent OS X 10.7+ history swiping on the NTP.
+      e.preventDefault();
+
+      // Mac value feels ok with multitouch trackpads and magic mice
+      // (with physical scrollwheel, too), but not so great with logitech
+      // mice.
+      var scrollAmountPerPage = cr.isMac ? 400 : 120;
+      if (!ntp4.isRTL())
+        scrollAmountPerPage *= -1;
       this.mouseWheelScrollAmount_ += e.wheelDeltaX;
       if (Math.abs(this.mouseWheelScrollAmount_) >=
           Math.abs(scrollAmountPerPage)) {
@@ -229,7 +246,7 @@ var CardSlider = (function() {
         pagesToScroll =
             (pagesToScroll > 0 ? Math.floor : Math.ceil)(pagesToScroll);
         var newCardIndex = this.currentCard + pagesToScroll;
-        newCardIndex = Math.min(this.cards_.length,
+        newCardIndex = Math.min(this.cards_.length - 1,
                                 Math.max(0, newCardIndex));
         this.selectCard(newCardIndex, true);
         this.mouseWheelScrollAmount_ -= pagesToScroll * scrollAmountPerPage;
@@ -263,13 +280,15 @@ var CardSlider = (function() {
      *     current position to new position.
      */
     selectCard: function(newCardIndex, opt_animate) {
-      var isChangingCard = newCardIndex >= 0 &&
-          newCardIndex < this.cards_.length &&
-          newCardIndex != this.currentCard;
+      var isChangingCard =
+          !this.cards_[newCardIndex].classList.contains('selected-card');
+
       if (isChangingCard) {
+        this.currentCardValue.classList.remove('selected-card');
         // If we have a new card index and it is valid then update the left
         // position and current card index.
         this.currentCard_ = newCardIndex;
+        this.currentCardValue.classList.add('selected-card');
       }
 
       this.transformToCurrentCard_(opt_animate);
@@ -279,6 +298,10 @@ var CardSlider = (function() {
         event.initEvent(CardSlider.EventType.CARD_CHANGED, true, true);
         event.cardSlider = this;
         this.container_.dispatchEvent(event);
+
+        // We also dispatch an event on the card itself.
+        cr.dispatchSimpleEvent(this.currentCardValue, 'cardselected',
+                               true, true);
       }
     },
 

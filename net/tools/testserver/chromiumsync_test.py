@@ -1,4 +1,4 @@
-#!/usr/bin/python2.4
+#!/usr/bin/python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -436,6 +436,16 @@ class SyncDataModelTest(unittest.TestCase):
     marker = self.FindMarkerByNumber(response.new_progress_marker, autofill)
     self.assertEqual(pickle.loads(marker.token), (3000, 1))
     self.assertFalse(marker.HasField('timestamp_token_for_migration'))
+
+  def testCheckRaiseTransientError(self):
+    testserver = chromiumsync.TestServer()
+    http_code, raw_respon = testserver.HandleSetTransientError()
+    self.assertEqual(http_code, 200)
+    try:
+      testserver.CheckTransientError()
+      self.fail('Should have raised transient error exception')
+    except chromiumsync.TransientError:
+      self.assertTrue(testserver.transient_error)
 
   def testUpdateSieveStoreMigration(self):
     autofill = autofill_specifics_pb2.autofill

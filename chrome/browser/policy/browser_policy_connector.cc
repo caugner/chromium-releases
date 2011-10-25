@@ -98,13 +98,23 @@ ConfigurationPolicyProvider*
   return recommended_cloud_provider_.get();
 }
 
-void BrowserPolicyConnector::SetDeviceCredentials(
+void BrowserPolicyConnector::RegisterForDevicePolicy(
     const std::string& owner_email,
-    const std::string& gaia_token) {
+    const std::string& token,
+    TokenType token_type) {
 #if defined(OS_CHROMEOS)
   if (device_data_store_.get()) {
     device_data_store_->set_user_name(owner_email);
-    device_data_store_->SetGaiaToken(gaia_token);
+    switch (token_type) {
+      case TOKEN_TYPE_OAUTH:
+        device_data_store_->SetOAuthToken(token);
+        break;
+      case TOKEN_TYPE_GAIA:
+        device_data_store_->SetGaiaToken(token);
+        break;
+      default:
+        NOTREACHED() << "Invalid token type " << token_type;
+    }
   }
 #endif
 }
@@ -136,10 +146,10 @@ std::string BrowserPolicyConnector::GetEnterpriseDomain() {
   return std::string();
 }
 
-void BrowserPolicyConnector::DeviceStopAutoRetry() {
+void BrowserPolicyConnector::ResetDevicePolicy() {
 #if defined(OS_CHROMEOS)
   if (device_cloud_policy_subsystem_.get())
-    device_cloud_policy_subsystem_->StopAutoRetry();
+    device_cloud_policy_subsystem_->Reset();
 #endif
 }
 
@@ -148,6 +158,15 @@ void BrowserPolicyConnector::FetchDevicePolicy() {
   if (device_data_store_.get()) {
     DCHECK(!device_data_store_->device_token().empty());
     device_data_store_->NotifyDeviceTokenChanged();
+  }
+#endif
+}
+
+void BrowserPolicyConnector::FetchUserPolicy() {
+#if defined(OS_CHROMEOS)
+  if (user_data_store_.get()) {
+    DCHECK(!user_data_store_->device_token().empty());
+    user_data_store_->NotifyDeviceTokenChanged();
   }
 #endif
 }
@@ -165,24 +184,25 @@ void BrowserPolicyConnector::ScheduleServiceInitialization(
   }
 #endif
 }
-void BrowserPolicyConnector::InitializeUserPolicy(const std::string& user_name,
-                                                  const FilePath& policy_dir,
-                                                  TokenService* token_service) {
+void BrowserPolicyConnector::InitializeUserPolicy(
+    const std::string& user_name) {
   // Throw away the old backend.
   user_cloud_policy_subsystem_.reset();
   user_policy_token_cache_.reset();
   user_data_store_.reset();
+  token_service_ = NULL;
   registrar_.RemoveAll();
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDeviceManagementUrl)) {
-    token_service_ = token_service;
-    if (token_service_) {
-      registrar_.Add(this,
-                     chrome::NOTIFICATION_TOKEN_AVAILABLE,
-                     Source<TokenService>(token_service_));
-    }
 
+  FilePath policy_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &policy_dir);
+#if defined(OS_CHROMEOS)
+  policy_dir = policy_dir.Append(
+      command_line->GetSwitchValuePath(switches::kLoginProfile));
+#endif
+
+  if (command_line->HasSwitch(switches::kDeviceManagementUrl)) {
     FilePath policy_cache_dir = policy_dir.Append(kPolicyDir);
     UserPolicyCache* user_policy_cache =
         new UserPolicyCache(policy_cache_dir.Append(kPolicyCacheFile));
@@ -203,16 +223,25 @@ void BrowserPolicyConnector::InitializeUserPolicy(const std::string& user_name,
     user_policy_token_cache_->Load();
 
     user_data_store_->set_user_name(user_name);
-    if (token_service_ &&
-        token_service_->HasTokenForService(
-            GaiaConstants::kDeviceManagementService)) {
-      user_data_store_->SetGaiaToken(token_service_->GetTokenForService(
-              GaiaConstants::kDeviceManagementService));
-    }
+    user_data_store_->set_user_affiliation(GetUserAffiliation(user_name));
 
     user_cloud_policy_subsystem_->CompleteInitialization(
         prefs::kUserPolicyRefreshRate,
         kServiceInitializationStartupDelay);
+  }
+}
+
+void BrowserPolicyConnector::SetUserPolicyTokenService(
+    TokenService* token_service) {
+  token_service_ = token_service;
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_TOKEN_AVAILABLE,
+                 Source<TokenService>(token_service_));
+
+  if (token_service_->HasTokenForService(
+          GaiaConstants::kDeviceManagementService)) {
+    user_data_store_->SetGaiaToken(token_service_->GetTokenForService(
+        GaiaConstants::kDeviceManagementService));
   }
 }
 
@@ -325,6 +354,21 @@ void BrowserPolicyConnector::InitializeDevicePolicySubsystem() {
         kServiceInitializationStartupDelay);
   }
 #endif
+}
+
+CloudPolicyDataStore::UserAffiliation
+    BrowserPolicyConnector::GetUserAffiliation(const std::string& user_name) {
+#if defined(OS_CHROMEOS)
+  if (install_attributes_.get()) {
+    size_t pos = user_name.find('@');
+    if (pos != std::string::npos &&
+        user_name.substr(pos + 1) == install_attributes_->GetDomain()) {
+      return CloudPolicyDataStore::USER_AFFILIATION_MANAGED;
+    }
+  }
+#endif
+
+  return CloudPolicyDataStore::USER_AFFILIATION_NONE;
 }
 
 // static

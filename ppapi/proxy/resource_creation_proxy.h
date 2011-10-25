@@ -17,21 +17,23 @@
 
 struct PP_Size;
 
-namespace pp {
-namespace proxy {
+namespace ppapi {
 
 class HostResource;
+
+namespace proxy {
+
 class Dispatcher;
 
-class ResourceCreationProxy : public ::ppapi::FunctionGroupBase,
-                              public ::ppapi::thunk::ResourceCreationAPI,
-                              public ::IPC::Channel::Listener,
+class ResourceCreationProxy : public FunctionGroupBase,
+                              public thunk::ResourceCreationAPI,
+                              public IPC::Channel::Listener,
                               public IPC::Message::Sender {
  public:
   explicit ResourceCreationProxy(Dispatcher* dispatcher);
   virtual ~ResourceCreationProxy();
 
-  virtual ::ppapi::thunk::ResourceCreationAPI* AsResourceCreationAPI() OVERRIDE;
+  virtual thunk::ResourceCreationAPI* AsResourceCreationAPI() OVERRIDE;
 
   // ResourceCreationAPI (called in plugin).
   virtual PP_Resource CreateAudio(PP_Instance instance,
@@ -56,7 +58,8 @@ class ResourceCreationProxy : public ::ppapi::FunctionGroupBase,
   virtual PP_Resource CreateDirectoryReader(PP_Resource directory_ref) OVERRIDE;
   virtual PP_Resource CreateFileChooser(
       PP_Instance instance,
-      const PP_FileChooserOptions_Dev* options) OVERRIDE;
+      PP_FileChooserMode_Dev mode,
+      const PP_Var& accept_mime_types) OVERRIDE;
   virtual PP_Resource CreateFileIO(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFileRef(PP_Resource file_system,
                                     const char* path) OVERRIDE;
@@ -73,11 +76,9 @@ class ResourceCreationProxy : public ::ppapi::FunctionGroupBase,
                                        const PP_Size& size,
                                        PP_Bool is_always_opaque) OVERRIDE;
   virtual PP_Resource CreateGraphics3D(PP_Instance instance,
-                                       PP_Config3D_Dev config,
                                        PP_Resource share_context,
                                        const int32_t* attrib_list) OVERRIDE;
   virtual PP_Resource CreateGraphics3DRaw(PP_Instance instance,
-                                          PP_Config3D_Dev config,
                                           PP_Resource share_context,
                                           const int32_t* attrib_list) OVERRIDE;
   virtual PP_Resource CreateImageData(PP_Instance instance,
@@ -98,7 +99,8 @@ class ResourceCreationProxy : public ::ppapi::FunctionGroupBase,
       uint32_t modifiers,
       PP_InputEvent_MouseButton mouse_button,
       const PP_Point* mouse_position,
-      int32_t click_count) OVERRIDE;
+      int32_t click_count,
+      const PP_Point* mouse_movement) OVERRIDE;
   virtual PP_Resource CreateScrollbar(PP_Instance instance,
                                       PP_Bool vertical) OVERRIDE;
   virtual PP_Resource CreateSurface3D(PP_Instance instance,
@@ -108,8 +110,14 @@ class ResourceCreationProxy : public ::ppapi::FunctionGroupBase,
                                       const char* name,
                                       const char* proto) OVERRIDE;
   virtual PP_Resource CreateURLLoader(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateURLRequestInfo(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateVideoDecoder(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateURLRequestInfo(
+      PP_Instance instance,
+      const PPB_URLRequestInfo_Data& data) OVERRIDE;
+  virtual PP_Resource CreateVideoCapture(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateVideoDecoder(
+      PP_Instance instance,
+      PP_Resource context3d_id,
+      PP_VideoDecoder_Profile profile) OVERRIDE;
   virtual PP_Resource CreateVideoLayer(PP_Instance instance,
                                        PP_VideoLayerMode_Dev mode) OVERRIDE;
   virtual PP_Resource CreateWheelInputEvent(
@@ -147,6 +155,6 @@ class ResourceCreationProxy : public ::ppapi::FunctionGroupBase,
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_RESOURCE_CREATION_PROXY_H_

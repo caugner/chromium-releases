@@ -31,8 +31,8 @@ PpapiPluginProcessHost::~PpapiPluginProcessHost() {
 
 bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   plugin_path_ = info.path;
-  set_name(UTF8ToWide(info.name));
-  set_version(UTF8ToWide(info.version));
+  set_name(UTF8ToUTF16(info.name));
+  set_version(UTF8ToUTF16(info.version));
 
   if (!CreateChannel())
     return false;
@@ -41,7 +41,13 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   CommandLine::StringType plugin_launcher =
       browser_command_line.GetSwitchValueNative(switches::kPpapiPluginLauncher);
 
-  FilePath exe_path = ChildProcessHost::GetChildPath(plugin_launcher.empty());
+#if defined(OS_LINUX)
+  int flags = plugin_launcher.empty() ? ChildProcessHost::CHILD_ALLOW_SELF :
+                                        ChildProcessHost::CHILD_NORMAL;
+#else
+  int flags = ChildProcessHost::CHILD_NORMAL;
+#endif
+  FilePath exe_path = ChildProcessHost::GetChildPath(flags);
   if (exe_path.empty())
     return false;
 

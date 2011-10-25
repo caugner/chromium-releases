@@ -9,6 +9,8 @@
 #include "base/metrics/histogram.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/version.h"
+#include "chrome/browser/plugin_prefs.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/plugin_service.h"
@@ -30,9 +32,10 @@ const uint64 kClearAllData = 0;
 
 }  // namespace
 
-PluginDataRemover::PluginDataRemover()
+PluginDataRemover::PluginDataRemover(Profile* profile)
     : mime_type_(kFlashMimeType),
       is_removing_(false),
+      context_(profile->GetResourceContext()),
       event_(new base::WaitableEvent(true, false)),
       channel_(NULL) {
 }
@@ -54,7 +57,7 @@ base::WaitableEvent* PluginDataRemover::StartRemoving(base::Time begin_time) {
   // called, so we need to keep this object around until then.
   AddRef();
   PluginService::GetInstance()->OpenChannelToNpapiPlugin(
-      0, 0, GURL(), mime_type_, this);
+      0, 0, GURL(), GURL(), mime_type_, this);
 
   BrowserThread::PostDelayedTask(
       BrowserThread::IO,
@@ -86,8 +89,12 @@ bool PluginDataRemover::OffTheRecord() {
   return false;
 }
 
+const content::ResourceContext& PluginDataRemover::GetResourceContext() {
+  return context_;
+}
+
 void PluginDataRemover::SetPluginInfo(
-    const webkit::npapi::WebPluginInfo& info) {
+    const webkit::WebPluginInfo& info) {
 }
 
 void PluginDataRemover::OnChannelOpened(const IPC::ChannelHandle& handle) {
@@ -165,23 +172,23 @@ void PluginDataRemover::SignalDone() {
 }
 
 // static
-bool PluginDataRemover::IsSupported() {
+bool PluginDataRemover::IsSupported(PluginPrefs* plugin_prefs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   bool allow_wildcard = false;
-  webkit::npapi::WebPluginInfo plugin;
-  std::string mime_type;
-  if (!webkit::npapi::PluginList::Singleton()->GetPluginInfo(
-          GURL(), kFlashMimeType, allow_wildcard, &plugin, &mime_type)) {
+  std::vector<webkit::WebPluginInfo> plugins;
+  webkit::npapi::PluginList::Singleton()->GetPluginInfoArray(
+      GURL(), kFlashMimeType, allow_wildcard, NULL, &plugins, NULL);
+  std::vector<webkit::WebPluginInfo>::iterator plugin = plugins.begin();
+  if (plugin == plugins.end())
     return false;
-  }
   scoped_ptr<Version> version(
-      webkit::npapi::PluginGroup::CreateVersionFromString(plugin.version));
+      webkit::npapi::PluginGroup::CreateVersionFromString(plugin->version));
   scoped_ptr<Version> min_version(Version::GetVersionFromString(
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kMinClearSiteDataFlashVersion)));
   if (!min_version.get())
     min_version.reset(Version::GetVersionFromString(kMinFlashVersion));
-  return webkit::npapi::IsPluginEnabled(plugin) &&
+  return plugin_prefs->IsPluginEnabled(*plugin) &&
          version.get() &&
          min_version->CompareTo(*version) == -1;
 }

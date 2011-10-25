@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_var.idl modified Sat Jul 16 16:50:26 2011. */
+/* From ppb_var.idl modified Wed Aug 24 20:49:04 2011. */
 
 #ifndef PPAPI_C_PPB_VAR_H_
 #define PPAPI_C_PPB_VAR_H_
@@ -13,6 +13,9 @@
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_var.h"
+
+#define PPB_VAR_INTERFACE_1_0 "PPB_Var;1.0"
+#define PPB_VAR_INTERFACE PPB_VAR_INTERFACE_1_0
 
 /**
  * @file
@@ -27,10 +30,6 @@
 /**
  * PPB_Var API
  */
-#define PPB_VAR_INTERFACE_0_5 "PPB_Var;0.5"
-#define PPB_VAR_INTERFACE_1_0 "PPB_Var;1.0"
-#define PPB_VAR_INTERFACE PPB_VAR_INTERFACE_1_0
-
 struct PPB_Var {
   /**
    * AddRef() adds a reference to the given var. If this is not a refcounted

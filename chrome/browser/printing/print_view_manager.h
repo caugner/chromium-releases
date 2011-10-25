@@ -46,6 +46,11 @@ class PrintViewManager : public NotificationObserver,
   // dialog from print preview.
   bool PrintForSystemDialogNow();
 
+  // Same as PrintNow(), but for the case where a user press "ctrl+shift+p" to
+  // show the native system dialog. This can happen from both initiator tab and
+  // preview tab.
+  bool AdvancedPrintNow();
+
   // Initiate print preview of the current document by first notifying the
   // renderer. Since this happens asynchronous, the print preview tab creation
   // will not be completed on the return of this function. Returns false if
@@ -59,6 +64,9 @@ class PrintViewManager : public NotificationObserver,
   // remove the current observer. |observer| may always be NULL, but |observer_|
   // must be NULL if |observer| is non-NULL.
   void set_observer(PrintViewManagerObserver* observer);
+
+  // Reset |is_title_overridden_| to false.
+  void ResetTitleOverride();
 
   // PrintedPagesSource implementation.
   virtual string16 RenderSourceName();

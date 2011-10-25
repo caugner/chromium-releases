@@ -102,8 +102,7 @@
       'filepath': 'sandbox/linux/.*',
     },
     'sync': {
-      'filepath': 'chrome/browser/sync/.*|chrome/browser/views/sync/.*|'\
-        'chrome/test/live_sync/.*',
+      'filepath': 'chrome/browser/sync/.*|chrome/browser/views/sync/.*',
     },
     'layout_tests': {
       'filepath': 'webkit/(tools|data)/(layout_tests|test_shell)/.*',
@@ -211,6 +210,9 @@
                   '|chrome/browser/resources/login.html' \
                   '|chrome/browser/ui/webui/chromeos/login/.*'
     },
+    'task_manager': {
+      'filepath': 'task_manager'
+    },
     'filebrowse': {
       'filepath': 'file_browser' \
                   '|file_manager' \
@@ -242,6 +244,13 @@
                   '|chrome/browser/chromeos/wm_.*' \
                   '|ui/base/x/.*'
     },
+    'accessibility': {
+      'filepath': 'chrome/browser/accessibility/.*' \
+                  '|content/browser/accessibility/.*' \
+                  '|chrome/.*accessib.*' \
+                  '|ui/base/accessibility/.*' \
+                  '|views/accessibility/.*'
+    },
   },
 
   'WATCHLISTS': {
@@ -253,7 +262,8 @@
     'browser_main': ['brettw-cc@chromium.org'],
     'browser_resources': ['arv@chromium.org'],
     'chromeos_login': ['nkostylev+cc@chromium.org'],
-    'content': ['jam@chromium.org', 'joi+watch-content@chromium.org'],
+    'content': ['jam@chromium.org', 'joi+watch-content@chromium.org',
+                'darin-cc@chromium.org'],
     'download': ['phajdan.jr@chromium.org','rdsmith+dwatch@chromium.org'],
     'history': ['brettw-cc@chromium.org'],
     'renderer': ['darin-cc@chromium.org',
@@ -264,7 +274,8 @@
                'stuartmorgan+watch@chromium.org'],
     'worker': ['jam@chromium.org'],
     'extension': ['aa@chromium.org',
-                  'erikkay@chromium.org'],
+                  'erikkay@chromium.org',
+                  'mihaip+watch@chromium.org'],
     'net': ['darin-cc@chromium.org', 'cbentzel+watch@chromium.org'],
     'net_error_list': ['mmenke@chromium.org'],
     'net_log': ['mmenke@chromium.org', 'eroman@chromium.org'],
@@ -286,7 +297,7 @@
     'gpu': ['apatrick@chromium.org'],
     'locale_settings': ['finnur+watch@chromium.org'],
     'options_dialog_content': ['finnur+watch@chromium.org'],
-    'chromeos': ['davemoore+watch@chromium.org'],
+    'chromeos': ['davemoore+watch@chromium.org, stevenjb@chromium.org'],
     'npapi_headers': ['stuartmorgan@chromium.org'],
     'remoting': ['ajwong+watch@chromium.org', 'dmaclach+watch@chromium.org',
                  'garykac+watch@chromium.org', 'hclam+watch@chromium.org',
@@ -307,11 +318,12 @@
                'dennisjeffrey@chromium.org'],
     'labs': ['thakis@chromium.org'],
     'fileapi': ['kinuko+watch@chromium.org'],
-    'pepper_api': ['piman+watch@chromium.org'],
+    'pepper_api': ['piman+watch@chromium.org', 'darin-cc@chromium.org'],
     'prerender': ['cbentzel+watch@chromium.org', 'tburkard+watch@chromium.org',
                   'dominich+watch@chromium.org', 'mmenke@chromium.org'],
     'chromedriver': ['kkania@chromium.org'],
     'dom_login': ['rharrison@chromium.org'],
+    'task_manager': ['yoshiki+watch@chromium.org'],
     'imageburner': ['achuith+watch@chromium.org', 'tbarzic+watch@chromium.org'],
     'filebrowse': ['achuith+watch@chromium.org', 'rginda+watch@chromium.org'],
     'clang_update': ['fischman+watch@chromium.org', 'ukai+watch@chromium.org'],
@@ -323,5 +335,14 @@
     'accelerator_table_gtk': ['mazda@chromium.org', 'derat+watch@chromium.org'],
     'downloads_ui': ['asanka@chromium.org', 'rdsmith@chromium.org'],
     'x11': ['derat+watch@chromium.org'],
+    'accessibility': ['dmazzoni+watch@chromium.org',
+                      'dtseng+watch@chromium.org',
+                      'ctguil+watch@chromium.org',
+                      'aboxhall+watch@chromium.org',
+                      'davidbarr+watch@chromium.org',
+                      'zork+watch@chromium.org',
+                      'hashimoto+watch@chromium.org',
+                      'yoshiki+watch@chromium.org',
+                      'yuzo+watch@chromium.org'],
   },
 }

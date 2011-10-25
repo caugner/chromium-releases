@@ -11,6 +11,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -187,11 +188,13 @@ DefaultSearchView::DefaultSearchView(TabContents* tab_contents,
       proposed_provider_button_(NULL),
       proposed_turl_(proposed_default_turl),
       template_url_service_(template_url_service) {
-  PrefService* prefs = tab_contents->profile()->GetPrefs();
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents->browser_context());
+  PrefService* prefs = profile->GetPrefs();
   SetupControls(prefs);
 
   // Show the dialog.
-  tab_contents->CreateConstrainedDialog(this);
+  new ConstrainedWindowViews(tab_contents, this);
 }
 
 void DefaultSearchView::SetupControls(PrefService* prefs) {

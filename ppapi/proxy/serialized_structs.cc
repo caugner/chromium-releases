@@ -8,7 +8,7 @@
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_rect.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 SerializedFontDescription::SerializedFontDescription()
@@ -63,10 +63,6 @@ void SerializedFontDescription::SetToPPFontDescription(
   desc->word_spacing = word_spacing;
 }
 
-PPBFileRef_CreateInfo::PPBFileRef_CreateInfo()
-    : file_system_type(PP_FILESYSTEMTYPE_EXTERNAL) {
-}
-
 PPBFlash_DrawGlyphs_Params::PPBFlash_DrawGlyphs_Params()
     : instance(0),
       font_desc(),
@@ -82,4 +78,4 @@ PPBFlash_DrawGlyphs_Params::PPBFlash_DrawGlyphs_Params()
 PPBFlash_DrawGlyphs_Params::~PPBFlash_DrawGlyphs_Params() {}
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

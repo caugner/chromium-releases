@@ -6,20 +6,20 @@
 #define CHROME_BROWSER_MOCK_BROWSING_DATA_INDEXED_DB_HELPER_H_
 #pragma once
 
+#include <list>
 #include <map>
-#include <vector>
 
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/browsing_data_indexed_db_helper.h"
 
 // Mock for BrowsingDataIndexedDBHelper.
-// Use AddIndexedDBSamples() or add directly to response_ vector, then
+// Use AddIndexedDBSamples() or add directly to response_ list, then
 // call Notify().
 class MockBrowsingDataIndexedDBHelper
     : public BrowsingDataIndexedDBHelper {
  public:
-  explicit MockBrowsingDataIndexedDBHelper(Profile* profile);
+  MockBrowsingDataIndexedDBHelper();
 
   // Adds some IndexedDBInfo samples.
   void AddIndexedDBSamples();
@@ -36,23 +36,16 @@ class MockBrowsingDataIndexedDBHelper
 
   // BrowsingDataIndexedDBHelper.
   virtual void StartFetching(
-      Callback1<const std::vector<IndexedDBInfo>& >::Type* callback);
+      Callback1<const std::list<IndexedDBInfo>& >::Type* callback);
   virtual void CancelNotification();
-  virtual void DeleteIndexedDBFile(const FilePath& file_path);
-
-  FilePath last_deleted_file_;
+  virtual void DeleteIndexedDB(const GURL& origin);
 
  private:
   virtual ~MockBrowsingDataIndexedDBHelper();
 
-  Profile* profile_;
-
-  scoped_ptr<Callback1<const std::vector<IndexedDBInfo>& >::Type >
-      callback_;
-
-  std::map<const FilePath::StringType, bool> files_;
-
-  std::vector<IndexedDBInfo> response_;
+  scoped_ptr<Callback1<const std::list<IndexedDBInfo>& >::Type > callback_;
+  std::map<GURL, bool> origins_;
+  std::list<IndexedDBInfo> response_;
 };
 
 #endif  // CHROME_BROWSER_MOCK_BROWSING_DATA_INDEXED_DB_HELPER_H_

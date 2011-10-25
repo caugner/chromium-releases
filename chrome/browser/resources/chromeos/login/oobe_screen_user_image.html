@@ -1,10 +1,12 @@
 <div class="step right hidden" id="user-image">
+  <div id="user-image-aria-label" aria-live="assertive"></div>
   <div id="user-image-screen-curtain">
     <p i18n-content="userImageScreenDescription"></p>
   </div>
   <div id="user-image-screen-main">
-    <div id="user-image-list">
-    </div>
-    <img id="user-image-preview" src="chrome://theme/IDR_LOGIN_DEFAULT_USER">
+    <grid id="user-image-grid">
+    </grid>
+    <img id="user-image-preview" alt=""
+         src="chrome://theme/IDR_LOGIN_DEFAULT_USER">
   </div>
 </div>

@@ -18,7 +18,6 @@
 #include "base/sync_socket.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "content/common/child_process_messages.h"
 #include "content/common/child_process.h"
 #include "content/common/child_thread.h"
 #include "content/common/content_switches.h"
@@ -36,6 +35,7 @@
 #include "content/renderer/gpu/renderer_gl_context.h"
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/renderer/media/audio_message_filter.h"
+#include "content/renderer/media/video_capture_impl_manager.h"
 #include "content/renderer/p2p/p2p_transport_impl.h"
 #include "content/renderer/pepper_platform_context_3d_impl.h"
 #include "content/renderer/pepper_platform_video_decoder_impl.h"
@@ -44,6 +44,7 @@
 #include "content/renderer/render_widget_fullscreen_pepper.h"
 #include "content/renderer/webplugin_delegate_proxy.h"
 #include "ipc/ipc_channel_handle.h"
+#include "media/video/capture/video_capture_proxy.h"
 #include "ppapi/c/dev/pp_video_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_flash.h"
@@ -68,12 +69,12 @@
 #include "webkit/plugins/ppapi/ppb_broker_impl.h"
 #include "webkit/plugins/ppapi/ppb_flash_impl.h"
 #include "webkit/plugins/ppapi/ppb_flash_net_connector_impl.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
+#include "webkit/plugins/webplugininfo.h"
 
 using WebKit::WebView;
 
 namespace {
-
-const int32 kDefaultCommandBufferSize = 1024 * 1024;
 
 int32_t PlatformFileToInt(base::PlatformFile handle) {
 #if defined(OS_WIN)
@@ -342,21 +343,21 @@ class DispatcherWrapper
             base::ProcessHandle plugin_process_handle,
             const IPC::ChannelHandle& channel_handle,
             PP_Module pp_module,
-            pp::proxy::Dispatcher::GetInterfaceFunc local_get_interface);
+            ppapi::proxy::Dispatcher::GetInterfaceFunc local_get_interface);
 
   // OutOfProcessProxy implementation.
   virtual const void* GetProxiedInterface(const char* name) {
     return dispatcher_->GetProxiedInterface(name);
   }
   virtual void AddInstance(PP_Instance instance) {
-    pp::proxy::HostDispatcher::SetForInstance(instance, dispatcher_.get());
+    ppapi::proxy::HostDispatcher::SetForInstance(instance, dispatcher_.get());
   }
   virtual void RemoveInstance(PP_Instance instance) {
-    pp::proxy::HostDispatcher::RemoveForInstance(instance);
+    ppapi::proxy::HostDispatcher::RemoveForInstance(instance);
   }
 
  private:
-  scoped_ptr<pp::proxy::HostDispatcher> dispatcher_;
+  scoped_ptr<ppapi::proxy::HostDispatcher> dispatcher_;
 };
 
 class QuotaCallbackTranslator : public QuotaDispatcher::Callback {
@@ -376,6 +377,64 @@ class QuotaCallbackTranslator : public QuotaDispatcher::Callback {
   scoped_ptr<PluginCallback> callback_;
 };
 
+class PlatformVideoCaptureImpl
+    : public webkit::ppapi::PluginDelegate::PlatformVideoCapture {
+ public:
+  PlatformVideoCaptureImpl(media::VideoCapture::EventHandler* handler)
+      : handler_proxy_(new media::VideoCaptureHandlerProxy(
+            handler, base::MessageLoopProxy::current())) {
+    VideoCaptureImplManager* manager =
+        RenderThread::current()->video_capture_impl_manager();
+    // 1 means the "default" video capture device.
+    // TODO(piman): Add a way to enumerate devices and pass them through the
+    // API.
+    video_capture_ = manager->AddDevice(1, handler_proxy_.get());
+  }
+
+  // Overrides from media::VideoCapture::EventHandler
+  virtual ~PlatformVideoCaptureImpl() {
+    VideoCaptureImplManager* manager =
+        RenderThread::current()->video_capture_impl_manager();
+    manager->RemoveDevice(1, handler_proxy_.get());
+  }
+
+  virtual void StartCapture(
+      EventHandler* handler,
+      const VideoCaptureCapability& capability) OVERRIDE {
+    DCHECK(handler == handler_proxy_->proxied());
+    video_capture_->StartCapture(handler_proxy_.get(), capability);
+  }
+
+  virtual void StopCapture(EventHandler* handler) OVERRIDE {
+    DCHECK(handler == handler_proxy_->proxied());
+    video_capture_->StopCapture(handler_proxy_.get());
+  }
+
+  virtual void FeedBuffer(scoped_refptr<VideoFrameBuffer> buffer) OVERRIDE {
+    video_capture_->FeedBuffer(buffer);
+  }
+
+  virtual bool CaptureStarted() OVERRIDE {
+    return handler_proxy_->state().started;
+  }
+
+  virtual int CaptureWidth() OVERRIDE {
+    return handler_proxy_->state().width;
+  }
+
+  virtual int CaptureHeight() OVERRIDE {
+    return handler_proxy_->state().height;
+  }
+
+  virtual int CaptureFrameRate() OVERRIDE {
+    return handler_proxy_->state().frame_rate;
+  }
+
+ private:
+  scoped_ptr<media::VideoCaptureHandlerProxy> handler_proxy_;
+  media::VideoCapture* video_capture_;
+};
+
 }  // namespace
 
 bool DispatcherWrapper::Init(
@@ -383,8 +442,8 @@ bool DispatcherWrapper::Init(
     base::ProcessHandle plugin_process_handle,
     const IPC::ChannelHandle& channel_handle,
     PP_Module pp_module,
-    pp::proxy::Dispatcher::GetInterfaceFunc local_get_interface) {
-  dispatcher_.reset(new pp::proxy::HostDispatcher(
+    ppapi::proxy::Dispatcher::GetInterfaceFunc local_get_interface) {
+  dispatcher_.reset(new ppapi::proxy::HostDispatcher(
       plugin_process_handle, pp_module, local_get_interface));
 
   if (!dispatcher_->InitHostWithChannel(
@@ -408,7 +467,7 @@ bool BrokerDispatcherWrapper::Init(
     base::ProcessHandle plugin_process_handle,
     const IPC::ChannelHandle& channel_handle) {
   dispatcher_.reset(
-      new pp::proxy::BrokerHostDispatcher(plugin_process_handle));
+      new ppapi::proxy::BrokerHostDispatcher(plugin_process_handle));
 
   if (!dispatcher_->InitBrokerWithChannel(PepperPluginRegistry::GetInstance(),
                                           channel_handle,
@@ -567,7 +626,7 @@ void PpapiBrokerImpl::ConnectPluginToBroker(
     scoped_ptr<base::SyncSocket> broker_socket(sockets[0]);
     scoped_ptr<base::SyncSocket> plugin_socket(sockets[1]);
 
-    result = dispatcher_->SendHandleToBroker(client->instance()->pp_instance(),
+    result = dispatcher_->SendHandleToBroker(client->pp_instance(),
                                              broker_socket->handle());
 
     // If the broker has its pipe handle, duplicate the plugin's handle.
@@ -598,12 +657,13 @@ PepperPluginDelegateImpl::~PepperPluginDelegateImpl() {
 }
 
 scoped_refptr<webkit::ppapi::PluginModule>
-PepperPluginDelegateImpl::CreatePepperPlugin(
-    const FilePath& path,
+PepperPluginDelegateImpl::CreatePepperPluginModule(
+    const webkit::WebPluginInfo& webplugin_info,
     bool* pepper_plugin_was_registered) {
   *pepper_plugin_was_registered = true;
 
   // See if a module has already been loaded for this plugin.
+  FilePath path(webplugin_info.path);
   scoped_refptr<webkit::ppapi::PluginModule> module =
       PepperPluginRegistry::GetInstance()->GetLiveModule(path);
   if (module)
@@ -613,7 +673,7 @@ PepperPluginDelegateImpl::CreatePepperPlugin(
   // sandbox restrictions. So getting here implies it doesn't exist or should
   // be out of process.
   const PepperPluginInfo* info =
-      PepperPluginRegistry::GetInstance()->GetInfoForPlugin(path);
+      PepperPluginRegistry::GetInstance()->GetInfoForPlugin(webplugin_info);
   if (!info) {
     *pepper_plugin_was_registered = false;
     return scoped_refptr<webkit::ppapi::PluginModule>();
@@ -854,13 +914,17 @@ webkit::ppapi::PluginDelegate::PlatformContext3D*
 #endif
 }
 
+webkit::ppapi::PluginDelegate::PlatformVideoCapture*
+PepperPluginDelegateImpl::CreateVideoCapture(
+      media::VideoCapture::EventHandler* handler) {
+  return new PlatformVideoCaptureImpl(handler);
+}
+
 webkit::ppapi::PluginDelegate::PlatformVideoDecoder*
 PepperPluginDelegateImpl::CreateVideoDecoder(
     media::VideoDecodeAccelerator::Client* client,
-    int32 command_buffer_route_id,
-    gpu::CommandBufferHelper* cmd_buffer_helper) {
-  return new PlatformVideoDecoderImpl(
-      client, command_buffer_route_id, cmd_buffer_helper);
+    int32 command_buffer_route_id) {
+  return new PlatformVideoDecoderImpl(client, command_buffer_route_id);
 }
 
 void PepperPluginDelegateImpl::NumberOfFindResultsChanged(int identifier,
@@ -898,7 +962,8 @@ PepperPluginDelegateImpl::ConnectToPpapiBroker(
   // before Connect() adds a reference.
   scoped_refptr<PpapiBrokerImpl> broker_impl;
 
-  webkit::ppapi::PluginModule* plugin_module = client->instance()->module();
+  webkit::ppapi::PluginModule* plugin_module =
+      webkit::ppapi::ResourceHelper::GetPluginModule(client);
   PpapiBroker* broker = plugin_module->GetBroker();
   if (!broker) {
     broker_impl = CreatePpapiBroker(plugin_module);
@@ -1170,6 +1235,12 @@ base::PlatformFileError PepperPluginDelegateImpl::GetDirContents(
   return error;
 }
 
+void PepperPluginDelegateImpl::SyncGetFileSystemPlatformPath(
+    const GURL& url, FilePath* platform_path) {
+  RenderThread::current()->Send(new FileSystemHostMsg_SyncGetPlatformPath(
+      url, platform_path));
+}
+
 scoped_refptr<base::MessageLoopProxy>
 PepperPluginDelegateImpl::GetFileThreadMessageLoopProxy() {
   return RenderThread::current()->GetFileThreadMessageLoopProxy();
@@ -1332,10 +1403,10 @@ void PepperPluginDelegateImpl::SubscribeToPolicyUpdates(
 }
 
 std::string PepperPluginDelegateImpl::ResolveProxy(const GURL& url) {
-  int net_error;
+  bool result;
   std::string proxy_result;
   RenderThread::current()->Send(
-      new ChildProcessHostMsg_ResolveProxy(url, &net_error, &proxy_result));
+      new ViewHostMsg_ResolveProxy(url, &result, &proxy_result));
   return proxy_result;
 }
 
@@ -1352,23 +1423,19 @@ void PepperPluginDelegateImpl::SetContentRestriction(int restrictions) {
       render_view_->routing_id(), restrictions));
 }
 
-void PepperPluginDelegateImpl::HasUnsupportedFeature() {
-  render_view_->Send(new ViewHostMsg_PDFHasUnsupportedFeature(
-      render_view_->routing_id()));
-}
-
 void PepperPluginDelegateImpl::SaveURLAs(const GURL& url) {
   render_view_->Send(new ViewHostMsg_SaveURLAs(
       render_view_->routing_id(), url));
 }
 
-P2PSocketDispatcher* PepperPluginDelegateImpl::GetP2PSocketDispatcher() {
+content::P2PSocketDispatcher*
+PepperPluginDelegateImpl::GetP2PSocketDispatcher() {
   return render_view_->p2p_socket_dispatcher();
 }
 
 webkit_glue::P2PTransport* PepperPluginDelegateImpl::CreateP2PTransport() {
 #if defined(ENABLE_P2P_APIS)
-  return new P2PTransportImpl(render_view_->p2p_socket_dispatcher());
+  return new content::P2PTransportImpl(render_view_->p2p_socket_dispatcher());
 #else
   return NULL;
 #endif
@@ -1405,6 +1472,10 @@ base::SharedMemory* PepperPluginDelegateImpl::CreateAnonymousSharedMemory(
 
 ppapi::Preferences PepperPluginDelegateImpl::GetPreferences() {
   return ppapi::Preferences(render_view_->webkit_preferences());
+}
+
+int PepperPluginDelegateImpl::GetRoutingId() const {
+  return render_view_->routing_id();
 }
 
 void PepperPluginDelegateImpl::PublishInitialPolicy(

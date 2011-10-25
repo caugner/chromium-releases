@@ -17,7 +17,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/content_notification_types.h"
@@ -161,6 +161,55 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_SingletonTabExisting) {
   // No tab contents should have been created
   EXPECT_EQ(previous_tab_contents_count,
             created_tab_contents_count_);
+}
+
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       Disposition_SingletonTabRespectingRef) {
+  GURL singleton_ref_url1("http://maps.google.com/#a");
+  GURL singleton_ref_url2("http://maps.google.com/#b");
+  GURL singleton_ref_url3("http://maps.google.com/");
+
+  browser()->AddSelectedTabWithURL(singleton_ref_url1, PageTransition::LINK);
+
+  // We should have one browser with 2 tabs, 2nd selected.
+  EXPECT_EQ(1u, BrowserList::size());
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Navigate to singleton_url2.
+  browser::NavigateParams p(MakeNavigateParams());
+  p.disposition = SINGLETON_TAB;
+  p.url = singleton_ref_url2;
+  browser::Navigate(&p);
+
+  // We should now have 2 tabs, the 2nd one selected.
+  EXPECT_EQ(browser(), p.browser);
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Navigate to singleton_url2, but with respect ref set.
+  p = MakeNavigateParams();
+  p.disposition = SINGLETON_TAB;
+  p.url = singleton_ref_url2;
+  p.ref_behavior = browser::NavigateParams::RESPECT_REF;
+  browser::Navigate(&p);
+
+  // We should now have 3 tabs, the 3th one selected.
+  EXPECT_EQ(browser(), p.browser);
+  EXPECT_EQ(3, browser()->tab_count());
+  EXPECT_EQ(2, browser()->active_index());
+
+  // Navigate to singleton_url3.
+  p = MakeNavigateParams();
+  p.disposition = SINGLETON_TAB;
+  p.url = singleton_ref_url3;
+  p.ref_behavior = browser::NavigateParams::RESPECT_REF;
+  browser::Navigate(&p);
+
+  // We should now have 4 tabs, the 4th one selected.
+  EXPECT_EQ(browser(), p.browser);
+  EXPECT_EQ(4, browser()->tab_count());
+  EXPECT_EQ(3, browser()->active_index());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,

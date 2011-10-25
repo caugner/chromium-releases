@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 
@@ -27,7 +27,8 @@ class FindBackendTest : public TabContentsWrapperTestHarness {
 namespace {
 
 string16 FindPrepopulateText(TabContents* contents) {
-  return FindBarState::GetLastPrepopulateText(contents->profile());
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  return FindBarState::GetLastPrepopulateText(profile);
 }
 
 }  // end namespace

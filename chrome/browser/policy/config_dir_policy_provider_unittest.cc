@@ -336,9 +336,9 @@ INSTANTIATE_TEST_CASE_P(
         ValueTestParams::ForBooleanPolicy(
             kPolicyInstantEnabled,
             key::kInstantEnabled),
-        ValueTestParams::ForBooleanPolicy(
-            kPolicyIncognitoEnabled,
-            key::kIncognitoEnabled),
+        ValueTestParams::ForIntegerPolicy(
+            kPolicyIncognitoModeAvailability,
+            key::kIncognitoModeAvailability),
         ValueTestParams::ForBooleanPolicy(
             kPolicyDisablePluginFinder,
             key::kDisablePluginFinder),
@@ -375,5 +375,18 @@ INSTANTIATE_TEST_CASE_P(
         ValueTestParams::ForStringPolicy(
             kPolicyDiskCacheDir,
             key::kDiskCacheDir)));
+
+// testing::Values has a limit of 50 test templates, which is reached by the
+// instantiations above. Add tests for new policies here:
+INSTANTIATE_TEST_CASE_P(
+    ConfigDirPolicyProviderValueTestInstance2,
+    ConfigDirPolicyProviderValueTest,
+    testing::Values(
+        ValueTestParams::ForListPolicy(
+            kPolicyURLBlacklist,
+            key::kURLBlacklist),
+        ValueTestParams::ForListPolicy(
+            kPolicyURLWhitelist,
+            key::kURLWhitelist)));
 
 }  // namespace policy

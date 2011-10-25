@@ -152,7 +152,7 @@ void NotificationUIManager::CheckAndShowNotifications() {
 
 void NotificationUIManager::CheckUserState() {
   bool is_user_active_previously = is_user_active_;
-  is_user_active_ = CalculateIdleState(0) != IDLE_STATE_LOCKED &&
+  is_user_active_ = CalculateIdleStateSync(0) != IDLE_STATE_LOCKED &&
                     !IsFullScreenMode();
   if (is_user_active_ == is_user_active_previously)
     return;
@@ -164,7 +164,7 @@ void NotificationUIManager::CheckUserState() {
     ShowNotifications();
   } else if (!user_state_check_timer_.IsRunning()) {
     // Start a timer to detect the moment at which the user becomes active.
-    user_state_check_timer_.Start(
+    user_state_check_timer_.Start(FROM_HERE,
         base::TimeDelta::FromSeconds(kUserStatePollingIntervalSeconds), this,
         &NotificationUIManager::CheckUserState);
   }

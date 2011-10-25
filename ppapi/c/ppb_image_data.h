@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_image_data.idl modified Sat Jul 16 16:50:26 2011. */
+/* From ppb_image_data.idl modified Mon Aug 29 10:11:34 2011. */
 
 #ifndef PPAPI_C_PPB_IMAGE_DATA_H_
 #define PPAPI_C_PPB_IMAGE_DATA_H_
@@ -14,6 +14,9 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/pp_stdint.h"
+
+#define PPB_IMAGEDATA_INTERFACE_1_0 "PPB_ImageData;1.0"
+#define PPB_IMAGEDATA_INTERFACE PPB_IMAGEDATA_INTERFACE_1_0
 
 /**
  * @file
@@ -43,7 +46,7 @@
  *
  * ...components of a pixel, floats ranging from 0 to 1...
  * <code>float red = 1.0f;</code>
- * <code><code>float green = 0.50f;</code>
+ * <code>float green = 0.50f;</code>
  * <code>float blue = 0.0f;</code>
  * <code>float alpha = 0.75f;</code>
  * ...components for image data are 8-bit values ranging from 0 to 255...
@@ -102,10 +105,6 @@ PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_ImageDataDesc, 16);
  * The <code>PPB_ImageData</code> interface contains pointers to several
  * functions for determining the browser's treatment of image data.
  */
-#define PPB_IMAGEDATA_INTERFACE_0_3 "PPB_ImageData;0.3"
-#define PPB_IMAGEDATA_INTERFACE_1_0 "PPB_ImageData;1.0"
-#define PPB_IMAGEDATA_INTERFACE PPB_IMAGEDATA_INTERFACE_1_0
-
 struct PPB_ImageData {
   /**
    * GetNativeImageDataFormat() returns the browser's preferred format for
@@ -133,7 +132,7 @@ struct PPB_ImageData {
    * memory, but may contain data from a previous image produced by the same
    * module if the bitmap was cached and re-used.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    * @param[in] format The desired image data format.
    * @param[in] size A pointer to a <code>PP_Size</code> containing the image
@@ -145,7 +144,7 @@ struct PPB_ImageData {
    * current contents of the bitmap will be undefined, and the module should
    * be sure to set all the pixels.
    *
-   * @return A <code>PP_Resource</code> with a nonzero ID on succes or zero on
+   * @return A <code>PP_Resource</code> with a nonzero ID on success or zero on
    * failure. Failure means the instance, image size, or format was invalid.
    */
   PP_Resource (*Create)(PP_Instance instance,

@@ -7,9 +7,13 @@
 
 #include "media/base/video_frame.h"
 #include "media/filters/video_renderer_base.h"
-#include "webkit/glue/webmediaplayer_impl.h"
+#include "ui/gfx/rect.h"
+
+class SkCanvas;
 
 namespace webkit_glue {
+
+class WebMediaPlayerProxy;
 
 // A specialized version of a VideoRenderer designed to be used inside WebKit.
 class WebVideoRenderer : public media::VideoRendererBase {
@@ -17,8 +21,8 @@ class WebVideoRenderer : public media::VideoRendererBase {
   WebVideoRenderer() : media::VideoRendererBase() {}
   virtual ~WebVideoRenderer() {}
 
-  // Saves the reference to WebMediaPlayerImpl::Proxy.
-  virtual void SetWebMediaPlayerImplProxy(WebMediaPlayerImpl::Proxy* proxy) = 0;
+  // Saves the reference to WebMediaPlayerProxy.
+  virtual void SetWebMediaPlayerProxy(WebMediaPlayerProxy* proxy) = 0;
 
   // This method is called with the same rect as the Paint() method and could
   // be used by future implementations to implement an improved color space +
@@ -32,17 +36,7 @@ class WebVideoRenderer : public media::VideoRendererBase {
   // |dest_rect|.
   //
   // Method called on the render thread.
-  virtual void Paint(SkCanvas* canvas,
-                     const gfx::Rect& dest_rect) = 0;
-
-  // Clients of this class (painter/compositor) should use GetCurrentFrame()
-  // obtain ownership of VideoFrame, it should always relinquish the ownership
-  // by use PutCurrentFrame(). Current frame is not guaranteed to be non-NULL.
-  // It expects clients to use color-fill the background if current frame
-  // is NULL. This could happen when before pipeline is pre-rolled or during
-  // pause/flush/seek.
-  virtual void GetCurrentFrame(scoped_refptr<media::VideoFrame>* frame_out) {}
-  virtual void PutCurrentFrame(scoped_refptr<media::VideoFrame> frame) {}
+  virtual void Paint(SkCanvas* canvas, const gfx::Rect& dest_rect) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebVideoRenderer);

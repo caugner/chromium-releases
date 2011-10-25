@@ -21,14 +21,13 @@ PP_Graphics3DTrustedState GetErrorState() {
 }
 
 PP_Resource CreateRaw(PP_Instance instance,
-                      PP_Config3D_Dev config,
                       PP_Resource share_context,
                       const int32_t* attrib_list) {
   EnterFunction<ResourceCreationAPI> enter(instance, true);
   if (enter.failed())
     return 0;
   return enter.functions()->CreateGraphics3DRaw(
-      instance, config, share_context, attrib_list);
+      instance, share_context, attrib_list);
 }
 
 PP_Bool InitCommandBuffer(PP_Resource context, int32_t size) {
@@ -101,7 +100,7 @@ PP_Graphics3DTrustedState FlushSyncFast(PP_Resource context,
   return enter.object()->FlushSyncFast(put_offset, last_known_get);
 }
 
-const PPB_Graphics3DTrusted_Dev g_ppb_graphics_3d_trusted_thunk = {
+const PPB_Graphics3DTrusted g_ppb_graphics_3d_trusted_thunk = {
   &CreateRaw,
   &InitCommandBuffer,
   &GetRingBuffer,
@@ -116,7 +115,7 @@ const PPB_Graphics3DTrusted_Dev g_ppb_graphics_3d_trusted_thunk = {
 
 }  // namespace
 
-const PPB_Graphics3DTrusted_Dev* GetPPB_Graphics3DTrusted_Thunk() {
+const PPB_Graphics3DTrusted* GetPPB_Graphics3DTrusted_Thunk() {
   return &g_ppb_graphics_3d_trusted_thunk;
 }
 

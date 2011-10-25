@@ -16,6 +16,7 @@
 #include "views/controls/button/button.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/menu/view_menu_delegate.h"
 
 class Extension;
@@ -42,6 +43,13 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   // Returns the height of the entire nonclient top border, including the window
   // frame, any title area, and any connected client edge.
   int NonClientTopBorderHeight() const;
+
+  // Returns the height of the panel in minimized state.
+  static int MinimizedPanelHeight();
+
+  // Returns the size of the non-client area, that is, the window size minus
+  // the size of the client area.
+  gfx::Size NonClientAreaSize() const;
 
  protected:
   // Overridden from BrowserNonClientFrameView:
@@ -141,7 +149,7 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   // borders, including both the window frame and any client edge.
   int NonClientBorderThickness() const;
 
-  // Update control styles to indicate if the title bar is active or not.
+  // Update control styles to indicate if the titlebar is active or not.
   void UpdateControlStyles(PaintState paint_state);
 
   // Custom draw the frame.
@@ -153,7 +161,7 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
 
   // Retrieves the drawing metrics based on the current painting state.
   SkColor GetTitleColor(PaintState paint_state) const;
-  gfx::Font* GetTitleFont(PaintState paint_state) const;
+  gfx::Font* GetTitleFont() const;
   SkBitmap* GetFrameTheme(PaintState paint_state) const;
 
   // Make settings button visible if either of the conditions is met:
@@ -190,7 +198,9 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   scoped_ptr<MouseWatcher> mouse_watcher_;
   ui::SimpleMenuModel settings_menu_contents_;
   views::MenuModelAdapter settings_menu_adapter_;
-  views::MenuItemView settings_menu_;
+  // Owned by |settings_menu_runner_|.
+  views::MenuItemView* settings_menu_;
+  views::MenuRunner settings_menu_runner_;
   scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserFrameView);

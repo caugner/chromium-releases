@@ -16,7 +16,6 @@
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
-#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
@@ -24,6 +23,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -68,8 +68,8 @@ GtkWidget* MakeMarkupLabel(const char* format, const std::string& str) {
 }
 
 void OnLinkButtonClick(GtkWidget* button, const char* url) {
-  BrowserList::GetLastActive()->
-      OpenURL(GURL(url), GURL(), NEW_WINDOW, PageTransition::LINK);
+  BrowserList::GetLastActive()->OpenURL(OpenURLParams(
+      GURL(url), GURL(), NEW_WINDOW, PageTransition::LINK));
 }
 
 const char* GetChromiumUrl() {
@@ -118,7 +118,7 @@ void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
   GtkWidget* close_button = gtk_dialog_add_button(GTK_DIALOG(dialog),
       GTK_STOCK_CLOSE, GTK_RESPONSE_CLOSE);
 
-  GtkWidget* content_area = GTK_DIALOG(dialog)->vbox;
+  GtkWidget* content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 
   // Use an event box to get the background painting correctly
   GtkWidget* ebox = gtk_event_box_new();
@@ -134,7 +134,7 @@ void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
 
   GtkWidget* text_vbox = gtk_vbox_new(FALSE, kExtraLineSpacing);
 
-  GdkColor black = gtk_util::kGdkBlack;
+  GdkColor black = ui::kGdkBlack;
   GtkWidget* product_label = MakeMarkupLabel(
       "<span font_desc=\"18\" style=\"normal\">%s</span>",
       l10n_util::GetStringUTF8(IDS_PRODUCT_NAME));
@@ -267,8 +267,8 @@ void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
 
   GtkWidget* alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(alignment),
-      gtk_util::kContentAreaBorder, 0,
-      gtk_util::kContentAreaBorder, gtk_util::kContentAreaBorder);
+      ui::kContentAreaBorder, 0,
+      ui::kContentAreaBorder, ui::kContentAreaBorder);
   gtk_container_add(GTK_CONTAINER(alignment), vbox);
   gtk_box_pack_start(GTK_BOX(content_area), alignment, FALSE, FALSE, 0);
 

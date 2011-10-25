@@ -9,7 +9,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppapi_proxy_test.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class HostDispatcherTest : public HostProxyTest {
@@ -38,5 +38,5 @@ TEST_F(HostDispatcherTest, FAILS_PPBCreation) {
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 

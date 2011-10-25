@@ -93,6 +93,7 @@ enum IPCMessageStart {
   TextInputClientMsgStart,
   ChromeUtilityMsgStart,
   MediaStreamMsgStart,
+  ChromePluginMsgStart,
   LastIPCMsgStart      // Must come last.
 };
 
@@ -104,6 +105,7 @@ class DictionaryValue;
 class ListValue;
 class Time;
 class TimeDelta;
+class TimeTicks;
 struct FileDescriptor;
 }
 
@@ -197,7 +199,7 @@ struct ParamTraits<int> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt(iter, r);
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -209,7 +211,7 @@ struct ParamTraits<unsigned int> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt(iter, reinterpret_cast<int*>(r));
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -221,7 +223,7 @@ struct ParamTraits<long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadLong(iter, r);
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -233,7 +235,7 @@ struct ParamTraits<unsigned long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadLong(iter, reinterpret_cast<long*>(r));
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -245,7 +247,7 @@ struct ParamTraits<long long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -257,11 +259,11 @@ struct ParamTraits<unsigned long long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 
 template <>
-struct ParamTraits<unsigned short> {
+struct IPC_EXPORT ParamTraits<unsigned short> {
   typedef unsigned short param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -316,7 +318,7 @@ struct ParamTraits<double> {
 };
 
 template <>
-struct ParamTraits<base::Time> {
+struct IPC_EXPORT ParamTraits<base::Time> {
   typedef base::Time param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -324,8 +326,16 @@ struct ParamTraits<base::Time> {
 };
 
 template <>
-struct ParamTraits<base::TimeDelta> {
+struct IPC_EXPORT ParamTraits<base::TimeDelta> {
   typedef base::TimeDelta param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct IPC_EXPORT ParamTraits<base::TimeTicks> {
+  typedef base::TimeTicks param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
@@ -382,7 +392,7 @@ struct ParamTraits<MSG> {
 #endif  // defined(OS_WIN)
 
 template <>
-struct ParamTraits<base::DictionaryValue> {
+struct IPC_EXPORT ParamTraits<base::DictionaryValue> {
   typedef base::DictionaryValue param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -390,7 +400,7 @@ struct ParamTraits<base::DictionaryValue> {
 };
 
 template <>
-struct ParamTraits<base::ListValue> {
+struct IPC_EXPORT ParamTraits<base::ListValue> {
   typedef base::ListValue param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -584,7 +594,7 @@ struct ParamTraits<std::wstring> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadWString(iter, r);
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 
 template <class A, class B>
@@ -607,7 +617,7 @@ struct ParamTraits<std::pair<A, B> > {
 };
 
 template <>
-struct ParamTraits<NullableString16> {
+struct IPC_EXPORT ParamTraits<NullableString16> {
   typedef NullableString16 param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -626,7 +636,7 @@ struct ParamTraits<string16> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadString16(iter, r);
   }
-  static void Log(const param_type& p, std::string* l);
+  IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
 #endif
 
@@ -698,7 +708,7 @@ struct ParamTraits<POINT> {
 #endif  // defined(OS_WIN)
 
 template <>
-struct ParamTraits<FilePath> {
+struct IPC_EXPORT ParamTraits<FilePath> {
   typedef FilePath param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -722,7 +732,7 @@ struct ParamTraits<FilePath> {
 // dup()ing any file descriptors to be transmitted and setting the |auto_close|
 // flag, which causes the file descriptor to be closed after writing.
 template<>
-struct ParamTraits<base::FileDescriptor> {
+struct IPC_EXPORT ParamTraits<base::FileDescriptor> {
   typedef base::FileDescriptor param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -734,7 +744,7 @@ struct ParamTraits<base::FileDescriptor> {
 // fact that IPC endpoints are handled specially on POSIX.  See above comments
 // on FileDescriptor for more background.
 template<>
-struct ParamTraits<IPC::ChannelHandle> {
+struct IPC_EXPORT ParamTraits<IPC::ChannelHandle> {
   typedef ChannelHandle param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -767,7 +777,7 @@ struct ParamTraits<XFORM> {
 };
 #endif  // defined(OS_WIN)
 
-struct LogData {
+struct IPC_EXPORT LogData {
   LogData();
   ~LogData();
 
@@ -785,7 +795,7 @@ struct LogData {
 };
 
 template <>
-struct ParamTraits<LogData> {
+struct IPC_EXPORT ParamTraits<LogData> {
   typedef LogData param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
@@ -944,141 +954,19 @@ struct ParamTraits< Tuple5<A, B, C, D, E> > {
 
 // Used for asynchronous messages.
 template <class ParamType>
-class MessageWithTuple : public Message {
+class MessageSchema {
  public:
   typedef ParamType Param;
   typedef typename TupleTypes<ParamType>::ParamTuple RefParam;
 
-  // The constructor and the Read() method's templated implementations are in
-  // ipc_message_utils_impl.h. The subclass constructor and Log() methods call
-  // the templated versions of these and make sure there are instantiations in
-  // those translation units.
-  MessageWithTuple(int32 routing_id, uint32 type, const RefParam& p);
-
+  static void Write(Message* msg, const RefParam& p) IPC_MSG_NOINLINE;
   static bool Read(const Message* msg, Param* p) IPC_MSG_NOINLINE;
-
-  // Generic dispatcher.  Should cover most cases.
-  template<class T, class S, class Method>
-  static bool Dispatch(const Message* msg, T* obj, S* sender, Method func) {
-    Param p;
-    if (Read(msg, &p)) {
-      DispatchToMethod(obj, func, p);
-      return true;
-    }
-    return false;
-  }
-
-  // The following dispatchers exist for the case where the callback function
-  // needs the message as well.  They assume that "Param" is a type of Tuple
-  // (except the one arg case, as there is no Tuple1).
-  template<class T, class S, typename TA>
-  static bool Dispatch(const Message* msg, T* obj, S* sender,
-                       void (T::*func)(const Message&, TA)) {
-    Param p;
-    if (Read(msg, &p)) {
-      (obj->*func)(*msg, p.a);
-      return true;
-    }
-    return false;
-  }
-
-  template<class T, class S, typename TA, typename TB>
-  static bool Dispatch(const Message* msg, T* obj, S* sender,
-                       void (T::*func)(const Message&, TA, TB)) {
-    Param p;
-    if (Read(msg, &p)) {
-      (obj->*func)(*msg, p.a, p.b);
-      return true;
-    }
-    return false;
-  }
-
-  template<class T, class S, typename TA, typename TB, typename TC>
-  static bool Dispatch(const Message* msg, T* obj, S* sender,
-                       void (T::*func)(const Message&, TA, TB, TC)) {
-    Param p;
-    if (Read(msg, &p)) {
-      (obj->*func)(*msg, p.a, p.b, p.c);
-      return true;
-    }
-    return false;
-  }
-
-  template<class T, class S, typename TA, typename TB, typename TC, typename TD>
-  static bool Dispatch(const Message* msg, T* obj, S* sender,
-                       void (T::*func)(const Message&, TA, TB, TC, TD)) {
-    Param p;
-    if (Read(msg, &p)) {
-      (obj->*func)(*msg, p.a, p.b, p.c, p.d);
-      return true;
-    }
-    return false;
-  }
-
-  template<class T, class S, typename TA, typename TB, typename TC, typename TD,
-           typename TE>
-  static bool Dispatch(const Message* msg, T* obj, S* sender,
-                       void (T::*func)(const Message&, TA, TB, TC, TD, TE)) {
-    Param p;
-    if (Read(msg, &p)) {
-      (obj->*func)(*msg, p.a, p.b, p.c, p.d, p.e);
-      return true;
-    }
-    return false;
-  }
-
-  // Functions used to do manual unpacking.  Only used by the automation code,
-  // these should go away once that code uses SyncChannel.
-  template<typename TA, typename TB>
-  static bool Read(const IPC::Message* msg, TA* a, TB* b) {
-    ParamType params;
-    if (!Read(msg, &params))
-      return false;
-    *a = params.a;
-    *b = params.b;
-    return true;
-  }
-
-  template<typename TA, typename TB, typename TC>
-  static bool Read(const IPC::Message* msg, TA* a, TB* b, TC* c) {
-    ParamType params;
-    if (!Read(msg, &params))
-      return false;
-    *a = params.a;
-    *b = params.b;
-    *c = params.c;
-    return true;
-  }
-
-  template<typename TA, typename TB, typename TC, typename TD>
-  static bool Read(const IPC::Message* msg, TA* a, TB* b, TC* c, TD* d) {
-    ParamType params;
-    if (!Read(msg, &params))
-      return false;
-    *a = params.a;
-    *b = params.b;
-    *c = params.c;
-    *d = params.d;
-    return true;
-  }
-
-  template<typename TA, typename TB, typename TC, typename TD, typename TE>
-  static bool Read(const IPC::Message* msg, TA* a, TB* b, TC* c, TD* d, TE* e) {
-    ParamType params;
-    if (!Read(msg, &params))
-      return false;
-    *a = params.a;
-    *b = params.b;
-    *c = params.c;
-    *d = params.d;
-    *e = params.e;
-    return true;
-  }
 };
 
 // defined in ipc_logging.cc
-void GenerateLogData(const std::string& channel, const Message& message,
-                     LogData* data);
+IPC_EXPORT void GenerateLogData(const std::string& channel,
+                                const Message& message,
+                                LogData* data);
 
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
@@ -1138,57 +1026,52 @@ class ParamDeserializer : public MessageReplyDeserializer {
 
 // Used for synchronous messages.
 template <class SendParamType, class ReplyParamType>
-class MessageWithReply : public SyncMessage {
+class SyncMessageSchema {
  public:
   typedef SendParamType SendParam;
   typedef typename TupleTypes<SendParam>::ParamTuple RefSendParam;
   typedef ReplyParamType ReplyParam;
 
-  MessageWithReply(int32 routing_id, uint32 type,
-                   const RefSendParam& send, const ReplyParam& reply);
+  static void Write(Message* msg, const RefSendParam& send) IPC_MSG_NOINLINE;
   static bool ReadSendParam(const Message* msg, SendParam* p) IPC_MSG_NOINLINE;
   static bool ReadReplyParam(
       const Message* msg,
       typename TupleTypes<ReplyParam>::ValueTuple* p) IPC_MSG_NOINLINE;
 
   template<class T, class S, class Method>
-  static bool Dispatch(const Message* msg, T* obj, S* sender, Method func) {
-    SendParam send_params;
-    Message* reply = GenerateReply(msg);
-    bool error;
-    if (ReadSendParam(msg, &send_params)) {
+  static bool DispatchWithSendParams(bool ok, const SendParam& send_params,
+                                     const Message* msg, T* obj, S* sender,
+                                     Method func) {
+    Message* reply = SyncMessage::GenerateReply(msg);
+    if (ok) {
       typename TupleTypes<ReplyParam>::ValueTuple reply_params;
       DispatchToMethod(obj, func, send_params, &reply_params);
       WriteParam(reply, reply_params);
-      error = false;
       LogReplyParamsToMessage(reply_params, msg);
     } else {
       NOTREACHED() << "Error deserializing message " << msg->type();
       reply->set_reply_error();
-      error = true;
     }
-
     sender->Send(reply);
-    return !error;
+    return ok;
   }
 
   template<class T, class Method>
-  static bool DispatchDelayReply(const Message* msg, T* obj, Method func) {
-    SendParam send_params;
-    Message* reply = GenerateReply(msg);
-    bool error;
-    if (ReadSendParam(msg, &send_params)) {
+  static bool DispatchDelayReplyWithSendParams(bool ok,
+                                               const SendParam& send_params,
+                                               const Message* msg, T* obj,
+                                               Method func) {
+    Message* reply = SyncMessage::GenerateReply(msg);
+    if (ok) {
       Tuple1<Message&> t = MakeRefTuple(*reply);
       ConnectMessageAndReply(msg, reply);
       DispatchToMethod(obj, func, send_params, &t);
-      error = false;
     } else {
       NOTREACHED() << "Error deserializing message " << msg->type();
       reply->set_reply_error();
       obj->Send(reply);
-      error = true;
     }
-    return !error;
+    return ok;
   }
 
   template<typename TA>

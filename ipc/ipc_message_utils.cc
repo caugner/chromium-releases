@@ -62,7 +62,8 @@ static void WriteValue(Message* m, const Value* value, int recursion) {
       break;
     }
     case Value::TYPE_BINARY: {
-      const BinaryValue* binary = static_cast<const BinaryValue*>(value);
+      const base::BinaryValue* binary =
+          static_cast<const base::BinaryValue*>(value);
       m->WriteData(binary->GetBuffer(), static_cast<int>(binary->GetSize()));
       break;
     }
@@ -113,7 +114,7 @@ static bool ReadDictionaryValue(const Message* m, void** iter,
     if (!ReadParam(m, iter, &key) ||
         !ReadValue(m, iter, &subval, recursion + 1))
       return false;
-    value->Set(key, subval);
+    value->SetWithoutPathExpansion(key, subval);
   }
 
   return true;
@@ -185,7 +186,7 @@ static bool ReadValue(const Message* m, void** iter, Value** value,
       int length;
       if (!m->ReadData(iter, &data, &length))
         return false;
-      *value = BinaryValue::CreateWithCopiedBuffer(data, length);
+      *value = base::BinaryValue::CreateWithCopiedBuffer(data, length);
       break;
     }
     case Value::TYPE_DICTIONARY: {
@@ -268,7 +269,7 @@ void ParamTraits<base::Time>::Log(const param_type& p, std::string* l) {
 }
 
 void ParamTraits<base::TimeDelta> ::Write(Message* m, const param_type& p) {
-  ParamTraits<int64> ::Write(m, p.InMicroseconds());
+  ParamTraits<int64> ::Write(m, p.ToInternalValue());
 }
 
 bool ParamTraits<base::TimeDelta> ::Read(const Message* m,
@@ -277,13 +278,32 @@ bool ParamTraits<base::TimeDelta> ::Read(const Message* m,
   int64 value;
   bool ret = ParamTraits<int64> ::Read(m, iter, &value);
   if (ret)
-    *r = base::TimeDelta::FromMicroseconds(value);
+    *r = base::TimeDelta::FromInternalValue(value);
 
   return ret;
 }
 
 void ParamTraits<base::TimeDelta> ::Log(const param_type& p, std::string* l) {
-  ParamTraits<int64> ::Log(p.InMicroseconds(), l);
+  ParamTraits<int64> ::Log(p.ToInternalValue(), l);
+}
+
+void ParamTraits<base::TimeTicks> ::Write(Message* m, const param_type& p) {
+  ParamTraits<int64> ::Write(m, p.ToInternalValue());
+}
+
+bool ParamTraits<base::TimeTicks> ::Read(const Message* m,
+                                         void** iter,
+                                         param_type* r) {
+  int64 value;
+  bool ret = ParamTraits<int64> ::Read(m, iter, &value);
+  if (ret)
+    *r = base::TimeTicks::FromInternalValue(value);
+
+  return ret;
+}
+
+void ParamTraits<base::TimeTicks> ::Log(const param_type& p, std::string* l) {
+  ParamTraits<int64> ::Log(p.ToInternalValue(), l);
 }
 
 void ParamTraits<DictionaryValue>::Write(Message* m, const param_type& p) {

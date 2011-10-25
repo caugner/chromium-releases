@@ -74,21 +74,12 @@ void GpuScheduler::Destroy() {
 }
 
 uint64 GpuScheduler::SetWindowSizeForIOSurface(const gfx::Size& size) {
-  // This is called from an IPC handler, so it's undefined which context is
-  // current. Make sure the right one is.
-  decoder_->GetGLContext()->MakeCurrent(decoder_->GetGLSurface());
-
-  ResizeOffscreenFrameBuffer(size);
-  decoder_->UpdateOffscreenFrameBufferSize();
-
   // Note: The following line changes the current context again.
   return surface_->SetSurfaceSize(size);
 }
 
 TransportDIB::Handle GpuScheduler::SetWindowSizeForTransportDIB(
     const gfx::Size& size) {
-  ResizeOffscreenFrameBuffer(size);
-  decoder_->UpdateOffscreenFrameBufferSize();
   return surface_->SetTransportDIBSize(size);
 }
 
@@ -127,6 +118,14 @@ void GpuScheduler::DidDestroySurface() {
   // surface became invalid, which causes the GPU process to not wait for paint
   // acks.
   surface_.reset();
+}
+
+void GpuScheduler::SetSwapBuffersCallback(
+    Callback0::Type* callback) {
+  wrapped_swap_buffers_callback_.reset(callback);
+  decoder_->SetSwapBuffersCallback(
+      NewCallback(this,
+                  &GpuScheduler::WillSwapBuffers));
 }
 
 void GpuScheduler::WillSwapBuffers() {

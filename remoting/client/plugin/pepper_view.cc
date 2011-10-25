@@ -37,27 +37,26 @@ bool PepperView::Initialize() {
 }
 
 void PepperView::TearDown() {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   task_factory_.RevokeAll();
 }
 
 void PepperView::Paint() {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   TraceContext::tracer()->PrintString("Start Paint.");
 
   if (is_static_fill_) {
-    instance_->Log(logging::LOG_INFO,
-                   "Static filling %08x", static_fill_color_);
+    LOG(INFO) << "Static filling " << static_fill_color_;
     pp::ImageData image(instance_, pp::ImageData::GetNativeImageDataFormat(),
                         pp::Size(graphics2d_.size().width(),
                                  graphics2d_.size().height()),
                         false);
     if (image.is_null()) {
-      instance_->Log(logging::LOG_ERROR,
-                     "Unable to allocate image of size: %dx%d",
-                     graphics2d_.size().width(), graphics2d_.size().height());
+      LOG(ERROR) << "Unable to allocate image of size: "
+                 << graphics2d_.size().width() << " x "
+                 << graphics2d_.size().height();
       return;
     }
 
@@ -80,7 +79,7 @@ void PepperView::Paint() {
 }
 
 void PepperView::SetHostSize(const gfx::Size& host_size) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   if (host_size_ == host_size)
     return;
@@ -93,14 +92,14 @@ void PepperView::SetHostSize(const gfx::Size& host_size) {
 }
 
 void PepperView::PaintFrame(media::VideoFrame* frame, UpdatedRects* rects) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   TraceContext::tracer()->PrintString("Start Paint Frame.");
 
   SetHostSize(gfx::Size(frame->width(), frame->height()));
 
   if (!backing_store_.get() || backing_store_->is_null()) {
-    instance_->Log(logging::LOG_ERROR, "Backing store is not available.");
+    LOG(ERROR) << "Backing store is not available.";
     return;
   }
 
@@ -195,20 +194,22 @@ void PepperView::FlushGraphics(base::Time paint_start) {
 }
 
 void PepperView::SetSolidFill(uint32 color) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   is_static_fill_ = true;
   static_fill_color_ = color;
+
+  Paint();
 }
 
 void PepperView::UnsetSolidFill() {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   is_static_fill_ = false;
 }
 
 void PepperView::SetConnectionState(ConnectionState state) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   // TODO(hclam): Re-consider the way we communicate with Javascript.
   ChromotingScriptableObject* scriptable_obj = instance_->GetScriptableObject();
@@ -236,7 +237,7 @@ void PepperView::SetConnectionState(ConnectionState state) {
 }
 
 void PepperView::UpdateLoginStatus(bool success, const std::string& info) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   // TODO(hclam): Re-consider the way we communicate with Javascript.
   ChromotingScriptableObject* scriptable_obj = instance_->GetScriptableObject();
@@ -255,7 +256,7 @@ bool PepperView::SetPluginSize(const gfx::Size& plugin_size) {
 
   graphics2d_ = pp::Graphics2D(instance_, pp_size, true);
   if (!instance_->BindGraphics(graphics2d_)) {
-    instance_->Log(logging::LOG_ERROR, "Couldn't bind the device context.");
+    LOG(ERROR) << "Couldn't bind the device context.";
     return false;
   }
 
@@ -265,8 +266,8 @@ bool PepperView::SetPluginSize(const gfx::Size& plugin_size) {
   // Allocate the backing store to save the desktop image.
   if ((backing_store_.get() == NULL) ||
       (backing_store_->size() != pp_size)) {
-    instance_->Log(logging::LOG_INFO, "Allocate backing store: %d x %d",
-                   plugin_size.width(), plugin_size.height());
+    LOG(INFO) << "Allocate backing store: "
+              << plugin_size.width() << " x " << plugin_size.height();
     backing_store_.reset(
         new pp::ImageData(instance_, pp::ImageData::GetNativeImageDataFormat(),
                           pp_size, false));
@@ -299,7 +300,7 @@ void PepperView::AllocateFrame(media::VideoFrame::Format format,
                                base::TimeDelta duration,
                                scoped_refptr<media::VideoFrame>* frame_out,
                                Task* done) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   *frame_out = media::VideoFrame::CreateFrame(media::VideoFrame::RGB32,
                                               width, height,
@@ -311,10 +312,10 @@ void PepperView::AllocateFrame(media::VideoFrame::Format format,
 }
 
 void PepperView::ReleaseFrame(media::VideoFrame* frame) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   if (frame) {
-    instance_->Log(logging::LOG_WARNING, "Frame released.");
+    LOG(WARNING) << "Frame released.";
     frame->Release();
   }
 }
@@ -322,7 +323,7 @@ void PepperView::ReleaseFrame(media::VideoFrame* frame) {
 void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
                                       UpdatedRects* rects,
                                       Task* done) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   TraceContext::tracer()->PrintString("Calling PaintFrame");
   // TODO(ajwong): Clean up this API to be async so we don't need to use a
@@ -333,7 +334,7 @@ void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
 }
 
 void PepperView::OnPaintDone(base::Time paint_start) {
-  DCHECK(CurrentlyOnPluginThread());
+  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
   TraceContext::tracer()->PrintString("Paint flushed");
   instance_->GetStats()->video_paint_ms()->Record(
       (base::Time::Now() - paint_start).InMilliseconds());

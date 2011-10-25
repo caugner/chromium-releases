@@ -12,6 +12,8 @@
 #include "jingle/glue/utils.h"
 #include "third_party/libjingle/source/talk/base/asyncpacketsocket.h"
 
+namespace content {
+
 namespace {
 
 // IpcPacketSocket implements talk_base::AsyncPacketSocket interface
@@ -124,8 +126,7 @@ bool IpcPacketSocket::Init(P2PSocketType type, P2PSocketClient* client,
     return false;
   }
 
-  client_->Init(type, local_endpoint, remote_endpoint, this,
-                base::MessageLoopProxy::CreateForCurrentThread());
+  client_->Init(type, local_endpoint, remote_endpoint, this);
 
   return true;
 }
@@ -363,3 +364,5 @@ talk_base::AsyncPacketSocket* IpcPacketSocketFactory::CreateClientTcpSocket(
     return NULL;
   return socket.release();
 }
+
+}  // namespace content

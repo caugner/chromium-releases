@@ -11,6 +11,7 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/language_preferences.h"
+#include "chrome/browser/chromeos/login/language_list.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -22,6 +23,7 @@
 #include "ui/gfx/platform_font_gtk.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/menu/submenu_view.h"
 #include "views/widget/widget.h"
 
@@ -37,7 +39,8 @@ const int kMoreLanguagesSubMenu = 200;
 namespace chromeos {
 
 LanguageSwitchMenu::LanguageSwitchMenu()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(menu_(new views::MenuItemView(this))) {
+    : ALLOW_THIS_IN_INITIALIZER_LIST(menu_(new views::MenuItemView(this))),
+      menu_runner_(new views::MenuRunner(menu_)) {
 }
 
 LanguageSwitchMenu::~LanguageSwitchMenu() {}
@@ -67,7 +70,7 @@ void LanguageSwitchMenu::InitLanguageMenu() {
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_LANGUAGES_MORE)));
 
   for (int line = kLanguageMainMenuSize;
-       line != language_list_->get_languages_count(); line++) {
+       line != language_list_->languages_count(); ++line) {
     submenu->AppendMenuItemWithLabel(
         line,
         UTF16ToWide(language_list_->GetLanguageNameAt(line)));
@@ -111,9 +114,17 @@ bool LanguageSwitchMenu::SwitchLanguage(const std::string& locale) {
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " << locale;
 
     LoadFontsForCurrentLocale();
+
     // The following line does not seem to affect locale anyhow. Maybe in
     // future..
     g_browser_process->SetApplicationLocale(locale);
+
+    // Force preferences save, otherwise they won't be saved on
+    // shutdown from login screen. http://crosbug.com/20747
+    PrefService* prefs = g_browser_process->local_state();
+    prefs->SetString(prefs::kApplicationLocale, locale);
+    prefs->SavePersistentPrefs();
+
     return true;
   }
   return false;
@@ -170,8 +181,10 @@ void LanguageSwitchMenu::RunMenu(views::View* source, const gfx::Point& pt) {
   else
     new_pt.set_x(pt.x() - reverse_offset);
 
-  menu_->RunMenuAt(button->GetWidget()->GetNativeWindow(), button,
-      gfx::Rect(new_pt, gfx::Size()), views::MenuItemView::TOPLEFT, true);
+  if (menu_runner_->RunMenuAt(button->GetWidget(), button,
+          gfx::Rect(new_pt, gfx::Size()), views::MenuItemView::TOPLEFT,
+          views::MenuRunner::HAS_MNEMONICS) == views::MenuRunner::MENU_DELETED)
+    return;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -182,9 +195,6 @@ void LanguageSwitchMenu::ExecuteCommand(int command_id) {
   // Here, we should enable keyboard layouts associated with the locale so
   // that users can use those keyboard layouts on the login screen.
   SwitchLanguageAndEnableKeyboardLayouts(locale);
-  g_browser_process->local_state()->SetString(
-      prefs::kApplicationLocale, locale);
-  g_browser_process->local_state()->ScheduleSavePersistentPrefs();
   InitLanguageMenu();
 
   // Update all view hierarchies that the locale has changed.

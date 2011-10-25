@@ -7,6 +7,7 @@
 #pragma once
 
 #include "ui/gfx/native_widget_types.h"
+#include "views/ime/input_method_delegate.h"
 #include "views/widget/native_widget.h"
 
 namespace gfx {
@@ -36,7 +37,8 @@ namespace internal {
 //             NativeWidget implementations. This file should not be included
 //             in code that does not fall into one of these use cases.
 //
-class NativeWidgetPrivate : public NativeWidget {
+class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
+                                         public internal::InputMethodDelegate {
  public:
   virtual ~NativeWidgetPrivate() {}
 
@@ -125,31 +127,21 @@ class NativeWidgetPrivate : public NativeWidget {
   // Returns true if this native widget is capturing mouse events.
   virtual bool HasMouseCapture() const = 0;
 
-  // Sets or release keyboard capture.
-  virtual void SetKeyboardCapture() = 0;
-  virtual void ReleaseKeyboardCapture() = 0;
-
-  // Returns true if this native widget is capturing keyboard events.
-  virtual bool HasKeyboardCapture() const = 0;
-
   // Returns the InputMethod for this native widget.
   // Note that all widgets in a widget hierarchy share the same input method.
   // TODO(suzhe): rename to GetInputMethod() when NativeWidget implementation
   // class doesn't inherit Widget anymore.
-  virtual InputMethod* GetInputMethodNative() = 0;
+  virtual InputMethod* CreateInputMethod() = 0;
 
-  // Sets a different InputMethod instance to this native widget. The instance
-  // must not be initialized, the ownership will be assumed by the native
-  // widget. It's only for testing purpose.
-  virtual void ReplaceInputMethod(InputMethod* input_method) = 0;
 
   // Centers the window and sizes it to the specified size.
   virtual void CenterWindow(const gfx::Size& size) = 0;
 
-  // Retrieves the window's current restored bounds and maximized state, for
+  // Retrieves the window's current restored bounds and "show" state, for
   // persisting.
-  virtual void GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
-                                                bool* maximized) const = 0;
+  virtual void GetWindowPlacement(
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const = 0;
 
   // Sets the NativeWindow title.
   virtual void SetWindowTitle(const std::wstring& title) = 0;
@@ -164,12 +156,6 @@ class NativeWidgetPrivate : public NativeWidget {
   virtual void SetAccessibleName(const std::wstring& name) = 0;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) = 0;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) = 0;
-
-  enum ShowState {
-    SHOW_RESTORED,
-    SHOW_MAXIMIZED,
-    SHOW_INACTIVE
-  };
 
   // Makes the NativeWindow modal.
   virtual void BecomeModal() = 0;
@@ -193,7 +179,7 @@ class NativeWidgetPrivate : public NativeWidget {
   // Invoked if the initial show should maximize the window. |restored_bounds|
   // is the bounds of the window when not maximized.
   virtual void ShowMaximizedWithBounds(const gfx::Rect& restored_bounds) = 0;
-  virtual void ShowWithState(ShowState state) = 0;
+  virtual void ShowWithWindowState(ui::WindowShowState show_state) = 0;
   virtual bool IsVisible() const = 0;
   virtual void Activate() = 0;
   virtual void Deactivate() = 0;
@@ -216,6 +202,8 @@ class NativeWidgetPrivate : public NativeWidget {
   virtual void SetCursor(gfx::NativeCursor cursor) = 0;
   virtual void ClearNativeFocus() = 0;
   virtual void FocusNativeView(gfx::NativeView native_view) = 0;
+  virtual bool ConvertPointFromAncestor(
+      const Widget* ancestor, gfx::Point* point) const = 0;
 
   // Overridden from NativeWidget:
   virtual internal::NativeWidgetPrivate* AsNativeWidgetPrivate() OVERRIDE;

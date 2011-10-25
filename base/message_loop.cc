@@ -12,6 +12,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop_proxy_impl.h"
 #include "base/message_pump_default.h"
 #include "base/metrics/histogram.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
@@ -25,15 +26,12 @@
 #if defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
 #endif
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_ANDROID)
+#include "base/message_pump_android.h"
+#endif
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
-#if defined(TOUCH_UI)
-#include "base/message_pump_x.h"
-#else
-#include "base/message_pump_gtk.h"
-#endif  // defined(TOUCH_UI)
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 
 using base::TimeDelta;
@@ -85,39 +83,7 @@ const base::LinearHistogram::DescriptionPair event_descriptions_[] = {
 
 bool enable_histogrammer_ = false;
 
-// TODO(ajwong): This is one use case for having a Owned() tag that behaves
-// like a "Unique" pointer.  If we had that, and Tasks were always safe to
-// delete on MessageLoop shutdown, this class could just be a function.
-class TaskClosureAdapter : public base::RefCounted<TaskClosureAdapter> {
- public:
-  // |should_leak_task| points to a flag variable that can be used to determine
-  // if this class should leak the Task on destruction.  This is important
-  // at MessageLoop shutdown since not all tasks can be safely deleted without
-  // running.  See MessageLoop::DeletePendingTasks() for the exact behavior
-  // of when a Task should be deleted. It is subtle.
-  TaskClosureAdapter(Task* task, bool* should_leak_task)
-      : task_(task),
-        should_leak_task_(should_leak_task) {
-  }
-
-  void Run() {
-    task_->Run();
-    delete task_;
-    task_ = NULL;
-  }
-
- private:
-  friend class base::RefCounted<TaskClosureAdapter>;
-
-  ~TaskClosureAdapter() {
-    if (!*should_leak_task_) {
-      delete task_;
-    }
-  }
-
-  Task* task_;
-  bool* should_leak_task_;
-};
+MessageLoop::MessagePumpFactory* message_pump_for_ui_factory_ = NULL;
 
 }  // namespace
 
@@ -170,12 +136,20 @@ MessageLoop::MessageLoop(Type type)
   DCHECK(!current()) << "should only have one message loop per thread";
   lazy_tls_ptr.Pointer()->Set(this);
 
+  message_loop_proxy_ = new base::MessageLoopProxyImpl();
+
 // TODO(rvargas): Get rid of the OS guards.
 #if defined(OS_WIN)
 #define MESSAGE_PUMP_UI new base::MessagePumpForUI()
 #define MESSAGE_PUMP_IO new base::MessagePumpForIO()
 #elif defined(OS_MACOSX)
 #define MESSAGE_PUMP_UI base::MessagePumpMac::Create()
+#define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
+#elif defined(OS_ANDROID)
+#define MESSAGE_PUMP_UI new base::MessagePumpForUI()
+#define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
+#elif defined(USE_WAYLAND)
+#define MESSAGE_PUMP_UI new base::MessagePumpWayland()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #elif defined(TOUCH_UI)
 #define MESSAGE_PUMP_UI new base::MessagePumpX()
@@ -193,7 +167,10 @@ MessageLoop::MessageLoop(Type type)
 #endif
 
   if (type_ == TYPE_UI) {
-    pump_ = MESSAGE_PUMP_UI;
+    if (message_pump_for_ui_factory_)
+      pump_ = message_pump_for_ui_factory_();
+    else
+      pump_ = MESSAGE_PUMP_UI;
   } else if (type_ == TYPE_IO) {
     pump_ = MESSAGE_PUMP_IO;
   } else {
@@ -228,6 +205,11 @@ MessageLoop::~MessageLoop() {
   FOR_EACH_OBSERVER(DestructionObserver, destruction_observers_,
                     WillDestroyCurrentMessageLoop());
 
+  // Tell the message_loop_proxy that we are dying.
+  static_cast<base::MessageLoopProxyImpl*>(message_loop_proxy_.get())->
+      WillDestroyCurrentMessageLoop();
+  message_loop_proxy_ = NULL;
+
   // OK, now make it so that no one can find us.
   lazy_tls_ptr.Pointer()->Set(NULL);
 
@@ -255,6 +237,12 @@ void MessageLoop::EnableHistogrammer(bool enable) {
   enable_histogrammer_ = enable;
 }
 
+// static
+void MessageLoop::InitMessagePumpForUIFactory(MessagePumpFactory* factory) {
+  DCHECK(!message_pump_for_ui_factory_);
+  message_pump_for_ui_factory_ = factory;
+}
+
 void MessageLoop::AddDestructionObserver(
     DestructionObserver* destruction_observer) {
   DCHECK_EQ(this, current());
@@ -271,8 +259,9 @@ void MessageLoop::PostTask(
     const tracked_objects::Location& from_here, Task* task) {
   CHECK(task);
   PendingTask pending_task(
-      base::Bind(&TaskClosureAdapter::Run,
-                 new TaskClosureAdapter(task, &should_leak_tasks_)),
+      base::Bind(
+          &base::subtle::TaskClosureAdapter::Run,
+          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
       from_here,
       CalculateDelayedRuntime(0), true);
   AddToIncomingQueue(&pending_task);
@@ -282,8 +271,9 @@ void MessageLoop::PostDelayedTask(
     const tracked_objects::Location& from_here, Task* task, int64 delay_ms) {
   CHECK(task);
   PendingTask pending_task(
-      base::Bind(&TaskClosureAdapter::Run,
-                 new TaskClosureAdapter(task, &should_leak_tasks_)),
+      base::Bind(
+          &base::subtle::TaskClosureAdapter::Run,
+          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
       from_here,
       CalculateDelayedRuntime(delay_ms), true);
   AddToIncomingQueue(&pending_task);
@@ -293,8 +283,9 @@ void MessageLoop::PostNonNestableTask(
     const tracked_objects::Location& from_here, Task* task) {
   CHECK(task);
   PendingTask pending_task(
-      base::Bind(&TaskClosureAdapter::Run,
-                 new TaskClosureAdapter(task, &should_leak_tasks_)),
+      base::Bind(
+          &base::subtle::TaskClosureAdapter::Run,
+          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
       from_here,
       CalculateDelayedRuntime(0), false);
   AddToIncomingQueue(&pending_task);
@@ -304,8 +295,9 @@ void MessageLoop::PostNonNestableDelayedTask(
     const tracked_objects::Location& from_here, Task* task, int64 delay_ms) {
   CHECK(task);
   PendingTask pending_task(
-      base::Bind(&TaskClosureAdapter::Run,
-                 new TaskClosureAdapter(task, &should_leak_tasks_)),
+      base::Bind(
+          &base::subtle::TaskClosureAdapter::Run,
+          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
       from_here,
       CalculateDelayedRuntime(delay_ms), false);
   AddToIncomingQueue(&pending_task);
@@ -440,7 +432,7 @@ void MessageLoop::RunInternal() {
 
   StartHistogrammer();
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
   if (state_->dispatcher && type() == TYPE_UI) {
     static_cast<base::MessagePumpForUI*>(pump_.get())->
         RunWithDispatcher(this, state_->dispatcher);
@@ -486,11 +478,9 @@ void MessageLoop::RunTask(const PendingTask& pending_task) {
                     DidProcessTask(pending_task.time_posted));
 
 #if defined(TRACK_ALL_TASK_OBJECTS)
-  if (tracked_objects::ThreadData::IsActive() && pending_task.post_births) {
-    tracked_objects::ThreadData::current()->TallyADeath(
-        *pending_task.post_births,
-        TimeTicks::Now() - pending_task.time_posted);
-  }
+  tracked_objects::ThreadData::TallyADeathIfActive(
+      pending_task.post_births,
+      TimeTicks::Now() - pending_task.time_posted);
 #endif  // defined(TRACK_ALL_TASK_OBJECTS)
 
   nestable_tasks_allowed_ = true;
@@ -542,12 +532,11 @@ void MessageLoop::ReloadWorkQueue() {
 bool MessageLoop::DeletePendingTasks() {
   bool did_work = !work_queue_.empty();
   // TODO(darin): Delete all tasks once it is safe to do so.
-  // Until it is totally safe, just do it when running Purify or
-  // Valgrind.
+  // Until it is totally safe, just do it when running Valgrind.
   //
   // See http://crbug.com/61131
   //
-#if defined(PURIFY) || defined(USE_HEAPCHECKER)
+#if defined(USE_HEAPCHECKER)
   should_leak_tasks_ = false;
 #else
       if (RunningOnValgrind())
@@ -756,7 +745,7 @@ MessageLoop::AutoRunState::AutoRunState(MessageLoop* loop) : loop_(loop) {
 
   // Initialize the other fields:
   quit_received = false;
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
   dispatcher = NULL;
 #endif
 }
@@ -780,14 +769,7 @@ MessageLoop::PendingTask::PendingTask(
       nestable(nestable),
       birth_program_counter(posted_from.program_counter()) {
 #if defined(TRACK_ALL_TASK_OBJECTS)
-  post_births = NULL;
-  if (tracked_objects::ThreadData::IsActive()) {
-    tracked_objects::ThreadData* current_thread_data =
-        tracked_objects::ThreadData::current();
-    if (current_thread_data) {
-      post_births = current_thread_data->TallyABirth(posted_from);
-    }
-  }
+  post_births = tracked_objects::ThreadData::TallyABirthIfActive(posted_from);
 #endif  // defined(TRACK_ALL_TASK_OBJECTS)
 }
 
@@ -819,7 +801,14 @@ void MessageLoopForUI::DidProcessMessage(const MSG& message) {
 }
 #endif  // defined(OS_WIN)
 
-#if !defined(OS_MACOSX) && !defined(OS_NACL)
+#if defined(OS_ANDROID)
+void MessageLoopForUI::Start() {
+  // No Histogram support for UI message loop as it is managed by Java side
+  static_cast<base::MessagePumpForUI*>(pump_.get())->Start(this);
+}
+#endif
+
+#if !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_ANDROID)
 void MessageLoopForUI::AddObserver(Observer* observer) {
   pump_ui()->AddObserver(observer);
 }
@@ -833,7 +822,7 @@ void MessageLoopForUI::Run(Dispatcher* dispatcher) {
   state_->dispatcher = dispatcher;
   RunHandler();
 }
-#endif  // !defined(OS_MACOSX) && !defined(OS_NACL)
+#endif  //  !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_ANDROID)
 
 //------------------------------------------------------------------------------
 // MessageLoopForIO

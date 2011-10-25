@@ -1190,7 +1190,7 @@ error::Error GLES2DecoderImpl::HandleGetTexParameterfv(
   Result* result = GetSharedMemoryAs<Result*>(
       c.params_shm_id, c.params_shm_offset, Result::ComputeSize(num_values));
   GLfloat* params = result ? result->GetData() : NULL;
-  if (!validators_->texture_target.IsValid(target)) {
+  if (!validators_->get_tex_param_target.IsValid(target)) {
     SetGLError(GL_INVALID_ENUM, "glGetTexParameterfv: target GL_INVALID_ENUM");
     return error::kNoError;
   }
@@ -1226,7 +1226,7 @@ error::Error GLES2DecoderImpl::HandleGetTexParameteriv(
   Result* result = GetSharedMemoryAs<Result*>(
       c.params_shm_id, c.params_shm_offset, Result::ComputeSize(num_values));
   GLint* params = result ? result->GetData() : NULL;
-  if (!validators_->texture_target.IsValid(target)) {
+  if (!validators_->get_tex_param_target.IsValid(target)) {
     SetGLError(GL_INVALID_ENUM, "glGetTexParameteriv: target GL_INVALID_ENUM");
     return error::kNoError;
   }
@@ -2568,29 +2568,21 @@ error::Error GLES2DecoderImpl::HandleGetMaxValueInBufferCHROMIUM(
   return error::kNoError;
 }
 
-error::Error GLES2DecoderImpl::HandleCopyTextureToParentTextureCHROMIUM(
-    uint32 immediate_data_size,
-    const gles2::CopyTextureToParentTextureCHROMIUM& c) {
-  GLuint client_child_id = c.client_child_id;
-  GLuint client_parent_id = c.client_parent_id;
-  DoCopyTextureToParentTextureCHROMIUM(client_child_id, client_parent_id);
-  return error::kNoError;
+error::Error GLES2DecoderImpl::HandlePlaceholder447CHROMIUM(
+    uint32 immediate_data_size, const gles2::Placeholder447CHROMIUM& c) {
+  return error::kUnknownCommand;
 }
-
-error::Error GLES2DecoderImpl::HandleResizeCHROMIUM(
-    uint32 immediate_data_size, const gles2::ResizeCHROMIUM& c) {
-  GLuint width = static_cast<GLuint>(c.width);
-  GLuint height = static_cast<GLuint>(c.height);
-  DoResizeCHROMIUM(width, height);
-  return error::kNoError;
+error::Error GLES2DecoderImpl::HandlePlaceholder451CHROMIUM(
+    uint32 immediate_data_size, const gles2::Placeholder451CHROMIUM& c) {
+  return error::kUnknownCommand;
 }
-
-error::Error GLES2DecoderImpl::HandleSetSurfaceCHROMIUM(
-    uint32 immediate_data_size, const gles2::SetSurfaceCHROMIUM& c) {
-  GLint surface_id = static_cast<GLint>(c.surface_id);
-  DoSetSurfaceCHROMIUM(surface_id);
-  return error::kNoError;
+error::Error GLES2DecoderImpl::HandlePlaceholder452CHROMIUM(
+    uint32 immediate_data_size, const gles2::Placeholder452CHROMIUM& c) {
+  return error::kUnknownCommand;
 }
-
+error::Error GLES2DecoderImpl::HandlePlaceholder453CHROMIUM(
+    uint32 immediate_data_size, const gles2::Placeholder453CHROMIUM& c) {
+  return error::kUnknownCommand;
+}
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_AUTOGEN_H_
 

@@ -55,6 +55,7 @@
 #include "base/metrics/histogram.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_canon.h"
 #include "net/base/net_util.h"
@@ -611,9 +612,7 @@ void CookieMonster::SetCookieWithDetailsAsync(
     callback.Run(success_);
 }
 
-bool CookieMonster::InitializeFrom(CookieMonster* cookie_monster) {
-  net::CookieList list = cookie_monster->GetAllCookies();
-
+bool CookieMonster::InitializeFrom(const CookieList& list) {
   base::AutoLock autolock(lock_);
   InitIfNecessary();
   for (net::CookieList::const_iterator iter = list.begin();
@@ -2149,6 +2148,31 @@ void CookieMonster::CanonicalCookie::SetSessionCookieExpiryTime() {
       base::TimeDelta::FromDays(kPersistentSessionCookieExpiryInDays);
   has_expires_ = true;
 #endif
+}
+
+CookieMonster::CanonicalCookie* CookieMonster::CanonicalCookie::Create(
+    const GURL& url,
+    const ParsedCookie& pc) {
+  if (!pc.IsValid()) {
+    return NULL;
+  }
+
+  std::string domain_string;
+  if (!GetCookieDomain(url, pc, &domain_string)) {
+    return NULL;
+  }
+  std::string path_string = CanonPath(url, pc);
+  std::string mac_key = pc.HasMACKey() ? pc.MACKey() : std::string();
+  std::string mac_algorithm = pc.HasMACAlgorithm() ?
+      pc.MACAlgorithm() : std::string();
+  Time creation_time = Time::Now();
+  Time expiration_time;
+  if (pc.HasExpires())
+    expiration_time =  net::CookieMonster::ParseCookieTime(pc.Expires());
+
+  return (Create(url, pc.Name(), pc.Value(), domain_string, path_string,
+                 mac_key, mac_algorithm, creation_time, expiration_time,
+                 pc.IsSecure(), pc.IsHttpOnly()));
 }
 
 CookieMonster::CanonicalCookie* CookieMonster::CanonicalCookie::Create(

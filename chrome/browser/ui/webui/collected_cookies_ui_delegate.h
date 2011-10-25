@@ -18,6 +18,7 @@
 
 class GURL;
 class TabContents;
+class TabContentsWrapper;
 
 namespace gfx {
 class Size;
@@ -30,25 +31,26 @@ class CollectedCookiesUIDelegate : public HtmlDialogUIDelegate,
   virtual ~CollectedCookiesUIDelegate();
 
   // static factory method that shows CollectedCookiesUI for |tab_contents|.
-  static void Show(TabContents* tab_contents);
+  static void Show(TabContentsWrapper* wrapper);
 
   // HtmlDialogUIDelegate implementation:
-  virtual bool IsDialogModal() const;
-  virtual std::wstring GetDialogTitle() const;
-  virtual GURL GetDialogContentURL() const;
+  virtual bool IsDialogModal() const OVERRIDE;
+  virtual string16 GetDialogTitle() const OVERRIDE;
+  virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const;
-  virtual void GetDialogSize(gfx::Size* size) const;
-  virtual std::string GetDialogArgs() const;
-  virtual void OnDialogClosed(const std::string& json_retval);
-  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog) {}
-  virtual bool ShouldShowDialogTitle() const;
+      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
+  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
+  virtual std::string GetDialogArgs() const OVERRIDE;
+  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog)
+      OVERRIDE {}
+  virtual bool ShouldShowDialogTitle() const OVERRIDE;
 
   // WebUIMessageHandler implementation:
   virtual void RegisterMessages();
 
  private:
-  explicit CollectedCookiesUIDelegate(TabContents* tab_contents);
+  explicit CollectedCookiesUIDelegate(TabContentsWrapper* wrapper);
 
   // Closes the dialog from javascript.
   void CloseDialog();
@@ -74,7 +76,7 @@ class CollectedCookiesUIDelegate : public HtmlDialogUIDelegate,
   void AllowThisSession(const base::ListValue* args);
 
   NotificationRegistrar registrar_;
-  TabContents* tab_contents_;
+  TabContentsWrapper* wrapper_;
   bool closed_;
 
   scoped_ptr<CookiesTreeModel> allowed_cookies_tree_model_;

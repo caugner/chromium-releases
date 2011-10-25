@@ -13,8 +13,9 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
 #include "net/base/transport_security_state.h"
@@ -39,11 +40,15 @@ class URLRequestJobFactory;
 // instances. Note that URLRequestContext typically does not provide storage for
 // these member variables, since they may be shared. For the ones that aren't
 // shared, URLRequestContextStorage can be helpful in defining their storage.
-class NET_API URLRequestContext
+class NET_EXPORT URLRequestContext
     : public base::RefCountedThreadSafe<URLRequestContext>,
       NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   URLRequestContext();
+
+  base::WeakPtr<URLRequestContext> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
 
   // Copies the state from |other| into this context.
   void CopyFrom(URLRequestContext* other);
@@ -75,6 +80,7 @@ class NET_API URLRequestContext
   OriginBoundCertService* origin_bound_cert_service() const {
     return origin_bound_cert_service_;
   }
+
   void set_origin_bound_cert_service(
       OriginBoundCertService* origin_bound_cert_service) {
     origin_bound_cert_service_ = origin_bound_cert_service;
@@ -188,6 +194,8 @@ class NET_API URLRequestContext
   virtual ~URLRequestContext();
 
  private:
+  base::WeakPtrFactory<URLRequestContext> weak_factory_;
+
   // ---------------------------------------------------------------------------
   // Important: When adding any new members below, consider whether they need to
   // be added to CopyFrom.

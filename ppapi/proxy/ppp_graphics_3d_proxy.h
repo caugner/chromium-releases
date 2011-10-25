@@ -6,12 +6,12 @@
 #define PPAPI_PROXY_PPP_GRAPHICS_3D_PROXY_H_
 
 #include "ppapi/c/pp_instance.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
+#include "ppapi/shared_impl/host_resource.h"
 
-struct PPP_Graphics3D_Dev;
+struct PPP_Graphics3D;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class PPP_Graphics3D_Proxy : public InterfaceProxy {
@@ -21,8 +21,8 @@ class PPP_Graphics3D_Proxy : public InterfaceProxy {
 
   static const Info* GetInfo();
 
-  const PPP_Graphics3D_Dev* ppp_graphics_3d_target() const {
-    return reinterpret_cast<const PPP_Graphics3D_Dev*>(target_interface());
+  const PPP_Graphics3D* ppp_graphics_3d_target() const {
+    return reinterpret_cast<const PPP_Graphics3D*>(target_interface());
   }
 
   // InterfaceProxy implementation.
@@ -34,6 +34,6 @@ class PPP_Graphics3D_Proxy : public InterfaceProxy {
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPP_GRAPHICS_3D_PROXY_H_

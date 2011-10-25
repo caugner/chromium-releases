@@ -3,12 +3,13 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/automation/ui_controls.h"
-#include "chrome/test/interactive_ui/view_event_test_base.h"
+#include "chrome/test/base/view_event_test_base.h"
 #include "ui/base/models/menu_model.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_controller.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/menu/submenu_view.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/test/test_views_delegate.h"
@@ -43,16 +44,13 @@ class TestViewsDelegate : public views::ViewsDelegate {
   virtual void SaveWindowPlacement(const views::Widget* widget,
                                    const std::wstring& window_name,
                                    const gfx::Rect& bounds,
-                                   bool maximized) OVERRIDE {
+                                   ui::WindowShowState show_state) OVERRIDE {
   }
 
-  virtual bool GetSavedWindowBounds(const std::wstring& window_name,
-                                    gfx::Rect* bounds) const OVERRIDE {
-    return false;
-  }
-
-  virtual bool GetSavedMaximizedState(const std::wstring& window_name,
-                                      bool* maximized) const OVERRIDE {
+  virtual bool GetSavedWindowPlacement(
+      const std::wstring& window_name,
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE {
     return false;
   }
 
@@ -247,10 +245,11 @@ class TopMenuModel : public CommonMenuModel {
 class MenuModelAdapterTest : public ViewEventTestBase,
                              public views::ViewMenuDelegate {
  public:
-  MenuModelAdapterTest() :
-      ViewEventTestBase(),
-      button_(NULL),
-      menu_model_adapter_(&top_menu_model_) {
+  MenuModelAdapterTest()
+      : ViewEventTestBase(),
+        button_(NULL),
+        menu_model_adapter_(&top_menu_model_),
+        menu_(NULL) {
     old_views_delegate_ = views::ViewsDelegate::views_delegate;
     views::ViewsDelegate::views_delegate = &views_delegate_;
   }
@@ -264,14 +263,15 @@ class MenuModelAdapterTest : public ViewEventTestBase,
   virtual void SetUp() OVERRIDE {
     button_ = new views::MenuButton(NULL, L"Menu Adapter Test", this, true);
 
-    menu_.reset(new views::MenuItemView(&menu_model_adapter_));
-    menu_model_adapter_.BuildMenu(menu_.get());
+    menu_ = menu_model_adapter_.CreateMenu();
+    menu_runner_.reset(new views::MenuRunner(menu_));
 
     ViewEventTestBase::SetUp();
   }
 
   virtual void TearDown() OVERRIDE {
-    menu_.reset(NULL);
+    menu_runner_.reset(NULL);
+    menu_ = NULL;
     ViewEventTestBase::TearDown();
   }
 
@@ -288,12 +288,12 @@ class MenuModelAdapterTest : public ViewEventTestBase,
     gfx::Point screen_location;
     views::View::ConvertPointToScreen(source, &screen_location);
     gfx::Rect bounds(screen_location, source->size());
-    menu_->RunMenuAt(
-        source->GetWidget()->GetNativeWindow(),
+    ignore_result(menu_runner_->RunMenuAt(
+        source->GetWidget(),
         button_,
         bounds,
         views::MenuItemView::TOPLEFT,
-        true);
+        views::MenuRunner::HAS_MNEMONICS));
   }
 
   // ViewEventTestBase implementation
@@ -321,7 +321,7 @@ class MenuModelAdapterTest : public ViewEventTestBase,
     ASSERT_TRUE(topmenu->IsShowing());
     ASSERT_TRUE(top_menu_model_.IsSubmenuShowing());
 
-    menu_model_adapter_.BuildMenu(menu_.get());
+    menu_model_adapter_.BuildMenu(menu_);
 
     MessageLoopForUI::current()->PostTask(
         FROM_HERE,
@@ -366,7 +366,8 @@ class MenuModelAdapterTest : public ViewEventTestBase,
   views::MenuButton* button_;
   TopMenuModel top_menu_model_;
   views::MenuModelAdapter menu_model_adapter_;
-  scoped_ptr<views::MenuItemView> menu_;
+  views::MenuItemView* menu_;
+  scoped_ptr<views::MenuRunner> menu_runner_;
 };
 
 VIEW_TEST(MenuModelAdapterTest, RebuildMenu)

@@ -12,6 +12,7 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/mock_resource_context.h"
+#include "content/browser/renderer_host/dummy_resource_handler.h"
 #include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
@@ -80,6 +81,7 @@ static ResourceHostMsg_Request CreateResourceRequest(
   request.download_to_file = false;
   request.is_main_frame = true;
   request.frame_id = 0;
+  request.transition_type = PageTransition::LINK;
   return request;
 }
 
@@ -298,7 +300,7 @@ class ResourceDispatcherHostTest : public testing::Test,
 
     ChildProcessSecurityPolicy::GetInstance()->Remove(0);
 
-    // Flush the message loop to make Purify happy.
+    // Flush the message loop to make application verifiers happy.
     message_loop_.RunAllPending();
   }
 
@@ -1208,45 +1210,3 @@ TEST_F(ResourceDispatcherHostTest, CancelRequestsForContext) {
   host_.CancelRequestsForContext(&filter_->resource_context());
   EXPECT_EQ(0, host_.pending_requests());
 }
-
-class DummyResourceHandler : public ResourceHandler {
- public:
-  DummyResourceHandler() {}
-
-  // Called as upload progress is made.
-  bool OnUploadProgress(int request_id, uint64 position, uint64 size) {
-    return true;
-  }
-
-  bool OnRequestRedirected(int request_id, const GURL& url,
-                           ResourceResponse* response, bool* defer) {
-    return true;
-  }
-
-  bool OnResponseStarted(int request_id, ResourceResponse* response) {
-    return true;
-  }
-
-  bool OnWillStart(int request_id, const GURL& url, bool* defer) {
-    return true;
-  }
-
-  bool OnWillRead(
-      int request_id, net::IOBuffer** buf, int* buf_size, int min_size) {
-    return true;
-  }
-
-  bool OnReadCompleted(int request_id, int* bytes_read) { return true; }
-
-  bool OnResponseCompleted(
-    int request_id,
-    const net::URLRequestStatus& status,
-    const std::string& info) {
-    return true;
-  }
-
-  void OnRequestClosed() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DummyResourceHandler);
-};

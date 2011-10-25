@@ -33,6 +33,7 @@
 #include "third_party/undoview/undo_view.h"
 #include "ui/base/animation/multi_animation.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
@@ -209,15 +210,10 @@ OmniboxViewGtk::OmniboxViewGtk(
 #else
       new OmniboxPopupViewGtk
 #endif
-          (GetFont(), this, model_.get(), profile, location_bar));
+          (GetFont(), this, model_.get(), location_bar));
 }
 
 OmniboxViewGtk::~OmniboxViewGtk() {
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_OMNIBOX_DESTROYED,
-      Source<OmniboxViewGtk>(this),
-      NotificationService::NoDetails());
-
   // Explicitly teardown members which have a reference to us.  Just to be safe
   // we want them to be destroyed before destroying any other internal state.
   popup_view_.reset();
@@ -411,7 +407,7 @@ void OmniboxViewGtk::Init() {
 #if !defined(TOOLKIT_VIEWS)
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+                 Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 #else
   // Manually invoke SetBaseColor() because TOOLKIT_VIEWS doesn't observe
@@ -467,7 +463,7 @@ void OmniboxViewGtk::SaveStateToTab(TabContents* tab) {
 void OmniboxViewGtk::Update(const TabContents* contents) {
   // NOTE: We're getting the URL text here from the ToolbarModel.
   bool visibly_changed_permanent_text =
-      model_->UpdatePermanentText(WideToUTF16Hack(toolbar_model_->GetText()));
+      model_->UpdatePermanentText(toolbar_model_->GetText());
 
   ToolbarModel::SecurityLevel security_level =
         toolbar_model_->GetSecurityLevel();
@@ -973,7 +969,7 @@ void OmniboxViewGtk::SetBaseColor() {
     background_color_ptr = &LocationBarViewGtk::kBackgroundColor;
 #endif
     gtk_widget_modify_cursor(
-        text_view_, &gtk_util::kGdkBlack, &gtk_util::kGdkGray);
+        text_view_, &ui::kGdkBlack, &ui::kGdkGray);
     gtk_widget_modify_base(text_view_, GTK_STATE_NORMAL, background_color_ptr);
 
 #if !defined(TOOLKIT_VIEWS)

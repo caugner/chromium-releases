@@ -17,7 +17,7 @@
 #include "base/synchronization/lock.h"
 #include "third_party/npapi/bindings/nphostapi.h"
 #include "webkit/plugins/npapi/plugin_group.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 
 class GURL;
 
@@ -80,7 +80,7 @@ class PluginList {
   // Register an internal plugin with the specified plugin information.
   // An internal plugin must be registered before it can
   // be loaded using PluginList::LoadPlugin().
-  void RegisterInternalPlugin(const WebPluginInfo& info);
+  void RegisterInternalPlugin(const webkit::WebPluginInfo& info);
 
   // This second version is for "plugins" that have been compiled
   // directly into the binary -- callers must provide the metadata and
@@ -105,23 +105,21 @@ class PluginList {
   // internally-owned PluginEntryPoints pointer.
   // Returns false if the library couldn't be found, or if it's not a plugin.
   bool ReadPluginInfo(const FilePath& filename,
-                      WebPluginInfo* info,
+                      webkit::WebPluginInfo* info,
                       const PluginEntryPoints** entry_points);
 
   // In Windows plugins, the mime types are passed as a specially formatted list
   // of strings. This function parses those strings into a WebPluginMimeType
   // vector.
   // TODO(evan): move this code into plugin_list_win.
-  static bool ParseMimeTypes(const std::string& mime_types,
-                             const std::string& file_extensions,
-                             const string16& mime_type_descriptions,
-                             std::vector<WebPluginMimeType>* parsed_mime_types);
+  static bool ParseMimeTypes(
+      const std::string& mime_types,
+      const std::string& file_extensions,
+      const string16& mime_type_descriptions,
+      std::vector<webkit::WebPluginMimeType>* parsed_mime_types);
 
   // Get all the plugins.
-  void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
-
-  // Get all the enabled plugins.
-  void GetEnabledPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
+  void GetPlugins(std::vector<webkit::WebPluginInfo>* plugins);
 
   // Returns a list in |info| containing plugins that are found for
   // the given url and mime type (including disabled plugins, for
@@ -133,24 +131,20 @@ class PluginList {
   // type).  The |info| parameter is required to be non-NULL.  The
   // list is in order of "most desirable" to "least desirable",
   // meaning that the default plugin is at the end of the list.
+  // If |use_stale| is NULL, this will load the plug-in list if necessary.
+  // If it is not NULL, the plug-in list will not be loaded, and |*use_stale|
+  // will be true iff the plug-in list was stale.
   void GetPluginInfoArray(const GURL& url,
                           const std::string& mime_type,
                           bool allow_wildcard,
-                          std::vector<WebPluginInfo>* info,
+                          bool* use_stale,
+                          std::vector<webkit::WebPluginInfo>* info,
                           std::vector<std::string>* actual_mime_types);
-
-  // Returns the first item from the list returned in GetPluginInfo in |info|.
-  // Returns true if it found a match.  |actual_mime_type| may be NULL.
-  bool GetPluginInfo(const GURL& url,
-                     const std::string& mime_type,
-                     bool allow_wildcard,
-                     WebPluginInfo* info,
-                     std::string* actual_mime_type);
 
   // Get plugin info by plugin path (including disabled plugins). Returns true
   // if the plugin is found and WebPluginInfo has been filled in |info|.
   bool GetPluginInfoByPath(const FilePath& plugin_path,
-                           WebPluginInfo* info);
+                           webkit::WebPluginInfo* info);
 
   // Populates the given vector with all available plugin groups.
   void GetPluginGroups(bool load_if_necessary,
@@ -164,7 +158,8 @@ class PluginList {
   // call to |GetPlugins()|, |GetEnabledPlugins()|, |GetPluginInfoArray()|,
   // |GetPluginInfoByPath()|, or |GetPluginGroups(true, _)|. It is the caller's
   // responsibility to make sure this doesn't happen.
-  const PluginGroup* GetPluginGroup(const WebPluginInfo& web_plugin_info);
+  const PluginGroup* GetPluginGroup(
+      const webkit::WebPluginInfo& web_plugin_info);
 
   // Returns the name of the PluginGroup with the given identifier.
   // If no such group exists, an empty string is returned.
@@ -173,7 +168,8 @@ class PluginList {
   // Returns the identifier string of the PluginGroup corresponding to the given
   // WebPluginInfo. If no such group exists, it is created and added to the
   // cache.
-  std::string GetPluginGroupIdentifier(const WebPluginInfo& web_plugin_info);
+  std::string GetPluginGroupIdentifier(
+      const webkit::WebPluginInfo& web_plugin_info);
 
   // Load a specific plugin with full path.
   void LoadPlugin(const FilePath& filename,
@@ -197,16 +193,6 @@ class PluginList {
   // the given name, it will be enabled/disabled.
   bool EnableGroup(bool enable, const string16& name);
 
-  // Disable all plugins groups that are known to be outdated, according to
-  // the information hardcoded in PluginGroup, to make sure that they can't
-  // be loaded on a web page and instead show a UI to update to the latest
-  // version.
-  void DisableOutdatedPluginGroups();
-
-  // Returns true if the plugin list is stale, i.e. it will need to be
-  // (re)loaded on the next access.
-  bool stale() { return plugins_need_refresh_; }
-
   virtual ~PluginList();
 
  protected:
@@ -217,7 +203,7 @@ class PluginList {
   // Adds the given WebPluginInfo to its corresponding group, creating it if
   // necessary, and returns the group.
   // Callers need to protect calls to this method by a lock themselves.
-  PluginGroup* AddToPluginGroups(const WebPluginInfo& web_plugin_info,
+  PluginGroup* AddToPluginGroups(const webkit::WebPluginInfo& web_plugin_info,
                                  ScopedVector<PluginGroup>* plugin_groups);
 
  private:
@@ -238,7 +224,7 @@ class PluginList {
   virtual void LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups);
 
   // Load all plugins from the default plugins directory
-  void LoadPlugins(bool refresh);
+  void LoadPlugins();
 
   // Load all plugins from a specific directory.
   // |plugins| is updated with loaded plugin information.
@@ -251,7 +237,7 @@ class PluginList {
   // Returns true if we should load the given plugin, or false otherwise.
   // plugins is the list of plugins we have crawled in the current plugin
   // loading run.
-  bool ShouldLoadPlugin(const WebPluginInfo& info,
+  bool ShouldLoadPlugin(const webkit::WebPluginInfo& info,
                         ScopedVector<PluginGroup>* plugins);
 
   // Return whether a plug-in group with the given name should be disabled,
@@ -262,7 +248,7 @@ class PluginList {
 
   // Returns true if the plugin supports |mime_type|. |mime_type| should be all
   // lower case.
-  bool SupportsType(const WebPluginInfo& plugin,
+  bool SupportsType(const webkit::WebPluginInfo& plugin,
                     const std::string& mime_type,
                     bool allow_wildcard);
 
@@ -270,7 +256,7 @@ class PluginList {
   // |extension| should be all lower case. If |mime_type| is not NULL, it will
   // be set to the MIME type if found. The MIME type which corresponds to the
   // extension is optionally returned back.
-  bool SupportsExtension(const WebPluginInfo& plugin,
+  bool SupportsExtension(const webkit::WebPluginInfo& plugin,
                          const std::string& extension,
                          std::string* actual_mime_type);
 
@@ -309,14 +295,11 @@ class PluginList {
   std::vector<FilePath> extra_plugin_dirs_;
 
   struct InternalPlugin {
-    WebPluginInfo info;
+    webkit::WebPluginInfo info;
     PluginEntryPoints entry_points;
   };
   // Holds information about internal plugins.
   std::vector<InternalPlugin> internal_plugins_;
-
-  // If set to true outdated plugins are disabled in the end of LoadPlugins.
-  bool disable_outdated_plugins_;
 
   // Hardcoded plugin group definitions.
   const PluginGroupDefinition* const group_definitions_;

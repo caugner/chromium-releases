@@ -8,13 +8,13 @@
 #include "base/basictypes.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
+#include "ppapi/shared_impl/host_resource.h"
 
 struct PP_Point;
 struct PPB_Testing_Dev;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class PPB_Testing_Proxy : public InterfaceProxy {
@@ -33,8 +33,8 @@ class PPB_Testing_Proxy : public InterfaceProxy {
 
  private:
   // Message handlers.
-  void OnMsgReadImageData(const HostResource& device_context_2d,
-                          const HostResource& image,
+  void OnMsgReadImageData(const ppapi::HostResource& device_context_2d,
+                          const ppapi::HostResource& image,
                           const PP_Point& top_left,
                           PP_Bool* result);
   void OnMsgRunMessageLoop(PP_Instance instance);
@@ -45,6 +45,6 @@ class PPB_Testing_Proxy : public InterfaceProxy {
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_TESTING_PROXY_H_

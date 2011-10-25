@@ -15,6 +15,7 @@
 
 class Browser;
 class Panel;
+class NativePanelTestingWin;
 class PanelBrowserFrameView;
 namespace ui {
 class SlideAnimation;
@@ -23,7 +24,6 @@ class SlideAnimation;
 // A browser view that implements Panel specific behavior.
 class PanelBrowserView : public BrowserView,
                          public NativePanel,
-                         public NativePanelTesting,
                          public ui::AnimationDelegate {
  public:
   PanelBrowserView(Browser* browser, Panel* panel, const gfx::Rect& bounds);
@@ -35,14 +35,15 @@ class PanelBrowserView : public BrowserView,
 
   PanelBrowserFrameView* GetFrameView() const;
 
-  // Called from frame view when title bar receives a mouse event.
+  // Called from frame view when titlebar receives a mouse event.
   // Return true if the event is handled.
-  bool OnTitleBarMousePressed(const views::MouseEvent& event);
-  bool OnTitleBarMouseDragged(const views::MouseEvent& event);
-  bool OnTitleBarMouseReleased(const views::MouseEvent& event);
-  bool OnTitleBarMouseCaptureLost();
+  bool OnTitlebarMousePressed(const gfx::Point& location);
+  bool OnTitlebarMouseDragged(const gfx::Point& location);
+  bool OnTitlebarMouseReleased();
+  bool OnTitlebarMouseCaptureLost();
 
  private:
+  friend class NativePanelTestingWin;
   friend class PanelBrowserViewTest;
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserViewTest, CreatePanel);
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserViewTest, ShowOrHideSettingsButton);
@@ -55,7 +56,9 @@ class PanelBrowserView : public BrowserView,
   virtual bool CanMaximize() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
-  virtual bool GetSavedWindowBounds(gfx::Rect* bounds) const OVERRIDE;
+  virtual bool GetSavedWindowPlacement(
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE;
   virtual bool AcceleratorPressed(const views::Accelerator& accelerator)
       OVERRIDE;
 
@@ -75,7 +78,7 @@ class PanelBrowserView : public BrowserView,
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void OnPanelExpansionStateChanged(
       Panel::ExpansionState expansion_state) OVERRIDE;
-  virtual bool ShouldBringUpPanelTitleBar(int mouse_x,
+  virtual bool ShouldBringUpPanelTitlebar(int mouse_x,
                                           int mouse_y) const OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
@@ -84,11 +87,20 @@ class PanelBrowserView : public BrowserView,
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void ShowTaskManagerForPanel() OVERRIDE;
+  virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
-  virtual void DestroyPanelBrowser() OVERRIDE;
   virtual void DrawAttention() OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
-  virtual NativePanelTesting* GetNativePanelTesting() OVERRIDE;
+  virtual bool PreHandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event,
+      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual gfx::Size GetNonClientAreaExtent() const OVERRIDE;
+  virtual int GetRestoredHeight() const OVERRIDE;
+  virtual void SetRestoredHeight(int height) OVERRIDE;
+  virtual Browser* GetPanelBrowser() const OVERRIDE;
+  virtual void DestroyPanelBrowser() OVERRIDE;
 
   // Overridden from AnimationDelegate:
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
@@ -100,9 +112,9 @@ class PanelBrowserView : public BrowserView,
   scoped_ptr<Panel> panel_;
   gfx::Rect bounds_;
 
-  // Stores the original height of the panel so we can restore it after it's
+  // Stores the full height of the panel so we can restore it after it's
   // been minimized.
-  int original_height_;
+  int restored_height_;
 
   // Is the panel being closed? Do not use it when it is closed.
   bool closed_;

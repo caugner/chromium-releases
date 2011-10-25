@@ -16,9 +16,14 @@
 #include "content/browser/browser_thread.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
+
+#if defined(ENABLE_CONFIGURATION_POLICY)
+#include "chrome/browser/policy/url_blacklist_manager.h"
+#endif
 
 namespace {
 
@@ -43,12 +48,14 @@ void ForwardProxyErrors(net::URLRequest* request,
 ChromeNetworkDelegate::ChromeNetworkDelegate(
     ExtensionEventRouterForwarder* event_router,
     ExtensionInfoMap* extension_info_map,
+    const policy::URLBlacklistManager* url_blacklist_manager,
     void* profile,
     BooleanPrefMember* enable_referrers)
     : event_router_(event_router),
       profile_(profile),
       extension_info_map_(extension_info_map),
-      enable_referrers_(enable_referrers) {
+      enable_referrers_(enable_referrers),
+      url_blacklist_manager_(url_blacklist_manager) {
   DCHECK(event_router);
   DCHECK(enable_referrers);
 }
@@ -68,6 +75,21 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     net::CompletionCallback* callback,
     GURL* new_url) {
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  // TODO(joaodasilva): This prevents extensions from seeing URLs that are
+  // blocked. However, an extension might redirect the request to another URL,
+  // which is not blocked.
+  if (url_blacklist_manager_ &&
+      url_blacklist_manager_->IsURLBlocked(request->url())) {
+    // URL access blocked by policy.
+    scoped_refptr<net::NetLog::EventParameters> params;
+    params = new net::NetLogStringParameter("url", request->url().spec());
+    request->net_log().AddEvent(
+        net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST, params);
+    return net::ERR_NETWORK_ACCESS_DENIED;
+  }
+#endif
+
   if (!enable_referrers_->GetValue())
     request->set_referrer(std::string());
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeRequest(
@@ -136,4 +158,11 @@ void ChromeNetworkDelegate::OnPACScriptError(int line_number,
                                              const string16& error) {
   ExtensionProxyEventRouter::GetInstance()->OnPACScriptError(
       event_router_.get(), profile_, line_number, error);
+}
+
+void ChromeNetworkDelegate::OnAuthRequired(
+    net::URLRequest* request,
+    const net::AuthChallengeInfo& auth_info) {
+  ExtensionWebRequestEventRouter::GetInstance()->OnAuthRequired(
+      profile_, extension_info_map_.get(), request, auth_info);
 }

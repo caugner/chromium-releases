@@ -25,6 +25,7 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/menu/submenu_view.h"
 #include "views/widget/widget.h"
 
@@ -90,6 +91,7 @@ const struct {
   { "xkb:us:dvorak:eng", "DV" },
   { "xkb:us:intl:eng", "INTL" },
   { "xkb:us:colemak:eng", "CO" },
+  { "english-m", "??" },
   { "xkb:de:neo:ger", "NEO" },
   // To distinguish from "xkb:es::spa"
   { "xkb:es:cat:cat", "CAS" },
@@ -108,8 +110,6 @@ const struct {
   { "m17n:zh:cangjie", "\xe5\x80\x89" },  // U+5009
   { "m17n:zh:quick", "\xe9\x80\x9f" },  // U+901F
   // For Hangul input method.
-  // TODO(nona): Remove ibus-hangul support.
-  { "hangul", "\xed\x95\x9c" },  // U+D55C
   { "mozc-hangul", "\xed\x95\x9c" },  // U+D55C
 };
 const size_t kMappingFromIdToIndicatorTextLen =
@@ -141,6 +141,7 @@ InputMethodMenu::InputMethodMenu(PrefService* pref_service,
           new views::MenuModelAdapter(this))),
       input_method_menu_(
           new views::MenuItemView(input_method_menu_delegate_.get())),
+      input_method_menu_runner_(new views::MenuRunner(input_method_menu_)),
       minimum_input_method_menu_width_(0),
       menu_alignment_(views::MenuItemView::TOPRIGHT),
       pref_service_(pref_service),
@@ -160,7 +161,8 @@ InputMethodMenu::InputMethodMenu(PrefService* pref_service,
   InputMethodManager* manager = InputMethodManager::GetInstance();
   manager->AddObserver(this);  // FirstObserverIsAdded() might be called back.
 
-  if (screen_mode_ == StatusAreaHost::kLoginMode) {
+  if (screen_mode_ == StatusAreaHost::kViewsLoginMode ||
+      screen_mode_ == StatusAreaHost::kWebUILoginMode) {
     // This button is for the login screen.
     registrar_.Add(this,
                    chrome::NOTIFICATION_LOGIN_USER_CHANGED,
@@ -387,19 +389,14 @@ void InputMethodMenu::RunMenu(views::View* source, const gfx::Point& pt) {
     submenu->set_minimum_preferred_width(minimum_input_method_menu_width_);
   }
 
-  // TODO(rhashimoto): Remove this workaround when WebUI provides a
-  // top-level widget on the ChromeOS login screen that is a window.
-  // The current BackgroundView class for the ChromeOS login screen
-  // creates a owning Widget that has a native GtkWindow but is not a
-  // Window.  This makes it impossible to get the NativeWindow via
-  // the views API.  This workaround casts the top-level NativeWidget
-  // to a NativeWindow that we can pass to MenuItemView::RunMenuAt().
-  gfx::NativeWindow window = GTK_WINDOW(source->GetWidget()->GetNativeView());
-
   gfx::Point screen_location;
   views::View::ConvertPointToScreen(source, &screen_location);
   gfx::Rect bounds(screen_location, source->size());
-  input_method_menu_->RunMenuAt(window, NULL, bounds, menu_alignment_, true);
+  if (input_method_menu_runner_->RunMenuAt(
+          source->GetWidget()->GetTopLevelWidget(), NULL, bounds,
+          menu_alignment_, views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED)
+    return;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -423,7 +420,8 @@ void InputMethodMenu::PreferenceUpdateNeeded(
       current_input_method_pref_.SetValue(current_input_method.id());
       pref_service_->ScheduleSavePersistentPrefs();
     }
-  } else if (screen_mode_ == StatusAreaHost::kLoginMode) {
+  } else if (screen_mode_ == StatusAreaHost::kViewsLoginMode ||
+      screen_mode_ == StatusAreaHost::kWebUILoginMode) {
     if (g_browser_process && g_browser_process->local_state()) {
       g_browser_process->local_state()->SetString(
           language_prefs::kPreferredKeyboardLayout, current_input_method.id());
@@ -546,7 +544,7 @@ void InputMethodMenu::RebuildModel() {
   }
 
   // Rebuild the menu from the model.
-  input_method_menu_delegate_->BuildMenu(input_method_menu_.get());
+  input_method_menu_delegate_->BuildMenu(input_method_menu_);
 }
 
 bool InputMethodMenu::IndexIsInInputMethodList(int index) const {
@@ -653,15 +651,23 @@ std::wstring InputMethodMenu::GetTextForMenu(
   // Special case for Dutch, French and German: these languages have multiple
   // keyboard layouts and share the same laout of keyboard (Belgian). We need to
   // show explicitly the language for the layout.
-  // For Arabic and Hindi: they share "Standard Input Method".
+  // For Arabic, Amharic, and Indic languages: they share "Standard Input
+  // Method".
   const std::string language_code
       = input_method::GetLanguageCodeFromDescriptor(input_method);
   std::wstring text;
-  if (language_code == "ar" ||
-      language_code == "hi" ||
-      language_code == "nl" ||
+  // TODO(yusukes): Add Telugu and Kanada.
+  if (language_code == "am" ||
+      language_code == "ar" ||
+      language_code == "bn" ||
+      language_code == "de" ||
       language_code == "fr" ||
-      language_code == "de") {
+      language_code == "gu" ||
+      language_code == "hi" ||
+      language_code == "ml" ||
+      language_code == "mr" ||
+      language_code == "nl" ||
+      language_code == "ta") {
     text = GetLanguageName(language_code) + L" - ";
   }
   text += input_method::GetString(input_method.id(), input_method.id());

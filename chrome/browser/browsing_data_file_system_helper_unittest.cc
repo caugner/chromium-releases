@@ -6,8 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_file_system_helper.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_path_manager.h"
@@ -35,9 +34,9 @@ const GURL kOrigin3(kTestOrigin3);
 // is concluded.
 const int kEmptyFileSystemSize = 0;
 
-typedef std::vector<BrowsingDataFileSystemHelper::FileSystemInfo>
-    FileSystemInfoVector;
-typedef scoped_ptr<FileSystemInfoVector> ScopedFileSystemInfoVector;
+typedef std::list<BrowsingDataFileSystemHelper::FileSystemInfo>
+    FileSystemInfoList;
+typedef scoped_ptr<FileSystemInfoList> ScopedFileSystemInfoList;
 
 // The FileSystem APIs are all asynchronous; this testing class wraps up the
 // boilerplate code necessary to deal with waiting for responses. In a nutshell,
@@ -97,10 +96,10 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   // Callback that should be executed in response to StartFetching(), and stores
   // found file systems locally so that they are available via GetFileSystems().
   void CallbackStartFetching(
-      const std::vector<BrowsingDataFileSystemHelper::FileSystemInfo>&
+      const std::list<BrowsingDataFileSystemHelper::FileSystemInfo>&
           file_system_info_list) {
     file_system_info_list_.reset(
-        new std::vector<BrowsingDataFileSystemHelper::FileSystemInfo>(
+        new std::list<BrowsingDataFileSystemHelper::FileSystemInfo>(
             file_system_info_list));
     Notify();
   }
@@ -151,14 +150,14 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
 
   // Returns a list of the FileSystemInfo objects gathered in the most recent
   // call to StartFetching().
-  FileSystemInfoVector* GetFileSystems() {
+  FileSystemInfoList* GetFileSystems() {
     return file_system_info_list_.get();
   }
 
 
   // Temporary storage to pass information back from callbacks.
   bool found_file_system_;
-  ScopedFileSystemInfoVector file_system_info_list_;
+  ScopedFileSystemInfoList file_system_info_list_;
 
   scoped_refptr<BrowsingDataFileSystemHelper> helper_;
   scoped_refptr<CannedBrowsingDataFileSystemHelper> canned_helper_;
@@ -190,32 +189,32 @@ TEST_F(BrowsingDataFileSystemHelperTest, FetchData) {
 
   // Order is arbitrary, verify all three origins.
   bool test_hosts_found[3] = {false, false, false};
-  for (size_t i = 0; i < file_system_info_list_->size(); i++) {
-    BrowsingDataFileSystemHelper::FileSystemInfo info =
-        file_system_info_list_->at(i);
-    if (info.origin == kOrigin1) {
+  for (std::list<BrowsingDataFileSystemHelper::FileSystemInfo>::iterator info =
+       file_system_info_list_->begin(); info != file_system_info_list_->end();
+       ++info) {
+    if (info->origin == kOrigin1) {
         EXPECT_FALSE(test_hosts_found[0]);
         test_hosts_found[0] = true;
-        EXPECT_FALSE(info.has_persistent);
-        EXPECT_TRUE(info.has_temporary);
-        EXPECT_EQ(0, info.usage_persistent);
-        EXPECT_EQ(kEmptyFileSystemSize, info.usage_temporary);
-    } else if (info.origin == kOrigin2) {
+        EXPECT_FALSE(info->has_persistent);
+        EXPECT_TRUE(info->has_temporary);
+        EXPECT_EQ(0, info->usage_persistent);
+        EXPECT_EQ(kEmptyFileSystemSize, info->usage_temporary);
+    } else if (info->origin == kOrigin2) {
         EXPECT_FALSE(test_hosts_found[1]);
         test_hosts_found[1] = true;
-        EXPECT_TRUE(info.has_persistent);
-        EXPECT_FALSE(info.has_temporary);
-        EXPECT_EQ(kEmptyFileSystemSize, info.usage_persistent);
-        EXPECT_EQ(0, info.usage_temporary);
-    } else if (info.origin == kOrigin3) {
+        EXPECT_TRUE(info->has_persistent);
+        EXPECT_FALSE(info->has_temporary);
+        EXPECT_EQ(kEmptyFileSystemSize, info->usage_persistent);
+        EXPECT_EQ(0, info->usage_temporary);
+    } else if (info->origin == kOrigin3) {
         EXPECT_FALSE(test_hosts_found[2]);
         test_hosts_found[2] = true;
-        EXPECT_TRUE(info.has_persistent);
-        EXPECT_TRUE(info.has_temporary);
-        EXPECT_EQ(kEmptyFileSystemSize, info.usage_persistent);
-        EXPECT_EQ(kEmptyFileSystemSize, info.usage_temporary);
+        EXPECT_TRUE(info->has_persistent);
+        EXPECT_TRUE(info->has_temporary);
+        EXPECT_EQ(kEmptyFileSystemSize, info->usage_persistent);
+        EXPECT_EQ(kEmptyFileSystemSize, info->usage_temporary);
     } else {
-        ADD_FAILURE() << info.origin.spec() << " isn't an origin we added.";
+        ADD_FAILURE() << info->origin.spec() << " isn't an origin we added.";
     }
   }
   for (size_t i = 0; i < arraysize(test_hosts_found); i++) {
@@ -235,7 +234,7 @@ TEST_F(BrowsingDataFileSystemHelperTest, DeleteData) {
 
   EXPECT_EQ(1UL, file_system_info_list_->size());
   BrowsingDataFileSystemHelper::FileSystemInfo info =
-      file_system_info_list_->at(0);
+      *(file_system_info_list_->begin());
   EXPECT_EQ(kOrigin3, info.origin);
   EXPECT_TRUE(info.has_persistent);
   EXPECT_TRUE(info.has_temporary);
@@ -262,16 +261,20 @@ TEST_F(BrowsingDataFileSystemHelperTest, CannedAddFileSystem) {
   FetchCannedFileSystems();
 
   EXPECT_EQ(2U, file_system_info_list_->size());
-  EXPECT_EQ(kOrigin1, file_system_info_list_->at(0).origin);
-  EXPECT_TRUE(file_system_info_list_->at(0).has_persistent);
-  EXPECT_FALSE(file_system_info_list_->at(0).has_temporary);
-  EXPECT_EQ(200, file_system_info_list_->at(0).usage_persistent);
-  EXPECT_EQ(0, file_system_info_list_->at(0).usage_temporary);
-  EXPECT_EQ(kOrigin2, file_system_info_list_->at(1).origin);
-  EXPECT_FALSE(file_system_info_list_->at(1).has_persistent);
-  EXPECT_TRUE(file_system_info_list_->at(1).has_temporary);
-  EXPECT_EQ(0, file_system_info_list_->at(1).usage_persistent);
-  EXPECT_EQ(100, file_system_info_list_->at(1).usage_temporary);
+  std::list<BrowsingDataFileSystemHelper::FileSystemInfo>::iterator info =
+      file_system_info_list_->begin();
+  EXPECT_EQ(kOrigin1, info->origin);
+  EXPECT_TRUE(info->has_persistent);
+  EXPECT_FALSE(info->has_temporary);
+  EXPECT_EQ(200, info->usage_persistent);
+  EXPECT_EQ(0, info->usage_temporary);
+
+  info++;
+  EXPECT_EQ(kOrigin2, info->origin);
+  EXPECT_FALSE(info->has_persistent);
+  EXPECT_TRUE(info->has_temporary);
+  EXPECT_EQ(0, info->usage_persistent);
+  EXPECT_EQ(100, info->usage_temporary);
 }
 
 }  // namespace

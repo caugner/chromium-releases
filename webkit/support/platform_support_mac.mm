@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,7 +130,7 @@ void AfterInitialize(bool unit_test_mode) {
     }
     if (ATSFontActivateFromFileReference(&resource_ref, kATSFontContextLocal,
         kATSFontFormatUnspecified, 0, kATSOptionFlagsDefault, 0) != noErr) {
-      DLOG(FATAL) << "Fail to activate font: %s" << resource_path;
+      DLOG(FATAL) << "Fail to activate font: " << resource_path;
     }
   }
 
@@ -211,7 +211,8 @@ base::StringPiece GetDataResource(int resource_id) {
   }
   }
   base::StringPiece res;
-  g_resource_data_pack->GetStringPiece(resource_id, &res);
+  if (g_resource_data_pack)
+    g_resource_data_pack->GetStringPiece(resource_id, &res);
   return res;
 }
 

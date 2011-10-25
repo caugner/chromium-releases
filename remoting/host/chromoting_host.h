@@ -15,6 +15,7 @@
 #include "remoting/host/client_session.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/host_status_observer.h"
+#include "remoting/host/ui_strings.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/protocol/session_manager.h"
@@ -36,7 +37,6 @@ class Capturer;
 class ChromotingHostContext;
 class DesktopEnvironment;
 class Encoder;
-class Logger;
 class MutableHostConfig;
 class ScreenRecorder;
 
@@ -71,13 +71,13 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
  public:
   // Factory methods that must be used to create ChromotingHost
   // instances.  Returned instance takes ownership of
-  // |access_verifier| and |environment|. It does NOT take ownership
-  // of |context| and |logger|.
+  // |access_verifier|. It does NOT take ownership of |context|,
+  // and |environment|, but they should not be deleted until
+  // returned host is destroyed.
   static ChromotingHost* Create(ChromotingHostContext* context,
                                 MutableHostConfig* config,
                                 DesktopEnvironment* environment,
                                 AccessVerifier* access_verifier,
-                                Logger* logger,
                                 bool allow_nat_traversal);
 
   // Asynchronously start the host process.
@@ -119,8 +119,6 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   virtual void LocalLoginFailed(
       scoped_refptr<protocol::ConnectionToClient> client);
 
-  Logger* logger() { return logger_; }
-
   // SessionManager::Listener implementation.
   virtual void OnSessionManagerInitialized() OVERRIDE;
   virtual void OnIncomingSession(
@@ -147,6 +145,11 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // is ignored.
   void PauseSession(bool pause);
 
+  const UiStrings& ui_strings() { return ui_strings_; }
+
+  // Set localized strings. Must be called before host is started.
+  void SetUiStrings(const UiStrings& ui_strings);
+
  private:
   friend class base::RefCountedThreadSafe<ChromotingHost>;
   friend class ChromotingHostTest;
@@ -161,13 +164,12 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
     kStopped,
   };
 
-  // Takes ownership of |access_verifier| and |environment|, and adds a
-  // reference to |config|. Does NOT take ownership of |context|.
+  // Takes ownership of |access_verifier|, and adds a reference to
+  // |config|. Caller keeps ownership of |context| and |environment|.
   ChromotingHost(ChromotingHostContext* context,
                  MutableHostConfig* config,
                  DesktopEnvironment* environment,
                  AccessVerifier* access_verifier,
-                 Logger* logger,
                  bool allow_nat_traversal);
   virtual ~ChromotingHost();
 
@@ -186,6 +188,9 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   void ProcessPreAuthentication(
       const scoped_refptr<protocol::ConnectionToClient>& connection);
 
+  void StopScreenRecorder();
+  void OnScreenRecorderStopped();
+
   // The following methods are called during shutdown.
   void ShutdownNetwork();
   void ShutdownRecorder();
@@ -193,10 +198,9 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   // Parameters specified when the host was created.
   ChromotingHostContext* context_;
+  DesktopEnvironment* desktop_environment_;
   scoped_refptr<MutableHostConfig> config_;
-  scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_ptr<AccessVerifier> access_verifier_;
-  Logger* logger_;
   bool allow_nat_traversal_;
 
   // Connection objects.
@@ -217,6 +221,12 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // and read by jingle thread.
   State state_;
 
+  // Number of screen recorders that are currently being
+  // stopped. Normally set to 0 or 1, but in some cases it may be
+  // greater than 1, particularly if when second client can connect
+  // immidiately after previous one disconnected.
+  int stopping_recorders_;
+
   // Lock is to lock the access to |state_|.
   base::Lock lock_;
 
@@ -234,6 +244,8 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Stores list of tasks that should be executed when we finish
   // shutdown. Used only while |state_| is set to kStopping.
   std::vector<Task*> shutdown_tasks_;
+
+  UiStrings ui_strings_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);
 };

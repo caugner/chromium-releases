@@ -26,7 +26,17 @@ extern const FilePath::CharType kBrowserProcessExecutablePathChromium[];
 extern const FilePath::CharType kHelperProcessExecutablePathChromium[];
 #if defined(OS_MACOSX)
 extern const FilePath::CharType kFrameworkName[];
-#endif
+
+// The helper .app bundle name and executable name may have one of these
+// suffixes to identify specific features, or it may have no suffix at all.
+// This is a NULL-terminated array of strings. If kHelperFlavorSuffixes
+// contains "EN", "MF", and NULL, it indicates that if the normal helper is
+// named Chromium Helper.app, helper executables could show up at any of
+// Chromium Helper.app/Contents/MacOS/Chromium Helper,
+// Chromium Helper EN.app/Contents/MacOS/Chromium Helper EN, and
+// Chromium Helper MF.app/Contents/MacOS/Chromium Helper MF.
+extern const FilePath::CharType* const kHelperFlavorSuffixes[];
+#endif  // OS_MACOSX
 extern const wchar_t kBrowserAppName[];
 #if defined(OS_WIN)
 extern const wchar_t kStatusTrayWindowClass[];
@@ -34,9 +44,8 @@ extern const wchar_t kStatusTrayWindowClass[];
 extern const wchar_t kMessageWindowClass[];
 extern const wchar_t kCrashReportLog[];
 extern const wchar_t kTestingInterfaceDLL[];
-extern const char    kNotSignedInProfile[];
+extern const char    kInitialProfile[];
 extern const char    kMultiProfileDirPrefix[];
-extern const char    kStatsFilename[];
 extern const wchar_t kBrowserResourcesDll[];
 extern const wchar_t kNaClAppName[];
 extern const FilePath::CharType kExtensionFileExtension[];
@@ -50,6 +59,7 @@ extern const FilePath::CharType kOffTheRecordMediaCacheDirname[];
 extern const FilePath::CharType kAppCacheDirname[];
 extern const FilePath::CharType kThemePackFilename[];
 extern const FilePath::CharType kCookieFilename[];
+extern const FilePath::CharType kOBCertFilename[];
 extern const FilePath::CharType kExtensionsCookieFilename[];
 extern const FilePath::CharType kIsolatedAppStateDirname[];
 extern const FilePath::CharType kFaviconsFilename[];
@@ -64,7 +74,6 @@ extern const FilePath::CharType kThumbnailsFilename[];
 extern const FilePath::CharType kNewTabThumbnailsFilename[];
 extern const FilePath::CharType kTopSitesFilename[];
 extern const wchar_t kUserDataDirname[];
-extern const FilePath::CharType kUserScriptsDirname[];
 extern const FilePath::CharType kWebDataFilename[];
 extern const FilePath::CharType kBookmarksFileName[];
 extern const FilePath::CharType kHistoryBookmarksFileName[];
@@ -73,9 +82,6 @@ extern const FilePath::CharType kLoginDataFileName[];
 extern const FilePath::CharType kJumpListIconDirname[];
 extern const FilePath::CharType kWebAppDirname[];
 extern const FilePath::CharType kServiceStateFileName[];
-
-extern const int kStatsMaxThreads;
-extern const int kStatsMaxCounters;
 
 extern const bool kRecordModeEnabled;
 
@@ -98,6 +104,13 @@ extern const int kJavascriptMessageExpectedDelay;
 
 // Are touch icons enabled? False by default.
 extern const bool kEnableTouchIcon;
+
+#if defined(OS_LINUX)
+// The highest and lowest assigned OOM score adjustment
+// (oom_score_adj) used by the OomPriority Manager.
+extern const int kLowestRendererOomScore;
+extern const int kHighestRendererOomScore;
+#endif
 
 }  // namespace chrome
 

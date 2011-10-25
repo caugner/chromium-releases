@@ -9,9 +9,9 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_message_handler.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_source.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
@@ -185,9 +185,8 @@ void CloudPrintSetupFlow::OnCloseContents(TabContents* source,
                                           bool* out_close_dialog) {
 }
 
-std::wstring CloudPrintSetupFlow::GetDialogTitle() const {
-  return UTF16ToWideHack(
-      l10n_util::GetStringUTF16(IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE));
+string16 CloudPrintSetupFlow::GetDialogTitle() const {
+  return l10n_util::GetStringUTF16(IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE);
 }
 
 bool CloudPrintSetupFlow::IsDialogModal() const {
@@ -215,8 +214,8 @@ void CloudPrintSetupFlow::OnClientLoginSuccess(
   ShowGaiaSuccessAndSettingUp();
   authenticator_.reset();
 
-  profile_->GetCloudPrintProxyService()->EnableForUser(credentials.lsid,
-                                                       login_);
+  CloudPrintProxyServiceFactory::GetForProfile(profile_)->EnableForUser(
+      credentials.lsid, login_);
   // TODO(sanjeevr): Should we wait and verify that the enable succeeded?
   ShowSetupDone();
 }
@@ -320,8 +319,8 @@ void CloudPrintSetupFlow::ShowSetupDone() {
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_HEIGHT_LINES,
         approximate_web_font);
 
-    FundamentalValue new_width(done_size.width());
-    FundamentalValue new_height(done_size.height());
+    base::FundamentalValue new_width(done_size.width());
+    base::FundamentalValue new_height(done_size.height());
     web_ui_->CallJavascriptFunction("cloudprint.showSetupDone",
                                     new_width, new_height);
   }

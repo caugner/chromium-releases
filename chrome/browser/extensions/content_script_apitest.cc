@@ -8,7 +8,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mock_host_resolver.h"
 
@@ -91,4 +91,9 @@ IN_PROC_BROWSER_TEST_F(
       L"getPropertyValue('background-color') == 'rgb(255, 0, 0)')",
       &styles_injected));
   ASSERT_TRUE(styles_injected);
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptCSSLocalization) {
+  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(RunExtensionTest("content_scripts/css_l10n")) << message_;
 }

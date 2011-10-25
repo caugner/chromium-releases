@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -201,7 +202,7 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(const TabContents* contents,
                      tab_strip && tab_strip->IsTabPinned(tab_index));
   result->SetString(keys::kTitleKey, contents->GetTitle());
   result->SetBoolean(keys::kIncognitoKey,
-                     contents->profile()->IsOffTheRecord());
+                     contents->browser_context()->IsOffTheRecord());
 
   if (!is_loading) {
     NavigationEntry* entry = contents->controller().GetActiveEntry();
@@ -527,7 +528,8 @@ bool CreateWindowFunction::RunImpl() {
     if (args->HasKey(keys::kIncognitoKey)) {
       EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kIncognitoKey,
                                                    &incognito));
-      if (!profile_->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled)) {
+      if (IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) ==
+          IncognitoModePrefs::DISABLED) {
         error_ = keys::kIncognitoModeIsDisabled;
         return false;
       }
@@ -979,10 +981,15 @@ bool UpdateTabFunction::RunImpl() {
     tab_index = tab_strip->GetIndexOfTabContents(contents);
   }
 
-  if (has_callback())
-    result_.reset(ExtensionTabUtil::CreateTabValue(contents->tab_contents(),
-        tab_strip,
-        tab_index));
+  if (has_callback()) {
+    if (GetExtension()->HasAPIPermission(ExtensionAPIPermission::kTab)) {
+      result_.reset(ExtensionTabUtil::CreateTabValue(contents->tab_contents(),
+                                                     tab_strip,
+                                                     tab_index));
+    } else {
+      result_.reset(Value::CreateNullValue());
+    }
+  }
 
   SendResponse(true);
   return true;

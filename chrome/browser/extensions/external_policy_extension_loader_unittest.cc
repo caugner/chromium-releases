@@ -13,8 +13,8 @@
 #include "chrome/browser/extensions/external_policy_extension_loader.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_pref_service.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -84,7 +84,7 @@ class MockExternalPolicyExtensionProviderVisitor
 
     // Remove the extension from our list.
     StringValue ext_str(id + ";" + update_url.spec());
-    EXPECT_NE(-1, remaining_extensions->Remove(ext_str));
+    EXPECT_NE(false, remaining_extensions->Remove(ext_str, NULL));
   }
 
   virtual void OnExternalProviderReady() {

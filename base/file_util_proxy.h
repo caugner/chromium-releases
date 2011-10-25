@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/base_api.h"
+#include "base/base_export.h"
 #include "base/callback_old.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -21,7 +21,7 @@ class MessageLoopProxy;
 class Time;
 
 // This class provides asynchronous access to common file routines.
-class BASE_API FileUtilProxy {
+class BASE_EXPORT FileUtilProxy {
  public:
   // Holds metadata for file or directory entry. Used by ReadDirectoryCallback.
   struct Entry {
@@ -34,6 +34,8 @@ class BASE_API FileUtilProxy {
   // This callback is used by methods that report only an error code.  It is
   // valid to pass NULL as the callback parameter to any function that takes a
   // StatusCallback, in which case the operation will complete silently.
+  // The ownership of |callback| is taken by the function and will always be
+  // deleted by the function even on failure.
   typedef Callback1<PlatformFileError /* error code */>::Type StatusCallback;
 
   typedef Callback3<PlatformFileError /* error code */,
@@ -60,6 +62,7 @@ class BASE_API FileUtilProxy {
   // If PLATFORM_FILE_CREATE is set in |file_flags| it always tries to create
   // a new file at the given |file_path| and calls back with
   // PLATFORM_FILE_ERROR_FILE_EXISTS if the |file_path| already exists.
+  // Takes ownership of |callback| and will delete it even on failure.
   static bool CreateOrOpen(scoped_refptr<MessageLoopProxy> message_loop_proxy,
                            const FilePath& file_path,
                            int file_flags,
@@ -168,6 +171,7 @@ class BASE_API FileUtilProxy {
   // Writes to a file. If |offset| is greater than the length of the file,
   // |false| is returned. On success, the file pointer is moved to position
   // |offset + bytes_to_write| in the file. The callback can be NULL.
+  // |bytes_to_write| must be greater than zero.
   static bool Write(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
       PlatformFile file,

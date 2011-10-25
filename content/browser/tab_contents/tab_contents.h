@@ -29,6 +29,7 @@
 #include "content/common/renderer_preferences.h"
 #include "net/base/load_states.h"
 #include "ui/gfx/native_widget_types.h"
+#include "webkit/glue/resource_type.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_handle.h"
@@ -40,7 +41,6 @@ class Rect;
 
 class DownloadItem;
 class LoadNotificationDetails;
-class Profile;
 struct RendererPreferences;
 class RenderViewHost;
 class SessionStorageNamespace;
@@ -54,6 +54,7 @@ class URLPattern;
 struct ViewHostMsg_FrameNavigate_Params;
 struct WebPreferences;
 class WebUI;
+struct ViewHostMsg_RunFileChooser_Params;
 
 // Describes what goes in the main content area of a tab. TabContents is
 // the only type of TabContents, and these should be merged together.
@@ -80,7 +81,7 @@ class TabContents : public PageNavigator,
   // tab contentses to share the same session storage (part of the WebStorage
   // spec) space. This is useful when restoring tabs, but most callers should
   // pass in NULL which will cause a new SessionStorageNamespace to be created.
-  TabContents(Profile* profile,
+  TabContents(content::BrowserContext* browser_context,
               SiteInstance* site_instance,
               int routing_id,
               const TabContents* base_tab_contents,
@@ -102,9 +103,11 @@ class TabContents : public PageNavigator,
   NavigationController& controller() { return controller_; }
   const NavigationController& controller() const { return controller_; }
 
-  // Returns the user profile associated with this TabContents (via the
+  // Returns the user browser context associated with this TabContents (via the
   // NavigationController).
-  Profile* profile() const { return controller_.profile(); }
+  content::BrowserContext* browser_context() const {
+    return controller_.browser_context();
+  }
 
   // Returns the SavePackage which manages the page saving job. May be NULL.
   SavePackage* save_package() const { return save_package_.get(); }
@@ -177,8 +180,8 @@ class TabContents : public PageNavigator,
   // "waiting" or "loading."
   bool waiting_for_response() const { return waiting_for_response_; }
 
-  net::LoadState load_state() const { return load_state_; }
-  string16 load_state_host() const { return load_state_host_; }
+  const net::LoadStateWithParam& load_state() const { return load_state_; }
+  const string16& load_state_host() const { return load_state_host_; }
   uint64 upload_size() const { return upload_size_; }
   uint64 upload_position() const { return upload_position_; }
 
@@ -253,10 +256,15 @@ class TabContents : public PageNavigator,
   // Commands ------------------------------------------------------------------
 
   // Implementation of PageNavigator.
+
+  // Deprecated. Please use the one-argument variant instead.
+  // TODO(adriansc): Remove this method once refactoring changed all call sites.
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
                                PageTransition::Type transition) OVERRIDE;
+
+  virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE;
 
   // Called by the NavigationController to cause the TabContents to navigate to
   // the current pending entry. The NavigationController should be called back
@@ -285,12 +293,9 @@ class TabContents : public PageNavigator,
 
   // Window management ---------------------------------------------------------
 
-  // Create a new window constrained to this TabContents' clip and visibility.
-  // The window is initialized by using the supplied delegate to obtain basic
-  // window characteristics, and the supplied view for the content. Note that
-  // the returned ConstrainedWindow might not yet be visible.
-  ConstrainedWindow* CreateConstrainedDialog(
-      ConstrainedWindowDelegate* delegate);
+  // Adds the given window to the list of child windows. The window will notify
+  // via WillClose() when it is being destroyed.
+  void AddConstrainedDialog(ConstrainedWindow* window);
 
   // Adds a new tab or window with the given already-created contents.
   void AddNewContents(TabContents* new_contents,
@@ -499,9 +504,6 @@ class TabContents : public PageNavigator,
   void AddObserver(TabContentsObserver* observer);
   void RemoveObserver(TabContentsObserver* observer);
 
-  // From RenderViewHostDelegate.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-
  private:
   friend class NavigationController;
   // Used to access the child_windows_ (ConstrainedWindowList) for testing
@@ -547,7 +549,9 @@ class TabContents : public PageNavigator,
                                          const GURL& url,
                                          bool showing_repost_interstitial);
   void OnDidLoadResourceFromMemoryCache(const GURL& url,
-                                        const std::string& security_info);
+                                        const std::string& security_info,
+                                        const std::string& http_request,
+                                        ResourceType::Type resource_type);
   void OnDidDisplayInsecureContent();
   void OnDidRunInsecureContent(const std::string& security_origin,
                                const GURL& target_url);
@@ -559,6 +563,24 @@ class TabContents : public PageNavigator,
                           int maximum_percent,
                           bool remember);
   void OnFocusedNodeChanged(bool is_editable_node);
+  void OnEnumerateDirectory(int request_id, const FilePath& path);
+  void OnJSOutOfMemory();
+  void OnRegisterProtocolHandler(const std::string& protocol,
+                                 const GURL& url,
+                                 const string16& title);
+  void OnRegisterIntentHandler(const string16& action,
+                               const string16& type,
+                               const string16& href,
+                               const string16& title);
+  void OnWebIntentDispatch(const IPC::Message& message,
+                           const string16& action,
+                           const string16& type,
+                           const string16& data,
+                           int intent_id);
+  void OnFindReply(int request_id, int number_of_matches,
+                   const gfx::Rect& selection_rect, int active_match_ordinal,
+                   bool final_update);
+  void OnCrashedPlugin(const FilePath& plugin_path);
 
   // Changes the IsLoading state and notifies delegate as needed
   // |details| is used to provide details on the load that just finished
@@ -606,7 +628,7 @@ class TabContents : public PageNavigator,
   // This is used as the backend for state updates, which include a new title,
   // or the dedicated set title message. It returns true if the new title is
   // different and was therefore updated.
-  bool UpdateTitleForEntry(NavigationEntry* entry, const std::wstring& title);
+  bool UpdateTitleForEntry(NavigationEntry* entry, const string16& title);
 
   // Causes the TabContents to navigate in the right renderer to |entry|, which
   // must be already part of the entries in the navigation controller.
@@ -651,7 +673,8 @@ class TabContents : public PageNavigator,
                            const std::string& state) OVERRIDE;
   virtual void UpdateTitle(RenderViewHost* render_view_host,
                            int32 page_id,
-                           const std::wstring& title) OVERRIDE;
+                           const string16& title,
+                           base::i18n::TextDirection title_direction) OVERRIDE;
   virtual void UpdateEncoding(RenderViewHost* render_view_host,
                               const std::string& encoding) OVERRIDE;
   virtual void UpdateTargetURL(int32 page_id, const GURL& url) OVERRIDE;
@@ -676,7 +699,8 @@ class TabContents : public PageNavigator,
   virtual void RunBeforeUnloadConfirm(const RenderViewHost* rvh,
                                       const string16& message,
                                       IPC::Message* reply_msg) OVERRIDE;
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const OVERRIDE;
+  virtual RendererPreferences GetRendererPrefs(
+      content::BrowserContext* browser_context) const OVERRIDE;
   virtual WebPreferences GetWebkitPrefs() OVERRIDE;
   virtual void OnUserGesture() OVERRIDE;
   virtual void OnIgnoredUIEvent() OVERRIDE;
@@ -684,7 +708,7 @@ class TabContents : public PageNavigator,
                                     bool is_during_unload) OVERRIDE;
   virtual void RendererResponsive(RenderViewHost* render_view_host) OVERRIDE;
   virtual void LoadStateChanged(const GURL& url,
-                                net::LoadState load_state,
+                                const net::LoadStateWithParam& load_state,
                                 uint64 upload_position,
                                 uint64 upload_size) OVERRIDE;
   virtual void WorkerCrashed() OVERRIDE;
@@ -697,6 +721,11 @@ class TabContents : public PageNavigator,
       const NativeWebKeyboardEvent& event) OVERRIDE;
   virtual void HandleMouseUp() OVERRIDE;
   virtual void HandleMouseActivate() OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual void RunFileChooser(RenderViewHost* render_view_host,
+                              const ViewHostMsg_RunFileChooser_Params& params);
+  virtual void ToggleFullscreenMode(bool enter_fullscreen) OVERRIDE;
+  virtual void UpdatePreferredSize(const gfx::Size& pref_size) OVERRIDE;
 
   // RenderViewHostManager::Delegate -------------------------------------------
 
@@ -726,10 +755,6 @@ class TabContents : public PageNavigator,
   // InitWithExistingID.
   virtual bool CreateRenderViewForRenderManager(
       RenderViewHost* render_view_host);
-
-  // Adds the given window to the list of child windows. The window will notify
-  // via WillClose() when it is being destroyed.
-  void AddConstrainedDialog(ConstrainedWindow* window);
 
   // Stores random bits of data for others to associate with this object.
   // WARNING: this needs to be deleted after NavigationController.
@@ -776,7 +801,7 @@ class TabContents : public PageNavigator,
   base::TimeTicks current_load_start_;
 
   // The current load state and the URL associated with it.
-  net::LoadState load_state_;
+  net::LoadStateWithParam load_state_;
   string16 load_state_host_;
   // Upload progress, for displaying in the status bar.
   // Set to zero when there is no significant upload happening.
@@ -811,6 +836,10 @@ class TabContents : public PageNavigator,
   // happen if a connection notification has happened and that they happen only
   // once.
   bool notify_disconnection_;
+
+  // Pointer to the JavaScript dialog creator, lazily assigned. Used because the
+  // delegate of this TabContents is nulled before its destructor is called.
+  content::JavaScriptDialogCreator* dialog_creator_;
 
 #if defined(OS_WIN)
   // Handle to an event that's set when the page is showing a message box (or

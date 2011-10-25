@@ -1704,14 +1704,16 @@ TEST_F(GLES2DecoderTest2, ViewportInvalidArgs3_0) {
 
 // TODO(gman): RegisterSharedIdsCHROMIUM
 
-// TODO(gman): CommandBufferEnableCHROMIUM
+// TODO(gman): EnableFeatureCHROMIUM
 
-// TODO(gman): CopyTextureToParentTextureCHROMIUM
 // TODO(gman): ResizeCHROMIUM
 // TODO(gman): GetRequestableExtensionsCHROMIUM
 
 // TODO(gman): RequestExtensionCHROMIUM
 
-// TODO(gman): SetSurfaceCHROMIUM
+// TODO(gman): GetMultipleIntegervCHROMIUM
+
+// TODO(gman): GetProgramInfoCHROMIUM
+
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_2_AUTOGEN_H_
 

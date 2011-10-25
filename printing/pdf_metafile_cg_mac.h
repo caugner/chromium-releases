@@ -25,7 +25,7 @@ class Point;
 namespace printing {
 
 // This class creates a graphics context that renders into a PDF data stream.
-class PdfMetafileCg : public Metafile, public base::ThreadChecker {
+class PRINTING_EXPORT PdfMetafileCg : public Metafile {
  public:
   PdfMetafileCg();
   virtual ~PdfMetafileCg();
@@ -36,8 +36,8 @@ class PdfMetafileCg : public Metafile, public base::ThreadChecker {
 
   // Not implemented on mac.
   virtual SkDevice* StartPageForVectorCanvas(
-      int page_number, const gfx::Size& page_size,
-      const gfx::Rect& content_area, const float& scale_factor);
+      const gfx::Size& page_size, const gfx::Rect& content_area,
+      const float& scale_factor);
   virtual bool StartPage(const gfx::Size& page_size,
                          const gfx::Rect& content_area,
                          const float& scale_factor);
@@ -68,6 +68,8 @@ class PdfMetafileCg : public Metafile, public base::ThreadChecker {
  private:
   // Returns a CGPDFDocumentRef version of pdf_data_.
   CGPDFDocumentRef GetPDFDocument() const;
+
+  base::ThreadChecker thread_checker_;
 
   // Context for rendering to the pdf.
   base::mac::ScopedCFTypeRef<CGContextRef> context_;

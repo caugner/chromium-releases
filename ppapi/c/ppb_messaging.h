@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_messaging.idl modified Wed Jul 13 16:51:56 2011. */
+/* From ppb_messaging.idl modified Mon Aug 29 10:11:34 2011. */
 
 #ifndef PPAPI_C_PPB_MESSAGING_H_
 #define PPAPI_C_PPB_MESSAGING_H_
@@ -13,6 +13,9 @@
 #include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_var.h"
+
+#define PPB_MESSAGING_INTERFACE_1_0 "PPB_Messaging;1.0"
+#define PPB_MESSAGING_INTERFACE PPB_MESSAGING_INTERFACE_1_0
 
 /**
  * @file
@@ -31,17 +34,13 @@
  * and is related to sending messages to JavaScript message event listeners on
  * the DOM element associated with specific module instance.
  */
-#define PPB_MESSAGING_INTERFACE_0_1 "PPB_Messaging;0.1"
-#define PPB_MESSAGING_INTERFACE_1_0 "PPB_Messaging;1.0"
-#define PPB_MESSAGING_INTERFACE PPB_MESSAGING_INTERFACE_1_0
-
 struct PPB_Messaging {
   /**
    * PostMessage() asynchronously invokes any listeners for message events on
    * the DOM element for the given module instance. A call to PostMessage()
    * will not block while the message is processed.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    * @param[in] message A <code>PP_Var</code> containing the data to be sent to
    * JavaScript.
@@ -61,7 +60,7 @@ struct PPB_Messaging {
    *
    * <strong>Example:</strong>
    *
-   * @code
+   * <code>
    *
    * <body>
    *   <object id="plugin"
@@ -74,11 +73,11 @@ struct PPB_Messaging {
    *   </script>
    * </body>
    *
-   * @endcode
+   * </code>
    *
    * The module instance then invokes PostMessage() as follows:
    *
-   * @code
+   * <code>
    *
    *
    *  char hello_world[] = "Hello world!";
@@ -88,7 +87,7 @@ struct PPB_Messaging {
    *  ppb_messaging_interface->PostMessage(instance, hello_var); // Copies var.
    *  ppb_var_interface->Release(hello_var);
    *
-   * @endcode
+   * </code>
    *
    * The browser will pop-up an alert saying "Hello world!"
    */

@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "remoting/host/screen_recorder.h"
+
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/task.h"
 #include "remoting/base/base_mock_objects.h"
 #include "remoting/host/host_mock_objects.h"
-#include "remoting/host/screen_recorder.h"
 #include "remoting/proto/video.pb.h"
 #include "remoting/protocol/protocol_mock_objects.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -31,13 +33,9 @@ namespace remoting {
 
 namespace {
 
-ACTION_P2(RunCallback, rects, data) {
-  InvalidRects& dirty_rects = data->mutable_dirty_rects();
-  InvalidRects temp_rects;
-  std::set_union(dirty_rects.begin(), dirty_rects.end(),
-                 rects.begin(), rects.end(),
-                 std::inserter(temp_rects, temp_rects.begin()));
-  dirty_rects.swap(temp_rects);
+ACTION_P2(RunCallback, region, data) {
+  SkRegion& dirty_region = data->mutable_dirty_region();
+  dirty_region.op(region, SkRegion::kUnion_Op);
   arg0->Run(data);
   delete arg0;
 }
@@ -80,11 +78,12 @@ class ScreenRecorderTest : public testing::Test {
     // Capturer and Encoder are owned by ScreenRecorder.
     encoder_ = new MockEncoder();
 
-    connection_ = new MockConnectionToClient(&message_loop_, &handler_,
-                                             &host_stub_, &event_executor_);
+    connection_ = new MockConnectionToClient(
+        &handler_, &host_stub_, &event_executor_);
 
     record_ = new ScreenRecorder(
-        &message_loop_, &message_loop_, &message_loop_,
+        &message_loop_, &message_loop_,
+        base::MessageLoopProxy::current(),
         &capturer_, encoder_);
   }
 
@@ -107,8 +106,7 @@ class ScreenRecorderTest : public testing::Test {
 // This test mocks capturer, encoder and network layer to operate one recording
 // cycle.
 TEST_F(ScreenRecorderTest, OneRecordCycle) {
-  InvalidRects update_rects;
-  update_rects.insert(gfx::Rect(0, 0, 10, 10));
+  SkRegion update_region(SkIRect::MakeXYWH(0, 0, 10, 10));
   DataPlanes planes;
   for (int i = 0; i < DataPlanes::kPlaneCount; ++i) {
     planes.data[i] = reinterpret_cast<uint8*>(i);
@@ -119,8 +117,8 @@ TEST_F(ScreenRecorderTest, OneRecordCycle) {
   EXPECT_CALL(capturer_, InvalidateFullScreen());
 
   // First the capturer is called.
-  EXPECT_CALL(capturer_, CaptureInvalidRects(NotNull()))
-      .WillOnce(RunCallback(update_rects, data));
+  EXPECT_CALL(capturer_, CaptureInvalidRegion(NotNull()))
+      .WillOnce(RunCallback(update_region, data));
 
   // Expect the encoder be called.
   EXPECT_CALL(*encoder_, Encode(data, false, NotNull()))
@@ -156,8 +154,7 @@ TEST_F(ScreenRecorderTest, OneRecordCycle) {
 // ScreenRecorder is instructed to come to a complete stop. We expect the stop
 // sequence to be executed successfully.
 TEST_F(ScreenRecorderTest, StartAndStop) {
-  InvalidRects update_rects;
-  update_rects.insert(gfx::Rect(0, 0, 10, 10));
+  SkRegion update_region(SkIRect::MakeXYWH(0, 0, 10, 10));
   DataPlanes planes;
   for (int i = 0; i < DataPlanes::kPlaneCount; ++i) {
     planes.data[i] = reinterpret_cast<uint8*>(i);
@@ -169,8 +166,8 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
   EXPECT_CALL(capturer_, InvalidateFullScreen());
 
   // First the capturer is called.
-  EXPECT_CALL(capturer_, CaptureInvalidRects(NotNull()))
-      .WillRepeatedly(RunCallback(update_rects, data));
+  EXPECT_CALL(capturer_, CaptureInvalidRegion(NotNull()))
+      .WillRepeatedly(RunCallback(update_region, data));
 
   // Expect the encoder be called.
   EXPECT_CALL(*encoder_, Encode(data, false, NotNull()))
@@ -190,8 +187,7 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
       .WillOnce(DoAll(
           FinishSend(),
           StopScreenRecorder(record_,
-                             NewRunnableFunction(&QuitMessageLoop,
-                                                 &message_loop_))))
+                             base::Bind(&QuitMessageLoop, &message_loop_))))
       .RetiresOnSaturation();
 
   // Add the mock client connection to the session.
@@ -203,7 +199,7 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
 }
 
 TEST_F(ScreenRecorderTest, StopWithoutStart) {
-  record_->Stop(NewRunnableFunction(&QuitMessageLoop, &message_loop_));
+  record_->Stop(base::Bind(&QuitMessageLoop, &message_loop_));
   message_loop_.Run();
 }
 

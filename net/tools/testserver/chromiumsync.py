@@ -101,6 +101,10 @@ class StoreBirthdayError(Error):
   """The client sent a birthday that doesn't correspond to this server."""
 
 
+class TransientError(Error):
+  """The client would be sent a transient error."""
+
+
 def GetEntryType(entry):
   """Extract the sync type from a SyncEntry.
 
@@ -407,8 +411,7 @@ class SyncDataModel(object):
     # SyncEntity protocol buffer.
     self._entries = {}
 
-    # TODO(nick): uuid.uuid1() is better, but python 2.5 only.
-    self.store_birthday = '%0.30f' % random.random()
+    self.ResetStoreBirthday()
 
     self.migration_history = MigrationHistory()
 
@@ -559,6 +562,15 @@ class SyncDataModel(object):
     for spec in self._PERMANENT_ITEM_SPECS:
       if spec.sync_type in requested_types:
         self._CreatePermanentItem(spec)
+
+  def ResetStoreBirthday(self):
+    """Resets the store birthday to a random value."""
+    # TODO(nick): uuid.uuid1() is better, but python 2.5 only.
+    self.store_birthday = '%0.30f' % random.random()
+
+  def StoreBirthday(self):
+    """Gets the store birthday."""
+    return self.store_birthday
 
   def GetChanges(self, sieve):
     """Get entries which have changed, oldest first.
@@ -851,6 +863,23 @@ class SyncDataModel(object):
             entry.parent_id_string)
       self._entries[entry.id_string] = entry
 
+  def TriggerSyncTabs(self):
+    """Set the 'sync_tabs' field to this account's nigori node.
+
+    If the field is not currently set, will write a new nigori node entry
+    with the field set. Else does nothing.
+    """
+
+    nigori_tag = "google_chrome_nigori"
+    nigori_original = self._entries.get(self._ServerTagToId(nigori_tag))
+    if (nigori_original.specifics.Extensions[nigori_specifics_pb2.nigori].
+        sync_tabs):
+      return
+    nigori_new = copy.deepcopy(nigori_original)
+    nigori_new.specifics.Extensions[nigori_specifics_pb2.nigori].sync_tabs = (
+        True)
+    self._SaveEntry(nigori_new)
+
 
 class TestServer(object):
   """An object to handle requests for one (and only one) Chrome Sync account.
@@ -869,6 +898,7 @@ class TestServer(object):
     self.clients = {}
     self.client_name_generator = ('+' * times + chr(c)
         for times in xrange(0, sys.maxint) for c in xrange(ord('A'), ord('Z')))
+    self.transient_error = False
 
   def GetShortClientName(self, query):
     parsed = cgi.parse_qs(query[query.find('?')+1:])
@@ -884,8 +914,13 @@ class TestServer(object):
     """Raises StoreBirthdayError if the request's birthday is a mismatch."""
     if not request.HasField('store_birthday'):
       return
-    if self.account.store_birthday != request.store_birthday:
+    if self.account.StoreBirthday() != request.store_birthday:
       raise StoreBirthdayError
+
+  def CheckTransientError(self):
+    """Raises TransientError if transient_error variable is set."""
+    if self.transient_error:
+      raise TransientError
 
   def HandleMigrate(self, path):
     query = urlparse.urlparse(path)[4]
@@ -908,6 +943,25 @@ class TestServer(object):
       self.account_lock.release()
     return (code, '<html><title>Migration: %d</title><H1>%d %s</H1></html>' %
                 (code, code, response))
+
+  def HandleCreateBirthdayError(self):
+    self.account.ResetStoreBirthday()
+    return (
+        200,
+        '<html><title>Birthday error</title><H1>Birthday error</H1></html>')
+
+  def HandleSetTransientError(self):
+    self.transient_error = True
+    return (
+        200,
+        '<html><title>Transient error</title><H1>Transient error</H1></html>')
+
+  def HandleSetSyncTabs(self):
+    """Set the 'sync_tab' field of the nigori node for this account."""
+    self.account.TriggerSyncTabs()
+    return (
+        200,
+        '<html><title>Sync Tabs</title><H1>Sync Tabs</H1></html>')
 
   def HandleCommand(self, query, raw_request):
     """Decode and handle a sync command from a raw input of bytes.
@@ -937,6 +991,7 @@ class TestServer(object):
       response.error_code = sync_pb2.ClientToServerResponse.SUCCESS
       self.CheckStoreBirthday(request)
       response.store_birthday = self.account.store_birthday
+      self.CheckTransientError();
 
       print_context('->')
 
@@ -958,7 +1013,7 @@ class TestServer(object):
         print 'Unrecognizable sync request!'
         return (400, None)  # Bad request.
       return (200, response.SerializeToString())
-    except MigrationDoneError as error:
+    except MigrationDoneError, error:
       print_context('<-')
       print 'MIGRATION_DONE: <%s>' % (ShortDatatypeListSummary(error.datatypes))
       response = sync_pb2.ClientToServerResponse()
@@ -967,12 +1022,18 @@ class TestServer(object):
       response.migrated_data_type_id[:] = [
           SyncTypeToProtocolDataTypeId(x) for x in error.datatypes]
       return (200, response.SerializeToString())
-    except StoreBirthdayError as error:
+    except StoreBirthdayError, error:
       print_context('<-')
       print 'NOT_MY_BIRTHDAY'
       response = sync_pb2.ClientToServerResponse()
       response.store_birthday = self.account.store_birthday
       response.error_code = sync_pb2.ClientToServerResponse.NOT_MY_BIRTHDAY
+      return (200, response.SerializeToString())
+    except TransientError as error:
+      print_context('<-')
+      print 'TRANSIENT_ERROR'
+      response.store_birthday = self.account.store_birthday
+      response.error_code = sync_pb2.ClientToServerResponse.TRANSIENT_ERROR
       return (200, response.SerializeToString())
     finally:
       self.account_lock.release()

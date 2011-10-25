@@ -10,7 +10,6 @@
 
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "ui/gfx/native_widget_types.h"
 #include "views/controls/menu/menu_delegate.h"
 #include "views/controls/menu/menu_item_view.h"
 
@@ -30,6 +29,8 @@ class OSExchangeData;
 
 namespace views {
 class MenuButton;
+class MenuRunner;
+class Widget;
 }  // namespace views
 
 // BookmarkMenuController is responsible for showing a menu of bookmarks,
@@ -52,16 +53,11 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   // at |start_child_index|.
   BookmarkMenuController(Profile* profile,
                          PageNavigator* page_navigator,
-                         gfx::NativeWindow parent,
+                         views::Widget* parent,
                          const BookmarkNode* node,
                          int start_child_index);
 
   void RunMenuAt(BookmarkBarView* bookmark_bar, bool for_drop);
-
-  // Shows the menu.
-  void RunMenuAt(views::MenuButton* button,
-                 views::MenuItemView::AnchorPosition position,
-                 bool for_drop);
 
   // Hides the menu.
   void Cancel();
@@ -74,6 +70,9 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
 
   // Returns the context menu, or NULL if the context menu isn't showing.
   views::MenuItemView* context_menu() const;
+
+  // Sets the page navigator.
+  void SetPageNavigator(PageNavigator* navigator);
 
   void set_observer(Observer* observer) { observer_ = observer; }
 
@@ -118,6 +117,8 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
  private:
   // BookmarkMenuController deletes itself as necessary.
   virtual ~BookmarkMenuController();
+
+  scoped_ptr<views::MenuRunner> menu_runner_;
 
   scoped_ptr<BookmarkMenuDelegate> menu_delegate_;
 

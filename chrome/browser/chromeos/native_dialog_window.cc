@@ -69,6 +69,7 @@ class NativeDialogHost : public views::DialogDelegateView {
  protected:
   CHROMEGTK_CALLBACK_0(NativeDialogHost, void, OnCheckResize);
   CHROMEGTK_CALLBACK_0(NativeDialogHost, void, OnDialogDestroy);
+  CHROMEGTK_CALLBACK_1(NativeDialogHost, gboolean, OnGtkKeyPressed, GdkEvent*);
 
   // views::View implementation:
   virtual gfx::Size GetPreferredSize();
@@ -79,6 +80,9 @@ class NativeDialogHost : public views::DialogDelegateView {
  private:
   // Init and attach to native dialog.
   void Init();
+
+  // Enable moving focuses over native widgets by the Tab key.
+  void InitNativeFocusMove(GtkWidget* contents);
 
   // Check and apply minimum size restriction.
   void CheckSize();
@@ -158,6 +162,21 @@ void NativeDialogHost::OnDialogDestroy(GtkWidget* widget) {
   GetWidget()->Close();
 }
 
+gboolean NativeDialogHost::OnGtkKeyPressed(GtkWidget* widget, GdkEvent* event) {
+  // Manually handle focus movement by Tab key.
+  // See the comments in NativeDialogHost::InitNativeFocusMove for more detail.
+  views::KeyEvent key_event(event);
+  if (views::FocusManager::IsTabTraversalKeyEvent(key_event)) {
+    GtkWindow* window = GetWidget()->GetNativeWindow();
+    GtkDirectionType dir =
+        key_event.IsShiftDown() ? GTK_DIR_TAB_BACKWARD : GTK_DIR_TAB_FORWARD;
+    static_cast<GtkWindowClass*>(
+        g_type_class_peek(GTK_TYPE_WINDOW))->move_focus(window, dir);
+    return true;
+  }
+  return false;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // NativeDialogHost, views::DialogDelegate implementation:
 void NativeDialogHost::WindowClosing() {
@@ -206,11 +225,11 @@ void NativeDialogHost::Init() {
       kDialogPadding, kDialogPadding);
 
   // Move dialog contents into our container.
-  GtkWidget* dialog_contents = GTK_DIALOG(dialog_)->vbox;
-  g_object_ref(dialog_contents);
-  gtk_container_remove(GTK_CONTAINER(dialog_), dialog_contents);
-  gtk_container_add(GTK_CONTAINER(contents), dialog_contents);
-  g_object_unref(dialog_contents);
+  GtkWidget* content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog_));
+  g_object_ref(content_area);
+  gtk_container_remove(GTK_CONTAINER(dialog_), content_area);
+  gtk_container_add(GTK_CONTAINER(contents), content_area);
+  g_object_unref(content_area);
   gtk_widget_hide(dialog_);
 
   g_object_set_data(G_OBJECT(dialog_), kNativeDialogHost,
@@ -221,9 +240,11 @@ void NativeDialogHost::Init() {
   contents_view_ = new views::NativeViewHost();
   // TODO(xiyuan): Find a better way to get proper background.
   contents_view_->set_background(views::Background::CreateSolidBackground(
-      BubbleWindow::kBackgroundColor));
+      kBubbleWindowBackgroundColor));
   AddChildView(contents_view_);
   contents_view_->Attach(contents);
+
+  InitNativeFocusMove(contents);
 
   g_signal_connect(GetWidget()->GetNativeWindow(), "check-resize",
       G_CALLBACK(&OnCheckResizeThunk), this);
@@ -256,6 +277,43 @@ void NativeDialogHost::Init() {
     gtk_widget_grab_focus(focus_widget);
 }
 
+void NativeDialogHost::InitNativeFocusMove(GtkWidget* contents) {
+  // Fix for http://crosbug.com/7725.
+  //
+  // When a native GTK dialog is hosted on views+GTK, the views framework
+  // prevents Tab key events to be passed to the GTK's handler in three places:
+  //   1. views::FocusManager::OnKeyEvent
+  //     It intercepts key events _after_ the usual event handlers through the
+  //     native widget hierarchy and _before_ the native key binding handlers.
+  //     Since moving focus by Tab is implemented as a key binding, it cannot
+  //     be reached. As a workaround for NativeDialogHost, we install an usual
+  //     key event handler for capturing Tab key, before FocusManager.
+  //   2. ::gtk_views_window_move_focus
+  //     The default "move_focus" method of GtkWindow is overridden by views
+  //     to invoke views::FocusManager. This is avoided by calling the default
+  //     GtkWindow->move_focus explicitly in the OnGtkKeyPressed handler.
+  //   3. ::gtk_views_fixed_init
+  //     Several GTK widgets of type GtkViewsFixed are inserted between the
+  //     dialog window and the dialog controls, so that views framework can
+  //     observe native events. The problem is that these widgets have CAN_FOCUS
+  //     flags, which means they don't propagate focuses to the child controls.
+  //     Here we turn the flag off to make descendant dialog controls focusable.
+  // Note that, these "stealing" behaviors of views are required ones in the
+  // usual situation where native widgets are used just as a hidden background
+  // implementation of views. Only when a native widget hierarchy is hosted and
+  // directly exposed to the users, the following workaround is necessary.
+
+  g_signal_connect(contents, "key_press_event",
+                   G_CALLBACK(&OnGtkKeyPressedThunk), this);
+
+  GtkWidget* window = GTK_WIDGET(GetWidget()->GetNativeWindow());
+  GtkWidget* anscestor = gtk_widget_get_parent(GTK_WIDGET(contents));
+  while (anscestor && anscestor != window) {
+    GTK_WIDGET_UNSET_FLAGS(anscestor, GTK_CAN_FOCUS);
+    anscestor = gtk_widget_get_parent(anscestor);
+  }
+}
+
 void NativeDialogHost::CheckSize() {
   // Apply the minimum size.
   if (preferred_size_.width() < min_size_.width())
@@ -271,7 +329,7 @@ void ShowNativeDialog(gfx::NativeWindow parent,
                       const gfx::Size& min_size) {
   NativeDialogHost* native_dialog_host =
       new NativeDialogHost(native_dialog, flags, size, min_size);
-  browser::CreateViewsWindow(parent, gfx::Rect(), native_dialog_host);
+  browser::CreateViewsWindow(parent, native_dialog_host);
   native_dialog_host->GetWidget()->Show();
 }
 

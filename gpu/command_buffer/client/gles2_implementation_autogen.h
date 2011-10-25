@@ -221,7 +221,6 @@ void DeleteBuffers(GLsizei n, const GLuint* buffers) {
     return;
   }
   DeleteBuffersHelper(n, buffers);
-  helper_->DeleteBuffersImmediate(n, buffers);
 }
 
 void DeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
@@ -241,14 +240,12 @@ void DeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
     return;
   }
   DeleteFramebuffersHelper(n, framebuffers);
-  helper_->DeleteFramebuffersImmediate(n, framebuffers);
 }
 
 void DeleteProgram(GLuint program) {
   GPU_CLIENT_LOG("[" << this << "] glDeleteProgram(" << program << ")");
   GPU_CLIENT_DCHECK(program != 0);
-  program_and_shader_id_handler_->FreeIds(1, &program);
-  helper_->DeleteProgram(program);
+  DeleteProgramHelper(program);
 }
 
 void DeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
@@ -268,14 +265,12 @@ void DeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
     return;
   }
   DeleteRenderbuffersHelper(n, renderbuffers);
-  helper_->DeleteRenderbuffersImmediate(n, renderbuffers);
 }
 
 void DeleteShader(GLuint shader) {
   GPU_CLIENT_LOG("[" << this << "] glDeleteShader(" << shader << ")");
   GPU_CLIENT_DCHECK(shader != 0);
-  program_and_shader_id_handler_->FreeIds(1, &shader);
-  helper_->DeleteShader(shader);
+  DeleteShaderHelper(shader);
 }
 
 void DeleteTextures(GLsizei n, const GLuint* textures) {
@@ -295,7 +290,6 @@ void DeleteTextures(GLsizei n, const GLuint* textures) {
     return;
   }
   DeleteTexturesHelper(n, textures);
-  helper_->DeleteTexturesImmediate(n, textures);
 }
 
 void DepthFunc(GLenum func) {
@@ -565,18 +559,19 @@ void GetProgramInfoLog(
       << static_cast<void*>(infolog) << ")");
   helper_->SetBucketSize(kResultBucketId, 0);
   helper_->GetProgramInfoLog(program, kResultBucketId);
-  if (bufsize > 0) {
-    std::string str;
-    if (GetBucketAsString(kResultBucketId, &str)) {
-      GLsizei max_size =
+  std::string str;
+  GLsizei max_size = 0;
+  if (GetBucketAsString(kResultBucketId, &str)) {
+    if (bufsize > 0) {
+      max_size =
           std::min(static_cast<size_t>(bufsize) - 1, str.size());
-      if (length != NULL) {
-        *length = max_size;
-      }
       memcpy(infolog, str.c_str(), max_size);
       infolog[max_size] = '\0';
       GPU_CLIENT_LOG("------\n" << infolog << "\n------");
     }
+  }
+  if (length != NULL) {
+    *length = max_size;
   }
 }
 void GetRenderbufferParameteriv(GLenum target, GLenum pname, GLint* params) {
@@ -627,18 +622,19 @@ void GetShaderInfoLog(
       << static_cast<void*>(infolog) << ")");
   helper_->SetBucketSize(kResultBucketId, 0);
   helper_->GetShaderInfoLog(shader, kResultBucketId);
-  if (bufsize > 0) {
-    std::string str;
-    if (GetBucketAsString(kResultBucketId, &str)) {
-      GLsizei max_size =
+  std::string str;
+  GLsizei max_size = 0;
+  if (GetBucketAsString(kResultBucketId, &str)) {
+    if (bufsize > 0) {
+      max_size =
           std::min(static_cast<size_t>(bufsize) - 1, str.size());
-      if (length != NULL) {
-        *length = max_size;
-      }
       memcpy(infolog, str.c_str(), max_size);
       infolog[max_size] = '\0';
       GPU_CLIENT_LOG("------\n" << infolog << "\n------");
     }
+  }
+  if (length != NULL) {
+    *length = max_size;
   }
 }
 void GetShaderPrecisionFormat(
@@ -654,24 +650,25 @@ void GetShaderSource(
       << static_cast<void*>(source) << ")");
   helper_->SetBucketSize(kResultBucketId, 0);
   helper_->GetShaderSource(shader, kResultBucketId);
-  if (bufsize > 0) {
-    std::string str;
-    if (GetBucketAsString(kResultBucketId, &str)) {
-      GLsizei max_size =
+  std::string str;
+  GLsizei max_size = 0;
+  if (GetBucketAsString(kResultBucketId, &str)) {
+    if (bufsize > 0) {
+      max_size =
           std::min(static_cast<size_t>(bufsize) - 1, str.size());
-      if (length != NULL) {
-        *length = max_size;
-      }
       memcpy(source, str.c_str(), max_size);
       source[max_size] = '\0';
       GPU_CLIENT_LOG("------\n" << source << "\n------");
     }
   }
+  if (length != NULL) {
+    *length = max_size;
+  }
 }
 const GLubyte* GetString(GLenum name);
 
 void GetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
-  GPU_CLIENT_LOG("[" << this << "] glGetTexParameterfv(" << GLES2Util::GetStringTextureTarget(target) << ", " << GLES2Util::GetStringTextureParameter(pname) << ", " << static_cast<const void*>(params) << ")");  // NOLINT
+  GPU_CLIENT_LOG("[" << this << "] glGetTexParameterfv(" << GLES2Util::GetStringGetTexParamTarget(target) << ", " << GLES2Util::GetStringTextureParameter(pname) << ", " << static_cast<const void*>(params) << ")");  // NOLINT
   if (GetTexParameterfvHelper(target, pname, params)) {
     return;
   }
@@ -690,7 +687,7 @@ void GetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
 }
 void GetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
   GPU_CLIENT_VALIDATE_DESTINATION_INITALIZATION(GLint, params);
-  GPU_CLIENT_LOG("[" << this << "] glGetTexParameteriv(" << GLES2Util::GetStringTextureTarget(target) << ", " << GLES2Util::GetStringTextureParameter(pname) << ", " << static_cast<const void*>(params) << ")");  // NOLINT
+  GPU_CLIENT_LOG("[" << this << "] glGetTexParameteriv(" << GLES2Util::GetStringGetTexParamTarget(target) << ", " << GLES2Util::GetStringTextureParameter(pname) << ", " << static_cast<const void*>(params) << ")");  // NOLINT
   if (GetTexParameterivHelper(target, pname, params)) {
     return;
   }
@@ -803,10 +800,7 @@ void LineWidth(GLfloat width) {
   helper_->LineWidth(width);
 }
 
-void LinkProgram(GLuint program) {
-  GPU_CLIENT_LOG("[" << this << "] glLinkProgram(" << program << ")");
-  helper_->LinkProgram(program);
-}
+void LinkProgram(GLuint program);
 
 void PixelStorei(GLenum pname, GLint param);
 
@@ -1247,7 +1241,7 @@ void DeleteSharedIdsCHROMIUM(
 void RegisterSharedIdsCHROMIUM(
     GLuint namespace_id, GLsizei n, const GLuint* ids);
 
-GLboolean CommandBufferEnableCHROMIUM(const char* feature);
+GLboolean EnableFeatureCHROMIUM(const char* feature);
 
 void* MapBufferSubDataCHROMIUM(
     GLuint target, GLintptr offset, GLsizeiptr size, GLenum access);
@@ -1260,24 +1254,13 @@ void* MapTexSubImage2DCHROMIUM(
 
 void UnmapTexSubImage2DCHROMIUM(const void* mem);
 
-void CopyTextureToParentTextureCHROMIUM(
-    GLuint client_child_id, GLuint client_parent_id);
-
-void ResizeCHROMIUM(GLuint width, GLuint height) {
-  GPU_CLIENT_LOG("[" << this << "] glResizeCHROMIUM(" << width << ", " << height << ")");  // NOLINT
-  helper_->ResizeCHROMIUM(width, height);
-}
+void ResizeCHROMIUM(GLuint width, GLuint height);
 
 const GLchar* GetRequestableExtensionsCHROMIUM();
 
 void RequestExtensionCHROMIUM(const char* extension);
 
 void RateLimitOffscreenContextCHROMIUM();
-
-void SetSurfaceCHROMIUM(GLint surface_id) {
-  GPU_CLIENT_LOG("[" << this << "] glSetSurfaceCHROMIUM(" << surface_id << ")");
-  helper_->SetSurfaceCHROMIUM(surface_id);
-}
 
 void GetMultipleIntegervCHROMIUM(
     const GLenum* pnames, GLuint count, GLint* results, GLsizeiptr size);

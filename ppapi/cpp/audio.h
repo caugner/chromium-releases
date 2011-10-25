@@ -38,7 +38,7 @@ class Audio : public Resource {
   /// the device configuration and is specified in the <code>AudioConfig</code>
   /// documentation.
   ///
-  /// @param[in] instance A pointer to an <code>Instance</code> indentifying one
+  /// @param[in] instance A pointer to an <code>Instance</code> identifying one
   /// instance of a module.
   /// @param[in] config An <code>AudioConfig</code> containing the audio config
   /// resource.
@@ -64,9 +64,13 @@ class Audio : public Resource {
   const AudioConfig& config() const { return config_; }
 
   /// StartPlayback() starts playback of audio.
+  ///
+  /// @return true if successful, otherwise false.
   bool StartPlayback();
 
   /// StopPlayback stops playback of audio.
+  ///
+  /// @return true if successful, otherwise false.
   bool StopPlayback();
 
  private:

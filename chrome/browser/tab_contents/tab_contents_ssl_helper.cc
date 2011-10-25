@@ -4,10 +4,18 @@
 
 #include "chrome/browser/tab_contents/tab_contents_ssl_helper.h"
 
+#include <string>
+#include <vector>
+
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/certificate_viewer.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_add_cert_handler.h"
 #include "chrome/browser/ssl_client_certificate_selector.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
@@ -15,6 +23,7 @@
 #include "chrome/browser/tab_contents/simple_alert_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
@@ -32,6 +41,23 @@ gfx::Image* GetCertIcon() {
       IDR_INFOBAR_SAVE_PASSWORD);
 }
 
+bool CertMatchesFilter(const net::X509Certificate& cert,
+                       const base::DictionaryValue& filter) {
+  // TODO(markusheintz): This is the minimal required filter implementation.
+  // Implement a better matcher.
+
+  // An empty filter matches any client certificate since no requirements are
+  // specified at all.
+  if (filter.empty())
+    return true;
+
+  std::string common_name;
+  if (filter.GetString("ISSUER.CN", &common_name) &&
+      (cert.issuer().common_name == common_name)) {
+    return true;
+  }
+  return false;
+}
 
 // SSLCertAddedInfoBarDelegate ------------------------------------------------
 
@@ -143,9 +169,10 @@ TabContentsSSLHelper::SSLAddCertData::~SSLAddCertData() {
 void TabContentsSSLHelper::SSLAddCertData::ShowInfoBar(
     InfoBarDelegate* delegate) {
   if (infobar_delegate_)
-    tab_contents_->ReplaceInfoBar(infobar_delegate_, delegate);
+    tab_contents_->infobar_tab_helper()->ReplaceInfoBar(infobar_delegate_,
+                                                        delegate);
   else
-    tab_contents_->AddInfoBar(delegate);
+    tab_contents_->infobar_tab_helper()->AddInfoBar(delegate);
   infobar_delegate_ = delegate;
 }
 
@@ -176,6 +203,45 @@ TabContentsSSLHelper::TabContentsSSLHelper(TabContentsWrapper* tab_contents)
 }
 
 TabContentsSSLHelper::~TabContentsSSLHelper() {
+}
+
+void TabContentsSSLHelper::SelectClientCertificate(
+    scoped_refptr<SSLClientAuthHandler> handler) {
+  net::SSLCertRequestInfo* cert_request_info = handler->cert_request_info();
+  GURL requesting_url("https://" + cert_request_info->host_and_port);
+  DCHECK(requesting_url.is_valid()) << "Invalid URL string: https://"
+                                    << cert_request_info->host_and_port;
+
+  HostContentSettingsMap* map =
+      tab_contents_->profile()->GetHostContentSettingsMap();
+  scoped_ptr<Value> filter(map->GetContentSettingValue(
+      requesting_url,
+      requesting_url,
+      CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
+      std::string()));
+
+  scoped_refptr<net::X509Certificate> selected_cert;
+  if (filter.get()) {
+    // Try to automatically select a client certificate.
+    DCHECK(filter->IsType(Value::TYPE_DICTIONARY));
+    DictionaryValue* filter_dict = static_cast<DictionaryValue*>(filter.get());
+
+    const std::vector<scoped_refptr<net::X509Certificate> >& all_client_certs =
+        cert_request_info->client_certs;
+    for (size_t i = 0; i < all_client_certs.size(); ++i) {
+      if (CertMatchesFilter(*all_client_certs[i], *filter_dict)) {
+        selected_cert = all_client_certs[i];
+        // Use the first certificate that is matched by the filter.
+        break;
+      }
+    }
+  }
+
+  if (selected_cert) {
+    handler->CertificateSelected(selected_cert);
+  } else {
+    ShowClientCertificateRequestDialog(handler);
+  }
 }
 
 void TabContentsSSLHelper::ShowClientCertificateRequestDialog(

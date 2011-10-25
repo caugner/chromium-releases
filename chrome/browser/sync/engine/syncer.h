@@ -21,8 +21,6 @@
 #include "chrome/browser/sync/syncable/directory_event.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/extensions_activity_monitor.h"
-#include "chrome/common/deprecated/event_sys.h"
-#include "chrome/common/deprecated/event_sys-inl.h"
 
 namespace syncable {
 class Directory;
@@ -87,6 +85,16 @@ class Syncer {
                          SyncerStep first_step,
                          SyncerStep last_step);
 
+  class ScopedSyncStartStopTracker {
+   public:
+    explicit ScopedSyncStartStopTracker(sessions::SyncSession* session);
+    ~ScopedSyncStartStopTracker();
+   private:
+    sessions::SyncSession* session_;
+
+    DISALLOW_COPY_AND_ASSIGN(ScopedSyncStartStopTracker);
+  };
+
  private:
   // Implements the PROCESS_CLIENT_COMMAND syncer step.
   void ProcessClientCommand(sessions::SyncSession* session);
@@ -134,4 +142,3 @@ void ClearServerData(syncable::MutableEntry* entry);
 }  // namespace browser_sync
 
 #endif  // CHROME_BROWSER_SYNC_ENGINE_SYNCER_H_
-

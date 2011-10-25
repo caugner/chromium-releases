@@ -68,9 +68,9 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   };
 
   // Does not assume ownership of |prefs| and |incognito_prefs|.
-  explicit ExtensionPrefs(PrefService* prefs,
-                          const FilePath& root_dir,
-                          ExtensionPrefValueMap* extension_pref_value_map);
+  ExtensionPrefs(PrefService* prefs,
+                 const FilePath& root_dir,
+                 ExtensionPrefValueMap* extension_pref_value_map);
   virtual ~ExtensionPrefs();
 
   // Returns a copy of the Extensions prefs.
@@ -81,6 +81,11 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   // Returns true if the specified external extension was uninstalled by the
   // user.
   bool IsExternalExtensionUninstalled(const std::string& id) const;
+
+  // Checks whether |extension_id| is disabled. If there's no state pref for
+  // the extension, this will return false. Generally you should use
+  // ExtensionService::IsExtensionEnabled instead.
+  bool IsExtensionDisabled(const std::string& id) const;
 
   // Get the order that toolstrip URLs appear in the shelf.
   typedef std::vector<GURL> URLList;
@@ -96,18 +101,16 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   void SetToolbarOrder(const std::vector<std::string>& extension_ids);
 
   // Called when an extension is installed, so that prefs get created.
+  // If |page_index| is -1, and the then a page will be found for the App.
   void OnExtensionInstalled(const Extension* extension,
                             Extension::State initial_state,
-                            bool from_webstore);
+                            bool from_webstore,
+                            int page_index);
 
   // Called when an extension is uninstalled, so that prefs get cleaned up.
   void OnExtensionUninstalled(const std::string& extension_id,
                               const Extension::Location& location,
                               bool external_uninstall);
-
-  // Returns the state (enabled/disabled) of the given extension. Generally you
-  // should use ExtensionService::IsExtensionEnabled instead.
-  Extension::State GetExtensionState(const std::string& extension_id) const;
 
   // Called to change the extension's state when it is enabled/disabled.
   void SetExtensionState(const std::string& extension_id, Extension::State);
@@ -187,6 +190,16 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   void AddGrantedPermissions(const std::string& extension_id,
                              const ExtensionPermissionSet* permissions);
 
+  // Gets the active permission set for the specified extension. This may
+  // differ from the permissions in the manifest due to the optional
+  // permissions API. This passes ownership of the set to the caller.
+  ExtensionPermissionSet* GetActivePermissions(
+      const std::string& extension_id);
+
+  // Sets the active |permissions| for the extension with |extension_id|.
+  void SetActivePermissions(const std::string& extension_id,
+                            const ExtensionPermissionSet* permissions);
+
   // Returns true if the user enabled this extension to be loaded in incognito
   // mode.
   bool IsIncognitoEnabled(const std::string& extension_id);
@@ -262,8 +275,12 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   void SetAppLaunchIndex(const std::string& extension_id, int index);
 
   // Gets the next available application launch index. This is 1 higher than the
-  // highest current application launch index found.
-  int GetNextAppLaunchIndex();
+  // highest current application launch index found for the page |on_page|.
+  int GetNextAppLaunchIndex(int on_page);
+
+  // Gets the page a new app should install to. Starts on page 0, and if there
+  // are N or more apps on it, tries to install on the next page.
+  int GetNaturalAppPageIndex();
 
   // Sets the order the apps should be displayed in the app launcher.
   void SetAppLauncherOrder(const std::vector<std::string>& extension_ids);
@@ -326,6 +343,10 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   // Returns true if the extension was installed from the Chrome Web Store.
   bool IsFromWebStore(const std::string& extension_id) const;
 
+  // Returns true if the extension was installed from an App generated from a
+  // bookmark.
+  bool IsFromBookmark(const std::string& extension_id) const;
+
   // Helper method to acquire the installation time of an extension.
   // Returns base::Time() if the installation time could not be parsed or
   // found.
@@ -346,6 +367,8 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   virtual base::Time GetCurrentTime() const;
 
  private:
+  friend class ExtensionPrefsUninstallExtension;  // Unit test.
+
   // ExtensionContentSettingsStore::Observer methods:
   virtual void OnContentSettingChanged(
       const std::string& extension_id,
@@ -405,6 +428,18 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
                                      const std::string& pref_key,
                                      const URLPatternSet& new_value);
 
+  // Interprets |pref_key| in |extension_id|'s preferences as an
+  // ExtensionPermissionSet, and passes ownership of the set to the caller.
+  ExtensionPermissionSet* ReadExtensionPrefPermissionSet(
+      const std::string& extension_id,
+      const std::string& pref_key);
+
+  // Converts the |new_value| to its value and sets the |pref_key| pref
+  // belonging to |extension_id|.
+  void SetExtensionPrefPermissionSet(const std::string& extension_id,
+                                     const std::string& pref_key,
+                                     const ExtensionPermissionSet* new_value);
+
   // Returns a dictionary for extension |id|'s prefs or NULL if it doesn't
   // exist.
   const base::DictionaryValue* GetExtensionPref(const std::string& id) const;
@@ -436,6 +471,11 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
 
   // Migrates the permissions data in the pref store.
   void MigratePermissions(const ExtensionIdSet& extension_ids);
+
+  // Checks whether there is a state pref for the extension and if so, whether
+  // it matches |check_state|.
+  bool DoesExtensionHaveState(const std::string& id,
+                              Extension::State check_state) const;
 
   // The pref service specific to this set of extension prefs. Owned by profile.
   PrefService* prefs_;

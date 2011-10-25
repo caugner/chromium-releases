@@ -4,7 +4,9 @@
 
 #include "remoting/protocol/rtp_video_reader.h"
 
+#include "base/bind.h"
 #include "base/task.h"
+#include "remoting/base/constants.h"
 #include "remoting/proto/video.pb.h"
 #include "remoting/protocol/session.h"
 
@@ -21,8 +23,10 @@ RtpVideoReader::PacketsQueueEntry::PacketsQueueEntry()
       packet(NULL) {
 }
 
-RtpVideoReader::RtpVideoReader()
-    : last_sequence_number_(0),
+RtpVideoReader::RtpVideoReader(base::MessageLoopProxy* message_loop)
+    : initialized_(false),
+      rtcp_writer_(message_loop),
+      last_sequence_number_(0),
       video_stub_(NULL) {
 }
 
@@ -30,11 +34,46 @@ RtpVideoReader::~RtpVideoReader() {
   ResetQueue();
 }
 
-void RtpVideoReader::Init(protocol::Session* session, VideoStub* video_stub) {
-  rtp_reader_.Init(session->video_rtp_channel(),
-                   NewCallback(this, &RtpVideoReader::OnRtpPacket));
-  rtcp_writer_.Init(session->video_rtcp_channel());
+void RtpVideoReader::Init(protocol::Session* session,
+                          VideoStub* video_stub,
+                          const InitializedCallback& callback) {
+  initialized_callback_ = callback;
   video_stub_ = video_stub;
+
+  session->CreateDatagramChannel(
+      kVideoRtpChannelName,
+      base::Bind(&RtpVideoReader::OnChannelReady,
+                 base::Unretained(this), true));
+  session->CreateDatagramChannel(
+      kVideoRtcpChannelName,
+      base::Bind(&RtpVideoReader::OnChannelReady,
+                 base::Unretained(this), false));
+}
+
+void RtpVideoReader::OnChannelReady(bool rtp, net::Socket* socket) {
+  if (!socket) {
+    if (!initialized_) {
+      initialized_ = true;
+      initialized_callback_.Run(false);
+    }
+    return;
+  }
+
+  if (rtp) {
+    DCHECK(!rtp_channel_.get());
+    rtp_channel_.reset(socket);
+    rtp_reader_.Init(socket, NewCallback(this, &RtpVideoReader::OnRtpPacket));
+  } else {
+    DCHECK(!rtcp_channel_.get());
+    rtcp_channel_.reset(socket);
+    rtcp_writer_.Init(socket);
+  }
+
+  if (rtp_channel_.get() && rtcp_channel_.get()) {
+    DCHECK(!initialized_);
+    initialized_ = true;
+    initialized_callback_.Run(true);
+  }
 }
 
 void RtpVideoReader::ResetQueue() {

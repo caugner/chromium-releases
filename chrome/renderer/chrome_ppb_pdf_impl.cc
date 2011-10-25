@@ -7,12 +7,18 @@
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/common/render_messages.h"
 #include "content/common/view_messages.h"
+#include "content/renderer/pepper_plugin_delegate_impl.h"
 #include "content/renderer/render_thread.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_strings.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/private/ppb_pdf.h"
+#include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/resource_tracker.h"
+#include "ppapi/shared_impl/tracker_base.h"
+#include "ppapi/shared_impl/var.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -23,16 +29,14 @@
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
-#include "webkit/plugins/ppapi/var.h"
+#include "webkit/plugins/ppapi/resource_tracker.h"
 
 namespace chrome {
 
 #if defined(OS_LINUX)
-class PrivateFontFile : public webkit::ppapi::Resource {
+class PrivateFontFile : public ppapi::Resource {
  public:
-  PrivateFontFile(webkit::ppapi::PluginInstance* instance, int fd)
-      : webkit::ppapi::Resource(instance),
-        fd_(fd) {
+  PrivateFontFile(PP_Instance instance, int fd) : Resource(instance), fd_(fd) {
   }
   virtual ~PrivateFontFile() {
   }
@@ -106,6 +110,7 @@ static const ResourceImageInfo kResourceImageMap[] = {
   { PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_BACKGROUND,
       IDR_PDF_PROGRESS_BAR_BACKGROUND },
   { PP_RESOURCEIMAGE_PDF_PAGE_DROPSHADOW, IDR_PDF_PAGE_DROPSHADOW },
+  { PP_RESOURCEIMAGE_PDF_PAN_SCROLL_ICON, IDR_PAN_SCROLL_ICON },
 };
 
 PP_Var GetLocalizedString(PP_Instance instance_id,
@@ -128,8 +133,7 @@ PP_Var GetLocalizedString(PP_Instance instance_id,
     NOTREACHED();
   }
 
-  return webkit::ppapi::StringVar::StringToPPVar(
-      instance->module()->pp_module(), rv);
+  return ppapi::StringVar::StringToPPVar(instance->module()->pp_module(), rv);
 }
 
 PP_Resource GetResourceImage(PP_Instance instance_id,
@@ -147,12 +151,11 @@ PP_Resource GetResourceImage(PP_Instance instance_id,
   SkBitmap* res_bitmap =
       ResourceBundle::GetSharedInstance().GetBitmapNamed(res_id);
 
-  webkit::ppapi::PluginInstance* instance =
-      webkit::ppapi::ResourceTracker::Get()->GetInstance(instance_id);
-  if (!instance)
+  // Validate the instance.
+  if (!webkit::ppapi::ResourceTracker::Get()->GetInstance(instance_id))
     return 0;
   scoped_refptr<webkit::ppapi::PPB_ImageData_Impl> image_data(
-      new webkit::ppapi::PPB_ImageData_Impl(instance));
+      new webkit::ppapi::PPB_ImageData_Impl(instance_id));
   if (!image_data->Init(
           webkit::ppapi::PPB_ImageData_Impl::GetNativeImageDataFormat(),
           res_bitmap->width(), res_bitmap->height(), false)) {
@@ -176,13 +179,12 @@ PP_Resource GetFontFileWithFallback(
     const PP_FontDescription_Dev* description,
     PP_PrivateFontCharset charset) {
 #if defined(OS_LINUX)
-  webkit::ppapi::PluginInstance* instance =
-      webkit::ppapi::ResourceTracker::Get()->GetInstance(instance_id);
-  if (!instance)
+  // Validate the instance before using it below.
+  if (!webkit::ppapi::ResourceTracker::Get()->GetInstance(instance_id))
     return 0;
 
-  scoped_refptr<webkit::ppapi::StringVar>
-      face_name(webkit::ppapi::StringVar::FromPPVar(description->face));
+  scoped_refptr<ppapi::StringVar> face_name(ppapi::StringVar::FromPPVar(
+      description->face));
   if (!face_name)
     return 0;
 
@@ -194,7 +196,7 @@ PP_Resource GetFontFileWithFallback(
   if (fd == -1)
     return 0;
 
-  scoped_refptr<PrivateFontFile> font(new PrivateFontFile(instance, fd));
+  scoped_refptr<PrivateFontFile> font(new PrivateFontFile(instance_id, fd));
 
   return font->GetReference();
 #else
@@ -209,14 +211,12 @@ bool GetFontTableForPrivateFontFile(PP_Resource font_file,
                                     void* output,
                                     uint32_t* output_length) {
 #if defined(OS_LINUX)
-  scoped_refptr<webkit::ppapi::Resource>
-      resource(webkit::ppapi::ResourceTracker::Get()->GetResource(font_file));
-  if (!resource.get())
+  ppapi::Resource* resource =
+      ppapi::TrackerBase::Get()->GetResourceTracker()->GetResource(font_file);
+  if (!resource)
     return false;
 
-  PrivateFontFile* font = static_cast<PrivateFontFile*>(resource.get());
-  if (!font)
-    return false;
+  PrivateFontFile* font = static_cast<PrivateFontFile*>(resource);
   return font->GetFontTable(table, output, output_length);
 #else
   return false;
@@ -302,11 +302,12 @@ void HistogramPDFPageCount(int count) {
 }
 
 void UserMetricsRecordAction(PP_Var action) {
-  scoped_refptr<webkit::ppapi::StringVar>
-      action_str(webkit::ppapi::StringVar::FromPPVar(action));
-  if (action_str)
+  scoped_refptr<ppapi::StringVar> action_str(
+      ppapi::StringVar::FromPPVar(action));
+  if (action_str) {
     RenderThread::current()->Send(
         new ViewHostMsg_UserMetricsRecordAction(action_str->value()));
+  }
 }
 
 void HasUnsupportedFeature(PP_Instance instance_id) {
@@ -319,7 +320,12 @@ void HasUnsupportedFeature(PP_Instance instance_id) {
   if (!instance->IsFullPagePlugin())
     return;
 
-  instance->delegate()->HasUnsupportedFeature();
+  PepperPluginDelegateImpl* pepper_delegate =
+      static_cast<PepperPluginDelegateImpl*>(instance->delegate());
+
+  RenderThread::current()->Send(
+      new ChromeViewHostMsg_PDFHasUnsupportedFeature(
+          pepper_delegate->GetRoutingId()));
 }
 
 void SaveAs(PP_Instance instance_id) {

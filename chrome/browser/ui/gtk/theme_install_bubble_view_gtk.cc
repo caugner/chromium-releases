@@ -11,6 +11,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 // Roundedness of bubble.
@@ -50,10 +51,14 @@ ThemeInstallBubbleViewGtk::ThemeInstallBubbleViewGtk(GtkWidget* parent)
   InitWidgets();
 
   // Close when theme has been installed.
+  //
+  // TODO(erg): At least for version 1 of multiprofiles, we're still going to
+  // listen to AllSources(). Installing a theme blocks the entire UI thread so
+  // we won't have another profile trying to install a theme.
   registrar_.Add(
       this,
       chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-      NotificationService::AllSources());
+      NotificationService::AllBrowserContextsAndSources());
 
   // Close when we are installing an extension, not a theme.
   registrar_.Add(
@@ -93,7 +98,7 @@ void ThemeInstallBubbleViewGtk::InitWidgets() {
   gtk_label_set_markup(GTK_LABEL(label), markup);
   g_free(markup);
 
-  gtk_widget_modify_fg(label, GTK_STATE_NORMAL, &gtk_util::kGdkWhite);
+  gtk_widget_modify_fg(label, GTK_STATE_NORMAL, &ui::kGdkWhite);
   gtk_container_add(GTK_CONTAINER(widget_), label);
 
   // We need to show the label so we'll know the widget's actual size when we
@@ -118,7 +123,7 @@ void ThemeInstallBubbleViewGtk::InitWidgets() {
                      G_CALLBACK(OnExposeThunk), this);
     gtk_widget_realize(widget_);
   } else {
-    gtk_widget_modify_bg(widget_, GTK_STATE_NORMAL, &gtk_util::kGdkBlack);
+    gtk_widget_modify_bg(widget_, GTK_STATE_NORMAL, &ui::kGdkBlack);
     GdkColor color;
     gtk_util::ActAsRoundedWindow(widget_, color, kBubbleCornerRadius,
                                  gtk_util::ROUNDED_ALL, gtk_util::BORDER_NONE);

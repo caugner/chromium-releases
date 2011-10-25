@@ -10,6 +10,8 @@
 #include <set>
 #include <string>
 
+#include "base/compiler_specific.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -65,7 +67,7 @@ class ExtensionEventRouter : public NotificationObserver {
       const GURL& event_url);
 
   // Same as above, except only send the event to the given extension.
-  void DispatchEventToExtension(
+  virtual void DispatchEventToExtension(
       const std::string& extension_id,
       const std::string& event_name,
       const std::string& event_args,
@@ -87,15 +89,22 @@ class ExtensionEventRouter : public NotificationObserver {
       const GURL& event_url);
 
  protected:
+  // The details of an event to be dispatched.
+  struct ExtensionEvent;
+
   // Shared by DispatchEvent*. If |extension_id| is empty, the event is
   // broadcast.
-  virtual void DispatchEventImpl(
-      const std::string& extension_id,
-      const std::string& event_name,
-      const std::string& event_args,
-      Profile* restrict_to_profile,
-      const std::string& cross_incognito_args,
-      const GURL& event_url);
+  // An event that just came off the pending list may not be delayed again.
+  void DispatchEventImpl(const linked_ptr<ExtensionEvent>& event,
+                         bool was_pending);
+
+  // Dispatch may be delayed if the extension has a lazy background page.
+  bool CanDispatchEventNow(const std::string& extension_id);
+
+  // Store the event so that it can be dispatched (in order received)
+  // when the background page is done loading.
+  void AppendEvent(const linked_ptr<ExtensionEvent>& event);
+  void DispatchPendingEvents(const std::string& extension_id);
 
  private:
   // An extension listening to an event.
@@ -103,7 +112,7 @@ class ExtensionEventRouter : public NotificationObserver {
 
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   Profile* profile_;
 
@@ -115,6 +124,13 @@ class ExtensionEventRouter : public NotificationObserver {
   // to that event.
   typedef std::map<std::string, std::set<EventListener> > ListenerMap;
   ListenerMap listeners_;
+
+  // A map between an extension id and the queue of events pending
+  // the load of it's background page.
+  typedef std::vector<linked_ptr<ExtensionEvent> > PendingEventsList;
+  typedef std::map<std::string,
+                   linked_ptr<PendingEventsList> > PendingEventsPerExtMap;
+  PendingEventsPerExtMap pending_events_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionEventRouter);
 };

@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/shared_impl/var.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHTTPHeaderVisitor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
@@ -14,9 +15,10 @@
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_file_ref_impl.h"
-#include "webkit/plugins/ppapi/var.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 #include "webkit/glue/webkit_glue.h"
 
+using ppapi::StringVar;
 using ppapi::thunk::PPB_URLResponseInfo_API;
 using WebKit::WebHTTPHeaderVisitor;
 using WebKit::WebString;
@@ -49,7 +51,7 @@ bool IsRedirect(int32_t status) {
 
 }  // namespace
 
-PPB_URLResponseInfo_Impl::PPB_URLResponseInfo_Impl(PluginInstance* instance)
+PPB_URLResponseInfo_Impl::PPB_URLResponseInfo_Impl(PP_Instance instance)
     : Resource(instance),
       status_code_(-1) {
 }
@@ -72,8 +74,8 @@ bool PPB_URLResponseInfo_Impl::Initialize(const WebURLResponse& response) {
 
   WebString file_path = response.downloadFilePath();
   if (!file_path.isEmpty()) {
-    body_ = new PPB_FileRef_Impl(instance(),
-                                 webkit_glue::WebStringToFilePath(file_path));
+    body_ = PPB_FileRef_Impl::CreateExternal(
+        pp_instance(), webkit_glue::WebStringToFilePath(file_path));
   }
   return true;
 }
@@ -83,7 +85,10 @@ PPB_URLResponseInfo_API* PPB_URLResponseInfo_Impl::AsPPB_URLResponseInfo_API() {
 }
 
 PP_Var PPB_URLResponseInfo_Impl::GetProperty(PP_URLResponseProperty property) {
-  PP_Module pp_module = instance()->module()->pp_module();
+  PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
+  if (!plugin_module)
+    return PP_MakeUndefined();
+  PP_Module pp_module = plugin_module->pp_module();
   switch (property) {
     case PP_URLRESPONSEPROPERTY_URL:
       return StringVar::StringToPPVar(pp_module, url_);
@@ -109,7 +114,6 @@ PP_Var PPB_URLResponseInfo_Impl::GetProperty(PP_URLResponseProperty property) {
 PP_Resource PPB_URLResponseInfo_Impl::GetBodyAsFileRef() {
   if (!body_.get())
     return 0;
-  body_->AddRef();  // AddRef for the caller.
   return body_->GetReference();
 }
 

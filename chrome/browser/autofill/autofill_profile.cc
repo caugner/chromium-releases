@@ -5,6 +5,7 @@
 #include "chrome/browser/autofill/autofill_profile.h"
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <set>
 
@@ -28,7 +29,7 @@ namespace {
 AutofillFieldType GetEquivalentFieldTypeCollapsingNames(
     AutofillFieldType field_type) {
   if (field_type == NAME_FIRST || field_type == NAME_MIDDLE ||
-      field_type == NAME_LAST)
+      field_type == NAME_LAST || field_type == NAME_MIDDLE_INITIAL)
     return NAME_FULL;
 
   return AutofillType::GetEquivalentFieldType(field_type);
@@ -48,6 +49,7 @@ void GetFieldsForDistinguishingProfiles(
   static const AutofillFieldType kDefaultDistinguishingFields[] = {
     NAME_FULL,
     ADDRESS_HOME_LINE1,
+    ADDRESS_HOME_LINE2,
     ADDRESS_HOME_CITY,
     ADDRESS_HOME_STATE,
     ADDRESS_HOME_ZIP,
@@ -536,6 +538,16 @@ const string16 AutofillProfile::PrimaryValue() const {
          GetInfo(ADDRESS_HOME_CITY);
 }
 
+// Functor used to check for case-insensitive equality of two strings.
+struct CaseInsensitiveStringEquals
+    : public std::binary_function<string16, string16, bool>
+{
+  bool operator()(const string16& x, const string16& y) const {
+    if (x.size() != y.size()) return false;
+    return StringToLowerASCII(x) == StringToLowerASCII(y);
+  }
+};
+
 void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile) {
   FieldTypeSet field_types;
   profile.GetNonEmptyTypes(&field_types);
@@ -559,10 +571,11 @@ void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile) {
             group == AutofillType::PHONE_FAX) {
           AddPhoneIfUnique(*value_iter, &existing_values);
         } else {
-          if (std::find(existing_values.begin(), existing_values.end(),
-                        *value_iter) == existing_values.end()) {
+          std::vector<string16>::const_iterator existing_iter = std::find_if(
+              existing_values.begin(), existing_values.end(),
+              std::bind1st(CaseInsensitiveStringEquals(), *value_iter));
+          if (existing_iter == existing_values.end())
             existing_values.insert(existing_values.end(), *value_iter);
-          }
         }
       }
       SetMultiInfo(*iter, existing_values);

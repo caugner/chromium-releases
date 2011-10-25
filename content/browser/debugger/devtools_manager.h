@@ -9,15 +9,14 @@
 #include <map>
 #include <string>
 
-#include "base/memory/ref_counted.h"
+#include "content/browser/debugger/devtools_agent_host.h"
 #include "content/browser/debugger/devtools_client_host.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
 
 namespace IPC {
 class Message;
 }
 
+class DevToolsAgentHost;
 class DevToolsNetLogObserver;
 class GURL;
 class IOThread;
@@ -29,13 +28,17 @@ typedef std::map<std::string, std::string> DevToolsRuntimeProperties;
 
 // This class is a singleton that manages DevToolsClientHost instances and
 // routes messages between developer tools clients and agents.
+//
+// Methods below that accept inspected RenderViewHost as a parameter are
+// just convenience methods that call corresponding methods accepting
+// DevToolAgentHost.
 class DevToolsManager : public DevToolsClientHost::CloseListener,
-                        public NotificationObserver,
-                        public base::RefCounted<DevToolsManager> {
+                        public DevToolsAgentHost::CloseListener {
  public:
   static DevToolsManager* GetInstance();
 
   DevToolsManager();
+  virtual ~DevToolsManager();
 
   // Returns DevToolsClientHost registered for |inspected_rvh| or NULL if
   // there is no alive DevToolsClientHost registered for |inspected_rvh|.
@@ -49,10 +52,10 @@ class DevToolsManager : public DevToolsClientHost::CloseListener,
 
   bool ForwardToDevToolsAgent(DevToolsClientHost* from,
                               const IPC::Message& message);
-  void ForwardToDevToolsClient(RenderViewHost* inspected_rvh,
+  void ForwardToDevToolsClient(DevToolsAgentHost* agent_host,
                                const IPC::Message& message);
 
-  void RuntimePropertyChanged(RenderViewHost* inspected_rvh,
+  void RuntimePropertyChanged(DevToolsAgentHost* agent_host,
                               const std::string& name,
                               const std::string& value);
 
@@ -80,34 +83,29 @@ class DevToolsManager : public DevToolsClientHost::CloseListener,
   // Closes all open developer tools windows.
   void CloseAllClientHosts();
 
+  DevToolsClientHost* GetDevToolsClientHostFor(DevToolsAgentHost* agent_host);
+  void UnregisterDevToolsClientHostFor(DevToolsAgentHost* agent_host);
+
  private:
-  friend class base::RefCounted<DevToolsManager>;
-
-  virtual ~DevToolsManager();
-
   // DevToolsClientHost::CloseListener override.
   // This method will remove all references from the manager to the
   // DevToolsClientHost and unregister all listeners related to the
   // DevToolsClientHost.
   virtual void ClientHostClosing(DevToolsClientHost* host);
 
-  // Overridden from NotificationObserver:
-  virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+  // DevToolsAgentHost::CloseListener implementation.
+  virtual void AgentHostClosing(DevToolsAgentHost* host);
 
-  // Returns RenderViewHost for the tab that is inspected by devtools
-  // client hosted by DevToolsClientHost.
-  RenderViewHost* GetInspectedRenderViewHost(DevToolsClientHost* client_host);
+  // Returns DevToolsAgentHost inspected by the DevToolsClientHost.
+  DevToolsAgentHost* GetAgentHost(DevToolsClientHost* client_host);
 
-  void SendAttachToAgent(RenderViewHost* inspected_rvh);
-  void SendDetachToAgent(RenderViewHost* inspected_rvh);
+  void SendAttachToAgent(DevToolsAgentHost*);
+  void SendDetachToAgent(DevToolsAgentHost*);
 
-  void BindClientHost(RenderViewHost* inspected_rvh,
+  void BindClientHost(DevToolsAgentHost* agent_host,
                       DevToolsClientHost* client_host,
                       const DevToolsRuntimeProperties& runtime_properties);
-
-  void UnbindClientHost(RenderViewHost* inspected_rvh,
+  void UnbindClientHost(DevToolsAgentHost* agent_host,
                         DevToolsClientHost* client_host);
 
   // These two maps are for tracking dependencies between inspected tabs and
@@ -116,15 +114,15 @@ class DevToolsManager : public DevToolsClientHost::CloseListener,
   //
   // DevToolsManager start listening to DevToolsClientHosts when they are put
   // into these maps and removes them when they are closing.
-  typedef std::map<RenderViewHost*, DevToolsClientHost*>
-      InspectedRvhToClientHostMap;
-  InspectedRvhToClientHostMap inspected_rvh_to_client_host_;
+  typedef std::map<DevToolsAgentHost*, DevToolsClientHost*>
+      AgentToClientHostMap;
+  AgentToClientHostMap agent_to_client_host_;
 
-  typedef std::map<DevToolsClientHost*, RenderViewHost*>
+  typedef std::map<DevToolsClientHost*, DevToolsAgentHost*>
       ClientHostToInspectedRvhMap;
-  ClientHostToInspectedRvhMap client_host_to_inspected_rvh_;
+  ClientHostToInspectedRvhMap client_to_agent_host_;
 
-  typedef std::map<RenderViewHost*, DevToolsRuntimeProperties>
+  typedef std::map<DevToolsAgentHost*, DevToolsRuntimeProperties>
       RuntimePropertiesMap;
   RuntimePropertiesMap runtime_properties_map_;
 
@@ -133,8 +131,6 @@ class DevToolsManager : public DevToolsClientHost::CloseListener,
       OrphanClientHosts;
   OrphanClientHosts orphan_client_hosts_;
   int last_orphan_cookie_;
-
-  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsManager);
 };

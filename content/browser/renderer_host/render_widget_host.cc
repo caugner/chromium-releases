@@ -34,6 +34,7 @@ using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
 
+using WebKit::WebGestureEvent;
 using WebKit::WebInputEvent;
 using WebKit::WebKeyboardEvent;
 using WebKit::WebMouseEvent;
@@ -113,9 +114,9 @@ void RenderWidgetHost::SetView(RenderWidgetHostView* view) {
     process_->SetCompositingSurface(routing_id_, gfx::kNullPluginWindow);
 }
 
-gfx::NativeViewId RenderWidgetHost::GetNativeViewId() {
+gfx::NativeViewId RenderWidgetHost::GetNativeViewId() const {
   if (view_)
-    return gfx::IdFromNativeView(view_->GetNativeView());
+    return view_->GetNativeViewId();
   return 0;
 }
 
@@ -481,7 +482,7 @@ void RenderWidgetHost::StartHangMonitorTimeout(TimeDelta delay) {
   // fire sooner.
   time_when_considered_hung_ = Time::Now() + delay;
   hung_renderer_timer_.Stop();
-  hung_renderer_timer_.Start(delay, this,
+  hung_renderer_timer_.Start(FROM_HERE, delay, this,
       &RenderWidgetHost::CheckRendererIsUnresponsive);
 }
 
@@ -553,11 +554,21 @@ void RenderWidgetHost::ForwardWheelEvent(
     return;
   }
   mouse_wheel_pending_ = true;
+  current_wheel_event_ = wheel_event;
 
   HISTOGRAM_COUNTS_100("MPArch.RWH_WheelQueueSize",
                        coalesced_mouse_wheel_events_.size());
 
   ForwardInputEvent(wheel_event, sizeof(WebMouseWheelEvent), false);
+}
+
+void RenderWidgetHost::ForwardGestureEvent(
+    const WebKit::WebGestureEvent& gesture_event) {
+  TRACE_EVENT0("renderer_host", "RenderWidgetHost::ForwardWheelEvent");
+  if (ignore_input_events_ || process_->ignore_input_events())
+    return;
+
+  ForwardInputEvent(gesture_event, sizeof(WebGestureEvent), false);
 }
 
 void RenderWidgetHost::ForwardKeyboardEvent(
@@ -815,7 +826,7 @@ void RenderWidgetHost::OnMsgClose() {
 }
 
 void RenderWidgetHost::OnMsgSetTooltipText(
-    const std::wstring& tooltip_text,
+    const string16& tooltip_text,
     WebTextDirection text_direction_hint) {
   // First, add directionality marks around tooltip text if necessary.
   // A naive solution would be to simply always wrap the text. However, on
@@ -830,7 +841,7 @@ void RenderWidgetHost::OnMsgSetTooltipText(
   // trying to detect the directionality from the tooltip text rather than the
   // element direction.  One could argue that would be a preferable solution
   // but we use the current approach to match Fx & IE's behavior.
-  string16 wrapped_tooltip_text = WideToUTF16(tooltip_text);
+  string16 wrapped_tooltip_text = tooltip_text;
   if (!tooltip_text.empty()) {
     if (text_direction_hint == WebKit::WebTextDirectionLeftToRight) {
       // Force the tooltip to have LTR directionality.
@@ -867,11 +878,6 @@ void RenderWidgetHost::OnMsgUpdateRect(
     const ViewHostMsg_UpdateRect_Params& params) {
   TRACE_EVENT0("renderer_host", "RenderWidgetHost::OnMsgUpdateRect");
   TimeTicks paint_start = TimeTicks::Now();
-
-  NotificationService::current()->Notify(
-      content::NOTIFICATION_RENDER_WIDGET_HOST_WILL_PAINT,
-      Source<RenderWidgetHost>(this),
-      NotificationService::NoDetails());
 
   // Update our knowledge of the RenderWidget's size.
   current_size_ = params.view_size;
@@ -918,8 +924,8 @@ void RenderWidgetHost::OnMsgUpdateRect(
     if (dib) {
       if (dib->size() < size) {
         DLOG(WARNING) << "Transport DIB too small for given rectangle";
-        UserMetrics::RecordAction(UserMetricsAction(
-            "BadMessageTerminate_RWH1"));
+        UserMetrics::RecordAction(
+            UserMetricsAction("BadMessageTerminate_RWH1"));
         process()->ReceivedBadMessage();
       } else {
         // Scroll the backing store.
@@ -1006,8 +1012,6 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
       DCHECK(next_mouse_move_->type == WebInputEvent::MouseMove);
       ForwardMouseEvent(*next_mouse_move_);
     }
-  } else if (type == WebInputEvent::MouseWheel) {
-    ProcessWheelAck();
   } else if (WebInputEvent::isKeyboardEventType(type)) {
     bool processed = false;
     if (!message.ReadBool(&iter, &processed)) {
@@ -1016,6 +1020,14 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
     }
 
     ProcessKeyboardEventAck(type, processed);
+  } else if (type == WebInputEvent::MouseWheel) {
+    bool processed = false;
+    if (!message.ReadBool(&iter, &processed)) {
+      UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_RWH4"));
+      process()->ReceivedBadMessage();
+    }
+
+    ProcessWheelAck(processed);
   } else if (type == WebInputEvent::TouchMove) {
     touch_move_pending_ = false;
     if (touch_event_is_queued_) {
@@ -1030,7 +1042,7 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
       Details<int>(&type));
 }
 
-void RenderWidgetHost::ProcessWheelAck() {
+void RenderWidgetHost::ProcessWheelAck(bool processed) {
   mouse_wheel_pending_ = false;
 
   // Now send the next (coalesced) mouse wheel event.
@@ -1040,6 +1052,9 @@ void RenderWidgetHost::ProcessWheelAck() {
     coalesced_mouse_wheel_events_.pop_front();
     ForwardWheelEvent(next_wheel_event);
   }
+
+  if (!processed && !is_hidden_ && view_)
+    view_->UnhandledWheelEvent(current_wheel_event_);
 }
 
 void RenderWidgetHost::OnMsgFocus() {
@@ -1095,6 +1110,28 @@ void RenderWidgetHost::OnMsgDidActivateAcceleratedCompositing(bool activated) {
     view_->AcceleratedCompositingActivated(activated);
 #endif
 }
+
+#if defined(OS_POSIX)
+void RenderWidgetHost::OnMsgGetScreenInfo(gfx::NativeViewId window_id,
+                                          WebKit::WebScreenInfo* results) {
+  if (view_)
+    view_->GetScreenInfo(results);
+  else
+    RenderWidgetHostView::GetDefaultScreenInfo(results);
+}
+
+void RenderWidgetHost::OnMsgGetWindowRect(gfx::NativeViewId window_id,
+                                          gfx::Rect* results) {
+  if (view_)
+    *results = view_->GetViewBounds();
+}
+
+void RenderWidgetHost::OnMsgGetRootWindowRect(gfx::NativeViewId window_id,
+                                              gfx::Rect* results) {
+  if (view_)
+    *results = view_->GetRootWindowBounds();
+}
+#endif
 
 void RenderWidgetHost::PaintBackingStoreRect(
     TransportDIB::Id bitmap,

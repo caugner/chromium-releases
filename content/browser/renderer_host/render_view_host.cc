@@ -15,7 +15,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/profiles/profile.h"
+#include "content/browser/browser_context.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/content_browser_client.h"
@@ -38,6 +38,7 @@
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "content/common/result_codes.h"
+#include "content/common/speech_input_messages.h"
 #include "content/common/swapped_out_messages.h"
 #include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
@@ -56,12 +57,25 @@ using WebKit::WebDragOperationNone;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebInputEvent;
 using WebKit::WebMediaPlayerAction;
-using WebKit::WebTextDirection;
 
 namespace {
 
 // Delay to wait on closing the tab for a beforeunload/unload handler to fire.
 const int kUnloadTimeoutMS = 1000;
+
+// Translate a WebKit text direction into a base::i18n one.
+base::i18n::TextDirection WebTextDirectionToChromeTextDirection(
+    WebKit::WebTextDirection dir) {
+  switch (dir) {
+    case WebKit::WebTextDirectionLeftToRight:
+      return base::i18n::LEFT_TO_RIGHT;
+    case WebKit::WebTextDirectionRightToLeft:
+      return base::i18n::RIGHT_TO_LEFT;
+    default:
+      NOTREACHED();
+      return base::i18n::UNKNOWN_DIRECTION;
+  }
+}
 
 }  // namespace
 
@@ -104,8 +118,8 @@ RenderViewHost::RenderViewHost(SiteInstance* instance,
       save_accessibility_tree_for_testing_(false),
       render_view_termination_status_(base::TERMINATION_STATUS_STILL_RUNNING) {
   if (!session_storage_namespace_) {
-    session_storage_namespace_ =
-        new SessionStorageNamespace(process()->profile()->GetWebKitContext());
+    session_storage_namespace_ = new SessionStorageNamespace(
+        process()->browser_context()->GetWebKitContext());
   }
 
   DCHECK(instance_);
@@ -147,15 +161,10 @@ bool RenderViewHost::CreateRenderView(const string16& frame_name) {
   if (!process()->Init(renderer_accessible()))
     return false;
   DCHECK(process()->HasConnection());
-  DCHECK(process()->profile());
+  DCHECK(process()->browser_context());
 
   if (BindingsPolicy::is_web_ui_enabled(enabled_bindings_)) {
     ChildProcessSecurityPolicy::GetInstance()->GrantWebUIBindings(
-        process()->id());
-  }
-
-  if (BindingsPolicy::is_extension_enabled(enabled_bindings_)) {
-    ChildProcessSecurityPolicy::GetInstance()->GrantExtensionBindings(
         process()->id());
   }
 
@@ -167,7 +176,7 @@ bool RenderViewHost::CreateRenderView(const string16& frame_name) {
   ViewMsg_New_Params params;
   params.parent_window = GetNativeViewId();
   params.renderer_preferences =
-      delegate_->GetRendererPrefs(process()->profile());
+      delegate_->GetRendererPrefs(process()->browser_context());
   params.web_preferences = delegate_->GetWebkitPrefs();
   params.view_id = routing_id();
   params.session_storage_namespace_id = session_storage_namespace_->id();
@@ -193,7 +202,7 @@ bool RenderViewHost::IsRenderViewLive() const {
 void RenderViewHost::SyncRendererPrefs() {
   Send(new ViewMsg_SetRendererPrefs(routing_id(),
                                     delegate_->GetRendererPrefs(
-                                        process()->profile())));
+                                        process()->browser_context())));
 }
 
 void RenderViewHost::Navigate(const ViewMsg_Navigate_Params& params) {
@@ -615,7 +624,7 @@ void RenderViewHost::DirectoryEnumerationFinished(
 }
 
 void RenderViewHost::LoadStateChanged(const GURL& url,
-                                      net::LoadState load_state,
+                                      const net::LoadStateWithParam& load_state,
                                       uint64 upload_position,
                                       uint64 upload_size) {
   delegate_->LoadStateChanged(url, load_state, upload_position, upload_size);
@@ -676,9 +685,17 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_DocumentOnLoadCompletedInMainFrame,
                         OnMsgDocumentOnLoadCompletedInMainFrame)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ContextMenu, OnMsgContextMenu)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ToggleFullscreen,
+                        OnMsgToggleFullscreen)
     IPC_MESSAGE_HANDLER(ViewHostMsg_OpenURL, OnMsgOpenURL)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidContentsPreferredSizeChange,
                         OnMsgDidContentsPreferredSizeChange)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeScrollbarsForMainFrame,
+                        OnMsgDidChangeScrollbarsForMainFrame)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeScrollOffsetPinningForMainFrame,
+                        OnMsgDidChangeScrollOffsetPinningForMainFrame)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidChangeNumWheelEvents,
+                        OnMsgDidChangeNumWheelEvents)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_RunJavaScriptMessage,
                                     OnMsgRunJavaScriptMessage)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_RunBeforeUnloadConfirm,
@@ -704,10 +721,9 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowPopup, OnMsgShowPopup)
 #endif
+    IPC_MESSAGE_HANDLER(ViewHostMsg_RunFileChooser, OnRunFileChooser)
     // Have the super handle all other messages.
     IPC_MESSAGE_UNHANDLED(handled = RenderWidgetHost::OnMessageReceived(msg))
-    // NOTE: Do not add a message handler that just calls the delegate!
-    // Dispatch the message directly there instead.
   IPC_END_MESSAGE_MAP_EX()
 
   if (!msg_is_ok) {
@@ -882,13 +898,18 @@ void RenderViewHost::OnMsgUpdateState(int32 page_id,
   delegate_->UpdateState(this, page_id, state);
 }
 
-void RenderViewHost::OnMsgUpdateTitle(int32 page_id,
-                                      const std::wstring& title) {
+void RenderViewHost::OnMsgUpdateTitle(
+    int32 page_id,
+    const string16& title,
+    WebKit::WebTextDirection title_direction) {
   if (title.length() > content::kMaxTitleChars) {
     NOTREACHED() << "Renderer sent too many characters in title.";
     return;
   }
-  delegate_->UpdateTitle(this, page_id, title);
+
+  delegate_->UpdateTitle(this, page_id, title,
+                         WebTextDirectionToChromeTextDirection(
+                             title_direction));
 }
 
 void RenderViewHost::OnMsgUpdateEncoding(const std::string& encoding_name) {
@@ -965,6 +986,11 @@ void RenderViewHost::OnMsgContextMenu(const ContextMenuParams& params) {
   view->ShowContextMenu(validated_params);
 }
 
+void RenderViewHost::OnMsgToggleFullscreen(bool enter_fullscreen) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  delegate_->ToggleFullscreenMode(enter_fullscreen);
+}
+
 void RenderViewHost::OnMsgOpenURL(const GURL& url,
                                   const GURL& referrer,
                                   WindowOpenDisposition disposition) {
@@ -977,16 +1003,30 @@ void RenderViewHost::OnMsgOpenURL(const GURL& url,
 
 void RenderViewHost::OnMsgDidContentsPreferredSizeChange(
     const gfx::Size& new_size) {
-  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
-  if (!view)
-    return;
-  view->UpdatePreferredSize(new_size);
+  delegate_->UpdatePreferredSize(new_size);
+}
+
+void RenderViewHost::OnMsgDidChangeScrollbarsForMainFrame(
+    bool has_horizontal_scrollbar, bool has_vertical_scrollbar) {
+  if (view())
+    view()->SetHasHorizontalScrollbar(has_horizontal_scrollbar);
+}
+
+void RenderViewHost::OnMsgDidChangeScrollOffsetPinningForMainFrame(
+    bool is_pinned_to_left, bool is_pinned_to_right) {
+  if (view())
+    view()->SetScrollOffsetPinning(is_pinned_to_left, is_pinned_to_right);
+}
+
+void RenderViewHost::OnMsgDidChangeNumWheelEvents(int count) {
 }
 
 void RenderViewHost::OnMsgSelectionChanged(const std::string& text,
-                                           const ui::Range& range) {
+                                           const ui::Range& range,
+                                           const gfx::Point& start,
+                                           const gfx::Point& end) {
   if (view())
-    view()->SelectionChanged(text, range);
+    view()->SelectionChanged(text, range, start, end);
 }
 
 void RenderViewHost::OnMsgRunJavaScriptMessage(
@@ -1065,9 +1105,9 @@ void RenderViewHost::OnTakeFocus(bool reverse) {
 }
 
 void RenderViewHost::OnAddMessageToConsole(int32 level,
-                                           const std::wstring& message,
+                                           const string16& message,
                                            int32 line_no,
-                                           const std::wstring& source_id) {
+                                           const string16& source_id) {
   // Pass through log level only on WebUI pages to limit console spew.
   int32 resolved_level =
       BindingsPolicy::is_web_ui_enabled(enabled_bindings_) ? level : 0;
@@ -1195,6 +1235,10 @@ void RenderViewHost::DidCancelPopupMenu() {
 }
 #endif
 
+void RenderViewHost::ToggleSpeechInput() {
+  Send(new SpeechInputMsg_ToggleSpeechInput(routing_id()));
+}
+
 void RenderViewHost::FilterURL(ChildProcessSecurityPolicy* policy,
                                int renderer_id,
                                GURL* url) {
@@ -1225,11 +1269,9 @@ void RenderViewHost::OnAccessibilityNotifications(
     for (unsigned i = 0; i < params.size(); i++) {
       const ViewHostMsg_AccessibilityNotification_Params& param = params[i];
 
-      if (param.notification_type ==
-              ViewHostMsg_AccessibilityNotification_Type::
-                  NOTIFICATION_TYPE_LOAD_COMPLETE) {
-        if (save_accessibility_tree_for_testing_)
-          accessibility_tree_ = param.acc_obj;
+      if (param.notification_type == ViewHostMsg_AccEvent::LOAD_COMPLETE &&
+          save_accessibility_tree_for_testing_) {
+        accessibility_tree_ = param.acc_obj;
       }
     }
 
@@ -1260,14 +1302,15 @@ void RenderViewHost::OnDidZoomURL(double zoom_level,
                                   bool remember,
                                   const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  HostZoomMap* host_zoom_map = process()->profile()->GetHostZoomMap();
+  HostZoomMap* host_zoom_map = process()->browser_context()->GetHostZoomMap();
   if (remember) {
     host_zoom_map->SetZoomLevel(net::GetHostOrSpecFromURL(url), zoom_level);
-    // Notify renderers from this profile.
+    // Notify renderers from this browser context.
     for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
          !i.IsAtEnd(); i.Advance()) {
       RenderProcessHost* render_process_host = i.GetCurrentValue();
-      if (render_process_host->profile() == process()->profile()) {
+      if (render_process_host->browser_context() ==
+          process()->browser_context()) {
         render_process_host->Send(
             new ViewMsg_SetZoomLevelForCurrentURL(url, zoom_level));
       }
@@ -1320,3 +1363,8 @@ void RenderViewHost::OnMsgShowPopup(
   }
 }
 #endif
+
+void RenderViewHost::OnRunFileChooser(
+    const ViewHostMsg_RunFileChooser_Params& params) {
+  delegate_->RunFileChooser(this, params);
+}

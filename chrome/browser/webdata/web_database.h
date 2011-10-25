@@ -7,17 +7,19 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/webdata/autofill_table.h"
-#include "chrome/browser/webdata/keyword_table.h"
-#include "chrome/browser/webdata/logins_table.h"
-#include "chrome/browser/webdata/token_service_table.h"
-#include "chrome/browser/webdata/web_apps_table.h"
 #include "sql/connection.h"
 #include "sql/init_status.h"
 #include "sql/meta_table.h"
 
 class FilePath;
 class NotificationService;
+
+class AutofillTable;
+class KeywordTable;
+class LoginsTable;
+class TokenServiceTable;
+class WebAppsTable;
+class WebIntentsTable;
 
 // This class manages a SQLite database that stores various web page meta data.
 class WebDatabase {
@@ -38,6 +40,7 @@ class WebDatabase {
   virtual LoginsTable* GetLoginsTable();
   virtual TokenServiceTable* GetTokenServiceTable();
   virtual WebAppsTable* GetWebAppsTable();
+  virtual WebIntentsTable* GetWebIntentsTable();
 
   // Exposed for testing only.
   sql::Connection* GetSQLConnection();
@@ -55,6 +58,7 @@ class WebDatabase {
   scoped_ptr<LoginsTable> logins_table_;
   scoped_ptr<TokenServiceTable> token_service_table_;
   scoped_ptr<WebAppsTable> web_apps_table_;
+  scoped_ptr<WebIntentsTable> web_intents_table_;
 
   scoped_ptr<NotificationService> notification_service_;
 

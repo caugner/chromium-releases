@@ -6,6 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
@@ -63,6 +64,11 @@ string16 RegisterProtocolHandlerInfoBarDelegate::GetButtonLabel(
       l10n_util::GetStringUTF16(IDS_REGISTER_PROTOCOL_HANDLER_DENY);
 }
 
+bool RegisterProtocolHandlerInfoBarDelegate::NeedElevation(
+    InfoBarButton button) const {
+  return button == BUTTON_OK;
+}
+
 bool RegisterProtocolHandlerInfoBarDelegate::Accept() {
   UserMetrics::RecordAction(
       UserMetricsAction("RegisterProtocolHandler.Infobar_Accept"));
@@ -85,8 +91,9 @@ bool RegisterProtocolHandlerInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
   UserMetrics::RecordAction(
       UserMetricsAction("RegisterProtocolHandler.InfoBar_LearnMore"));
-  // Ignore the click dispostion and always open in a new top level tab.
-  tab_contents_->OpenURL(GURL(chrome::kLearnMoreRegisterProtocolHandlerURL),
-                         GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  tab_contents_->OpenURL(google_util::AppendGoogleLocaleParam(GURL(
+      chrome::kLearnMoreRegisterProtocolHandlerURL)), GURL(),
+      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+      PageTransition::LINK);
   return false;
 }

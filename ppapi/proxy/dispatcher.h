@@ -21,10 +21,9 @@
 #include "ppapi/proxy/plugin_var_tracker.h"
 
 namespace ppapi {
-class WebKitForwarding;
-}
 
-namespace pp {
+class WebKitForwarding;
+
 namespace proxy {
 
 class VarSerializationRules;
@@ -43,7 +42,7 @@ class VarSerializationRules;
 //    "Target"                          |    "Source"
 //    InterfaceProxy <---------------------- InterfaceProxy
 //                                      |
-class Dispatcher : public ProxyChannel {
+class PPAPI_PROXY_EXPORT Dispatcher : public ProxyChannel {
  public:
   typedef const void* (*GetInterfaceFunc)(const char*);
   typedef int32_t (*InitModuleFunc)(PP_Module, GetInterfaceFunc);
@@ -119,6 +118,6 @@ class Dispatcher : public ProxyChannel {
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_DISPATCHER_H_

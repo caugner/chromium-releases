@@ -17,12 +17,14 @@
 #include "gpu/ipc/gpu_command_buffer_traits.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
+#include "media/video/video_decode_accelerator.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 
 #define IPC_MESSAGE_START GpuMsgStart
 
 IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
+  IPC_STRUCT_MEMBER(int32, share_group_id)
   IPC_STRUCT_MEMBER(std::string, allowed_extensions)
   IPC_STRUCT_MEMBER(std::vector<int>, attribs)
   IPC_STRUCT_MEMBER(GURL, active_url)
@@ -100,13 +102,10 @@ IPC_STRUCT_TRAITS_BEGIN(GPUInfo)
 #endif
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(gpu::ReadWriteTokens)
-  IPC_STRUCT_TRAITS_MEMBER(last_token_read)
-  IPC_STRUCT_TRAITS_MEMBER(last_token_written)
-IPC_STRUCT_TRAITS_END()
-
 IPC_ENUM_TRAITS(content::CauseForGpuLaunch)
 IPC_ENUM_TRAITS(gpu::error::ContextLostReason)
+
+IPC_ENUM_TRAITS(media::VideoDecodeAccelerator::Profile)
 
 //------------------------------------------------------------------------------
 // GPU Messages
@@ -297,19 +296,14 @@ IPC_SYNC_MESSAGE_CONTROL2_1(GpuChannelMsg_CreateOffscreenCommandBuffer,
 IPC_SYNC_MESSAGE_CONTROL1_0(GpuChannelMsg_DestroyCommandBuffer,
                             int32 /* instance_id */)
 
-// Create a surface for offscreen rendering.
-IPC_SYNC_MESSAGE_CONTROL1_1(GpuChannelMsg_CreateOffscreenSurface,
-                            gfx::Size, /* size */
-                            int /* route_id */)
-
-// Destroy a surface by routing id.
-IPC_MESSAGE_CONTROL1(GpuChannelMsg_DestroySurface,
-                     int /* route_id */)
-
 // Create a TransportTexture corresponding to |host_id|.
 IPC_MESSAGE_CONTROL2(GpuChannelMsg_CreateTransportTexture,
                      int32, /* context_route_id */
                      int32 /* host_id */)
+
+// Request that the GPU process reply with the given message.
+IPC_MESSAGE_CONTROL1(GpuChannelMsg_Echo,
+                     IPC::Message /* reply */)
 
 //------------------------------------------------------------------------------
 // GPU Command Buffer Messages
@@ -361,9 +355,6 @@ IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_Rescheduled)
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_UpdateState,
                     gpu::CommandBuffer::State /* state */)
 
-// Indicates that a SwapBuffers call has been issued.
-IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_SwapBuffers)
-
 // Create a shared memory transfer buffer. Returns an id that can be used to
 // identify the transfer buffer from a comment.
 IPC_SYNC_MESSAGE_ROUTED2_1(GpuCommandBufferMsg_CreateTransferBuffer,
@@ -390,13 +381,14 @@ IPC_SYNC_MESSAGE_ROUTED1_2(GpuCommandBufferMsg_GetTransferBuffer,
                            base::SharedMemoryHandle /* transfer_buffer */,
                            uint32 /* size */)
 
-// Create and initialize a hardware video decoder.
-IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_CreateVideoDecoder,
-                    std::vector<uint32> /* configs */)
+// Create and initialize a hardware video decoder, returning its new route_id.
+IPC_SYNC_MESSAGE_ROUTED1_1(GpuCommandBufferMsg_CreateVideoDecoder,
+                           media::VideoDecodeAccelerator::Profile /* profile */,
+                           int /* route_id */)
 
-// Release all resources held by the hardware video decoder associated with this
-// stub.
-IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_DestroyVideoDecoder)
+// Release all resources held by the named hardware video decoder.
+IPC_SYNC_MESSAGE_ROUTED1_0(GpuCommandBufferMsg_DestroyVideoDecoder,
+                           int /* route_id */)
 
 // Send from command buffer stub to proxy when window is invalid and must be
 // repainted.
@@ -420,6 +412,9 @@ IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetWindowSize,
 // destroyed for some reason.
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_Destroyed,
                     gpu::error::ContextLostReason /* reason */)
+
+// Response to a GpuChannelMsg_Echo message.
+IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_EchoAck)
 
 // --------------------------------------------------------------------------
 // TransportTexture messages
@@ -458,45 +453,33 @@ IPC_MESSAGE_ROUTED1(GpuTransportTextureHostMsg_TextureUpdated,
 //------------------------------------------------------------------------------
 // Accelerated Video Decoder Messages
 // These messages are sent from Renderer process to GPU process.
-//
-// These messages defer execution until |tokens.last_token_written| is
-// seen (using |tokens.last_token_read| as a wrap-around indicator).  The
-// implementation REQUIRES that |tokens| be the first parameter of these
-// messages.
 
 // Send input buffer for decoding.
-IPC_MESSAGE_ROUTED4(AcceleratedVideoDecoderMsg_Decode,
-                    gpu::ReadWriteTokens, /* tokens */
+IPC_MESSAGE_ROUTED3(AcceleratedVideoDecoderMsg_Decode,
                     base::SharedMemoryHandle, /* input_buffer_handle */
                     int32, /* bitstream_buffer_id */
                     int32) /* size */
 
 // Sent from Renderer process to the GPU process to give the texture IDs for
-// the textures the decoder will use for output.  Delays evaluation until
-// |token.second| is seen.
-IPC_MESSAGE_ROUTED4(AcceleratedVideoDecoderMsg_AssignPictureBuffers,
-                    gpu::ReadWriteTokens, /* tokens */
+// the textures the decoder will use for output.
+IPC_MESSAGE_ROUTED3(AcceleratedVideoDecoderMsg_AssignPictureBuffers,
                     std::vector<int32>, /* Picture buffer ID */
                     std::vector<uint32>, /* Texture ID */
                     std::vector<gfx::Size>) /* Size */
 
 // Send from Renderer process to the GPU process to recycle the given picture
 // buffer for further decoding.
-IPC_MESSAGE_ROUTED2(AcceleratedVideoDecoderMsg_ReusePictureBuffer,
-                    gpu::ReadWriteTokens, /* tokens */
+IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderMsg_ReusePictureBuffer,
                     int32) /* Picture buffer ID */
 
 // Send flush request to the decoder.
-IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderMsg_Flush,
-                    gpu::ReadWriteTokens) /* tokens */
+IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderMsg_Flush)
 
 // Send reset request to the decoder.
-IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderMsg_Reset,
-                    gpu::ReadWriteTokens) /* tokens */
+IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderMsg_Reset)
 
 // Send destroy request to the decoder.
-IPC_SYNC_MESSAGE_ROUTED1_0(AcceleratedVideoDecoderMsg_Destroy,
-                           gpu::ReadWriteTokens) /* tokens */
+IPC_SYNC_MESSAGE_ROUTED0_0(AcceleratedVideoDecoderMsg_Destroy)
 
 //------------------------------------------------------------------------------
 // Accelerated Video Decoder Host Messages
@@ -512,9 +495,6 @@ IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderHostMsg_BitstreamBufferProcessed,
 IPC_MESSAGE_ROUTED2(AcceleratedVideoDecoderHostMsg_ProvidePictureBuffers,
                     int32, /* Number of video frames to generate */
                     gfx::Size) /* Requested size of buffer */
-
-// Notify client that decoder has been initialized.
-IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderHostMsg_InitializeDone)
 
 // Decoder reports that a picture is ready and buffer does not need to be passed
 // back to the decoder.

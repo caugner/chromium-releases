@@ -15,17 +15,17 @@
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/about_handler.h"
-#include "chrome/renderer/content_settings_observer.h"
 #include "chrome/renderer/automation/dom_automation_controller.h"
+#include "chrome/renderer/content_settings_observer.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/external_host_bindings.h"
+#include "chrome/renderer/frame_sniffer.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/translate_helper.h"
 #include "content/common/bindings_policy.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/content_renderer_client.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/data_url.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
@@ -85,7 +85,6 @@ static const int kThumbnailHeight = 132;
 
 // Constants for UMA statistic collection.
 static const char kSSLInsecureContent[] = "SSL.InsecureContent";
-static const char kDotGoogleDotCom[] = ".google.com";
 static const char kWWWDotGoogleDotCom[] = "www.google.com";
 static const char kMailDotGoogleDotCom[] = "mail.google.com";
 static const char kPlusDotGoogleDotCom[] = "plus.google.com";
@@ -144,6 +143,11 @@ enum {
   INSECURE_CONTENT_NUM_EVENTS
 };
 
+// Constants for mixed-content blocking.
+static const char kGoogleDotCom[] = "google.com";
+static const char kFacebookDotCom[] = "facebook.com";
+static const char kTwitterDotCom[] = "twitter.com";
+
 static bool PaintViewIntoCanvas(WebView* view,
                                 skia::PlatformCanvas& canvas) {
   view->layout();
@@ -187,6 +191,21 @@ static FaviconURL::IconType ToFaviconType(WebIconURL::Type type) {
   return FaviconURL::INVALID_ICON;
 }
 
+static bool isHostInDomain(const std::string& host, const std::string& domain) {
+  return (EndsWith(host, domain, false) &&
+          (host.length() == domain.length() ||
+           (host.length() > domain.length() &&
+            host[host.length() - domain.length() - 1] == '.')));
+}
+
+namespace {
+GURL StripRef(const GURL& url) {
+  GURL::Replacements replacements;
+  replacements.ClearRef();
+  return url.ReplaceComponents(replacements);
+}
+}  // namespace
+
 ChromeRenderViewObserver::ChromeRenderViewObserver(
     RenderView* render_view,
     ContentSettingsObserver* content_settings,
@@ -218,29 +237,44 @@ ChromeRenderViewObserver::~ChromeRenderViewObserver() {
 bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewObserver, message)
-    IPC_MESSAGE_HANDLER(ViewMsg_CaptureSnapshot, OnCaptureSnapshot)
-    IPC_MESSAGE_HANDLER(ViewMsg_HandleMessageFromExternalHost,
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_WebUIJavaScript, OnWebUIJavaScript)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_CaptureSnapshot, OnCaptureSnapshot)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_HandleMessageFromExternalHost,
                         OnHandleMessageFromExternalHost)
-    IPC_MESSAGE_HANDLER(ViewMsg_JavaScriptStressTestControl,
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_JavaScriptStressTestControl,
                         OnJavaScriptStressTestControl)
     IPC_MESSAGE_HANDLER(IconMsg_DownloadFavicon, OnDownloadFavicon)
-    IPC_MESSAGE_HANDLER(ViewMsg_EnableViewSourceMode, OnEnableViewSourceMode)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetAllowDisplayingInsecureContent,
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetAllowDisplayingInsecureContent,
                         OnSetAllowDisplayingInsecureContent)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetAllowRunningInsecureContent,
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetAllowRunningInsecureContent,
                         OnSetAllowRunningInsecureContent)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetClientSidePhishingDetection,
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetClientSidePhishingDetection,
                         OnSetClientSidePhishingDetection)
+#if defined(OS_CHROMEOS)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_StartFrameSniffer, OnStartFrameSniffer)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
   // Filter only.
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewObserver, message)
     IPC_MESSAGE_HANDLER(ViewMsg_Navigate, OnNavigate)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetIsPrerendering, OnSetIsPrerendering);
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetIsPrerendering, OnSetIsPrerendering);
   IPC_END_MESSAGE_MAP()
 
   return handled;
+}
+
+void ChromeRenderViewObserver::OnWebUIJavaScript(
+    const string16& frame_xpath,
+    const string16& jscript,
+    int id,
+    bool notify_result) {
+  webui_javascript_.reset(new WebUIJavaScript());
+  webui_javascript_->frame_xpath = frame_xpath;
+  webui_javascript_->jscript = jscript;
+  webui_javascript_->id = id;
+  webui_javascript_->notify_result = notify_result;
 }
 
 void ChromeRenderViewObserver::OnCaptureSnapshot() {
@@ -258,7 +292,7 @@ void ChromeRenderViewObserver::OnCaptureSnapshot() {
       "Snapshot should be empty on error, non-empty otherwise.";
 
   // Send the snapshot to the browser process.
-  Send(new ViewHostMsg_Snapshot(routing_id(), snapshot));
+  Send(new ChromeViewHostMsg_Snapshot(routing_id(), snapshot));
 }
 
 void ChromeRenderViewObserver::OnHandleMessageFromExternalHost(
@@ -300,15 +334,6 @@ void ChromeRenderViewObserver::OnDownloadFavicon(int id,
   }
 }
 
-void ChromeRenderViewObserver::OnEnableViewSourceMode() {
-  if (!render_view()->webview())
-    return;
-  WebFrame* main_frame = render_view()->webview()->mainFrame();
-  if (!main_frame)
-    return;
-  main_frame->enableViewSourceMode(true);
-}
-
 void ChromeRenderViewObserver::OnSetAllowDisplayingInsecureContent(bool allow) {
   allow_displaying_insecure_content_ = allow;
   WebFrame* main_frame = render_view()->webview()->mainFrame();
@@ -329,6 +354,10 @@ void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
           render_view(), NULL) :
       NULL;
 #endif
+}
+
+void ChromeRenderViewObserver::OnStartFrameSniffer(const string16& frame_name) {
+  new FrameSniffer(render_view(), frame_name);
 }
 
 bool ChromeRenderViewObserver::allowDatabase(
@@ -378,7 +407,7 @@ bool ChromeRenderViewObserver::allowStorage(WebFrame* frame, bool local) {
 bool ChromeRenderViewObserver::allowReadFromClipboard(WebFrame* frame,
                                                      bool default_value) {
   bool allowed = false;
-  Send(new ViewHostMsg_CanTriggerClipboardRead(
+  Send(new ChromeViewHostMsg_CanTriggerClipboardRead(
       routing_id(), frame->document().url(), &allowed));
   return allowed;
 }
@@ -386,7 +415,7 @@ bool ChromeRenderViewObserver::allowReadFromClipboard(WebFrame* frame,
 bool ChromeRenderViewObserver::allowWriteToClipboard(WebFrame* frame,
                                                     bool default_value) {
   bool allowed = false;
-  Send(new ViewHostMsg_CanTriggerClipboardWrite(
+  Send(new ChromeViewHostMsg_CanTriggerClipboardWrite(
       routing_id(), frame->document().url(), &allowed));
   return allowed;
 }
@@ -401,7 +430,7 @@ bool ChromeRenderViewObserver::allowDisplayingInsecureContent(
                             INSECURE_CONTENT_NUM_EVENTS);
   std::string host(origin.host().utf8());
   GURL frame_url(frame->document().url());
-  if (EndsWith(host, kDotGoogleDotCom, false)) {
+  if (isHostInDomain(host, kGoogleDotCom)) {
     UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
                               INSECURE_CONTENT_DISPLAY_HOST_GOOGLE,
                               INSECURE_CONTENT_NUM_EVENTS);
@@ -473,7 +502,7 @@ bool ChromeRenderViewObserver::allowDisplayingInsecureContent(
   if (allowed_per_settings || allow_displaying_insecure_content_)
     return true;
 
-  Send(new ViewHostMsg_DidBlockDisplayingInsecureContent(routing_id()));
+  Send(new ChromeViewHostMsg_DidBlockDisplayingInsecureContent(routing_id()));
   return false;
 }
 
@@ -482,12 +511,15 @@ bool ChromeRenderViewObserver::allowRunningInsecureContent(
     bool allowed_per_settings,
     const WebKit::WebSecurityOrigin& origin,
     const WebKit::WebURL& url) {
+  // Single value to control permissive mixed content behaviour.
+  const bool enforce_insecure_content_on_all_domains = false;
+
   UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
                             INSECURE_CONTENT_RUN,
                             INSECURE_CONTENT_NUM_EVENTS);
   std::string host(origin.host().utf8());
   GURL frame_url(frame->document().url());
-  bool is_google = EndsWith(host, kDotGoogleDotCom, false);
+  bool is_google = isHostInDomain(host, kGoogleDotCom);
   if (is_google) {
     UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
                               INSECURE_CONTENT_RUN_HOST_GOOGLE,
@@ -574,10 +606,20 @@ bool ChromeRenderViewObserver::allowRunningInsecureContent(
                               INSECURE_CONTENT_NUM_EVENTS);
   }
 
-  if (allow_running_insecure_content_ || (!is_google && allowed_per_settings))
+  if (allow_running_insecure_content_ || allowed_per_settings)
     return true;
 
-  Send(new ViewHostMsg_DidBlockRunningInsecureContent(routing_id()));
+  if (!(enforce_insecure_content_on_all_domains ||
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kNoRunningInsecureContent))) {
+    bool mandatory_enforcement = (is_google ||
+                                  isHostInDomain(host, kFacebookDotCom) ||
+                                  isHostInDomain(host, kTwitterDotCom));
+    if (!mandatory_enforcement)
+      return true;
+  }
+
+  Send(new ChromeViewHostMsg_DidBlockRunningInsecureContent(routing_id()));
   return false;
 }
 
@@ -603,6 +645,16 @@ void ChromeRenderViewObserver::OnSetIsPrerendering(bool is_prerendering) {
   }
 }
 
+void ChromeRenderViewObserver::DidStartLoading() {
+  if (BindingsPolicy::is_web_ui_enabled(render_view()->enabled_bindings()) &&
+      webui_javascript_.get()) {
+    render_view()->EvaluateScript(webui_javascript_->frame_xpath,
+                                  webui_javascript_->jscript,
+                                  webui_javascript_->id,
+                                  webui_javascript_->notify_result);
+  }
+}
+
 void ChromeRenderViewObserver::DidStopLoading() {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
@@ -614,7 +666,7 @@ void ChromeRenderViewObserver::DidStopLoading() {
   WebFrame* main_frame = render_view()->webview()->mainFrame();
   GURL osd_url = main_frame->document().openSearchDescriptionURL();
   if (!osd_url.is_empty()) {
-    Send(new ViewHostMsg_PageHasOSDD(
+    Send(new ChromeViewHostMsg_PageHasOSDD(
         routing_id(), render_view()->page_id(), osd_url,
         search_provider::AUTODETECTED_PROVIDER));
   }
@@ -688,8 +740,12 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
   if (load_id != render_view()->page_id())
     return;  // This capture call is no longer relevant due to navigation.
 
-  if (load_id == last_indexed_page_id_)
-    return;  // we already indexed this page
+  // Skip indexing if this is not a new load.  Note that the case where
+  // load_id == last_indexed_page_id_ is more complicated, since we need to
+  // reindex if the toplevel URL has changed (such as from a redirect), even
+  // though this may not cause the page id to be incremented.
+  if (load_id < last_indexed_page_id_)
+    return;
 
   if (!render_view()->webview())
     return;
@@ -708,13 +764,29 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
   if (ds && ds->hasUnreachableURL())
     return;
 
+  bool same_page_id = last_indexed_page_id_ == load_id;
   if (!preliminary_capture)
     last_indexed_page_id_ = load_id;
 
   // Get the URL for this page.
   GURL url(main_frame->document().url());
-  if (url.is_empty())
+  if (url.is_empty()) {
+    if (!preliminary_capture)
+      last_indexed_url_ = GURL();
     return;
+  }
+
+  // If the page id is unchanged, check whether the URL (ignoring fragments)
+  // has changed.  If so, we need to reindex.  Otherwise, assume this is a
+  // reload, in-page navigation, or some other load type where we don't want to
+  // reindex.  Note: subframe navigations after onload increment the page id,
+  // so these will trigger a reindex.
+  GURL stripped_url(StripRef(url));
+  if (same_page_id && stripped_url == last_indexed_url_)
+    return;
+
+  if (!preliminary_capture)
+    last_indexed_url_ = stripped_url;
 
   // Retrieve the frame's full text.
   string16 contents;
@@ -724,7 +796,8 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
   if (contents.size()) {
     // Send the text to the browser for indexing (the browser might decide not
     // to index, if the URL is HTTPS for instance) and language discovery.
-    Send(new ViewHostMsg_PageContents(routing_id(), url, load_id, contents));
+    Send(new ChromeViewHostMsg_PageContents(routing_id(), url, load_id,
+                                            contents));
   }
 
   // Generate the thumbnail here if the in-browser thumbnailing isn't
@@ -793,7 +866,7 @@ void ChromeRenderViewObserver::CaptureThumbnail() {
     return;
 
   // send the thumbnail message to the browser process
-  Send(new ViewHostMsg_Thumbnail(routing_id(), url, score, thumbnail));
+  Send(new ChromeViewHostMsg_Thumbnail(routing_id(), url, score, thumbnail));
 }
 
 bool ChromeRenderViewObserver::CaptureFrameThumbnail(WebView* view,
@@ -812,6 +885,8 @@ bool ChromeRenderViewObserver::CaptureFrameThumbnail(WebView* view,
   SkDevice* device = skia::GetTopDevice(canvas);
 
   const SkBitmap& src_bmp = device->accessBitmap(false);
+  // Cut off the vertical scrollbars (if any).
+  int src_bmp_width = view->mainFrame()->contentsSize().width;
 
   SkRect dest_rect = { 0, 0, SkIntToScalar(w), SkIntToScalar(h) };
   float dest_aspect = dest_rect.width() / dest_rect.height();
@@ -819,7 +894,7 @@ bool ChromeRenderViewObserver::CaptureFrameThumbnail(WebView* view,
   // Get the src rect so that we can preserve the aspect ratio while filling
   // the destination.
   SkIRect src_rect;
-  if (src_bmp.width() < dest_rect.width() ||
+  if (src_bmp_width < dest_rect.width() ||
       src_bmp.height() < dest_rect.height()) {
     // Source image is smaller: we clip the part of source image within the
     // dest rect, and then stretch it to fill the dest rect. We don't respect
@@ -828,17 +903,17 @@ bool ChromeRenderViewObserver::CaptureFrameThumbnail(WebView* view,
                  static_cast<S16CPU>(dest_rect.height()));
     score->good_clipping = false;
   } else {
-    float src_aspect = static_cast<float>(src_bmp.width()) / src_bmp.height();
+    float src_aspect = static_cast<float>(src_bmp_width) / src_bmp.height();
     if (src_aspect > dest_aspect) {
       // Wider than tall, clip horizontally: we center the smaller thumbnail in
       // the wider screen.
       S16CPU new_width = static_cast<S16CPU>(src_bmp.height() * dest_aspect);
-      S16CPU x_offset = (src_bmp.width() - new_width) / 2;
+      S16CPU x_offset = (src_bmp_width - new_width) / 2;
       src_rect.set(x_offset, 0, new_width + x_offset, src_bmp.height());
       score->good_clipping = false;
     } else {
-      src_rect.set(0, 0, src_bmp.width(),
-                   static_cast<S16CPU>(src_bmp.width() / dest_aspect));
+      src_rect.set(0, 0, src_bmp_width,
+                   static_cast<S16CPU>(src_bmp_width / dest_aspect));
       score->good_clipping = true;
     }
   }

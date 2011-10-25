@@ -142,7 +142,7 @@ cr.define('options', function() {
         if (focusElement) {
           window.setTimeout(function() {
             // Make sure we are still in edit mode by the time we execute.
-            if (self.editing) {
+            if (self.editing && self.focusPlaceholder) {
               focusElement.focus();
               focusElement.select();
             }
@@ -151,6 +151,9 @@ cr.define('options', function() {
       } else {
         if (!this.editCancelled_ && this.hasBeenEdited &&
             this.currentInputIsValid) {
+          if (this.isPlaceholder)
+            this.parentNode.focusPlaceholder = true;
+
           this.updateStaticValues_();
           cr.dispatchSimpleEvent(this, 'commitedit', true);
         } else {
@@ -242,7 +245,20 @@ cr.define('options', function() {
       if (!this.isPlaceholder) {
         inputEl.setAttribute('displaymode', 'edit');
         inputEl.staticVersion = textEl;
+      } else {
+        // At this point |this| is not attached to the parent list yet, so give
+        // a short timeout in order for the attachment to occur.
+        var self = this;
+        window.setTimeout(function() {
+          var list = self.parentNode;
+          if (list && list.focusPlaceholder) {
+            list.focusPlaceholder = false;
+            if (list.shouldFocusPlaceholder())
+              inputEl.focus();
+          }
+        }, 50);
       }
+
       inputEl.addEventListener('focus', this.handleFocus_.bind(this));
       container.appendChild(inputEl);
       this.editFields_.push(inputEl);
@@ -261,6 +277,7 @@ cr.define('options', function() {
         var staticLabel = editFields[i].staticVersion;
         if (!staticLabel && !this.isPlaceholder)
           continue;
+
         if (editFields[i].tagName == 'INPUT') {
           editFields[i].value =
             this.isPlaceholder ? '' : staticLabel.textContent;
@@ -283,6 +300,7 @@ cr.define('options', function() {
         var staticLabel = editFields[i].staticVersion;
         if (!staticLabel)
           continue;
+
         if (editFields[i].tagName == 'INPUT')
           staticLabel.textContent = editFields[i].value;
         // Add more tag types here as new createEditable* methods are added.
@@ -361,6 +379,12 @@ cr.define('options', function() {
   InlineEditableItemList.prototype = {
     __proto__: DeletableItemList.prototype,
 
+    /**
+     * Focuses the input element of the placeholder if true.
+     * @type {boolean}
+     */
+    focusPlaceholder: false,
+
     /** @inheritDoc */
     decorate: function() {
       DeletableItemList.prototype.decorate.call(this);
@@ -383,6 +407,14 @@ cr.define('options', function() {
         else
           leadItem.editing = false;
       }
+    },
+
+    /**
+     * May be overridden by subclasses to disable focusing the placeholder.
+     * @return true if the placeholder element should be focused on edit commit.
+     */
+    shouldFocusPlaceholder: function() {
+      return true;
     },
   };
 

@@ -453,7 +453,7 @@ class SettingGetterImplGConf : public ProxyConfigServiceLinux::SettingGetter {
     // We don't use Reset() because the timer may not yet be running.
     // (In that case Stop() is a no-op.)
     debounce_timer_.Stop();
-    debounce_timer_.Start(
+    debounce_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(kDebounceTimeoutMilliseconds),
         this, &SettingGetterImplGConf::OnDebouncedNotification);
   }
@@ -557,7 +557,7 @@ GSettings* (*g_settings_new)(const gchar* schema);
   bool SchemaExists(const char* schema_name) {
     const gchar* const* schemas = g_settings_list_schemas();
     while (*schemas) {
-      if (strcmp(schema_name, reinterpret_cast<const char*>(schemas)) == 0)
+      if (strcmp(schema_name, static_cast<const char*>(*schemas)) == 0)
         return true;
       schemas++;
     }
@@ -781,7 +781,7 @@ GSettings* (*g_settings_new)(const gchar* schema);
     // We don't use Reset() because the timer may not yet be running.
     // (In that case Stop() is a no-op.)
     debounce_timer_.Stop();
-    debounce_timer_.Start(
+    debounce_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(kDebounceTimeoutMilliseconds),
         this, &SettingGetterImplGSettings::OnDebouncedNotification);
   }
@@ -830,10 +830,14 @@ bool SettingGetterImplGSettings::LoadAndCheckVersion(
   // binary, so we detect these systems that way.
 
 #ifdef DLOPEN_GSETTINGS
-  gio_handle_ = dlopen("libgio-2.0.so", RTLD_NOW | RTLD_GLOBAL);
+  gio_handle_ = dlopen("libgio-2.0.so.0", RTLD_NOW | RTLD_GLOBAL);
   if (!gio_handle_) {
-    VLOG(1) << "Cannot load gio library. Will fall back to gconf.";
-    return false;
+    // Try again without .0 at the end; on some systems this may be required.
+    gio_handle_ = dlopen("libgio-2.0.so", RTLD_NOW | RTLD_GLOBAL);
+    if (!gio_handle_) {
+      VLOG(1) << "Cannot load gio library. Will fall back to gconf.";
+      return false;
+    }
   }
   if (!LoadSymbol("g_settings_new",
                   reinterpret_cast<void**>(&g_settings_new)) ||
@@ -1341,7 +1345,7 @@ class SettingGetterImplKDE : public ProxyConfigServiceLinux::SettingGetter,
       // We don't use Reset() because the timer may not yet be running.
       // (In that case Stop() is a no-op.)
       debounce_timer_.Stop();
-      debounce_timer_.Start(base::TimeDelta::FromMilliseconds(
+      debounce_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(
           kDebounceTimeoutMilliseconds), this,
           &SettingGetterImplKDE::OnDebouncedNotification);
     }

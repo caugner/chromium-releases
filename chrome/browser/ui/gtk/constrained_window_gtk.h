@@ -10,9 +10,9 @@
 
 #include "base/basictypes.h"
 #include "base/task.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "content/browser/tab_contents/constrained_window.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 
 class TabContents;
 typedef struct _GdkColor GdkColor;
@@ -58,6 +58,8 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
    typedef TabContentsViewGtk TabContentsViewType;
 #endif
 
+  ConstrainedWindowGtk(TabContents* owner,
+                       ConstrainedWindowGtkDelegate* delegate);
   virtual ~ConstrainedWindowGtk();
 
   // Overridden from ConstrainedWindow:
@@ -77,9 +79,6 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
  private:
   friend class ConstrainedWindow;
 
-  ConstrainedWindowGtk(TabContents* owner,
-                       ConstrainedWindowGtkDelegate* delegate);
-
   // Signal callbacks.
   CHROMEGTK_CALLBACK_1(ConstrainedWindowGtk, gboolean, OnKeyPress,
                        GdkEventKey*);
@@ -90,7 +89,7 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   TabContents* owner_;
 
   // The top level widget container that exports to our TabContentsView.
-  OwnedWidgetGtk border_;
+  ui::OwnedWidgetGtk border_;
 
   // Delegate that provides the contents of this constrained window.
   ConstrainedWindowGtkDelegate* delegate_;

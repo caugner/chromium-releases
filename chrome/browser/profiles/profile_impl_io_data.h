@@ -30,6 +30,7 @@ class ProfileImplIOData : public ProfileIOData {
     // Init() must be called before ~Handle(). It records all the necessary
     // parameters needed to construct a ChromeURLRequestContextGetter.
     void Init(const FilePath& cookie_path,
+              const FilePath& origin_bound_cert_path,
               const FilePath& cache_path,
               int cache_max_size,
               const FilePath& media_cache_path,
@@ -75,7 +76,7 @@ class ProfileImplIOData : public ProfileIOData {
     mutable scoped_refptr<ChromeURLRequestContextGetter>
         extensions_request_context_getter_;
     mutable ChromeURLRequestContextGetterMap app_request_context_getter_map_;
-    scoped_refptr<ProfileImplIOData> io_data_;
+    ProfileImplIOData* const io_data_;
 
     Profile* const profile_;
 
@@ -93,6 +94,7 @@ class ProfileImplIOData : public ProfileIOData {
 
     // All of these parameters are intended to be read on the IO thread.
     FilePath cookie_path;
+    FilePath origin_bound_cert_path;
     FilePath cache_path;
     int cache_max_size;
     FilePath media_cache_path;
@@ -107,12 +109,12 @@ class ProfileImplIOData : public ProfileIOData {
   virtual ~ProfileImplIOData();
 
   virtual void LazyInitializeInternal(ProfileParams* profile_params) const;
-  virtual scoped_refptr<RequestContext> InitializeAppRequestContext(
+  virtual scoped_refptr<ChromeURLRequestContext> InitializeAppRequestContext(
       scoped_refptr<ChromeURLRequestContext> main_context,
       const std::string& app_id) const;
   virtual scoped_refptr<ChromeURLRequestContext>
       AcquireMediaRequestContext() const;
-  virtual scoped_refptr<RequestContext>
+  virtual scoped_refptr<ChromeURLRequestContext>
       AcquireIsolatedAppRequestContext(
           scoped_refptr<ChromeURLRequestContext> main_context,
           const std::string& app_id) const;
@@ -120,7 +122,7 @@ class ProfileImplIOData : public ProfileIOData {
   // Lazy initialization params.
   mutable scoped_ptr<LazyParams> lazy_params_;
 
-  mutable scoped_refptr<RequestContext> media_request_context_;
+  mutable scoped_refptr<ChromeURLRequestContext> media_request_context_;
 
   mutable scoped_ptr<net::HttpTransactionFactory> main_http_factory_;
   mutable scoped_ptr<net::HttpTransactionFactory> media_http_factory_;

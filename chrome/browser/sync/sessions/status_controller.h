@@ -37,6 +37,7 @@
 #include <map>
 
 #include "base/stl_util.h"
+#include "base/time.h"
 #include "chrome/browser/sync/sessions/ordered_commit_set.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 
@@ -102,8 +103,8 @@ class StatusController {
   }
 
   // Errors and SyncerStatus.
-  const ErrorCounters& error_counters() const {
-    return shared_.error_counters.value();
+  const ErrorCounters& error() const {
+    return shared_.error.value();
   }
   const SyncerStatus& syncer_status() const {
     return shared_.syncer_status.value();
@@ -192,6 +193,11 @@ class StatusController {
     return group_restriction_;
   }
 
+  base::Time sync_start_time() const {
+    // The time at which we sent the first GetUpdates command for this sync.
+    return sync_start_time_;
+  }
+
   // Check whether a particular model is included by the active group
   // restriction.
   bool ActiveGroupRestrictionIncludesModel(syncable::ModelType model) const {
@@ -214,7 +220,6 @@ class StatusController {
   void set_num_server_changes_remaining(int64 changes_remaining);
   void set_invalid_store(bool invalid_store);
   void set_syncer_stuck(bool syncer_stuck);
-  void set_syncing(bool syncing);
   void set_num_successful_bookmark_commits(int value);
   void increment_num_successful_commits();
   void increment_num_successful_bookmark_commits();
@@ -224,12 +229,15 @@ class StatusController {
   void set_unsynced_handles(const std::vector<int64>& unsynced_handles);
   void increment_num_local_overwrites();
   void increment_num_server_overwrites();
+  void set_sync_protocol_error(const SyncProtocolError& error);
 
   void set_commit_set(const OrderedCommitSet& commit_set);
   void update_conflict_sets_built(bool built);
   void update_conflicts_resolved(bool resolved);
   void reset_conflicts_resolved();
   void set_items_committed();
+
+  void SetSyncInProgressAndUpdateStartTime(bool sync_in_progress);
 
  private:
   friend class ScopedModelSafeGroupRestriction;
@@ -258,6 +266,8 @@ class StatusController {
   ModelSafeGroup group_restriction_;
 
   const ModelSafeRoutingInfo routing_info_;
+
+  base::Time sync_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(StatusController);
 };

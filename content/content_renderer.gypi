@@ -22,6 +22,7 @@
         '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
         '../ui/gfx/surface/surface.gyp:surface',
         '../v8/tools/gyp/v8.gyp:v8',
+        '../webkit/support/webkit_support.gyp:webkit_gpu',
       ],
       'include_dirs': [
         '..',
@@ -48,8 +49,6 @@
         'renderer/geolocation_dispatcher.h',
         'renderer/gpu/gpu_channel_host.cc',
         'renderer/gpu/gpu_channel_host.h',
-        'renderer/gpu/gpu_surface_proxy.cc',
-        'renderer/gpu/gpu_surface_proxy.h',
         'renderer/gpu/gpu_video_decode_accelerator_host.cc',
         'renderer/gpu/gpu_video_decode_accelerator_host.h',
         'renderer/gpu/renderer_gl_context.cc',
@@ -81,6 +80,8 @@
         'renderer/media/media_stream_dispatcher_eventhandler.h',
         'renderer/media/media_stream_impl.cc',
         'renderer/media/media_stream_impl.h',
+        'renderer/media/render_media_log.cc',
+        'renderer/media/render_media_log.h',
         'renderer/media/rtc_video_decoder.cc',
         'renderer/media/rtc_video_decoder.h',
         'renderer/media/video_capture_impl.cc',
@@ -120,6 +121,8 @@
         'renderer/render_view_observer.cc',
         'renderer/render_view_observer.h',
         'renderer/render_view_observer_tracker.h',
+        'renderer/render_view_selection.cc',
+        'renderer/render_view_selection.h',
         'renderer/render_view_visitor.h',
         'renderer/render_widget.cc',
         'renderer/render_widget.h',
@@ -151,8 +154,8 @@
         'renderer/renderer_webidbobjectstore_impl.h',
         'renderer/renderer_webidbtransaction_impl.cc',
         'renderer/renderer_webidbtransaction_impl.h',
-        'renderer/renderer_webkitclient_impl.cc',
-        'renderer/renderer_webkitclient_impl.h',
+        'renderer/renderer_webkitplatformsupport_impl.cc',
+        'renderer/renderer_webkitplatformsupport_impl.h',
         'renderer/renderer_webstoragearea_impl.cc',
         'renderer/renderer_webstoragearea_impl.h',
         'renderer/renderer_webstoragenamespace_impl.cc',
@@ -187,6 +190,8 @@
             'renderer/p2p/ipc_socket_factory.h',
             'renderer/p2p/p2p_transport_impl.cc',
             'renderer/p2p/p2p_transport_impl.h',
+            'renderer/p2p/port_allocator.cc',
+            'renderer/p2p/port_allocator.h',
             'renderer/p2p/socket_client.cc',
             'renderer/p2p/socket_client.h',
             'renderer/p2p/socket_dispatcher.cc',
@@ -203,6 +208,13 @@
           ],
         }],
         ['toolkit_uses_gtk == 1', {
+          'conditions': [
+            [ 'linux_use_tcmalloc==1', {
+              'dependencies': [
+                 '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
           'dependencies': [
             '../build/linux/system.gyp:gtk',
           ],
@@ -216,6 +228,11 @@
               'renderer/renderer.sb',
             ],
           },
+        }],
+        ['OS=="win" and win_use_allocator_shim==1', {
+          'dependencies': [
+             '../base/allocator/allocator.gyp:allocator',
+          ],
         }],
         ['enable_webrtc==1', {
           'dependencies': [

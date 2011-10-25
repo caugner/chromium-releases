@@ -20,10 +20,12 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
@@ -174,10 +176,13 @@ NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   pref_change_registrar_.Init(profile_->GetPrefs());
+  pref_change_registrar_.Add(prefs::kAcknowledgedSyncTypes, this);
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
   pref_change_registrar_.Add(prefs::kEnableBookmarkBar, this);
+  pref_change_registrar_.Add(prefs::kHomePageIsNewTabPage, this);
   pref_change_registrar_.Add(prefs::kNTPShownSections, this);
   pref_change_registrar_.Add(prefs::kNTPShownPage, this);
+  pref_change_registrar_.Add(prefs::kNTP4IntroDisplayCount, this);
 }
 
 NTPResourceCache::~NTPResourceCache() {}
@@ -218,17 +223,10 @@ void NTPResourceCache::Observe(int type,
     new_tab_incognito_css_ = NULL;
     new_tab_css_ = NULL;
   } else if (chrome::NOTIFICATION_PREF_CHANGED == type) {
-    std::string* pref_name = Details<std::string>(details).ptr();
-    if (*pref_name == prefs::kShowBookmarkBar ||
-        *pref_name == prefs::kEnableBookmarkBar ||
-        *pref_name == prefs::kHomePageIsNewTabPage ||
-        *pref_name == prefs::kNTPShownSections ||
-        *pref_name == prefs::kNTPShownPage) {
-      new_tab_incognito_html_ = NULL;
-      new_tab_html_ = NULL;
-    } else {
-      NOTREACHED();
-    }
+    // A change occurred to one of the preferences we care about, so flush the
+    // cache.
+    new_tab_incognito_html_ = NULL;
+    new_tab_html_ = NULL;
   } else {
     NOTREACHED();
   }
@@ -253,9 +251,11 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
       l10n_util::GetStringFUTF16(new_tab_message_ids,
                                  GetUrlWithLang(GURL(new_tab_link))));
   localized_strings.SetString("extensionsmessage",
-      l10n_util::GetStringFUTF16(IDS_NEW_TAB_OTR_EXTENSIONS_MESSAGE,
-                                 l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-                                 ASCIIToUTF16(chrome::kChromeUIExtensionsURL)));
+      l10n_util::GetStringFUTF16(
+          IDS_NEW_TAB_OTR_EXTENSIONS_MESSAGE,
+          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+          ASCIIToUTF16(std::string(chrome::kChromeUISettingsURL) +
+                       chrome::kExtensionsSubPage)));
   bool bookmark_bar_attached = profile_->GetPrefs()->GetBoolean(
       prefs::kShowBookmarkBar);
   localized_strings.SetString("bookmarkbarattached",
@@ -302,6 +302,8 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED));
   localized_strings.SetString("closedwindowsingle",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE));
+  localized_strings.SetString("searchengines",
+      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SEARCH_ENGINES));
   localized_strings.SetString("foreignsessions",
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SESSIONS));
   localized_strings.SetString("closedwindowmultiple",
@@ -324,8 +326,6 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_SHOW_HIDE_LIST_TOOLTIP));
   localized_strings.SetString("pagedisplaytooltip",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_PAGE_DISPLAY_TOOLTIP));
-  localized_strings.SetString("closefirstrunnotification",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CLOSE_FIRST_RUN_NOTIFICATION));
   localized_strings.SetString("close", l10n_util::GetStringUTF16(IDS_CLOSE));
   localized_strings.SetString("history",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_HISTORY));
@@ -338,7 +338,9 @@ void NTPResourceCache::CreateNewTabHTML() {
   localized_strings.SetString("appsettings",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_SETTINGS));
   localized_strings.SetString("appuninstall",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_UNINSTALL));
+      l10n_util::GetStringFUTF16(
+          IDS_NEW_TAB_APP_UNINSTALL,
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
   localized_strings.SetString("appoptions",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_OPTIONS));
   localized_strings.SetString("appcreateshortcut",
@@ -356,13 +358,15 @@ void NTPResourceCache::CreateNewTabHTML() {
   localized_strings.SetString("web_store_title",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
   localized_strings.SetString("web_store_url",
-      GetUrlWithLang(GURL(Extension::ChromeStoreLaunchURL())));
+      GetUrlWithLang(GURL(extension_urls::GetWebstoreLaunchURL())));
   localized_strings.SetString("syncpromotext",
       l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL));
-  localized_strings.SetString("trashLabel",
-      l10n_util::GetStringFUTF16(
-          IDS_NEW_TAB_TRASH_LABEL,
-          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
+  localized_strings.SetString("syncLinkText",
+      l10n_util::GetStringUTF16(IDS_SYNC_ADVANCED_OPTIONS));
+  localized_strings.SetString("bookmarksManagerLinkTitle",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_MANAGER_LINK_TITLE));
+  localized_strings.SetString("bookmarksShowAllLinkTitle",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_SHOW_ALL_LINK_TITLE));
 #if defined(OS_CHROMEOS)
   localized_strings.SetString("expandMenu",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_CLOSE_MENU_EXPAND));
@@ -386,6 +390,12 @@ void NTPResourceCache::CreateNewTabHTML() {
       ui::Animation::ShouldRenderRichAnimation() ? "true" : "false";
   localized_strings.SetString("anim", anim);
 
+  int alignment;
+  ui::ThemeProvider* tp = ThemeServiceFactory::GetForProfile(profile_);
+  tp->GetDisplayProperty(ThemeService::NTP_BACKGROUND_ALIGNMENT, &alignment);
+  localized_strings.SetString("themegravity",
+      (alignment & ThemeService::ALIGN_RIGHT) ? "right" : "");
+
   // Pass the shown_sections pref early so that we can prevent flicker.
   const int shown_sections = ShownSectionsHandler::GetShownSections(
       profile_->GetPrefs());
@@ -405,15 +415,9 @@ void NTPResourceCache::CreateNewTabHTML() {
 
   // If the user has preferences for a start and end time for a promo from
   // the server, and this promo string exists, set the localized string.
-  if (profile_->GetPrefs()->FindPreference(prefs::kNTPPromoStart) &&
-      profile_->GetPrefs()->FindPreference(prefs::kNTPPromoEnd) &&
-      profile_->GetPrefs()->FindPreference(prefs::kNTPPromoLine) &&
-      PromoResourceServiceUtil::CanShowPromo(profile_)) {
+  if (PromoResourceService::CanShowNotificationPromo(profile_)) {
     localized_strings.SetString("serverpromo",
-        InDateRange(profile_->GetPrefs()->GetDouble(prefs::kNTPPromoStart),
-                    profile_->GetPrefs()->GetDouble(prefs::kNTPPromoEnd)) ?
-                    profile_->GetPrefs()->GetString(prefs::kNTPPromoLine) :
-                                                    std::string());
+        profile_->GetPrefs()->GetString(prefs::kNTPPromoLine));
     UserMetrics::RecordAction(UserMetricsAction("NTPPromoShown"));
   }
 
@@ -423,7 +427,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   // consistent across builds, supporting the union of all NTP front-ends
   // for simplicity.
   std::string full_html;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4)) {
+  if (NewTabUI::NTP4Enabled()) {
     base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
         GetRawDataResource(IDR_NEW_TAB_4_HTML));
     full_html = jstemplate_builder::GetI18nTemplateHtml(new_tab_html,
@@ -570,11 +574,11 @@ void NTPResourceCache::CreateNewTabCSS() {
       SkColorSetA(color_section_header_rule, 0)));  // $20
   subst.push_back(SkColorToRGBAString(color_text_light));  // $21
   subst.push_back(SkColorToRGBComponents(color_section_border));  // $22
+  subst.push_back(SkColorToRGBComponents(color_text));  // $23
 
   // Get our template.
-  int ntp_css_resource_id =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4) ?
-          IDR_NEW_TAB_4_THEME_CSS : IDR_NEW_TAB_THEME_CSS;
+  int ntp_css_resource_id = NewTabUI::NTP4Enabled() ?
+      IDR_NEW_TAB_4_THEME_CSS : IDR_NEW_TAB_THEME_CSS;
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           ntp_css_resource_id));

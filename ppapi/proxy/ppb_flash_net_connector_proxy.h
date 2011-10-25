@@ -14,10 +14,11 @@
 
 struct PPB_Flash_NetConnector;
 
-namespace pp {
-namespace proxy {
+namespace ppapi {
 
 class HostResource;
+
+namespace proxy {
 
 class PPB_Flash_NetConnector_Proxy : public InterfaceProxy {
  public:
@@ -37,15 +38,15 @@ class PPB_Flash_NetConnector_Proxy : public InterfaceProxy {
 
   // Plugin->host message handlers.
   void OnMsgCreate(PP_Instance instance,
-                   HostResource* result);
-  void OnMsgConnectTcp(const HostResource& resource,
+                   ppapi::HostResource* result);
+  void OnMsgConnectTcp(const ppapi::HostResource& resource,
                        const std::string& host,
                        uint16_t port);
-  void OnMsgConnectTcpAddress(const HostResource& resource_id,
+  void OnMsgConnectTcpAddress(const ppapi::HostResource& resource_id,
                               const std::string& net_address_as_string);
 
   // Host->plugin message handler.
-  void OnMsgConnectACK(const HostResource& host_resource,
+  void OnMsgConnectACK(const ppapi::HostResource& host_resource,
                        int32_t result,
                        IPC::PlatformFileForTransit handle,
                        const std::string& load_addr_as_string,
@@ -53,11 +54,11 @@ class PPB_Flash_NetConnector_Proxy : public InterfaceProxy {
 
   void OnCompleteCallbackInHost(int32_t result, ConnectCallbackInfo* info);
 
-  CompletionCallbackFactory<PPB_Flash_NetConnector_Proxy,
-                            ProxyNonThreadSafeRefCount> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_Flash_NetConnector_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_FLASH_NET_CONNECTOR_PROXY_H_

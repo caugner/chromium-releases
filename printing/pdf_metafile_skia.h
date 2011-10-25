@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "printing/metafile.h"
 
@@ -20,7 +20,7 @@ namespace printing {
 struct PdfMetafileSkiaData;
 
 // This class uses Skia graphics library to generate a PDF document.
-class PdfMetafileSkia : public Metafile {
+class PRINTING_EXPORT PdfMetafileSkia : public Metafile {
  public:
   PdfMetafileSkia();
   virtual ~PdfMetafileSkia();
@@ -30,7 +30,6 @@ class PdfMetafileSkia : public Metafile {
   virtual bool InitFromData(const void* src_buffer, uint32 src_buffer_size);
 
   virtual SkDevice* StartPageForVectorCanvas(
-      int page_number,
       const gfx::Size& page_size,
       const gfx::Rect& content_area,
       const float& scale_factor);
@@ -73,12 +72,10 @@ class PdfMetafileSkia : public Metafile {
   PdfMetafileSkia* GetMetafileForCurrentPage();
 
  private:
-  static const int kNoOutstandingPage = -1;
-
   scoped_ptr<PdfMetafileSkiaData> data_;
 
-  // Page number of the outstanding page, or kNoOutstandingPage.
-  int outstanding_page_number_;
+  // True when finish page is outstanding for current page.
+  bool page_outstanding_;
 
   DISALLOW_COPY_AND_ASSIGN(PdfMetafileSkia);
 };

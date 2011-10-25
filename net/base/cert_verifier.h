@@ -16,7 +16,7 @@
 #include "net/base/cert_database.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/completion_callback.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/x509_cert_types.h"
 
 namespace net {
@@ -48,8 +48,8 @@ struct CachedCertVerifyResult {
 // request at a time is to create a SingleRequestCertVerifier wrapper around
 // CertVerifier (which will automatically cancel the single request when it
 // goes out of scope).
-class NET_API CertVerifier : NON_EXPORTED_BASE(public base::NonThreadSafe),
-                             public CertDatabase::Observer {
+class NET_EXPORT CertVerifier : NON_EXPORTED_BASE(public base::NonThreadSafe),
+                                public CertDatabase::Observer {
  public:
   // Opaque type used to cancel a request.
   typedef void* RequestHandle;
@@ -114,6 +114,8 @@ class NET_API CertVerifier : NON_EXPORTED_BASE(public base::NonThreadSafe),
 
   size_t GetCacheSize() const;
 
+  void set_max_cache_entries(size_t max) { max_cache_entries_ = max; }
+
   uint64 requests() const { return requests_; }
   uint64 cache_hits() const { return cache_hits_; }
   uint64 inflight_joins() const { return inflight_joins_; }
@@ -161,7 +163,7 @@ class NET_API CertVerifier : NON_EXPORTED_BASE(public base::NonThreadSafe),
   virtual void OnCertTrustChanged(const X509Certificate* cert);
 
   // cache_ maps from a request to a cached result. The cached result may
-  // have expired and the size of |cache_| must be <= kMaxCacheEntries.
+  // have expired and the size of |cache_| must be <= max_cache_entries_.
   std::map<RequestParams, CachedCertVerifyResult> cache_;
 
   // inflight_ maps from a request to an active verification which is taking
@@ -169,6 +171,9 @@ class NET_API CertVerifier : NON_EXPORTED_BASE(public base::NonThreadSafe),
   std::map<RequestParams, CertVerifierJob*> inflight_;
 
   scoped_ptr<TimeService> time_service_;
+
+  // The number of CachedCertVerifyResult objects that we'll cache.
+  size_t max_cache_entries_;
 
   uint64 requests_;
   uint64 cache_hits_;

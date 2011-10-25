@@ -102,13 +102,13 @@ class ChromeAppExtensionWrapper : public v8::Extension {
   static v8::Handle<v8::Value> GetIsInstalled(const v8::Arguments& args) {
     WebFrame* frame = WebFrame::frameForCurrentContext();
     if (!frame)
-      return v8::Boolean::New(false);
+      return v8::False();
 
     GURL url(frame->document().url());
     if (url.is_empty() ||
         !url.is_valid() ||
         !(url.SchemeIs("http") || url.SchemeIs("https")))
-      return v8::Boolean::New(false);
+      return v8::False();
 
     const ::Extension* extension =
         extension_dispatcher_->extensions()->GetByURL(frame->document().url());
@@ -120,14 +120,17 @@ class ChromeAppExtensionWrapper : public v8::Extension {
 
   static v8::Handle<v8::Value> Install(const v8::Arguments& args) {
     WebFrame* frame = WebFrame::frameForCurrentContext();
-    RenderView* render_view = bindings_utils::GetRenderViewForCurrentContext();
-    if (frame && render_view) {
-      string16 error;
+    if (!frame || !frame->view())
+      return v8::Undefined();
 
-      ExtensionHelper* helper = ExtensionHelper::Get(render_view);
-      if (!helper->InstallWebApplicationUsingDefinitionFile(frame, &error))
-        v8::ThrowException(v8::String::New(UTF16ToUTF8(error).c_str()));
-    }
+    RenderView* render_view = RenderView::FromWebView(frame->view());
+    if (!render_view)
+      return v8::Undefined();
+
+    string16 error;
+    ExtensionHelper* helper = ExtensionHelper::Get(render_view);
+    if (!helper->InstallWebApplicationUsingDefinitionFile(frame, &error))
+      v8::ThrowException(v8::String::New(UTF16ToUTF8(error).c_str()));
 
     return v8::Undefined();
   }

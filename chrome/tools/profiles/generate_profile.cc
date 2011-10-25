@@ -22,7 +22,7 @@
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/thumbnail_score.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -178,13 +178,11 @@ void InsertURLBatch(Profile* profile,
     history_service->SetPageTitle(url, ConstructRandomTitle());
     if (types & FULL_TEXT)
       history_service->SetPageContents(url, ConstructRandomPage());
-    if (types & TOP_SITES) {
+    if (types & TOP_SITES && top_sites) {
       SkBitmap* bitmap = (RandomInt(0, 2) == 0) ? google_bitmap.get() :
                                                   weewar_bitmap.get();
-      if (top_sites)
-        top_sites->SetPageThumbnail(url, *bitmap, score);
-      else
-        history_service->SetPageThumbnail(url, *bitmap, score);
+      gfx::Image image(new SkBitmap(*bitmap));
+      top_sites->SetPageThumbnail(url, &image, score);
     }
 
     previous_url = url;
@@ -268,7 +266,7 @@ int main(int argc, const char* argv[]) {
 
   file_util::FileEnumerator file_iterator(
       profile.GetPath(), false,
-      static_cast<file_util::FileEnumerator::FILE_TYPE>(
+      static_cast<file_util::FileEnumerator::FileType>(
           file_util::FileEnumerator::FILES));
   FilePath path = file_iterator.Next();
   while (!path.empty()) {

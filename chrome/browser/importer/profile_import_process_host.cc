@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
 #include "chrome/browser/importer/profile_import_process_client.h"
@@ -53,8 +54,8 @@ bool ProfileImportProcessHost::StartProfileImportProcess(
       base::IntToString(IDS_IMPORT_FROM_SAFARI),
       l10n_util::GetStringUTF8(IDS_IMPORT_FROM_SAFARI));
   localized_strings.SetString(
-      base::IntToString(IDS_BOOMARK_BAR_FOLDER_NAME),
-      l10n_util::GetStringUTF8(IDS_BOOMARK_BAR_FOLDER_NAME));
+      base::IntToString(IDS_BOOKMARK_BAR_FOLDER_NAME),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_BAR_FOLDER_NAME));
 
   Send(new ProfileImportProcessMsg_StartImport(source_profile, items,
                                                localized_strings));
@@ -75,11 +76,16 @@ bool ProfileImportProcessHost::ReportImportItemFinished(
 }
 
 FilePath ProfileImportProcessHost::GetProfileImportProcessCmd() {
-  return GetChildPath(true);
+#if defined(OS_LINUX)
+  int flags = CHILD_ALLOW_SELF;
+#else
+  int flags = CHILD_NORMAL;
+#endif
+  return GetChildPath(flags);
 }
 
 bool ProfileImportProcessHost::StartProcess() {
-  set_name(L"profile import process");
+  set_name(ASCIIToUTF16("profile import process"));
 
   if (!CreateChannel())
     return false;

@@ -25,9 +25,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/model_test_utils.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/model_test_utils.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_registrar.h"
@@ -52,7 +51,7 @@ void SwapDateAdded(BookmarkNode* n1, BookmarkNode* n2) {
   n2->set_date_added(tmp);
 }
 
-class BookmarkModelTest : public TestingBrowserProcessTest,
+class BookmarkModelTest : public testing::Test,
                           public BookmarkModelObserver {
  public:
   struct ObserverDetails {
@@ -694,13 +693,13 @@ void PopulateBookmarkNode(TestNode* parent,
 }
 
 // Test class that creates a BookmarkModel with a real history backend.
-class BookmarkModelTestWithProfile : public TestingBrowserProcessTest {
+class BookmarkModelTestWithProfile : public testing::Test {
  public:
   BookmarkModelTestWithProfile()
       : ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_) {}
 
-  // TestingBrowserProcessTest:
+  // testing::Test:
   virtual void TearDown() OVERRIDE {
     profile_.reset(NULL);
   }
@@ -971,7 +970,7 @@ TEST_F(BookmarkModelTestWithProfile2, RemoveNotification) {
 
   // Add a URL.
   GURL url("http://www.google.com");
-  bb_model_->SetURLStarred(url, string16(), true);
+  bookmark_utils::AddIfNotBookmarked(bb_model_, url, string16());
 
   profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->AddPage(
       url, NULL, 1, GURL(), PageTransition::TYPED,

@@ -30,7 +30,7 @@
 #include "net/base/cache_type.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/http/http_transaction_factory.h"
 
 class GURL;
@@ -53,13 +53,14 @@ class HttpResponseInfo;
 class IOBuffer;
 class NetLog;
 class NetworkDelegate;
+class OriginBoundCertService;
 class ProxyService;
 class SSLConfigService;
 class ViewCacheHelper;
 
-class NET_API HttpCache : public HttpTransactionFactory,
-                          public base::SupportsWeakPtr<HttpCache>,
-                          NON_EXPORTED_BASE(public base::NonThreadSafe) {
+class NET_EXPORT HttpCache : public HttpTransactionFactory,
+                             public base::SupportsWeakPtr<HttpCache>,
+                             NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   // The cache mode of operation.
   enum Mode {
@@ -76,7 +77,7 @@ class NET_API HttpCache : public HttpTransactionFactory,
   };
 
   // A BackendFactory creates a backend object to be used by the HttpCache.
-  class NET_API BackendFactory {
+  class NET_EXPORT BackendFactory {
    public:
     virtual ~BackendFactory() {}
 
@@ -92,7 +93,7 @@ class NET_API HttpCache : public HttpTransactionFactory,
   };
 
   // A default backend factory for the common use cases.
-  class NET_API DefaultBackend : public BackendFactory {
+  class NET_EXPORT DefaultBackend : public BackendFactory {
    public:
     // |path| is the destination for any files used by the backend, and
     // |cache_thread| is the thread where disk operations should take place. If
@@ -120,6 +121,7 @@ class NET_API HttpCache : public HttpTransactionFactory,
   // The HttpCache takes ownership of the |backend_factory|.
   HttpCache(HostResolver* host_resolver,
             CertVerifier* cert_verifier,
+            OriginBoundCertService* origin_bound_cert_service,
             DnsRRResolver* dnsrr_resolver,
             DnsCertProvenanceChecker* dns_cert_checker,
             ProxyService* proxy_service,
@@ -156,7 +158,7 @@ class NET_API HttpCache : public HttpTransactionFactory,
   int GetBackend(disk_cache::Backend** backend, CompletionCallback* callback);
 
   // Returns the current backend (can be NULL).
-  disk_cache::Backend* GetCurrentBackend();
+  disk_cache::Backend* GetCurrentBackend() const;
 
   // Given a header data blob, convert it to a response info object.
   static bool ParseResponseInfo(const char* data, int len,
@@ -178,6 +180,10 @@ class NET_API HttpCache : public HttpTransactionFactory,
   // recycled connections.  For sockets currently in use, they may not close
   // immediately, but they will not be reusable. This is for debugging.
   void CloseAllConnections();
+
+  // Called whenever an external cache in the system reuses the resource
+  // referred to by |url| and |http_method|.
+  void OnExternalCacheHit(const GURL& url, const std::string& http_method);
 
   // HttpTransactionFactory implementation:
   virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans);
@@ -344,7 +350,6 @@ class NET_API HttpCache : public HttpTransactionFactory,
 
   // Processes the backend creation notification.
   void OnBackendCreated(int result, PendingOp* pending_op);
-
 
   // Variables ----------------------------------------------------------------
 

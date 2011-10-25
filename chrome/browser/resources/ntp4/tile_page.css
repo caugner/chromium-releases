@@ -4,9 +4,11 @@
  */
 
 .tile-page {
+  display: -webkit-box;
   height: 100%;
   position: relative;
   width: 100%;
+  -webkit-box-orient: vertical;
 }
 
 .tile-page-scrollbar {
@@ -20,20 +22,23 @@
 }
 
 .tile-page-content {
-  height: 100%;
   overflow-y: scroll;
   padding-top: 100px;
   position: relative;
   text-align: center;
   width: 100%;
+  /* TODO(estade): this mask is disabled for technical reasons. It negatively
+   * impacts performance of page switching, also it causes problems with Mac
+   * text: http://crbug.com/86955
   -webkit-mask-image: -webkit-linear-gradient(bottom, transparent, black 30px);
+  */
   /* The following four properties are necessary so that the mask won't clip
    * the scrollbar. */
   box-sizing: border-box;
-  /* Scrollbar + balance right padding.  */
-  padding-left: 26px;
-  /* Same width as the scrollbar. */
-  padding-right: 13px;
+  /* Scrollbar width(13px) + balance right padding.  */
+  padding-left: 93px;
+  padding-right: 80px;
+  -webkit-box-flex: 1;
   /* Don't apply clip mask to padding. */
   -webkit-mask-clip: content-box;
 }
@@ -73,13 +78,20 @@
   pointer-events: none;
   position: fixed;
   z-index: 3;
+  -webkit-transition: opacity 0.2s;
 }
 
 .tile.drag-representation.placing > * {
   -webkit-transition: -webkit-transform 200ms;
 }
 
-.tile.drag-representation.placing > *.deleting {
+/* When a drag finishes while we're not showing the page where the tile
+ * belongs, the tile shrinks to a dot. */
+.tile.drag-representation.dropped-on-other-page > * {
+   -webkit-transform: scale(0) rotate(0);
+}
+
+.tile.drag-representation.deleting > * {
   -webkit-transform: scale(0) rotate(360deg);
   -webkit-transition: -webkit-transform 600ms;
 }
@@ -87,6 +99,10 @@
 .animating-tile-page .tile,
 .tile.drag-representation.placing {
   -webkit-transition: left 200ms, right 200ms, top 200ms;
+}
+
+.hovering-on-trash {
+  opacity: 0.6;
 }
 
 .animating-tile-page .top-margin {
@@ -138,6 +154,10 @@
 .tile > .removing-tile-contents {
   pointer-events: none;
   -webkit-animation: blipout 0.3s;
+}
+
+.tile-page:not(.selected-card) * {
+  -webkit-transition: none !important;
 }
 
 /** Scrollbars ****************************************************************/

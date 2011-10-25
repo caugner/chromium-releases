@@ -2321,6 +2321,8 @@ ssl3_SendApplicationData(sslSocket *ss, const unsigned char *in,
 {
     PRInt32   totalSent	= 0;
     PRInt32   discarded = 0;
+    PRBool    isBlockCipher;
+    int       recordIndex;
 
     PORT_Assert( ss->opt.noLocks || ssl_HaveXmitBufLock(ss) );
     if (len < 0 || !in) {
@@ -2345,7 +2347,12 @@ ssl3_SendApplicationData(sslSocket *ss, const unsigned char *in,
 	len--;
 	discarded = 1;
     }
-    while (len > totalSent) {
+
+    ssl_GetSpecReadLock(ss);
+    isBlockCipher = ss->ssl3.cwSpec->cipher_def->type == type_block;
+    ssl_ReleaseSpecReadLock(ss);
+
+    for (recordIndex = 0; len > totalSent; recordIndex++) {
 	PRInt32   sent, toSend;
 
 	if (totalSent > 0) {
@@ -2360,6 +2367,29 @@ ssl3_SendApplicationData(sslSocket *ss, const unsigned char *in,
 	    ssl_GetXmitBufLock(ss);
 	}
 	toSend = PR_MIN(len - totalSent, MAX_FRAGMENT_LENGTH);
+	if (isBlockCipher &&
+	    ss->opt.enableFalseStart &&
+	    ss->ssl3.cwSpec->version <= SSL_LIBRARY_VERSION_3_1_TLS) {
+	    /*
+	     * We assume that block ciphers are used in CBC mode and send
+	     * only one byte in the first record.  This effectively
+	     * randomizes the IV in a backward compatible way.
+	     *
+	     * We get back to the MAX_FRAGMENT_LENGTH record boundary in
+	     * the second record.  So for a large amount of data, we send
+	     *     1
+	     *     MAX_FRAGMENT_LENGTH - 1
+	     *     MAX_FRAGMENT_LENGTH
+	     *     MAX_FRAGMENT_LENGTH
+	     *     ...
+	     */
+	    if (recordIndex == 0) {
+		toSend = 1;
+	    } else if (recordIndex == 1 &&
+		       len - totalSent > MAX_FRAGMENT_LENGTH) {
+		toSend--;
+	    }
+	}
 	sent = ssl3_SendRecord(ss, content_application_data, 
 	                       in + totalSent, toSend, flags);
 	if (sent < 0) {
@@ -5703,9 +5733,10 @@ done:
  *		reference count.  The caller should drop its reference
  *		without calling CERT_DestroyCert after calling this function.
  *
- *	key	Private key associated with cert.  This function makes a
- *		copy of the private key, so the caller remains responsible
- *		for destroying its copy after this function returns.
+ *	key	Private key associated with cert.  This function takes
+ *		ownership of the private key, so the caller should drop its
+ *		reference without destroying the private key after this
+ *		function returns.
  *
  *	certChain  DER-encoded certs, client cert and its signers.
  *		Note: ssl takes this reference, and does not copy the chain.
@@ -5725,27 +5756,50 @@ ssl3_RestartHandshakeAfterCertReq(sslSocket *         ss,
 				SECKEYPrivateKey *   key,
 				CERTCertificateList *certChain)
 {
-    SECStatus        rv          = SECSuccess;
+    SECStatus        rv          = SECFailure;
 
-    if (MSB(ss->version) == MSB(SSL_LIBRARY_VERSION_3_0)) {
-	/* XXX This code only works on the initial handshake on a connection,
-	** XXX It does not work on a subsequent handshake (redo).
-	*/
-	if (ss->handshake != 0) {
-	    ss->handshake               = ssl_GatherRecord1stHandshake;
-	    ss->ssl3.clientCertificate = cert;
-	    ss->ssl3.clientCertChain   = certChain;
-	    if (key == NULL) {
-		(void)SSL3_SendAlert(ss, alert_warning, no_certificate);
-		ss->ssl3.clientPrivateKey = NULL;
-	    } else {
-		ss->ssl3.clientPrivateKey = SECKEY_CopyPrivateKey(key);
-	    }
-	    ssl_GetRecvBufLock(ss);
-	    if (ss->ssl3.hs.msgState.buf != NULL) {
-		rv = ssl3_HandleRecord(ss, NULL, &ss->gs.buf);
-	    }
-	    ssl_ReleaseRecvBufLock(ss);
+    /* XXX This code only works on the initial handshake on a connection,
+    ** XXX It does not work on a subsequent handshake (redo).
+    */
+    if (ss->handshake != 0) {
+	ss->handshake              = ssl_GatherRecord1stHandshake;
+	ss->ssl3.clientCertificate = cert;
+	ss->ssl3.clientPrivateKey  = key;
+	ss->ssl3.clientCertChain   = certChain;
+        if (!cert || !key || !certChain) {
+            /* we are missing the key, cert, or cert chain */
+            if (ss->ssl3.clientCertificate) {
+                CERT_DestroyCertificate(ss->ssl3.clientCertificate);
+                ss->ssl3.clientCertificate = NULL;
+            }
+            if (ss->ssl3.clientPrivateKey) {
+                SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
+                ss->ssl3.clientPrivateKey = NULL;
+            }
+            if (ss->ssl3.clientCertChain != NULL) {
+                CERT_DestroyCertificateList(ss->ssl3.clientCertChain);
+                ss->ssl3.clientCertChain = NULL;
+            }
+            if (ss->ssl3.prSpec->version > SSL_LIBRARY_VERSION_3_0) {
+                ss->ssl3.sendEmptyCert = PR_TRUE;
+            } else {
+                (void)SSL3_SendAlert(ss, alert_warning, no_certificate);
+            }
+	}
+	ssl_GetRecvBufLock(ss);
+	if (ss->ssl3.hs.msgState.buf != NULL) {
+	    rv = ssl3_HandleRecord(ss, NULL, &ss->gs.buf);
+	}
+	ssl_ReleaseRecvBufLock(ss);
+    } else {
+	if (cert) {
+	    CERT_DestroyCertificate(cert);
+	}
+	if (key) {
+	    SECKEY_DestroyPrivateKey(key);
+	}
+	if (certChain) {
+	    CERT_DestroyCertificateList(certChain);
 	}
     }
     return rv;
@@ -8428,13 +8482,14 @@ ssl3_TLSPRFWithMasterSecret(ssl3CipherSpec *spec, const char *label,
     unsigned char *out, unsigned int outLen)
 {
     SECStatus rv = SECSuccess;
-    unsigned int retLen;
 
     if (spec->master_secret && !spec->bypassCiphers) {
 	SECItem      param       = {siBuffer, NULL, 0};
 	PK11Context *prf_context =
 	    PK11_CreateContextBySymKey(CKM_TLS_PRF_GENERAL, CKA_SIGN, 
 				       spec->master_secret, &param);
+	unsigned int retLen;
+
 	if (!prf_context)
 	    return SECFailure;
 
@@ -8470,10 +8525,12 @@ ssl3_ComputeTLSFinished(ssl3CipherSpec *spec,
 {
     const char * label;
     SECStatus    rv;
+    unsigned int len;
 
     label = isServer ? "server finished" : "client finished";
+    len = 15;
 
-    rv = ssl3_TLSPRFWithMasterSecret(spec, label, 15, hashes->md5,
+    rv = ssl3_TLSPRFWithMasterSecret(spec, label, len, hashes->md5,
 	sizeof *hashes, tlsFinished->verify_data,
 	sizeof tlsFinished->verify_data);
 

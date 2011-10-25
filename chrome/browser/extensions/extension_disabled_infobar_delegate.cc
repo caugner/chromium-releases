@@ -6,9 +6,11 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -38,8 +40,8 @@ class ExtensionDisabledDialogDelegate
   virtual ~ExtensionDisabledDialogDelegate();
 
   // ExtensionInstallUI::Delegate:
-  virtual void InstallUIProceed();
-  virtual void InstallUIAbort(bool user_initiated);
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
 
   // The UI for showing the install dialog when enabling.
   scoped_ptr<ExtensionInstallUI> install_ui_;
@@ -162,8 +164,8 @@ void ExtensionDisabledInfobarDelegate::Observe(
   } else {
     DCHECK_EQ(chrome::NOTIFICATION_EXTENSION_UNLOADED, type);
     UnloadedExtensionInfo* info = Details<UnloadedExtensionInfo>(details).ptr();
-    if (info->reason == UnloadedExtensionInfo::DISABLE ||
-        info->reason == UnloadedExtensionInfo::UNINSTALL)
+    if (info->reason == extension_misc::UNLOAD_REASON_DISABLE ||
+        info->reason == extension_misc::UNLOAD_REASON_UNINSTALL)
       extension = info->extension;
   }
   if (extension == extension_)
@@ -183,8 +185,8 @@ void ShowExtensionDisabledUI(ExtensionService* service, Profile* profile,
   if (!tab_contents)
     return;
 
-  tab_contents->AddInfoBar(new ExtensionDisabledInfobarDelegate(
-      tab_contents, service, extension));
+  tab_contents->infobar_tab_helper()->AddInfoBar(
+      new ExtensionDisabledInfobarDelegate(tab_contents, service, extension));
 }
 
 void ShowExtensionDisabledDialog(ExtensionService* service, Profile* profile,

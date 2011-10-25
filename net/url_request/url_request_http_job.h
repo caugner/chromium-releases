@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/task.h"
 #include "base/time.h"
@@ -64,29 +65,32 @@ class URLRequestHttpJob : public URLRequestJob {
                                   const string16& password);
 
   // Overridden from URLRequestJob:
-  virtual void SetUpload(UploadData* upload);
-  virtual void SetExtraRequestHeaders(const HttpRequestHeaders& headers);
-  virtual void Start();
-  virtual void Kill();
-  virtual LoadState GetLoadState() const;
-  virtual uint64 GetUploadProgress() const;
-  virtual bool GetMimeType(std::string* mime_type) const;
-  virtual bool GetCharset(std::string* charset);
-  virtual void GetResponseInfo(HttpResponseInfo* info);
-  virtual bool GetResponseCookies(std::vector<std::string>* cookies);
-  virtual int GetResponseCode() const;
-  virtual Filter* SetupFilter() const;
-  virtual bool IsSafeRedirect(const GURL& location);
-  virtual bool NeedsAuth();
-  virtual void GetAuthChallengeInfo(scoped_refptr<AuthChallengeInfo>*);
+  virtual void SetUpload(UploadData* upload) OVERRIDE;
+  virtual void SetExtraRequestHeaders(
+      const HttpRequestHeaders& headers) OVERRIDE;
+  virtual void Start() OVERRIDE;
+  virtual void Kill() OVERRIDE;
+  virtual LoadState GetLoadState() const OVERRIDE;
+  virtual uint64 GetUploadProgress() const OVERRIDE;
+  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
+  virtual bool GetCharset(std::string* charset) OVERRIDE;
+  virtual void GetResponseInfo(HttpResponseInfo* info) OVERRIDE;
+  virtual bool GetResponseCookies(std::vector<std::string>* cookies) OVERRIDE;
+  virtual int GetResponseCode() const OVERRIDE;
+  virtual Filter* SetupFilter() const OVERRIDE;
+  virtual bool IsSafeRedirect(const GURL& location) OVERRIDE;
+  virtual bool NeedsAuth() OVERRIDE;
+  virtual void GetAuthChallengeInfo(scoped_refptr<AuthChallengeInfo>*) OVERRIDE;
   virtual void SetAuth(const string16& username,
-                       const string16& password);
-  virtual void CancelAuth();
-  virtual void ContinueWithCertificate(X509Certificate* client_cert);
-  virtual void ContinueDespiteLastError();
-  virtual bool ReadRawData(IOBuffer* buf, int buf_size, int *bytes_read);
-  virtual void StopCaching();
-  virtual HostPortPair GetSocketAddress() const;
+                       const string16& password) OVERRIDE;
+  virtual void CancelAuth() OVERRIDE;
+  virtual void ContinueWithCertificate(X509Certificate* client_cert) OVERRIDE;
+  virtual void ContinueDespiteLastError() OVERRIDE;
+  virtual bool ReadRawData(IOBuffer* buf, int buf_size,
+                           int *bytes_read) OVERRIDE;
+  virtual void StopCaching() OVERRIDE;
+  virtual void DoneReading() OVERRIDE;
+  virtual HostPortPair GetSocketAddress() const OVERRIDE;
 
   // Keep a reference to the url request context to be sure it's not deleted
   // before us.
@@ -163,6 +167,7 @@ class URLRequestHttpJob : public URLRequestJob {
   void DoneWithRequest(CompletionCause reason);
 
   // Callback functions for Cookie Monster
+  void CheckCookiePolicyAndLoad(const CookieList& cookie_list);
   void OnCookiesLoaded(
       std::string* cookie_line,
       std::vector<CookieStore::CookieInfo>* cookie_infos);
@@ -196,9 +201,6 @@ class URLRequestHttpJob : public URLRequestJob {
   // those packets may possibly have had their time of arrival recorded).
   int64 bytes_observed_in_packets_;
 
-  // Arrival times for some of the first few packets.
-  std::vector<base::Time> packet_times_;
-
   // The request time may not be available when we are being destroyed, so we
   // snapshot it early on.
   base::Time request_time_snapshot_;
@@ -210,12 +212,9 @@ class URLRequestHttpJob : public URLRequestJob {
   // The start time for the job, ignoring re-starts.
   base::TimeTicks start_time_;
 
-  // The count of the number of packets, some of which may not have been timed.
-  // We're ignoring overflow, as 1430 x 2^31 is a LOT of bytes.
-  int observed_packet_count_;
-
   scoped_ptr<HttpFilterContext> filter_context_;
   ScopedRunnableMethodFactory<URLRequestHttpJob> method_factory_;
+  base::WeakPtrFactory<URLRequestHttpJob> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestHttpJob);
 };

@@ -41,7 +41,6 @@
 #include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/preconnect.h"
-#include "chrome/browser/plugin_updater.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile.h"
@@ -51,6 +50,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/net/gaia/gaia_auth_consumer.h"
+#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/pref_names.h"
@@ -101,13 +102,13 @@ class StartSyncOnUIThreadTask : public Task {
   // Task override.
   virtual void Run() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
+    LoginUtils::Get()->FetchCookies(ProfileManager::GetDefaultProfile(),
+                                    credentials_);
     LoginUtils::Get()->StartSync(ProfileManager::GetDefaultProfile(),
                                    credentials_);
   }
 
  private:
-  Profile* user_profile_;
   GaiaAuthConsumer::ClientLoginResult credentials_;
 };
 
@@ -129,11 +130,19 @@ class TransferDefaultCookiesOnIOThreadTask : public Task {
         auth_context_->GetURLRequestContext()->cookie_store();
     net::CookieMonster* default_monster = default_store->GetCookieMonster();
     default_monster->SetKeepExpiredCookies();
-    net::CookieStore* new_store =
-        new_context_->GetURLRequestContext()->cookie_store();
-    net::CookieMonster* new_monster = new_store->GetCookieMonster();
+    default_monster->GetAllCookiesAsync(
+        base::Bind(
+            &TransferDefaultCookiesOnIOThreadTask::InitializeCookieMonster,
+            base::Unretained(this)));
+  }
 
-    if (!new_monster->InitializeFrom(default_monster)) {
+  void InitializeCookieMonster(const net::CookieList& cookies) {
+     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+     net::CookieStore* new_store =
+       new_context_->GetURLRequestContext()->cookie_store();
+     net::CookieMonster* new_monster = new_store->GetCookieMonster();
+
+    if (!new_monster->InitializeFrom(cookies)) {
       LOG(WARNING) << "Failed initial cookie transfer.";
     }
   }
@@ -152,21 +161,31 @@ class OAuthLoginVerifier : public GaiaOAuthConsumer {
  public:
   OAuthLoginVerifier(Profile* user_profile,
                      const std::string& oauth1_token,
-                     const std::string& oauth1_secret)
+                     const std::string& oauth1_secret,
+                     const std::string& username)
       : oauth_fetcher_(this,
             user_profile->GetOffTheRecordProfile()->GetRequestContext(),
             user_profile->GetOffTheRecordProfile(),
             kServiceScopeChromeOS),
         oauth1_token_(oauth1_token),
-        oauth1_secret_(oauth1_secret) {
+        oauth1_secret_(oauth1_secret),
+        username_(username) {
   }
   virtual ~OAuthLoginVerifier() {}
 
   void Start() {
-    oauth_fetcher_.StartOAuthLogin(GaiaConstants::kChromeOSSource,
-                                   GaiaConstants::kContactsService,
-                                   oauth1_token_,
-                                   oauth1_secret_);
+    if (oauth1_token_.empty() || oauth1_secret_.empty()) {
+      // Empty OAuth1 access token or secret probably means that we are
+      // dealing with a legacy ChromeOS account. This should be treated as
+      // invalid/expired token.
+      OnOAuthLoginFailure(GoogleServiceAuthError(
+          GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
+    } else {
+      oauth_fetcher_.StartOAuthLogin(GaiaConstants::kChromeOSSource,
+                                     GaiaConstants::kContactsService,
+                                     oauth1_token_,
+                                     oauth1_secret_);
+    }
   }
 
   // GaiaOAuthConsumer implementation:
@@ -175,28 +194,97 @@ class OAuthLoginVerifier : public GaiaOAuthConsumer {
                                    const std::string& auth) OVERRIDE {
     GaiaAuthConsumer::ClientLoginResult credentials(sid,
       lsid, auth, std::string());
+    UserManager::Get()->set_offline_login(false);
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                             new StartSyncOnUIThreadTask(credentials));
   }
+
   virtual void OnOAuthLoginFailure(
       const GoogleServiceAuthError& error) OVERRIDE {
-    LOG(WARNING) << "Failed to verify OAuth1 access tokens.";
+    LOG(WARNING) << "Failed to verify OAuth1 access tokens,"
+                 << " error.state=" << error.state();
+
+    // Mark this account's OAuth token state as invalid if the failure is not
+    // caused by network error.
+    if (error.state() != GoogleServiceAuthError::CONNECTION_FAILED) {
+      UserManager::Get()->SaveUserOAuthStatus(username_,
+            UserManager::OAUTH_TOKEN_STATUS_INVALID);
+    } else {
+      UserManager::Get()->set_offline_login(true);
+    }
   }
 
  private:
   GaiaOAuthFetcher oauth_fetcher_;
   std::string oauth1_token_;
   std::string oauth1_secret_;
+  std::string username_;
 
   DISALLOW_COPY_AND_ASSIGN(OAuthLoginVerifier);
 };
 
+// Verifies OAuth1 access token by performing OAuthLogin.
+class UserSessionCookieFetcher : public GaiaAuthConsumer {
+ public:
+  explicit UserSessionCookieFetcher(Profile* user_profile)
+      : gaia_fetcher_(this,
+                      std::string(GaiaConstants::kChromeOSSource),
+                      user_profile->GetRequestContext()) {
+  }
+  virtual ~UserSessionCookieFetcher() {}
+
+  void Start(const GaiaAuthConsumer::ClientLoginResult& credentials) {
+    gaia_fetcher_.StartIssueAuthToken(credentials.sid, credentials.lsid,
+                                      GaiaConstants::kGaiaService);
+  }
+
+  // GaiaAuthConsumer overrides.
+  virtual void OnIssueAuthTokenSuccess(const std::string& service,
+                                       const std::string& auth_token) OVERRIDE {
+    gaia_fetcher_.StartMergeSession(auth_token);
+  }
+
+  virtual void OnIssueAuthTokenFailure(const std::string& service,
+      const GoogleServiceAuthError& error) OVERRIDE {
+    LOG(WARNING) << "Failed IssueAuthToken request,"
+                 << " error.state=" << error.state();
+    HandlerGaiaAuthError(error);
+    delete this;
+  }
+
+  virtual void OnMergeSessionSuccess(const std::string& data) OVERRIDE {
+    VLOG(1) << "MergeSession successful.";
+    delete this;
+  }
+
+  virtual void OnMergeSessionFailure(
+      const GoogleServiceAuthError& error) OVERRIDE {
+    LOG(WARNING) << "Failed MergeSession request,"
+                 << " error.state=" << error.state();
+    HandlerGaiaAuthError(error);
+    delete this;
+  }
+
+ private:
+  void HandlerGaiaAuthError(const GoogleServiceAuthError& error) {
+    // Mark this account's login state as offline if we encountered a network
+    // error. That will make us verify user OAuth token and try to fetch session
+    // cookies again once we detect that the machine comes online.
+    if (error.state() == GoogleServiceAuthError::CONNECTION_FAILED)
+      UserManager::Get()->set_offline_login(true);
+  }
+
+  GaiaAuthFetcher gaia_fetcher_;
+  DISALLOW_COPY_AND_ASSIGN(UserSessionCookieFetcher);
+};
+
+
 // Fetches an OAuth token and initializes user policy with it.
 class PolicyOAuthFetcher : public GaiaOAuthConsumer {
  public:
-  explicit PolicyOAuthFetcher(Profile* profile,
-                              const std::string& oauth1_token,
-                              const std::string& oauth1_secret)
+  PolicyOAuthFetcher(Profile* profile,
+                     const std::string& oauth1_token,
+                     const std::string& oauth1_secret)
       : oauth_fetcher_(this,
                        profile->GetRequestContext(),
                        profile,
@@ -209,12 +297,14 @@ class PolicyOAuthFetcher : public GaiaOAuthConsumer {
   virtual ~PolicyOAuthFetcher() {}
 
   void Start() {
-    oauth_fetcher_.StartOAuthWrapBridge(oauth1_token_, oauth1_secret_, "3600",
+    oauth_fetcher_.StartOAuthWrapBridge(
+        oauth1_token_, oauth1_secret_, GaiaConstants::kGaiaOAuthDuration,
         std::string(kServiceScopeChromeOSDeviceManagement));
   }
 
   // GaiaOAuthConsumer implementation:
   virtual void OnOAuthWrapBridgeSuccess(
+      const std::string& service_name,
       const std::string& token,
       const std::string& expires_in) OVERRIDE {
     policy::BrowserPolicyConnector* browser_policy_connector =
@@ -223,8 +313,9 @@ class PolicyOAuthFetcher : public GaiaOAuthConsumer {
   }
 
   virtual void OnOAuthWrapBridgeFailure(
+      const std::string& service_name,
       const GoogleServiceAuthError& error) OVERRIDE {
-    LOG(WARNING) << "Failed to get OAuth access token.";
+    LOG(WARNING) << "Failed to get OAuth access token for " << service_name;
   }
 
  private:
@@ -238,7 +329,8 @@ class PolicyOAuthFetcher : public GaiaOAuthConsumer {
 
 class LoginUtilsImpl : public LoginUtils,
                        public ProfileManagerObserver,
-                       public GaiaOAuthConsumer {
+                       public GaiaOAuthConsumer,
+                       public net::NetworkChangeNotifier::OnlineStateObserver {
  public:
   LoginUtilsImpl()
       : background_view_(NULL),
@@ -246,6 +338,11 @@ class LoginUtilsImpl : public LoginUtils,
         using_oauth_(false),
         has_cookies_(false),
         delegate_(NULL) {
+    net::NetworkChangeNotifier::AddOnlineStateObserver(this);
+  }
+
+  virtual ~LoginUtilsImpl() {
+    net::NetworkChangeNotifier::RemoveOnlineStateObserver(this);
   }
 
   virtual void PrepareProfile(
@@ -256,6 +353,8 @@ class LoginUtilsImpl : public LoginUtils,
       bool using_oauth,
       bool has_cookies,
       LoginUtils::Delegate* delegate) OVERRIDE;
+
+  virtual void DelegateDeleted(Delegate* delegate) OVERRIDE;
 
   // Invoked after the tmpfs is successfully mounted.
   // Launches a browser in the incognito mode.
@@ -312,11 +411,15 @@ class LoginUtilsImpl : public LoginUtils,
 
   // GaiaOAuthConsumer overrides.
   virtual void OnGetOAuthTokenSuccess(const std::string& oauth_token) OVERRIDE;
-  virtual void OnGetOAuthTokenFailure() OVERRIDE;
+  virtual void OnGetOAuthTokenFailure(
+    const GoogleServiceAuthError& error) OVERRIDE;
   virtual void OnOAuthGetAccessTokenSuccess(const std::string& token,
                                             const std::string& secret) OVERRIDE;
   virtual void OnOAuthGetAccessTokenFailure(
       const GoogleServiceAuthError& error) OVERRIDE;
+
+  // net::NetworkChangeNotifier::OnlineStateObserver overrides.
+  virtual void OnOnlineStateChanged(bool online) OVERRIDE;
 
  protected:
   virtual std::string GetOffTheRecordCommandLine(
@@ -334,6 +437,11 @@ class LoginUtilsImpl : public LoginUtils,
   void StoreOAuth1AccessToken(Profile* user_profile,
                               const std::string& token,
                               const std::string& secret);
+
+  // Verifies OAuth1 token by doing OAuthLogin and fetching credentials.
+  void VerifyOAuth1AccessToken(Profile* user_profile,
+                               const std::string& token,
+                               const std::string& secret);
 
   // Fetch all secondary (OAuth2) tokens given OAuth1 access |token| and
   // |secret|.
@@ -437,9 +545,18 @@ void LoginUtilsImpl::PrepareProfile(
   has_cookies_ = has_cookies;
   delegate_ = delegate;
 
+  // Initialize user policy before the profile is created so the profile
+  // initialization code sees the policy settings.
+  g_browser_process->browser_policy_connector()->InitializeUserPolicy(username);
+
   // The default profile will have been changed because the ProfileManager
   // will process the notification that the UserManager sends out.
   ProfileManager::CreateDefaultProfileAsync(this);
+}
+
+void LoginUtilsImpl::DelegateDeleted(Delegate* delegate) {
+  if (delegate_ == delegate)
+    delegate_ = NULL;
 }
 
 void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
@@ -462,12 +579,10 @@ void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
   policy::BrowserPolicyConnector* browser_policy_connector =
       g_browser_process->browser_policy_connector();
 
-  TokenService* token_service_for_policy = NULL;
-  if (!using_oauth_)
-    token_service_for_policy = user_profile->GetTokenService();
-  browser_policy_connector->InitializeUserPolicy(username_,
-                                                 user_profile->GetPath(),
-                                                 token_service_for_policy);
+  if (!using_oauth_) {
+    browser_policy_connector->SetUserPolicyTokenService(
+        user_profile->GetTokenService());
+  }
 
   BootTimesLoader* btl = BootTimesLoader::Get();
   btl->AddLoginTimeMarker("UserProfileGotten", false);
@@ -487,11 +602,13 @@ void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
     }
     std::string oauth1_token;
     std::string oauth1_secret;
-    if (!has_cookies_ &&
-        ReadOAuth1AccessToken(user_profile, &oauth1_token, &oauth1_secret)) {
-      // Verify OAuth access token when we find it in the profile and no cookies
-      // available because user is not signing in using extension.
-      authenticator_->VerifyOAuth1AccessToken(oauth1_token, oauth1_secret);
+    if (ReadOAuth1AccessToken(user_profile, &oauth1_token, &oauth1_secret) ||
+        !has_cookies_) {
+      // Verify OAuth access token when we find it in the profile and always if
+      // if we don't have cookies.
+      // TODO(xiyuan): Change back to use authenticator to verify token when
+      // we support Gaia in lock screen.
+      VerifyOAuth1AccessToken(user_profile, oauth1_token, oauth1_secret);
     } else {
       // If we don't have it, fetch OAuth1 access token.
       // Use off-the-record profile that was used for this step. It should
@@ -519,14 +636,6 @@ void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
     authenticator_ = NULL;
   }
 
-  // Init extension event routers; this normally happens in browser_main
-  // but on Chrome OS it has to be deferred until the user finishes
-  // logging in and the profile is not OTR.
-  if (user_profile->GetExtensionService() &&
-      user_profile->GetExtensionService()->extensions_enabled()) {
-    user_profile->GetExtensionService()->InitEventRouters();
-  }
-
   // Supply credentials for sync and others to use. Load tokens from disk.
   if (!using_oauth_) {
     // For existing users there's usually a pending online auth request.
@@ -549,9 +658,6 @@ void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
     }
     btl->AddLoginTimeMarker("TPMOwn-End", false);
   }
-
-  // Enable/disable plugins based on user preferences.
-  PluginUpdater::GetInstance()->SetProfile(user_profile);
 
   // We suck. This is a hack since we do not have the enterprise feature
   // done yet to pull down policies from the domain admin. We'll take this
@@ -589,16 +695,21 @@ void LoginUtilsImpl::FetchOAuth1AccessToken(Profile* auth_profile) {
   oauth_fetcher_->StartGetOAuthTokenRequest();
 }
 
-void LoginUtilsImpl::FetchCookies(
-    Profile* profile,
+void LoginUtilsImpl::FetchCookies(Profile* user_profile,
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
-  // Take the credentials passed in and try to exchange them for
-  // full-fledged Google authentication cookies.  This is
-  // best-effort; it's possible that we'll fail due to network
-  // troubles or some such.
-  // CookieFetcher will delete itself once done.
-  CookieFetcher* cf = new CookieFetcher(profile);
-  cf->AttemptFetch(credentials.data);
+  if (!using_oauth_) {
+    // Take the credentials passed in and try to exchange them for
+    // full-fledged Google authentication cookies.  This is
+    // best-effort; it's possible that we'll fail due to network
+    // troubles or some such.
+    // CookieFetcher will delete itself once done.
+    CookieFetcher* cf = new CookieFetcher(user_profile);
+    cf->AttemptFetch(credentials.data);
+  } else {
+    UserSessionCookieFetcher* cf =
+        new UserSessionCookieFetcher(user_profile);
+    cf->Start(credentials);
+  }
 }
 
 void LoginUtilsImpl::StartTokenServices(Profile* user_profile) {
@@ -622,7 +733,7 @@ void LoginUtilsImpl::StartSync(
     // Set the CrOS user by getting this constructor run with the
     // user's email on first retrieval.
     user_profile->GetProfileSyncService(username_)->SetPassphrase(
-        password_, false, true);
+        password_, false);
     username_ = "";
     password_ = "";
 
@@ -687,7 +798,7 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
     CommandLine* command_line) {
   static const char* kForwardSwitches[] = {
       switches::kEnableLogging,
-      switches::kEnableAcceleratedPlugins,
+      switches::kDisableAcceleratedPlugins,
       switches::kUseGL,
       switches::kUserDataDir,
       switches::kScrollPixels,
@@ -866,7 +977,8 @@ void LoginUtilsImpl::OnGetOAuthTokenSuccess(const std::string& oauth_token) {
   VLOG(1) << "Got OAuth request token!";
 }
 
-void LoginUtilsImpl::OnGetOAuthTokenFailure() {
+void LoginUtilsImpl::OnGetOAuthTokenFailure(
+    const GoogleServiceAuthError& error) {
   // TODO(zelidrag): Pop up sync setup UI here?
   LOG(WARNING) << "Failed fetching OAuth request token";
 }
@@ -877,11 +989,8 @@ void LoginUtilsImpl::OnOAuthGetAccessTokenSuccess(const std::string& token,
   Profile* user_profile = ProfileManager::GetDefaultProfile();
   StoreOAuth1AccessToken(user_profile, token, secret);
 
-  // Kick off verification of OAuth1 access token (via OAuthLogin), this should
-  // let us fetch credentials that will be used to initialize sync engine.
-  FetchCredentials(user_profile, token, secret);
-
-  FetchSecondaryTokens(user_profile->GetOffTheRecordProfile(), token, secret);
+  // Verify OAuth1 token by doing OAuthLogin and fetching credentials.
+  VerifyOAuth1AccessToken(user_profile, token, secret);
 }
 
 void LoginUtilsImpl::FetchSecondaryTokens(Profile* offrecord_profile,
@@ -895,12 +1004,19 @@ void LoginUtilsImpl::FetchSecondaryTokens(Profile* offrecord_profile,
 bool LoginUtilsImpl::ReadOAuth1AccessToken(Profile* user_profile,
                                            std::string* token,
                                            std::string* secret) {
+  // Skip reading oauth token if user does not have a valid status.
+  if (UserManager::Get()->GetUserOAuthStatus(username_) !=
+      UserManager::OAUTH_TOKEN_STATUS_VALID) {
+    return false;
+  }
+
   PrefService* pref_service = user_profile->GetPrefs();
   std::string encoded_token = pref_service->GetString(prefs::kOAuth1Token);
   std::string encoded_secret = pref_service->GetString(prefs::kOAuth1Secret);
   if (!encoded_token.length() || !encoded_secret.length())
     return false;
 
+  DCHECK(authenticator_.get());
   std::string decoded_token = authenticator_->DecryptToken(encoded_token);
   std::string decoded_secret = authenticator_->DecryptToken(encoded_secret);
   if (!decoded_token.length() || !decoded_secret.length())
@@ -927,12 +1043,23 @@ void LoginUtilsImpl::StoreOAuth1AccessToken(Profile* user_profile,
       UserManager::OAUTH_TOKEN_STATUS_VALID);
 }
 
+void LoginUtilsImpl::VerifyOAuth1AccessToken(Profile* user_profile,
+                                             const std::string& token,
+                                             const std::string& secret) {
+  // Kick off verification of OAuth1 access token (via OAuthLogin), this should
+  // let us fetch credentials that will be used to initialize sync engine.
+  FetchCredentials(user_profile, token, secret);
+
+  FetchSecondaryTokens(user_profile->GetOffTheRecordProfile(), token, secret);
+}
+
 void LoginUtilsImpl::FetchCredentials(Profile* user_profile,
                                       const std::string& token,
                                       const std::string& secret) {
   oauth_login_verifier_.reset(new OAuthLoginVerifier(user_profile,
                                                      token,
-                                                     secret));
+                                                     secret,
+                                                     username_));
   oauth_login_verifier_->Start();
 }
 
@@ -961,6 +1088,22 @@ void LoginUtilsImpl::OnOAuthGetAccessTokenFailure(
     const GoogleServiceAuthError& error) {
   // TODO(zelidrag): Pop up sync setup UI here?
   LOG(WARNING) << "Failed fetching OAuth v1 token, error: " << error.state();
+}
+
+void LoginUtilsImpl::OnOnlineStateChanged(bool online) {
+  // If we come online for the first time after successful offline login,
+  // we need to kick of OAuth token verification process again.
+  if (UserManager::Get()->user_is_logged_in() &&
+      UserManager::Get()->offline_login() && online) {
+    if (!authenticator_.get())
+      CreateAuthenticator(NULL);
+    std::string oauth1_token;
+    std::string oauth1_secret;
+    Profile* user_profile = ProfileManager::GetDefaultProfile();
+    if (ReadOAuth1AccessToken(user_profile, &oauth1_token, &oauth1_secret))
+      VerifyOAuth1AccessToken(user_profile, oauth1_token, oauth1_secret);
+    authenticator_ = NULL;
+  }
 }
 
 LoginUtils* LoginUtils::Get() {

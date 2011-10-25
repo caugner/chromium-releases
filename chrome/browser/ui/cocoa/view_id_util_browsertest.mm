@@ -6,6 +6,7 @@
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -16,8 +17,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 
 // Basic sanity check of ViewID use on the mac.
 class ViewIDTest : public InProcessBrowserTest {
@@ -62,8 +63,8 @@ class ViewIDTest : public InProcessBrowserTest {
       if (!bookmark_model->IsLoaded())
         ui_test_utils::WaitForBookmarkModelToLoad(bookmark_model);
 
-      bookmark_model->SetURLStarred(GURL(chrome::kAboutBlankURL),
-                                    UTF8ToUTF16("about"), true);
+      bookmark_utils::AddIfNotBookmarked(
+          bookmark_model, GURL(chrome::kAboutBlankURL), ASCIIToUTF16("about"));
     }
 
     for (int i = VIEW_ID_TOOLBAR; i < VIEW_ID_PREDEFINED_COUNT; ++i) {
@@ -95,7 +96,8 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
   ASSERT_NO_FATAL_FAILURE(DoTest());
 }
 
-IN_PROC_BROWSER_TEST_F(ViewIDTest, Fullscreen) {
+// Flaky on Mac: http://crbug.com/90557.
+IN_PROC_BROWSER_TEST_F(ViewIDTest, FLAKY_Fullscreen) {
   browser()->window()->SetFullscreen(true);
   ASSERT_NO_FATAL_FAILURE(DoTest());
 }

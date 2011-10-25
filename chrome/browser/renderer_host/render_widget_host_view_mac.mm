@@ -2,12 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
+
 #include <QuartzCore/QuartzCore.h>
 
-#include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
+#include <cmath>
 
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
 #include "base/metrics/histogram.h"
@@ -16,15 +19,20 @@
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/browser_trial.h"
+#include "chrome/browser/mac/closure_blocks_leopard_compat.h"
 #import "chrome/browser/renderer_host/accelerated_plugin_view_mac.h"
 #import "chrome/browser/renderer_host/text_input_client_mac.h"
-#include "chrome/browser/spellchecker_platform_engine.h"
+#include "chrome/browser/spellchecker/spellchecker_platform_engine.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#import "chrome/browser/ui/cocoa/history_overlay_controller.h"
 #import "chrome/browser/ui/cocoa/rwhvm_editcommand_helper.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/spellcheck_messages.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/debugger/devtools_client_host.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/plugin_process_host.h"
@@ -41,9 +49,12 @@
 #include "skia/ext/platform_canvas.h"
 #import "third_party/mozilla/ComplexTextInputPanel.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebInputEventFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebInputEventFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebScreenInfoFactory.h"
 #include "ui/gfx/point.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/surface/io_surface_support_mac.h"
 #include "webkit/glue/webaccessibility.h"
 #include "webkit/plugins/npapi/webplugin.h"
@@ -52,6 +63,67 @@ using WebKit::WebInputEvent;
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseEvent;
 using WebKit::WebMouseWheelEvent;
+using WebKit::WebGestureEvent;
+
+// Declare things that are part of the 10.6 SDK.
+#if !defined(MAC_OS_X_VERSION_10_6) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
+enum {
+  NSEventTypeBeginGesture     = 19,
+  NSEventTypeEndGesture       = 20
+};
+
+enum {
+  NSEventMaskBeginGesture     = 1 << NSEventTypeBeginGesture,
+  NSEventMaskEndGesture       = 1 << NSEventTypeEndGesture,
+};
+
+typedef unsigned long long NSEventMask;
+
+@class NSTextInputContext;
+@interface NSResponder (AppKitDetails)
+- (NSTextInputContext*)inputContext;
+@end
+#endif  // 10.6
+
+// Declare things that are part of the 10.7 SDK.
+#if !defined(MAC_OS_X_VERSION_10_7) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
+enum {
+  NSEventPhaseNone        = 0, // event not associated with a phase.
+  NSEventPhaseBegan       = 0x1 << 0,
+  NSEventPhaseStationary  = 0x1 << 1,
+  NSEventPhaseChanged     = 0x1 << 2,
+  NSEventPhaseEnded       = 0x1 << 3,
+  NSEventPhaseCancelled   = 0x1 << 4,
+};
+typedef NSUInteger NSEventPhase;
+
+enum {
+  NSEventSwipeTrackingLockDirection = 0x1 << 0,
+  NSEventSwipeTrackingClampGestureAmount = 0x1 << 1
+};
+typedef NSUInteger NSEventSwipeTrackingOptions;
+
+@interface NSEvent (LionAPI)
++ (BOOL)isSwipeTrackingFromScrollEventsEnabled;
+
++ (id)addLocalMonitorForEventsMatchingMask:(NSEventMask)mask
+                                   handler:(NSEvent* (^)(NSEvent*))block;
++ (void)removeMonitor:(id)eventMonitor;
+
+- (NSEventPhase)phase;
+- (CGFloat)scrollingDeltaX;
+- (CGFloat)scrollingDeltaY;
+- (void)trackSwipeEventWithOptions:(NSEventSwipeTrackingOptions)options
+          dampenAmountThresholdMin:(CGFloat)minDampenThreshold
+                               max:(CGFloat)maxDampenThreshold
+                      usingHandler:(void (^)(CGFloat gestureAmount,
+                                             NSEventPhase phase,
+                                             BOOL isComplete,
+                                             BOOL *stop))trackingHandler;
+@end
+#endif  // 10.7
 
 static inline int ToWebKitModifiers(NSUInteger flags) {
   int modifiers = 0;
@@ -74,14 +146,8 @@ static inline int ToWebKitModifiers(NSUInteger flags) {
 - (void)checkForPluginImeCancellation;
 @end
 
-// This API was published since 10.6. Provide the declaration so it can be
-// // called below when building with the 10.5 SDK.
-#if MAC_OS_X_VERSION_MAX_ALLOWED <= MAC_OS_X_VERSION_10_5
-@class NSTextInputContext;
-@interface NSResponder (AppKitDetails)
-- (NSTextInputContext *)inputContext;
-@end
-#endif
+// NSEvent subtype for scroll gestures events.
+static const short kIOHIDEventTypeScroll = 6;
 
 namespace {
 
@@ -188,7 +254,7 @@ class SpellCheckRenderViewObserver : public RenderViewHostObserver {
 
  private:
   // RenderViewHostObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) {
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(SpellCheckRenderViewObserver, message)
       IPC_MESSAGE_HANDLER(SpellCheckHostMsg_ToggleSpellCheck,
@@ -213,16 +279,6 @@ class SpellCheckRenderViewObserver : public RenderViewHostObserver {
 RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
     RenderWidgetHost* widget) {
   return new RenderWidgetHostViewMac(widget);
-}
-
-// static
-RenderWidgetHostView* RenderWidgetHostView::
-    GetRenderWidgetHostViewFromNativeView(gfx::NativeView native_view) {
-  // TODO(port)
-  NOTREACHED() <<
-      "RenderWidgetHostView::GetRenderWidgetHostViewFromNativeView not"
-      "implemented";
-  return NULL;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -374,8 +430,12 @@ void RenderWidgetHostViewMac::SetBounds(const gfx::Rect& rect) {
   }
 }
 
-gfx::NativeView RenderWidgetHostViewMac::GetNativeView() {
+gfx::NativeView RenderWidgetHostViewMac::GetNativeView() const {
   return native_view();
+}
+
+gfx::NativeViewId RenderWidgetHostViewMac::GetNativeViewId() const {
+  return reinterpret_cast<gfx::NativeViewId>(native_view());
 }
 
 void RenderWidgetHostViewMac::MovePluginWindows(
@@ -644,7 +704,9 @@ void RenderWidgetHostViewMac::SetTooltipText(const std::wstring& tooltip_text) {
 // which implements NSServicesRequests protocol.
 //
 void RenderWidgetHostViewMac::SelectionChanged(const std::string& text,
-                                               const ui::Range& range) {
+                                               const ui::Range& range,
+                                               const gfx::Point& start,
+                                               const gfx::Point& end) {
   selected_text_ = text;
   [cocoa_view_ setSelectedRange:range.ToNSRange()];
   // Updaes markedRange when there is no marked text so that retrieving
@@ -862,23 +924,27 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
     int32 route_id,
     int gpu_host_id,
     uint64 swap_buffers_count) {
-  TRACE_EVENT0("browser",
-      "RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped");
+  TRACE_EVENT1("browser",
+      "RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped",
+      "frameNum", swap_buffers_count);
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   AcceleratedPluginView* view = ViewForPluginWindowHandle(window);
   DCHECK(view);
-  if (!view)
-    return;
+  if (view) {
+    plugin_container_manager_.SetSurfaceWasPaintedTo(window, surface_id);
 
-  plugin_container_manager_.SetSurfaceWasPaintedTo(window, surface_id);
+    // The surface is hidden until its first paint, to not show gargabe.
+    if (plugin_container_manager_.SurfaceShouldBeVisible(window))
+      [view setHidden:NO];
+    [view drawView];
+  }
 
-  // The surface is hidden until its first paint, to not show gargabe.
-  if (plugin_container_manager_.SurfaceShouldBeVisible(window))
-    [view setHidden:NO];
-  [view updateSwapBuffersCount:swap_buffers_count
-                  fromRenderer:renderer_id
-                       routeId:route_id
-                     gpuHostId:gpu_host_id];
+  if (renderer_id != 0 || route_id != 0) {
+    AcknowledgeSwapBuffers(renderer_id,
+                           route_id,
+                           gpu_host_id,
+                           swap_buffers_count);
+  }
 }
 
 void RenderWidgetHostViewMac::UpdateRootGpuViewVisibility(
@@ -967,6 +1033,22 @@ void RenderWidgetHostViewMac::GpuRenderingStateDidChange() {
   }
 }
 
+void RenderWidgetHostViewMac::GetScreenInfo(WebKit::WebScreenInfo* results) {
+  *results = WebKit::WebScreenInfoFactory::screenInfo(GetNativeView());
+}
+
+gfx::Rect RenderWidgetHostViewMac::GetRootWindowBounds() {
+  // TODO(shess): In case of !window, the view has been removed from
+  // the view hierarchy because the tab isn't main.  Could retrieve
+  // the information from the main tab for our window.
+  NSWindow* enclosing_window = ApparentWindowForView(cocoa_view_);
+  if (!enclosing_window)
+    return gfx::Rect();
+
+  NSRect bounds = [enclosing_window frame];
+  return FlipNSRectToRectScreen(bounds);
+}
+
 gfx::PluginWindowHandle RenderWidgetHostViewMac::GetCompositingSurface() {
   if (compositing_surface_ == gfx::kNullPluginWindow)
     compositing_surface_ = AllocateFakePluginWindowHandle(
@@ -1003,6 +1085,22 @@ void RenderWidgetHostViewMac::SetVisuallyDeemphasized(const SkColor* color,
   // This is not used on mac.
 }
 
+void RenderWidgetHostViewMac::UnhandledWheelEvent(
+    const WebKit::WebMouseWheelEvent& event) {
+  [cocoa_view_ setGotUnhandledWheelEvent:YES];
+}
+
+void RenderWidgetHostViewMac::SetHasHorizontalScrollbar(
+    bool has_horizontal_scrollbar) {
+  [cocoa_view_ setHasHorizontalScrollbar:has_horizontal_scrollbar];
+}
+
+void RenderWidgetHostViewMac::SetScrollOffsetPinning(
+    bool is_pinned_to_left, bool is_pinned_to_right) {
+  [cocoa_view_ setPinnedLeft:is_pinned_to_left];
+  [cocoa_view_ setPinnedRight:is_pinned_to_right];
+}
+
 void RenderWidgetHostViewMac::ShutdownHost() {
   shutdown_factory_.RevokeAll();
   render_widget_host_->Shutdown();
@@ -1011,18 +1109,6 @@ void RenderWidgetHostViewMac::ShutdownHost() {
 
 gfx::Rect RenderWidgetHostViewMac::GetViewCocoaBounds() const {
   return gfx::Rect(NSRectToCGRect([cocoa_view_ bounds]));
-}
-
-gfx::Rect RenderWidgetHostViewMac::GetRootWindowRect() {
-  // TODO(shess): In case of !window, the view has been removed from
-  // the view hierarchy because the tab isn't main.  Could retrieve
-  // the information from the main tab for our window.
-  NSWindow* enclosing_window = ApparentWindowForView(cocoa_view_);
-  if (!enclosing_window)
-    return gfx::Rect();
-
-  NSRect bounds = [enclosing_window frame];
-  return FlipNSRectToRectScreen(bounds);
 }
 
 void RenderWidgetHostViewMac::SetActive(bool active) {
@@ -1046,7 +1132,7 @@ void RenderWidgetHostViewMac::SetWindowVisibility(bool visible) {
 void RenderWidgetHostViewMac::WindowFrameChanged() {
   if (render_widget_host_) {
     render_widget_host_->Send(new ViewMsg_WindowFrameChanged(
-        render_widget_host_->routing_id(), GetRootWindowRect(),
+        render_widget_host_->routing_id(), GetRootWindowBounds(),
         GetViewBounds()));
   }
 }
@@ -1061,12 +1147,9 @@ void RenderWidgetHostViewMac::SetBackground(const SkBitmap& background) {
 void RenderWidgetHostViewMac::OnAccessibilityNotifications(
     const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
   if (!browser_accessibility_manager_.get()) {
-    // Use empty document to process notifications
-    webkit_glue::WebAccessibility empty_document;
-    empty_document.role = WebAccessibility::ROLE_WEB_AREA;
-    empty_document.state = 0;
     browser_accessibility_manager_.reset(
-        BrowserAccessibilityManager::Create(cocoa_view_, empty_document, NULL));
+        BrowserAccessibilityManager::CreateEmptyDocument(
+            cocoa_view_, static_cast<WebAccessibility::State>(0), NULL));
   }
   browser_accessibility_manager_->OnAccessibilityNotifications(params);
 }
@@ -1089,6 +1172,10 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
 @synthesize selectedRange = selectedRange_;
 @synthesize markedRange = markedRange_;
+@synthesize gotUnhandledWheelEvent = gotUnhandledWheelEvent_;
+@synthesize isPinnedLeft = isPinnedLeft_;
+@synthesize isPinnedRight = isPinnedRight_;
+@synthesize hasHorizontalScrollbar = hasHorizontalScrollbar_;
 
 - (id)initWithRenderWidgetHostViewMac:(RenderWidgetHostViewMac*)r {
   self = [super initWithFrame:NSZeroRect];
@@ -1212,6 +1299,45 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     renderWidgetHostView_->render_widget_host_->ForwardMouseEvent(event);
 }
 
+- (void)shortCircuitEndGestureWithEvent:(NSEvent*)event {
+  DCHECK(base::mac::IsOSLionOrLater());
+
+  if ([event subtype] != kIOHIDEventTypeScroll)
+    return;
+
+  if (renderWidgetHostView_->render_widget_host_) {
+    WebGestureEvent webEvent = WebInputEventFactory::gestureEvent(event, self);
+    renderWidgetHostView_->render_widget_host_->ForwardGestureEvent(webEvent);
+  }
+
+  if (endGestureMonitor_) {
+    [NSEvent removeMonitor:endGestureMonitor_];
+    endGestureMonitor_ = nil;
+  }
+}
+
+- (void)beginGestureWithEvent:(NSEvent*)event {
+  if (base::mac::IsOSLionOrLater() &&
+      [event subtype] == kIOHIDEventTypeScroll &&
+      renderWidgetHostView_->render_widget_host_) {
+    WebGestureEvent webEvent = WebInputEventFactory::gestureEvent(event, self);
+    renderWidgetHostView_->render_widget_host_->ForwardGestureEvent(webEvent);
+
+    // Use an NSEvent monitor to get the gesture-end event. This is done in
+    // order to get the gesture-end, even if the view is not visible, which is
+    // not the case with -endGestureWithEvent:. An example scenario where this
+    // may happen is switching tabs while a gesture is in progress.
+    if (!endGestureMonitor_) {
+      endGestureMonitor_ =
+          [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskEndGesture
+              handler:^(NSEvent* blockEvent) {
+                        [self shortCircuitEndGestureWithEvent:blockEvent];
+                        return blockEvent;
+                      }];
+    }
+  }
+}
+
 - (BOOL)performKeyEquivalent:(NSEvent*)theEvent {
   // |performKeyEquivalent:| is sent to all views of a window, not only down the
   // responder chain (cf. "Handling Key Equivalents" in
@@ -1248,7 +1374,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   // to us instead of doing key view loop control, ctrl-left/right get handled
   // correctly, etc.
   // (However, there are still some keys that Cocoa swallows, e.g. the key
-  // equivalent that Cocoa uses for toggling the input langauge. In this case,
+  // equivalent that Cocoa uses for toggling the input language. In this case,
   // that's actually a good thing, though -- see http://crbug.com/26115 .)
   return YES;
 }
@@ -1459,8 +1585,115 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     [NSCursor setHiddenUntilMouseMoves:YES];
 }
 
-- (void)scrollWheel:(NSEvent *)theEvent {
+// Checks if |theEvent| should trigger history swiping, and if so, does
+// history swiping. Returns YES if the event was consumed or NO if it should
+// be passed on to the renderer.
+- (BOOL)maybeHandleHistorySwiping:(NSEvent*)theEvent {
+  BOOL canUseLionApis = [theEvent respondsToSelector:@selector(phase)];
+  if (!canUseLionApis)
+    return NO;
+
+  // Scroll events always go to the web first, and can only trigger history
+  // swiping if they come back unhandled.
+  if ([theEvent phase] == NSEventPhaseBegan) {
+    totalScrollDelta_ = NSZeroSize;
+    gotUnhandledWheelEvent_ = false;
+  }
+
+  RenderWidgetHost* rwh = renderWidgetHostView_->render_widget_host_;
+  if (!rwh || !rwh->IsRenderView())
+    return NO;
+  bool isDevtoolsRwhv = DevToolsClientHost::FindOwnerClientHost(
+      static_cast<RenderViewHost*>(rwh)) != NULL;
+  if (isDevtoolsRwhv)
+    return NO;
+
+  if (gotUnhandledWheelEvent_ &&
+      [NSEvent isSwipeTrackingFromScrollEventsEnabled] &&
+      [theEvent phase] == NSEventPhaseChanged) {
+    totalScrollDelta_.width += [theEvent scrollingDeltaX];
+    totalScrollDelta_.height += [theEvent scrollingDeltaY];
+
+    bool isHorizontalGesture =
+      std::abs(totalScrollDelta_.width) > std::abs(totalScrollDelta_.height);
+
+    bool isRightScroll = [theEvent scrollingDeltaX] < 0;
+    bool goForward = isRightScroll;
+    bool canGoBack = false, canGoForward = false;
+    if (Browser* browser = BrowserList::GetLastActive()) {
+      canGoBack = browser->CanGoBack();
+      canGoForward = browser->CanGoForward();
+    }
+
+    // If "forward" is inactive and the user rubber-bands to the right,
+    // "isPinnedLeft" will be false.  When the user then rubber-bands to the
+    // left in the same gesture, that should trigger history immediately if
+    // there's no scrollbar, hence the check for hasHorizontalScrollbar_.
+    bool shouldGoBack = isPinnedLeft_ || !hasHorizontalScrollbar_;
+    bool shouldGoForward = isPinnedRight_ || !hasHorizontalScrollbar_;
+    if (isHorizontalGesture &&
+        // For normal pages, canGoBack/canGoForward are checked in the renderer
+        // (ChromeClientImpl::shouldRubberBand()), when it decides if it should
+        // rubberband or send back an event unhandled. The check here is
+        // required for pages with an onmousewheel handler that doesn't call
+        // preventDefault().
+        ((shouldGoBack && canGoBack && !isRightScroll) ||
+         (shouldGoForward && canGoForward && isRightScroll))) {
+
+      // Released by the tracking handler once the gesture is complete.
+      HistoryOverlayController* historyOverlay =
+          [[HistoryOverlayController alloc]
+            initForMode:goForward ? kHistoryOverlayModeForward :
+                                    kHistoryOverlayModeBack];
+
+      // The way this api works: gestureAmount is between -1 and 1 (float).  If
+      // the user does the gesture for more than about 25% (i.e. < -0.25 or >
+      // 0.25) and then lets go, it is accepted, we get a NSEventPhaseEnded,
+      // and after that the block is called with amounts animating towards 1
+      // (or -1, depending on the direction).  If the user lets go below that
+      // threshold, we get NSEventPhaseCancelled, and the amount animates
+      // toward 0.  When gestureAmount has reaches its final value, i.e. the
+      // track animation is done, the handler is called with |isComplete| set
+      // to |YES|.
+      [theEvent trackSwipeEventWithOptions:0
+                  dampenAmountThresholdMin:-1
+                                       max:1
+                              usingHandler:^(CGFloat gestureAmount,
+                                             NSEventPhase phase,
+                                             BOOL isComplete,
+                                             BOOL *stop) {
+          if (phase == NSEventPhaseBegan) {
+            [historyOverlay showPanelForWindow:[self window]];
+            return;
+          }
+
+          // |gestureAmount| obeys -[NSEvent isDirectionInvertedFromDevice]
+          // automatically.
+          Browser* browser = BrowserList::GetLastActive();
+          if (phase == NSEventPhaseEnded && browser) {
+            if (goForward)
+              browser->GoForward(CURRENT_TAB);
+            else
+              browser->GoBack(CURRENT_TAB);
+          }
+
+          [historyOverlay setProgress:gestureAmount];
+          if (isComplete) {
+            [historyOverlay dismiss];
+            [historyOverlay release];
+          }
+        }];
+      return YES;
+    }
+  }
+  return NO;
+}
+
+- (void)scrollWheel:(NSEvent*)theEvent {
   [self cancelChildPopups];
+
+  if ([self maybeHandleHistorySwiping:theEvent])
+    return;
 
   const WebMouseWheelEvent& event =
       WebInputEventFactory::mouseWheelEvent(theEvent, self);
@@ -1588,9 +1821,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
           renderWidgetHostView_->ViewForPluginWindowHandle(root_handle);
       DCHECK(view);
       if (view && ![view isHidden]) {
-        NSRect frame = [view frame];
-        frame.size = [view cachedSize];
-        gpuRect = [self flipNSRectToRect:frame];
+        gpuRect = [self flipNSRectToRect:[view frame]];
       }
     }
 
@@ -1889,7 +2120,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   // Performs a right click copying WebKit's
   // accessibilityPerformShowMenuAction.
   NSPoint location = [self accessibilityPointInScreen:accessibility];
-NSSize size = [[accessibility size] sizeValue];
+  NSSize size = [[accessibility size] sizeValue];
   location = [[self window] convertScreenToBase:location];
   location.x += size.width/2;
   location.y += size.height/2;
@@ -2087,7 +2318,7 @@ static const NSTrackingRectTag kTrackingRectTag = 0xBADFACE;
 - (void)_sendToolTipMouseExited {
   // Nothing matters except window, trackingNumber, and userData.
   int windowNumber = [[self window] windowNumber];
-  NSEvent *fakeEvent = [NSEvent enterExitEventWithType:NSMouseExited
+  NSEvent* fakeEvent = [NSEvent enterExitEventWithType:NSMouseExited
                                               location:NSMakePoint(0, 0)
                                          modifierFlags:0
                                              timestamp:0
@@ -2103,7 +2334,7 @@ static const NSTrackingRectTag kTrackingRectTag = 0xBADFACE;
 - (void)_sendToolTipMouseEntered {
   // Nothing matters except window, trackingNumber, and userData.
   int windowNumber = [[self window] windowNumber];
-  NSEvent *fakeEvent = [NSEvent enterExitEventWithType:NSMouseEntered
+  NSEvent* fakeEvent = [NSEvent enterExitEventWithType:NSMouseEntered
                                               location:NSMakePoint(0, 0)
                                          modifierFlags:0
                                              timestamp:0
@@ -2151,7 +2382,7 @@ static const NSTrackingRectTag kTrackingRectTag = 0xBADFACE;
   return [[toolTip_ copy] autorelease];
 }
 
-// Below is our NSTextInput implementation.
+// Below is our NSTextInputClient implementation.
 //
 // When WebHTMLView receives a NSKeyDown event, WebHTMLView calls the following
 // functions to process this event.
@@ -2232,14 +2463,18 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   thePoint = [self convertPoint:thePoint fromView:nil];
   thePoint.y = NSHeight([self frame]) - thePoint.y;
 
-  NSUInteger point =
+  NSUInteger index =
       TextInputClientMac::GetInstance()->GetCharacterIndexAtPoint(
           renderWidgetHostView_->render_widget_host_,
           gfx::Point(thePoint.x, thePoint.y));
-  return point;
+  return index;
 }
 
-- (NSRect)firstRectForCharacterRange:(NSRange)theRange {
+- (NSRect)firstRectForCharacterRange:(NSRange)theRange
+                         actualRange:(NSRangePointer)actualRange {
+  // TODO(thakis): Pipe |actualRange| through TextInputClientMac machinery.
+  if (actualRange)
+    *actualRange = theRange;
   NSRect rect = TextInputClientMac::GetInstance()->GetFirstRectForRange(
       renderWidgetHostView_->render_widget_host_, theRange);
 
@@ -2264,7 +2499,11 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   return hasMarkedText_ ? markedRange_ : NSMakeRange(NSNotFound, 0);
 }
 
-- (NSAttributedString*)attributedSubstringFromRange:(NSRange)range {
+- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range
+    actualRange:(NSRangePointer)actualRange {
+  // TODO(thakis): Pipe |actualRange| through TextInputClientMac machinery.
+  if (actualRange)
+    *actualRange = range;
   NSAttributedString* str =
       TextInputClientMac::GetInstance()->GetAttributedSubstringFromRange(
           renderWidgetHostView_->render_widget_host_, range);
@@ -2319,10 +2558,13 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
     unmarkTextCalled_ = YES;
 }
 
-- (void)setMarkedText:(id)string selectedRange:(NSRange)newSelRange {
+- (void)setMarkedText:(id)string selectedRange:(NSRange)newSelRange
+                              replacementRange:(NSRange)replacementRange {
   // An input method updates the composition string.
   // We send the given text and range to the renderer so it can update the
   // composition node of WebKit.
+  // TODO(suzhe): It's hard for us to support replacementRange without accessing
+  // the full web content.
   BOOL isAttributedString = [string isKindOfClass:[NSAttributedString class]];
   NSString* im_text = isAttributedString ? [string string] : string;
   int length = [im_text length];
@@ -2380,7 +2622,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   }
 }
 
-- (void)insertText:(id)string {
+- (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
   // An input method has characters to be inserted.
   // Same as Linux, Mac calls this method not only:
   // * when an input method finishs composing text, but also;
@@ -2394,6 +2636,9 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   // Text inserting might be initiated by other source instead of keyboard
   // events, such as the Characters dialog. In this case the text should be
   // sent as an input method event as well.
+  // TODO(suzhe): It's hard for us to support replacementRange without accessing
+  // the full web content. NOTE: If someone adds support for this, make sure
+  // it works with the default range passed in by -insertText: below.
   BOOL isAttributedString = [string isKindOfClass:[NSAttributedString class]];
   NSString* im_text = isAttributedString ? [string string] : string;
   if (handlingKeyDown_) {
@@ -2405,6 +2650,12 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 
   // Inserting text will delete all marked text automatically.
   hasMarkedText_ = NO;
+}
+
+- (void)insertText:(id)string {
+  // This is a method on NSTextInput, not NSTextInputClient. But on 10.5, this
+  // gets called anyway. Forward to the right method. http://crbug.com/47890
+  [self insertText:string replacementRange:NSMakeRange(0, 0)];
 }
 
 - (void)viewDidMoveToWindow {

@@ -20,6 +20,7 @@ class CookieInfoView;
 class CookiesTreeModel;
 class InfobarView;
 class TabContents;
+class TabContentsWrapper;
 
 namespace views {
 class Label;
@@ -32,7 +33,7 @@ class TextButton;
 // cookies of the current tab contents. To display the dialog, invoke
 // ShowCollectedCookiesDialog() on the delegate of the tab contents wrapper's
 // content settings tab helper.
-class CollectedCookiesWin : public ConstrainedDialogDelegate,
+class CollectedCookiesWin : public views::DialogDelegate,
                             public NotificationObserver,
                             public views::ButtonListener,
                             public views::TabbedPaneListener,
@@ -41,9 +42,9 @@ class CollectedCookiesWin : public ConstrainedDialogDelegate,
  public:
   // Use BrowserWindow::ShowCollectedCookiesDialog to show.
   CollectedCookiesWin(gfx::NativeWindow parent_window,
-                      TabContents* tab_contents);
+                      TabContentsWrapper* wrapper);
 
-  // ConstrainedDialogDelegate:
+  // views::DialogDelegate:
   virtual std::wstring GetWindowTitle() const OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
   virtual std::wstring GetDialogButtonLabel(
@@ -89,7 +90,7 @@ class CollectedCookiesWin : public ConstrainedDialogDelegate,
   ConstrainedWindow* window_;
 
   // The tab contents.
-  TabContents* tab_contents_;
+  TabContentsWrapper* wrapper_;
 
   // Assorted views.
   views::Label* allowed_label_;

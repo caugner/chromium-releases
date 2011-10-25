@@ -15,7 +15,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/webdata/autofill_entry.h"
@@ -26,6 +25,7 @@ class ProfileSyncService;
 class WebDatabase;
 
 namespace sync_api {
+class ReadNode;
 class WriteTransaction;
 }
 
@@ -54,10 +54,10 @@ class AutofillModelAssociator
   // PerDataTypeAssociatorInterface implementation.
   //
   // Iterates through the sync model looking for matched pairs of items.
-  virtual bool AssociateModels();
+  virtual bool AssociateModels(SyncError* error);
 
   // Clears all associations.
-  virtual bool DisassociateModels();
+  virtual bool DisassociateModels(SyncError* error);
 
   // The has_nodes out param is true if the sync model has nodes other
   // than the permanent tagged nodes.

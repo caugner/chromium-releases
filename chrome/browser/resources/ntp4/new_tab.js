@@ -56,10 +56,10 @@ cr.define('ntp4', function() {
   var dotList;
 
   /**
-   * A list of all 'dots' elements.
-   * @type {!NodeList|undefined}
+   * The 'notification-container' element.
+   * @type {!Element|undefined}
    */
-  var dots;
+  var notificationContainer;
 
   /**
    * The left and right paging buttons.
@@ -102,6 +102,22 @@ cr.define('ntp4', function() {
   var localStrings = new LocalStrings;
 
   /**
+   * If non-null, this is the ID of the app to highlight to the user the next
+   * time getAppsCallback runs. "Highlight" in this case means to switch to
+   * the page and run the new tile animation.
+   * @type {String}
+   */
+  var highlightAppId = null;
+
+  /**
+   * If non-null, an info bubble for showing messages to the user. It points at
+   * the Most Visited label, and is used to draw more attention to the
+   * navigation dot UI.
+   * @type {!Element|undefined}
+   */
+  var infoBubble;
+
+  /**
    * The time in milliseconds for most transitions.  This should match what's
    * in new_tab.css.  Unfortunately there's no better way to try to time
    * something to occur until after a transition has completed.
@@ -127,10 +143,6 @@ cr.define('ntp4', function() {
     shownPage = templateData['shown_page_type'];
     shownPageIndex = templateData['shown_page_index'];
 
-    document.querySelector('#notification button').onclick = function(e) {
-      hideNotification();
-    };
-
     // Request data on the apps so we can fill them in.
     // Note that this is kicked off asynchronously.  'getAppsCallback' will be
     // invoked at some point after this function returns.
@@ -141,15 +153,17 @@ cr.define('ntp4', function() {
       e.preventDefault();
     }, true);
 
-    dots = dotList.getElementsByClassName('dot');
     tilePages = pageList.getElementsByClassName('tile-page');
     appsPages = pageList.getElementsByClassName('apps-page');
+
     pageSwitcherStart = getRequiredElement('page-switcher-start');
-    pageSwitcherStart.addEventListener('click', onPageSwitcherClicked);
-    pageSwitcherStart.addEventListener('mousewheel', onPageSwitcherScrolled);
+    ntp4.initializePageSwitcher(pageSwitcherStart);
     pageSwitcherEnd = getRequiredElement('page-switcher-end');
-    pageSwitcherEnd.addEventListener('click', onPageSwitcherClicked);
-    pageSwitcherEnd.addEventListener('mousewheel', onPageSwitcherScrolled);
+    ntp4.initializePageSwitcher(pageSwitcherEnd);
+
+    notificationContainer = getRequiredElement('notification-container');
+    notificationContainer.addEventListener(
+        'webkitTransitionEnd', onNotificationTransitionEnd);
 
     // Initialize the cardSlider without any cards at the moment
     var sliderFrame = getRequiredElement('card-slider-frame');
@@ -159,6 +173,7 @@ cr.define('ntp4', function() {
     // Ensure the slider is resized appropriately with the window
     window.addEventListener('resize', function() {
       cardSlider.resize(sliderFrame.offsetWidth);
+      updatePageSwitchers();
     });
 
     // Handle the page being changed
@@ -173,9 +188,36 @@ cr.define('ntp4', function() {
     appendTilePage(mostVisitedPage, localStrings.getString('mostvisited'));
     chrome.send('getMostVisited');
 
+    if (localStrings.getString('ntp4_intro_message')) {
+      infoBubble = new cr.ui.Bubble;
+      infoBubble.anchorNode = mostVisitedPage.navigationDot;
+
+      var bubbleContent = $('ntp4-intro-bubble-contents');
+      infoBubble.content = bubbleContent;
+      bubbleContent.hidden = false;
+
+      infoBubble.handleCloseEvent = function() {
+        this.hide();
+        chrome.send('introMessageDismissed');
+      }
+      infoBubble.querySelector('a').onclick = infoBubble.hide.bind(infoBubble);
+
+      infoBubble.show();
+      chrome.send('introMessageSeen');
+    }
+
+    /*
     bookmarksPage = new ntp4.BookmarksPage();
     appendTilePage(bookmarksPage, localStrings.getString('bookmarksPage'));
-    chrome.send('getBookmarks');
+    chrome.send('getBookmarksData');
+    */
+
+    var serverpromo = localStrings.getString('serverpromo');
+    if (serverpromo) {
+      showNotification(parseHtmlSubset(serverpromo), [], function() {
+        chrome.send('closePromo');
+      }, 60000);
+    }
   }
 
   /**
@@ -218,6 +260,8 @@ cr.define('ntp4', function() {
    *        applications.
    */
   function getAppsCallback(data) {
+    var startTime = Date.now();
+
     // Clear any existing apps pages and dots.
     // TODO(rbyers): It might be nice to preserve animation of dots after an
     // uninstall. Could we re-use the existing page and dot elements?  It seems
@@ -255,6 +299,9 @@ cr.define('ntp4', function() {
       return a.app_launch_index - b.app_launch_index;
     });
 
+    // An app to animate (in case it was just installed).
+    var highlightApp;
+
     // Add the apps, creating pages as necessary
     for (var i = 0; i < apps.length; i++) {
       var app = apps[i];
@@ -265,48 +312,86 @@ cr.define('ntp4', function() {
           pageName = pageNames[appsPages.length];
 
         var origPageCount = appsPages.length;
-        appendAppsPage(new ntp4.AppsPage(), pageName);
+        appendTilePage(new ntp4.AppsPage(), pageName, bookmarksPage);
         // Confirm that appsPages is a live object, updated when a new page is
         // added (otherwise we'd have an infinite loop)
         assert(appsPages.length == origPageCount + 1, 'expected new page');
       }
 
-      appsPages[pageIndex].appendApp(app);
+      if (app.id == highlightAppId)
+        highlightApp = app;
+      else
+        appsPages[pageIndex].appendApp(app);
     }
 
-    // Tell the slider about the pages
+    ntp4.AppsPage.setPromo(data.showPromo ? data : null);
+
+    // Tell the slider about the pages.
     updateSliderCards();
 
-    // Mark the current page
-    dots[cardSlider.currentCard].classList.add('selected');
+    if (highlightApp)
+      appAdded(highlightApp, true);
+
+    // Mark the current page.
+    cardSlider.currentCardValue.navigationDot.classList.add('selected');
+    logEvent('apps.layout: ' + (Date.now() - startTime));
+
+    document.documentElement.classList.remove('starting-up');
   }
 
   /**
-   * Called by chrome when a new app has been added to chrome.
-   * @param {Object} app A data structure full of relevant information for the
-   *     app.
-   */
-  function appAdded(app) {
-    var pageIndex = app.page_index || 0;
-    assert(pageIndex == 0, 'pageIndex != 0 not implemented');
-
-    var page = appsPages[pageIndex];
-    cardSlider.selectCardByValue(page);
-    page.appendApp(app, true);
-  }
-
-  /**
-   * Called by chrome when an existing app has been removed/uninstalled from
-   * chrome.
+   * Called by chrome when a new app has been added to chrome or has been
+   * enabled if previously disabled.
    * @param {Object} appData A data structure full of relevant information for
    *     the app.
    */
-  function appRemoved(appData) {
+  function appAdded(appData, opt_highlight) {
+    if (appData.id == highlightAppId) {
+      opt_highlight = true;
+      highlightAppId = null;
+    }
+
+    var pageIndex = appData.page_index || 0;
+
+    if (pageIndex >= appsPages.length) {
+      while (pageIndex >= appsPages.length) {
+        appendTilePage(new ntp4.AppsPage(), '', bookmarksPage);
+      }
+      updateSliderCards();
+    }
+
+    var page = appsPages[pageIndex];
+    var app = $(appData.id);
+    if (app)
+      app.replaceAppData(appData);
+    else
+      page.appendApp(appData, opt_highlight);
+  }
+
+  /**
+   * Sets that an app should be highlighted if it is added. Called right before
+   * appAdded for new installs.
+   */
+  function setAppToBeHighlighted(appId) {
+    highlightAppId = appId;
+  }
+
+  /**
+   * Called by chrome when an existing app has been disabled or
+   * removed/uninstalled from chrome.
+   * @param {Object} appData A data structure full of relevant information for
+   *     the app.
+   * @param {boolean} isUninstall True if the app is being uninstalled;
+   *     false if the app is being disabled.
+   */
+  function appRemoved(appData, isUninstall) {
     var app = $(appData.id);
     assert(app, 'trying to remove an app that doesn\'t exist');
 
-    var tile = findAncestorByClass(app, 'tile');
-    tile.doRemove();
+    if (!isUninstall)
+      app.replaceAppData(appData);
+    else
+      app.remove();
   }
 
   /**
@@ -324,15 +409,21 @@ cr.define('ntp4', function() {
    *     applications.
    */
   function appsPrefChangeCallback(data) {
-    var apps = document.querySelectorAll('.app');
+    for (var i = 0; i < data.apps.length; ++i) {
+      $(data.apps[i].id).appData = data.apps[i];
+    }
+  }
 
-    // This is an expensive operation. We minimize how frequently it's called
-    // by only calling it for changes across different instances of the NTP
-    // (i.e. two separate tabs both showing NTP).
-    for (var j = 0; j < data.apps.length; ++j) {
-      for (var i = 0; i < apps.length; ++i) {
-        if (data.apps[j]['id'] == apps[i].appId)
-          apps[i].appData = data.apps[j];
+  /**
+   * Listener for offline status change events. Updates apps that are
+   * not offline-enabled to be grayscale if the browser is offline.
+   */
+  function updateOfflineEnabledApps() {
+    var apps = document.querySelectorAll('.app');
+    for (var i = 0; i < apps.length; ++i) {
+      if (apps[i].appData.enabled && !apps[i].appData.offline_enabled) {
+        apps[i].setIcon();
+        apps[i].loadIcon();
       }
     }
   }
@@ -346,18 +437,22 @@ cr.define('ntp4', function() {
    * the Slider knows about the new elements.
    */
   function updateSliderCards() {
-    var pageNo = cardSlider.currentCard;
-    if (pageNo >= tilePages.length)
-      pageNo = tilePages.length - 1;
-    var pageArray = [];
-    for (var i = 0; i < tilePages.length; i++)
-      pageArray[i] = tilePages[i];
-    cardSlider.setCards(pageArray, pageNo);
-
-    if (shownPage == templateData['most_visited_page_id'])
-      cardSlider.selectCardByValue(mostVisitedPage);
-    else if (shownPage == templateData['apps_page_id'])
-      cardSlider.selectCardByValue(appsPages[shownPageIndex]);
+    var pageNo = Math.min(cardSlider.currentCard, tilePages.length - 1);
+    cardSlider.setCards(Array.prototype.slice.call(tilePages), pageNo);
+    switch (shownPage) {
+      case templateData['bookmarks_page_id']:
+      case templateData['apps_page_id']:
+        cardSlider.selectCardByValue(
+            appsPages[Math.min(shownPageIndex, appsPages.length - 1)]);
+        break;
+/*
+        cardSlider.selectCardByValue(bookmarksPage);
+        break;
+*/
+      case templateData['most_visited_page_id']:
+        cardSlider.selectCardByValue(mostVisitedPage);
+        break;
+    }
   }
 
   /**
@@ -365,37 +460,24 @@ cr.define('ntp4', function() {
    *
    * @param {TilePage} page The page element.
    * @param {string} title The title of the tile page.
+   * @param {TilePage} refNode Optional reference node to insert in front of.
+   * When refNode is falsey, |page| will just be appended to the end of the
+   * page list.
    */
-  function appendTilePage(page, title) {
-    pageList.appendChild(page);
+  function appendTilePage(page, title, refNode) {
+    // When refNode is falsey, insertBefore acts just like appendChild.
+    pageList.insertBefore(page, refNode);
 
+    // If we're appending an AppsPage and it's a temporary page, animate it.
+    var animate = page instanceof ntp4.AppsPage &&
+                  page.classList.contains('temporary');
     // Make a deep copy of the dot template to add a new one.
-    var newDot = new ntp4.NavDot(page, title, false, false);
-
-    dotList.appendChild(newDot);
-    page.navigationDot = newDot;
-
-    eventTracker.add(page, 'pagelayout', onPageLayout);
-  }
-
-  /**
-   * Appends an apps page into the page list.  This is like appendTilePage,
-   * but takes care to insert before the Bookmarks page.
-   * TODO(csilv): Refactor this function with appendTilePage to avoid
-   *              duplication.
-   *
-   * @param {AppsPage} page The page element.
-   * @param {string} title The title of the tile page.
-   */
-  function appendAppsPage(page, title) {
-    pageList.insertBefore(page, bookmarksPage);
-
-    // Make a deep copy of the dot template to add a new one.
-    var animate = page.classList.contains('temporary');
     var newDot = new ntp4.NavDot(page, title, true, animate);
-
-    dotList.insertBefore(newDot, bookmarksPage.navigationDot);
     page.navigationDot = newDot;
+    dotList.insertBefore(newDot, refNode ? refNode.navigationDot : null);
+
+    if (infoBubble)
+      window.setTimeout(infoBubble.reposition.bind(infoBubble), 0);
 
     eventTracker.add(page, 'pagelayout', onPageLayout);
   }
@@ -416,16 +498,20 @@ cr.define('ntp4', function() {
   }
 
   /**
-   * Invoked whenever some app is grabbed
-   * @param {Grabber.Event} e The Grabber Grab event.
+   * Called whenever tiles should be re-arranging themselves out of the way of a
+   * moving or insert tile.
    */
-  function enterRearrangeMode(e) {
+  function enterRearrangeMode() {
     var tempPage = new ntp4.AppsPage();
     tempPage.classList.add('temporary');
-    appendAppsPage(tempPage, '');
+    appendTilePage(tempPage, '', bookmarksPage);
+    var tempIndex = Array.prototype.indexOf.call(tilePages, tempPage);
+    if (cardSlider.currentCard >= tempIndex)
+      cardSlider.currentCard += 1;
     updateSliderCards();
 
-    $('footer').classList.add('dragging-mode');
+    if (ntp4.getCurrentlyDraggingTile().firstChild.canBeRemoved())
+      $('footer').classList.add('showing-trash-mode');
   }
 
   /**
@@ -435,8 +521,11 @@ cr.define('ntp4', function() {
   function leaveRearrangeMode(e) {
     var tempPage = document.querySelector('.tile-page.temporary');
     var dot = tempPage.navigationDot;
-    if (!tempPage.tileCount) {
+    if (!tempPage.tileCount && tempPage != cardSlider.currentCardValue) {
       dot.animateRemove();
+      var tempIndex = Array.prototype.indexOf.call(tilePages, tempPage);
+      if (cardSlider.currentCard > tempIndex)
+        cardSlider.currentCard -= 1;
       tempPage.parentNode.removeChild(tempPage);
       updateSliderCards();
     } else {
@@ -444,7 +533,7 @@ cr.define('ntp4', function() {
       saveAppPageName(tempPage, '');
     }
 
-    $('footer').classList.remove('dragging-mode');
+    $('footer').classList.remove('showing-trash-mode');
   }
 
   /**
@@ -501,6 +590,12 @@ cr.define('ntp4', function() {
     pageSwitcherRight.style.width =
         (page.sideMargin - scrollbarWidth + 13) + 'px';
     pageSwitcherRight.style.right = scrollbarWidth + 'px';
+
+    var offsetTop = page.querySelector('.tile-page-content').offsetTop + 'px';
+    pageSwitcherLeft.style.top = offsetTop;
+    pageSwitcherRight.style.top = offsetTop;
+    pageSwitcherLeft.style.paddingBottom = offsetTop;
+    pageSwitcherRight.style.paddingBottom = offsetTop;
   }
 
   /**
@@ -552,46 +647,60 @@ cr.define('ntp4', function() {
    */
   function cardChangedHandler(e) {
     var page = e.cardSlider.currentCardValue;
-    if (page.classList.contains('apps-page')) {
-      shownPage = templateData['apps_page_id'];
-      shownPageIndex = getAppsPageIndex(page);
-    } else if (page.classList.contains('most-visited-page')) {
-      shownPage = templateData['most_visited_page_id'];
-      shownPageIndex = 0;
-    } else if (page.classList.contains('bookmarks-page')) {
-      shownPage = templateData['bookmarks_page_id'];
-      shownPageIndex = 0;
-    } else {
-      console.error('unknown page selected');
+
+    // Don't change shownPage until startup is done (and page changes actually
+    // reflect user actions).
+    if (!document.documentElement.classList.contains('starting-up')) {
+      if (page.classList.contains('apps-page')) {
+        shownPage = templateData['apps_page_id'];
+        shownPageIndex = getAppsPageIndex(page);
+      } else if (page.classList.contains('most-visited-page')) {
+        shownPage = templateData['most_visited_page_id'];
+        shownPageIndex = 0;
+      } else if (page.classList.contains('bookmarks-page')) {
+        shownPage = templateData['bookmarks_page_id'];
+        shownPageIndex = 0;
+      } else {
+        console.error('unknown page selected');
+      }
+      chrome.send('pageSelected', [shownPage, shownPageIndex]);
     }
-    chrome.send('pageSelected', [shownPage, shownPageIndex]);
 
     // Update the active dot
     var curDot = dotList.getElementsByClassName('selected')[0];
     if (curDot)
       curDot.classList.remove('selected');
-    var newPageIndex = e.cardSlider.currentCard;
-    dots[newPageIndex].classList.add('selected');
+    page.navigationDot.classList.add('selected');
     updatePageSwitchers();
   }
 
   /**
-    * Timeout ID.
-    * @type {number}
-    */
+   * Timeout ID.
+   * @type {number}
+   */
   var notificationTimeout_ = 0;
 
   /**
    * Shows the notification bubble.
-   * @param {string} text The notification message.
+   * @param {string|Node} message The notification message or node to use as
+   *     message.
    * @param {Array.<{text: string, action: function()}>} links An array of
    *     records describing the links in the notification. Each record should
    *     have a 'text' attribute (the display string) and an 'action' attribute
    *     (a function to run when the link is activated).
+   * @param {Function} opt_closeHandler The callback invoked if the user
+   *     manually dismisses the notification.
    */
-  function showNotification(text, links) {
+  function showNotification(message, links, opt_closeHandler, opt_timeout) {
     window.clearTimeout(notificationTimeout_);
-    document.querySelector('#notification > span').textContent = text;
+
+    var span = document.querySelector('#notification > span');
+    if (typeof message == 'string') {
+      span.textContent = message;
+    } else {
+      span.textContent = '';  // Remove all children.
+      span.appendChild(message);
+    }
 
     var linksBin = $('notificationLinks');
     linksBin.textContent = '';
@@ -609,15 +718,32 @@ cr.define('ntp4', function() {
       linksBin.appendChild(link);
     }
 
-    $('notification').classList.remove('inactive');
-    notificationTimeout_ = window.setTimeout(hideNotification, 10000);
+    document.querySelector('#notification button').onclick = function(e) {
+      if (opt_closeHandler)
+        opt_closeHandler();
+      hideNotification();
+    };
+
+    var timeout = opt_timeout || 10000;
+    notificationContainer.hidden = false;
+    notificationContainer.classList.remove('inactive');
+    notificationTimeout_ = window.setTimeout(hideNotification, timeout);
   }
 
   /**
    * Hide the notification bubble.
    */
   function hideNotification() {
-    $('notification').classList.add('inactive');
+    notificationContainer.classList.add('inactive');
+  }
+
+  /**
+   * When done fading out, set hidden to true so the notification can't be
+   * tabbed to or clicked.
+   */
+  function onNotificationTransitionEnd(e) {
+    if (notificationContainer.classList.contains('inactive'));
+      notificationContainer.hidden = true;
   }
 
   function setRecentlyClosedTabs(dataItems) {
@@ -626,6 +752,10 @@ cr.define('ntp4', function() {
 
   function setMostVisitedPages(data, hasBlacklistedUrls) {
     mostVisitedPage.data = data;
+  }
+
+  function setBookmarksData(data) {
+    bookmarksPage.data = data;
   }
 
   /**
@@ -648,24 +778,76 @@ cr.define('ntp4', function() {
     chrome.send('saveAppPageName', [name, index]);
   }
 
+  function bookmarkImportBegan() {
+    bookmarksPage.bookmarkImportBegan.apply(bookmarksPage, arguments);
+  }
+
+  function bookmarkImportEnded() {
+    bookmarksPage.bookmarkImportEnded.apply(bookmarksPage, arguments);
+  }
+
+  function bookmarkNodeAdded() {
+    bookmarksPage.bookmarkNodeAdded.apply(bookmarksPage, arguments);
+  }
+
+  function bookmarkNodeChanged() {
+    bookmarksPage.bookmarkNodeChanged.apply(bookmarksPage, arguments);
+  }
+
+  function bookmarkNodeChildrenReordered() {
+    bookmarksPage.bookmarkNodeChildrenReordered.apply(bookmarksPage, arguments);
+  }
+
+  function bookmarkNodeMoved() {
+    bookmarksPage.bookmarkNodeMoved.apply(bookmarksPage, arguments);
+  }
+
+  function bookmarkNodeRemoved() {
+    bookmarksPage.bookmarkNodeRemoved.apply(bookmarksPage, arguments);
+  }
+
+  /**
+   * Set the dominant color for a node. This will be called in response to
+   * getFaviconDominantColor. The node represented by |id| better have a setter
+   * for stripeColor.
+   * @param {string} id The ID of a node.
+   * @param {string} color The color represented as a CSS string.
+   */
+  function setStripeColor(id, color) {
+    var node = $(id);
+    if (node)
+      node.stripeColor = color;
+  };
+
   // Return an object with all the exports
   return {
-    assert: assert,
     appAdded: appAdded,
     appRemoved: appRemoved,
     appsPrefChangeCallback: appsPrefChangeCallback,
+    assert: assert,
+    bookmarkImportBegan: bookmarkImportBegan,
+    bookmarkImportEnded: bookmarkImportEnded,
+    bookmarkNodeAdded: bookmarkNodeAdded,
+    bookmarkNodeChanged: bookmarkNodeChanged,
+    bookmarkNodeChildrenReordered: bookmarkNodeChildrenReordered,
+    bookmarkNodeMoved: bookmarkNodeMoved,
+    bookmarkNodeRemoved: bookmarkNodeRemoved,
     enterRearrangeMode: enterRearrangeMode,
     getAppsCallback: getAppsCallback,
-    getCardSlider: getCardSlider,
     getAppsPageIndex: getAppsPageIndex,
+    getCardSlider: getCardSlider,
     initialize: initialize,
     isRTL: isRTL,
     leaveRearrangeMode: leaveRearrangeMode,
-    themeChanged: themeChanged,
-    setRecentlyClosedTabs: setRecentlyClosedTabs,
+    saveAppPageName: saveAppPageName,
+    setAppToBeHighlighted: setAppToBeHighlighted,
+    setBookmarksData: setBookmarksData,
     setMostVisitedPages: setMostVisitedPages,
+    setRecentlyClosedTabs: setRecentlyClosedTabs,
+    setStripeColor: setStripeColor,
     showNotification: showNotification,
-    saveAppPageName: saveAppPageName
+    themeChanged: themeChanged,
+    updateOfflineEnabledApps: updateOfflineEnabledApps
   };
 });
 
@@ -680,3 +862,5 @@ var recentlyClosedTabs = ntp4.setRecentlyClosedTabs;
 var setMostVisitedPages = ntp4.setMostVisitedPages;
 
 document.addEventListener('DOMContentLoaded', ntp4.initialize);
+window.addEventListener('online', ntp4.updateOfflineEnabledApps);
+window.addEventListener('offline', ntp4.updateOfflineEnabledApps);

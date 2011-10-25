@@ -7,6 +7,7 @@
 #include <set>
 
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
@@ -41,7 +42,6 @@
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/dom_operation_notification_details.h"
-#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -79,6 +79,7 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/debugger/devtools_manager.h"
+#include "content/browser/download/download_item.h"
 #include "content/browser/download/save_package.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -95,9 +96,13 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
 #include "webkit/glue/password_form.h"
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/external_tab_container_win.h"
 #endif  // defined(OS_WIN)
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/user_manager.h"
+#endif  // defined(OS_CHROMEOS)
 
 using WebKit::WebFindOptions;
 using base::Time;
@@ -105,10 +110,13 @@ using base::Time;
 AutomationProvider::AutomationProvider(Profile* profile)
     : profile_(profile),
       reply_message_(NULL),
-      reinitialize_on_channel_error_(false),
+      reinitialize_on_channel_error_(
+          CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kAutomationReinitializeOnChannelError)),
       is_connected_(false),
       initial_tab_loads_complete_(false),
-      network_library_initialized_(true) {
+      network_library_initialized_(true),
+      login_webui_ready_(true) {
   TRACE_EVENT_BEGIN_ETW("AutomationProvider::AutomationProvider", 0, "");
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -117,7 +125,7 @@ AutomationProvider::AutomationProvider(Profile* profile)
   extension_tracker_.reset(new AutomationExtensionTracker(this));
   tab_tracker_.reset(new AutomationTabTracker(this));
   window_tracker_.reset(new AutomationWindowTracker(this));
-  new_tab_ui_load_observer_.reset(new NewTabUILoadObserver(this));
+  new_tab_ui_load_observer_.reset(new NewTabUILoadObserver(this, profile));
   metric_event_duration_observer_.reset(new MetricEventDurationObserver());
   extension_test_result_observer_.reset(
       new ExtensionTestResultNotificationObserver(this));
@@ -164,6 +172,14 @@ bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
   channel_->AddFilter(automation_resource_message_filter_);
 
 #if defined(OS_CHROMEOS)
+  // Wait for webui login to be ready.
+  // Observer will delete itself.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin) &&
+      !chromeos::UserManager::Get()->user_is_logged_in()) {
+    login_webui_ready_ = false;
+    new LoginWebuiReadyObserver(this);
+  }
+
   // Wait for the network manager to initialize.
   // The observer will delete itself when done.
   network_library_initialized_ = false;
@@ -199,13 +215,20 @@ void AutomationProvider::SetExpectedTabCount(size_t expected_tabs) {
 
 void AutomationProvider::OnInitialTabLoadsComplete() {
   initial_tab_loads_complete_ = true;
-  if (is_connected_ && network_library_initialized_)
+  if (is_connected_ && network_library_initialized_ && login_webui_ready_)
     Send(new AutomationMsg_InitialLoadsComplete());
 }
 
 void AutomationProvider::OnNetworkLibraryInit() {
   network_library_initialized_ = true;
-  if (is_connected_ && initial_tab_loads_complete_)
+  if (is_connected_ && initial_tab_loads_complete_ && login_webui_ready_)
+    Send(new AutomationMsg_InitialLoadsComplete());
+}
+
+void AutomationProvider::OnLoginWebuiReady() {
+  login_webui_ready_ = true;
+  if (is_connected_ && initial_tab_loads_complete_ &&
+      network_library_initialized_)
     Send(new AutomationMsg_InitialLoadsComplete());
 }
 
@@ -257,8 +280,6 @@ DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
   dl_item_value->SetBoolean("is_paused", download->is_paused());
   dl_item_value->SetBoolean("open_when_complete",
                             download->open_when_complete());
-  dl_item_value->SetBoolean("is_extension_install",
-                            download->is_extension_install());
   dl_item_value->SetBoolean("is_temporary", download->is_temporary());
   dl_item_value->SetBoolean("is_otr", download->is_otr());  // incognito
   dl_item_value->SetString("state", state_to_string[download->state()]);
@@ -301,7 +322,8 @@ void AutomationProvider::OnChannelConnected(int pid) {
 
   // Send a hello message with our current automation protocol version.
   channel_->Send(new AutomationMsg_Hello(GetProtocolVersion()));
-  if (initial_tab_loads_complete_ && network_library_initialized_)
+  if (initial_tab_loads_complete_ && network_library_initialized_ &&
+      login_webui_ready_)
     Send(new AutomationMsg_InitialLoadsComplete());
 }
 
@@ -325,13 +347,10 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_ReloadAsync, ReloadAsync)
     IPC_MESSAGE_HANDLER(AutomationMsg_StopAsync, StopAsync)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetPageFontSize, OnSetPageFontSize)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_InstallExtension,
-                                    InstallExtension)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForExtensionTestResult,
                                     WaitForExtensionTestResult)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(
-        AutomationMsg_InstallExtensionAndGetHandle,
-        InstallExtensionAndGetHandle)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_InstallExtension,
+                                    InstallExtension)
     IPC_MESSAGE_HANDLER(AutomationMsg_UninstallExtension,
                         UninstallExtension)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_EnableExtension,
@@ -349,7 +368,7 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_RemoveBrowsingData, RemoveBrowsingData)
     IPC_MESSAGE_HANDLER(AutomationMsg_JavaScriptStressTestControl,
                         JavaScriptStressTestControl)
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     // These are for use with external tabs.
     IPC_MESSAGE_HANDLER(AutomationMsg_CreateExternalTab, CreateExternalTab)
     IPC_MESSAGE_HANDLER(AutomationMsg_ProcessUnhandledAccelerator,
@@ -712,9 +731,10 @@ void AutomationProvider::OnSetPageFontSize(int tab_handle,
     NavigationController* tab = tab_tracker_->GetResource(tab_handle);
     DCHECK(tab != NULL);
     if (tab && tab->tab_contents()) {
-      DCHECK(tab->tab_contents()->profile() != NULL);
-      tab->tab_contents()->profile()->GetPrefs()->SetInteger(
-          prefs::kWebKitDefaultFontSize, font_size);
+      DCHECK(tab->tab_contents()->browser_context() != NULL);
+      Profile* profile =
+          Profile::FromBrowserContext(tab->tab_contents()->browser_context());
+      profile->GetPrefs()->SetInteger(prefs::kWebKitDefaultFontSize, font_size);
     }
   }
 }
@@ -737,7 +757,7 @@ void AutomationProvider::JavaScriptStressTestControl(int tab_handle,
     return;
   }
 
-  view->Send(new ViewMsg_JavaScriptStressTestControl(
+  view->Send(new ChromeViewMsg_JavaScriptStressTestControl(
       view->routing_id(), cmd, param));
 }
 
@@ -762,26 +782,6 @@ RenderViewHost* AutomationProvider::GetViewForTab(int tab_handle) {
   return NULL;
 }
 
-void AutomationProvider::InstallExtension(const FilePath& crx_path,
-                                          IPC::Message* reply_message) {
-  ExtensionService* service = profile_->GetExtensionService();
-  if (service) {
-    // The observer will delete itself when done.
-    new ExtensionInstallNotificationObserver(this,
-                                             AutomationMsg_InstallExtension::ID,
-                                             reply_message);
-
-    // Pass NULL for a silent install with no UI.
-    scoped_refptr<CrxInstaller> installer(service->MakeCrxInstaller(NULL));
-    installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
-    installer->InstallCrx(crx_path);
-  } else {
-    AutomationMsg_InstallExtension::WriteReplyParams(
-        reply_message, AUTOMATION_MSG_EXTENSION_INSTALL_FAILED);
-    Send(reply_message);
-  }
-}
-
 void AutomationProvider::WaitForExtensionTestResult(
     IPC::Message* reply_message) {
   DCHECK(!reply_message_);
@@ -791,28 +791,33 @@ void AutomationProvider::WaitForExtensionTestResult(
   extension_test_result_observer_->MaybeSendResult();
 }
 
-void AutomationProvider::InstallExtensionAndGetHandle(
-    const FilePath& crx_path, bool with_ui, IPC::Message* reply_message) {
+void AutomationProvider::InstallExtension(
+    const FilePath& extension_path, bool with_ui,
+    IPC::Message* reply_message) {
   ExtensionService* service = profile_->GetExtensionService();
   ExtensionProcessManager* manager = profile_->GetExtensionProcessManager();
   if (service && manager) {
     // The observer will delete itself when done.
     new ExtensionReadyNotificationObserver(
         manager,
+        service,
         this,
-        AutomationMsg_InstallExtensionAndGetHandle::ID,
+        AutomationMsg_InstallExtension::ID,
         reply_message);
 
-    ExtensionInstallUI* client =
-        (with_ui ? new ExtensionInstallUI(profile_) : NULL);
-    scoped_refptr<CrxInstaller> installer(service->MakeCrxInstaller(client));
-    if (!with_ui)
-      installer->set_allow_silent_install(true);
-    installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
-    installer->InstallCrx(crx_path);
+    if (extension_path.MatchesExtension(FILE_PATH_LITERAL(".crx"))) {
+      ExtensionInstallUI* client =
+          (with_ui ? new ExtensionInstallUI(profile_) : NULL);
+      scoped_refptr<CrxInstaller> installer(service->MakeCrxInstaller(client));
+      if (!with_ui)
+        installer->set_allow_silent_install(true);
+      installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
+      installer->InstallCrx(extension_path);
+    } else {
+      service->LoadExtension(extension_path, with_ui);
+    }
   } else {
-    AutomationMsg_InstallExtensionAndGetHandle::WriteReplyParams(
-        reply_message, 0);
+    AutomationMsg_InstallExtension::WriteReplyParams(reply_message, 0);
     Send(reply_message);
   }
 }
@@ -841,6 +846,7 @@ void AutomationProvider::EnableExtension(int extension_handle,
     // The observer will delete itself when done.
     new ExtensionReadyNotificationObserver(
         manager,
+        service,
         this,
         AutomationMsg_EnableExtension::ID,
         reply_message);

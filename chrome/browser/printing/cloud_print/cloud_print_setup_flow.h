@@ -18,12 +18,13 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/native_widget_types.h"
 
-class GaiaAuthFetcher;
+class Browser;
 class CloudPrintServiceProcessHelper;
 class CloudPrintSetupMessageHandler;
-class ServiceProcessControl;
+class GaiaAuthFetcher;
 class GoogleServiceAuthError;
-class Browser;
+class Profile;
+class ServiceProcessControl;
 
 namespace base {
 class DictionaryValue;
@@ -69,17 +70,18 @@ class CloudPrintSetupFlow : public HtmlDialogUIDelegate,
   void Focus();
 
   // HtmlDialogUIDelegate implementation.
-  virtual GURL GetDialogContentURL() const;
+  virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const;
-  virtual void GetDialogSize(gfx::Size* size) const;
-  virtual std::string GetDialogArgs() const;
-  virtual void OnDialogClosed(const std::string& json_retval);
-  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog);
-  virtual std::wstring GetDialogTitle() const;
-  virtual bool IsDialogModal() const;
-  virtual bool ShouldShowDialogTitle() const;
-  virtual bool HandleContextMenu(const ContextMenuParams& params);
+      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
+  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
+  virtual std::string GetDialogArgs() const OVERRIDE;
+  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog)
+      OVERRIDE;
+  virtual string16 GetDialogTitle() const OVERRIDE;
+  virtual bool IsDialogModal() const OVERRIDE;
+  virtual bool ShouldShowDialogTitle() const OVERRIDE;
+  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
 
   // GaiaAuthConsumer implementation.
   virtual void OnClientLoginSuccess(

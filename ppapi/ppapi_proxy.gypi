@@ -6,10 +6,12 @@
   'targets': [
     {
       'target_name': 'ppapi_proxy',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
-        '../ipc/ipc.gyp:ipc',
+        '../base/base.gyp:base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../gpu/gpu.gyp:gpu_ipc',
+        '../ipc/ipc.gyp:ipc',
         '../skia/skia.gyp:skia',
         '../ui/gfx/surface/surface.gyp:surface',
         'ppapi.gyp:ppapi_c',
@@ -33,7 +35,6 @@
         'proxy/dispatcher.h',
         'proxy/host_dispatcher.cc',
         'proxy/host_dispatcher.h',
-        'proxy/host_resource.h',
         'proxy/host_var_serialization_rules.cc',
         'proxy/host_var_serialization_rules.h',
         'proxy/interface_proxy.cc',
@@ -42,8 +43,6 @@
         'proxy/plugin_dispatcher.h',
         'proxy/plugin_message_filter.cc',
         'proxy/plugin_message_filter.h',
-        'proxy/plugin_resource.cc',
-        'proxy/plugin_resource.h',
         'proxy/plugin_resource_tracker.cc',
         'proxy/plugin_resource_tracker.h',
         'proxy/plugin_var_serialization_rules.cc',
@@ -126,6 +125,10 @@
         'proxy/ppb_var_deprecated_proxy.h',
         'proxy/ppb_var_proxy.cc',
         'proxy/ppb_var_proxy.h',
+        'proxy/ppb_video_capture_proxy.cc',
+        'proxy/ppb_video_capture_proxy.h',
+        'proxy/ppb_video_decoder_proxy.cc',
+        'proxy/ppb_video_decoder_proxy.h',
         'proxy/ppp_class_proxy.cc',
         'proxy/ppp_class_proxy.h',
         'proxy/ppp_graphics_3d_proxy.cc',
@@ -136,10 +139,16 @@
         'proxy/ppp_instance_private_proxy.h',
         'proxy/ppp_instance_proxy.cc',
         'proxy/ppp_instance_proxy.h',
+        'proxy/ppp_messaging_proxy.cc',
+        'proxy/ppp_messaging_proxy.h',
+        'proxy/ppp_video_decoder_proxy.cc',
+        'proxy/ppp_video_decoder_proxy.h',
         'proxy/proxy_channel.cc',
         'proxy/proxy_channel.h',
         'proxy/proxy_module.cc',
         'proxy/proxy_module.h',
+        'proxy/proxy_object_var.cc',
+        'proxy/proxy_object_var.h',
         'proxy/resource_creation_proxy.cc',
         'proxy/resource_creation_proxy.h',
         'proxy/serialized_flash_menu.cc',
@@ -151,14 +160,7 @@
         'proxy/var_serialization_rules.h',
       ],
       'defines': [
-      ],
-      'conditions': [
-        ['OS=="win"', {
-        }],
-        ['OS=="linux"', {
-        }],
-        ['OS=="mac"', {
-        }]
+        'PPAPI_PROXY_IMPLEMENTATION',
       ],
     },
   ],

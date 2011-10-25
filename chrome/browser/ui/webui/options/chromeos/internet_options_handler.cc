@@ -13,9 +13,11 @@
 #include "base/base64.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -23,19 +25,21 @@
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 #include "chrome/browser/chromeos/status/network_menu_icon.h"
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "content/common/notification_service.h"
@@ -116,8 +120,18 @@ void InternetOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CHANGE_PROXY_BUTTON));
   localized_strings->SetString("enableSharedProxiesHint",
+      l10n_util::GetStringFUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ENABLE_SHARED_PROXIES_HINT,
+          l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_USE_SHARED_PROXIES)));
+  localized_strings->SetString("policyManagedProxyText",
       l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ENABLE_SHARED_PROXIES_HINT));
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_POLICY_MANAGED_PROXY_TEXT));
+  localized_strings->SetString("extensionManagedProxyText",
+      l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_EXTENSION_MANAGED_PROXY_TEXT));
+  localized_strings->SetString("unmodifiableProxyText",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_UNMODIFIABLE_PROXY_TEXT));
 
   localized_strings->SetString("wifiNetworkTabLabel",
       l10n_util::GetStringUTF16(
@@ -349,7 +363,7 @@ void InternetOptionsHandler::GetLocalizedValues(
       chromeos::UserCrosSettingsProvider::cached_owner()));
 
   FillNetworkInfo(localized_strings);
- }
+}
 
 void InternetOptionsHandler::Initialize() {
   cros_->RequestNetworkScan();
@@ -418,7 +432,7 @@ void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {
   if (!web_ui_)
     return;
   Browser* browser = BrowserList::FindBrowserWithFeature(
-      web_ui_->GetProfile(), Browser::FEATURE_TABSTRIP);
+      Profile::FromWebUI(web_ui_), Browser::FEATURE_TABSTRIP);
   if (browser)
     browser->OpenMobilePlanTabAndActivate();
 }
@@ -688,15 +702,41 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
   dictionary.SetBoolean("connecting", network->connecting());
   dictionary.SetBoolean("connected", network->connected());
   dictionary.SetString("connectionState", network->GetStateString());
-  bool remembered = (network->profile_type() != chromeos::PROFILE_NONE);
-  bool proxy_configurable =
-      (remembered && (network->profile_type() == chromeos::PROFILE_USER ||
-                      use_shared_proxies)) ||
-      (type == chromeos::TYPE_ETHERNET && use_shared_proxies);
+
+  // Determine if proxy is configurable.
+  // First check proxy prefs.
+  bool proxy_configurable = true;
+  std::string change_proxy_text;
+  if (web_ui_) {
+    const PrefService::Preference* proxy_pref =
+      Profile::FromWebUI(web_ui_)->GetPrefs()->FindPreference(prefs::kProxy);
+    if (proxy_pref && (!proxy_pref->IsUserModifiable() ||
+                       proxy_pref->HasUserSetting())) {
+      proxy_configurable = false;
+      // Provide reason that proxy is managed by admin or extension.
+      if (proxy_pref->IsManaged())
+        change_proxy_text = "policyManagedProxyText";
+      else if (proxy_pref->IsExtensionControlled())
+        change_proxy_text = "extensionManagedProxyText";
+      else
+        change_proxy_text = "unmodifiableProxyText";
+    }
+  }
+  // Next check network type and use-shared-proxies.
+  chromeos::NetworkProfileType profile = network->profile_type();
+  bool shared_network = type == chromeos::TYPE_ETHERNET ||
+                        profile == chromeos::PROFILE_SHARED;
+  if (proxy_configurable) {  // Only check more if proxy  is still configurable.
+    proxy_configurable = profile == chromeos::PROFILE_USER ||
+        (shared_network && use_shared_proxies);
+  }
+  // If no reason has been set yet, provide hint to configure shared proxy.
+  if (change_proxy_text.empty() && shared_network && !use_shared_proxies)
+    change_proxy_text = "enableSharedProxiesHint";
+  // Lastly, store proxy-configurable flag and, if available, text to display.
   dictionary.SetBoolean("proxyConfigurable", proxy_configurable);
-  dictionary.SetBoolean("showSharedProxiesHint",
-      !proxy_configurable && !use_shared_proxies &&
-      (remembered || type == chromeos::TYPE_ETHERNET));
+  if (!change_proxy_text.empty())
+    dictionary.SetString("changeProxyText", change_proxy_text);
 
   // Hide the dhcp/static radio if not ethernet or wifi (or if not enabled)
   bool staticIPConfig = CommandLine::ForCurrentProcess()->HasSwitch(
@@ -704,7 +744,13 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
   dictionary.SetBoolean("showStaticIPConfig", staticIPConfig &&
       (type == chromeos::TYPE_WIFI || type == chromeos::TYPE_ETHERNET));
 
-  dictionary.SetBoolean("preferred", network->preferred());
+  if (network->profile_type() == chromeos::PROFILE_USER) {
+    dictionary.SetBoolean("showPreferred", true);
+    dictionary.SetBoolean("preferred", network->preferred());
+  } else {
+    dictionary.SetBoolean("showPreferred", false);
+    dictionary.SetBoolean("preferred", false);
+  }
   dictionary.SetBoolean("autoConnect", network->auto_connect());
 
   if (type == chromeos::TYPE_WIFI) {
@@ -813,7 +859,7 @@ void InternetOptionsHandler::PopulateCellularDetails(
     dictionary->SetString("firmwareRevision", device->firmware_revision());
     dictionary->SetString("hardwareRevision", device->hardware_revision());
     dictionary->SetString("prlVersion",
-                          StringPrintf("%u", device->prl_version()));
+                          base::StringPrintf("%u", device->prl_version()));
     dictionary->SetString("meid", device->meid());
     dictionary->SetString("imei", device->imei());
     dictionary->SetString("mdn", device->mdn());
@@ -825,14 +871,13 @@ void InternetOptionsHandler::PopulateCellularDetails(
     dictionary->SetBoolean("simCardLockEnabled",
         device->sim_pin_required() == chromeos::SIM_PIN_REQUIRED);
 
-    chromeos::ServicesCustomizationDocument* customization =
-        chromeos::ServicesCustomizationDocument::GetInstance();
-    if (customization->IsReady()) {
+    chromeos::MobileConfig* config = chromeos::MobileConfig::GetInstance();
+    if (config->IsReady()) {
       std::string carrier_id = cros_->GetCellularHomeCarrierId();
-      const chromeos::ServicesCustomizationDocument::CarrierDeal* deal =
-          customization->GetCarrierDeal(carrier_id, false);
-      if (deal && !deal->top_up_url().empty())
-        dictionary->SetString("carrierUrl", deal->top_up_url());
+      const chromeos::MobileConfig::Carrier* carrier =
+          config->GetCarrier(carrier_id);
+      if (carrier && !carrier->top_up_url().empty())
+        dictionary->SetString("carrierUrl", carrier->top_up_url());
     }
 
     const chromeos::CellularApnList& apn_list = device->provider_apn_list();
@@ -872,9 +917,7 @@ void InternetOptionsHandler::SetActivationButtonVisibility(
 }
 
 void InternetOptionsHandler::CreateModalPopup(views::WidgetDelegate* view) {
-  views::Widget* window = browser::CreateViewsWindow(GetNativeWindow(),
-                                                     gfx::Rect(),
-                                                     view);
+  views::Widget* window = browser::CreateViewsWindow(GetNativeWindow(), view);
   window->SetAlwaysOnTop(true);
   window->Show();
 }
@@ -882,7 +925,8 @@ void InternetOptionsHandler::CreateModalPopup(views::WidgetDelegate* view) {
 gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
   // TODO(beng): This is an improper direct dependency on Browser. Route this
   // through some sort of delegate.
-  Browser* browser = BrowserList::FindBrowserWithProfile(web_ui_->GetProfile());
+  Browser* browser =
+      BrowserList::FindBrowserWithProfile(Profile::FromWebUI(web_ui_));
   return browser->window()->GetNativeHandle();
 }
 
@@ -901,7 +945,8 @@ void InternetOptionsHandler::ButtonClickCallback(const ListValue* args) {
   int type = atoi(str_type.c_str());
   if (type == chromeos::TYPE_ETHERNET) {
     const chromeos::EthernetNetwork* ether = cros_->ethernet_network();
-    PopulateDictionaryDetails(ether);
+    if (ether)
+      PopulateDictionaryDetails(ether);
   } else if (type == chromeos::TYPE_WIFI) {
     HandleWifiButtonClick(service_path, command);
   } else if (type == chromeos::TYPE_CELLULAR) {

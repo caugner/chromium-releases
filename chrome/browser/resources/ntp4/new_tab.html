@@ -2,7 +2,9 @@
 <html i18n-values="
     dir:textdirection;
     hasattribution:hasattribution;
-    customlogo:customlogo;">
+    customlogo:customlogo;
+    themegravity:themegravity;"
+  class="starting-up">
 <head>
 <meta charset="utf-8">
 <title i18n-content="title"></title>
@@ -15,12 +17,16 @@
 <meta name="viewport"
       content="user-scalable=no, width=device-width, maximum-scale=1.0">
 
+<!-- It's important that this be the first script loaded. -->
+<script src="logging.js"></script>
+
 <if expr="pp_ifdef('touchui')">
 <script>
 document.documentElement.setAttribute('touchui', true);
 </script>
 </if>
 
+<link rel="stylesheet" href="../shared/css/bubble.css">
 <link rel="stylesheet" href="../shared/css/menu.css">
 <link rel="stylesheet" href="apps_page.css">
 <link rel="stylesheet" href="bookmarks_page.css">
@@ -33,10 +39,12 @@ document.documentElement.setAttribute('touchui', true);
 
 <script src="../shared/js/event_tracker.js"></script>
 <script src="../shared/js/local_strings.js"></script>
+<script src="../shared/js/parse_html_subset.js"></script>
 <script src="../shared/js/util.js"></script>
 
 <script src="../shared/js/cr.js"></script>
 <script src="../shared/js/cr/ui.js"></script>
+<script src="../shared/js/cr/ui/bubble.js"></script>
 <script src="../shared/js/cr/ui/menu.js"></script>
 <script src="../shared/js/cr/ui/menu_item.js"></script>
 <script src="../shared/js/cr/ui/position_util.js"></script>
@@ -49,6 +57,7 @@ document.documentElement.setAttribute('touchui', true);
 <script src="bookmarks_page.js"></script>
 <script src="most_visited_page.js"></script>
 <script src="trash.js"></script>
+<script src="page_switcher.js"></script>
 
 <script src="card_slider.js"></script>
 <script src="grabber.js"></script>
@@ -59,10 +68,12 @@ document.documentElement.setAttribute('touchui', true);
 </head>
 
 <body>
-  <div id="notification" class="inactive">
-    <span></span>
-    <div id="notificationLinks"></div>
-    <button class="close-button"></button>
+  <div id="notification-container" class="inactive" hidden>
+    <div id="notification">
+      <span></span>
+      <div id="notificationLinks"></div>
+      <button class="close-button"></button>
+    </div>
   </div>
 
   <div id="card-slider-frame">
@@ -74,6 +85,7 @@ document.documentElement.setAttribute('touchui', true);
       <img id="attribution-img">
     </div>
   </div>
+
   <div id="footer">
     <div id="footer-border"></div>
     <div id="footer-content">
@@ -88,9 +100,50 @@ document.documentElement.setAttribute('touchui', true);
       </button>
 
       <div id="trash">
-        <span i18n-content="trashLabel"></span>
+        <span i18n-content="appuninstall"></span>
       </div>
     </div>
   </div>
 </body>
+
+<!-- NTP4 intro bubble -->
+<div id="ntp4-intro-bubble-contents" hidden>
+  <div i18n-content="ntp4_intro_message"></div>
+  <a i18n-content="learn_more" i18n-values="href: ntp4_intro_url;"
+     target="_blank"></a>
+</div>
+  
+<!-- Apps promo. -->
+<div id="apps-promo-extras-template" class="apps-promo-extras" hidden>
+  <h3 class="apps-promo-heading"></h3>
+  <a class="apps-promo-link g-button-basic"><a/>
+</div>
+
+<!-- Bookmark -->
+<div id="bookmark-template" class="bookmark" hidden>
+  <a class="button bookmark-fills-parent">
+    <div class="close-button" hidden></div>
+    <span class="button-frame bookmark-fills-parent"></span>
+    <span class="favicon bookmark-fills-parent"></span>
+  </a>
+  <div class="color-stripe"></div>
+  <a class="title"></a>
+</div>
+
+<!-- Bookmarks Title Wrapper -->
+<div id="bookmarks-title-wrapper" class="section-title-wrapper" hidden>
+  <div class="section-title-mask"></div>
+  <div class="section-title"></div>
+</div>
+
+<!-- Bookmarks Top Link -->
+<div id="bookmarks-top-link-wrapper" hidden>
+  <a i18n-content="bookmarksManagerLinkTitle" class="link-color"></a>
+</div>
+
+<!-- Bookmarks Bottom Link -->
+<div id="bookmarks-bottom-link-wrapper" hidden>
+  <a i18n-content="bookmarksShowAllLinkTitle" class="link-color"></a>
+</div>
+
 </html>

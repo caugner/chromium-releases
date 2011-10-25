@@ -10,6 +10,8 @@
 #include "base/scoped_temp_dir.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/values.h"
+#include "build/build_config.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -20,12 +22,16 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_pref_service.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#endif
 
 namespace {
 // This global variable is used to check that value returned to different
@@ -34,21 +40,22 @@ Profile* g_created_profile;
 
 }  // namespace
 
-class ProfileManagerTest : public TestingBrowserProcessTest {
+class ProfileManagerTest : public testing::Test {
  protected:
   ProfileManagerTest()
-      : local_state_(testing_browser_process_.get()),
+      : local_state_(static_cast<TestingBrowserProcess*>(g_browser_process)),
         extension_event_router_forwarder_(new ExtensionEventRouterForwarder),
         ui_thread_(BrowserThread::UI, &message_loop_),
         db_thread_(BrowserThread::DB, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_),
         io_thread_(local_state_.Get(), NULL, extension_event_router_forwarder_),
-        profile_manager_(new ProfileManagerWithoutInit) {
+        profile_manager_(new ProfileManagerWithoutInit(temp_dir_.path())) {
 #if defined(OS_MACOSX)
     base::SystemMonitor::AllocateSystemIOPorts();
 #endif
     system_monitor_dummy_.reset(new base::SystemMonitor);
-    testing_browser_process_.get()->SetIOThread(&io_thread_);
+    static_cast<TestingBrowserProcess*>(g_browser_process)->SetIOThread(
+        &io_thread_);
   }
 
   virtual void SetUp() {
@@ -80,6 +87,10 @@ class ProfileManagerTest : public TestingBrowserProcessTest {
 
   scoped_ptr<base::SystemMonitor> system_monitor_dummy_;
 
+#if defined(OS_CHROMEOS)
+  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
+#endif
+
   // Also will test profile deletion.
   scoped_ptr<ProfileManager> profile_manager_;
 };
@@ -105,9 +116,9 @@ TEST_F(ProfileManagerTest, DefaultProfileDir) {
   cl->AppendSwitch(switches::kTestType);
 
   FilePath expected_default =
-      FilePath().AppendASCII(chrome::kNotSignedInProfile);
+      FilePath().AppendASCII(chrome::kInitialProfile);
   EXPECT_EQ(expected_default.value(),
-            profile_manager_->GetCurrentProfileDir().value());
+            profile_manager_->GetInitialProfileDir().value());
 }
 
 #if defined(OS_CHROMEOS)
@@ -120,18 +131,18 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
   cl->AppendSwitch(switches::kTestType);
 
   FilePath expected_default =
-      FilePath().AppendASCII(chrome::kNotSignedInProfile);
+      FilePath().AppendASCII(chrome::kInitialProfile);
   EXPECT_EQ(expected_default.value(),
-            profile_manager_->GetCurrentProfileDir().value());
+            profile_manager_->GetInitialProfileDir().value());
 
   profile_manager_->Observe(chrome::NOTIFICATION_LOGIN_USER_CHANGED,
                            NotificationService::AllSources(),
                            NotificationService::NoDetails());
   FilePath expected_logged_in(profile_dir);
   EXPECT_EQ(expected_logged_in.value(),
-            profile_manager_->GetCurrentProfileDir().value());
+            profile_manager_->GetInitialProfileDir().value());
   VLOG(1) << temp_dir_.path().Append(
-      profile_manager_->GetCurrentProfileDir()).value();
+      profile_manager_->GetInitialProfileDir()).value();
 }
 
 #endif

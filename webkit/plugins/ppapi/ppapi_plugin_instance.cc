@@ -29,6 +29,9 @@
 #include "ppapi/c/ppp_messaging.h"
 #include "ppapi/c/private/ppb_instance_private.h"
 #include "ppapi/c/private/ppp_instance_private.h"
+#include "ppapi/shared_impl/input_event_impl.h"
+#include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_buffer_api.h"
 #include "printing/units.h"
@@ -51,6 +54,7 @@
 #include "webkit/plugins/ppapi/event_conversion.h"
 #include "webkit/plugins/ppapi/fullscreen_container.h"
 #include "webkit/plugins/ppapi/message_channel.h"
+#include "webkit/plugins/ppapi/npapi_glue.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/plugin_object.h"
@@ -58,13 +62,12 @@
 #include "webkit/plugins/ppapi/ppb_graphics_2d_impl.h"
 #include "webkit/plugins/ppapi/ppb_graphics_3d_impl.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
-#include "webkit/plugins/ppapi/ppb_input_event_impl.h"
 #include "webkit/plugins/ppapi/ppb_surface_3d_impl.h"
 #include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
 #include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
 #include "webkit/plugins/ppapi/ppp_pdf.h"
+#include "webkit/plugins/ppapi/resource_tracker.h"
 #include "webkit/plugins/ppapi/string.h"
-#include "webkit/plugins/ppapi/var.h"
 #include "webkit/plugins/sad_plugin.h"
 
 #if defined(OS_MACOSX)
@@ -88,6 +91,8 @@
 #include "skia/ext/skia_utils_mac.h"
 #endif
 
+using ppapi::InputEventImpl;
+using ppapi::StringVar;
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_Buffer_API;
 using ppapi::thunk::PPB_Graphics2D_API;
@@ -95,6 +100,7 @@ using ppapi::thunk::PPB_Graphics3D_API;
 using ppapi::thunk::PPB_ImageData_API;
 using ppapi::thunk::PPB_Instance_FunctionAPI;
 using ppapi::thunk::PPB_Surface3D_API;
+using ppapi::Var;
 using WebKit::WebBindings;
 using WebKit::WebCanvas;
 using WebKit::WebCursorInfo;
@@ -211,6 +217,7 @@ PluginInstance::PluginInstance(
       pp_instance_(0),
       container_(NULL),
       full_frame_(false),
+      sent_did_change_view_(false),
       has_webkit_focus_(false),
       has_content_area_focus_(false),
       find_identifier_(-1),
@@ -314,11 +321,12 @@ void PluginInstance::ScrollRect(int dx, int dy, const gfx::Rect& rect) {
   if (fullscreen_container_) {
     fullscreen_container_->ScrollRect(dx, dy, rect);
   } else {
-    if (full_frame_) {
+    if (full_frame_ && !IsViewAccelerated()) {
       container_->scrollRect(dx, dy, rect);
     } else {
       // Can't do optimized scrolling since there could be other elements on top
-      // of us.
+      // of us or the view renders via the accelerated compositor which is
+      // incompatible with the move and backfill scrolling model.
       InvalidateRect(rect);
     }
   }
@@ -336,7 +344,7 @@ unsigned PluginInstance::GetBackingTextureId() {
 void PluginInstance::CommitBackingTexture() {
   if (fullscreen_container_)
     fullscreen_container_->Invalidate();
-  else
+  else if (container_)
     container_->commitBackingTexture();
 }
 
@@ -356,7 +364,7 @@ bool PluginInstance::SetCursor(PP_CursorType_Dev type,
                                PP_Resource custom_image,
                                const PP_Point* hot_spot) {
   if (type != PP_CURSORTYPE_CUSTOM) {
-    cursor_.reset(new WebCursorInfo(static_cast<WebCursorInfo::Type>(type)));
+    DoSetCursor(new WebCursorInfo(static_cast<WebCursorInfo::Type>(type)));
     return true;
   }
 
@@ -399,7 +407,7 @@ bool PluginInstance::SetCursor(PP_CursorType_Dev type,
   return false;
 #endif
 
-  cursor_.reset(custom_cursor.release());
+  DoSetCursor(custom_cursor.release());
   return true;
 }
 
@@ -428,13 +436,16 @@ bool PluginInstance::Initialize(WebPluginContainer* container,
 }
 
 bool PluginInstance::HandleDocumentLoad(PPB_URLLoader_Impl* loader) {
-  Resource::ScopedResourceId resource(loader);
-  return PP_ToBool(instance_interface_->HandleDocumentLoad(pp_instance(),
-                                                           resource.id));
+  return PP_ToBool(instance_interface_->HandleDocumentLoad(
+      pp_instance(), loader->pp_resource()));
 }
 
 bool PluginInstance::HandleInputEvent(const WebKit::WebInputEvent& event,
                                       WebCursorInfo* cursor_info) {
+  // Don't dispatch input events to crashed plugins.
+  if (module()->is_crashed())
+    return false;
+
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PluginInstance> ref(this);
 
@@ -451,21 +462,17 @@ bool PluginInstance::HandleInputEvent(const WebKit::WebInputEvent& event,
       CreateInputEventData(event, &events);
 
       // Each input event may generate more than one PP_InputEvent.
-      ResourceTracker* tracker = ResourceTracker::Get();
       for (size_t i = 0; i < events.size(); i++) {
         if (filtered_input_event_mask_ & event_class)
           events[i].is_filtered = true;
         else
           rv = true;  // Unfiltered events are assumed to be handled.
-        scoped_refptr<PPB_InputEvent_Impl> event_resource(
-            new PPB_InputEvent_Impl(this, events[i]));
-        PP_Resource resource = event_resource->GetReference();
+        scoped_refptr<InputEventImpl> event_resource(
+            new InputEventImpl(InputEventImpl::InitAsImpl(),
+                               pp_instance(), events[i]));
 
         rv |= PP_ToBool(plugin_input_event_interface_->HandleInputEvent(
-            pp_instance(), event_resource->GetReference()));
-
-        // Release the reference we took above.
-        tracker->UnrefResource(resource);
+            pp_instance(), event_resource->pp_resource()));
       }
     }
   }
@@ -504,18 +511,22 @@ PP_Var PluginInstance::GetInstanceObject() {
 
 void PluginInstance::ViewChanged(const gfx::Rect& position,
                                  const gfx::Rect& clip) {
-  fullscreen_ = (fullscreen_container_ != NULL);
-  position_ = position;
+  // WebKit can give weird (x,y) positions for empty clip rects (since the
+  // position technically doesn't matter). But we want to make these
+  // consistent since this is given to the plugin, so force everything to 0
+  // in the "everything is clipped" case.
+  gfx::Rect new_clip;
+  if (!clip.IsEmpty())
+    new_clip = clip;
 
-  if (clip.IsEmpty()) {
-    // WebKit can give weird (x,y) positions for empty clip rects (since the
-    // position technically doesn't matter). But we want to make these
-    // consistent since this is given to the plugin, so force everything to 0
-    // in the "everything is clipped" case.
-    clip_ = gfx::Rect();
-  } else {
-    clip_ = clip;
-  }
+  // Don't notify the plugin if we've already sent these same params before.
+  if (sent_did_change_view_ && position == position_ && new_clip == clip_)
+    return;
+
+  sent_did_change_view_ = true;
+  position_ = position;
+  clip_ = new_clip;
+  fullscreen_ = (fullscreen_container_ != NULL);
 
   PP_Rect pp_position, pp_clip;
   RectToPPRect(position_, &pp_position);
@@ -605,11 +616,13 @@ string16 PluginInstance::GetSelectedText(bool html) {
 
   PP_Var rv = plugin_selection_interface_->GetSelectedText(pp_instance(),
                                                            PP_FromBool(html));
-  scoped_refptr<StringVar> string(StringVar::FromPPVar(rv));
-  Var::PluginReleasePPVar(rv);  // Release the ref the plugin transfered to us.
-  if (!string)
-    return string16();
-  return UTF8ToUTF16(string->value());
+  StringVar* string = StringVar::FromPPVar(rv);
+  string16 selection;
+  if (string)
+    selection = UTF8ToUTF16(string->value());
+  // Release the ref the plugin transfered to us.
+  ResourceTracker::Get()->GetVarTracker()->ReleaseVar(rv);
+  return selection;
 }
 
 string16 PluginInstance::GetLinkAtPosition(const gfx::Point& point) {
@@ -622,11 +635,13 @@ string16 PluginInstance::GetLinkAtPosition(const gfx::Point& point) {
   p.x = point.x();
   p.y = point.y();
   PP_Var rv = plugin_pdf_interface_->GetLinkAtPosition(pp_instance(), p);
-  scoped_refptr<StringVar> string(StringVar::FromPPVar(rv));
-  Var::PluginReleasePPVar(rv);  // Release the ref the plugin transfered to us.
-  if (!string)
-    return string16();
-  return UTF8ToUTF16(string->value());
+  StringVar* string = StringVar::FromPPVar(rv);
+  string16 link;
+  if (string)
+    link = UTF8ToUTF16(string->value());
+  // Release the ref the plugin transfered to us.
+  ResourceTracker::Get()->GetVarTracker()->ReleaseVar(rv);
+  return link;
 }
 
 void PluginInstance::Zoom(double factor, bool text_only) {
@@ -720,30 +735,17 @@ bool PluginInstance::LoadPolicyUpdateInterface() {
 }
 
 bool PluginInstance::LoadPrintInterface() {
-  if (!plugin_print_interface_.get()) {
-    // Try to get the most recent version first.  Fall back to older supported
-    // versions if necessary.
-    const PPP_Printing_Dev_0_4* print_if =
-        static_cast<const PPP_Printing_Dev_0_4*>(
-            module_->GetPluginInterface(PPP_PRINTING_DEV_INTERFACE_0_4));
-    if (print_if) {
-      plugin_print_interface_.reset(new PPP_Printing_Dev_Combined(*print_if));
-    } else {
-      const PPP_Printing_Dev_0_3* print_if_0_3 =
-          static_cast<const PPP_Printing_Dev_0_3*>(
-              module_->GetPluginInterface(PPP_PRINTING_DEV_INTERFACE_0_3));
-      if (print_if_0_3)
-        plugin_print_interface_.reset(
-            new PPP_Printing_Dev_Combined(*print_if_0_3));
-    }
+  if (!plugin_print_interface_) {
+    plugin_print_interface_ = static_cast<const PPP_Printing_Dev*>(
+        module_->GetPluginInterface(PPP_PRINTING_DEV_INTERFACE));
   }
-  return !!plugin_print_interface_.get();
+  return !!plugin_print_interface_;
 }
 
 bool PluginInstance::LoadPrivateInterface() {
   if (!plugin_private_interface_) {
     plugin_private_interface_ = static_cast<const PPP_Instance_Private*>(
-            module_->GetPluginInterface(PPP_INSTANCE_PRIVATE_INTERFACE));
+        module_->GetPluginInterface(PPP_INSTANCE_PRIVATE_INTERFACE));
   }
 
   return !!plugin_private_interface_;
@@ -782,56 +784,25 @@ void PluginInstance::ReportGeometry() {
 }
 
 bool PluginInstance::GetPreferredPrintOutputFormat(
-    PP_PrintOutputFormat_Dev_0_4* format) {
+    PP_PrintOutputFormat_Dev* format) {
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PluginInstance> ref(this);
   if (!LoadPrintInterface())
     return false;
-  if (plugin_print_interface_->QuerySupportedFormats) {
-    // If the most recent version of the QuerySupportedFormats functions is
-    // available, use it.
-    uint32_t supported_formats =
-        plugin_print_interface_->QuerySupportedFormats(pp_instance());
-    if (supported_formats & PP_PRINTOUTPUTFORMAT_PDF_0_4) {
-      *format = PP_PRINTOUTPUTFORMAT_PDF_0_4;
-      return true;
-    } else if (supported_formats & PP_PRINTOUTPUTFORMAT_RASTER_0_4) {
-      *format = PP_PRINTOUTPUTFORMAT_RASTER_0_4;
-      return true;
-    }
-    return false;
-  } else if (plugin_print_interface_->QuerySupportedFormats_0_3) {
-    // If we couldn't use the latest version of the function, but the 0.3
-    // version exists, we can use it.
-    uint32_t format_count = 0;
-    PP_PrintOutputFormat_Dev_0_3* supported_formats =
-        plugin_print_interface_->QuerySupportedFormats_0_3(pp_instance(),
-                                                           &format_count);
-    if (!supported_formats)
-      return false;
-
-    bool found_supported_format = false;
-    for (uint32_t index = 0; index < format_count; index++) {
-      if (supported_formats[index] == PP_PRINTOUTPUTFORMAT_PDF_0_3) {
-        // If we found PDF, we are done.
-        found_supported_format = true;
-        *format = PP_PRINTOUTPUTFORMAT_PDF_0_4;
-        break;
-      } else if (supported_formats[index] ==
-                 PP_PRINTOUTPUTFORMAT_RASTER_0_3) {
-        // We found raster. Keep looking.
-        found_supported_format = true;
-        *format = PP_PRINTOUTPUTFORMAT_RASTER_0_4;
-      }
-    }
-    PluginModule::GetMemoryDev()->MemFree(supported_formats);
-    return found_supported_format;
+  uint32_t supported_formats =
+      plugin_print_interface_->QuerySupportedFormats(pp_instance());
+  if (supported_formats & PP_PRINTOUTPUTFORMAT_PDF) {
+    *format = PP_PRINTOUTPUTFORMAT_PDF;
+    return true;
+  } else if (supported_formats & PP_PRINTOUTPUTFORMAT_RASTER) {
+    *format = PP_PRINTOUTPUTFORMAT_RASTER;
+    return true;
   }
   return false;
 }
 
 bool PluginInstance::SupportsPrintInterface() {
-  PP_PrintOutputFormat_Dev_0_4 format;
+  PP_PrintOutputFormat_Dev format;
   return GetPreferredPrintOutputFormat(&format);
 }
 
@@ -839,7 +810,7 @@ int PluginInstance::PrintBegin(const gfx::Rect& printable_area,
                                int printer_dpi) {
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PluginInstance> ref(this);
-  PP_PrintOutputFormat_Dev_0_4 format;
+  PP_PrintOutputFormat_Dev format;
   if (!GetPreferredPrintOutputFormat(&format)) {
     // PrintBegin should not have been called since SupportsPrintInterface
     // would have returned false;
@@ -848,40 +819,14 @@ int PluginInstance::PrintBegin(const gfx::Rect& printable_area,
   }
 
   int num_pages = 0;
-  PP_PrintSettings_Dev_0_4 print_settings;
+  PP_PrintSettings_Dev print_settings;
   RectToPPRect(printable_area, &print_settings.printable_area);
   print_settings.dpi = printer_dpi;
   print_settings.orientation = PP_PRINTORIENTATION_NORMAL;
   print_settings.grayscale = PP_FALSE;
   print_settings.format = format;
-  if (plugin_print_interface_->Begin) {
-    // If we have the most current version of Begin, use it.
-    num_pages = plugin_print_interface_->Begin(pp_instance(),
-                                               &print_settings);
-  } else if (plugin_print_interface_->Begin_0_3) {
-    // Fall back to the 0.3 version of Begin if necessary, and convert the
-    // output format.
-    PP_PrintSettings_Dev_0_3 print_settings_0_3;
-    RectToPPRect(printable_area, &print_settings_0_3.printable_area);
-    print_settings_0_3.dpi = printer_dpi;
-    print_settings_0_3.orientation = PP_PRINTORIENTATION_NORMAL;
-    print_settings_0_3.grayscale = PP_FALSE;
-    switch (format) {
-      case PP_PRINTOUTPUTFORMAT_RASTER_0_4:
-        print_settings_0_3.format = PP_PRINTOUTPUTFORMAT_RASTER_0_3;
-        break;
-      case PP_PRINTOUTPUTFORMAT_PDF_0_4:
-        print_settings_0_3.format = PP_PRINTOUTPUTFORMAT_PDF_0_3;
-        break;
-      case PP_PRINTOUTPUTFORMAT_POSTSCRIPT_0_4:
-        print_settings_0_3.format = PP_PRINTOUTPUTFORMAT_POSTSCRIPT_0_3;
-        break;
-      default:
-        return 0;
-    }
-    num_pages = plugin_print_interface_->Begin_0_3(pp_instance(),
-                                                   &print_settings_0_3);
-  }
+  num_pages = plugin_print_interface_->Begin(pp_instance(),
+                                             &print_settings);
   if (!num_pages)
     return 0;
   current_print_settings_ = print_settings;
@@ -893,7 +838,7 @@ int PluginInstance::PrintBegin(const gfx::Rect& printable_area,
 }
 
 bool PluginInstance::PrintPage(int page_number, WebKit::WebCanvas* canvas) {
-  DCHECK(plugin_print_interface_.get());
+  DCHECK(plugin_print_interface_);
   PP_PrintPageNumberRange_Dev page_range;
   page_range.first_page_number = page_range.last_page_number = page_number;
 #if defined(OS_LINUX) || defined(OS_WIN)
@@ -921,9 +866,9 @@ bool PluginInstance::PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
 
   bool ret = false;
 
-  if (current_print_settings_.format == PP_PRINTOUTPUTFORMAT_PDF_0_4)
+  if (current_print_settings_.format == PP_PRINTOUTPUTFORMAT_PDF)
     ret = PrintPDFOutput(print_output, canvas);
-  else if (current_print_settings_.format == PP_PRINTOUTPUTFORMAT_RASTER_0_4)
+  else if (current_print_settings_.format == PP_PRINTOUTPUTFORMAT_RASTER)
     ret = PrintRasterOutput(print_output, canvas);
 
   // Now we need to release the print output resource.
@@ -942,8 +887,8 @@ void PluginInstance::PrintEnd() {
   ranges_.clear();
 #endif  // OS_LINUX || OS_WIN
 
-  DCHECK(plugin_print_interface_.get());
-  if (plugin_print_interface_.get())
+  DCHECK(plugin_print_interface_);
+  if (plugin_print_interface_)
     plugin_print_interface_->End(pp_instance());
 
   memset(&current_print_settings_, 0, sizeof(current_print_settings_));
@@ -995,7 +940,10 @@ int32_t PluginInstance::Navigate(PPB_URLRequestInfo_Impl* request,
   WebFrame* frame = document.frame();
   if (!frame)
     return PP_ERROR_FAILED;
-  WebURLRequest web_request(request->ToWebURLRequest(frame));
+
+  WebURLRequest web_request;
+  if (!request->ToWebURLRequest(frame, &web_request))
+    return PP_ERROR_FAILED;
   web_request.setFirstPartyForCookies(document.firstPartyForCookies());
   web_request.setHasUserGesture(from_user_action);
 
@@ -1022,6 +970,21 @@ int32_t PluginInstance::Navigate(PPB_URLRequestInfo_Impl* request,
   WebString target_str = WebString::fromUTF8(target);
   container_->loadFrameRequest(web_request, target_str, false, NULL);
   return PP_OK;
+}
+
+bool PluginInstance::IsViewAccelerated() {
+  if (!container_)
+    return false;
+
+  WebDocument document = container_->element().document();
+  WebFrame* frame = document.frame();
+  if (!frame)
+    return false;
+  WebView* view = frame->view();
+  if (!view)
+    return false;
+
+  return view->isAcceleratedCompositingActive();
 }
 
 PluginDelegate::PlatformContext3D* PluginInstance::CreateContext3D() {
@@ -1324,34 +1287,6 @@ void PluginInstance::RemovePluginObject(PluginObject* plugin_object) {
   live_plugin_objects_.erase(plugin_object);
 }
 
-void PluginInstance::AddNPObjectVar(ObjectVar* object_var) {
-  DCHECK(np_object_to_object_var_.find(object_var->np_object()) ==
-         np_object_to_object_var_.end()) << "ObjectVar already in map";
-  np_object_to_object_var_[object_var->np_object()] = object_var;
-}
-
-void PluginInstance::RemoveNPObjectVar(ObjectVar* object_var) {
-  NPObjectToObjectVarMap::iterator found =
-      np_object_to_object_var_.find(object_var->np_object());
-  if (found == np_object_to_object_var_.end()) {
-    NOTREACHED() << "ObjectVar not registered.";
-    return;
-  }
-  if (found->second != object_var) {
-    NOTREACHED() << "ObjectVar doesn't match.";
-    return;
-  }
-  np_object_to_object_var_.erase(found);
-}
-
-ObjectVar* PluginInstance::ObjectVarForNPObject(NPObject* np_object) const {
-  NPObjectToObjectVarMap::const_iterator found =
-      np_object_to_object_var_.find(np_object);
-  if (found == np_object_to_object_var_.end())
-    return NULL;
-  return found->second;
-}
-
 bool PluginInstance::IsFullPagePlugin() const {
   WebFrame* frame = container()->element().document().frame();
   return frame->view()->mainFrame()->document().isPluginDocument();
@@ -1396,7 +1331,7 @@ PP_Bool PluginInstance::BindGraphics(PP_Instance instance,
       static_cast<PPB_Surface3D_Impl*>(enter_surface_3d.object()) : NULL;
 
   if (graphics_2d) {
-    if (graphics_2d->instance() != this)
+    if (graphics_2d->pp_instance() != pp_instance())
       return PP_FALSE;  // Can't bind other instance's contexts.
     if (!graphics_2d->BindToInstance(this))
       return PP_FALSE;  // Can't bind to more than one instance.
@@ -1407,7 +1342,7 @@ PP_Bool PluginInstance::BindGraphics(PP_Instance instance,
   } else if (graphics_3d) {
     // Make sure graphics can only be bound to the instance it is
     // associated with.
-    if (graphics_3d->instance() != this)
+    if (graphics_3d->pp_instance() != pp_instance())
       return PP_FALSE;
     if (!graphics_3d->BindToInstance(true))
       return PP_FALSE;
@@ -1417,7 +1352,7 @@ PP_Bool PluginInstance::BindGraphics(PP_Instance instance,
   } else if (surface_3d) {
     // Make sure graphics can only be bound to the instance it is
     // associated with.
-    if (surface_3d->instance() != this)
+    if (surface_3d->pp_instance() != pp_instance())
       return PP_FALSE;
     if (!surface_3d->BindToInstance(true))
       return PP_FALSE;
@@ -1444,25 +1379,28 @@ PP_Var PluginInstance::GetWindowObject(PP_Instance instance) {
   if (!frame)
     return PP_MakeUndefined();
 
-  return ObjectVar::NPObjectToPPVar(this, frame->windowObject());
+  return NPObjectToPPVar(this, frame->windowObject());
 }
 
 PP_Var PluginInstance::GetOwnerElementObject(PP_Instance instance) {
   if (!container_)
     return PP_MakeUndefined();
-  return ObjectVar::NPObjectToPPVar(this,
-                                    container_->scriptableObjectForElement());
+  return NPObjectToPPVar(this, container_->scriptableObjectForElement());
 }
 
 PP_Var PluginInstance::ExecuteScript(PP_Instance instance,
                                      PP_Var script,
                                      PP_Var* exception) {
+  // Executing the script may remove the plugin from the DOM, so we need to keep
+  // a reference to ourselves so that we can still process the result after the
+  // WebBindings::evaluate() below.
+  scoped_refptr<PluginInstance> ref(this);
   TryCatch try_catch(module()->pp_module(), exception);
   if (try_catch.has_exception())
     return PP_MakeUndefined();
 
   // Convert the script into an inconvenient NPString object.
-  scoped_refptr<StringVar> script_string(StringVar::FromPPVar(script));
+  StringVar* script_string = StringVar::FromPPVar(script);
   if (!script_string) {
     try_catch.SetException("Script param to ExecuteScript must be a string.");
     return PP_MakeUndefined();
@@ -1481,8 +1419,6 @@ PP_Var PluginInstance::ExecuteScript(PP_Instance instance,
   NPVariant result;
   bool ok = WebBindings::evaluate(NULL, frame->windowObject(), &np_script,
                                   &result);
-  // DANGER! |this| could be deleted at this point if the script removed the
-  // plugin from the DOM.
   if (!ok) {
     // TODO(brettw) bug 54011: The TryCatch isn't working properly and
     // doesn't actually catch this exception.
@@ -1491,7 +1427,7 @@ PP_Var PluginInstance::ExecuteScript(PP_Instance instance,
     return PP_MakeUndefined();
   }
 
-  PP_Var ret = Var::NPVariantToPPVar(this, &result);
+  PP_Var ret = NPVariantToPPVar(this, &result);
   WebBindings::releaseVariantValue(&result);
   return ret;
 }
@@ -1567,6 +1503,12 @@ void PluginInstance::PostMessage(PP_Instance instance, PP_Var message) {
 
 void PluginInstance::SubscribeToPolicyUpdates(PP_Instance instance) {
   delegate()->SubscribeToPolicyUpdates(this);
+}
+
+void PluginInstance::DoSetCursor(WebCursorInfo* cursor) {
+  cursor_.reset(cursor);
+  if (fullscreen_container_)
+    fullscreen_container_->DidChangeCursor(*cursor);
 }
 
 }  // namespace ppapi

@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop_proxy.h"
 #include "base/task.h"
 #include "net/base/completion_callback.h"
 #include "remoting/base/compound_buffer.h"
@@ -54,13 +55,11 @@ class MessageReader : public base::RefCountedThreadSafe<MessageReader> {
   void OnRead(int result);
   void HandleReadResult(int result);
   void OnDataReceived(net::IOBuffer* data, int data_size);
-  void OnMessageDone(CompoundBuffer* message);
+  void OnMessageDone(CompoundBuffer* message,
+                     scoped_refptr<base::MessageLoopProxy> message_loop);
   void ProcessDoneEvent();
 
   net::Socket* socket_;
-
-  // The network message loop this object runs on.
-  MessageLoop* message_loop_;
 
   // Set to true, when we have a socket read pending, and expecting
   // OnRead() to be called when new data is received.

@@ -15,8 +15,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
-#include "chrome/test/testing_profile.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
@@ -107,6 +106,10 @@ class MockSafeBrowsingService : public SafeBrowsingService {
     client->OnBlockingPageComplete(false);
   }
 
+  bool CanReportStats() const {
+    return true;  // tests for UMA users.
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSafeBrowsingService);
 };
@@ -150,12 +153,13 @@ class ClientSideDetectionHostTest : public TabContentsWrapperTestHarness {
     mock_profile_ = new NiceMock<MockTestingProfile>();
     profile_.reset(mock_profile_);
 
-    TabContentsWrapperTestHarness::SetUp();
     ui_thread_.reset(new BrowserThread(BrowserThread::UI, &message_loop_));
     // Note: we're starting a real IO thread to make sure our DCHECKs that
     // verify which thread is running are actually tested.
     io_thread_.reset(new BrowserThread(BrowserThread::IO));
     ASSERT_TRUE(io_thread_->Start());
+
+    TabContentsWrapperTestHarness::SetUp();
 
     // Inject service classes.
     csd_service_.reset(new StrictMock<MockClientSideDetectionService>());

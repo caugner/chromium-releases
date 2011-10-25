@@ -15,6 +15,7 @@
 #include "chrome/browser/sessions/session_id.h"
 #include "content/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
 
 class NavigationEntry;
@@ -189,22 +190,11 @@ struct SessionWindow {
   // The tabs, ordered by visual order.
   std::vector<SessionTab*> tabs;
 
-  // Is the window maximized?
-  bool is_maximized;
+  // Is the window maximized, minimized, or normal?
+  ui::WindowShowState show_state;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionWindow);
-};
-
-// Defines a synced session for use by session sync. A synced session is a
-// list of windows along with a unique session identifer (tag).
-struct SyncedSession {
-  SyncedSession();
-  ~SyncedSession();
-
-  // Unique tag for each session.
-  std::string session_tag;
-  std::vector<SessionWindow*> windows;
 };
 
 #endif  // CHROME_BROWSER_SESSIONS_SESSION_TYPES_H_

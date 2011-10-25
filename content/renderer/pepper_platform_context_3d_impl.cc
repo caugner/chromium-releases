@@ -40,7 +40,7 @@ PlatformContext3DImpl::~PlatformContext3DImpl() {
   channel_ = NULL;
 }
 
-bool PlatformContext3DImpl::Init() {
+bool PlatformContext3DImpl::Init(const int32* attrib_list) {
   // Ignore initializing more than once.
   if (command_buffer_)
     return true;
@@ -66,20 +66,36 @@ bool PlatformContext3DImpl::Init() {
   parent_gles2->helper()->CommandBufferHelper::Finish();
   parent_texture_id_ = parent_gles2->MakeTextureId();
 
-  // TODO(apatrick): Let Pepper plugins configure their back buffer surface.
-  static const int32 kAttribs[] = {
-    RendererGLContext::ALPHA_SIZE, 8,
-    RendererGLContext::DEPTH_SIZE, 24,
-    RendererGLContext::STENCIL_SIZE, 8,
-    RendererGLContext::SAMPLES, 0,
-    RendererGLContext::SAMPLE_BUFFERS, 0,
-    RendererGLContext::NONE,
-  };
-  std::vector<int32> attribs(kAttribs, kAttribs + ARRAYSIZE_UNSAFE(kAttribs));
+  gfx::Size surface_size;
+  std::vector<int32> attribs;
+  // TODO(alokp): Change GpuChannelHost::CreateOffscreenCommandBuffer()
+  // interface to accept width and height in the attrib_list so that
+  // we do not need to filter for width and height here.
+  if (attrib_list) {
+    for (const int32_t* attr = attrib_list;
+         attr[0] != RendererGLContext::NONE;
+         attr += 2) {
+      switch (attr[0]) {
+        case RendererGLContext::WIDTH:
+          surface_size.set_width(attr[1]);
+          break;
+        case RendererGLContext::HEIGHT:
+          surface_size.set_height(attr[1]);
+          break;
+        default:
+          attribs.push_back(attr[0]);
+          attribs.push_back(attr[1]);
+          break;
+      }
+    }
+    attribs.push_back(RendererGLContext::NONE);
+  }
+
   CommandBufferProxy* parent_command_buffer =
       parent_context_->GetCommandBufferProxy();
   command_buffer_ = channel_->CreateOffscreenCommandBuffer(
-      gfx::Size(1, 1),
+      surface_size,
+      NULL,
       "*",
       attribs,
       GURL::EmptyGURL());
@@ -93,11 +109,6 @@ bool PlatformContext3DImpl::Init() {
       &PlatformContext3DImpl::OnContextLost));
 
   return true;
-}
-
-void PlatformContext3DImpl::SetSwapBuffersCallback(Callback0::Type* callback) {
-  DCHECK(command_buffer_);
-  command_buffer_->SetSwapBuffersCallback(callback);
 }
 
 unsigned PlatformContext3DImpl::GetBackingTextureId() {
@@ -116,6 +127,10 @@ int PlatformContext3DImpl::GetCommandBufferRouteId() {
 
 void PlatformContext3DImpl::SetContextLostCallback(Callback0::Type* callback) {
   context_lost_callback_.reset(callback);
+}
+
+bool PlatformContext3DImpl::Echo(Task* task) {
+  return command_buffer_->Echo(task);
 }
 
 void PlatformContext3DImpl::OnContextLost() {

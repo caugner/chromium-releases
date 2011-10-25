@@ -254,7 +254,7 @@ var util = {
    * Locate the file referred to by path, creating directories or the file
    * itself if necessary.
    */
-  getOrCreateFile: function(path, successCallback, errorCallback) {
+  getOrCreateFile: function(root, path, successCallback, errorCallback) {
     var dirname = null;
     var basename = null;
 
@@ -272,16 +272,16 @@ var util = {
     }
 
     if (!dirname)
-      return onDirFound(this.filesystem.root);
+      return onDirFound(root);
 
-    this.getOrCreateDirectory(dirname, onDirFound, errorCallback);
+    util.getOrCreateDirectory(root, dirname, onDirFound, errorCallback);
   },
 
   /**
    * Locate the directory referred to by path, creating directories along the
    * way.
    */
-  getOrCreateDirectory: function(path, successCallback, errorCallback) {
+  getOrCreateDirectory: function(root, path, successCallback, errorCallback) {
     var names = path.split('/');
 
     function getOrCreateNextName(dir) {
@@ -297,7 +297,7 @@ var util = {
                        errorCallback);
     }
 
-    getOrCreateNextName(this.filesystem.root);
+    getOrCreateNextName(root);
   },
 
   /**
@@ -350,5 +350,44 @@ var util = {
       callback(file, new ByteReader(fileReader.result))
     };
     fileReader.readAsArrayBuffer(file.webkitSlice(begin, end));
+  },
+
+  /**
+   * Write a blob to a file.
+   * Truncates the file first, so the previous content is fully overwritten.
+   * @param {FileEntry} entry
+   * @param {Blob} blob
+   * @param {Function} onSuccess completion callback
+   * @param {Function} onError error handler
+   */
+  writeBlobToFile: function(entry, blob, onSuccess, onError) {
+    function truncate(writer) {
+      writer.onerror = onError;
+      writer.onwriteend = write.bind(null, writer);
+      writer.truncate(0);
+    }
+
+    function write(writer) {
+      writer.onwriteend = onSuccess;
+      writer.write(blob);
+    }
+
+    entry.createWriter(truncate, onError);
+  },
+
+  createElement: function (document, elementName, var_arg) { // children
+    var logger = console;
+    var element = document.createElement(elementName);
+
+    for (var i = 2; i < arguments.length; i++) {
+      var arg = arguments[i];
+      if (typeof(arg) == 'string') {
+        element.appendChild(document.createTextNode(arg));
+      } else {
+        element.appendChild(arg);
+      }
+    }
+
+    return element;
   }
 };

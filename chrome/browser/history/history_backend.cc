@@ -20,7 +20,6 @@
 #include "base/time.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
-#include "chrome/browser/history/download_history_info.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
@@ -29,6 +28,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/download/download_persistent_store_info.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -91,7 +91,7 @@ static const int kArchiveDaysThreshold = 90;
 // Converts from PageUsageData to MostVisitedURL. |redirects| is a
 // list of redirects for this URL. Empty list means no redirects.
 MostVisitedURL MakeMostVisitedURL(const PageUsageData& page_data,
-                                           const RedirectList& redirects) {
+                                  const RedirectList& redirects) {
   MostVisitedURL mv;
   mv.url = page_data.GetURL();
   mv.title = page_data.GetTitle();
@@ -399,7 +399,28 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
       PageTransition::StripQualifier(request->transition);
   bool is_keyword_generated = (transition == PageTransition::KEYWORD_GENERATED);
 
-  if (request->redirects.size() <= 1) {
+  // If the user is navigating to a not-previously-typed intranet hostname,
+  // change the transition to TYPED so that the omnibox will learn that this is
+  // a known host.
+  bool has_redirects = request->redirects.size() > 1;
+  if (PageTransition::IsMainFrame(request->transition) &&
+      (transition != PageTransition::TYPED) && !is_keyword_generated) {
+    const GURL& origin_url(has_redirects ?
+        request->redirects[0] : request->url);
+    if (origin_url.SchemeIs(chrome::kHttpScheme) ||
+        origin_url.SchemeIs(chrome::kHttpsScheme) ||
+        origin_url.SchemeIs(chrome::kFtpScheme)) {
+      std::string host(origin_url.host());
+      if ((net::RegistryControlledDomainService::GetRegistryLength(
+          host, false) == 0) && !db_->IsTypedHost(host)) {
+        transition = PageTransition::TYPED;
+        request->transition = PageTransition::FromInt(transition |
+            PageTransition::GetQualifier(request->transition));
+      }
+    }
+  }
+
+  if (!has_redirects) {
     // The single entry is both a chain start and end.
     PageTransition::Type t = request->transition |
         PageTransition::CHAIN_START | PageTransition::CHAIN_END;
@@ -920,6 +941,14 @@ bool HistoryBackend::GetVisitsForURL(URLID id, VisitVector* visits) {
   return false;
 }
 
+bool HistoryBackend::GetMostRecentVisitsForURL(URLID id,
+                                               int max_visits,
+                                               VisitVector* visits) {
+  if (db_.get())
+    return db_->GetMostRecentVisitsForURL(id, max_visits, visits);
+  return false;
+}
+
 bool HistoryBackend::UpdateURL(URLID id, const history::URLRow& url) {
   if (db_.get())
     return db_->UpdateURLRow(id, url);
@@ -1114,7 +1143,7 @@ void HistoryBackend::UpdateDownloadPath(const FilePath& path,
 void HistoryBackend::CreateDownload(
     scoped_refptr<DownloadCreateRequest> request,
     int32 id,
-    const DownloadHistoryInfo& history_info) {
+    const DownloadPersistentStoreInfo& history_info) {
   int64 db_handle = 0;
   if (!request->canceled()) {
     if (db_.get())
@@ -1465,7 +1494,7 @@ void HistoryBackend::SetPageContents(const GURL& url,
 
 void HistoryBackend::SetPageThumbnail(
     const GURL& url,
-    const SkBitmap& thumbnail,
+    const gfx::Image* thumbnail,
     const ThumbnailScore& score) {
   if (!db_.get() || !thumbnail_db_.get())
     return;

@@ -118,6 +118,12 @@ class PrefProvider : public ObservableProvider,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier) const;
 
+  virtual Value* GetContentSettingValue(
+      const GURL& primary_url,
+      const GURL& secondary_url,
+      ContentSettingsType content_type,
+      const ResourceIdentifier& resource_identifier) const;
+
   virtual void GetAllContentSettingsRules(
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
@@ -134,8 +140,6 @@ class PrefProvider : public ObservableProvider,
                        const NotificationDetails& details);
 
  private:
-  void Init();
-
   // Reads all content settings exceptions from the preference and load them
   // into the |value_map_|. The |value_map_| is cleared first if |overwrite| is
   // true.
@@ -150,36 +154,62 @@ class PrefProvider : public ObservableProvider,
       const ResourceIdentifier& resource_identifier,
       ContentSetting setting);
 
-  // Update the preference prefs::kContentSettingsPatternPairs, which is used to
-  // persist content settigns exceptions and supposed to replace the preferences
-  // prefs::kContentSettingsPatterns.
-  void UpdatePatternPairsPref(
+  // Updates the given |pattern_pairs_settings| dictionary value.
+  void UpdatePatternPairsSettings(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      const ResourceIdentifier& resource_identifier,
+      ContentSetting setting,
+      DictionaryValue* pattern_pairs_settings);
+
+  // Updates the preferences prefs::kContentSettingsPatterns. This preferences
+  // is obsolete and only used for compatibility reasons.
+  void UpdateObsoletePatternsPref(
       const ContentSettingsPattern& primary_pattern,
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
       ContentSetting setting);
 
-  // Updates the preferences prefs::kContentSettingsPatterns. This preferences
-  // is obsolete and only used for compatibility reasons.
-  void UpdatePatternsPref(
+  // Updates the preference prefs::kGeolocationContentSettings. This preference
+  // is obsolete and only used to keep sync working with older chrome versions
+  // that do not know about the new preference.
+  void UpdateObsoleteGeolocationPref(
       const ContentSettingsPattern& primary_pattern,
       const ContentSettingsPattern& secondary_pattern,
-      ContentSettingsType content_type,
-      const ResourceIdentifier& resource_identifier,
       ContentSetting setting);
+
+  // Updates the obsolete notifications settings in the passed list values
+  // |allowed_sites| and |denied_sites|.
+  void UpdateObsoleteNotificationsSettings(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSetting setting,
+      ListValue* allowed_sites,
+      ListValue* denied_sites);
 
   // Various migration methods (old cookie, popup and per-host data gets
   // migrated to the new format).
   void MigrateObsoletePerhostPref();
   void MigrateObsoletePopupsPref();
   void MigrateObsoleteContentSettingsPatternPref();
+  void MigrateObsoleteGeolocationPref();
+  void MigrateObsoleteNotificationsPrefs();
 
   // Copies the value of the preference that stores the content settings
   // exceptions to the obsolete preference for content settings exceptions. This
   // is necessary to allow content settings exceptions beeing synced to older
-  // versions of chrome that only use the obsolete.
-  void SyncObsoletePref();
+  // versions of chrome that only use the obsolete preference.
+  void SyncObsoletePatternPref();
+
+  // Copies the notifications and geolocation content settings exceptions from
+  // the preference that stores the content settings exceptions to the obsolete
+  // preference for notification and geolocation content settings exceptions.
+  // This is necessary to allow notifications and geolocation content settings
+  // exceptions being synced to older versions of chrome that only use the
+  // obsolete preference.
+  void SyncObsoletePrefs();
 
   static void CanonicalizeContentSettingsExceptions(
       base::DictionaryValue* all_settings_dictionary);

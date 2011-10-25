@@ -7,7 +7,7 @@
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_test_sink.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 ProxyChannel::ProxyChannel(base::ProcessHandle remote_process_handle)
@@ -26,7 +26,7 @@ bool ProxyChannel::InitWithChannel(Delegate* delegate,
   IPC::Channel::Mode mode = is_client ? IPC::Channel::MODE_CLIENT
                                       : IPC::Channel::MODE_SERVER;
   channel_.reset(new IPC::SyncChannel(channel_handle, mode, this,
-                                      delegate->GetIPCMessageLoop(), false,
+                                      delegate->GetIPCMessageLoop(), true,
                                       delegate->GetShutdownEvent()));
   return true;
 }
@@ -66,4 +66,4 @@ bool ProxyChannel::Send(IPC::Message* msg) {
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

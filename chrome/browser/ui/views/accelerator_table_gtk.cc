@@ -14,7 +14,6 @@ namespace browser {
 // the Windows accelerators in ../../app/chrome_dll.rc.
 const AcceleratorMapping kAcceleratorMap[] = {
   // Keycode                  Shift  Ctrl   Alt    Command ID
-  { ui::VKEY_A,              true,  true,  false, IDC_AUTOFILL_DEFAULT },
   { ui::VKEY_LEFT,           false, false, true,  IDC_BACK },
   { ui::VKEY_BACK,           false, false, false, IDC_BACK },
 #if defined(OS_CHROMEOS)
@@ -96,6 +95,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_N,              false, true,  false, IDC_NEW_WINDOW },
   { ui::VKEY_O,              false, true,  false, IDC_OPEN_FILE },
   { ui::VKEY_P,              false, true,  false, IDC_PRINT},
+  { ui::VKEY_P,              true,  true,  false, IDC_ADVANCED_PRINT},
   { ui::VKEY_R,              false, true,  false, IDC_RELOAD },
   { ui::VKEY_R,              true,  true,  false, IDC_RELOAD_IGNORING_CACHE },
 #if !defined(OS_CHROMEOS)
@@ -144,6 +144,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_E,              false, false, true,  IDC_SHOW_APP_MENU},
   { ui::VKEY_ESCAPE,         false, false, false, IDC_STOP },
   { ui::VKEY_ESCAPE,         true,  false, false, IDC_TASK_MANAGER },
+  { ui::VKEY_OEM_PERIOD,     true,  true,  false, IDC_TOGGLE_SPEECH_INPUT },
   { ui::VKEY_U,              false, true,  false, IDC_VIEW_SOURCE },
   { ui::VKEY_OEM_MINUS,      false, true,  false, IDC_ZOOM_MINUS },
   { ui::VKEY_OEM_MINUS,      true,  true,  false, IDC_ZOOM_MINUS },

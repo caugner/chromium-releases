@@ -7,11 +7,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -70,7 +70,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionFromWebAppTest, Basic) {
   EXPECT_EQ(extension_misc::LAUNCH_PANEL,
             installed_extension_->launch_container());
 
-  ASSERT_EQ(2u, installed_extension_->permission_set()->apis().size());
+  ASSERT_EQ(2u, installed_extension_->GetActivePermissions()->apis().size());
   EXPECT_TRUE(installed_extension_->HasAPIPermission(
       ExtensionAPIPermission::kGeolocation));
   EXPECT_TRUE(installed_extension_->HasAPIPermission(

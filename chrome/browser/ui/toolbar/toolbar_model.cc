@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,15 +34,16 @@ ToolbarModel::~ToolbarModel() {
 }
 
 // ToolbarModel Implementation.
-std::wstring ToolbarModel::GetText() const {
+string16 ToolbarModel::GetText() const {
   GURL url(chrome::kAboutBlankURL);
   std::string languages;  // Empty if we don't have a |navigation_controller|.
 
   NavigationController* navigation_controller = GetNavigationController();
   if (navigation_controller) {
-    languages = navigation_controller->profile()->GetPrefs()->GetString(
-        prefs::kAcceptLanguages);
-    NavigationEntry* entry = navigation_controller->GetActiveEntry();
+    Profile* profile =
+        Profile::FromBrowserContext(navigation_controller->browser_context());
+    languages = profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
+    NavigationEntry* entry = navigation_controller->GetVisibleEntry();
     if (!navigation_controller->tab_contents()->ShouldDisplayURL()) {
       // Explicitly hide the URL for this tab.
       url = GURL();
@@ -55,11 +56,9 @@ std::wstring ToolbarModel::GetText() const {
   // Note that we can't unescape spaces here, because if the user copies this
   // and pastes it into another program, that program may think the URL ends at
   // the space.
-  return UTF16ToWideHack(
-      AutocompleteInput::FormattedStringWithEquivalentMeaning(
-          url,
-          net::FormatUrl(url, languages, net::kFormatUrlOmitAll,
-                         UnescapeRule::NORMAL, NULL, NULL, NULL)));
+  return AutocompleteInput::FormattedStringWithEquivalentMeaning(
+      url, net::FormatUrl(url, languages, net::kFormatUrlOmitAll,
+                          UnescapeRule::NORMAL, NULL, NULL, NULL));
 }
 
 ToolbarModel::SecurityLevel ToolbarModel::GetSecurityLevel() const {
@@ -70,7 +69,7 @@ ToolbarModel::SecurityLevel ToolbarModel::GetSecurityLevel() const {
   if (!navigation_controller)  // We might not have a controller on init.
     return NONE;
 
-  NavigationEntry* entry = navigation_controller->GetActiveEntry();
+  NavigationEntry* entry = navigation_controller->GetVisibleEntry();
   if (!entry)
     return NONE;
 
@@ -114,14 +113,14 @@ int ToolbarModel::GetIcon() const {
   return icon_ids[GetSecurityLevel()];
 }
 
-std::wstring ToolbarModel::GetEVCertName() const {
+string16 ToolbarModel::GetEVCertName() const {
   DCHECK_EQ(GetSecurityLevel(), EV_SECURE);
   scoped_refptr<net::X509Certificate> cert;
   // Note: Navigation controller and active entry are guaranteed non-NULL or
   // the security level would be NONE.
   CertStore::GetInstance()->RetrieveCert(
-      GetNavigationController()->GetActiveEntry()->ssl().cert_id(), &cert);
-  return UTF16ToWideHack(GetEVCertName(*cert));
+      GetNavigationController()->GetVisibleEntry()->ssl().cert_id(), &cert);
+  return GetEVCertName(*cert);
 }
 
 // static

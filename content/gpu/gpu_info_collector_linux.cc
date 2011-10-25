@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,6 +18,8 @@
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_implementation.h"
+#include "ui/gfx/gl/gl_surface.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 namespace {
 
@@ -192,16 +195,27 @@ namespace gpu_info_collector {
 bool CollectGraphicsInfo(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
-  // TODO(zmo): need to consider the case where we are running on top of
-  // desktop GL and GL_ARB_robustness extension is available.
-  gpu_info->can_lose_context =
-      (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kGpuNoContextLost)) {
+    gpu_info->can_lose_context = false;
+  } else {
+    // TODO(zmo): need to consider the case where we are running on top
+    // of desktop GL and GL_ARB_robustness extension is available.
+    gpu_info->can_lose_context =
+        (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2);
+  }
+
   gpu_info->finalized = true;
   return CollectGraphicsInfoGL(gpu_info);
 }
 
 bool CollectPreliminaryGraphicsInfo(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
+
+  if (!gfx::GLSurface::InitializeOneOff()) {
+    LOG(ERROR) << "gfx::GLContext::InitializeOneOff() failed";
+    return false;
+  }
 
   bool rt = true;
   if (!CollectVideoCardInfo(gpu_info))
@@ -322,6 +336,8 @@ bool CollectDriverInfoGL(GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   std::string gl_version_string = gpu_info->gl_version_string;
+  if (StartsWithASCII(gl_version_string, "OpenGL ES", true))
+    gl_version_string = gl_version_string.substr(10);
   std::vector<std::string> pieces;
   base::SplitStringAlongWhitespace(gl_version_string, &pieces);
   // In linux, the gl version string might be in the format of

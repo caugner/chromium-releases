@@ -7,13 +7,13 @@
 #include <map>
 #include <set>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/history/history.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/plugin_data_remover.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
@@ -33,8 +34,10 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/download_manager.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_source.h"
@@ -71,9 +74,13 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
       waiting_for_clear_history_(false),
       waiting_for_clear_quota_managed_data_(false),
       waiting_for_clear_networking_history_(false),
+      waiting_for_clear_cookies_(false),
       waiting_for_clear_cache_(false),
       waiting_for_clear_lso_data_(false) {
   DCHECK(profile);
+  clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
+                                      profile_->GetPrefs(),
+                                      NULL);
 }
 
 BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
@@ -93,18 +100,28 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
       waiting_for_clear_history_(false),
       waiting_for_clear_quota_managed_data_(false),
       waiting_for_clear_networking_history_(false),
+      waiting_for_clear_cookies_(false),
       waiting_for_clear_cache_(false),
       waiting_for_clear_lso_data_(false) {
   DCHECK(profile);
+  clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
+                                      profile_->GetPrefs(),
+                                      NULL);
 }
 
 BrowsingDataRemover::~BrowsingDataRemover() {
   DCHECK(all_done());
 }
 
+// Static.
+void BrowsingDataRemover::set_removing(bool removing) {
+  DCHECK(removing_ != removing);
+  removing_ = removing;
+}
+
 void BrowsingDataRemover::Remove(int remove_mask) {
-  DCHECK(!removing_);
-  removing_ = true;
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  set_removing(true);
 
   if (remove_mask & REMOVE_HISTORY) {
     HistoryService* history_service =
@@ -179,25 +196,30 @@ void BrowsingDataRemover::Remove(int remove_mask) {
   if (remove_mask & REMOVE_COOKIES) {
     UserMetrics::RecordAction(UserMetricsAction("ClearBrowsingData_Cookies"));
     // Since we are running on the UI thread don't call GetURLRequestContext().
-    net::CookieMonster* cookie_monster = NULL;
     net::URLRequestContextGetter* rq_context = profile_->GetRequestContext();
     if (rq_context) {
-      cookie_monster = rq_context->DONTUSEME_GetCookieStore()->
-          GetCookieMonster();
+      waiting_for_clear_cookies_ = true;
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(&BrowsingDataRemover::ClearCookiesOnIOThread,
+                     base::Unretained(this), base::Unretained(rq_context)));
     }
-    if (cookie_monster)
-      cookie_monster->DeleteAllCreatedBetween(delete_begin_, delete_end_, true);
+  }
 
-    // REMOVE_COOKIES is actually "cookies and other site data" so we make sure
-    // to remove other data such local databases, STS state, etc. These only can
+  if (remove_mask & REMOVE_LOCAL_STORAGE) {
+    // Remove data such as local databases, STS state, etc. These only can
     // be removed if a WEBKIT thread exists, so check that first:
     if (BrowserThread::IsMessageLoopValid(BrowserThread::WEBKIT)) {
       // We assume the end time is now.
       profile_->GetWebKitContext()->DeleteDataModifiedSince(delete_begin_);
     }
+  }
 
-    // We'll start by using the quota system to clear out AppCaches, WebSQL DBs,
-    // and File Systems.
+  if (remove_mask & REMOVE_INDEXEDDB || remove_mask & REMOVE_WEBSQL ||
+      remove_mask & REMOVE_APPCACHE || remove_mask & REMOVE_FILE_SYSTEMS) {
+    // TODO(mkwst): At the moment, we don't have the ability to pass a mask into
+    // QuotaManager. Until then, we'll clear all quota-managed data types if any
+    // ought to be cleared.
     quota_manager_ = profile_->GetQuotaManager();
     if (quota_manager_) {
       waiting_for_clear_quota_managed_data_ = true;
@@ -207,15 +229,17 @@ void BrowsingDataRemover::Remove(int remove_mask) {
               this,
               &BrowsingDataRemover::ClearQuotaManagedDataOnIOThread));
     }
+  }
 
-    if (profile_->GetTransportSecurityState()) {
-      BrowserThread::PostTask(
-          BrowserThread::IO, FROM_HERE,
-          NewRunnableMethod(
-              profile_->GetTransportSecurityState(),
-              &net::TransportSecurityState::DeleteSince,
-              delete_begin_));
-    }
+  if (remove_mask & REMOVE_LSO_DATA && *clear_plugin_lso_data_enabled_) {
+    UserMetrics::RecordAction(UserMetricsAction("ClearBrowsingData_LSOData"));
+
+    waiting_for_clear_lso_data_ = true;
+    if (!plugin_data_remover_.get())
+      plugin_data_remover_ = new PluginDataRemover(profile_);
+    base::WaitableEvent* event =
+        plugin_data_remover_->StartRemoving(delete_begin_);
+    watcher_.StartWatching(event, this);
   }
 
   if (remove_mask & REMOVE_PASSWORDS) {
@@ -266,15 +290,14 @@ void BrowsingDataRemover::Remove(int remove_mask) {
     }
   }
 
-  if (remove_mask & REMOVE_LSO_DATA) {
-    UserMetrics::RecordAction(UserMetricsAction("ClearBrowsingData_LSOData"));
-
-    waiting_for_clear_lso_data_ = true;
-    if (!plugin_data_remover_.get())
-      plugin_data_remover_ = new PluginDataRemover();
-    base::WaitableEvent* event =
-        plugin_data_remover_->StartRemoving(delete_begin_);
-    watcher_.StartWatching(event, this);
+  // Also delete cached TransportSecurityState data.
+  if (profile_->GetTransportSecurityState()) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        NewRunnableMethod(
+            profile_->GetTransportSecurityState(),
+            &net::TransportSecurityState::DeleteSince,
+            delete_begin_));
   }
 
   NotifyAndDeleteIfDone();
@@ -347,7 +370,7 @@ void BrowsingDataRemover::NotifyAndDeleteIfDone() {
   if (g_browser_process->net_log())
     g_browser_process->net_log()->ClearAllPassivelyCapturedEvents();
 
-  removing_ = false;
+  set_removing(false);
   FOR_EACH_OBSERVER(Observer, observer_list_, OnBrowsingDataRemoverDone());
 
   // History requests aren't happy if you delete yourself from the callback.
@@ -450,7 +473,6 @@ void BrowsingDataRemover::DoClearCache(int rv) {
 
 void BrowsingDataRemover::ClearQuotaManagedDataOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(waiting_for_clear_quota_managed_data_);
 
   // Ask the QuotaManager for all origins with temporary quota modified within
   // the user-specified timeframe, and deal with the resulting set in
@@ -465,7 +487,7 @@ void BrowsingDataRemover::ClearQuotaManagedDataOnIOThread() {
     // OnGotPersistentQuotaManagedOrigins.
     profile_->GetQuotaManager()->GetOriginsModifiedSince(
         quota::kStorageTypePersistent, delete_begin_, NewCallback(this,
-            &BrowsingDataRemover::OnGotPersistentQuotaManagedOrigins));
+            &BrowsingDataRemover::OnGotQuotaManagedOrigins));
   } else {
     // Otherwise, we don't need to deal with persistent storage.
     --quota_managed_storage_types_to_delete_count_;
@@ -475,13 +497,13 @@ void BrowsingDataRemover::ClearQuotaManagedDataOnIOThread() {
   // OnGotTemporaryQuotaManagedOrigins.
   profile_->GetQuotaManager()->GetOriginsModifiedSince(
       quota::kStorageTypeTemporary, delete_begin_, NewCallback(this,
-          &BrowsingDataRemover::OnGotTemporaryQuotaManagedOrigins));
+          &BrowsingDataRemover::OnGotQuotaManagedOrigins));
 }
 
-void BrowsingDataRemover::OnGotTemporaryQuotaManagedOrigins(
-    const std::set<GURL>& origins) {
+void BrowsingDataRemover::OnGotQuotaManagedOrigins(
+    const std::set<GURL>& origins, quota::StorageType type) {
   DCHECK_GT(quota_managed_storage_types_to_delete_count_, 0);
-  // Walk through the origins passed in, delete temporary quota from each that
+  // Walk through the origins passed in, delete quota of |type| from each that
   // isn't protected.
   std::set<GURL>::const_iterator origin;
   for (origin = origins.begin(); origin != origins.end(); ++origin) {
@@ -489,35 +511,12 @@ void BrowsingDataRemover::OnGotTemporaryQuotaManagedOrigins(
       continue;
     ++quota_managed_origins_to_delete_count_;
     quota_manager_->DeleteOriginData(origin->GetOrigin(),
-        quota::kStorageTypeTemporary, NewCallback(this,
-            &BrowsingDataRemover::OnQuotaManagedOriginDeletion));
+        type, NewCallback(this,
+                          &BrowsingDataRemover::OnQuotaManagedOriginDeletion));
   }
 
   --quota_managed_storage_types_to_delete_count_;
-  if (quota_managed_storage_types_to_delete_count_ == 0 &&
-      quota_managed_origins_to_delete_count_ == 0)
-    CheckQuotaManagedDataDeletionStatus();
-}
-
-void BrowsingDataRemover::OnGotPersistentQuotaManagedOrigins(
-    const std::set<GURL>& origins) {
-  DCHECK_GT(quota_managed_storage_types_to_delete_count_, 0);
-  // Walk through the origins passed in, delete persistent quota from each that
-  // isn't protected.
-  std::set<GURL>::const_iterator origin;
-  for (origin = origins.begin(); origin != origins.end(); ++origin) {
-    if (special_storage_policy_->IsStorageProtected(origin->GetOrigin()))
-      continue;
-    ++quota_managed_origins_to_delete_count_;
-    quota_manager_->DeleteOriginData(origin->GetOrigin(),
-        quota::kStorageTypePersistent, NewCallback(this,
-            &BrowsingDataRemover::OnQuotaManagedOriginDeletion));
-  }
-
-  --quota_managed_storage_types_to_delete_count_;
-  if (quota_managed_storage_types_to_delete_count_ == 0 &&
-      quota_managed_origins_to_delete_count_ == 0)
-    CheckQuotaManagedDataDeletionStatus();
+  CheckQuotaManagedDataDeletionStatus();
 }
 
 void BrowsingDataRemover::OnQuotaManagedOriginDeletion(
@@ -530,26 +529,58 @@ void BrowsingDataRemover::OnQuotaManagedOriginDeletion(
   }
 
   --quota_managed_origins_to_delete_count_;
-  if (quota_managed_storage_types_to_delete_count_ == 0 &&
-      quota_managed_origins_to_delete_count_ == 0)
-    CheckQuotaManagedDataDeletionStatus();
+  CheckQuotaManagedDataDeletionStatus();
 }
 
 void BrowsingDataRemover::CheckQuotaManagedDataDeletionStatus() {
-  DCHECK_EQ(quota_managed_origins_to_delete_count_, 0);
-  DCHECK_EQ(quota_managed_storage_types_to_delete_count_, 0);
-  DCHECK(waiting_for_clear_quota_managed_data_);
+  if (quota_managed_storage_types_to_delete_count_ != 0 ||
+      quota_managed_origins_to_delete_count_ != 0) {
+    return;
+  }
 
-  waiting_for_clear_quota_managed_data_ = false;
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(
           this,
-          &BrowsingDataRemover::NotifyAndDeleteIfDone));
+          &BrowsingDataRemover::OnQuotaManagedDataDeleted));
+}
+
+void BrowsingDataRemover::OnQuotaManagedDataDeleted() {
+  DCHECK(waiting_for_clear_quota_managed_data_);
+  waiting_for_clear_quota_managed_data_ = false;
+  NotifyAndDeleteIfDone();
 }
 
 void BrowsingDataRemover::OnWaitableEventSignaled(
     base::WaitableEvent* waitable_event) {
   waiting_for_clear_lso_data_ = false;
   NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::OnClearedCookies(int num_deleted) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&BrowsingDataRemover::OnClearedCookies,
+                   base::Unretained(this), num_deleted));
+    return;
+  }
+
+  waiting_for_clear_cookies_ = false;
+  NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::ClearCookiesOnIOThread(
+    net::URLRequestContextGetter* rq_context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  net::CookieMonster* cookie_monster = rq_context->
+      GetURLRequestContext()->cookie_store()->GetCookieMonster();
+  if (cookie_monster) {
+      cookie_monster->DeleteAllCreatedBetweenAsync(
+          delete_begin_, delete_end_, true,
+          base::Bind(&BrowsingDataRemover::OnClearedCookies,
+                     base::Unretained(this)));
+  } else {
+    OnClearedCookies(0);
+  }
 }

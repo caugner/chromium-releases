@@ -12,6 +12,10 @@ ADVAPI32.dll!WmiOpenBlock
 ADVAPI32.dll!WmiOpenBlock
 
 # Reports from Sophos antivirus
+UNADDRESSABLE ACCESS
+...
+sophos*.dll!*
+
 UNINITIALIZED READ
 ...
 sophos*.dll!*
@@ -25,29 +29,18 @@ LEAK
 ...
 GoogleDesktopNetwork3.DLL!DllUnregisterServer
 
+# They deliberately use uninit local var in sqlite random generator
+UNINITIALIZED READ
+*!randomByte
+*!sqlite3_randomness
+
 ############################
 # Suppress some false reports due to bugs in Dr.Memory like wrong analysis
 # assumptions or unhandled syscalls
 
-# False reports during printing using fprintf
-UNINITIALIZED READ
-system call NtRaiseException
-KERNEL32.dll!RaiseException
-*!DebuggerProbe
-*!DebuggerKnownHandle
-
-UNADDRESSABLE ACCESS
-ntdll.dll!towlower
-ntdll.dll!KiUserExceptionDispatcher
-*!DebuggerProbe
-*!DebuggerKnownHandle
-
-# LoadLibrary calls give some strange reports
-UNADDRESSABLE ACCESS
-ntdll.dll!strchr
-KERNEL32.dll!LoadLibraryExW
-
 # http://code.google.com/p/drmemory/issues/detail?id=12
+# Please note: the following suppressions were written in the abscense of
+# private symbols so may need to be updated when we switch to auto-loading PDBs
 UNINITIALIZED READ
 ntdll.dll!Rtl*
 ntdll.dll!Rtl*
@@ -81,9 +74,22 @@ UNINITIALIZED READ
 ...
 SHELL32.dll!ILSaveToStream*
 
-POSSIBLE LEAK
+LEAK
 ...
 SHELL32.dll!SHFileOperation*
+
+UNINITIALIZED READ
+...
+SHELL32.dll!SHGetItemFromDataObject
+
+LEAK
+...
+SHELL32.dll!SHGetItemFromDataObject
+
+LEAK
+...
+ole32.dll!*
+SHELL32.dll!SHChangeNotifySuspendResume
 
 # http://code.google.com/p/drmemory/issues/detail?id=14
 UNINITIALIZED READ
@@ -124,16 +130,6 @@ UNINITIALIZED READ
 UNINITIALIZED READ
 ...
 UxTheme.dll!*
-
-UNINITIALIZED READ
-...
-RPCRT4.dll!UuidCreate
-
-# http://code.google.com/p/drmemory/issues/detail?id=36
-UNINITIALIZED READ
-system call NtContinue
-*!DebuggerProbe
-*!DebuggerKnownHandle
 
 # http://code.google.com/p/drmemory/issues/detail?id=40
 UNINITIALIZED READ
@@ -195,9 +191,6 @@ UNINITIALIZED READ
 USP10.dll!*
 ...
 USP10.dll!ScriptStringAnalyse
-
-UNADDRESSABLE ACCESS
-system call NtUserGetClassInfo* WNDCLASS*.lpszClassName
 
 LEAK
 IMM32.dll!ImmGetIMCCSize
@@ -287,10 +280,6 @@ GDI32.dll!CreateICW
 # http://code.google.com/p/drmemory/issues/detail?id=362
 UNINITIALIZED READ
 USER32.dll!UnregisterClass*
-
-# http://code.google.com/p/drmemory/issues/detail?id=380
-UNINITIALIZED READ
-system call NtQueryInformationToken
 
 # http://code.google.com/p/drmemory/issues/detail?id=382
 LEAK
@@ -394,11 +383,16 @@ LEAK
 # http://code.google.com/p/drmemory/issues/detail?id=454
 UNINITIALIZED READ
 ...
-WINMM.dll!waveOutGetNumDevs
+WINMM.dll!wave*GetNumDevs
 
 LEAK
 ...
-WINMM.dll!waveOutGetNumDevs
+WINMM.dll!wave*GetNumDevs
+
+# http://code.google.com/p/drmemory/issues/detail?id=466
+LEAK
+ntdll.dll!RtlRunOnceBeginInitialize
+ntdll.dll!RtlInitializeCriticalSectionAndSpinCount
 
 # http://code.google.com/p/drmemory/issues/detail?id=471
 UNINITIALIZED READ
@@ -456,12 +450,77 @@ CRYPT32.dll!CertGetCRLContextProperty
 ...
 CRYPT32.dll!CertGetCertificateChain
 
-# http://code.google.com/p/drmemory/issues/detail?id=499
+# http://code.google.com/p/drmemory/issues/detail?id=511
 UNINITIALIZED READ
-system call NtUserGetClassInfo WNDCLASSEX*
+RPCRT4.dll!*
+...
+RPCRT4.dll!UuidCreate
+ole32.dll!*
 
-UNADDRESSABLE ACCESS
-system call NtUserGetClassInfo WNDCLASSEX
+UNINITIALIZED READ
+ole32.dll!*
+ole32.dll!*
+ole32.dll!StringFromGUID2
+
+# http://code.google.com/p/drmemory/issues/detail?id=512
+UNINITIALIZED READ
+...
+*!browser_sync::Cryptographer::PackBootstrapToken
+*!browser_sync::Cryptographer::GetBootstrapToken
+
+UNINITIALIZED READ
+...
+*!Encrypt*
+
+# http://code.google.com/p/drmemory/issues/detail?id=513
+UNINITIALIZED READ
+*!v8*
+
+UNINITIALIZED READ
+*!*
+*!v8*
+
+UNINITIALIZED READ
+<not in a module>
+...
+*!v8*
+
+# http://code.google.com/p/drmemory/issues/detail?id=546
+UNINITIALIZED READ
+...
+mscms.dll!*
+...
+GDI32.dll!*
+*!IconUtil::Create*HICON*
+
+# http://crbug.com/92152
+LEAK
+...
+USER32.dll!CreateWindowExW
+*!views::TooltipManagerWin::Init
+*!views::TooltipManagerWin::TooltipManagerWin
+
+# http://code.google.com/p/drmemory/issues/detail?id=567
+UNINITIALIZED READ
+dbghelp.dll!*
+...
+dbghelp.dll!StackWalk64
+
+LEAK
+*!*
+dbghelp.dll!*
+...
+dbghelp.dll!StackWalk64
+
+# http://code.google.com/p/drmemory/issues/detail?id=569
+# symbols w/o PDB make no sense, so sticking with mod+offs
+POSSIBLE LEAK
+<RPCRT4.dll+0x10636>
+<RPCRT4.dll+0x10610>
+...
+<RPCRT4.dll+0x3474?>
+<ntdll.dll+0x64fde>
+<ntdll.dll+0x447f3>
 
 ############################
 # TODO(timurrrr): investigate these
@@ -616,6 +675,35 @@ LEAK
 *!base::LeakyLazyInstanceTraits*::New
 *!base::LazyInstance*::Pointer
 
+# Deliberate NULL deref to crash the child process
+UNADDRESSABLE ACCESS
+*!CrashingChildProcess
+
+# http://crbug.com/79933
+LEAK
+...
+*!TestURLRequestContext::Init
+
+LEAK
+...
+*!TestURLRequestContext::TestURLRequestContext
+*!TestURLRequestContextGetter::GetURLRequestContext
+*!notifier::SingleLoginAttempt::SingleLoginAttempt
+*!notifier::Login::StartConnection
+*!sync_notifier::InvalidationNotifier::UpdateCredentials
+*!sync_notifier::NonBlockingInvalidationNotifier::Core::UpdateCredentials
+
+LEAK
+...
+*!TestURLRequestContext::TestURLRequestContext
+*!TestURLRequestContextGetter::GetURLRequestContext
+*!URLFetcher::Core::StartURLRequest
+
+# This test intentionally leaks an object and checks that it's never deleted
+LEAK
+...
+*!BrowserThreadTest_NotReleasedIfTargetThreadNonExistent_Test::TestBody
+
 ############################
 # Real issues in Chromium
 
@@ -682,6 +770,7 @@ LEAK
 
 # http://crbug.com/74413
 LEAK
+...
 *!operator new
 *!net::HttpAuthHandlerFactory::CreateDefault
 
@@ -695,13 +784,70 @@ LEAK
 *!operator new
 *!disk_cache::BackendImpl::NewEntry
 
+# http://crbug.com/75247
+LEAK
+...
+*!operator new
+*!AutofillDownloadTestHelper::AutofillDownloadTestHelper
+
+# http://crbug.com/76354
+LEAK
+...
+*!IPC::MessageWithReply*
+*!ChildProcessHostMsg_ResolveProxy::ChildProcessHostMsg_ResolveProxy
+*!ResolveProxyMsgHelperTest::GenerateReply
+*!ResolveProxyMsgHelperTest_*_Test::TestBody
+
+# http://crbug.com/78784
+LEAK
+*!generic_cpp_alloc
+*!operator new
+*!TestingProfile::CreateRequestContext
+*!*ProfileSyncService*::SetUp
+
+# http://crbug.com/78784
+LEAK
+...
+*!RenderWidgetHost::WasHidden
+
+LEAK
+...
+*!RenderWidgetHost::WasRestored
+
 # http://crbug.com/81522
 LEAK
 *!operator new
-*!base::MessageLoopProxy::CreateForCurrentThread
+*!base::MessageLoopProxy::current
 *!IPC::ChannelProxy::Context::Context
 *!IPC::ChannelProxy::ChannelProxy
 *!IPCChannelTest_ChannelProxyTest_Test::TestBody
+
+# http://crbug.com/81753
+UNINITIALIZED READ
+...
+*!icu_46::RegexMatcher::MatchChunkAt
+*!icu_46::RegexMatcher::findUsingChunk
+*!icu_46::RegexMatcher::find
+*!icu_46::RegexMatcher::find
+*!autofill::MatchesPattern
+
+UNINITIALIZED READ
+...
+*!icu_46::RegexMatcher::MatchChunkAt
+*!icu_46::RegexMatcher::matches
+*!i18n::phonenumbers::IcuRegExp::Match
+*!i18n::phonenumbers::RegExp::FullMatch
+*!i18n::phonenumbers::PhoneNumberUtil::IsViablePhoneNumber
+
+# http://crbug.com/82716
+LEAK
+*!generic_cpp_alloc
+*!operator new
+*!base::MessageLoopProxy::current
+*!IPC::SyncChannel::ReceivedSyncMsgQueue::ReceivedSyncMsgQueue
+*!IPC::SyncChannel::ReceivedSyncMsgQueue::AddContext
+*!IPC::SyncChannel::SyncContext::SyncContext
+*!IPC::SyncChannel::SyncChannel
 
 # http://crbug.com/87612
 LEAK
@@ -709,6 +855,56 @@ LEAK
 *!SSL_ConfigSecureServer
 *!net::SSLServerSocketNSS::InitializeSSLOptions
 *!net::SSLServerSocketNSS::Handshake
+
+# http://crbug.com/88213
+UNADDRESSABLE ACCESS
+*!base::win::ObjectWatcher::StopWatching
+*!base::win::ObjectWatcher::WillDestroyCurrentMessageLoop
+*!MessageLoop::~MessageLoop
+
+# http://crbug.com/88640
+LEAK
+*!generic_cpp_alloc
+*!operator new
+*!ProfileImpl::InitRegisteredProtocolHandlers
+*!ProfileImpl::DoFinalInit
+*!ProfileImpl::OnPrefsLoaded
+
+# http://crbug.com/90654
+UNINITIALIZED READ
+*!_output_s_l
+...
+*!testing_internal::DefaultPrintNonContainerTo<policy::FailedRequestParams>
+
+# http://crbug.com/91465
+LEAK
+*!generic_cpp_alloc
+*!operator new
+*!browser_sync::internal::WeakHandleCore<browser_sync::JsBackend>::*
+*!browser_sync::WeakHandle<browser_sync::JsBackend>::*
+*!sync_api::SyncManager::SyncInternal::Init
+
+# http://crbug.com/91491
+LEAK
+...
+*!CrxUpdateService::ProcessPendingItems
+
+# http://crbug.com/92026
+UNINITIALIZED READ
+softokn3.dll!FC_GetFunctionList
+...
+softokn3.dll!NSC_ModuleDBFunc
+
+UNINITIALIZED READ
+freebl3.dll!FREEBL_GetVector
+...
+softokn3.dll!NSC_ModuleDBFunc
+
+# http://crbug.com/92166
+LEAK
+...
+*!operator new
+*!views::NativeWidgetWin::OnCreate
 
 # Empty line at EOF - workaround for
 # http://code.google.com/p/drmemory/issues/detail?id=41

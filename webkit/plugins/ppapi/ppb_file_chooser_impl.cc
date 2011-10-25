@@ -11,20 +11,22 @@
 #include "base/sys_string_conversions.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/shared_impl/var.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileChooserCompletion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileChooserParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/ppapi/callbacks.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/ppb_file_ref_impl.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/resource_tracker.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 
+using ppapi::StringVar;
 using ppapi::thunk::PPB_FileChooser_API;
 using WebKit::WebCString;
 using WebKit::WebFileChooserCompletion;
@@ -61,13 +63,15 @@ class FileChooserCompletionImpl : public WebFileChooserCompletion {
 }  // namespace
 
 PPB_FileChooser_Impl::PPB_FileChooser_Impl(
-    PluginInstance* instance,
-    const PP_FileChooserOptions_Dev* options)
+    PP_Instance instance,
+    PP_FileChooserMode_Dev mode,
+    const PP_Var& accept_mime_types)
     : Resource(instance),
-      mode_(options->mode),
-      accept_mime_types_(options->accept_mime_types ?
-                         options->accept_mime_types : ""),
+      mode_(mode),
       next_chosen_file_index_(0) {
+  scoped_refptr<StringVar> accept = StringVar::FromPPVar(accept_mime_types);
+  if (accept)
+    accept_mime_types_ = accept->value();
 }
 
 PPB_FileChooser_Impl::~PPB_FileChooser_Impl() {
@@ -75,14 +79,14 @@ PPB_FileChooser_Impl::~PPB_FileChooser_Impl() {
 
 // static
 PP_Resource PPB_FileChooser_Impl::Create(
-    PluginInstance* instance,
-    const PP_FileChooserOptions_Dev* options) {
-  if ((options->mode != PP_FILECHOOSERMODE_OPEN) &&
-      (options->mode != PP_FILECHOOSERMODE_OPENMULTIPLE))
+    PP_Instance instance,
+    PP_FileChooserMode_Dev mode,
+    const PP_Var& accept_mime_types) {
+  if (mode != PP_FILECHOOSERMODE_OPEN &&
+      mode != PP_FILECHOOSERMODE_OPENMULTIPLE)
     return 0;
-
-  PPB_FileChooser_Impl* chooser = new PPB_FileChooser_Impl(instance, options);
-  return chooser->GetReference();
+  return (new PPB_FileChooser_Impl(instance, mode,
+                                   accept_mime_types))->GetReference();
 }
 
 PPB_FileChooser_Impl* PPB_FileChooser_Impl::AsPPB_FileChooser_Impl() {
@@ -106,7 +110,7 @@ void PPB_FileChooser_Impl::StoreChosenFiles(
 #endif
 
     chosen_files_.push_back(make_scoped_refptr(
-        new PPB_FileRef_Impl(instance(), file_path)));
+        PPB_FileRef_Impl::CreateExternal(pp_instance(), file_path)));
   }
 
   RunCallback((chosen_files_.size() > 0) ? PP_OK : PP_ERROR_USERCANCEL);
@@ -129,10 +133,12 @@ void PPB_FileChooser_Impl::RegisterCallback(
   DCHECK(callback.func);
   DCHECK(!callback_.get() || callback_->completed());
 
-  PP_Resource resource_id = GetReferenceNoAddRef();
-  CHECK(resource_id);
-  callback_ = new TrackedCompletionCallback(
-      instance()->module()->GetCallbackTracker(), resource_id, callback);
+  PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
+  if (!plugin_module)
+    return;
+
+  callback_ = new TrackedCompletionCallback(plugin_module->GetCallbackTracker(),
+                                            pp_resource(), callback);
 }
 
 void PPB_FileChooser_Impl::RunCallback(int32_t result) {
@@ -141,7 +147,7 @@ void PPB_FileChooser_Impl::RunCallback(int32_t result) {
   callback->Run(result);  // Will complete abortively if necessary.
 }
 
-int32_t PPB_FileChooser_Impl::Show(PP_CompletionCallback callback) {
+int32_t PPB_FileChooser_Impl::Show(const PP_CompletionCallback& callback) {
   int32_t rv = ValidateCallback(callback);
   if (rv != PP_OK)
     return rv;
@@ -154,8 +160,12 @@ int32_t PPB_FileChooser_Impl::Show(PP_CompletionCallback callback) {
   params.acceptTypes = WebString::fromUTF8(accept_mime_types_);
   params.directory = false;
 
-  if (!instance()->delegate()->RunFileChooser(params,
-          new FileChooserCompletionImpl(this)))
+  PluginDelegate* plugin_delegate = ResourceHelper::GetPluginDelegate(this);
+  if (!plugin_delegate)
+    return PP_ERROR_FAILED;
+
+  if (!plugin_delegate->RunFileChooser(params,
+                                       new FileChooserCompletionImpl(this)))
     return PP_ERROR_FAILED;
 
   RegisterCallback(callback);

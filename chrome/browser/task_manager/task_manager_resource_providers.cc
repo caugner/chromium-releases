@@ -22,6 +22,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
@@ -109,7 +111,7 @@ TaskManagerRendererResource::~TaskManagerRendererResource() {
 
 void TaskManagerRendererResource::Refresh() {
   if (!pending_stats_update_) {
-    render_view_host_->Send(new ViewMsg_GetCacheResourceStats);
+    render_view_host_->Send(new ChromeViewMsg_GetCacheResourceStats);
     pending_stats_update_ = true;
   }
   if (!pending_fps_update_) {
@@ -118,7 +120,7 @@ void TaskManagerRendererResource::Refresh() {
     pending_fps_update_ = true;
   }
   if (!pending_v8_memory_allocated_update_) {
-    render_view_host_->Send(new ViewMsg_GetV8HeapStats);
+    render_view_host_->Send(new ChromeViewMsg_GetV8HeapStats);
     pending_v8_memory_allocated_update_ = true;
   }
 }
@@ -263,6 +265,14 @@ string16 TaskManagerTabContentsResource::GetTitle() const {
   return l10n_util::GetStringFUTF16(message_id, tab_title);
 }
 
+string16 TaskManagerTabContentsResource::GetProfileName() const {
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  Profile* profile = tab_contents_->profile()->GetOriginalProfile();
+  return cache.GetNameOfProfileAtIndex(
+      cache.GetIndexOfProfileWithPath(profile->GetPath()));
+}
+
 SkBitmap TaskManagerTabContentsResource::GetIcon() const {
   if (IsPrerendering())
     return *prerender_icon_;
@@ -334,17 +344,17 @@ void TaskManagerTabContentsResourceProvider::StartUpdating() {
 
   // Then we register for notifications to get new tabs.
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_SWAPPED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   // TAB_CONTENTS_DISCONNECTED should be enough to know when to remove a
   // resource.  This is an attempt at mitigating a crasher that seem to
   // indicate a resource is still referencing a deleted TabContents
   // (http://crbug.com/7321).
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 void TaskManagerTabContentsResourceProvider::StopUpdating() {
@@ -353,13 +363,13 @@ void TaskManagerTabContentsResourceProvider::StopUpdating() {
 
   // Then we unregister for notifications to get new tabs.
   registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_SWAPPED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
 
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
@@ -494,6 +504,9 @@ string16 TaskManagerBackgroundContentsResource::GetTitle() const {
   return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_BACKGROUND_PREFIX, title);
 }
 
+string16 TaskManagerBackgroundContentsResource::GetProfileName() const {
+  return string16();
+}
 
 SkBitmap TaskManagerBackgroundContentsResource::GetIcon() const {
   return *default_icon_;
@@ -574,11 +587,11 @@ void TaskManagerBackgroundContentsResourceProvider::StartUpdating() {
 
   // Then we register for notifications to get new BackgroundContents.
   registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 void TaskManagerBackgroundContentsResourceProvider::StopUpdating() {
@@ -587,11 +600,11 @@ void TaskManagerBackgroundContentsResourceProvider::StopUpdating() {
 
   // Unregister for notifications
   registrar_.Remove(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
 
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
@@ -725,6 +738,10 @@ string16 TaskManagerChildProcessResource::GetTitle() const {
   return title_;
 }
 
+string16 TaskManagerChildProcessResource::GetProfileName() const {
+  return string16();
+}
+
 SkBitmap TaskManagerChildProcessResource::GetIcon() const {
   return *default_icon_;
 }
@@ -772,14 +789,14 @@ void TaskManagerChildProcessResource::SetSupportNetworkUsage() {
 }
 
 string16 TaskManagerChildProcessResource::GetLocalizedTitle() const {
-  string16 title = WideToUTF16Hack(child_process_.name());
+  string16 title = child_process_.name();
   if (child_process_.type() == ChildProcessInfo::PLUGIN_PROCESS &&
       title.empty()) {
     title = l10n_util::GetStringUTF16(IDS_TASK_MANAGER_UNKNOWN_PLUGIN_NAME);
   }
 
   // Explicitly mark name as LTR if there is no strong RTL character,
-  // to avoid the wrong concatenation result similar to "!Yahoo! Mail: the
+  // to avoid the wrong concatenation result similar to "!Yahoo Mail: the
   // best web-based Email: NIGULP", in which "NIGULP" stands for the Hebrew
   // or Arabic word for "plugin".
   base::i18n::AdjustStringForLocaleDirection(&title);
@@ -801,8 +818,7 @@ string16 TaskManagerChildProcessResource::GetLocalizedTitle() const {
     case ChildProcessInfo::PPAPI_PLUGIN_PROCESS:
     case ChildProcessInfo::PPAPI_BROKER_PROCESS: {
       return l10n_util::GetStringFUTF16(
-          IDS_TASK_MANAGER_PLUGIN_PREFIX, title,
-          WideToUTF16Hack(child_process_.version()));
+          IDS_TASK_MANAGER_PLUGIN_PREFIX, title, child_process_.version());
     }
 
     case ChildProcessInfo::NACL_LOADER_PROCESS:
@@ -858,9 +874,9 @@ void TaskManagerChildProcessResourceProvider::StartUpdating() {
 
   // Register for notifications to get new child processes.
   registrar_.Add(this, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 
   // Get the existing child processes.
   BrowserThread::PostTask(
@@ -876,10 +892,10 @@ void TaskManagerChildProcessResourceProvider::StopUpdating() {
 
   // Unregister for notifications to get new plugin processes.
   registrar_.Remove(this, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this,
                     content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
 
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
@@ -1014,6 +1030,14 @@ string16 TaskManagerExtensionProcessResource::GetTitle() const {
   return title_;
 }
 
+string16 TaskManagerExtensionProcessResource::GetProfileName() const {
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  Profile* profile = extension_host_->profile()->GetOriginalProfile();
+  return cache.GetNameOfProfileAtIndex(
+      cache.GetIndexOfProfileWithPath(profile->GetPath()));
+}
+
 SkBitmap TaskManagerExtensionProcessResource::GetIcon() const {
   return *default_icon_;
 }
@@ -1088,7 +1112,7 @@ void TaskManagerExtensionProcessResourceProvider::StartUpdating() {
 
     // If we have an incognito profile active, include the split-mode incognito
     // extensions.
-    if (BrowserList::IsOffTheRecordSessionActive()) {
+    if (BrowserList::IsOffTheRecordSessionActiveForProfile(profiles[i])) {
       ExtensionProcessManager* process_manager =
           profiles[i]->GetOffTheRecordProfile()->GetExtensionProcessManager();
       if (process_manager) {
@@ -1101,11 +1125,11 @@ void TaskManagerExtensionProcessResourceProvider::StartUpdating() {
 
   // Register for notifications about extension process changes.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 void TaskManagerExtensionProcessResourceProvider::StopUpdating() {
@@ -1114,11 +1138,11 @@ void TaskManagerExtensionProcessResourceProvider::StopUpdating() {
 
   // Unregister for notifications about extension process changes.
   registrar_.Remove(this, chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
 
   // Delete all the resources.
   STLDeleteContainerPairSecondPointers(resources_.begin(), resources_.end());
@@ -1238,6 +1262,10 @@ string16 TaskManagerBrowserProcessResource::GetTitle() const {
     title_ = l10n_util::GetStringUTF16(IDS_TASK_MANAGER_WEB_BROWSER_CELL_TEXT);
   }
   return title_;
+}
+
+string16 TaskManagerBrowserProcessResource::GetProfileName() const {
+  return string16();
 }
 
 SkBitmap TaskManagerBrowserProcessResource::GetIcon() const {

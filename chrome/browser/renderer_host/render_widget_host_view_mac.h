@@ -34,10 +34,9 @@ class RWHVMEditCommandHelper;
 // RenderWidgetHostViewWin is both the view and the delegate. We split the roles
 // but that means that the view needs to own the delegate and will dispose of it
 // when it's removed from the view system.
-// See http://crbug.com/47890 for why we don't use NSTextInputClient yet.
 @interface RenderWidgetHostViewCocoa
     : BaseView <RenderWidgetHostViewMacOwner,
-                NSTextInput,
+                NSTextInputClient,
                 NSChangeSpelling,
                 BrowserAccessibilityDelegateCocoa> {
  @private
@@ -117,9 +116,35 @@ class RWHVMEditCommandHelper;
 
   // Whether the previous mouse event was ignored due to hitTest check.
   BOOL mouseEventWasIgnored_;
+
+  // If a scroll event came back unhandled from the renderer. Set to |NO| at
+  // the start of a scroll gesture, and then to |YES| if a scroll event comes
+  // back unhandled from the renderer.
+  // Used for history swiping.
+  BOOL gotUnhandledWheelEvent_;
+
+  // Cummulative scroll delta since scroll gesture start. Only valid during
+  // scroll gesture handling. Used for history swiping.
+  NSSize totalScrollDelta_;
+
+  // If the viewport is scrolled all the way to the left or right.
+  // Used for history swiping.
+  BOOL isPinnedLeft_;
+  BOOL isPinnedRight_;
+
+  // If the main frame has a horizontal scrollbar.
+  // Used for history swiping.
+  BOOL hasHorizontalScrollbar_;
+
+  // Event monitor for gesture-end events.
+  id endGestureMonitor_;
 }
 
 @property(nonatomic, readonly) NSRange selectedRange;
+@property(nonatomic) BOOL gotUnhandledWheelEvent;
+@property(nonatomic, setter=setPinnedLeft:) BOOL isPinnedLeft;
+@property(nonatomic, setter=setPinnedRight:) BOOL isPinnedRight;
+@property(nonatomic) BOOL hasHorizontalScrollbar;
 
 - (void)setCanBeKeyView:(BOOL)can;
 - (void)setTakesFocusOnlyOnMouseDown:(BOOL)b;
@@ -181,7 +206,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void WasHidden() OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
-  virtual gfx::NativeView GetNativeView() OVERRIDE;
+  virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
@@ -206,13 +232,14 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void Destroy() OVERRIDE;
   virtual void SetTooltipText(const std::wstring& tooltip_text) OVERRIDE;
   virtual void SelectionChanged(const std::string& text,
-                                const ui::Range& range) OVERRIDE;
+                                const ui::Range& range,
+                                const gfx::Point& start,
+                                const gfx::Point& end) OVERRIDE;
   virtual void ShowingContextMenu(bool showing) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE;
   // See comment in RenderWidgetHostView!
   virtual gfx::Rect GetViewCocoaBounds() const OVERRIDE;
-  virtual gfx::Rect GetRootWindowRect() OVERRIDE;
   virtual void SetActive(bool active) OVERRIDE;
   virtual void SetWindowVisibility(bool visible) OVERRIDE;
   virtual void WindowFrameChanged() OVERRIDE;
@@ -229,9 +256,10 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
 
   // Methods associated with GPU-accelerated plug-in instances and the
   // accelerated compositor.
-  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(bool opaque,
-                                                                 bool root);
-  virtual void DestroyFakePluginWindowHandle(gfx::PluginWindowHandle window);
+  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(
+      bool opaque, bool root) OVERRIDE;
+  virtual void DestroyFakePluginWindowHandle(
+      gfx::PluginWindowHandle window) OVERRIDE;
 
   // Exposed for testing.
   AcceleratedPluginView* ViewForPluginWindowHandle(
@@ -261,7 +289,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
       int gpu_host_id,
       uint64 swap_buffers_count);
   virtual void GpuRenderingStateDidChange() OVERRIDE;
-
+  virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
+  virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
 
   // Returns |true| if a context menu is currently being shown.
@@ -276,6 +305,13 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   void ForceTextureReload();
 
   virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate);
+
+  virtual void UnhandledWheelEvent(
+      const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+  virtual void SetHasHorizontalScrollbar(
+      bool has_horizontal_scrollbar) OVERRIDE;
+  virtual void SetScrollOffsetPinning(
+      bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE;
 
   void KillSelf();
 

@@ -84,6 +84,9 @@ be available for now. -->
     <output filename="chromium_strings_da.pak" type="data_package" lang="da" />
     <output filename="chromium_strings_de.pak" type="data_package" lang="de" />
     <output filename="chromium_strings_el.pak" type="data_package" lang="el" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_en-AU.pak" type="data_package" lang="en-AU" />
+    </if>
     <output filename="chromium_strings_en-GB.pak" type="data_package" lang="en-GB" />
     <output filename="chromium_strings_en-US.pak" type="data_package" lang="en" />
     <if expr="pp_ifdef('use_third_party_translations')">
@@ -96,6 +99,7 @@ be available for now. -->
       <output filename="chromium_strings_eu.pak" type="data_package" lang="eu" />
     </if>
     <output filename="chromium_strings_fa.pak" type="data_package" lang="fa" />
+    <output filename="chromium_strings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
     <output filename="chromium_strings_fi.pak" type="data_package" lang="fi" />
     <output filename="chromium_strings_fil.pak" type="data_package" lang="fil" />
     <output filename="chromium_strings_fr.pak" type="data_package" lang="fr" />
@@ -109,6 +113,7 @@ be available for now. -->
     <output filename="chromium_strings_hu.pak" type="data_package" lang="hu" />
     <if expr="pp_ifdef('use_third_party_translations')">
       <output filename="chromium_strings_hy.pak" type="data_package" lang="hy" />
+      <output filename="chromium_strings_ia.pak" type="data_package" lang="ia" />
     </if>
     <output filename="chromium_strings_id.pak" type="data_package" lang="id" />
     <output filename="chromium_strings_it.pak" type="data_package" lang="it" />
@@ -126,6 +131,9 @@ be available for now. -->
     <output filename="chromium_strings_lv.pak" type="data_package" lang="lv" />
     <output filename="chromium_strings_ml.pak" type="data_package" lang="ml" />
     <output filename="chromium_strings_mr.pak" type="data_package" lang="mr" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="chromium_strings_ms.pak" type="data_package" lang="ms" />
+    </if>
     <output filename="chromium_strings_nl.pak" type="data_package" lang="nl" />
     <output filename="chromium_strings_nb.pak" type="data_package" lang="no" />
     <!-- 'no' for Norwegian Bokmål. It should be 'nb'. -->
@@ -150,17 +158,19 @@ be available for now. -->
     <output filename="chromium_strings_vi.pak" type="data_package" lang="vi" />
     <output filename="chromium_strings_zh-CN.pak" type="data_package" lang="zh-CN" />
     <output filename="chromium_strings_zh-TW.pak" type="data_package" lang="zh-TW" />
-    <output filename="chromium_strings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
   </outputs>
   <translations>
     <if expr="pp_ifdef('use_third_party_translations')">
       <file path="../../third_party/launchpad_translations/chromium_strings_ast.xtb" lang="ast" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_bg.xtb" lang="bg" />
       <file path="../../third_party/launchpad_translations/chromium_strings_bs.xtb" lang="bs" />
       <file path="../../third_party/launchpad_translations/chromium_strings_ca.xtb" lang="ca" />
       <file path="../../third_party/launchpad_translations/chromium_strings_ca-valencia.xtb" lang="ca@valencia" />
       <file path="../../third_party/launchpad_translations/chromium_strings_cs.xtb" lang="cs" />
       <file path="../../third_party/launchpad_translations/chromium_strings_da.xtb" lang="da" />
       <file path="../../third_party/launchpad_translations/chromium_strings_de.xtb" lang="de" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_en-AU.xtb" lang="en-AU" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_eo.xtb" lang="eo" />
       <file path="../../third_party/launchpad_translations/chromium_strings_es.xtb" lang="es" />
       <file path="../../third_party/launchpad_translations/chromium_strings_et.xtb" lang="et" />
       <file path="../../third_party/launchpad_translations/chromium_strings_eu.xtb" lang="eu" />
@@ -169,6 +179,7 @@ be available for now. -->
       <file path="../../third_party/launchpad_translations/chromium_strings_gl.xtb" lang="gl" />
       <file path="../../third_party/launchpad_translations/chromium_strings_he.xtb" lang="he" />
       <file path="../../third_party/launchpad_translations/chromium_strings_hy.xtb" lang="hy" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_ia.xtb" lang="ia" />
       <file path="../../third_party/launchpad_translations/chromium_strings_id.xtb" lang="id" />
       <file path="../../third_party/launchpad_translations/chromium_strings_it.xtb" lang="it" />
       <file path="../../third_party/launchpad_translations/chromium_strings_ja.xtb" lang="ja" />
@@ -176,6 +187,7 @@ be available for now. -->
       <file path="../../third_party/launchpad_translations/chromium_strings_ku.xtb" lang="ku" />
       <file path="../../third_party/launchpad_translations/chromium_strings_kw.xtb" lang="kw" />
       <file path="../../third_party/launchpad_translations/chromium_strings_lt.xtb" lang="lt" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_ms.xtb" lang="ms" />
       <file path="../../third_party/launchpad_translations/chromium_strings_nl.xtb" lang="nl" />
       <file path="../../third_party/launchpad_translations/chromium_strings_no.xtb" lang="no" />
       <file path="../../third_party/launchpad_translations/chromium_strings_pt-BR.xtb" lang="pt-BR" />
@@ -334,9 +346,8 @@ be available for now. -->
                desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
         Welcome to Chromium
       </message>
-      <message name="IDS_NEW_TAB_THEMES_GALLERY_PAGE_TITLE"
-         desc="Title for the hard coded thumbnail that represents the Themes Gallery page. This is used on the NTP when there aren't enough thumbnails to show.">
-        Chromium Themes Gallery
+      <message name="IDS_NTP4_INTRO_MESSAGE" desc="Message explaning the navigation bar at the bottom of the new NTP.">
+        Chromium's New Tab page has been remodeled. Switch between sections by clicking these labels. Chrome will remember your preference for next time.
       </message>
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
@@ -413,10 +424,13 @@ be available for now. -->
         An administrator has installed Chromium on this system, and it is available for all users. The system-level Chromium will replace your user-level installation now.
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION" desc="Error displayed when higher version already exists.">
-        This computer already has a more recent version of Chromium. If the software is not working, please uninstall Chromium and download it again.
+        This computer already has a more recent version of Chromium. If the software is not working, please uninstall Chromium and try again.
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version already exists.">
-        This computer already has a more recent version of Chromium Frame. If the software is not working, please uninstall Chromium Frame and download it again.
+        This computer already has a more recent version of Chromium Frame. If the software is not working, please uninstall Chromium Frame and try again.
+      </message>
+      <message name="IDS_INSTALL_HIGHER_VERSION_CB_CF" desc="Error displayed when higher version of Chromium and Chromium Frame already exists">
+        This computer already has a more recent version of Chromium and Chromium Frame. If the software is not working, please uninstall both Chromium and Chromium Frame and try again.
       </message>
       <message name="IDS_INSTALL_SYSTEM_LEVEL_EXISTS" desc="Error displayed during user level install if system level Chromium is already installed.">
         Chromium is already installed and available to all users of this computer. If you want to install Chromium at the user level, you must first uninstall the system-level version installed by an administrator.
@@ -552,8 +566,8 @@ be available for now. -->
       <message name="IDS_PRINT_PREVIEW_NO_PLUGIN" desc="Message to display when the PDF viewer is missing.">
         Chromium does not include the PDF viewer which is required for Print Preview to function.
       </message>
-      <message name="IDS_PRINT_PREVIEW_NATIVE_DIALOG" desc="Option offering the user to open the native print dialog, displayed when the PDF viewer is missing.">
-        Launch native print dialog
+      <message name="IDS_PRINT_PREVIEW_NATIVE_DIALOG" desc="Option offering the user to open the native print dialog, displayed when the PDF viewer is missing or when print preview fails.">
+        Print using system dialog…
       </message>
 
       <if expr="is_macosx">

@@ -12,7 +12,6 @@
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu.h"
-#include "ui/gfx/native_widget_types.h"
 #include "views/controls/menu/menu_delegate.h"
 
 class BookmarkNode;
@@ -25,6 +24,7 @@ class OSExchangeData;
 
 namespace views {
 class MenuItemView;
+class Widget;
 }
 
 // BookmarkMenuDelegate acts as the (informal) views::MenuDelegate for showing
@@ -47,7 +47,7 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
 
   BookmarkMenuDelegate(Profile* profile,
                        PageNavigator* navigator,
-                       gfx::NativeWindow parent,
+                       views::Widget* parent,
                        int first_menu_id);
   virtual ~BookmarkMenuDelegate();
 
@@ -57,6 +57,9 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
             const BookmarkNode* node,
             int start_child_index,
             ShowOptions show_options);
+
+  // Sets the PageNavigator.
+  void SetPageNavigator(PageNavigator* navigator);
 
   // Returns the id given to the next menu.
   int next_menu_id() const { return next_menu_id_; }
@@ -75,7 +78,7 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
 
   Profile* profile() { return profile_; }
 
-  gfx::NativeWindow parent() { return parent_; }
+  views::Widget* parent() { return parent_; }
 
   // Returns true if we're in the process of mutating the model. This happens
   // when the user deletes menu items using the context menu.
@@ -141,19 +144,12 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   // Returns the menu whose id is |id|.
   views::MenuItemView* GetMenuByID(int id);
 
-  // Does the work of processing WillRemoveBookmarks. On exit the set of removed
-  // menus is added to |removed_menus|. It's up to the caller to delete the
-  // the menus added to |removed_menus|.
-  void WillRemoveBookmarksImpl(
-      const std::vector<const BookmarkNode*>& bookmarks,
-      std::set<views::MenuItemView*>* removed_menus);
-
   Profile* profile_;
 
   PageNavigator* page_navigator_;
 
   // Parent of menus.
-  gfx::NativeWindow parent_;
+  views::Widget* parent_;
 
   // Maps from menu id to BookmarkNode.
   std::map<int, const BookmarkNode*> menu_id_to_node_map_;

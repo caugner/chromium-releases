@@ -15,7 +15,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -351,12 +351,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 }
 
-// Flaky on linux due to http://crbug.com/89078.
-#if defined(OS_LINUX)
+// Flaky on mac&&linux due to http://crbug.com/89078.
+#if defined(OS_LINUX) || defined(OS_MACOSX)
 #define MAYBE_TwoExtensionsIgnoreFirst FLAKY_TwoExtensionsIgnoreFirst
 #else
 #define MAYBE_TwoExtensionsIgnoreFirst TwoExtensionsIgnoreFirst
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
                        MAYBE_TwoExtensionsIgnoreFirst) {
   const size_t size_before = GetExtensionService()->extensions()->size();

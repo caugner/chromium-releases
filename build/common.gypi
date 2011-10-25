@@ -35,18 +35,24 @@
           # Disable touch support by default.
           'touchui%': 0,
 
-          # Disable webui certificate viewer until it is complete.
-          'webui_certificate_viewer%': 0,
+          # Disable webui dialog replacements for native dialogs by default.
+          # TODO(flackr): Change this to a runtime flag triggered by
+          #     --pure-views so that these dialogs can be easily tested. 
+          'webui_dialogs%': 0,
 
           # Whether the compositor is enabled on views.
           'views_compositor%': 0,
+          
+          # Whether or not we are building with the Aura window manager.
+          'use_aura%': 0,
         },
         # Copy conditionally-set variables out one scope.
         'chromeos%': '<(chromeos)',
         'toolkit_uses_pure_views%': '<(toolkit_uses_pure_views)',
         'touchui%': '<(touchui)',
-        'webui_certificate_viewer%': '<(webui_certificate_viewer)',
+        'webui_dialogs%': '<(webui_dialogs)',
         'views_compositor%': '<(views_compositor)',
+        'use_aura%': '<(use_aura)',
 
         # Compute the architecture that we're building on.
         'conditions': [
@@ -75,9 +81,14 @@
             'toolkit_uses_pure_views%': 0,
           }],
 
-          # Use WebUI certificate viewer in Touch case
+          # Use WebUI dialogs in TouchUI builds.
           ['touchui==1', {
-            'webui_certificate_viewer%': 1
+            'webui_dialogs%': 1,
+          }],
+          
+          # Use the views compositor when using the Aura window manager.
+          ['use_aura==1', {
+            'views_compositor%': 1,
           }],
         ],
       },
@@ -85,11 +96,12 @@
       # Copy conditionally-set variables out one scope.
       'chromeos%': '<(chromeos)',
       'touchui%': '<(touchui)',
-      'webui_certificate_viewer%': '<(webui_certificate_viewer)',
+      'webui_dialogs%': '<(webui_dialogs)',
       'host_arch%': '<(host_arch)',
       'toolkit_views%': '<(toolkit_views)',
       'toolkit_uses_pure_views%': '<(toolkit_uses_pure_views)',
       'views_compositor%': '<(views_compositor)',
+      'use_aura%': '<(use_aura)',
 
       # We used to provide a variable for changing how libraries were built.
       # This variable remains until we can clean up all the users.
@@ -181,12 +193,20 @@
       # Has no effect if 'clang' is not set as well.
       'clang_use_chrome_plugins%': 0,
 
+      # Enable building with ASAN (Clang's -fasan option).
+      # -fasan only works with clang, but asan=1 implies clang=1
+      # See https://sites.google.com/a/chromium.org/dev/developers/testing/addresssanitizer
+      'asan%': 0,
+
       # Set to 1 compile with -fPIC cflag on linux. This is a must for shared
       # libraries on linux x86-64 and arm, plus ASLR.
       'linux_fpic%': 1,
 
       # Enable navigator.registerProtocolHandler and supporting UI.
       'enable_register_protocol_handler%': 1,
+
+      # Enable Web Intents and supporting UI.
+      'enable_web_intents%': 0,
 
       # Smooth scrolling is disabled by default.
       'enable_smooth_scrolling%': 0,
@@ -214,6 +234,9 @@
           'toolkit_uses_gtk%': 0,
           'use_x11%': 0,
         }, {
+          # TODO(dnicoara) Wayland build should have these disabled, but
+          # currently GTK and X is too spread and it's hard to completely
+          # remove every dependency.
           'toolkit_uses_gtk%': 1,
           'use_x11%': 1,
         }],
@@ -254,8 +277,8 @@
           'webui_task_manager%': 0,
         }],
 
-        # Enable smooth scrolling for Linux and ChromeOS
-        ['OS=="linux"', {
+        # Enable smooth scrolling for Mac, Win, Linux and ChromeOS
+        ['OS=="linux" or OS=="mac" or OS=="win"', {
           'enable_smooth_scrolling%': 1,
         }, {
           'enable_smooth_scrolling%': 0,
@@ -272,6 +295,7 @@
     'toolkit_views%': '<(toolkit_views)',
     'toolkit_uses_pure_views%': '<(toolkit_uses_pure_views)',
     'views_compositor%': '<(views_compositor)',
+    'use_aura%': '<(use_aura)',
     'os_posix%': '<(os_posix)',
     'toolkit_uses_gtk%': '<(toolkit_uses_gtk)',
     'use_skia%': '<(use_skia)',
@@ -281,7 +305,7 @@
     'enable_flapper_hacks%': '<(enable_flapper_hacks)',
     'chromeos%': '<(chromeos)',
     'touchui%': '<(touchui)',
-    'webui_certificate_viewer%': '<(webui_certificate_viewer)',
+    'webui_dialogs%': '<(webui_dialogs)',
     'file_manager_extension%': '<(file_manager_extension)',
     'webui_task_manager%': '<(webui_task_manager)',
     'inside_chromium_build%': '<(inside_chromium_build)',
@@ -300,8 +324,15 @@
     'configuration_policy%': '<(configuration_policy)',
     'safe_browsing%': '<(safe_browsing)',
     'clang_use_chrome_plugins%': '<(clang_use_chrome_plugins)',
+    'asan%': '<(asan)',
     'enable_register_protocol_handler%': '<(enable_register_protocol_handler)',
     'enable_smooth_scrolling%': '<(enable_smooth_scrolling)',
+    'enable_web_intents%': '<(enable_web_intents)',
+    # Whether to build for Wayland display server
+    'use_wayland%': 0,
+
+    # Use system yasm instead of bundled one.
+    'use_system_yasm%': 0,
 
     # The release channel that this build targets. This is used to restrict
     # channel-specific build options, like which installer packages to create.
@@ -381,6 +412,10 @@
     # Needed for some of the largest modules.
     'msvs_debug_link_nonincremental%': '1',
 
+    # Turn on Use Library Dependency Inputs for linking chrome.dll on Windows
+    # to get incremental linking to be faster in debug builds.
+    'incremental_chrome_dll%': 0,
+
     # This is the location of the sandbox binary. Chrome looks for this before
     # running the zygote process. If found, and SUID, it will be used to
     # sandbox the zygote process and, thus, all renderer processes.
@@ -407,6 +442,9 @@
     # Enable sampling based profiler.
     # See http://google-perftools.googlecode.com/svn/trunk/doc/cpuprofile.html
     'profiling%': '0',
+
+    # Enable strict glibc debug mode.
+    'glibcxx_debug%': 0,
 
     # Override whether we should use Breakpad on Linux. I.e. for Chrome bot.
     'linux_breakpad%': 0,
@@ -548,6 +586,14 @@
           ['branding=="Chrome" and buildtype=="Official"', {
             'mac_breakpad%': 1,
             'mac_keystone%': 1,
+
+            # Official builds use clang, but only on m15+. Since there's just
+            # one buildbot config for the builder for m13, m14, and m15, this
+            # can't be defined in the buildbot config but is instead defined
+            # here (it was added after the m14 branch was cut). This is in the
+            # buildtype=="Official" section so that developers don't see it
+            # for their local builds.
+            'clang%': 1,
           }, { # else: branding!="Chrome" or buildtype!="Official"
             'mac_breakpad%': 0,
             'mac_keystone%': 0,
@@ -635,8 +681,8 @@
       ['touchui==1', {
         'grit_defines': ['-D', 'touchui'],
       }],
-      ['webui_certificate_viewer==1', {
-        'grit_defines': ['-D', 'webui_certificate_viewer'],
+      ['webui_dialogs==1', {
+        'grit_defines': ['-D', 'webui_dialogs'],
       }],
       ['file_manager_extension==1', {
         'grit_defines': ['-D', 'file_manager_extension'],
@@ -653,8 +699,8 @@
       ['use_third_party_translations==1', {
         'grit_defines': ['-D', 'use_third_party_translations'],
         'locales': [
-          'ast', 'bs', 'ca@valencia', 'eo', 'eu', 'gl', 'hy', 'ka', 'ku', 'kw',
-          'ug',
+          'ast', 'bs', 'ca@valencia', 'en-AU', 'eo', 'eu', 'gl', 'hy', 'ia',
+          'ka', 'ku', 'kw', 'ms', 'ug'
         ],
       }],
 
@@ -672,6 +718,14 @@
 
       ['enable_register_protocol_handler==1', {
         'grit_defines': ['-D', 'enable_register_protocol_handler'],
+      }],
+
+      ['enable_web_intents==1', {
+        'grit_defines': ['-D', 'enable_web_intents'],
+      }],
+
+      ['asan==1', {
+        'clang%': 1,
       }],
     ],
   },
@@ -740,11 +794,17 @@
       ['views_compositor==1', {
         'defines': ['VIEWS_COMPOSITOR=1'],
       }],
+      ['use_aura==1', {
+        'defines': ['USE_AURA=1'],
+      }],
       ['chromeos==1', {
         'defines': ['OS_CHROMEOS=1'],
       }],
       ['touchui==1', {
         'defines': ['TOUCH_UI=1'],
+      }],
+      ['use_wayland==1', {
+        'defines': ['USE_WAYLAND=1', 'WL_EGL_PLATFORM=1'],
       }],
       ['file_manager_extension==1', {
         'defines': ['FILE_MANAGER_EXTENSION=1'],
@@ -754,6 +814,11 @@
       }],
       ['profiling==1', {
         'defines': ['ENABLE_PROFILING=1'],
+      }],
+      ['OS=="linux" and glibcxx_debug==1', {
+        'defines': ['_GLIBCXX_DEBUG=1',],
+        'cflags_cc!': ['-fno-rtti'],
+        'cflags_cc+': ['-frtti', '-g'],
       }],
       ['remoting==1', {
         'defines': ['ENABLE_REMOTING=1'],
@@ -878,6 +943,11 @@
           'ENABLE_REGISTER_PROTOCOL_HANDLER=1',
         ],
       }],
+      ['enable_web_intents==1', {
+        'defines': [
+          'ENABLE_INTENTS=1',
+        ],
+      }],
     ],  # conditions for 'target_defaults'
     'target_conditions': [
       ['chromium_code==0', {
@@ -902,6 +972,18 @@
               # http://code.google.com/p/chromium/issues/detail?id=90453
               '-Wsign-compare',
             ]
+          }],
+          [ 'os_posix==1 and OS!="mac" and chromeos==0', {
+            'cflags': [
+              # Don't warn about ignoring the return value from e.g. close().
+              # This is off by default in some gccs but on by default in others.
+              # Currently this option is not set for Chrome OS build because
+              # the current version of gcc (4.3.4) used for building Chrome in
+              # Chrome OS chroot doesn't support this option.
+              # TODO(mazda): remove the conditional for Chrome OS when gcc
+              # version is upgraded.
+              '-Wno-unused-result',
+            ],
           }],
           [ 'OS=="win"', {
             'defines': [
@@ -956,6 +1038,13 @@
               ['exclude', '(^|/)(gtk|x11)_[^/]*\\.(h|cc)$'],
             ],
           }],
+          ['use_wayland!=1', {
+            'sources/': [
+              ['exclude', '_(wayland)(_unittest)?\\.(h|cc)$'],
+              ['exclude', '(^|/)wayland/'],
+              ['exclude', '(^|/)(wayland)_[^/]*\\.(h|cc)$'],
+            ],
+          }],
           ['OS!="linux"', {
             'sources/': [
               ['exclude', '_linux(_unittest)?\\.(h|cc)$'],
@@ -982,6 +1071,9 @@
           }],
           ['toolkit_views==0', {
             'sources/': [ ['exclude', '_views\\.(h|cc)$'] ]
+          }],
+          ['use_aura==0', {
+            'sources/': [ ['exclude', '_aura\\.(h|cc)$'] ]
           }],
         ],
       }],
@@ -1130,7 +1222,16 @@
             ],
           },
           'VCLinkerTool': {
+            # LinkIncremental is a tri-state boolean, where 0 means default
+            # (i.e., inherit from parent solution), 1 means false, and
+            # 2 means true.
             'LinkIncremental': '1',
+            # This corresponds to the /PROFILE flag which ensures the PDB
+            # file contains FIXUP information (growing the PDB file by about
+            # 5%) but does not otherwise alter the output binary. This
+            # information is used by the Syzygy optimization tool when
+            # decomposing the release image.
+            'Profile': 'true',
           },
         },
         'conditions': [
@@ -1155,24 +1256,6 @@
           }],
         ],
       },
-      'Purify_Base': {
-        'abstract': 1,
-        'defines': [
-          'PURIFY',
-          'NO_TCMALLOC',
-        ],
-        'msvs_settings': {
-          'VCCLCompilerTool': {
-            'Optimization': '0',
-            'RuntimeLibrary': '0',
-            'BufferSecurityCheck': 'false',
-          },
-          'VCLinkerTool': {
-            'EnableCOMDATFolding': '1',
-            'LinkIncremental': '1',
-          },
-        },
-      },
       #
       # Concrete configurations
       #
@@ -1190,17 +1273,11 @@
       'conditions': [
         [ 'OS=="win"', {
           # TODO(bradnelson): add a gyp mechanism to make this more graceful.
-          'Purify': {
-            'inherit_from': ['Common_Base', 'x86_Base', 'Release_Base', 'Purify'],
-          },
           'Debug_x64': {
             'inherit_from': ['Common_Base', 'x64_Base', 'Debug_Base'],
           },
           'Release_x64': {
             'inherit_from': ['Common_Base', 'x64_Base', 'Release_Base'],
-          },
-          'Purify_x64': {
-            'inherit_from': ['Common_Base', 'x64_Base', 'Release_Base', 'Purify_Base'],
           },
         }],
       ],
@@ -1468,41 +1545,44 @@
               }]]
           }],
           ['clang==1', {
-            'target_conditions': [
-              ['_toolset=="target"', {
-                'cflags': [
-                  '-Wheader-hygiene',
-                  # Clang spots more unused functions.
-                  '-Wno-unused-function',
-                  # Don't die on dtoa code that uses a char as an array index.
-                  '-Wno-char-subscripts',
-                  # Survive EXPECT_EQ(unnamed_enum, unsigned int) -- see
-                  # http://code.google.com/p/googletest/source/detail?r=446 .
-                  # TODO(thakis): Use -isystem instead (http://crbug.com/58751 )
-                  '-Wno-unnamed-type-template-args',
-                ],
-                'cflags!': [
-                  # Clang doesn't seem to know know this flag.
-                  '-mfpmath=sse',
-                ],
-              }]],
+            'cflags': [
+              '-Wheader-hygiene',
+              # Clang spots more unused functions.
+              '-Wno-unused-function',
+              # Don't die on dtoa code that uses a char as an array index.
+              '-Wno-char-subscripts',
+              # Especially needed for gtest macros using enum values from Mac
+              # system headers.
+              # TODO(pkasting): In C++11 this is legal, so this should be
+              # removed when we change to that.  (This is also why we don't
+              # bother fixing all these cases today.)
+              '-Wno-unnamed-type-template-args',
+            ],
+            'cflags!': [
+              # Clang doesn't seem to know know this flag.
+              '-mfpmath=sse',
+            ],
           }],
           ['clang==1 and clang_use_chrome_plugins==1', {
-            'target_conditions': [
-              ['_toolset=="target"', {
-                'cflags': [
-                  '<(clang_chrome_plugins_flags)',
-                ],
-              }]],
+            'cflags': [
+              '<(clang_chrome_plugins_flags)',
+            ],
           }],
           ['clang==1 and clang_load!="" and clang_add_plugin!=""', {
-            'target_conditions': [
-              ['_toolset=="target"', {
-                'cflags': [
-                  '-Xclang', '-load', '-Xclang', '<(clang_load)',
-                  '-Xclang', '-add-plugin', '-Xclang', '<(clang_add_plugin)',
-                ],
-              }]],
+            'cflags': [
+              '-Xclang', '-load', '-Xclang', '<(clang_load)',
+              '-Xclang', '-add-plugin', '-Xclang', '<(clang_add_plugin)',
+            ],
+          }],
+          ['asan==1', {
+            # Only in the linux section for now, since ASAN doesn't
+            # work on Mac yet.
+            'cflags': [
+              '-fasan -w',
+            ],
+            'ldflags': [
+              '-fasan',
+            ],
           }],
           ['no_strict_aliasing==1', {
             'cflags': [
@@ -1591,6 +1671,9 @@
                                  {'GCC_PRECOMPILE_PREFIX_HEADER': 'NO'}
             ],
             ['clang==1', {
+              'CC': '$(SOURCE_ROOT)/<(clang_dir)/clang',
+              'LDPLUSPLUS': '$(SOURCE_ROOT)/<(clang_dir)/clang++',
+              'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
               'WARNING_CFLAGS': [
                 '-Wheader-hygiene',
                 # Don't die on dtoa code that uses a char as an array index.
@@ -1598,17 +1681,11 @@
                 '-Wno-char-subscripts',
                 # Clang spots more unused functions.
                 '-Wno-unused-function',
-                # Survive EXPECT_EQ(unnamed_enum, unsigned int) -- see
-                # http://code.google.com/p/googletest/source/detail?r=446 .
-                # TODO(thakis): Use -isystem instead (http://crbug.com/58751 ).
+                # See comments on this flag higher up in this file.
                 '-Wno-unnamed-type-template-args',
                 # TODO(thakis): Reenable once the one instance this warns on
                 # is fixed.
                 '-Wno-parentheses',
-              ],
-              'OTHER_CFLAGS': [
-                # TODO(thakis): Causes many warnings - http://crbug.com/75001
-                '-fobjc-exceptions',
               ],
             }],
             ['clang==1 and clang_use_chrome_plugins==1', {
@@ -1624,12 +1701,64 @@
             }],
           ],
         },
+        'conditions': [
+          ['clang==1', {
+            'variables': {
+              'clang_dir': '../third_party/llvm-build/Release+Asserts/bin',
+            },
+          }],
+        ],
         'target_conditions': [
           ['_type!="static_library"', {
             'xcode_settings': {'OTHER_LDFLAGS': ['-Wl,-search_paths_first']},
           }],
           ['_mac_bundle', {
             'xcode_settings': {'OTHER_LDFLAGS': ['-Wl,-ObjC']},
+          }],
+          ['_type=="executable"', {
+            'postbuilds': [
+              {
+                # Arranges for data (heap) pages to be protected against
+                # code execution when running on Mac OS X 10.7 ("Lion"), and
+                # ensures that the position-independent executable (PIE) bit
+                # is set for ASLR when running on Mac OS X 10.5 ("Leopard").
+                'variables': {
+                  # Define change_mach_o_flags in a variable ending in _path
+                  # so that GYP understands it's a path and performs proper
+                  # relativization during dict merging.
+                  'change_mach_o_flags_path':
+                      'mac/change_mach_o_flags_from_xcode.sh',
+                  'change_mach_o_flags_options': [
+                  ],
+                  'target_conditions': [
+                    ['release_valgrind_build==1', {
+                      'change_mach_o_flags_options': [
+                        # Turn off PIE when building for Valgrind because
+                        # Valgrind doesn't understand slide. TODO: Make
+                        # Valgrind on Mac OS X understand slide, and get rid
+                        # of the Valgrind check.
+                        '--no-pie',
+                      ],
+                    }],
+                  ],
+                },
+                'postbuild_name': 'Change Mach-O Flags',
+                'action': [
+                  '<(change_mach_o_flags_path)',
+                  '>@(change_mach_o_flags_options)',
+                ],
+              },
+            ],
+            'conditions': [
+              ['asan==1', {
+                'variables': {
+                 'asan_saves_file': 'asan.saves',
+                },
+                'xcode_settings': {
+                  'CHROMIUM_STRIP_SAVE_FILE': '<(asan_saves_file)'
+                },
+              }],
+            ],
           }],
           ['_type=="executable" and release_valgrind_build==0', {
             # Turn on position-independence (ASLR) for executables. When PIE
@@ -1702,6 +1831,7 @@
           'WIN32',
           '_WINDOWS',
           'NOMINMAX',
+          'PSAPI_VERSION=1',
           '_CRT_RAND_S',
           'CERT_CHAIN_PARA_HAS_EXTRA_FIELDS',
           'WIN32_LEAN_AND_MEAN',
@@ -1884,6 +2014,16 @@
           'ENABLE_NEW_NPDEVICE_API',
         ],
       },
+    }],
+    ['clang==1', {
+      'make_global_settings': [
+        ['CC', 'third_party/llvm-build/Release+Asserts/bin/clang'],
+        ['CXX', 'third_party/llvm-build/Release+Asserts/bin/clang++'],
+        ['LINK', '$(CXX)'],
+        ['CC.host', '$(CC)'],
+        ['CXX.host', '$(CXX)'],
+        ['LINK.host', '$(LINK)'],
+      ],
     }],
   ],
   'xcode_settings': {

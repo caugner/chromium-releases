@@ -4,18 +4,17 @@
 
 #include <vector>
 
-#include "testing/gtest/include/gtest/gtest.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_factory_impl.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 using browser_sync::DataTypeController;
 
@@ -43,6 +42,7 @@ class ProfileSyncFactoryImplTest : public testing::Test {
     datatypes.push_back(syncable::APPS);
     datatypes.push_back(syncable::AUTOFILL_PROFILE);
     datatypes.push_back(syncable::PASSWORDS);
+    datatypes.push_back(syncable::TYPED_URLS);
     return datatypes;
   }
 

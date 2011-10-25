@@ -35,7 +35,6 @@
 #include "views/window/dialog_delegate.h"
 
 #if defined(OS_WIN)
-#include "views/controls/button/native_button_win.h"
 #include "views/test/test_views_delegate.h"
 #endif
 
@@ -296,7 +295,7 @@ TEST_F(ViewTest, TouchEvent) {
   View* root = widget->GetRootView();
 
   root->AddChildView(v1);
-  static_cast<internal::RootView*>(root)->SetGestureManager(&gm);
+  static_cast<internal::RootView*>(root)->SetGestureManagerForTesting(&gm);
   v1->AddChildView(v2);
   v2->AddChildView(v3);
 
@@ -700,7 +699,7 @@ TEST_F(ViewTest, Textfield) {
   widget->CloseNow();
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 
 // Tests that the Textfield view respond appropiately to cut/copy/paste.
 TEST_F(ViewTest, TextfieldCutCopyPaste) {
@@ -822,7 +821,7 @@ bool TestView::AcceleratorPressed(const Accelerator& accelerator) {
   return true;
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 TEST_F(ViewTest, ActivateAccelerator) {
   // Register a keyboard accelerator before the view is added to a window.
   Accelerator return_accelerator(ui::VKEY_RETURN, false, false, false);
@@ -841,8 +840,7 @@ TEST_F(ViewTest, ActivateAccelerator) {
   root->AddChildView(view);
 
   // Get the focus manager.
-  FocusManager* focus_manager = FocusManager::GetFocusManagerForNativeView(
-      widget->GetNativeView());
+  FocusManager* focus_manager = widget->GetFocusManager();
   ASSERT_TRUE(focus_manager);
 
   // Hit the return key and see if it takes effect.
@@ -889,7 +887,7 @@ TEST_F(ViewTest, ActivateAccelerator) {
 }
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 TEST_F(ViewTest, HiddenViewWithAccelerator) {
   Accelerator return_accelerator(ui::VKEY_RETURN, false, false, false);
   TestView* view = new TestView();
@@ -905,8 +903,7 @@ TEST_F(ViewTest, HiddenViewWithAccelerator) {
   View* root = widget->GetRootView();
   root->AddChildView(view);
 
-  FocusManager* focus_manager = FocusManager::GetFocusManagerForNativeView(
-      widget->GetNativeView());
+  FocusManager* focus_manager = widget->GetFocusManager();
   ASSERT_TRUE(focus_manager);
 
   view->SetVisible(false);
@@ -921,31 +918,10 @@ TEST_F(ViewTest, HiddenViewWithAccelerator) {
 }
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 ////////////////////////////////////////////////////////////////////////////////
 // Mouse-wheel message rerouting
 ////////////////////////////////////////////////////////////////////////////////
-class ButtonTest : public NativeButton {
- public:
-  ButtonTest(ButtonListener* listener, const std::wstring& label)
-      : NativeButton(listener, label) {
-  }
-
-  HWND GetHWND() {
-    return static_cast<NativeButtonWin*>(native_wrapper_)->native_view();
-  }
-};
-
-class CheckboxTest : public NativeCheckbox {
- public:
-  explicit CheckboxTest(const std::wstring& label) : NativeCheckbox(label) {
-  }
-
-  HWND GetHWND() {
-    return static_cast<NativeCheckboxWin*>(native_wrapper_)->native_view();
-  }
-};
-
 class ScrollableTestView : public View {
  public:
   ScrollableTestView() { }
@@ -962,16 +938,10 @@ class ScrollableTestView : public View {
 class TestViewWithControls : public View {
  public:
   TestViewWithControls() {
-    button_ = new ButtonTest(NULL, L"Button");
-    checkbox_ = new CheckboxTest(L"My checkbox");
     text_field_ = new Textfield();
-    AddChildView(button_);
-    AddChildView(checkbox_);
     AddChildView(text_field_);
   }
 
-  ButtonTest* button_;
-  CheckboxTest* checkbox_;
   Textfield* text_field_;
 };
 
@@ -1025,16 +995,6 @@ TEST_F(ViewTest, DISABLED_RerouteMouseWheelTest) {
                 WM_MOUSEWHEEL, MAKEWPARAM(0, -20), MAKELPARAM(250, 250));
   EXPECT_EQ(20, scroll_view->GetVisibleRect().y());
 
-  // Then the button.
-  ::SendMessage(view_with_controls->button_->GetHWND(),
-                WM_MOUSEWHEEL, MAKEWPARAM(0, -20), MAKELPARAM(250, 250));
-  EXPECT_EQ(40, scroll_view->GetVisibleRect().y());
-
-  // Then the check-box.
-  ::SendMessage(view_with_controls->checkbox_->GetHWND(),
-                WM_MOUSEWHEEL, MAKEWPARAM(0, -20), MAKELPARAM(250, 250));
-  EXPECT_EQ(60, scroll_view->GetVisibleRect().y());
-
   // Then the text-field.
   ::SendMessage(view_with_controls->text_field_->GetTestingHandle(),
                 WM_MOUSEWHEEL, MAKEWPARAM(0, -20), MAKELPARAM(250, 250));
@@ -1075,8 +1035,7 @@ class MockMenuModel : public ui::MenuModel {
   MOCK_CONST_METHOD1(GetSubmenuModelAt, MenuModel*(int index));
   MOCK_METHOD1(HighlightChangedTo, void(int index));
   MOCK_METHOD1(ActivatedAt, void(int index));
-  MOCK_METHOD2(ActivatedAtWithDisposition, void(int index,
-      int disposition));
+  MOCK_METHOD2(ActivatedAt, void(int index, int disposition));
   MOCK_METHOD0(MenuWillShow, void());
   MOCK_METHOD0(MenuClosed, void());
   MOCK_METHOD1(SetMenuModelDelegate, void(ui::MenuModelDelegate* delegate));
@@ -1095,7 +1054,18 @@ class TestDialog : public DialogDelegate, public ButtonListener {
         last_pressed_button_(NULL),
         mock_menu_model_(mock_menu_model),
         canceled_(false),
-        oked_(false) {
+        oked_(false),
+        closeable_(false),
+        widget_(NULL) {
+  }
+
+  void TearDown() {
+    // Now we can close safely.
+    closeable_ = true;
+    widget_->Close();
+    widget_ = NULL;
+    // delegate has to be alive while shutting down.
+    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   }
 
   // DialogDelegate implementation:
@@ -1108,7 +1078,7 @@ class TestDialog : public DialogDelegate, public ButtonListener {
       contents_ = new View;
       button1_ = new NativeTextButton(this, L"Button1");
       button2_ = new NativeTextButton(this, L"Button2");
-      checkbox_ = new NativeCheckbox(L"My checkbox");
+      checkbox_ = new Checkbox(L"My checkbox");
       button_drop_ = new ButtonDropDown(this, mock_menu_model_);
       contents_->AddChildView(button1_);
       contents_->AddChildView(button2_);
@@ -1122,11 +1092,11 @@ class TestDialog : public DialogDelegate, public ButtonListener {
   // buttons to our heart's content).
   virtual bool Cancel() OVERRIDE {
     canceled_ = true;
-    return false;
+    return closeable_;
   }
   virtual bool Accept() OVERRIDE {
     oked_ = true;
-    return false;
+    return closeable_;
   }
 
   virtual Widget* GetWidget() OVERRIDE {
@@ -1161,13 +1131,14 @@ class TestDialog : public DialogDelegate, public ButtonListener {
   View* contents_;
   NativeTextButton* button1_;
   NativeTextButton* button2_;
-  NativeCheckbox* checkbox_;
+  Checkbox* checkbox_;
   ButtonDropDown* button_drop_;
   Button* last_pressed_button_;
   MockMenuModel* mock_menu_model_;
 
   bool canceled_;
   bool oked_;
+  bool closeable_;
   Widget* widget_;
 };
 
@@ -1188,7 +1159,8 @@ class DefaultButtonTest : public ViewTest {
         cancel_button_(NULL) {
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
+    ViewTest::SetUp();
     test_dialog_ = new TestDialog(NULL);
     Widget* window =
         Widget::CreateWindowWithBounds(test_dialog_, gfx::Rect(0, 0, 100, 100));
@@ -1200,6 +1172,11 @@ class DefaultButtonTest : public ViewTest {
         static_cast<DialogClientView*>(window->client_view());
     ok_button_ = client_view_->ok_button();
     cancel_button_ = client_view_->cancel_button();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    test_dialog_->TearDown();
+    ViewTest::TearDown();
   }
 
   void SimulatePressingEnterAndCheckDefaultButton(ButtonID button_id) {
@@ -1293,7 +1270,8 @@ class ButtonDropDownTest : public ViewTest {
         button_as_view_(NULL) {
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
+    ViewTest::SetUp();
     test_dialog_ = new TestDialog(&mock_menu_model_);
     Widget* window =
         Widget::CreateWindowWithBounds(test_dialog_, gfx::Rect(0, 0, 100, 100));
@@ -1303,6 +1281,11 @@ class ButtonDropDownTest : public ViewTest {
     // We have to cast the button back into a View in order to invoke it's
     // OnMouseReleased method.
     button_as_view_ = static_cast<View*>(test_dialog_->button_drop_);
+  }
+
+  virtual void TearDown() OVERRIDE {
+    test_dialog_->TearDown();
+    ViewTest::TearDown();
   }
 
   TestDialog* test_dialog_;
@@ -2327,16 +2310,18 @@ class TestTexture : public ui::Texture {
   static void reset_live_count() { live_count_ = 0; }
   static int live_count() { return live_count_; }
 
-  // Bounds of the last bitmap passed to SetBitmap.
+  // Bounds of the last bitmap passed to SetCanvas.
   const gfx::Rect& bounds_of_last_paint() const {
     return bounds_of_last_paint_;
   }
 
   // ui::Texture
-  virtual void SetBitmap(const SkBitmap& bitmap,
+  virtual void SetCanvas(const SkCanvas& canvas,
                          const gfx::Point& origin,
                          const gfx::Size& overall_size) OVERRIDE;
-  virtual void Draw(const ui::Transform& transform) OVERRIDE {}
+
+  virtual void Draw(const ui::TextureDrawParams& params,
+                    const gfx::Rect& clip_bounds) OVERRIDE {}
 
  private:
   // Number of live instances.
@@ -2350,16 +2335,17 @@ class TestTexture : public ui::Texture {
 // static
 int TestTexture::live_count_ = 0;
 
-void TestTexture::SetBitmap(const SkBitmap& bitmap,
+void TestTexture::SetCanvas(const SkCanvas& canvas,
                             const gfx::Point& origin,
                             const gfx::Size& overall_size) {
+  const SkBitmap& bitmap = canvas.getDevice()->accessBitmap(false);
   bounds_of_last_paint_.SetRect(
       origin.x(), origin.y(), bitmap.width(), bitmap.height());
 }
 
 class TestCompositor : public ui::Compositor {
  public:
-  TestCompositor() {}
+  TestCompositor() : Compositor(gfx::Size(100, 100)) {}
 
   // ui::Compositor:
   virtual ui::Texture* CreateTexture() OVERRIDE {
@@ -2369,7 +2355,9 @@ class TestCompositor : public ui::Compositor {
   virtual void NotifyEnd() OVERRIDE {}
   virtual void Blur(const gfx::Rect& bounds) OVERRIDE {}
   virtual void SchedulePaint() OVERRIDE {}
-  virtual void OnWidgetSizeChanged(const gfx::Size& size) OVERRIDE {}
+
+ protected:
+  virtual void OnWidgetSizeChanged() OVERRIDE {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestCompositor);
@@ -2430,12 +2418,13 @@ class ViewLayerTest : public ViewsTestBase {
   }
 
   virtual void SetUp() OVERRIDE {
+    ViewTest::SetUp();
     old_use_acceleration_ = View::get_use_acceleration_when_possible();
     View::set_use_acceleration_when_possible(true);
 
     TestTexture::reset_live_count();
 
-    Widget::set_compositor_factory(&TestCreateCompositor);
+    Widget::set_compositor_factory_for_testing(&TestCreateCompositor);
     widget_ = new Widget;
     Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
     params.bounds = gfx::Rect(50, 50, 200, 200);
@@ -2445,7 +2434,7 @@ class ViewLayerTest : public ViewsTestBase {
   virtual void TearDown() OVERRIDE {
     View::set_use_acceleration_when_possible(old_use_acceleration_);
     widget_->CloseNow();
-    Widget::set_compositor_factory(NULL);
+    Widget::set_compositor_factory_for_testing(NULL);
     Widget::SetPureViews(false);
   }
 
@@ -2632,7 +2621,7 @@ TEST_F(ViewLayerTest, ResetTransformOnLayerAfterAdd) {
   EXPECT_EQ(2.0f, view->layer()->transform().matrix().get(0, 0));
 }
 
-// Makes sure that layer persists after toggling the visibility
+// Makes sure that layer persists after toggling the visibility.
 TEST_F(ViewLayerTest, ToggleVisibilityWithLayer) {
   View* content_view = new View;
   widget()->SetContentsView(content_view);
@@ -2649,6 +2638,108 @@ TEST_F(ViewLayerTest, ToggleVisibilityWithLayer) {
 
   v1->SetVisible(true);
   EXPECT_TRUE(v1->layer());
+}
+
+// Test that a hole in a layer is correctly created regardless of whether
+// the opacity attribute is set before or after the layer is created.
+TEST_F(ViewLayerTest, ToggleOpacityWithLayer) {
+  View* content_view = new View;
+  widget()->SetContentsView(content_view);
+
+  View* parent_view = new View;
+  content_view->AddChildView(parent_view);
+  parent_view->SetPaintToLayer(true);
+  parent_view->SetBounds(0, 0, 400, 400);
+
+  View* child_view = new View;
+  child_view->SetBounds(50, 50, 100, 100);
+  parent_view->AddChildView(child_view);
+
+  // Call SetFillsBoundsOpaquely before layer is created.
+  ASSERT_TRUE(child_view->layer() == NULL);
+  child_view->SetFillsBoundsOpaquely(true);
+
+  child_view->SetPaintToLayer(true);
+  ASSERT_TRUE(child_view->layer());
+  EXPECT_EQ(
+      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
+
+  child_view->SetFillsBoundsOpaquely(false);
+  EXPECT_TRUE(parent_view->layer()->hole_rect().IsEmpty());
+
+  // Call SetFillsBoundsOpaquely after layer is created.
+  ASSERT_TRUE(parent_view->layer());
+
+  child_view->SetFillsBoundsOpaquely(true);
+  EXPECT_EQ(
+      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
+}
+
+// Test that a hole in a layer always corresponds to the bounds of opaque
+// layers.
+TEST_F(ViewLayerTest, MultipleOpaqueLayers) {
+  View* content_view = new View;
+  widget()->SetContentsView(content_view);
+
+  View* parent_view = new View;
+  parent_view->SetPaintToLayer(true);
+  parent_view->SetBounds(0, 0, 400, 400);
+  content_view->AddChildView(parent_view);
+
+  View* child_view1 = new View;
+  child_view1->SetPaintToLayer(true);
+  child_view1->SetFillsBoundsOpaquely(true);
+  child_view1->SetBounds(50, 50, 100, 100);
+  parent_view->AddChildView(child_view1);
+
+  View* child_view2 = new View;
+  child_view2->SetPaintToLayer(true);
+  child_view2->SetBounds(150, 150, 200, 200);
+  parent_view->AddChildView(child_view2);
+
+  // Only child_view1 is opaque
+  EXPECT_EQ(
+      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
+
+  // Both child views are opaque
+  child_view2->SetFillsBoundsOpaquely(true);
+  EXPECT_TRUE(
+      gfx::Rect(50, 50, 100, 100) == parent_view->layer()->hole_rect() ||
+      gfx::Rect(150, 150, 200, 200) == parent_view->layer()->hole_rect());
+
+  // Only child_view2 is opaque
+  delete child_view1;
+  EXPECT_EQ(
+      gfx::Rect(150, 150, 200, 200), parent_view->layer()->hole_rect());
+}
+
+// Makes sure that opacity of layer persists after toggling visibilty.
+TEST_F(ViewLayerTest, ToggleVisibilityWithOpaqueLayer) {
+  View* content_view = new View;
+  widget()->SetContentsView(content_view);
+
+  View* parent_view = new View;
+  parent_view->SetPaintToLayer(true);
+  parent_view->SetBounds(0, 0, 400, 400);
+  content_view->AddChildView(parent_view);
+
+  parent_view->SetPaintToLayer(true);
+  parent_view->SetBounds(0, 0, 400, 400);
+
+  View* child_view = new View;
+  child_view->SetBounds(50, 50, 100, 100);
+  child_view->SetFillsBoundsOpaquely(true);
+  child_view->SetPaintToLayer(true);
+  parent_view->AddChildView(child_view);
+  EXPECT_EQ(
+       gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
+
+  child_view->SetVisible(false);
+  EXPECT_TRUE(parent_view->layer()->hole_rect().IsEmpty());
+
+  child_view->SetVisible(true);
+  EXPECT_EQ(
+      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
 }
 
 // Verifies that the complete bounds of a texture are updated if the texture
@@ -2683,7 +2774,7 @@ TEST_F(ViewLayerTest, DISABLED_NativeWidgetView) {
 
   // NativeWidgetView should have been added to view.
   ASSERT_EQ(1, view->child_count());
-  View* widget_view_host = view->GetChildViewAt(0);
+  View* widget_view_host = view->child_at(0);
   ASSERT_TRUE(widget_view_host->layer() != NULL);
   EXPECT_EQ(gfx::Rect(11, 22, 100, 200), widget_view_host->layer()->bounds());
 

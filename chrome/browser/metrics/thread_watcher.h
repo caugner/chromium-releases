@@ -57,6 +57,7 @@
 #include "base/synchronization/lock.h"
 #include "base/task.h"
 #include "base/threading/thread.h"
+#include "base/threading/watchdog.h"
 #include "base/time.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_observer.h"
@@ -132,7 +133,8 @@ class ThreadWatcher {
 
   // This will ensure that the watching is actively taking place, and awaken
   // (i.e., post a PostPingMessage()) if the watcher has stopped pinging due to
-  // lack of user activity. It will also reset |ping_count_| to |kPingCount|.
+  // lack of user activity. It will also reset |ping_count_| to
+  // |unresponsive_threshold_|.
   virtual void WakeUp();
 
   // This method records when ping message was sent and it will Post a task
@@ -187,10 +189,6 @@ class ThreadWatcher {
   // This method returns true if the watched thread has not responded with a
   // pong message for |unresponsive_threshold_| number of ping messages.
   bool IsVeryUnresponsive();
-
-  // This is the number of ping messages to be sent when the user is idle.
-  // ping_count_ will be initialized to kPingCount whenever user becomes active.
-  static const int kPingCount;
 
   // The |thread_id_| of the thread being watched. Only one instance can exist
   // for the given |thread_id_| of the thread being watched.
@@ -253,8 +251,8 @@ class ThreadWatcher {
   uint32 unresponsive_count_;
 
   // This is set to true when we would have crashed the browser because the
-  // watched thread hasn't responded atleast 6 times. It is reset to false when
-  // watched thread responds with a pong message.
+  // watched thread hasn't responded at least |unresponsive_threshold_| times.
+  // It is reset to false when watched thread responds with a pong message.
   bool hung_processing_complete_;
 
   // This is used to determine if the watched thread is responsive or not. If
@@ -471,6 +469,26 @@ class WatchDogThread : public base::Thread {
   static WatchDogThread* watchdog_thread_;  // The singleton of this class.
 
   DISALLOW_COPY_AND_ASSIGN(WatchDogThread);
+};
+
+// This is a wrapper class for watching the jank during shutdown.
+class ShutdownWatcherHelper {
+ public:
+  // Create an empty holder for |shutdown_watchdog_|.
+  ShutdownWatcherHelper();
+
+  // Destructor disarm's shutdown_watchdog_ so that alarm doesn't go off.
+  ~ShutdownWatcherHelper();
+
+  // Constructs ShutdownWatchDogThread which spawns a thread and starts timer.
+  // |duration| specifies how long it will wait before it calls alarm.
+  void Arm(const base::TimeDelta& duration);
+
+ private:
+  // shutdown_watchdog_ watches the jank during shutdown.
+  base::Watchdog* shutdown_watchdog_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShutdownWatcherHelper);
 };
 
 // DISABLE_RUNNABLE_METHOD_REFCOUNT is a convenience macro for disabling

@@ -5601,7 +5601,7 @@ For other examples and for help in viewing the source code, see
                 <!-- TYPE -->
                 <div style="display:inline">
                   (
-                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="optional">optional</span>
                     <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span>
@@ -5623,7 +5623,7 @@ For other examples and for help in viewing the source code, see
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>Details about the updated tab.</dd>
+          <dd>Details about the updated tab, or <code>null</code> if the 'tabs' permission has not been requested.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -5689,7 +5689,7 @@ For other examples and for help in viewing the source code, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.tabs.</span><span>onAttached</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object attachInfo</span>) <span class="subdued">{...}</span><span></span>));
+                <span class="subdued">chrome.tabs.</span><span>onAttached</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object attachInfo</span>) <span class="subdued">{...}</span><span></span>);
               </div>
 
               <div class="description">
@@ -6008,12 +6008,12 @@ For other examples and for help in viewing the source code, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.tabs.</span><span>onCreated</span><span class="subdued">.addListener</span>(function(<span>Tab tab</span>) <span class="subdued">{...}</span><span></span>));
+                <span class="subdued">chrome.tabs.</span><span>onCreated</span><span class="subdued">.addListener</span>(function(<span>Tab tab</span>) <span class="subdued">{...}</span><span></span>);
               </div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Fires when a tab is created. Note that the tab's URL may not be set at the time this event fires, but you can listen to onUpdated events to be notified when a URL is set.</p>
+                <p>Fired when a tab is created. Note that the tab's URL may not be set at the time this event fired, but you can listen to onUpdated events to be notified when a URL is set.</p>
 
                 <!-- LISTENER PARAMETERS -->
                 <div>
@@ -6118,7 +6118,7 @@ For other examples and for help in viewing the source code, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.tabs.</span><span>onDetached</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object detachInfo</span>) <span class="subdued">{...}</span><span></span>));
+                <span class="subdued">chrome.tabs.</span><span>onDetached</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object detachInfo</span>) <span class="subdued">{...}</span><span></span>);
               </div>
 
               <div class="description">
@@ -6437,12 +6437,12 @@ For other examples and for help in viewing the source code, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.tabs.</span><span>onMoved</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object moveInfo</span>) <span class="subdued">{...}</span><span></span>));
+                <span class="subdued">chrome.tabs.</span><span>onMoved</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object moveInfo</span>) <span class="subdued">{...}</span><span></span>);
               </div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Fires when a tab is moved within a window. Only one move event is fired, representing the tab the user directly moved. Move events are not fired for the other tabs that must move in response. This event is not fired when a tab is moved between windows. For that, see <a href="#event-onDetached">onDetached</a>.</p>
+                <p>Fired when a tab is moved within a window. Only one move event is fired, representing the tab the user directly moved. Move events are not fired for the other tabs that must move in response. This event is not fired when a tab is moved between windows. For that, see <a href="#event-onDetached">onDetached</a>.</p>
 
                 <!-- LISTENER PARAMETERS -->
                 <div>
@@ -6826,12 +6826,12 @@ For other examples and for help in viewing the source code, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.tabs.</span><span>onRemoved</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object removeInfo</span>) <span class="subdued">{...}</span><span></span>));
+                <span class="subdued">chrome.tabs.</span><span>onRemoved</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object removeInfo</span>) <span class="subdued">{...}</span><span></span>);
               </div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Fires when a tab is closed. Note: A listener can be registered for this event without requesting the 'tabs' permission in the manifest.</p>
+                <p>Fired when a tab is closed. Note: A listener can be registered for this event without requesting the 'tabs' permission in the manifest.</p>
 
                 <!-- LISTENER PARAMETERS -->
                 <div>
@@ -7073,12 +7073,12 @@ For other examples and for help in viewing the source code, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.tabs.</span><span>onSelectionChanged</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object selectInfo</span>) <span class="subdued">{...}</span><span></span>));
+                <span class="subdued">chrome.tabs.</span><span>onSelectionChanged</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object selectInfo</span>) <span class="subdued">{...}</span><span></span>);
               </div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Fires when the selected tab in a window changes.</p>
+                <p>Fired when the selected tab in a window changes.</p>
 
                 <!-- LISTENER PARAMETERS -->
                 <div>
@@ -7318,12 +7318,12 @@ For other examples and for help in viewing the source code, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.tabs.</span><span>onUpdated</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object changeInfo, Tab tab</span>) <span class="subdued">{...}</span><span></span>));
+                <span class="subdued">chrome.tabs.</span><span>onUpdated</span><span class="subdued">.addListener</span>(function(<span>integer tabId, object changeInfo, Tab tab</span>) <span class="subdued">{...}</span><span></span>);
               </div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Fires when a tab is updated.</p>
+                <p>Fired when a tab is updated.</p>
 
                 <!-- LISTENER PARAMETERS -->
                 <div>

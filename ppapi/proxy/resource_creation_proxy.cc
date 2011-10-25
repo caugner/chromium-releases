@@ -6,13 +6,11 @@
 
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_size.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_id.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/c/trusted/ppb_image_data_trusted.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/proxy/ppb_audio_config_proxy.h"
 #include "ppapi/proxy/ppb_audio_proxy.h"
 #include "ppapi/proxy/ppb_buffer_proxy.h"
 #include "ppapi/proxy/ppb_broker_proxy.h"
@@ -27,20 +25,23 @@
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
-#include "ppapi/proxy/ppb_input_event_proxy.h"
 #include "ppapi/proxy/ppb_surface_3d_proxy.h"
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
-#include "ppapi/proxy/ppb_url_request_info_proxy.h"
+#include "ppapi/proxy/ppb_video_capture_proxy.h"
+#include "ppapi/proxy/ppb_video_decoder_proxy.h"
+#include "ppapi/shared_impl/audio_config_impl.h"
 #include "ppapi/shared_impl/font_impl.h"
 #include "ppapi/shared_impl/function_group_base.h"
+#include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/input_event_impl.h"
+#include "ppapi/shared_impl/url_request_info_impl.h"
+#include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_image_data_api.h"
 
-using ppapi::InputEventData;
 using ppapi::thunk::ResourceCreationAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 ResourceCreationProxy::ResourceCreationProxy(Dispatcher* dispatcher)
@@ -67,7 +68,7 @@ PP_Resource ResourceCreationProxy::CreateAudioConfig(
     PP_Instance instance,
     PP_AudioSampleRate sample_rate,
     uint32_t sample_frame_count) {
-  return PPB_AudioConfig_Proxy::CreateProxyResource(
+  return AudioConfigImpl::CreateAsProxy(
       instance, sample_rate, sample_frame_count);
 }
 
@@ -112,8 +113,10 @@ PP_Resource ResourceCreationProxy::CreateDirectoryReader(
 
 PP_Resource ResourceCreationProxy::CreateFileChooser(
     PP_Instance instance,
-    const PP_FileChooserOptions_Dev* options) {
-  return PPB_FileChooser_Proxy::CreateProxyResource(instance, options);
+    PP_FileChooserMode_Dev mode,
+    const PP_Var& accept_mime_types) {
+  return PPB_FileChooser_Proxy::CreateProxyResource(instance, mode,
+                                                    accept_mime_types);
 }
 
 PP_Resource ResourceCreationProxy::CreateFileIO(PP_Instance instance) {
@@ -153,10 +156,8 @@ PP_Resource ResourceCreationProxy::CreateFontObject(
     const PP_FontDescription_Dev* description) {
   if (!ppapi::FontImpl::IsPPFontDescriptionValid(*description))
     return 0;
-
-  linked_ptr<Font> object(new Font(HostResource::MakeInstanceOnly(instance),
-                                   *description));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return (new Font(HostResource::MakeInstanceOnly(instance), *description))->
+      GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
@@ -188,8 +189,7 @@ PP_Resource ResourceCreationProxy::CreateImageData(PP_Instance instance,
   PP_ImageDataDesc desc;
   memcpy(&desc, image_data_desc.data(), sizeof(PP_ImageDataDesc));
 
-  linked_ptr<ImageData> object(new ImageData(result, desc, image_handle));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return (new ImageData(result, desc, image_handle))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
@@ -204,17 +204,20 @@ PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
       type != PP_INPUTEVENT_TYPE_KEYUP &&
       type != PP_INPUTEVENT_TYPE_CHAR)
     return 0;
-  PluginVarTracker* tracker = PluginVarTracker::GetInstance();
-
   ppapi::InputEventData data;
   data.event_type = type;
   data.event_time_stamp = time_stamp;
   data.event_modifiers = modifiers;
   data.key_code = key_code;
-  if (character_text.type == PP_VARTYPE_STRING)
-    data.character_text = *tracker->GetExistingString(character_text);
+  if (character_text.type == PP_VARTYPE_STRING) {
+    StringVar* text_str = StringVar::FromPPVar(character_text);
+    if (!text_str)
+      return 0;
+    data.character_text = text_str->value();
+  }
 
-  return PPB_InputEvent_Proxy::CreateProxyResource(instance, data);
+  return (new InputEventImpl(InputEventImpl::InitAsProxy(),
+                             instance, data))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
@@ -224,7 +227,8 @@ PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
     uint32_t modifiers,
     PP_InputEvent_MouseButton mouse_button,
     const PP_Point* mouse_position,
-    int32_t click_count) {
+    int32_t click_count,
+    const PP_Point* mouse_movement) {
   if (type != PP_INPUTEVENT_TYPE_MOUSEDOWN &&
       type != PP_INPUTEVENT_TYPE_MOUSEUP &&
       type != PP_INPUTEVENT_TYPE_MOUSEMOVE &&
@@ -239,22 +243,22 @@ PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
   data.mouse_button = mouse_button;
   data.mouse_position = *mouse_position;
   data.mouse_click_count = click_count;
+  data.mouse_movement = *mouse_movement;
 
-  return PPB_InputEvent_Proxy::CreateProxyResource(instance, data);
+  return (new InputEventImpl(InputEventImpl::InitAsProxy(),
+                             instance, data))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateGraphics3D(
     PP_Instance instance,
-    PP_Config3D_Dev config,
     PP_Resource share_context,
     const int32_t* attrib_list) {
   return PPB_Graphics3D_Proxy::CreateProxyResource(
-      instance, config, share_context, attrib_list);
+      instance, share_context, attrib_list);
 }
 
 PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
     PP_Instance instance,
-    PP_Config3D_Dev config,
     PP_Resource share_context,
     const int32_t* attrib_list) {
   // Not proxied. The raw creation function is used only in the implementation
@@ -287,13 +291,23 @@ PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
   return PPB_URLLoader_Proxy::CreateProxyResource(instance);
 }
 
-PP_Resource ResourceCreationProxy::CreateURLRequestInfo(PP_Instance instance) {
-  return PPB_URLRequestInfo_Proxy::CreateProxyResource(instance);
+PP_Resource ResourceCreationProxy::CreateURLRequestInfo(
+    PP_Instance instance,
+    const PPB_URLRequestInfo_Data& data) {
+  return (new URLRequestInfoImpl(
+      HostResource::MakeInstanceOnly(instance), data))->GetReference();
 }
 
-PP_Resource ResourceCreationProxy::CreateVideoDecoder(PP_Instance instance) {
-  NOTIMPLEMENTED();
-  return 0;
+PP_Resource ResourceCreationProxy::CreateVideoCapture(PP_Instance instance) {
+  return PPB_VideoCapture_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateVideoDecoder(
+    PP_Instance instance,
+    PP_Resource context3d_id,
+    PP_VideoDecoder_Profile profile) {
+  return PPB_VideoDecoder_Proxy::CreateProxyResource(
+      instance, context3d_id, profile);
 }
 
 PP_Resource ResourceCreationProxy::CreateVideoLayer(
@@ -318,7 +332,8 @@ PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
   data.wheel_ticks = *wheel_ticks;
   data.wheel_scroll_by_page = PP_ToBool(scroll_by_page);
 
-  return PPB_InputEvent_Proxy::CreateProxyResource(instance, data);
+  return (new InputEventImpl(InputEventImpl::InitAsProxy(),
+                             instance, data))->GetReference();
 }
 
 bool ResourceCreationProxy::Send(IPC::Message* msg) {
@@ -386,7 +401,7 @@ void ResourceCreationProxy::OnMsgCreateImageData(
     int32_t handle;
     if (trusted->GetSharedMemory(resource, &handle, &byte_count) == PP_OK) {
 #if defined(OS_WIN)
-      pp::proxy::ImageHandle ih = ImageData::HandleFromInt(handle);
+      ImageHandle ih = ImageData::HandleFromInt(handle);
       *result_image_handle = dispatcher_->ShareHandleWithRemote(ih, false);
 #else
       *result_image_handle = ImageData::HandleFromInt(handle);
@@ -396,4 +411,4 @@ void ResourceCreationProxy::OnMsgCreateImageData(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

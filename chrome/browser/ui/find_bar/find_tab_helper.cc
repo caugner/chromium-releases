@@ -38,8 +38,10 @@ void FindTabHelper::StartFinding(string16 search_string,
   // If search_string is empty, it means FindNext was pressed with a keyboard
   // shortcut so unless we have something to search for we return early.
   if (search_string.empty() && find_text_.empty()) {
+    Profile* profile =
+        Profile::FromBrowserContext(tab_contents()->browser_context());
     string16 last_search_prepopulate_text =
-        FindBarState::GetLastPrepopulateText(tab_contents()->profile());
+        FindBarState::GetLastPrepopulateText(profile);
 
     // Try the last thing we searched for on this tab, then the last thing
     // searched for on any tab.
@@ -73,7 +75,9 @@ void FindTabHelper::StartFinding(string16 search_string,
   find_op_aborted_ = false;
 
   // Keep track of what the last search was across the tabs.
-  FindBarState* find_bar_state = tab_contents()->profile()->GetFindBarState();
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  FindBarState* find_bar_state = profile->GetFindBarState();
   find_bar_state->set_last_prepopulate_text(find_text_);
 
   WebFindOptions options;
@@ -120,20 +124,11 @@ void FindTabHelper::StopFinding(
       tab_contents()->render_view_host()->routing_id(), params));
 }
 
-bool FindTabHelper::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(FindTabHelper, message)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_Find_Reply, OnFindReply)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
-void FindTabHelper::OnFindReply(int request_id,
-                                int number_of_matches,
-                                const gfx::Rect& selection_rect,
-                                int active_match_ordinal,
-                                bool final_update) {
+void FindTabHelper::HandleFindReply(int request_id,
+                                    int number_of_matches,
+                                    const gfx::Rect& selection_rect,
+                                    int active_match_ordinal,
+                                    bool final_update) {
   // Ignore responses for requests that have been aborted.
   // Ignore responses for requests other than the one we have most recently
   // issued. That way we won't act on stale results when the user has

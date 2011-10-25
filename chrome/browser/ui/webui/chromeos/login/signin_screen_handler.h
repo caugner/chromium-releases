@@ -9,9 +9,13 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "base/task.h"
+#include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "content/browser/webui/web_ui.h"
+
+class BrowsingDataRemover;
 
 namespace base {
 class DictionaryValue;
@@ -19,6 +23,8 @@ class ListValue;
 }
 
 namespace chromeos {
+
+class NetworkStateInformer;
 
 // An interface for WebUILoginDisplay to call SigninScreenHandler.
 class LoginDisplayWebUIHandler {
@@ -30,6 +36,9 @@ class LoginDisplayWebUIHandler {
                          const std::string& error_text,
                          const std::string& help_link_text,
                          HelpAppLauncher::HelpTopic help_topic_id) = 0;
+  // Show siginin screen for the given credentials.
+  virtual void ShowSigninScreenForCreds(const std::string& username,
+                                        const std::string& password) = 0;
  protected:
   virtual ~LoginDisplayWebUIHandler() {}
 };
@@ -50,6 +59,9 @@ class SigninScreenHandlerDelegate {
   // Sign in into Guest session.
   virtual void LoginAsGuest() = 0;
 
+  // Sign in into Guest session for fixing captive portal issues.
+  virtual void FixCaptivePortal() = 0;
+
   // Create a new Google account.
   virtual void CreateAccount() = 0;
 
@@ -69,7 +81,8 @@ class SigninScreenHandlerDelegate {
 // A class that handles the WebUI hooks in sign-in screen in OobeDisplay
 // and LoginDisplay.
 class SigninScreenHandler : public BaseScreenHandler,
-                            public LoginDisplayWebUIHandler {
+                            public LoginDisplayWebUIHandler,
+                            public BrowsingDataRemover::Observer {
  public:
   SigninScreenHandler();
   virtual ~SigninScreenHandler();
@@ -79,6 +92,8 @@ class SigninScreenHandler : public BaseScreenHandler,
   void Show(bool oobe_ui);
 
  private:
+  friend class ReportDnsCacheClearedOnUIThread;
+
   // BaseScreenHandler implementation:
   virtual void GetLocalizedStrings(
       base::DictionaryValue* localized_strings) OVERRIDE;
@@ -95,6 +110,14 @@ class SigninScreenHandler : public BaseScreenHandler,
                          const std::string& error_text,
                          const std::string& help_link_text,
                          HelpAppLauncher::HelpTopic help_topic_id) OVERRIDE;
+  virtual void ShowSigninScreenForCreds(const std::string& username,
+                                        const std::string& password) OVERRIDE;
+
+  // BrowsingDataRemover::Observer overrides.
+  virtual void OnBrowsingDataRemoverDone() OVERRIDE;
+
+  // Shows signin screen after dns cache and cookie cleanup operations finish.
+  void ShowSigninScreenIfReady();
 
   // Handles confirmation message of user authentication that was performed by
   // the authentication extension.
@@ -108,6 +131,10 @@ class SigninScreenHandler : public BaseScreenHandler,
 
   // Handles entering bwsi mode request.
   void HandleLaunchIncognito(const base::ListValue* args);
+
+  // Handles fix captive portal request (starts guest session with specific
+  // start URL).
+  void HandleFixCaptivePortal(const base::ListValue* args);
 
   // Handles system shutdown request.
   void HandleShutdownSystem(const base::ListValue* args);
@@ -127,8 +154,27 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Handle 'createAccount' request.
   void HandleCreateAccount(const base::ListValue* args);
 
+  // Handle 'loginWebuiReady' request.
+  void HandleLoginWebuiReady(const base::ListValue* args);
+
+  // Handle 'loginRequestNetworkState' request.
+  void HandleLoginRequestNetworkState(const base::ListValue* args);
+
+  // Handle 'loginAddNetworkStateObserver' request.
+  void HandleLoginAddNetworkStateObserver(const base::ListValue* args);
+
+  // Handle 'loginRemoveNetworkStateObserver' request.
+  void HandleLoginRemoveNetworkStateObserver(const base::ListValue* args);
+
   // Sends user list to account picker.
   void SendUserList(bool animated);
+
+  // Kick off cookie / local storage cleanup.
+  void StartClearingCookies();
+
+  // Kick off DNS cache flushing.
+  void StartClearingDnsCache();
+  void OnDnsCleared();
 
   // A delegate that glues this handler with backend LoginDisplay.
   SigninScreenHandlerDelegate* delegate_;
@@ -139,11 +185,34 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Keeps whether screen should be shown for OOBE.
   bool oobe_ui_;
 
+  // True if dns cache cleanup is done.
+  bool dns_cleared_;
+
+  // True if DNS cache task is already running.
+  bool dns_clear_task_running_;
+
+  // True if cookie jar cleanup is done.
+  bool cookies_cleared_;
+
   // True if new user sign in flow is driven by the extension.
   bool extension_driven_;
 
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;
+
+  // Network state infromer used to keep offline message screen up.
+  scoped_ptr<NetworkStateInformer> network_state_informer_;
+
+  // Email to pre-populate with.
+  std::string email_;
+
+  // Test credentials.
+  std::string test_user_;
+  std::string test_pass_;
+
+  BrowsingDataRemover* cookie_remover_;
+
+  ScopedRunnableMethodFactory<SigninScreenHandler> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

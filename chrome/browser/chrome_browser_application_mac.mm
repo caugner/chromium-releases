@@ -5,7 +5,6 @@
 #import "chrome/browser/chrome_browser_application_mac.h"
 
 #import "base/logging.h"
-#import "base/mac/mac_util.h"
 #import "base/mac/scoped_nsexception_enabler.h"
 #import "base/metrics/histogram.h"
 #import "base/memory/scoped_nsobject.h"
@@ -13,9 +12,9 @@
 #import "chrome/app/breakpad_mac.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/ui/browser_list.h"
-#import "chrome/browser/ui/cocoa/objc_method_swizzle.h"
-#import "chrome/browser/ui/cocoa/objc_zombie.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#import "chrome/common/mac/objc_method_swizzle.h"
+#import "chrome/common/mac/objc_zombie.h"
 #include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/renderer_host/render_view_host.h"
 
@@ -122,29 +121,6 @@ static IMP gOriginalInitIMP = NULL;
 }
 @end
 
-static IMP gOriginalNSBundleLoadIMP = NULL;
-
-@interface NSBundle (CrNSBundleSwizzle)
-- (BOOL)crLoad;
-@end
-
-@implementation NSBundle (CrNSBundleSwizzle)
-- (BOOL)crLoad {
-  // Method only called when swizzled.
-  DCHECK(_cmd == @selector(load));
-
-  // MultiClutchInputManager is broken in Chrome on Lion.
-  // http://crbug.com/90075.
-  if (base::mac::IsOSLionOrLater() &&
-      [[self bundleIdentifier]
-       isEqualToString:@"net.wonderboots.multiclutchinputmanager"]) {
-    return NO;
-  }
-
-  return gOriginalNSBundleLoadIMP(self, _cmd) != nil;
-}
-@end
-
 namespace chrome_browser_application_mac {
 
 // Maximum number of known named exceptions we'll support.  There is
@@ -225,13 +201,6 @@ void SwizzleInit() {
       [NSException class],
       @selector(initWithName:reason:userInfo:),
       @selector(crInitWithName:reason:userInfo:));
-
-  // Avoid loading broken input managers.
-  gOriginalNSBundleLoadIMP =
-      ObjcEvilDoers::SwizzleImplementedInstanceMethods(
-          [NSBundle class],
-          @selector(load),
-          @selector(crLoad));
 }
 
 }  // namespace
@@ -241,7 +210,7 @@ void SwizzleInit() {
 + (void)initialize {
   // Turn all deallocated Objective-C objects into zombies, keeping
   // the most recent 10,000 of them on the treadmill.
-  ObjcEvilDoers::ZombieEnable(YES, 10000);
+  ObjcEvilDoers::ZombieEnable(true, 10000);
 }
 
 - (id)init {

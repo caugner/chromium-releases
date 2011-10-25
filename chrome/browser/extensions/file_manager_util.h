@@ -12,6 +12,8 @@
 
 class Profile;
 
+extern const char kFileBrowserDomain[];
+
 // Helper class for wiring file browser component extension with the rest of UI.
 class FileManagerUtil {
  public:
@@ -36,15 +38,15 @@ class FileManagerUtil {
   static GURL GetFileBrowserUrlWithParams(
       SelectFileDialog::Type type,
       const string16& title,
-      const FilePath& default_path,
+      const FilePath& default_virtual_path,
       const SelectFileDialog::FileTypeInfo* file_types,
       int file_type_index,
       const FilePath::StringType& default_extension);
 
   // Opens file browser UI in its own tab on file system location defined with
-  // |default_path|.
+  // |dir|.
   static void ShowFullTabUrl(Profile* profile,
-                             const FilePath& default_path);
+                             const FilePath& dir);
 
   static void ViewItem(const FilePath& full_path, bool enqueue);
 
@@ -52,14 +54,6 @@ class FileManagerUtil {
   FileManagerUtil() {}
   // Helper to convert numeric dialog type to a string.
   static std::string GetDialogTypeAsString(SelectFileDialog::Type dialog_type);
-  // Help to convert potential dialog arguments into json.
-  static std::string GetArgumentsJson(
-      SelectFileDialog::Type type,
-      const string16& title,
-      const FilePath& default_path,
-      const SelectFileDialog::FileTypeInfo* file_types,
-      int file_type_index,
-      const FilePath::StringType& default_extension);
 
   DISALLOW_COPY_AND_ASSIGN(FileManagerUtil);
 };

@@ -7,6 +7,7 @@
 #include <gtk/gtk.h>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -70,8 +71,8 @@ bool HtmlDialogGtk::IsDialogModal() const {
   return delegate_ ? delegate_->IsDialogModal() : false;
 }
 
-std::wstring HtmlDialogGtk::GetDialogTitle() const {
-  return delegate_ ? delegate_->GetDialogTitle() : L"";
+string16 HtmlDialogGtk::GetDialogTitle() const {
+  return delegate_ ? delegate_->GetDialogTitle() : string16();
 }
 
 GURL HtmlDialogGtk::GetDialogContentURL() const {
@@ -171,7 +172,7 @@ gfx::NativeWindow HtmlDialogGtk::InitDialog() {
     flags = static_cast<GtkDialogFlags>(flags | GTK_DIALOG_MODAL);
 
   dialog_ = gtk_dialog_new_with_buttons(
-      WideToUTF8(delegate_->GetDialogTitle()).c_str(),
+      UTF16ToUTF8(delegate_->GetDialogTitle()).c_str(),
       parent_window_,
       flags,
       NULL);

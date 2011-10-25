@@ -10,7 +10,7 @@
 #include "base/sync_socket.h"
 #include "base/threading/simple_thread.h"
 #include "ppapi/c/ppb_audio.h"
-#include "ppapi/shared_impl/resource_object_base.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_audio_api.h"
 
 namespace ppapi {
@@ -18,15 +18,12 @@ namespace ppapi {
 // Implements the logic to map shared memory and run the audio thread signaled
 // from the sync socket. Both the proxy and the renderer implementation use
 // this code.
-class AudioImpl : public ResourceObjectBase,
-                  public thunk::PPB_Audio_API,
-                  public base::DelegateSimpleThread::Delegate {
+class PPAPI_SHARED_EXPORT AudioImpl
+    : public thunk::PPB_Audio_API,
+      public base::DelegateSimpleThread::Delegate {
  public:
   AudioImpl();
   virtual ~AudioImpl();
-
-  // ResourceObjectBase implementation.
-  virtual ::ppapi::thunk::PPB_Audio_API* AsPPB_Audio_API() OVERRIDE;
 
   bool playing() const { return playing_; }
 

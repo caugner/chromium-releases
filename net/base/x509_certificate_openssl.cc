@@ -404,7 +404,8 @@ X509Certificate* X509Certificate::CreateSelfSigned(
     const std::string& subject,
     uint32 serial_number,
     base::TimeDelta valid_duration) {
-  // TODO(port): Implement.
+  // TODO(port): Implement. See http://crbug.com/91512.
+  NOTIMPLEMENTED();
   return NULL;
 }
 
@@ -423,6 +424,8 @@ void X509Certificate::GetSubjectAltName(
 X509_STORE* X509Certificate::cert_store() {
   return X509InitSingleton::GetInstance()->store();
 }
+
+#if !defined(OS_ANDROID)
 
 int X509Certificate::VerifyInternal(const std::string& hostname,
                                     int flags,
@@ -462,8 +465,16 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
     return MapCertStatusToNetError(verify_result->cert_status);
 
   STACK_OF(X509)* chain = X509_STORE_CTX_get_chain(ctx.get());
+  X509* verified_cert = NULL;
+  std::vector<X509*> verified_chain;
   for (int i = 0; i < sk_X509_num(chain); ++i) {
     X509* cert = sk_X509_value(chain, i);
+    if (i == 0) {
+      verified_cert = cert;
+    } else {
+      verified_chain.push_back(cert);
+    }
+
     DERCache der_cache;
     if (!GetDERAndCacheIfNeeded(cert, &der_cache))
       continue;
@@ -480,6 +491,11 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
     verify_result->public_key_hashes.push_back(hash);
   }
 
+  if (verified_cert) {
+    verify_result->verified_cert = CreateFromHandle(verified_cert,
+                                                    verified_chain);
+  }
+
   // Currently we only ues OpenSSL's default root CA paths, so treat all
   // correctly verified certs as being from a known root. TODO(joth): if the
   // motivations described in http://src.chromium.org/viewvc/chrome?view=rev&revision=80778
@@ -489,6 +505,8 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
 
   return OK;
 }
+
+#endif  // !defined(OS_ANDROID)
 
 bool X509Certificate::GetDEREncoded(std::string* encoded) {
   DERCache der_cache;

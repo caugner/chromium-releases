@@ -31,6 +31,7 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/constrained_window_mac.h"
+#include "chrome/browser/ui/cocoa/drag_util.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
@@ -66,21 +67,6 @@
 #include "ui/gfx/mac/nsimage_cache.h"
 
 NSString* const kTabStripNumberOfTabsChanged = @"kTabStripNumberOfTabsChanged";
-
-// 10.7 adds public APIs for full-screen support. Provide the declaration so it
-// can be called below when building with the 10.5 SDK.
-#if !defined(MAC_OS_X_VERSION_10_7) || \
-MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-
-@interface NSWindow (LionSDKDeclarations)
-- (void)toggleFullScreen:(id)sender;
-@end
-
-enum {
-  NSWindowFullScreenButton = 7
-};
-
-#endif  // MAC_OS_X_VERSION_10_7
 
 namespace {
 
@@ -1943,6 +1929,11 @@ private:
     [tabStripView_ setDropArrowShown:NO];
     [tabStripView_ setNeedsDisplay:YES];
   }
+}
+
+// (URLDropTargetController protocol)
+- (BOOL)isUnsupportedDropData:(id<NSDraggingInfo>)info {
+  return drag_util::IsUnsupportedDropData(browser_->profile(), info);
 }
 
 - (GTMWindowSheetController*)sheetController {

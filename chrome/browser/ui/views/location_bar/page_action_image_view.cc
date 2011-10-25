@@ -17,19 +17,19 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 
 PageActionImageView::PageActionImageView(LocationBarView* owner,
-                                         Profile* profile,
                                          ExtensionAction* page_action)
     : owner_(owner),
-      profile_(profile),
       page_action_(page_action),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)),
       current_tab_id_(-1),
       preview_enabled_(false),
       popup_(NULL) {
-  const Extension* extension = profile->GetExtensionService()->
-      GetExtensionById(page_action->extension_id(), false);
+  const Extension* extension = owner_->browser()->profile()->
+      GetExtensionService()->GetExtensionById(page_action->extension_id(),
+                                              false);
   DCHECK(extension);
 
   // Load all the icons declared in the manifest. This is the contents of the
@@ -62,15 +62,6 @@ void PageActionImageView::ExecuteAction(int button,
   }
 
   if (page_action_->HasPopup(current_tab_id_)) {
-    // In tests, GetLastActive could return NULL, so we need to have
-    // a fallback.
-    // TODO(erikkay): Find a better way to get the Browser that this
-    // button is in.
-    Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-    if (!browser)
-      browser = BrowserList::FindBrowserWithProfile(profile_);
-    DCHECK(browser);
-
     bool popup_showing = popup_ != NULL;
 
     // Always hide the current popup. Only one popup at a time.
@@ -85,20 +76,21 @@ void PageActionImageView::ExecuteAction(int button,
     View::ConvertPointToScreen(this, &origin);
     screen_bounds.set_origin(origin);
 
-    BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
-        BubbleBorder::TOP_LEFT : BubbleBorder::TOP_RIGHT;
+    views::BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
+        views::BubbleBorder::TOP_LEFT : views::BubbleBorder::TOP_RIGHT;
 
     popup_ = ExtensionPopup::Show(
         page_action_->GetPopupUrl(current_tab_id_),
-        browser,
+        owner_->browser(),
         screen_bounds,
         arrow_location,
         inspect_with_devtools,
         this);  // ExtensionPopup::Observer
   } else {
-    ExtensionService* service = profile_->GetExtensionService();
+    Profile* profile = owner_->browser()->profile();
+    ExtensionService* service = profile->GetExtensionService();
     service->browser_event_router()->PageActionExecuted(
-        profile_, page_action_->extension_id(), page_action_->id(),
+        profile, page_action_->extension_id(), page_action_->id(),
         current_tab_id_, current_url_.spec(), button);
   }
 }
@@ -143,24 +135,22 @@ bool PageActionImageView::OnKeyPressed(const views::KeyEvent& event) {
 
 void PageActionImageView::ShowContextMenu(const gfx::Point& p,
                                           bool is_mouse_gesture) {
-  const Extension* extension = profile_->GetExtensionService()->
-      GetExtensionById(page_action()->extension_id(), false);
+  const Extension* extension = owner_->browser()->profile()->
+      GetExtensionService()->GetExtensionById(page_action()->extension_id(),
+                                              false);
   if (!extension->ShowConfigureContextMenus())
     return;
 
-  Browser* browser = BrowserView::GetBrowserViewForNativeWindow(
-      platform_util::GetTopLevel(GetWidget()->GetNativeView()))->browser();
-
   scoped_refptr<ExtensionContextMenuModel> context_menu_model(
-      new ExtensionContextMenuModel(extension, browser, this));
+      new ExtensionContextMenuModel(extension, owner_->browser(), this));
   views::MenuModelAdapter menu_model_adapter(context_menu_model.get());
-  views::MenuItemView menu(&menu_model_adapter);
-  menu_model_adapter.BuildMenu(&menu);
-
+  menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
   gfx::Point screen_loc;
   views::View::ConvertPointToScreen(this, &screen_loc);
-  menu.RunMenuAt(GetWidget()->GetNativeWindow(), NULL,
-      gfx::Rect(screen_loc ,size()), views::MenuItemView::TOPLEFT, true);
+  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(screen_loc, size()),
+          views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED)
+    return;
 }
 
 void PageActionImageView::OnImageLoaded(

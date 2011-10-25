@@ -39,12 +39,18 @@ NPObjectStub::~NPObjectStub() {
   CHECK(!npobject_);
 }
 
-void NPObjectStub::DeleteSoon(bool release_npobject) {
+void NPObjectStub::DeleteSoon() {
   if (npobject_) {
     channel_->RemoveMappingForNPObjectStub(route_id_, npobject_);
-    if (release_npobject)
-      WebBindings::releaseObject(npobject_);
+
+    // We need to NULL npobject_ prior to calling releaseObject() to avoid
+    // problems with re-entrancy. See http://crbug.com/94179#c17 for more
+    // details on how this can happen.
+    NPObject* npobject = npobject_;
     npobject_ = NULL;
+
+    WebBindings::releaseObject(npobject);
+
     MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   }
 }
@@ -95,12 +101,12 @@ bool NPObjectStub::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void NPObjectStub::OnChannelError() {
-  DeleteSoon(true);
+  DeleteSoon();
 }
 
 void NPObjectStub::OnRelease(IPC::Message* reply_msg) {
   Send(reply_msg);
-  DeleteSoon(true);
+  DeleteSoon();
 }
 
 void NPObjectStub::OnHasMethod(const NPIdentifier_Param& name,

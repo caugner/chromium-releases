@@ -8,6 +8,8 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/ui/webui/media/media_internals_handler.h"
+#include "content/common/notification_service.h"
+#include "content/browser/renderer_host/render_process_host.h"
 
 static const int kMediaInternalsProxyEventDelayMilliseconds = 100;
 
@@ -19,12 +21,20 @@ static const net::NetLog::EventType kNetEventTypeFilter[] = {
   net::NetLog::TYPE_HTTP_TRANSACTION_READ_RESPONSE_HEADERS,
 };
 
-static const char kSendConstantsFunction[] = "media.onReceiveConstants";
-static const char kSendNetworkEventsFunction[] = "media.onNetUpdate";
-
 MediaInternalsProxy::MediaInternalsProxy()
-    : ThreadSafeObserver(net::NetLog::LOG_ALL_BUT_BYTES) {
+    : ThreadSafeObserverImpl(net::NetLog::LOG_ALL_BUT_BYTES) {
   io_thread_ = g_browser_process->io_thread();
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                 NotificationService::AllSources());
+}
+
+void MediaInternalsProxy::Observe(int type, const NotificationSource& source,
+                                  const NotificationDetails& details) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_EQ(type, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
+  RenderProcessHost* process = Source<RenderProcessHost>(source).ptr();
+  CallJavaScriptFunctionOnUIThread("media.onRendererTerminated",
+      base::Value::CreateIntegerValue(process->id()));
 }
 
 void MediaInternalsProxy::Attach(MediaInternalsMessageHandler* handler) {
@@ -51,7 +61,7 @@ void MediaInternalsProxy::GetEverything() {
       NewRunnableMethod(this, &MediaInternalsProxy::GetEverythingOnIOThread));
 
   // Send the page names for constants.
-  CallJavaScriptFunctionOnUIThread(kSendConstantsFunction, GetConstants());
+  CallJavaScriptFunctionOnUIThread("media.onReceiveConstants", GetConstants());
 }
 
 void MediaInternalsProxy::OnUpdate(const string16& update) {
@@ -118,13 +128,13 @@ void MediaInternalsProxy::ObserveMediaInternalsOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   io_thread_->globals()->media.media_internals->AddObserver(this);
   // TODO(scottfr): Get the passive log data as well.
-  io_thread_->net_log()->AddObserver(this);
+  AddAsObserver(io_thread_->net_log());
 }
 
 void MediaInternalsProxy::StopObservingMediaInternalsOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   io_thread_->globals()->media.media_internals->RemoveObserver(this);
-  io_thread_->net_log()->RemoveObserver(this);
+  RemoveAsObserver();
 }
 
 void MediaInternalsProxy::GetEverythingOnIOThread() {
@@ -156,7 +166,7 @@ void MediaInternalsProxy::AddNetEventOnUIThread(Value* entry) {
 
 void MediaInternalsProxy::SendNetEventsOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  CallJavaScriptFunctionOnUIThread(kSendNetworkEventsFunction,
+  CallJavaScriptFunctionOnUIThread("media.onNetUpdate",
                                    pending_net_updates_.release());
 }
 

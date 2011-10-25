@@ -9,7 +9,7 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/login/enterprise_enrollment_screen_actor.h"
+#include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen_actor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/enterprise_enrollment_screen_handler.h"
@@ -39,8 +39,7 @@ class SingleEnterpriseEnrollmentScreenHandler
 
   // Overridden from EnterpriseEnrollmentScreenHandler:
   virtual void ShowConfirmationScreen() OVERRIDE;
-  virtual void SetController(
-      EnterpriseEnrollmentUI::Controller* controller_) OVERRIDE;
+  virtual void SetController(Controller* controller_) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
  private:
@@ -63,10 +62,11 @@ void SingleEnterpriseEnrollmentScreenHandler::ShowConfirmationScreen() {
   render_view_host->ExecuteJavascriptInWebFrame(
       string16(),
       UTF8ToUTF16("enterpriseEnrollment.showScreen('confirmation-screen');"));
+  NotifyObservers(true);
 }
 
 void SingleEnterpriseEnrollmentScreenHandler::SetController(
-    EnterpriseEnrollmentUI::Controller* controller) {
+    Controller* controller) {
   EnterpriseEnrollmentScreenHandler::SetController(controller);
   if (show_when_controller_is_set_) {
     show_when_controller_is_set_ = false;
@@ -167,7 +167,9 @@ void EnterpriseEnrollmentUI::RenderViewCreated(
   ChromeURLDataManager::DataSource::SetFontAndTextDirection(
       localized_strings.get());
   // Set up the data source, so the enrollment page can be loaded.
-  tab_contents()->profile()->GetChromeURLDataManager()->AddDataSource(
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(
       new EnterpriseEnrollmentDataSource(localized_strings.release()));
 }
 

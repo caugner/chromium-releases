@@ -64,6 +64,7 @@
 #include "grit/net_resources.h"
 #include "net/base/dns_util.h"
 #include "net/base/escape.h"
+#include "net/base/mime_util.h"
 #include "net/base/net_module.h"
 #if defined(OS_WIN)
 #include "net/base/winsock_init.h"
@@ -156,6 +157,18 @@ static const int kAllowedFtpPorts[] = {
   21,   // ftp data
   22,   // ssh
 };
+
+std::string::size_type CountTrailingChars(
+    const std::string input,
+    const std::string::value_type trailing_chars[]) {
+  const std::string::size_type last_good_char =
+      input.find_last_not_of(trailing_chars);
+
+  if (last_good_char == std::string::npos)
+    return input.length();
+  else
+    return input.length() - last_good_char - 1;
+}
 
 // Similar to Base64Decode. Decodes a Q-encoded string to a sequence
 // of bytes. If input is invalid, return false.
@@ -921,6 +934,158 @@ char* do_strdup(const char* src) {
 #endif
 }
 
+void SanitizeGeneratedFileName(std::string& filename) {
+  if (!filename.empty()) {
+    // Remove "." from the beginning and end of the file name to avoid tricks
+    // with hidden files, "..", and "."
+    TrimString(filename, ".", &filename);
+#if defined(OS_WIN)
+    // Handle CreateFile() stripping trailing dots and spaces on filenames
+    // http://support.microsoft.com/kb/115827
+    std::string::size_type pos = filename.find_last_not_of(" .");
+    if (pos == std::string::npos)
+      filename.resize(0);
+    else
+      filename.resize(++pos);
+#endif
+    // Replace any path information by changing path separators with
+    // underscores.
+    ReplaceSubstringsAfterOffset(&filename, 0, "/", "_");
+    ReplaceSubstringsAfterOffset(&filename, 0, "\\", "_");
+  }
+}
+
+std::string GetFileNameFromURL(const GURL& url,
+                               const std::string& referrer_charset) {
+  // about: and data: URLs don't have file names, but esp. data: URLs may
+  // contain parts that look like ones (i.e., contain a slash).  Therefore we
+  // don't attempt to divine a file name out of them.
+  if (!url.is_valid() || url.SchemeIs("about") || url.SchemeIs("data"))
+    return std::string();
+
+  const std::string unescaped_url_filename = UnescapeURLComponent(
+      url.ExtractFileName(),
+      UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
+
+  // The URL's path should be escaped UTF-8, but may not be.
+  std::string decoded_filename = unescaped_url_filename;
+  if (!IsStringASCII(decoded_filename)) {
+    bool ignore;
+    // TODO(jshin): this is probably not robust enough. To be sure, we need
+    // encoding detection.
+    DecodeWord(unescaped_url_filename, referrer_charset, &ignore,
+               &decoded_filename);
+  }
+
+  return decoded_filename;
+}
+
+#if defined(OS_WIN)
+// Returns whether the specified extension is automatically integrated into the
+// windows shell.
+bool IsShellIntegratedExtension(const string16& extension) {
+  string16 extension_lower = StringToLowerASCII(extension);
+
+  static const wchar_t* const integrated_extensions[] = {
+    // See <http://msdn.microsoft.com/en-us/library/ms811694.aspx>.
+    L"local",
+    // Right-clicking on shortcuts can be magical.
+    L"lnk",
+  };
+
+  for (int i = 0; i < arraysize(integrated_extensions); ++i) {
+    if (extension_lower == integrated_extensions[i])
+      return true;
+  }
+
+  // See <http://www.juniper.net/security/auto/vulnerabilities/vuln2612.html>.
+  // That vulnerability report is not exactly on point, but files become magical
+  // if their end in a CLSID.  Here we block extensions that look like CLSIDs.
+  if (!extension_lower.empty() && extension_lower[0] == L'{' &&
+      extension_lower[extension_lower.length() - 1] == L'}')
+    return true;
+
+  return false;
+}
+
+// Returns whether the specified file name is a reserved name on windows.
+// This includes names like "com2.zip" (which correspond to devices) and
+// desktop.ini and thumbs.db which have special meaning to the windows shell.
+bool IsReservedName(const string16& filename) {
+  // This list is taken from the MSDN article "Naming a file"
+  // http://msdn2.microsoft.com/en-us/library/aa365247(VS.85).aspx
+  // I also added clock$ because GetSaveFileName seems to consider it as a
+  // reserved name too.
+  static const wchar_t* const known_devices[] = {
+    L"con", L"prn", L"aux", L"nul", L"com1", L"com2", L"com3", L"com4", L"com5",
+    L"com6", L"com7", L"com8", L"com9", L"lpt1", L"lpt2", L"lpt3", L"lpt4",
+    L"lpt5", L"lpt6", L"lpt7", L"lpt8", L"lpt9", L"clock$"
+  };
+  string16 filename_lower = StringToLowerASCII(filename);
+
+  for (int i = 0; i < arraysize(known_devices); ++i) {
+    // Exact match.
+    if (filename_lower == known_devices[i])
+      return true;
+    // Starts with "DEVICE.".
+    if (filename_lower.find(string16(known_devices[i]) + L".") == 0)
+      return true;
+  }
+
+  static const wchar_t* const magic_names[] = {
+    // These file names are used by the "Customize folder" feature of the shell.
+    L"desktop.ini",
+    L"thumbs.db",
+  };
+
+  for (int i = 0; i < arraysize(magic_names); ++i) {
+    if (filename_lower == magic_names[i])
+      return true;
+  }
+
+  return false;
+}
+#endif  // OS_WIN
+
+void GenerateSafeExtension(const std::string& mime_type, FilePath* file_name) {
+  // We're worried about two things here:
+  //
+  // 1) Usability.  If the site fails to provide a file extension, we want to
+  //    guess a reasonable file extension based on the content type.
+  //
+  // 2) Shell integration.  Some file extensions automatically integrate with
+  //    the shell.  We block these extensions to prevent a malicious web site
+  //    from integrating with the user's shell.
+
+  // See if our file name already contains an extension.
+  FilePath::StringType extension = file_name->Extension();
+  if (!extension.empty())
+    extension.erase(extension.begin());  // Erase preceding '.'.
+
+#if defined(OS_WIN)
+  static const FilePath::CharType default_extension[] =
+      FILE_PATH_LITERAL("download");
+
+  // Rename shell-integrated extensions.
+  // TODO(asanka): Consider stripping out the bad extension and replacing it
+  // with the preferred extension for the MIME type if one is available.
+  if (IsShellIntegratedExtension(extension))
+    extension.assign(default_extension);
+#endif
+
+  if (extension.empty() && !mime_type.empty()) {
+    // The GetPreferredExtensionForMimeType call will end up going to disk.  Do
+    // this on another thread to avoid slowing the IO thread.
+    // http://crbug.com/61827
+    // TODO(asanka): Remove this ScopedAllowIO once all callers have switched
+    // over to IO safe threads.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    net::GetPreferredExtensionForMimeType(mime_type, &extension);
+  }
+
+  *file_name = file_name->ReplaceExtension(extension);
+}
+
 }  // namespace
 
 const FormatUrlType kFormatUrlOmitNothing                     = 0;
@@ -968,7 +1133,7 @@ GURL FilePathToFileURL(const FilePath& path) {
 }
 
 std::string GetSpecificHeader(const std::string& headers,
-                               const std::string& name) {
+                              const std::string& name) {
   // We want to grab the Value from the "Key: Value" pairs in the headers,
   // which should look like this (no leading spaces, \n-separated) (we format
   // them this way in url_request_inet.cc):
@@ -1115,8 +1280,7 @@ std::string GetHeaderParamValue(const std::string& header,
 
 string16 IDNToUnicode(const std::string& host,
                       const std::string& languages) {
-  std::vector<size_t> offsets;
-  return IDNToUnicodeWithOffsets(host, languages, &offsets);
+  return IDNToUnicodeWithOffsets(host, languages, NULL);
 }
 
 std::string CanonicalizeHost(const std::string& host,
@@ -1248,104 +1412,122 @@ string16 StripWWW(const string16& text) {
   return StartsWith(text, www, true) ? text.substr(www.length()) : text;
 }
 
+void GenerateSafeFileName(const std::string& mime_type, FilePath* file_path) {
+  // Make sure we get the right file extension
+  GenerateSafeExtension(mime_type, file_path);
+
+#if defined(OS_WIN)
+  // Prepend "_" to the file name if it's a reserved name
+  FilePath::StringType leaf_name = file_path->BaseName().value();
+  DCHECK(!leaf_name.empty());
+  if (IsReservedName(leaf_name)) {
+    leaf_name = FilePath::StringType(FILE_PATH_LITERAL("_")) + leaf_name;
+    *file_path = file_path->DirName();
+    if (file_path->value() == FilePath::kCurrentDirectory) {
+      *file_path = FilePath(leaf_name);
+    } else {
+      *file_path = file_path->Append(leaf_name);
+    }
+  }
+#endif
+}
+
 string16 GetSuggestedFilename(const GURL& url,
                               const std::string& content_disposition,
                               const std::string& referrer_charset,
                               const std::string& suggested_name,
+                              const std::string& mime_type,
                               const string16& default_name) {
   // TODO: this function to be updated to match the httpbis recommendations.
   // Talk to abarth for the latest news.
 
   // We don't translate this fallback string, "download". If localization is
-  // needed, the caller should provide localized fallback default_name.
+  // needed, the caller should provide localized fallback in |default_name|.
   static const char* kFinalFallbackName = "download";
+  std::string filename;  // In UTF-8
 
-  std::string filename;
-
-  // Try to extract from content-disposition first.
+  // Try to extract a filename from content-disposition first.
   if (!content_disposition.empty())
     filename = GetFileNameFromCD(content_disposition, referrer_charset);
 
-  // Then try to use suggested name.
+  // Then try to use the suggested name.
   if (filename.empty() && !suggested_name.empty())
     filename = suggested_name;
 
-  if (!filename.empty()) {
-    // Replace any path information the server may have sent, by changing
-    // path separators with underscores.
-    ReplaceSubstringsAfterOffset(&filename, 0, "/", "_");
-    ReplaceSubstringsAfterOffset(&filename, 0, "\\", "_");
+  // Now try extracting the filename from the URL.  GetFileNameFromURL() only
+  // looks at the last component of the URL and doesn't return the hostname as a
+  // failover.
+  if (filename.empty())
+    filename = GetFileNameFromURL(url, referrer_charset);
 
-    // Next, remove "." from the beginning and end of the file name to avoid
-    // tricks with hidden files, "..", and "."
-    TrimString(filename, ".", &filename);
-  }
-
-  if (filename.empty()) {
-    // about: and data: URLs don't have file names, but esp. data: URLs may
-    // contain parts that look like ones (i.e., contain a slash).
-    // Therefore we don't attempt to divine a file name out of them.
-    if (url.SchemeIs("about") || url.SchemeIs("data")) {
-      return default_name.empty() ? ASCIIToUTF16(kFinalFallbackName)
-                                  : default_name;
-    }
-
-    if (url.is_valid()) {
-      const std::string unescaped_url_filename = UnescapeURLComponent(
-          url.ExtractFileName(),
-          UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
-
-      // The URL's path should be escaped UTF-8, but may not be.
-      std::string decoded_filename = unescaped_url_filename;
-      if (!IsStringASCII(decoded_filename)) {
-        bool ignore;
-        // TODO(jshin): this is probably not robust enough. To be sure, we
-        // need encoding detection.
-        DecodeWord(unescaped_url_filename, referrer_charset, &ignore,
-                   &decoded_filename);
-      }
-
-      filename = decoded_filename;
-    }
+  // Finally try the URL hostname, but only if there's no default specified in
+  // |default_name|.  Some schemes (e.g.: file:, about:, data:) do not have a
+  // host name.
+  if (filename.empty() && default_name.empty() &&
+      url.is_valid() && !url.host().empty()) {
+    // TODO(jungshik) : Decode a 'punycoded' IDN hostname. (bug 1264451)
+    filename = url.host();
   }
 
 #if defined(OS_WIN)
-  { // Handle CreateFile() stripping trailing dots and spaces on filenames
-    // http://support.microsoft.com/kb/115827
-    std::string::size_type pos = filename.find_last_not_of(" .");
-    if (pos == std::string::npos)
-      filename.resize(0);
-    else
-      filename.resize(++pos);
-  }
+  std::string::size_type trimmed_trailing_character_count =
+      CountTrailingChars(filename, " .");
 #endif
-  // Trim '.' once more.
-  TrimString(filename, ".", &filename);
-
-  // If there's no filename or it gets trimed to be empty, use
-  // the URL hostname or default_name
+  SanitizeGeneratedFileName(filename);
+  // Sanitization can cause the filename to disappear (e.g.: if the filename
+  // consisted entirely of spaces and '.'s), in which case we use the default.
   if (filename.empty()) {
-    if (!default_name.empty()) {
-      return default_name;
-    } else if (url.is_valid()) {
-      // Some schemes (e.g. file) do not have a hostname. Even though it's
-      // not likely to reach here, let's hardcode the last fallback name.
-      // TODO(jungshik) : Decode a 'punycoded' IDN hostname. (bug 1264451)
-      filename = url.host().empty() ? kFinalFallbackName : url.host();
-    } else {
-      NOTREACHED();
-    }
+#if defined(OS_WIN)
+    trimmed_trailing_character_count = 0;
+#endif
+    if (default_name.empty())
+      filename = kFinalFallbackName;
   }
 
 #if defined(OS_WIN)
-  string16 path = UTF8ToUTF16(filename);
+  string16 path = (filename.empty())? default_name : UTF8ToUTF16(filename);
+  // On Windows we want to preserve or replace all characters including
+  // whitespace to prevent file extension obfuscation on trusted websites
+  // e.g. Gmail might think evil.exe. is safe, so we don't want it to become
+  // evil.exe when we download it
+  std::wstring::size_type path_length_before_trim = path.length();
+  TrimWhitespace(path, TRIM_TRAILING, &path);
+  trimmed_trailing_character_count += path_length_before_trim - path.length();
   file_util::ReplaceIllegalCharactersInPath(&path, '-');
-  return path;
+  path.append(trimmed_trailing_character_count, '-');
+  FilePath result(path);
+  GenerateSafeFileName(mime_type, &result);
+  return result.value();
 #else
-  std::string path = filename;
+  std::string path = (filename.empty())? UTF16ToUTF8(default_name) : filename;
   file_util::ReplaceIllegalCharactersInPath(&path, '-');
-  return UTF8ToUTF16(path);
+  FilePath result(path);
+  GenerateSafeFileName(mime_type, &result);
+  return UTF8ToUTF16(result.value());
 #endif
+}
+
+FilePath GenerateFileName(const GURL& url,
+                          const std::string& content_disposition,
+                          const std::string& referrer_charset,
+                          const std::string& suggested_name,
+                          const std::string& mime_type,
+                          const string16& default_file_name) {
+  string16 file_name = GetSuggestedFilename(url,
+                                            content_disposition,
+                                            referrer_charset,
+                                            suggested_name,
+                                            mime_type,
+                                            default_file_name);
+
+#if defined(OS_WIN)
+  FilePath generated_name(file_name);
+#else
+  FilePath generated_name(base::SysWideToNativeMB(UTF16ToWide(file_name)));
+#endif
+  DCHECK(!generated_name.empty());
+
+  return generated_name;
 }
 
 bool IsPortAllowedByDefault(int port) {

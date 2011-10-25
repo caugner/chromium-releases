@@ -19,10 +19,10 @@
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_url_response_info_proxy.h"
+#include "ppapi/shared_impl/scoped_pp_resource.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_url_loader_api.h"
 #include "ppapi/thunk/resource_creation_api.h"
@@ -37,7 +37,7 @@ using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_URLLoader_API;
 using ppapi::thunk::ResourceCreationAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -79,12 +79,12 @@ InterfaceProxy* CreateURLLoaderProxy(Dispatcher* dispatcher,
 
 // URLLoader -------------------------------------------------------------------
 
-class URLLoader : public PluginResource, public PPB_URLLoader_API {
+class URLLoader : public Resource, public PPB_URLLoader_API {
  public:
   URLLoader(const HostResource& resource);
   virtual ~URLLoader();
 
-  // ResourceObjectBase overrides.
+  // Resource overrides.
   virtual PPB_URLLoader_API* AsPPB_URLLoader_API() OVERRIDE;
 
   // PPB_URLLoader_API implementation.
@@ -120,6 +120,10 @@ class URLLoader : public PluginResource, public PPB_URLLoader_API {
   // The size must be not more than the current size of the buffer.
   void PopBuffer(void* output_buffer, int32_t output_size);
 
+  PluginDispatcher* GetDispatcher() const {
+    return PluginDispatcher::GetForResource(this);
+  }
+
   // Initialized to -1. Will be set to nonnegative values by the UpdateProgress
   // message when the values are known.
   int64_t bytes_sent_;
@@ -146,7 +150,7 @@ class URLLoader : public PluginResource, public PPB_URLLoader_API {
 };
 
 URLLoader::URLLoader(const HostResource& resource)
-    : PluginResource(resource),
+    : Resource(resource),
       bytes_sent_(-1),
       total_bytes_to_be_sent_(-1),
       bytes_received_(-1),
@@ -177,16 +181,14 @@ PPB_URLLoader_API* URLLoader::AsPPB_URLLoader_API() {
 
 int32_t URLLoader::Open(PP_Resource request_id,
                         PP_CompletionCallback callback) {
-  PluginResource* request_object =
-      PluginResourceTracker::GetInstance()->GetResourceObject(request_id);
-  if (!request_object)
-    return PP_ERROR_BADARGUMENT;
+  EnterResourceNoLock<thunk::PPB_URLRequestInfo_API> enter(request_id, true);
+  if (enter.failed())
+    return PP_ERROR_BADRESOURCE;
 
   // TODO(brettw) http://crbug.com/86279: SendCallback doesn't ensure that
   // the proper callback semantics happen if the object is deleted.
   GetDispatcher()->Send(new PpapiHostMsg_PPBURLLoader_Open(
-      INTERFACE_ID_PPB_URL_LOADER, host_resource(),
-      request_object->host_resource(),
+      INTERFACE_ID_PPB_URL_LOADER, host_resource(), enter.object()->GetData(),
       GetDispatcher()->callback_tracker().SendCallback(callback)));
   return PP_OK_COMPLETIONPENDING;
 }
@@ -357,14 +359,13 @@ PPB_URLLoader_Proxy::~PPB_URLLoader_Proxy() {
 // static
 PP_Resource PPB_URLLoader_Proxy::TrackPluginResource(
     const HostResource& url_loader_resource) {
-  linked_ptr<URLLoader> object(new URLLoader(url_loader_resource));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return (new URLLoader(url_loader_resource))->GetReference();
 }
 
 // static
 const InterfaceProxy::Info* PPB_URLLoader_Proxy::GetInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_URLLoader_Thunk(),
+    thunk::GetPPB_URLLoader_Thunk(),
     PPB_URLLOADER_INTERFACE,
     INTERFACE_ID_PPB_URL_LOADER,
     false,
@@ -376,7 +377,7 @@ const InterfaceProxy::Info* PPB_URLLoader_Proxy::GetInfo() {
 // static
 const InterfaceProxy::Info* PPB_URLLoader_Proxy::GetTrustedInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_URLLoaderTrusted_Thunk(),
+    thunk::GetPPB_URLLoaderTrusted_Thunk(),
     PPB_URLLOADERTRUSTED_INTERFACE,
     INTERFACE_ID_NONE,  // URL_LOADER is the canonical one.
     false,
@@ -451,13 +452,23 @@ void PPB_URLLoader_Proxy::OnMsgCreate(PP_Instance instance,
 }
 
 void PPB_URLLoader_Proxy::OnMsgOpen(const HostResource& loader,
-                                    const HostResource& request_info,
+                                    const PPB_URLRequestInfo_Data& data,
                                     uint32_t serialized_callback) {
+  // Have to be careful to always issue the callback, so don't return early.
   EnterHostFromHostResource<PPB_URLLoader_API> enter(loader);
+  EnterFunctionNoLock<ResourceCreationAPI> enter_creation(
+      loader.instance(), true);
+
   PP_CompletionCallback callback = ReceiveCallback(serialized_callback);
+
   int32_t result = PP_ERROR_BADRESOURCE;
-  if (enter.succeeded())
-    result = enter.object()->Open(request_info.host_resource(), callback);
+  if (enter.succeeded() && enter_creation.succeeded()) {
+    ScopedPPResource request_resource(
+        ScopedPPResource::PassRef(),
+        enter_creation.functions()->CreateURLRequestInfo(loader.instance(),
+                                                         data));
+    result = enter.object()->Open(request_resource, callback);
+  }
   if (result != PP_OK_COMPLETIONPENDING)
     PP_RunCompletionCallback(&callback, result);
   // TODO(brettw) bug 73236 register for the status callbacks.
@@ -517,21 +528,12 @@ void PPB_URLLoader_Proxy::OnMsgReadResponseBody(
   // TODO(brettw) have a way to check for out-of-memory.
   info->read_buffer.resize(bytes_to_read);
 
-  CompletionCallback callback = callback_factory_.NewOptionalCallback(
-      &PPB_URLLoader_Proxy::OnReadCallback, info);
-
-  EnterHostFromHostResource<PPB_URLLoader_API> enter(loader);
-  int32_t result = PP_ERROR_BADRESOURCE;
+  EnterHostFromHostResourceForceCallback<PPB_URLLoader_API> enter(
+      loader, callback_factory_, &PPB_URLLoader_Proxy::OnReadCallback, info);
   if (enter.succeeded()) {
-    result = enter.object()->ReadResponseBody(
+    enter.SetResult(enter.object()->ReadResponseBody(
         const_cast<char*>(info->read_buffer.c_str()),
-        bytes_to_read, callback.pp_completion_callback());
-  }
-  if (result != PP_OK_COMPLETIONPENDING) {
-    // Send error (or perhaps success for synchronous reads) back to plugin.
-    // The callback function is already set up to do this and also delete the
-    // callback info.
-    callback.Run(result);
+        bytes_to_read, enter.callback()));
   }
 }
 
@@ -592,4 +594,4 @@ void PPB_URLLoader_Proxy::OnReadCallback(int32_t result,
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

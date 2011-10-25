@@ -53,16 +53,23 @@ void XmppSignalStrategy::Init(StatusObserver* observer) {
   xmpp_client_->Connect(settings, "", socket, CreatePreXmppAuth(settings));
   xmpp_client_->SignalStateChange.connect(
       this, &XmppSignalStrategy::OnConnectionStateChanged);
-  xmpp_client_->engine()->AddStanzaHandler(this, buzz::XmppEngine::HL_PEEK);
+  xmpp_client_->engine()->AddStanzaHandler(this, buzz::XmppEngine::HL_TYPE);
   xmpp_client_->Start();
 }
 
 void XmppSignalStrategy::Close() {
   if (xmpp_client_) {
     xmpp_client_->engine()->RemoveStanzaHandler(this);
+
+    // TODO(sergeyu): XmppClient::Disconnect() should call
+    // Abort(). Remove this line when it's fixed in libjingle.
+    xmpp_client_->Abort();
+
     xmpp_client_->Disconnect();
-    // Client is deleted by TaskRunner.
-    xmpp_client_ = NULL;
+
+    // |xmpp_client_| should be set to NULL in OnConnectionStateChanged()
+    // in response to Disconnect() call above.
+    DCHECK(xmpp_client_ == NULL);
   }
 }
 
@@ -87,7 +94,7 @@ IqRequest* XmppSignalStrategy::CreateIqRequest() {
 
 bool XmppSignalStrategy::HandleStanza(const buzz::XmlElement* stanza) {
   if (listener_)
-    listener_->OnIncomingStanza(stanza);
+    return listener_->OnIncomingStanza(stanza);
   return false;
 }
 

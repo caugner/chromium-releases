@@ -33,6 +33,7 @@ namespace chromeos {
 namespace {
 
 const int kCornerRadius = 5;
+const SkColor kPodBackgroundColor = 0xFFF0F0F0;
 
 // A Textfield for password, which also sets focus to itself
 // when a mouse is clicked on it. This is necessary in screen locker
@@ -124,13 +125,9 @@ void ScreenLockView::Init() {
                             false,  // is_login
                             true);  // need_background
   main_ = new views::View();
-  // Use rounded rect background.
-  views::Painter* painter =
-      CreateWizardPainter(&BorderDefinition::kUserBorder);
-
   main_->set_background(
-      views::Background::CreateBackgroundPainter(true, painter));
-  main_->set_border(CreateWizardBorder(&BorderDefinition::kUserBorder));
+      views::Background::CreateSolidBackground(
+          kPodBackgroundColor));
 
   // Password field.
   password_field_ = new PasswordField();

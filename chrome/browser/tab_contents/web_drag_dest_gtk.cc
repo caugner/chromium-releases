@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -100,6 +101,14 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
                                       GdkDragContext* context,
                                       gint x, gint y,
                                       guint time) {
+  // Ideally we would want to initialize the the TabContentsWrapper member in
+  // the constructor. We cannot do that as the WebDragDestGtk object is
+  // created during the construction of the TabContents object.
+  // The TabContentsWrapper is created much later.
+  if (!tab_) {
+    tab_ = TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
+    DCHECK(tab_);
+  }
   if (context_ != context) {
     context_ = context;
     drop_data_.reset(new WebDropData);
@@ -165,8 +174,7 @@ void WebDragDestGtk::OnDragDataReceived(
       guchar* text = gtk_selection_data_get_text(data);
       if (text) {
         drop_data_->plain_text =
-            UTF8ToUTF16(std::string(reinterpret_cast<char*>(text),
-                                    data->length));
+            UTF8ToUTF16(std::string(reinterpret_cast<char*>(text)));
         g_free(text);
       }
     } else if (data->target == ui::GetAtomForTarget(ui::TEXT_URI_LIST)) {
@@ -221,12 +229,14 @@ void WebDragDestGtk::OnDragDataReceived(
   // GTK and Views, hence we can share the same logic here.
   if (data->target == GetBookmarkTargetAtom()) {
     if (data->data && data->length > 0) {
+      Profile* profile =
+          Profile::FromBrowserContext(tab_contents_->browser_context());
       bookmark_drag_data_.ReadFromVector(
           bookmark_utils::GetNodesFromSelection(
               NULL, data,
               ui::CHROME_BOOKMARK_ITEM,
-              tab_contents_->profile(), NULL, NULL));
-      bookmark_drag_data_.SetOriginatingProfile(tab_contents_->profile());
+              profile, NULL, NULL));
+      bookmark_drag_data_.SetOriginatingProfile(profile);
     } else {
       bookmark_drag_data_.ReadFromTuple(drop_data_->url,
                                         drop_data_->url_title);
@@ -242,10 +252,7 @@ void WebDragDestGtk::OnDragDataReceived(
             gtk_util::ScreenPoint(widget_),
             gtk_util::GdkDragActionToWebDragOp(context->actions));
 
-    if (!tab_) {
-      tab_ = TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
-      DCHECK(tab_);
-    }
+    DCHECK(tab_);
     // This is non-null if tab_contents_ is showing an ExtensionWebUI with
     // support for (at the moment experimental) drag and drop extensions.
     if (tab_->bookmark_tab_helper()->GetBookmarkDragDelegate()) {

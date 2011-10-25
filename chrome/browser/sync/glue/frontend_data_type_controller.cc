@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
@@ -92,20 +93,31 @@ bool FrontendDataTypeController::Associate() {
   }
 
   base::TimeTicks start_time = base::TimeTicks::Now();
-  bool merge_success = model_associator()->AssociateModels();
+  SyncError error;
+  bool merge_success = model_associator()->AssociateModels(&error);
   RecordAssociationTime(base::TimeTicks::Now() - start_time);
   if (!merge_success) {
-    StartFailed(ASSOCIATION_FAILED, FROM_HERE);
+    StartFailed(ASSOCIATION_FAILED, error.location());
     return false;
   }
 
-  sync_service_->ActivateDataType(this, change_processor_.get());
+  sync_service_->ActivateDataType(type(), model_safe_group(),
+                                  change_processor_.get());
   state_ = RUNNING;
+  // FinishStart() invokes the DataTypeManager callback, which can lead to a
+  // call to Stop() if one of the other data types being started generates an
+  // error.
   FinishStart(!sync_has_nodes ? OK_FIRST_RUN : OK, FROM_HERE);
-  return true;
+  // Return false if we're not in the RUNNING state (due to Stop() being called
+  // from FinishStart()).
+  // TODO(zea/atwilson): Should we maybe move the call to FinishStart() out of
+  // Associate() and into Start(), so we don't need this logic here? It seems
+  // cleaner to call FinishStart() from Start().
+  return state_ == RUNNING;
 }
 
-void FrontendDataTypeController::StartFailed(StartResult result,
+void FrontendDataTypeController::StartFailed(
+    StartResult result,
     const tracked_objects::Location& location) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CleanUpState();
@@ -118,10 +130,12 @@ void FrontendDataTypeController::StartFailed(StartResult result,
   // invoking the callback will trigger a call to STOP(), which will get
   // confused by the non-NULL start_callback_.
   scoped_ptr<StartCallback> callback(start_callback_.release());
+  // TODO(zea): Send the full SyncError on failure and handle it higher up.
   callback->Run(result, location);
 }
 
-void FrontendDataTypeController::FinishStart(StartResult result,
+void FrontendDataTypeController::FinishStart(
+    StartResult result,
     const tracked_objects::Location& location) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -146,11 +160,12 @@ void FrontendDataTypeController::Stop() {
 
   CleanUpState();
 
-  if (change_processor_.get())
-    sync_service_->DeactivateDataType(this, change_processor_.get());
+  sync_service_->DeactivateDataType(type());
 
-  if (model_associator())
-    model_associator()->DisassociateModels();
+  if (model_associator()) {
+    SyncError error;
+    model_associator()->DisassociateModels(&error);
+  }
 
   set_model_associator(NULL);
   change_processor_.reset();

@@ -27,8 +27,6 @@
 #include "ui/gfx/surface/transport_dib.h"
 
 struct FontDescriptor;
-class HostContentSettingsMap;
-class Profile;
 class RenderWidgetHelper;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_CreateWorker_Params;
@@ -38,6 +36,7 @@ struct WebScreenInfo;
 }
 
 namespace content {
+class BrowserContext;
 class ResourceContext;
 }
 
@@ -49,15 +48,17 @@ namespace gfx {
 class Rect;
 }
 
+namespace media {
+struct MediaLogEvent;
+}
+
 namespace net {
 class CookieList;
 class URLRequestContextGetter;
 }
 
 namespace webkit {
-namespace npapi {
 struct WebPluginInfo;
-}
 }
 
 namespace webkit_glue {
@@ -71,7 +72,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // Create the filter.
   RenderMessageFilter(int render_process_id,
                       PluginService* plugin_service,
-                      Profile* profile,
+                      content::BrowserContext* browser_context,
                       net::URLRequestContextGetter* request_context,
                       RenderWidgetHelper* render_widget_helper);
 
@@ -122,11 +123,6 @@ class RenderMessageFilter : public BrowserMessageFilter {
   void OnCookiesEnabled(const GURL& url,
                         const GURL& first_party_for_cookies,
                         bool* cookies_enabled);
-  void OnPluginFileDialog(const IPC::Message& msg,
-                          bool multiple_files,
-                          const std::wstring& title,
-                          const std::wstring& filter,
-                          uint32 user_data);
 
 #if defined(OS_MACOSX)
   void OnLoadFont(const FontDescriptor& font,
@@ -150,16 +146,17 @@ class RenderMessageFilter : public BrowserMessageFilter {
 #endif
 
   void OnGetPlugins(bool refresh,
-                    std::vector<webkit::npapi::WebPluginInfo>* plugins);
+                    std::vector<webkit::WebPluginInfo>* plugins);
   void OnGetPluginInfo(int routing_id,
                        const GURL& url,
                        const GURL& policy_url,
                        const std::string& mime_type,
                        bool* found,
-                       webkit::npapi::WebPluginInfo* info,
+                       webkit::WebPluginInfo* info,
                        std::string* actual_mime_type);
   void OnOpenChannelToPlugin(int routing_id,
                              const GURL& url,
+                             const GURL& policy_url,
                              const std::string& mime_type,
                              IPC::Message* reply_msg);
   void OnOpenChannelToPepperPlugin(const FilePath& path,
@@ -212,6 +209,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
                                  int flags,
                                  int message_id,
                                  int routing_id);
+  void OnMediaLogEvent(const media::MediaLogEvent&);
 
   // Check the policy for getting cookies. Gets the cookies if allowed.
   void CheckPolicyForCookies(const GURL& url,
@@ -235,9 +233,9 @@ class RenderMessageFilter : public BrowserMessageFilter {
   ResourceDispatcherHost* resource_dispatcher_host_;
   PluginService* plugin_service_;
 
-  // The Profile associated with our renderer process.  This should only be
-  // accessed on the UI thread!
-  Profile* profile_;
+  // The browser context associated with our renderer process.  This should only
+  // be accessed on the UI thread!
+  content::BrowserContext* browser_context_;
 
   // Contextual information to be used for requests created here.
   scoped_refptr<net::URLRequestContextGetter> request_context_;

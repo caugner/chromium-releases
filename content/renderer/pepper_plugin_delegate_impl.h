@@ -29,15 +29,12 @@ class Point;
 class Rect;
 }
 
-namespace gpu {
-class CommandBufferHelper;
-}
-
 namespace IPC {
 struct ChannelHandle;
 }
 
 namespace webkit {
+struct WebPluginInfo;
 namespace ppapi {
 class PepperFilePath;
 class PluginInstance;
@@ -69,7 +66,7 @@ class BrokerDispatcherWrapper {
                              base::SyncSocket::Handle handle);
 
  private:
-  scoped_ptr<pp::proxy::BrokerDispatcher> dispatcher_;
+  scoped_ptr<ppapi::proxy::BrokerDispatcher> dispatcher_;
 };
 
 // This object is NOT thread-safe.
@@ -131,8 +128,8 @@ class PepperPluginDelegateImpl
   // the second is that the plugin failed to initialize. In this case,
   // |*pepper_plugin_was_registered| will be set to true and the caller should
   // not fall back on any other plugin types.
-  scoped_refptr<webkit::ppapi::PluginModule> CreatePepperPlugin(
-      const FilePath& path,
+  scoped_refptr<webkit::ppapi::PluginModule> CreatePepperPluginModule(
+      const webkit::WebPluginInfo& webplugin_info,
       bool* pepper_plugin_was_registered);
 
   // Called by RenderView to tell us about painting events, these two functions
@@ -182,10 +179,11 @@ class PepperPluginDelegateImpl
       PlatformAudio::Client* client);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
   virtual PlatformContext3D* CreateContext3D();
+  virtual PlatformVideoCapture* CreateVideoCapture(
+      media::VideoCapture::EventHandler* handler) OVERRIDE;
   virtual PlatformVideoDecoder* CreateVideoDecoder(
       media::VideoDecodeAccelerator::Client* client,
-      int32 command_buffer_route_id,
-      gpu::CommandBufferHelper* cmd_buffer_helper);
+      int32 command_buffer_route_id);
   virtual PpapiBroker* ConnectToPpapiBroker(
       webkit::ppapi::PPB_Broker_Impl* client);
   virtual void NumberOfFindResultsChanged(int identifier,
@@ -253,6 +251,9 @@ class PepperPluginDelegateImpl
   virtual base::PlatformFileError GetDirContents(
       const webkit::ppapi::PepperFilePath& path,
       webkit::ppapi::DirContents* contents) OVERRIDE;
+  virtual void SyncGetFileSystemPlatformPath(
+      const GURL& url,
+      FilePath* platform_path) OVERRIDE;
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy() OVERRIDE;
   virtual int32_t ConnectTcp(
@@ -293,15 +294,16 @@ class PepperPluginDelegateImpl
   virtual void DidStartLoading() OVERRIDE;
   virtual void DidStopLoading() OVERRIDE;
   virtual void SetContentRestriction(int restrictions) OVERRIDE;
-  virtual void HasUnsupportedFeature() OVERRIDE;
   virtual void SaveURLAs(const GURL& url) OVERRIDE;
-  virtual P2PSocketDispatcher* GetP2PSocketDispatcher() OVERRIDE;
+  virtual content::P2PSocketDispatcher* GetP2PSocketDispatcher() OVERRIDE;
   virtual webkit_glue::P2PTransport* CreateP2PTransport() OVERRIDE;
   virtual double GetLocalTimeZoneOffset(base::Time t) OVERRIDE;
   virtual std::string GetFlashCommandLineArgs() OVERRIDE;
   virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size)
       OVERRIDE;
   virtual ::ppapi::Preferences GetPreferences() OVERRIDE;
+
+  int GetRoutingId() const;
 
  private:
   void PublishInitialPolicy(

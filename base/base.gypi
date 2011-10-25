@@ -19,6 +19,8 @@
           'third_party/icu/icu_utf.h',
           'third_party/nspr/prtime.cc',
           'third_party/nspr/prtime.h',
+          'android/scoped_java_global_reference.h',
+          'android/scoped_java_reference.h',
           'at_exit.cc',
           'at_exit.h',
           'atomic_ref_count.h',
@@ -26,7 +28,7 @@
           'atomicops.h',
           'atomicops_internals_x86_gcc.cc',
           'atomicops_internals_x86_msvc.h',
-          'base_api.h',
+          'base_export.h',
           'base_paths.cc',
           'base_paths.h',
           'base_paths_mac.h',
@@ -94,7 +96,6 @@
           'files/file_path_watcher_linux.cc',
           'files/file_path_watcher_mac.cc',
           'files/file_path_watcher_win.cc',
-          'fix_wp64.h',
           'float_util.h',
           'global_descriptors_posix.cc',
           'global_descriptors_posix.h',
@@ -132,8 +133,6 @@
           'mach_ipc_mac.h',
           'mach_ipc_mac.mm',
           'memory/linked_ptr.h',
-          'memory/memory_debug.cc',
-          'memory/memory_debug.h',
           'memory/mru_cache.h',
           'memory/raw_scoped_refptr_mismatch_checker.h',
           'memory/ref_counted.cc',
@@ -198,8 +197,6 @@
           'rand_util.h',
           'rand_util_posix.cc',
           'rand_util_win.cc',
-          'resource_util.cc',
-          'resource_util.h',
           'safe_strerror_posix.cc',
           'safe_strerror_posix.h',
           'scoped_ptr.h',
@@ -336,6 +333,8 @@
           'win/object_watcher.h',
           'win/registry.cc',
           'win/registry.h',
+          'win/resource_util.cc',
+          'win/resource_util.h',
           'win/scoped_bstr.cc',
           'win/scoped_bstr.h',
           'win/scoped_com_initializer.h',
@@ -367,6 +366,12 @@
           '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
         ],
         'conditions': [
+          [ 'use_wayland == 1', {
+            'sources!': [
+              'message_pump_gtk.cc',
+              'message_pump_x.cc',
+            ],
+          }],
           [ 'toolkit_uses_gtk==0', {
               'sources/': [
                 ['exclude', '^nix/'],
@@ -409,6 +414,10 @@
           ],
           ['OS != "win"', {
               'sources/': [ ['exclude', '^win/'] ],
+            },
+          ],
+          ['OS != "android"', {
+              'sources/': [ ['exclude', '^android/'] ],
             },
           ],
           [ 'OS == "win"', {
@@ -527,14 +536,12 @@
               '$(SDKROOT)/System/Library/Frameworks/Security.framework',
             ],
           },
+          'dependencies': [
+            '../third_party/mach_override/mach_override.gyp:mach_override',
+          ],
         }],
         [ 'OS != "win"', {
             'dependencies': ['../third_party/libevent/libevent.gyp:libevent'],
-            'sources!': [
-              'third_party/purify/pure_api.c',
-              'event_recorder.cc',
-              'resource_util.cc',
-            ],
         },],
         [ 'component=="shared_library"', {
           'conditions': [
@@ -550,16 +557,14 @@
         'third_party/nspr/prcpucfg.h',
         'third_party/nspr/prcpucfg_win.h',
         'third_party/nspr/prtypes.h',
-        'third_party/purify/pure.h',
-        'third_party/purify/pure_api.c',
         'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
         'third_party/xdg_user_dirs/xdg_user_dir_lookup.h',
         'auto_reset.h',
         'base64.cc',
         'base64.h',
-        'event_recorder.cc',
         'event_recorder.h',
         'event_recorder_stubs.cc',
+        'event_recorder_win.cc',
         'file_descriptor_shuffle.cc',
         'file_descriptor_shuffle.h',
         'linux_util.cc',
@@ -576,6 +581,8 @@
         'message_pump_libevent.h',
         'message_pump_mac.h',
         'message_pump_mac.mm',
+        'message_pump_wayland.cc',
+        'message_pump_wayland.h',
         'metrics/field_trial.cc',
         'metrics/field_trial.h',
         'string16.cc',
@@ -611,9 +618,6 @@
           'defines': [
             '<@(nacl_win64_defines)',
           ],
-          'sources': [
-            'i18n/icu_util_nacl_win64.cc',
-          ],
           'configurations': {
             'Common_Base': {
               'msvs_target_platform': 'x64',
@@ -629,7 +633,7 @@
         },
         {
           'target_name': 'base_i18n_nacl_win64',
-          'type': 'static_library',
+          'type': '<(component)',
           # TODO(gregoryd): direct_dependent_settings should be shared with the
           # 32-bit target, but it doesn't work due to a bug in gyp
           'direct_dependent_settings': {
@@ -639,6 +643,7 @@
           },
           'defines': [
             '<@(nacl_win64_defines)',
+            'BASE_I18N_IMPLEMENTATION',
           ],
           'include_dirs': [
             '..',

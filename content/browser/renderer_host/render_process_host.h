@@ -17,11 +17,14 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/surface/transport_dib.h"
 
-class Profile;
 struct ViewMsg_SwapOut_Params;
 
 namespace base {
 class SharedMemory;
+}
+
+namespace content {
+class BrowserContext;
 }
 
 namespace net {
@@ -64,11 +67,11 @@ class RenderProcessHost : public IPC::Channel::Sender,
     bool was_extension_renderer;
   };
 
-  explicit RenderProcessHost(Profile* profile);
+  explicit RenderProcessHost(content::BrowserContext* browser_context);
   virtual ~RenderProcessHost();
 
-  // Returns the user profile associated with this renderer process.
-  Profile* profile() const { return profile_; }
+  // Returns the user browser context associated with this renderer process.
+  content::BrowserContext* browser_context() const { return browser_context_; }
 
   // Returns the unique ID for this child process. This can be used later in
   // a call to FromID() to get back to this object (this is used to avoid
@@ -262,12 +265,13 @@ class RenderProcessHost : public IPC::Channel::Sender,
   // RenderProcessHost rather than creating a new one.
   static bool ShouldTryToUseExistingProcessHost();
 
-  // Get an existing RenderProcessHost associated with the given profile, if
-  // possible.  The renderer process is chosen randomly from suitable renderers
-  // that share the same profile and type.
+  // Get an existing RenderProcessHost associated with the given browser
+  // context, if possible.  The renderer process is chosen randomly from
+  // suitable renderers that share the same context and type.
   // Returns NULL if no suitable renderer process is available, in which case
   // the caller is free to create a new renderer.
-  static RenderProcessHost* GetExistingProcessHost(Profile* profile, Type type);
+  static RenderProcessHost* GetExistingProcessHost(
+      content::BrowserContext* browser_context, Type type);
 
   // Overrides the default heuristic for limiting the max renderer process
   // count.  This is useful for unit testing process limit behaviors.
@@ -305,7 +309,7 @@ class RenderProcessHost : public IPC::Channel::Sender,
   // The globally-unique identifier for this RPH.
   int id_;
 
-  Profile* profile_;
+  content::BrowserContext* browser_context_;
 
   // set of listeners that expect the renderer process to close
   std::set<int> listeners_expecting_close_;
@@ -337,7 +341,7 @@ class RenderProcessHostFactory {
  public:
   virtual ~RenderProcessHostFactory() {}
   virtual RenderProcessHost* CreateRenderProcessHost(
-      Profile* profile) const = 0;
+      content::BrowserContext* browser_context) const = 0;
 };
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_PROCESS_HOST_H_

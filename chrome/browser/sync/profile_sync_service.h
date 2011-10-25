@@ -9,8 +9,10 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/string16.h"
 #include "base/task.h"
@@ -21,10 +23,11 @@
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "chrome/browser/sync/js_event_handler_list.h"
+#include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
-#include "chrome/browser/sync/sync_setup_wizard.h"
 #include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/browser/sync/sync_js_controller.h"
+#include "chrome/browser/sync/sync_setup_wizard.h"
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/common/content_notification_types.h"
@@ -43,7 +46,7 @@ namespace browser_sync {
 class BackendMigrator;
 class ChangeProcessor;
 class DataTypeManager;
-class JsFrontend;
+class JsController;
 class SessionModelAssociator;
 namespace sessions { struct SyncSessionSnapshot; }
 }
@@ -189,29 +192,33 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void SetSyncSetupCompleted();
 
   // SyncFrontend implementation.
-  virtual void OnBackendInitialized(bool success);
-  virtual void OnSyncCycleCompleted();
-  virtual void OnAuthError();
-  virtual void OnStopSyncingPermanently();
-  virtual void OnClearServerDataFailed();
-  virtual void OnClearServerDataTimeout();
-  virtual void OnClearServerDataSucceeded();
-  virtual void OnPassphraseRequired(sync_api::PassphraseRequiredReason reason);
-  virtual void OnPassphraseAccepted();
+  virtual void OnBackendInitialized(
+      const browser_sync::WeakHandle<browser_sync::JsBackend>& js_backend,
+      bool success) OVERRIDE;
+  virtual void OnSyncCycleCompleted() OVERRIDE;
+  virtual void OnAuthError() OVERRIDE;
+  virtual void OnStopSyncingPermanently() OVERRIDE;
+  virtual void OnClearServerDataFailed() OVERRIDE;
+  virtual void OnClearServerDataSucceeded() OVERRIDE;
+  virtual void OnPassphraseRequired(
+      sync_api::PassphraseRequiredReason reason) OVERRIDE;
+  virtual void OnPassphraseAccepted() OVERRIDE;
   virtual void OnEncryptionComplete(
-      const syncable::ModelTypeSet& encrypted_types);
+      const syncable::ModelTypeSet& encrypted_types) OVERRIDE;
   virtual void OnMigrationNeededForTypes(
-      const syncable::ModelTypeSet& types);
+      const syncable::ModelTypeSet& types) OVERRIDE;
+  virtual void OnDataTypesChanged(
+      const syncable::ModelTypeSet& to_add) OVERRIDE;
+  virtual void OnActionableError(
+      const browser_sync::SyncProtocolError& error) OVERRIDE;
+
+  void OnClearServerDataTimeout();
 
   // Called when a user enters credentials through UI.
   virtual void OnUserSubmittedAuth(const std::string& username,
                                    const std::string& password,
                                    const std::string& captcha,
                                    const std::string& access_code);
-
-  // Called when a cookie, e. g. oauth_token, changes
-  virtual void OnCookieChanged(Profile* profile,
-                               ChromeCookieDetails* cookie_details);
 
   // Update the last auth error and notify observers of error state.
   void UpdateAuthErrorState(const GoogleServiceAuthError& error);
@@ -261,7 +268,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // types to sync.
   void ShowConfigure(bool sync_everything);
 
-  void ShowSyncSetup(SyncSetupWizard::State state);
+  void ShowSyncSetup(const std::string& sub_page);
+  void ShowSyncSetupWithWizard(SyncSetupWizard::State state);
 
   // Pretty-printed strings for a given StatusSummary.
   static std::string BuildSyncStatusSummaryText(
@@ -275,7 +283,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // currently no need to do so) we need to protect this with a lock.
   // TODO(timsteele): What happens if the bookmark model is loaded, a change
   // takes place, and the backend isn't initialized yet?
-  bool sync_initialized() const { return backend_initialized_; }
+  virtual bool sync_initialized() const;
   virtual bool unrecoverable_error_detected() const;
   const std::string& unrecoverable_error_message() {
     return unrecoverable_error_message_;
@@ -328,10 +336,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Returns true if |observer| has already been added as an observer.
   bool HasObserver(Observer* observer) const;
 
-  // Returns a pointer to the service's JsFrontend (which is owned by
-  // the service).  Never returns NULL.  Overrideable for testing
-  // purposes.
-  virtual browser_sync::JsFrontend* GetJsFrontend();
+  // Returns a weak pointer to the service's JsController.
+  // Overrideable for testing purposes.
+  virtual base::WeakPtr<browser_sync::JsController> GetJsController();
 
   // Record stats on various events.
   static void SyncEvent(SyncEventCodes code);
@@ -348,7 +355,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // UnrecoverableErrorHandler implementation.
   virtual void OnUnrecoverableError(
       const tracked_objects::Location& from_here,
-      const std::string& message);
+      const std::string& message) OVERRIDE;
 
   // The functions below (until ActivateDataType()) should only be
   // called if sync_initialized() is true.
@@ -374,9 +381,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Logs the current unsynced items in the sync database. Useful for debugging.
   void LogUnsyncedItems(int level) const;
 
-  // Returns whether or not the sync service is reconfiguring due
-  // to server-initiated resynchronization.
-  bool HasPendingBackendMigration() const;
+  // Used by ProfileSyncServiceHarness.  May return NULL.
+  browser_sync::BackendMigrator* GetBackendMigratorForTest();
 
   // Get the current routing information for all enabled model types.
   // If a model type is not enabled (that is, if the syncer should not
@@ -386,15 +392,15 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // sync_ui_util::ConstructAboutInformation() and by some test
   // classes.  Figure out a different way to expose this info and
   // remove this function.
-  void GetModelSafeRoutingInfo(browser_sync::ModelSafeRoutingInfo* out);
+  void GetModelSafeRoutingInfo(
+      browser_sync::ModelSafeRoutingInfo* out) const;
 
+  // Overridden by tests.
   // TODO(zea): Remove these and have the dtc's call directly into the SBH.
   virtual void ActivateDataType(
-      browser_sync::DataTypeController* data_type_controller,
+      syncable::ModelType type, browser_sync::ModelSafeGroup group,
       browser_sync::ChangeProcessor* change_processor);
-  virtual void DeactivateDataType(
-      browser_sync::DataTypeController* data_type_controller,
-      browser_sync::ChangeProcessor* change_processor);
+  virtual void DeactivateDataType(syncable::ModelType type);
 
   // NotificationObserver implementation.
   virtual void Observe(int type,
@@ -436,31 +442,29 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // is known.
   // |is_explicit| is true if the call is in response to the user explicitly
   // setting a passphrase as opposed to implicitly (from the users' perspective)
-  // using their Google Account password.  An implicit SetPassphrase will *not*
+  // using their Google Account password.  An implicit SetPassphrase will
   // *not* override an explicit passphrase set previously.
-  // |is_creation| is true if the call is in response to the user setting
-  // up a new passphrase, and false if it's being set in response to a prompt
-  // for an existing passphrase.
   virtual void SetPassphrase(const std::string& passphrase,
-                             bool is_explicit,
-                             bool is_creation);
+                             bool is_explicit);
 
-  // Sets the set of datatypes that are waiting for encryption
-  // (pending_types_for_encryption_).
-  // Note that this does not trigger the actual encryption. The encryption call
-  // is kicked off automatically the next time the datatype manager is
-  // reconfigured.
-  virtual void set_pending_types_for_encryption(
-      const syncable::ModelTypeSet& encrypted_types);
+  // If |encrypt_all| is true, turns on encryption for all sync data. Else, only
+  // sensitive types are encrypted (see cryptographer.h for the list of
+  // sensitive types). Passwords is always considered a sensitive type.
+  virtual void SetEncryptEverything(bool encrypt_all);
 
-  // Get the currently encrypted data types.
-  // Note: this can include types that this client is not syncing. Passwords
-  // will always be in this list.
+  // Returns true if we are currently set to encrypt all the sync data. Note:
+  // this is based on the cryptographer's settings, so if the user has recently
+  // requested encryption to be turned on, this may not be true yet. For that,
+  // encryption_pending() must be checked.
+  virtual bool EncryptEverythingEnabled() const;
+
+  // Fills |encrypted_types| with the set of currently encrypted types. Does
+  // not account for types pending encryption.
   virtual void GetEncryptedDataTypes(
       syncable::ModelTypeSet* encrypted_types) const;
 
   // Returns true if the syncer is waiting for new datatypes to be encrypted.
-  virtual bool HasPendingEncryptedTypes() const;
+  virtual bool encryption_pending() const;
 
   // Returns whether processing changes is allowed.  Check this before doing
   // any model-modifying operations.
@@ -469,6 +473,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   const GURL& sync_service_url() const { return sync_service_url_; }
   SigninManager* signin() { return signin_.get(); }
   const std::string& cros_user() const { return cros_user_; }
+
+  // Returns the set of unacknowledged types (new data types added since the
+  // last call to AcknowledgedSyncTypes())..
+  syncable::ModelTypeBitSet GetUnacknowledgedTypes() const;
+
+  // Marks all currently registered types as "acknowledged" so we won't prompt
+  // the user about them any more.
+  void AcknowledgeSyncedTypes();
 
  protected:
   // Used by test classes that derive from ProfileSyncService.
@@ -541,6 +553,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   static const char* GetPrefNameForDataType(syncable::ModelType data_type);
 
+  // About-flags experiment names for datatypes that aren't enabled by default
+  // yet.
+  static std::string GetExperimentNameForDataType(
+      syncable::ModelType data_type);
+
+  // Create and register a new datatype controller.
+  void RegisterNewDataType(syncable::ModelType data_type);
+
   // Time at which we begin an attempt a GAIA authorization.
   base::TimeTicks auth_start_time_;
 
@@ -595,7 +615,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   ObserverList<Observer> observers_;
 
-  browser_sync::JsEventHandlerList js_event_handlers_;
+  browser_sync::SyncJsController sync_js_controller_;
 
   NotificationRegistrar registrar_;
 
@@ -615,16 +635,11 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // yet have a backend to send it to.  This happens during initialization as
   // we don't StartUp until we have a valid token, which happens after valid
   // credentials were provided.
-  struct CachedPassphrase {
-    std::string value;
-    bool is_explicit;
-    bool is_creation;
-    CachedPassphrase() : is_explicit(false), is_creation(false) {}
+  struct CachedPassphrases {
+    std::string explicit_passphrase;
+    std::string gaia_passphrase;
   };
-  CachedPassphrase cached_passphrase_;
-
-  // TODO(lipalani): Bug 82221 unify this with the CachedPassphrase struct.
-  std::string gaia_password_;
+  CachedPassphrases cached_passphrases_;
 
   // Keep track of where we are in a server clear operation
   ClearServerDataState clear_server_data_state_;
@@ -636,14 +651,28 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // is reworked to allow one-shot commands like clearing server data.
   base::OneShotTimer<ProfileSyncService> clear_server_data_timer_;
 
-  // The most recently requested set of types to encrypt. Set by the user,
-  // and cached until the syncer either finishes encryption
-  // (OnEncryptionComplete) or the user cancels.
-  syncable::ModelTypeSet pending_types_for_encryption_;
+  // Whether we're waiting for an attempt to encryption all sync data to
+  // complete. We track this at this layer in order to allow the user to cancel
+  // if they e.g. don't remember their explicit passphrase.
+  bool encryption_pending_;
+
+  // If true, we want to automatically start sync signin whenever we have
+  // credentials (user doesn't need to go through the startup flow). This is
+  // typically enabled on platforms (like ChromeOS) that have their own
+  // distinct signin flow.
+  bool auto_start_enabled_;
 
   scoped_ptr<browser_sync::BackendMigrator> migrator_;
 
+  // This is the last |SyncProtocolError| we received from the server that had
+  // an action set on it.
+  browser_sync::SyncProtocolError last_actionable_error_;
+
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };
+
+bool ShouldShowActionOnUI(
+    const browser_sync::SyncProtocolError& error);
+
 
 #endif  // CHROME_BROWSER_SYNC_PROFILE_SYNC_SERVICE_H_

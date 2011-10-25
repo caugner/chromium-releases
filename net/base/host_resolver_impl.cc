@@ -30,6 +30,7 @@
 #include "base/values.h"
 #include "net/base/address_list.h"
 #include "net/base/address_list_net_log_param.h"
+#include "net/base/dns_reloader.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/host_resolver_proc.h"
 #include "net/base/net_errors.h"
@@ -43,6 +44,10 @@
 namespace net {
 
 namespace {
+
+// Limit the size of hostnames that will be resolved to combat issues in
+// some platform's resolvers.
+const size_t kMaxHostLength = 4096;
 
 // Helper to mutate the linked list contained by AddressList to the given
 // port. Note that in general this is dangerous since the AddressList's
@@ -218,8 +223,6 @@ class RequestInfoParameters : public NetLog::EventParameters {
     dict->SetInteger("address_family",
                      static_cast<int>(info_.address_family()));
     dict->SetBoolean("allow_cached_response", info_.allow_cached_response());
-    dict->SetBoolean("only_use_cached_response",
-                     info_.only_use_cached_response());
     dict->SetBoolean("is_speculative", info_.is_speculative());
     dict->SetInteger("priority", info_.priority());
 
@@ -362,7 +365,7 @@ class HostResolverImpl::Job
      : id_(id),
        key_(key),
        resolver_(resolver),
-       origin_loop_(base::MessageLoopProxy::CreateForCurrentThread()),
+       origin_loop_(base::MessageLoopProxy::current()),
        resolver_proc_(resolver->effective_resolver_proc()),
        unresponsive_delay_(resolver->unresponsive_delay()),
        attempt_number_(0),
@@ -823,7 +826,7 @@ class HostResolverImpl::IPv6ProbeJob
  public:
   explicit IPv6ProbeJob(HostResolverImpl* resolver)
       : resolver_(resolver),
-        origin_loop_(base::MessageLoopProxy::CreateForCurrentThread()) {
+        origin_loop_(base::MessageLoopProxy::current()) {
     DCHECK(resolver);
   }
 
@@ -1088,6 +1091,10 @@ HostResolverImpl::HostResolverImpl(
     additional_resolver_flags_ |= HOST_RESOLVER_LOOPBACK_ONLY;
 #endif
   NetworkChangeNotifier::AddIPAddressObserver(this);
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
+  EnsureDnsReloaderInit();
+  NetworkChangeNotifier::AddDNSObserver(this);
+#endif
 }
 
 HostResolverImpl::~HostResolverImpl() {
@@ -1102,6 +1109,9 @@ HostResolverImpl::~HostResolverImpl() {
     cur_completing_job_->Cancel();
 
   NetworkChangeNotifier::RemoveIPAddressObserver(this);
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
+  NetworkChangeNotifier::RemoveDNSObserver(this);
+#endif
 
   // Delete the job pools.
   for (size_t i = 0u; i < arraysize(job_pools_); ++i)
@@ -1131,6 +1141,8 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
                               CompletionCallback* callback,
                               RequestHandle* out_req,
                               const BoundNetLog& source_net_log) {
+  DCHECK(addresses);
+  DCHECK(callback);
   DCHECK(CalledOnValidThread());
 
   // Choose a unique ID number for observers to see.
@@ -1147,84 +1159,16 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
   // outstanding jobs map.
   Key key = GetEffectiveKeyForRequest(info);
 
-  // Check for IP literal.
-  IPAddressNumber ip_number;
-  if (ParseIPLiteralToNumber(info.hostname(), &ip_number)) {
-    DCHECK_EQ(key.host_resolver_flags &
-                  ~(HOST_RESOLVER_CANONNAME | HOST_RESOLVER_LOOPBACK_ONLY |
-                    HOST_RESOLVER_DEFAULT_FAMILY_SET_DUE_TO_NO_IPV6),
-              0) << " Unhandled flag";
-    bool ipv6_disabled = default_address_family_ == ADDRESS_FAMILY_IPV4 &&
-        !ipv6_probe_monitoring_;
-    int net_error = OK;
-    if (ip_number.size() == 16 && ipv6_disabled) {
-      net_error = ERR_NAME_NOT_RESOLVED;
-    } else {
-      *addresses = AddressList::CreateFromIPAddressWithCname(
-          ip_number, info.port(),
-          (key.host_resolver_flags & HOST_RESOLVER_CANONNAME));
-    }
-    // Update the net log and notify registered observers.
+  int rv = ResolveHelper(request_id, key, info, addresses,
+                         source_net_log, request_net_log);
+  if (rv != ERR_DNS_CACHE_MISS) {
     OnFinishRequest(source_net_log, request_net_log, request_id, info,
-                    net_error, 0  /* os_error (unknown since from cache) */);
-    return net_error;
+                    rv,
+                    0  /* os_error (unknown since from cache) */);
+    return rv;
   }
 
-  // If we have an unexpired cache entry, use it.
-  if (info.allow_cached_response() && cache_.get()) {
-    const HostCache::Entry* cache_entry = cache_->Lookup(
-        key, base::TimeTicks::Now());
-    if (cache_entry) {
-      request_net_log.AddEvent(NetLog::TYPE_HOST_RESOLVER_IMPL_CACHE_HIT, NULL);
-      int net_error = cache_entry->error;
-      if (net_error == OK) {
-        *addresses = CreateAddressListUsingPort(
-            cache_entry->addrlist, info.port());
-      }
-
-      // Update the net log and notify registered observers.
-      OnFinishRequest(source_net_log, request_net_log, request_id, info,
-                      net_error,
-                      0  /* os_error (unknown since from cache) */);
-
-      return net_error;
-    }
-  }
-
-  if (info.only_use_cached_response()) {  // Not allowed to do a real lookup.
-    OnFinishRequest(source_net_log,
-                    request_net_log,
-                    request_id,
-                    info,
-                    ERR_NAME_NOT_RESOLVED,
-                    0);
-    return ERR_NAME_NOT_RESOLVED;
-  }
-
-  // If no callback was specified, do a synchronous resolution.
-  if (!callback) {
-    AddressList addrlist;
-    int os_error = 0;
-    int error = ResolveAddrInfo(
-        effective_resolver_proc(), key.hostname, key.address_family,
-        key.host_resolver_flags, &addrlist, &os_error);
-    if (error == OK) {
-      MutableSetPort(info.port(), &addrlist);
-      *addresses = addrlist;
-    }
-
-    // Write to cache.
-    if (cache_.get())
-      cache_->Set(key, error, addrlist, base::TimeTicks::Now());
-
-    // Update the net log and notify registered observers.
-    OnFinishRequest(source_net_log, request_net_log, request_id, info, error,
-                    os_error);
-
-    return error;
-  }
-
-  // Create a handle for this request, and pass it back to the user if they
+   // Create a handle for this request, and pass it back to the user if they
   // asked for it (out_req != NULL).
   Request* req = new Request(source_net_log, request_net_log, request_id, info,
                              callback, addresses);
@@ -1251,6 +1195,54 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
 
   // Completion happens during OnJobComplete(Job*).
   return ERR_IO_PENDING;
+}
+
+int HostResolverImpl::ResolveHelper(int request_id,
+                                    const Key& key,
+                                    const RequestInfo& info,
+                                    AddressList* addresses,
+                                    const BoundNetLog& request_net_log,
+                                    const BoundNetLog& source_net_log) {
+  // The result of |getaddrinfo| for empty hosts is inconsistent across systems.
+  // On Windows it gives the default interface's address, whereas on Linux it
+  // gives an error. We will make it fail on all platforms for consistency.
+  if (info.hostname().empty() || info.hostname().size() > kMaxHostLength)
+    return ERR_NAME_NOT_RESOLVED;
+
+  int net_error = ERR_UNEXPECTED;
+  if (ResolveAsIP(key, info, &net_error, addresses))
+    return net_error;
+  net_error = ERR_DNS_CACHE_MISS;
+  ServeFromCache(key, info, request_net_log, &net_error, addresses);
+  return net_error;
+}
+
+int HostResolverImpl::ResolveFromCache(const RequestInfo& info,
+                                       AddressList* addresses,
+                                       const BoundNetLog& source_net_log) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(addresses);
+
+  // Choose a unique ID number for observers to see.
+  int request_id = next_request_id_++;
+
+  // Make a log item for the request.
+  BoundNetLog request_net_log = BoundNetLog::Make(net_log_,
+      NetLog::SOURCE_HOST_RESOLVER_IMPL_REQUEST);
+
+  // Update the net log and notify registered observers.
+  OnStartRequest(source_net_log, request_net_log, request_id, info);
+
+  // Build a key that identifies the request in the cache and in the
+  // outstanding jobs map.
+  Key key = GetEffectiveKeyForRequest(info);
+
+  int rv = ResolveHelper(request_id, key, info, addresses, request_net_log,
+                         source_net_log);
+  OnFinishRequest(source_net_log, request_net_log, request_id, info,
+                  rv,
+                  0  /* os_error (unknown since from cache) */);
+  return rv;
 }
 
 // See OnJobComplete(Job*) for why it is important not to clean out
@@ -1310,6 +1302,56 @@ AddressFamily HostResolverImpl::GetDefaultAddressFamily() const {
 
 HostResolverImpl* HostResolverImpl::GetAsHostResolverImpl() {
   return this;
+}
+
+
+bool HostResolverImpl::ResolveAsIP(const Key& key,
+                                   const RequestInfo& info,
+                                   int* net_error,
+                                   AddressList* addresses) {
+  DCHECK(addresses);
+  DCHECK(net_error);
+  IPAddressNumber ip_number;
+  if (!ParseIPLiteralToNumber(key.hostname, &ip_number))
+    return false;
+
+  DCHECK_EQ(key.host_resolver_flags &
+      ~(HOST_RESOLVER_CANONNAME | HOST_RESOLVER_LOOPBACK_ONLY |
+        HOST_RESOLVER_DEFAULT_FAMILY_SET_DUE_TO_NO_IPV6),
+            0) << " Unhandled flag";
+  bool ipv6_disabled = default_address_family_ == ADDRESS_FAMILY_IPV4 &&
+    !ipv6_probe_monitoring_;
+  *net_error = OK;
+  if (ip_number.size() == 16 && ipv6_disabled) {
+    *net_error = ERR_NAME_NOT_RESOLVED;
+  } else {
+    *addresses = AddressList::CreateFromIPAddressWithCname(
+        ip_number, info.port(),
+        (key.host_resolver_flags & HOST_RESOLVER_CANONNAME));
+  }
+  return true;
+}
+
+bool HostResolverImpl::ServeFromCache(const Key& key,
+                                      const RequestInfo& info,
+                                      const BoundNetLog& request_net_log,
+                                      int* net_error,
+                                      AddressList* addresses) {
+  DCHECK(addresses);
+  DCHECK(net_error);
+  if (!info.allow_cached_response() || !cache_.get())
+    return false;
+
+  const HostCache::Entry* cache_entry = cache_->Lookup(
+      key, base::TimeTicks::Now());
+  if (!cache_entry)
+    return false;
+
+  request_net_log.AddEvent(NetLog::TYPE_HOST_RESOLVER_IMPL_CACHE_HIT, NULL);
+  *net_error = cache_entry->error;
+  if (*net_error == OK)
+    *addresses = CreateAddressListUsingPort(cache_entry->addrlist, info.port());
+  return true;
 }
 
 void HostResolverImpl::AddOutstandingJob(Job* job) {
@@ -1606,6 +1648,19 @@ void HostResolverImpl::OnIPAddressChanged() {
     additional_resolver_flags_ &= ~HOST_RESOLVER_LOOPBACK_ONLY;
   }
 #endif
+  AbortAllInProgressJobs();
+  // |this| may be deleted inside AbortAllInProgressJobs().
+}
+
+void HostResolverImpl::OnDNSChanged() {
+  // If the DNS server has changed, existing cached info could be wrong so we
+  // have to drop our internal cache :( Note that OS level DNS caches, such
+  // as NSCD's cache should be dropped automatically by the OS when
+  // resolv.conf changes so we don't need to do anything to clear that cache.
+  if (cache_.get())
+    cache_->clear();
+  // Existing jobs will have been sent to the original server so they need to
+  // be aborted. TODO(Craig): Should these jobs be restarted?
   AbortAllInProgressJobs();
   // |this| may be deleted inside AbortAllInProgressJobs().
 }

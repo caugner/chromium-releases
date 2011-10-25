@@ -60,6 +60,9 @@
     {
       'target_name': 'ppapi_tests',
       'type': 'loadable_module',
+      'include_dirs': [
+        'lib/gl/include',
+      ],
       'sources': [
         # Common test files.
         'tests/test_case.cc',
@@ -72,6 +75,7 @@
         'tests/all_cpp_includes.h',
         'tests/arch_dependent_sizes_32.h',
         'tests/arch_dependent_sizes_64.h',
+        'tests/pp_thread.h',
         'tests/test_broker.cc',
         'tests/test_broker.h',
         'tests/test_buffer.cc',
@@ -94,6 +98,8 @@
         'tests/test_file_system.h',
         'tests/test_graphics_2d.cc',
         'tests/test_graphics_2d.h',
+        'tests/test_graphics_3d.cc',
+        'tests/test_graphics_3d.h',
         'tests/test_image_data.cc',
         'tests/test_image_data.h',
         'tests/test_memory.cc',
@@ -129,6 +135,15 @@
       'dependencies': [
         'ppapi.gyp:ppapi_cpp'
       ],
+      'run_as': {
+        'action': [
+          '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)chrome<(EXECUTABLE_SUFFIX)',
+          '--enable-pepper-testing',
+          '--enable-accelerated-plugins',
+          '--register-pepper-plugins=$(TargetPath);application/x-ppapi-tests',
+          'file://$(ProjectDir)/tests/test_case.html?testcase=',
+        ],
+      },
       'conditions': [
         ['OS=="win"', {
           'defines': [
@@ -174,7 +189,10 @@
       },
       'dependencies': [
         'ppapi_proxy',
+        'ppapi_shared',
         '../base/base.gyp:test_support_base',
+        '../gpu/gpu.gyp:gpu_ipc',
+        '../ipc/ipc.gyp:ipc',
         '../ipc/ipc.gyp:test_support_ipc',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
@@ -191,8 +209,11 @@
         'proxy/plugin_var_tracker_unittest.cc',
         'proxy/ppapi_proxy_test.cc',
         'proxy/ppapi_proxy_test.h',
+        'proxy/ppb_var_unittest.cc',
         'proxy/ppp_instance_proxy_test.cc',
+        'proxy/ppp_messaging_proxy_test.cc',
         'proxy/serialized_var_unittest.cc',
+        'shared_impl/resource_tracker_unittest.cc',
       ],
     },
   ],

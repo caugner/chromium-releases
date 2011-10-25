@@ -13,6 +13,7 @@
 #include "base/task.h"
 #include "content/renderer/render_view.h"
 #include "content/renderer/render_view_observer.h"
+#include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
 
 class ContentSettingsObserver;
@@ -20,7 +21,6 @@ class DomAutomationController;
 class ExtensionDispatcher;
 class ExternalHostBindings;
 class FilePath;
-class GURL;
 class SkBitmap;
 class TranslateHelper;
 struct ThumbnailScore;
@@ -48,8 +48,18 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   virtual ~ChromeRenderViewObserver();
 
  private:
+  // Holds the information received in OnWebUIJavaScript for later use
+  // to call EvaluateScript() to preload javascript for WebUI tests.
+  struct WebUIJavaScript {
+    string16 frame_xpath;
+    string16 jscript;
+    int id;
+    bool notify_result;
+  };
+
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void DidStartLoading() OVERRIDE;
   virtual void DidStopLoading() OVERRIDE;
   virtual void DidChangeIcon(WebKit::WebFrame* frame,
                              WebKit::WebIconURL::Type icon_type) OVERRIDE;
@@ -93,18 +103,22 @@ class ChromeRenderViewObserver : public RenderViewObserver,
       const WebKit::WebSecurityOrigin& context,
       const WebKit::WebURL& url) OVERRIDE;
 
+  void OnWebUIJavaScript(const string16& frame_xpath,
+                         const string16& jscript,
+                         int id,
+                         bool notify_result);
   void OnCaptureSnapshot();
   void OnHandleMessageFromExternalHost(const std::string& message,
                                        const std::string& origin,
                                        const std::string& target);
   void OnJavaScriptStressTestControl(int cmd, int param);
   void OnDownloadFavicon(int id, const GURL& image_url, int image_size);
-  void OnEnableViewSourceMode();
   void OnNavigate(const ViewMsg_Navigate_Params& params);
   void OnSetIsPrerendering(bool is_prerendering);
   void OnSetAllowDisplayingInsecureContent(bool allow);
   void OnSetAllowRunningInsecureContent(bool allow);
   void OnSetClientSidePhishingDetection(bool enable_phishing_detection);
+  void OnStartFrameSniffer(const string16& frame_name);
 
   // Captures the thumbnail and text contents for indexing for the given load
   // ID. If the view's load ID is different than the parameter, this call is
@@ -152,6 +166,9 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   // Decodes a data: URL image or returns an empty image in case of failure.
   SkBitmap ImageFromDataUrl(const GURL&) const;
 
+  // Save the JavaScript to preload if a ViewMsg_WebUIJavaScript is received.
+  scoped_ptr<WebUIJavaScript> webui_javascript_;
+
   // Have the same lifetime as us.
   ContentSettingsObserver* content_settings_;
   ExtensionDispatcher* extension_dispatcher_;
@@ -161,6 +178,10 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   // Page_id from the last page we indexed. This prevents us from indexing the
   // same page twice in a row.
   int32 last_indexed_page_id_;
+  // The toplevel URL that was last indexed.  This is used together with the
+  // page id to decide whether to reindex in certain cases like history
+  // replacement.
+  GURL last_indexed_url_;
 
   // Insecure content may be permitted for the duration of this render view.
   bool allow_displaying_insecure_content_;

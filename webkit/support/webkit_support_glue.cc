@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,10 @@
 namespace webkit_glue {
 
 void GetPlugins(bool refresh,
-                std::vector<webkit::npapi::WebPluginInfo>* plugins) {
-  webkit::npapi::PluginList::Singleton()->GetPlugins(refresh, plugins);
+                std::vector<webkit::WebPluginInfo>* plugins) {
+  if (refresh)
+    webkit::npapi::PluginList::Singleton()->RefreshPlugins();
+  webkit::npapi::PluginList::Singleton()->GetPlugins(plugins);
   // Don't load the forked npapi_layout_test_plugin in DRT, we only want to
   // use the upstream version TestNetscapePlugIn.
   const FilePath::StringType kPluginBlackList[] = {
@@ -25,7 +27,7 @@ void GetPlugins(bool refresh,
     FILE_PATH_LITERAL("libnpapi_layout_test_plugin.so"),
   };
   for (int i = plugins->size() - 1; i >= 0; --i) {
-    webkit::npapi::WebPluginInfo plugin_info = plugins->at(i);
+    webkit::WebPluginInfo plugin_info = plugins->at(i);
     for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
       if (plugin_info.path.BaseName() == FilePath(kPluginBlackList[j])) {
         webkit::npapi::PluginList::Singleton()->DisablePlugin(plugin_info.path);

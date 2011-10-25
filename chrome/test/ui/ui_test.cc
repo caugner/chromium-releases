@@ -43,8 +43,8 @@
 #include "chrome/test/automation/proxy_launcher.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
-#include "chrome/test/chrome_process_util.h"
-#include "chrome/test/test_switches.h"
+#include "chrome/test/base/chrome_process_util.h"
+#include "chrome/test/base/test_switches.h"
 #include "content/common/debug_flags.h"
 #include "content/common/json_value_serializer.h"
 #include "googleurl/src/gurl.h"
@@ -117,16 +117,16 @@ void UITestBase::SetUp() {
   // We don't want to reset the ProxyLauncher's state in those cases.
   if (!launcher_.get())
     launcher_.reset(CreateProxyLauncher());
-  launcher_->AssertAppNotRunning(L"Please close any other instances "
-                                 L"of the app before testing.");
+  launcher_->AssertAppNotRunning("Please close any other instances "
+                                 "of the app before testing.");
 
   JavaScriptExecutionController::set_timeout(
       TestTimeouts::action_max_timeout_ms());
   test_start_time_ = Time::NowFromSystemTime();
 
   SetLaunchSwitches();
-  launcher_->InitializeConnection(DefaultLaunchState(),
-                                  wait_for_initial_loads_);
+  ASSERT_TRUE(launcher_->InitializeConnection(DefaultLaunchState(),
+                                              wait_for_initial_loads_));
 }
 
 void UITestBase::TearDown() {
@@ -572,7 +572,7 @@ DictionaryValue* UITest::GetLocalState() {
 DictionaryValue* UITest::GetDefaultProfilePreferences() {
   FilePath path;
   PathService::Get(chrome::DIR_USER_DATA, &path);
-  path = path.AppendASCII(chrome::kNotSignedInProfile);
+  path = path.AppendASCII(chrome::kInitialProfile);
   return LoadDictionaryValueFromPath(path.Append(chrome::kPreferencesFilename));
 }
 

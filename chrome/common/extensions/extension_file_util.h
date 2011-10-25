@@ -10,6 +10,7 @@
 #include <map>
 
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_message_bundle.h"
 
 class Extension;
 class ExtensionMessageBundle;
@@ -44,7 +45,7 @@ scoped_refptr<Extension> LoadExtension(const FilePath& extension_root,
 
 // Returns true if the given extension object is valid and consistent.
 // Otherwise, a description of the error is returned in |error|.
-bool ValidateExtension(Extension* extension, std::string* error);
+bool ValidateExtension(const Extension* extension, std::string* error);
 
 // Cleans up the extension install directory. It can end up with garbage in it
 // if extensions can't initially be removed when they are uninstalled (eg if a
@@ -65,6 +66,14 @@ ExtensionMessageBundle* LoadExtensionMessageBundle(
     const FilePath& extension_path,
     const std::string& default_locale,
     std::string* error);
+
+// Loads the extension message bundle substitution map. Contains at least
+// extension_id item.
+ExtensionMessageBundle::SubstitutionMap*
+    LoadExtensionMessageBundleSubstitutionMap(
+    const FilePath& extension_path,
+    const std::string& extension_id,
+    const std::string& default_locale);
 
 // We need to reserve the namespace of entries that start with "_" for future
 // use by Chrome.

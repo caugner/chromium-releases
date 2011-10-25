@@ -498,7 +498,8 @@ const wchar_t* ShellUtil::kFileAssociations[] = {L".htm", L".html", L".shtml",
 const wchar_t* ShellUtil::kBrowserProtocolAssociations[] = {L"ftp", L"http",
     L"https", NULL};
 const wchar_t* ShellUtil::kPotentialProtocolAssociations[] = {L"ftp", L"http",
-    L"https", L"mailto", L"webcal", NULL};
+    L"https", L"irc", L"mailto", L"mms", L"news", L"nntp", L"sms", L"smsto",
+    L"tel", L"urn", L"webcal", NULL};
 const wchar_t* ShellUtil::kRegUrlProtocol = L"URL Protocol";
 
 bool ShellUtil::AdminNeededForRegistryCleanup(BrowserDistribution* dist,
@@ -720,23 +721,26 @@ bool ShellUtil::MakeChromeDefault(BrowserDistribution* dist,
       if (ShellUtil::GetUserSpecificDefaultBrowserSuffix(dist, &suffix))
         app_name += suffix;
 
-      for (int i = 0;
-           SUCCEEDED(hr) && ShellUtil::kBrowserProtocolAssociations[i] != NULL;
-           i++) {
+      for (int i = 0; ShellUtil::kBrowserProtocolAssociations[i] != NULL; i++) {
         hr = pAAR->SetAppAsDefault(app_name.c_str(),
             ShellUtil::kBrowserProtocolAssociations[i], AT_URLPROTOCOL);
+        if (!SUCCEEDED(hr)) {
+          ret = false;
+          LOG(ERROR) << "Failed to register as default for protocol "
+                     << ShellUtil::kBrowserProtocolAssociations[i]
+                     << " (" << hr << ")";
+        }
       }
 
-      for (int i = 0;
-           SUCCEEDED(hr) && ShellUtil::kFileAssociations[i] != NULL; i++) {
+      for (int i = 0; ShellUtil::kFileAssociations[i] != NULL; i++) {
         hr = pAAR->SetAppAsDefault(app_name.c_str(),
             ShellUtil::kFileAssociations[i], AT_FILEEXTENSION);
+        if (!SUCCEEDED(hr)) {
+          ret = false;
+          LOG(ERROR) << "Failed to register as default for file extension "
+                     << ShellUtil::kFileAssociations[i] << " (" << hr << ")";
+        }
       }
-    }
-    if (!SUCCEEDED(hr)) {
-      ret = false;
-      LOG(ERROR) << "Could not make Chrome default browser (Vista): HRESULT="
-                 << hr << ".";
     }
   }
 

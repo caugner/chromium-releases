@@ -8,6 +8,7 @@
 
 #include <list>
 #include <map>
+#include <string>
 #include <vector>
 
 #include "base/hash_tables.h"
@@ -20,6 +21,7 @@
 #include "base/timer.h"
 #include "chrome/browser/prerender/prerender_config.h"
 #include "chrome/browser/prerender/prerender_contents.h"
+#include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_origin.h"
 #include "googleurl/src/gurl.h"
 
@@ -41,6 +43,8 @@ struct hash<TabContents*> {
 
 namespace prerender {
 
+class PrerenderCondition;
+class PrerenderHistograms;
 class PrerenderHistory;
 class PrerenderTracker;
 
@@ -197,6 +201,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   PrerenderTracker* prerender_tracker() { return prerender_tracker_; }
 
+  // Adds a condition. This is owned by the PrerenderManager.
+  void AddCondition(const PrerenderCondition* condition);
+
+  bool IsTopSite(const GURL& url);
+
  protected:
   // Test that needs needs access to internal functions.
   FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ExpireTest);
@@ -219,6 +228,8 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   struct NavigationRecord;
 
   class OnCloseTabContentsDeleter;
+
+  class MostVisitedSites;
 
   // Adds a prerender for |url| from referrer |referrer| initiated from the
   // RenderViewHost specified by |child_route_id_pair|. The |origin| specifies
@@ -320,26 +331,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Used both on destruction, and when clearing the browing history.
   void DestroyAllContents(FinalStatus final_status);
 
-  // Records the time from when a page starts prerendering to when the user
-  // navigates to it. This must be called on the UI thread.
-  void RecordTimeUntilUsed(base::TimeDelta time_until_used);
-
-  // Composes a histogram name based on a histogram type.
-  std::string ComposeHistogramName(const std::string& prefix_type,
-                                   const std::string& name) const;
-
-  // Returns the histogram name for a given origin and experiment.
-  std::string GetHistogramName(Origin origin, uint8 experiment_id,
-                               const std::string& name) const;
-  // Returns the histogram name for the current window.
-  std::string GetDefaultHistogramName(const std::string& name) const;
-  // Returns the current experiment.
-  uint8 GetCurrentExperimentId() const;
-  // Returns the current origin.
-  Origin GetCurrentOrigin() const;
-  // Returns whether or not there is currently an origin/experiment wash.
-  bool IsOriginExperimentWash() const;
-
   // The configuration.
   Config config_;
 
@@ -379,23 +370,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   static PrerenderManagerMode mode_;
 
-  // An integer indicating a Prerendering Experiment being currently conducted.
-  // (The last experiment ID seen).
-  uint8 last_experiment_id_;
-
-  // Origin of the last prerender seen.
-  Origin last_origin_;
-
-  // A boolean indicating that we have recently encountered a combination of
-  // different experiments and origins, making an attribution of PPLT's to
-  // experiments / origins impossible.
-  bool origin_experiment_wash_;
-
-  // The time when we last saw a prerender request coming from a renderer.
-  // This is used to record perceived PLT's for a certain amount of time
-  // from the point that we last saw a <link rel=prerender> tag.
-  base::TimeTicks last_prerender_seen_time_;
-
   // A count of how many prerenders we do per session. Initialized to 0 then
   // incremented and emitted to a histogram on each successful prerender.
   static int prerenders_per_session_count_;
@@ -415,6 +389,12 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   ScopedVector<OnCloseTabContentsDeleter> on_close_tab_contents_deleters_;
 
   scoped_ptr<PrerenderHistory> prerender_history_;
+
+  std::list<const PrerenderCondition*> prerender_conditions_;
+
+  scoped_ptr<PrerenderHistograms> histograms_;
+
+  scoped_ptr<MostVisitedSites> most_visited_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderManager);
 };

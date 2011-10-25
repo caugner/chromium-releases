@@ -14,7 +14,7 @@
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
 #include "grit/generated_resources.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -240,6 +240,16 @@ class BalloonSubContainer : public views::View {
     return NULL;
   }
 
+  // Returns true if the |view| is in the container.
+  // |view| can be a deleted pointer - we do not dereference it.
+  bool HasChildView(View* view) const {
+    for (int i = 0; i < child_count(); ++i) {
+      if (child_at(i) == view)
+        return true;
+    }
+    return false;
+  }
+
  private:
   gfx::Size preferred_size_;
   int margin_;
@@ -345,9 +355,10 @@ class BalloonContainer : public views::View {
   }
 
   // Returns true if the |view| is contained in the panel.
+  // |view| can be a deleted pointer - we do not dereference it.
   bool HasBalloonView(View* view) {
-    return view->parent() == sticky_container_ ||
-        view->parent() == non_sticky_container_;
+    return sticky_container_->HasChildView(view) ||
+        non_sticky_container_->HasChildView(view);
   }
 
   // Updates the bounds so that all notifications are visible.
@@ -420,7 +431,7 @@ NotificationPanel::~NotificationPanel() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NottificationPanel public.
+// NotificationPanel public.
 
 void NotificationPanel::Show() {
   if (!panel_widget_) {
@@ -651,11 +662,15 @@ void NotificationPanel::OnMouseLeave() {
 
 void NotificationPanel::OnMouseMotion(const gfx::Point& point) {
   SetActiveView(balloon_container_->FindBalloonView(point));
-  SET_STATE(KEEP_SIZE);
   // We need to set the focus to scroll view to get mouse wheel
   // working. Setting focus when mouse moves on the panel
   // because focus may be taken by other view.
   scroll_view_->RequestFocus();
+  // This method used to set KEEP_SIZE state. However,
+  // some html notifications may want to change their size,
+  // and setting KEEP_SIZE caused them to behave differently
+  // depending on whether user moved mouse over notification
+  // or not.
 }
 
 NotificationPanelTester* NotificationPanel::GetTester() {
@@ -792,6 +807,7 @@ void NotificationPanel::StartStaleTimer(Balloon* balloon) {
 }
 
 void NotificationPanel::OnStale(BalloonViewImpl* view) {
+  // Note: |view| may point to deleted memory.
   if (balloon_container_->HasBalloonView(view) && !view->stale()) {
     view->set_stale();
     // don't update panel on stale

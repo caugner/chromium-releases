@@ -9,45 +9,26 @@
 
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
+#include "base/string_util.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/safe_browsing/browser_features.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
+#include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "content/common/page_transition_types.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/cancelable_request.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 
 namespace safe_browsing {
-namespace features {
-const char kUrlHistoryVisitCount[] = "UrlHistoryVisitCount";
-const char kUrlHistoryTypedCount[] = "UrlHistoryTypedCount";
-const char kUrlHistoryLinkCount[] = "UrlHistoryLinkCount";
-const char kUrlHistoryVisitCountMoreThan24hAgo[] =
-    "UrlHistoryVisitCountMoreThan24hAgo";
-const char kHttpHostVisitCount[] = "HttpHostVisitCount";
-const char kHttpsHostVisitCount[] = "HttpsHostVisitCount";
-const char kFirstHttpHostVisitMoreThan24hAgo[] =
-    "FirstHttpHostVisitMoreThan24hAgo";
-const char kFirstHttpsHostVisitMoreThan24hAgo[] =
-    "FirstHttpsHostVisitMoreThan24hAgo";
 
-const char kHostPrefix[] = "Host";
-const char kRedirectPrefix[] = "Redirect";
-const char kReferrer[] = "Referrer";
-const char kHasSSLReferrer[] = "HasSSLReferrer";
-const char kPageTransitionType[] = "PageTransitionType";
-const char kIsFirstNavigation[] = "IsFirstNavigation";
-const char kBadIpFetch[] = "BadIpFetch=";
-const char kSafeBrowsingMaliciousUrl[] = "SafeBrowsingMaliciousUrl=";
-const char kSafeBrowsingOriginalUrl[] = "SafeBrowsingOriginalUrl=";
-const char kSafeBrowsingIsSubresource[] = "SafeBrowsingIsSubresource";
-const char kSafeBrowsingThreatType[] = "SafeBrowsingThreatType";
-}  // namespace features
+const int BrowserFeatureExtractor::kHashPrefixLength = 5;
 
 BrowseInfo::BrowseInfo() {}
 
@@ -211,6 +192,7 @@ void BrowserFeatureExtractor::ExtractFeatures(const BrowseInfo* info,
   }
 
   ExtractBrowseInfoFeatures(*info, request);
+  ComputeURLHash(request);
   pending_extractions_.insert(std::make_pair(request, callback));
   MessageLoop::current()->PostTask(
       FROM_HERE,
@@ -452,8 +434,9 @@ bool BrowserFeatureExtractor::GetPendingQuery(
 
 bool BrowserFeatureExtractor::GetHistoryService(HistoryService** history) {
   *history = NULL;
-  if (tab_ && tab_->profile()) {
-    *history = tab_->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  if (tab_ && tab_->browser_context()) {
+    Profile* profile = Profile::FromBrowserContext(tab_->browser_context());
+    *history = profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
     if (*history) {
       return true;
     }
@@ -461,4 +444,37 @@ bool BrowserFeatureExtractor::GetHistoryService(HistoryService** history) {
   VLOG(2) << "Unable to query history.  No history service available.";
   return false;
 }
+
+void BrowserFeatureExtractor::ComputeURLHash(
+    ClientPhishingRequest* request) {
+  // Put the url into SafeBrowsing host suffix / path prefix format, with
+  // query parameters stripped.
+  std::string host, path, query;
+  safe_browsing_util::CanonicalizeUrl(GURL(request->url()),
+                                      &host, &path, &query);
+  DCHECK(!host.empty()) << request->url();
+  DCHECK(!path.empty()) << request->url();
+
+  // Lowercase the URL.  Note: canonicalization converts the URL to ASCII.
+  // Percent encoded characters will not be lowercased but this is consistent
+  // with what we're doing on the server side.
+  StringToLowerASCII(&host);
+  StringToLowerASCII(&path);
+
+  // Remove leading 'www.' from the host.
+  if (host.size() > 4 && host.substr(0, 4) == "www.") {
+    host.erase(0, 4);
+  }
+  // Remove everything after the last '/' to broaden the pattern.
+  if (path.size() > 1 && *(path.rbegin()) != '/') {
+    // The pattern never ends in foo.com/test? because we stripped CGI params.
+    // Remove everything that comes after the last '/'.
+    size_t last_path = path.rfind("/");
+    path.erase(last_path + 1);
+  }
+
+  request->set_hash_prefix(crypto::SHA256HashString(host + path).substr(
+      0, kHashPrefixLength));
+}
+
 };  // namespace safe_browsing

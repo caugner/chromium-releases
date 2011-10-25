@@ -11,10 +11,11 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_handle.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/windows_version.h"
+#include "skia/ext/platform_canvas.h"
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
@@ -759,7 +760,8 @@ HRESULT NativeThemeWin::PaintMenuCheck(
   if (handle && draw_theme_)
     return draw_theme_(handle, hdc, MENU_POPUPCHECK, state_id, &rect_win, NULL);
 
-  return PaintFrameControl(hdc, rect, DFC_MENU, DFCS_MENUCHECK,
+  return PaintFrameControl(hdc, rect, DFC_MENU,
+                           extra.is_radio ? DFCS_MENUBULLET : DFCS_MENUCHECK,
                            extra.is_selected, state);
 }
 

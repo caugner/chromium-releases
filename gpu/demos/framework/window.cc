@@ -41,7 +41,7 @@ bool Window::Init(int width, int height) {
   if (!CreateRenderContext(PluginWindow(window_handle_)))
     return false;
 
-  demo_->InitWindowSize(width, height);
+  demo_->Resize(width, height);
   return demo_->InitGL();
 }
 
@@ -60,9 +60,7 @@ bool Window::CreateRenderContext(gfx::PluginWindowHandle hwnd) {
   }
 
   GpuScheduler* gpu_scheduler(
-      GpuScheduler::Create(command_buffer.get(),
-                           NULL,
-                           NULL));
+      GpuScheduler::Create(command_buffer.get(), NULL));
   if (!gpu_scheduler->Initialize(hwnd, gfx::Size(), false,
                                  gpu::gles2::DisallowedExtensions(),
                                  NULL, std::vector<int32>(),
@@ -90,7 +88,8 @@ bool Window::CreateRenderContext(gfx::PluginWindowHandle hwnd) {
                                                 transfer_buffer.size,
                                                 transfer_buffer.ptr,
                                                 transfer_buffer_id,
-                                                false));
+                                                false,
+                                                true));
   return command_buffer.release() != NULL;
 }
 

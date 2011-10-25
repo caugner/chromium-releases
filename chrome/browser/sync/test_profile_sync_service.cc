@@ -5,16 +5,17 @@
 #include "chrome/browser/sync/test_profile_sync_service.h"
 
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/internal_api/user_share.h"
+#include "chrome/browser/sync/js/js_reply_handler.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
-#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sessions/session_state.h"
+#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
+#include "chrome/browser/sync/test/test_http_bridge_factory.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/sync/test_http_bridge_factory.h"
 
 using browser_sync::ModelSafeRoutingInfo;
 using browser_sync::sessions::ErrorCounters;
@@ -45,47 +46,28 @@ class FakeSigninManager : public SigninManager {
 
 namespace browser_sync {
 
-using ::testing::_;
 SyncBackendHostForProfileSyncTest::SyncBackendHostForProfileSyncTest(
     Profile* profile,
     bool set_initial_sync_ended_on_init,
     bool synchronous_init,
     bool fail_initial_download)
-    : browser_sync::SyncBackendHost(profile),
+    : browser_sync::SyncBackendHost(profile->GetDebugName(), profile),
       synchronous_init_(synchronous_init),
       fail_initial_download_(fail_initial_download) {}
 
 SyncBackendHostForProfileSyncTest::~SyncBackendHostForProfileSyncTest() {}
 
-void SyncBackendHostForProfileSyncTest::ConfigureDataTypes(
-    const DataTypeController::TypeMap& data_type_controllers,
-    const syncable::ModelTypeSet& types,
-    sync_api::ConfigureReason reason,
-    base::Callback<void(bool)> ready_task,
-    bool nigori_enabled) {
-  SyncBackendHost::ConfigureDataTypes(data_type_controllers, types,
-                                      reason, ready_task, nigori_enabled);
-}
-
 void SyncBackendHostForProfileSyncTest::
     SimulateSyncCycleCompletedInitialSyncEnded(
     const tracked_objects::Location& location) {
   syncable::ModelTypeBitSet sync_ended;
-  ModelSafeRoutingInfo enabled_types;
-  GetModelSafeRoutingInfo(&enabled_types);
+  if (!fail_initial_download_)
+    sync_ended.set();
   std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
-  for (ModelSafeRoutingInfo::const_iterator i = enabled_types.begin();
-       i != enabled_types.end(); ++i) {
-    sync_ended.set(i->first);
-  }
-
-  if (fail_initial_download_)
-    sync_ended.reset();
-
   core_->HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
       SyncerStatus(), ErrorCounters(), 0, false,
       sync_ended, download_progress_markers, false, false, 0, 0, 0, false,
-      SyncSourceInfo(), 0));
+      SyncSourceInfo(), 0, base::Time::Now()));
 }
 
 sync_api::HttpPostProviderFactory*
@@ -96,54 +78,17 @@ sync_api::HttpPostProviderFactory*
 
 void SyncBackendHostForProfileSyncTest::InitCore(
     const Core::DoInitializeOptions& options) {
-  std::wstring user = L"testuser@gmail.com";
-  sync_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(core_.get(),
-                        &SyncBackendHost::Core::DoInitializeForTest,
-                        user,
-                        options.request_context_getter,
-                        options.delete_sync_data_folder));
-
+  Core::DoInitializeOptions test_options = options;
+  test_options.credentials.email = "testuser@gmail.com";
+  test_options.credentials.sync_token = "token";
+  test_options.restored_key_for_bootstrapping = "";
+  test_options.setup_for_test_mode = true;
+  SyncBackendHost::InitCore(test_options);
   // TODO(akalin): Figure out a better way to do this.
   if (synchronous_init_) {
     // The SyncBackend posts a task to the current loop when
     // initialization completes.
     MessageLoop::current()->Run();
-  }
-}
-
-JsBackend* SyncBackendHostForProfileSyncTest::GetJsBackend() {
-  // Return a non-NULL result only when the overridden function does.
-  if (SyncBackendHost::GetJsBackend()) {
-    return this;
-  } else {
-    NOTREACHED();
-    return NULL;
-  }
-}
-
-void SyncBackendHostForProfileSyncTest::SetParentJsEventRouter(
-    JsEventRouter* router) {
-  core_->SetParentJsEventRouter(router);
-}
-
-void SyncBackendHostForProfileSyncTest::RemoveParentJsEventRouter() {
-  core_->RemoveParentJsEventRouter();
-}
-
-const JsEventRouter*
-    SyncBackendHostForProfileSyncTest::GetParentJsEventRouter() const {
-  return core_->GetParentJsEventRouter();
-}
-
-void SyncBackendHostForProfileSyncTest::ProcessMessage(
-    const std::string& name, const JsArgList& args,
-    const JsEventHandler* sender) {
-  if (name.find("delay") != name.npos) {
-    core_->RouteJsMessageReply(name, args, sender);
-  } else {
-    core_->RouteJsMessageReplyOnFrontendLoop(name, args, sender);
   }
 }
 
@@ -160,7 +105,7 @@ void SyncBackendHostForProfileSyncTest::StartConfiguration(
     core_->HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
         SyncerStatus(), ErrorCounters(), 0, false,
         sync_ended, download_progress_markers, false, false, 0, 0, 0, false,
-        SyncSourceInfo(), 0));
+        SyncSourceInfo(), 0, base::Time::Now()));
   }
 }
 
@@ -207,7 +152,7 @@ TestProfileSyncService::TestProfileSyncService(
 
 TestProfileSyncService::~TestProfileSyncService() {}
 
-void TestProfileSyncService::SetInitialSyncEndedForEnabledTypes() {
+void TestProfileSyncService::SetInitialSyncEndedForAllTypes() {
   UserShare* user_share = GetUserShare();
   DirectoryManager* dir_manager = user_share->dir_manager.get();
 
@@ -215,15 +160,16 @@ void TestProfileSyncService::SetInitialSyncEndedForEnabledTypes() {
   if (!dir.good())
     FAIL();
 
-  ModelSafeRoutingInfo enabled_types;
-  backend_->GetModelSafeRoutingInfo(&enabled_types);
-  for (ModelSafeRoutingInfo::const_iterator i = enabled_types.begin();
-       i != enabled_types.end(); ++i) {
-    dir->set_initial_sync_ended_for_type(i->first, true);
+  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
+       i < syncable::MODEL_TYPE_COUNT; ++i) {
+    dir->set_initial_sync_ended_for_type(
+        syncable::ModelTypeFromInt(i), true);
   }
 }
 
-void TestProfileSyncService::OnBackendInitialized(bool success) {
+void TestProfileSyncService::OnBackendInitialized(
+    const browser_sync::WeakHandle<browser_sync::JsBackend>& backend,
+    bool success) {
   bool send_passphrase_required = false;
   if (success) {
     // Set this so below code can access GetUserShare().
@@ -255,11 +201,11 @@ void TestProfileSyncService::OnBackendInitialized(bool success) {
         send_passphrase_required = true;
       }
 
-      SetInitialSyncEndedForEnabledTypes();
+      SetInitialSyncEndedForAllTypes();
     }
   }
 
-  ProfileSyncService::OnBackendInitialized(success);
+  ProfileSyncService::OnBackendInitialized(backend, success);
   if (success && send_passphrase_required)
     OnPassphraseRequired(sync_api::REASON_DECRYPTION);
 
@@ -295,8 +241,4 @@ void TestProfileSyncService::CreateBackend() {
       set_initial_sync_ended_on_init_,
       synchronous_backend_initialization_,
       fail_initial_download_));
-}
-
-std::string TestProfileSyncService::GetLsidForAuthBootstraping() {
-  return "foo";
 }

@@ -10,6 +10,8 @@
 #include "ui/base/l10n/l10n_font_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/compositor/compositor.h"
+#include "views/controls/menu/menu_controller.h"
+#include "views/focus/focus_manager_factory.h"
 #include "views/focus/view_storage.h"
 #include "views/ime/input_method.h"
 #include "views/views_delegate.h"
@@ -64,7 +66,10 @@ class ScopedEvent {
 // WidgetDelegate is supplied.
 class DefaultWidgetDelegate : public WidgetDelegate {
  public:
-  explicit DefaultWidgetDelegate(Widget* widget) : widget_(widget) {}
+  DefaultWidgetDelegate(Widget* widget, const Widget::InitParams& params)
+      : widget_(widget),
+        can_activate_(params.type != Widget::InitParams::TYPE_POPUP) {
+  }
   virtual ~DefaultWidgetDelegate() {}
 
   // Overridden from WidgetDelegate:
@@ -78,8 +83,13 @@ class DefaultWidgetDelegate : public WidgetDelegate {
     return widget_;
   }
 
+  virtual bool CanActivate() const {
+    return can_activate_;
+  }
+
  private:
   Widget* widget_;
+  bool can_activate_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultWidgetDelegate);
 };
@@ -99,11 +109,12 @@ Widget::InitParams::InitParams()
       ownership(NATIVE_WIDGET_OWNS_WIDGET),
       mirror_origin_in_rtl(false),
       has_dropshadow(false),
-      maximize(false),
+      show_state(ui::SHOW_STATE_DEFAULT),
       double_buffer(false),
       parent(NULL),
       parent_widget(NULL),
-      native_widget(NULL) {
+      native_widget(NULL),
+      top_level(false) {
 }
 
 Widget::InitParams::InitParams(Type type)
@@ -118,11 +129,12 @@ Widget::InitParams::InitParams(Type type)
       ownership(NATIVE_WIDGET_OWNS_WIDGET),
       mirror_origin_in_rtl(false),
       has_dropshadow(false),
-      maximize(false),
+      show_state(ui::SHOW_STATE_DEFAULT),
       double_buffer(false),
       parent(NULL),
       parent_widget(NULL),
-      native_widget(NULL) {
+      native_widget(NULL),
+      top_level(false) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -146,9 +158,11 @@ Widget::Widget()
       frame_type_(FRAME_TYPE_DEFAULT),
       disable_inactive_rendering_(false),
       widget_closed_(false),
-      saved_maximized_state_(false),
+      saved_show_state_(ui::SHOW_STATE_DEFAULT),
       minimum_size_(100, 100),
-      focus_on_creation_(true) {
+      focus_on_creation_(true),
+      is_top_level_(false),
+      native_widget_initialized_(false) {
 }
 
 Widget::~Widget() {
@@ -158,7 +172,6 @@ Widget::~Widget() {
   }
 
   DestroyRootView();
-
   if (ownership_ == InitParams::WIDGET_OWNS_NATIVE_WIDGET)
     delete native_widget_;
 }
@@ -187,7 +200,7 @@ Widget* Widget::CreateWindowWithParentAndBounds(WidgetDelegate* delegate,
   Widget* widget = new Widget;
   Widget::InitParams params;
   params.delegate = delegate;
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
   params.parent = parent;
 #endif
   params.bounds = bounds;
@@ -273,9 +286,18 @@ bool Widget::IsDebugPaintEnabled() {
   return debug_paint;
 }
 
+// static
+bool Widget::RequiresNonClientView(InitParams::Type type) {
+  return type == InitParams::TYPE_WINDOW;
+}
+
 void Widget::Init(const InitParams& params) {
-  widget_delegate_ =
-      params.delegate ? params.delegate : new DefaultWidgetDelegate(this);
+  is_top_level_ = params.top_level ||
+      (!params.child &&
+       params.type != InitParams::TYPE_CONTROL &&
+       params.type != InitParams::TYPE_TOOLTIP);
+  widget_delegate_ = params.delegate ?
+      params.delegate : new DefaultWidgetDelegate(this, params);
   ownership_ = params.ownership;
   native_widget_ = params.native_widget ?
       params.native_widget->AsNativeWidgetPrivate() :
@@ -287,7 +309,7 @@ void Widget::Init(const InitParams& params) {
         internal::NativeWidgetPrivate::IsMouseButtonDown();
   }
   native_widget_->InitNativeWidget(params);
-  if (params.type == InitParams::TYPE_WINDOW) {
+  if (RequiresNonClientView(params.type)) {
     non_client_view_ = new NonClientView;
     non_client_view_->SetFrameView(CreateNonClientFrameView());
     // Create the ClientView, add it to the NonClientView and add the
@@ -295,8 +317,13 @@ void Widget::Init(const InitParams& params) {
     non_client_view_->set_client_view(widget_delegate_->CreateClientView(this));
     SetContentsView(non_client_view_);
     SetInitialBounds(params.bounds);
+    if (params.show_state == ui::SHOW_STATE_MAXIMIZED)
+      Maximize();
+    else if (params.show_state == ui::SHOW_STATE_MINIMIZED)
+      Minimize();
     UpdateWindowTitle();
   }
+  native_widget_initialized_ = true;
 }
 
 // Unconverted methods (see header) --------------------------------------------
@@ -358,6 +385,12 @@ Widget* Widget::GetTopLevelWidget() {
 }
 
 const Widget* Widget::GetTopLevelWidget() const {
+  // GetTopLevelNativeWidget doesn't work during destruction because
+  // property is gone after gobject gets deleted. Short circuit here
+  // for toplevel so that InputMethod can remove itself from
+  // focus manager.
+  if (is_top_level())
+    return this;
   return native_widget_->GetTopLevelWidget();
 }
 
@@ -422,14 +455,14 @@ void Widget::Close() {
   if (non_client_view_)
     can_close = non_client_view_->CanClose();
   if (can_close) {
-    SaveWindowPosition();
+    SaveWindowPlacement();
 
     // During tear-down the top-level focus manager becomes unavailable to
     // GTK tabbed panes and their children, so normal deregistration via
     // |FormManager::ViewRemoved()| calls are fouled.  We clear focus here
     // to avoid these redundant steps and to avoid accessing deleted views
     // that may have been in focus.
-    if (GetTopLevelWidget() == this && focus_manager_.get())
+    if (is_top_level() && focus_manager_.get())
       focus_manager_->SetFocusedView(NULL);
 
     native_widget_->Close();
@@ -449,17 +482,16 @@ void Widget::EnableClose(bool enable) {
 
 void Widget::Show() {
   if (non_client_view_) {
-    if (saved_maximized_state_ && !initial_restored_bounds_.IsEmpty()) {
+    if (saved_show_state_ == ui::SHOW_STATE_MAXIMIZED &&
+        !initial_restored_bounds_.IsEmpty()) {
       native_widget_->ShowMaximizedWithBounds(initial_restored_bounds_);
     } else {
-      native_widget_->ShowWithState(saved_maximized_state_ ?
-          internal::NativeWidgetPrivate::SHOW_MAXIMIZED :
-          internal::NativeWidgetPrivate::SHOW_RESTORED);
+      native_widget_->ShowWithWindowState(saved_show_state_);
     }
-    // |saved_maximized_state_| only applies the first time the window is shown.
-    // If we don't reset the value the window will be shown maximized every time
+    // |saved_show_state_| only applies the first time the window is shown.
+    // If we don't reset the value the window may be shown maximized every time
     // it is subsequently shown after being hidden.
-    saved_maximized_state_ = false;
+    saved_show_state_ = ui::SHOW_STATE_NORMAL;
   } else {
     native_widget_->Show();
   }
@@ -470,14 +502,16 @@ void Widget::Hide() {
 }
 
 void Widget::ShowInactive() {
-  // If this gets called with saved_maximized_state_ == true, call SetBounds()
-  // with the restored bounds to set the correct size. This normally should
-  // not happen, but if it does we should avoid showing unsized windows.
-  if (saved_maximized_state_ && !initial_restored_bounds_.IsEmpty()) {
+  // If this gets called with saved_show_state_ == ui::SHOW_STATE_MAXIMIZED,
+  // call SetBounds()with the restored bounds to set the correct size. This
+  // normally should not happen, but if it does we should avoid showing unsized
+  // windows.
+  if (saved_show_state_ == ui::SHOW_STATE_MAXIMIZED &&
+      !initial_restored_bounds_.IsEmpty()) {
     SetBounds(initial_restored_bounds_);
-    saved_maximized_state_ = false;
+    saved_show_state_ = ui::SHOW_STATE_NORMAL;
   }
-  native_widget_->ShowWithState(internal::NativeWidgetPrivate::SHOW_INACTIVE);
+  native_widget_->ShowWithWindowState(ui::SHOW_STATE_INACTIVE);
 }
 
 void Widget::Activate() {
@@ -576,16 +610,18 @@ ThemeProvider* Widget::GetThemeProvider() const {
 
 FocusManager* Widget::GetFocusManager() {
   Widget* toplevel_widget = GetTopLevelWidget();
-  if (toplevel_widget && toplevel_widget != this)
-    return toplevel_widget->focus_manager_.get();
-
-  return focus_manager_.get();
+  return toplevel_widget ? toplevel_widget->focus_manager_.get() : NULL;
 }
 
 InputMethod* Widget::GetInputMethod() {
-  Widget* toplevel_widget = GetTopLevelWidget();
-  return toplevel_widget ?
-      toplevel_widget->native_widget_->GetInputMethodNative() : NULL;
+  if (is_top_level()) {
+    if (!input_method_.get())
+      input_method_.reset(native_widget_->CreateInputMethod());
+    return input_method_.get();
+  } else {
+    Widget* toplevel = GetTopLevelWidget();
+    return toplevel ? toplevel->GetInputMethod() : NULL;
+  }
 }
 
 void Widget::RunShellDrag(View* view, const ui::OSExchangeData& data,
@@ -763,6 +799,11 @@ bool Widget::SetInitialFocus() {
   return !!v;
 }
 
+bool Widget::ConvertPointFromAncestor(
+    const Widget* ancestor, gfx::Point* point) const {
+  return native_widget_->ConvertPointFromAncestor(ancestor, point);
+}
+
 View* Widget::GetChildViewParent() {
   return GetContentsView() ? GetContentsView() : GetRootView();
 }
@@ -793,8 +834,14 @@ void Widget::EnableInactiveRendering() {
 }
 
 void Widget::OnNativeWidgetActivationChanged(bool active) {
-  if (!active)
-    SaveWindowPosition();
+  if (!active) {
+    SaveWindowPlacement();
+
+    // Close any open menus.
+    MenuController* menu_controller = MenuController::GetActiveInstance();
+    if (menu_controller)
+      menu_controller->OnWidgetActivationChanged();
+  }
 
   FOR_EACH_OBSERVER(Observer, observers_,
                     OnWidgetActivationChanged(this, active));
@@ -813,16 +860,14 @@ void Widget::OnNativeBlur(gfx::NativeView focused_view) {
 }
 
 void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
+  GetRootView()->PropagateVisibilityNotifications(GetRootView(), visible);
   FOR_EACH_OBSERVER(Observer, observers_,
                     OnWidgetVisibilityChanged(this, visible));
 }
 
 void Widget::OnNativeWidgetCreated() {
-  if (GetTopLevelWidget() == this) {
-    // Only the top level Widget in a native widget hierarchy has a focus
-    // manager.
-    focus_manager_.reset(new FocusManager(this));
-  }
+  if (is_top_level())
+    focus_manager_.reset(FocusManagerFactory::Create(this));
 
   native_widget_->SetAccessibleRole(
       widget_delegate_->GetAccessibleWindowRole());
@@ -851,6 +896,12 @@ gfx::Size Widget::GetMinimumSize() {
 
 void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
   root_view_->SetSize(new_size);
+
+  // Size changed notifications can fire prior to full initialization
+  // i.e. during session restore.  Avoid saving session state during these
+  // startup procedures.
+  if (native_widget_initialized_)
+    SaveWindowPlacement();
 }
 
 void Widget::OnNativeWidgetBeginUserBoundsChange() {
@@ -942,7 +993,6 @@ bool Widget::OnMouseEvent(const MouseEvent& event) {
 void Widget::OnMouseCaptureLost() {
   if (is_mouse_button_pressed_)
     GetRootView()->OnMouseCaptureLost();
-  static_cast<internal::RootView*>(GetRootView())->set_capture_view(NULL);
   is_mouse_button_pressed_ = false;
 }
 
@@ -953,6 +1003,10 @@ ui::TouchStatus Widget::OnTouchEvent(const TouchEvent& event) {
 
 bool Widget::ExecuteCommand(int command_id) {
   return widget_delegate_->ExecuteWindowsCommand(command_id);
+}
+
+InputMethod* Widget::GetInputMethodDirect() {
+  return input_method_.get();
 }
 
 Widget* Widget::AsWidget() {
@@ -993,7 +1047,8 @@ internal::RootView* Widget::CreateRootView() {
 
 void Widget::DestroyRootView() {
   root_view_.reset();
-
+  // Input method has to be destroyed before focus manager.
+  input_method_.reset();
   // Defer focus manager's destruction. This is for the case when the
   // focus manager is referenced by a child NativeWidgetGtk (e.g. TabbedPane in
   // a dialog). When gtk_widget_destroy is called on the parent, the destroy
@@ -1006,10 +1061,6 @@ void Widget::DestroyRootView() {
     MessageLoop::current()->DeleteSoon(FROM_HERE, focus_manager);
 }
 
-void Widget::ReplaceFocusManager(FocusManager* focus_manager) {
-  focus_manager_.reset(focus_manager);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Widget, private:
 
@@ -1020,7 +1071,7 @@ bool Widget::ShouldReleaseCaptureOnMouseReleased() const {
   return true;
 }
 
-void Widget::SaveWindowPosition() {
+void Widget::SaveWindowPlacement() {
   // The window delegate does the actual saving for us. It seems like (judging
   // by go/crash) that in some circumstances we can end up here after
   // WM_DESTROY, at which point the window delegate is likely gone. So just
@@ -1028,10 +1079,10 @@ void Widget::SaveWindowPosition() {
   if (!widget_delegate_)
     return;
 
-  bool maximized = false;
+  ui::WindowShowState show_state = ui::SHOW_STATE_NORMAL;
   gfx::Rect bounds;
-  native_widget_->GetWindowBoundsAndMaximizedState(&bounds, &maximized);
-  widget_delegate_->SaveWindowPlacement(bounds, maximized);
+  native_widget_->GetWindowPlacement(&bounds, &show_state);
+  widget_delegate_->SaveWindowPlacement(bounds, show_state);
 }
 
 void Widget::SetInitialBounds(const gfx::Rect& bounds) {
@@ -1039,8 +1090,8 @@ void Widget::SetInitialBounds(const gfx::Rect& bounds) {
     return;
 
   gfx::Rect saved_bounds;
-  if (GetSavedBounds(&saved_bounds, &saved_maximized_state_)) {
-    if (saved_maximized_state_) {
+  if (GetSavedWindowPlacement(&saved_bounds, &saved_show_state_)) {
+    if (saved_show_state_ == ui::SHOW_STATE_MAXIMIZED) {
       // If we're going to maximize, wait until Show is invoked to set the
       // bounds. That way we avoid a noticable resize.
       initial_restored_bounds_ = saved_bounds;
@@ -1059,17 +1110,17 @@ void Widget::SetInitialBounds(const gfx::Rect& bounds) {
   }
 }
 
-bool Widget::GetSavedBounds(gfx::Rect* bounds, bool* maximize) {
+bool Widget::GetSavedWindowPlacement(gfx::Rect* bounds,
+                                     ui::WindowShowState* show_state) {
   // First we obtain the window's saved show-style and store it. We need to do
   // this here, rather than in Show() because by the time Show() is called,
   // the window's size will have been reset (below) and the saved maximized
   // state will have been lost. Sadly there's no way to tell on Windows when
   // a window is restored from maximized state, so we can't more accurately
   // track maximized state independently of sizing information.
-  widget_delegate_->GetSavedMaximizedState(maximize);
 
   // Restore the window's placement from the controller.
-  if (widget_delegate_->GetSavedWindowBounds(bounds)) {
+  if (widget_delegate_->GetSavedWindowPlacement(bounds, show_state)) {
     if (!widget_delegate_->ShouldRestoreWindowSize()) {
       bounds->set_size(non_client_view_->GetPreferredSize());
     } else {
@@ -1083,6 +1134,16 @@ bool Widget::GetSavedBounds(gfx::Rect* bounds, bool* maximize) {
     return true;
   }
   return false;
+}
+
+void Widget::ReplaceInputMethod(InputMethod* input_method) {
+  input_method_.reset(input_method);
+  // TODO(oshima): Gtk's textfield doesn't need views InputMethod.
+  // Remove this check once gtk is removed.
+  if (input_method) {
+    input_method->set_delegate(native_widget_);
+    input_method->Init(this);
+  }
 }
 
 namespace internal {

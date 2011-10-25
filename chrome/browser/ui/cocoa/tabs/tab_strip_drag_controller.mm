@@ -11,8 +11,7 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 
-// Provide the forward-declarations of new 10.7 SDK symbols so they can be
-// called when building with the 10.5 SDK.
+// Replicate specific 10.7 SDK declarations for building with prior SDKs.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
 MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
 
@@ -265,9 +264,12 @@ const NSTimeInterval kTearDuration = 0.333;
 
     // Disable window animation before calling |orderFront:| when detatching
     // to a new window.
-    NSWindowAnimationBehavior savedAnimationBehavior = 0;
+    NSWindowAnimationBehavior savedAnimationBehavior =
+        NSWindowAnimationBehaviorDefault;
+    bool didSaveAnimationBehavior = false;
     if ([dragWindow_ respondsToSelector:@selector(animationBehavior)] &&
         [dragWindow_ respondsToSelector:@selector(setAnimationBehavior:)]) {
+      didSaveAnimationBehavior = true;
       savedAnimationBehavior = [dragWindow_ animationBehavior];
       [dragWindow_ setAnimationBehavior:NSWindowAnimationBehaviorNone];
     }
@@ -286,11 +288,9 @@ const NSTimeInterval kTearDuration = 0.333;
     tearTime_ = [NSDate timeIntervalSinceReferenceDate];
     tearOrigin_ = sourceWindowFrame_.origin;
 
-    // Restore window animation behavior
-    if ([dragWindow_ respondsToSelector:@selector(animationBehavior)] &&
-        [dragWindow_ respondsToSelector:@selector(setAnimationBehavior:)]) {
+    // Restore window animation behavior.
+    if (didSaveAnimationBehavior)
       [dragWindow_ setAnimationBehavior:savedAnimationBehavior];
-    }
   }
 
   // TODO(pinkerton): http://crbug.com/25682 demonstrates a way to get here by

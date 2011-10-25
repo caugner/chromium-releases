@@ -15,7 +15,7 @@ from grit.node import message
 from grit.node import misc
 
 
-PACK_FILE_VERSION = 1
+PACK_FILE_VERSION = 3
 
 
 class DataPack(interface.ItemFormatter):
@@ -60,13 +60,17 @@ class DataPack(interface.ItemFormatter):
     ret.append(struct.pack("<II", PACK_FILE_VERSION, len(ids)))
     HEADER_LENGTH = 2 * 4             # Two uint32s.
 
-    index_length = len(ids) * 3 * 4   # Each entry is 3 uint32s.
+    # Each entry is a uint16 + a uint32s. We have one extra entry for the last
+    # item.
+    index_length = (len(ids) + 1) * (2 + 4)
 
     # Write index.
     data_offset = HEADER_LENGTH + index_length
     for id in ids:
-      ret.append(struct.pack("<III", id, data_offset, len(resources[id])))
+      ret.append(struct.pack("<HI", id, data_offset))
       data_offset += len(resources[id])
+
+    ret.append(struct.pack("<HI", 0, data_offset))
 
     # Write data.
     for id in ids:

@@ -18,7 +18,7 @@
 #include "chrome/browser/sync/glue/model_associator_mock.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/test/profile_mock.h"
+#include "chrome/test/base/profile_mock.h"
 #include "content/browser/browser_thread.h"
 
 using base::WaitableEvent;
@@ -152,21 +152,21 @@ class NonFrontendDataTypeControllerTest : public testing::Test {
         WillOnce(Return(true));
     EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
         WillOnce(DoAll(SetArgumentPointee<0>(true), Return(true)));
-    EXPECT_CALL(*model_associator_, AssociateModels()).
+    EXPECT_CALL(*model_associator_, AssociateModels(_)).
         WillOnce(Return(true));
     EXPECT_CALL(*dtc_mock_, RecordAssociationTime(_));
   }
 
   void SetActivateExpectations(DataTypeController::StartResult result) {
-    EXPECT_CALL(service_, ActivateDataType(_, _));
+    EXPECT_CALL(service_, ActivateDataType(_, _, _));
     EXPECT_CALL(start_callback_, Run(result,_));
   }
 
   void SetStopExpectations() {
     EXPECT_CALL(*dtc_mock_, StopAssociationAsync());
     EXPECT_CALL(*dtc_mock_, StopModels());
-    EXPECT_CALL(service_, DeactivateDataType(_, _));
-    EXPECT_CALL(*model_associator_, DisassociateModels());
+    EXPECT_CALL(service_, DeactivateDataType(_));
+    EXPECT_CALL(*model_associator_, DisassociateModels(_));
   }
 
   void SetStartFailExpectations(DataTypeController::StartResult result) {
@@ -222,7 +222,7 @@ TEST_F(NonFrontendDataTypeControllerTest, StartFirstRun) {
       WillOnce(Return(true));
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
       WillOnce(DoAll(SetArgumentPointee<0>(false), Return(true)));
-  EXPECT_CALL(*model_associator_, AssociateModels()).
+  EXPECT_CALL(*model_associator_, AssociateModels(_)).
       WillOnce(Return(true));
   EXPECT_CALL(*dtc_mock_, RecordAssociationTime(_));
   SetActivateExpectations(DataTypeController::OK_FIRST_RUN);
@@ -250,8 +250,9 @@ TEST_F(NonFrontendDataTypeControllerTest, StartAssociationFailed) {
       WillOnce(Return(true));
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
       WillOnce(DoAll(SetArgumentPointee<0>(true), Return(true)));
-  EXPECT_CALL(*model_associator_, AssociateModels()).
-      WillOnce(Return(false));
+  EXPECT_CALL(*model_associator_, AssociateModels(_)).
+      WillOnce(DoAll(browser_sync::SetSyncError(syncable::AUTOFILL),
+                     Return(false)));
   EXPECT_CALL(*dtc_mock_, RecordAssociationTime(_));
   SetStartFailExpectations(DataTypeController::ASSOCIATION_FAILED);
   // Set up association to fail with an association failed error.
@@ -308,9 +309,9 @@ TEST_F(NonFrontendDataTypeControllerTest, AbortDuringAssociationInactive) {
           Return(true)));
   EXPECT_CALL(*model_associator_, AbortAssociation()).WillOnce(
       SignalEvent(&pause_db_thread));
-  EXPECT_CALL(*model_associator_, AssociateModels()).WillOnce(Return(true));
+  EXPECT_CALL(*model_associator_, AssociateModels(_)).WillOnce(Return(true));
   EXPECT_CALL(*dtc_mock_, RecordAssociationTime(_));
-  EXPECT_CALL(service_, ActivateDataType(_, _));
+  EXPECT_CALL(service_, ActivateDataType(_, _, _));
   EXPECT_CALL(start_callback_, Run(DataTypeController::ABORTED,_));
   EXPECT_CALL(*dtc_mock_, RecordStartFailure(DataTypeController::ABORTED));
   SetStopExpectations();
@@ -337,10 +338,10 @@ TEST_F(NonFrontendDataTypeControllerTest, AbortDuringAssociationActivated) {
           Return(true)));
   EXPECT_CALL(*model_associator_, AbortAssociation()).WillOnce(
       SignalEvent(&pause_db_thread));
-  EXPECT_CALL(*model_associator_, AssociateModels()).
+  EXPECT_CALL(*model_associator_, AssociateModels(_)).
       WillOnce(Return(true));
   EXPECT_CALL(*dtc_mock_, RecordAssociationTime(_));
-  EXPECT_CALL(service_, ActivateDataType(_, _)).WillOnce(DoAll(
+  EXPECT_CALL(service_, ActivateDataType(_, _, _)).WillOnce(DoAll(
       SignalEvent(&wait_for_db_thread_pause),
       WaitOnEvent(&pause_db_thread)));
   EXPECT_CALL(start_callback_, Run(DataTypeController::ABORTED,_));

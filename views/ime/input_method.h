@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/i18n/rtl.h"
 #include "ui/base/ime/text_input_type.h"
+#include "views/views_export.h"
 
 namespace views {
 
@@ -30,7 +31,7 @@ class Widget;
 // And in Views control system, only the top-level NativeWidget has a native
 // window that can get keyboard focus. So this API is designed to be bound to
 // the top-level NativeWidget.
-class InputMethod {
+class VIEWS_EXPORT InputMethod {
  public:
   virtual ~InputMethod() {}
 
@@ -100,6 +101,9 @@ class InputMethod {
   // Gets the text input type of the focused text input client. Returns
   // ui::TEXT_INPUT_TYPE_NONE if there is no focused text input client.
   virtual ui::TextInputType GetTextInputType() const = 0;
+
+  // Returns true if the input method is a mock and not real.
+  virtual bool IsMock() const = 0;
 
   // TODO(suzhe): Support mouse/touch event.
 };

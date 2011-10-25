@@ -7,10 +7,9 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/plugin_installer_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
-#include "chrome/browser/tab_contents/simple_alert_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -21,10 +20,9 @@
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/plugins/npapi/default_plugin_shared.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/plugin_list.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 
 namespace {
 
@@ -65,16 +63,16 @@ PluginInfoBarDelegate::~PluginInfoBarDelegate() {
 }
 
 bool PluginInfoBarDelegate::Cancel() {
-  tab_contents_->render_view_host()->Send(new ViewMsg_LoadBlockedPlugins(
+  tab_contents_->render_view_host()->Send(new ChromeViewMsg_LoadBlockedPlugins(
       tab_contents_->render_view_host()->routing_id()));
   return true;
 }
 
 bool PluginInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
-  if (disposition == CURRENT_TAB)
-    disposition = NEW_FOREGROUND_TAB;
-  GURL url = google_util::AppendGoogleLocaleParam(GURL(GetLearnMoreURL()));
-  tab_contents_->OpenURL(url, GURL(), disposition, PageTransition::LINK);
+  tab_contents_->OpenURL(
+      google_util::AppendGoogleLocaleParam(GURL(GetLearnMoreURL())), GURL(),
+      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+      PageTransition::LINK);
   return false;
 }
 
@@ -160,7 +158,9 @@ bool BlockedPluginInfoBarDelegate::Accept() {
 bool BlockedPluginInfoBarDelegate::Cancel() {
   UserMetrics::RecordAction(
       UserMetricsAction("BlockedPluginInfobar.AlwaysAllow"));
-  tab_contents_->profile()->GetHostContentSettingsMap()->AddExceptionForURL(
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents_->browser_context());
+  profile->GetHostContentSettingsMap()->AddExceptionForURL(
       tab_contents_->GetURL(),
       tab_contents_->GetURL(),
       CONTENT_SETTINGS_TYPE_PLUGINS,
@@ -292,9 +292,7 @@ PluginObserver::~PluginObserver() {
 
 bool PluginObserver::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(PluginObserver, message)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_MissingPluginStatus, OnMissingPluginStatus)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_CrashedPlugin, OnCrashedPlugin)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_BlockedOutdatedPlugin,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_BlockedOutdatedPlugin,
                         OnBlockedOutdatedPlugin)
     IPC_MESSAGE_UNHANDLED(return false)
   IPC_END_MESSAGE_MAP()
@@ -302,61 +300,9 @@ bool PluginObserver::OnMessageReceived(const IPC::Message& message) {
   return true;
 }
 
-PluginInstallerInfoBarDelegate* PluginObserver::GetPluginInstaller() {
-  if (plugin_installer_ == NULL)
-    plugin_installer_.reset(new PluginInstallerInfoBarDelegate(tab_contents()));
-  return plugin_installer_->AsPluginInstallerInfoBarDelegate();
-}
-
-void PluginObserver::OnMissingPluginStatus(int status) {
-  // TODO(PORT): pull in when plug-ins work
-#if defined(OS_WIN)
-  if (status == webkit::npapi::default_plugin::MISSING_PLUGIN_AVAILABLE) {
-    tab_contents_->AddInfoBar(
-        new PluginInstallerInfoBarDelegate(tab_contents()));
-    return;
-  }
-
-  DCHECK_EQ(webkit::npapi::default_plugin::MISSING_PLUGIN_USER_STARTED_DOWNLOAD,
-            status);
-  for (size_t i = 0; i < tab_contents_->infobar_count(); ++i) {
-    InfoBarDelegate* delegate = tab_contents_->GetInfoBarDelegateAt(i);
-    if (delegate->AsPluginInstallerInfoBarDelegate() != NULL) {
-      tab_contents_->RemoveInfoBar(delegate);
-      return;
-    }
-  }
-#endif
-}
-
-void PluginObserver::OnCrashedPlugin(const FilePath& plugin_path) {
-  DCHECK(!plugin_path.value().empty());
-
-  string16 plugin_name = plugin_path.LossyDisplayName();
-  webkit::npapi::WebPluginInfo plugin_info;
-  if (webkit::npapi::PluginList::Singleton()->GetPluginInfoByPath(
-          plugin_path, &plugin_info) &&
-      !plugin_info.name.empty()) {
-    plugin_name = plugin_info.name;
-#if defined(OS_MACOSX)
-    // Many plugins on the Mac have .plugin in the actual name, which looks
-    // terrible, so look for that and strip it off if present.
-    const std::string kPluginExtension = ".plugin";
-    if (EndsWith(plugin_name, ASCIIToUTF16(kPluginExtension), true))
-      plugin_name.erase(plugin_name.length() - kPluginExtension.length());
-#endif  // OS_MACOSX
-  }
-  gfx::Image* icon = &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INFOBAR_PLUGIN_CRASHED);
-  tab_contents_->AddInfoBar(new SimpleAlertInfoBarDelegate(tab_contents(),
-      icon,
-      l10n_util::GetStringFUTF16(IDS_PLUGIN_CRASHED_PROMPT, plugin_name),
-      true));
-}
-
 void PluginObserver::OnBlockedOutdatedPlugin(const string16& name,
                                              const GURL& update_url) {
-  tab_contents_->AddInfoBar(update_url.is_empty() ?
+  tab_contents_->infobar_tab_helper()->AddInfoBar(update_url.is_empty() ?
       static_cast<InfoBarDelegate*>(new BlockedPluginInfoBarDelegate(
           tab_contents(), name)) :
       new OutdatedPluginInfoBarDelegate(tab_contents(), name, update_url));

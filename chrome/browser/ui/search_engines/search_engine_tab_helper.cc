@@ -41,7 +41,7 @@ void SearchEngineTabHelper::DidNavigateMainFramePostCommit(
 bool SearchEngineTabHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SearchEngineTabHelper, message)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_PageHasOSDD, OnPageHasOSDD)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_PageHasOSDD, OnPageHasOSDD)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -58,11 +58,13 @@ void SearchEngineTabHelper::OnPageHasOSDD(
 
   // Make sure page_id is the current page and other basic checks.
   DCHECK(doc_url.is_valid());
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
   if (!tab_contents()->IsActiveEntry(page_id))
     return;
-  if (!tab_contents()->profile()->GetTemplateURLFetcher())
+  if (!profile->GetTemplateURLFetcher())
     return;
-  if (tab_contents()->profile()->IsOffTheRecord())
+  if (profile->IsOffTheRecord())
     return;
 
   TemplateURLFetcher::ProviderType provider_type;
@@ -116,7 +118,7 @@ void SearchEngineTabHelper::OnPageHasOSDD(
 
   // Download the OpenSearch description document. If this is successful, a
   // new keyword will be created when done.
-  tab_contents()->profile()->GetTemplateURLFetcher()->ScheduleDownload(
+  profile->GetTemplateURLFetcher()->ScheduleDownload(
       keyword,
       doc_url,
       base_entry->favicon().url(),
@@ -129,7 +131,9 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
   if (!params.searchable_form_url.is_valid())
     return;
 
-  if (tab_contents()->profile()->IsOffTheRecord())
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  if (profile->IsOffTheRecord())
     return;
 
   const NavigationController& controller = tab_contents()->controller();
@@ -156,7 +160,7 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
     return;
 
   TemplateURLService* url_service =
-      TemplateURLServiceFactory::GetForProfile(tab_contents()->profile());
+      TemplateURLServiceFactory::GetForProfile(profile);
   if (!url_service)
     return;
 

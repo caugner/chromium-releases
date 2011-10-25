@@ -78,7 +78,7 @@ class ScrollButton : public views::TextButton {
     DOWN
   };
 
-  explicit ScrollButton(views::ButtonListener* listener, Type type);
+  ScrollButton(views::ButtonListener* listener, Type type);
 
  protected:
   // views::View overrides.
@@ -153,6 +153,10 @@ bool SideTabStrip::IsPositionInWindowCaption(const gfx::Point& point) {
 }
 
 void SideTabStrip::SetBackgroundOffset(const gfx::Point& offset) {
+}
+
+views::View* SideTabStrip::GetNewTabButton() {
+  return newtab_button_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

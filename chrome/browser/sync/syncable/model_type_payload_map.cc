@@ -4,10 +4,10 @@
 
 #include "chrome/browser/sync/syncable/model_type_payload_map.h"
 
-#include "chrome/browser/sync/engine/model_safe_worker.h"
+#include <vector>
 
 #include "base/json/json_writer.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 
 using browser_sync::ModelSafeRoutingInfo;
@@ -24,6 +24,15 @@ ModelTypePayloadMap ModelTypePayloadMapFromBitSet(
     }
   }
   return types_with_payloads;
+}
+
+ModelTypeSet ModelTypePayloadMapToSet(const ModelTypePayloadMap& payload_map) {
+  ModelTypeSet types;
+  for (ModelTypePayloadMap::const_iterator it = payload_map.begin();
+       it != payload_map.end(); ++it) {
+    types.insert(it->first);
+  }
+  return types;
 }
 
 ModelTypePayloadMap ModelTypePayloadMapFromRoutingInfo(

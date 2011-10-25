@@ -13,9 +13,12 @@
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/file_path.h"
+#include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "content/common/unix_domain_socket_posix.h"
 #include "content/common/zygote_fork_delegate_linux.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/nacl_helper_linux.h"
 
@@ -23,6 +26,8 @@ NaClForkDelegate::NaClForkDelegate()
     : ready_(false),
       sandboxed_(false),
       fd_(-1) {}
+
+const char kNaClHelperAtZero[] = "--at-zero";
 
 void NaClForkDelegate::Init(const bool sandboxed,
                             const int browserdesc,
@@ -40,19 +45,20 @@ void NaClForkDelegate::Init(const bool sandboxed,
   base::file_handle_mapping_vector fds_to_map;
   fds_to_map.push_back(std::make_pair(fds[1], kNaClZygoteDescriptor));
   fds_to_map.push_back(std::make_pair(sandboxdesc, kNaClSandboxDescriptor));
-  // TODO(bradchen): Before making this the default for release builds,
-  // replace command line switch with PathService::Get().
-  const std::string nacl_zygote_exe =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kNaClLinuxHelper);
   ready_ = false;
-  if (nacl_zygote_exe.length() != 0) {
-    CommandLine::StringVector argv = CommandLine::ForCurrentProcess()->argv();
-    argv[0] = nacl_zygote_exe;
+  FilePath helper_exe;
+  FilePath helper_bootstrap_exe;
+  if (PathService::Get(chrome::FILE_NACL_HELPER, &helper_exe) &&
+      PathService::Get(chrome::FILE_NACL_HELPER_BOOTSTRAP,
+                       &helper_bootstrap_exe) &&
+      !RunningOnValgrind()) {
+    CommandLine cmd_line(helper_bootstrap_exe);
+    cmd_line.AppendArgPath(helper_exe);
+    cmd_line.AppendArgNative(kNaClHelperAtZero);
     base::LaunchOptions options;
     options.fds_to_remap = &fds_to_map;
     options.clone_flags = CLONE_FS | SIGCHLD;
-    ready_ = base::LaunchProcess(argv, options, NULL);
+    ready_ = base::LaunchProcess(cmd_line.argv(), options, NULL);
     // parent and error cases are handled below
   }
   if (HANDLE_EINTR(close(fds[1])) != 0)

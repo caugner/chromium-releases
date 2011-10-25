@@ -56,14 +56,14 @@ RenderViewHostManager::~RenderViewHostManager() {
   }
 }
 
-void RenderViewHostManager::Init(Profile* profile,
+void RenderViewHostManager::Init(content::BrowserContext* browser_context,
                                  SiteInstance* site_instance,
                                  int routing_id) {
   // Create a RenderViewHost, once we have an instance.  It is important to
   // immediately give this SiteInstance to a RenderViewHost so that it is
   // ref counted.
   if (!site_instance)
-    site_instance = SiteInstance::CreateSiteInstance(profile);
+    site_instance = SiteInstance::CreateSiteInstance(browser_context);
   render_view_host_ = RenderViewHostFactory::Create(
       site_instance, render_view_delegate_, routing_id, delegate_->
       GetControllerForRenderManager().session_storage_namespace());
@@ -346,15 +346,17 @@ bool RenderViewHostManager::ShouldSwapProcessesForNavigation(
   // site, which might already be committed to a Web UI URL (such as the NTP).
   const GURL& current_url = (cur_entry) ? cur_entry->url() :
       render_view_host_->site_instance()->site();
-  Profile* profile = delegate_->GetControllerForRenderManager().profile();
+  content::BrowserContext* browser_context =
+      delegate_->GetControllerForRenderManager().browser_context();
   const content::WebUIFactory* web_ui_factory = content::WebUIFactory::Get();
-  if (web_ui_factory->UseWebUIForURL(profile, current_url)) {
+  if (web_ui_factory->UseWebUIForURL(browser_context, current_url)) {
     // Force swap if it's not an acceptable URL for Web UI.
-    if (!web_ui_factory->IsURLAcceptableForWebUI(profile, new_entry->url()))
+    if (!web_ui_factory->IsURLAcceptableForWebUI(browser_context,
+                                                 new_entry->url()))
       return true;
   } else {
     // Force swap if it's a Web UI URL.
-    if (web_ui_factory->UseWebUIForURL(profile, new_entry->url()))
+    if (web_ui_factory->UseWebUIForURL(browser_context, new_entry->url()))
       return true;
   }
 
@@ -393,7 +395,7 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
 
   const GURL& dest_url = entry.url();
   NavigationController& controller = delegate_->GetControllerForRenderManager();
-  Profile* profile = controller.profile();
+  content::BrowserContext* browser_context = controller.browser_context();
 
   // If the entry has an instance already we should use it, unless the URL
   // is part of an app that has been installed or uninstalled since the last
@@ -437,8 +439,9 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
     // want to use the curr_instance if it has no site, since it will have a
     // RenderProcessHost of TYPE_NORMAL.  Create a new SiteInstance for this
     // URL instead (with the correct process type).
-    if (content::WebUIFactory::Get()->UseWebUIForURL(profile, dest_url)) {
-      return SiteInstance::CreateSiteInstanceForURL(profile, dest_url);
+    if (content::WebUIFactory::Get()->UseWebUIForURL(browser_context,
+                                                     dest_url)) {
+      return SiteInstance::CreateSiteInstanceForURL(browser_context, dest_url);
     }
 
     // Normally the "site" on the SiteInstance is set lazily when the load
@@ -487,7 +490,7 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
   // Use the current SiteInstance for same site navigations, as long as the
   // process type is correct.  (The URL may have been installed as an app since
   // the last time we visited it.)
-  if (SiteInstance::IsSameWebSite(profile, current_url, dest_url) &&
+  if (SiteInstance::IsSameWebSite(browser_context, current_url, dest_url) &&
       !curr_instance->HasWrongProcessForURL(dest_url)) {
     return curr_instance;
   } else if (ShouldSwapProcessesForNavigation(curr_entry, &entry)) {
@@ -497,7 +500,7 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
     // Pages), keeping them in the same process. When you navigate away from
     // that page, we want to explicity ignore that BrowsingInstance and group
     // this page into the appropriate SiteInstance for its URL.
-    return SiteInstance::CreateSiteInstanceForURL(profile, dest_url);
+    return SiteInstance::CreateSiteInstanceForURL(browser_context, dest_url);
   } else {
     // Start the new renderer in a new SiteInstance, but in the current
     // BrowsingInstance.  It is important to immediately give this new
@@ -632,8 +635,19 @@ void RenderViewHostManager::CommitPending() {
   // in case we navigate back to it.
   if (old_render_view_host->IsRenderViewLive()) {
     DCHECK(old_render_view_host->is_swapped_out());
-    swapped_out_hosts_[old_render_view_host->site_instance()->id()] =
-        old_render_view_host;
+    // Temp fix for http://crbug.com/90867 until we do a better cleanup to make
+    // sure we don't get different rvh instances for the same site instance
+    // in the same rvhmgr.
+    // TODO(creis): Clean this up, and duplication in SwapInRenderViewHost.
+    int32 old_site_instance_id = old_render_view_host->site_instance()->id();
+    RenderViewHostMap::iterator iter =
+        swapped_out_hosts_.find(old_site_instance_id);
+    if (iter != swapped_out_hosts_.end() &&
+        iter->second != old_render_view_host) {
+      // Shutdown the RVH that will be replaced in the map to avoid a leak.
+      iter->second->Shutdown();
+    }
+    swapped_out_hosts_[old_site_instance_id] = old_render_view_host;
   } else {
     old_render_view_host->Shutdown();
   }
@@ -852,8 +866,19 @@ void RenderViewHostManager::SwapInRenderViewHost(RenderViewHost* rvh) {
   // in case we navigate back to it.
   if (old_render_view_host->IsRenderViewLive()) {
     DCHECK(old_render_view_host->is_swapped_out());
-    swapped_out_hosts_[old_render_view_host->site_instance()->id()] =
-        old_render_view_host;
+    // Temp fix for http://crbug.com/90867 until we do a better cleanup to make
+    // sure we don't get different rvh instances for the same site instance
+    // in the same rvhmgr.
+    // TODO(creis): Clean this up as well as duplication with CommitPending.
+    int32 old_site_instance_id = old_render_view_host->site_instance()->id();
+    RenderViewHostMap::iterator iter =
+        swapped_out_hosts_.find(old_site_instance_id);
+    if (iter != swapped_out_hosts_.end() &&
+        iter->second != old_render_view_host) {
+      // Shutdown the RVH that will be replaced in the map to avoid a leak.
+      iter->second->Shutdown();
+    }
+    swapped_out_hosts_[old_site_instance_id] = old_render_view_host;
   } else {
     old_render_view_host->Shutdown();
   }

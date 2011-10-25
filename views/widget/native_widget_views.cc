@@ -10,6 +10,7 @@
 #include "views/views_delegate.h"
 #include "views/widget/native_widget_view.h"
 #include "views/widget/root_view.h"
+#include "views/widget/window_manager.h"
 
 #if defined(HAVE_IBUS)
 #include "views/ime/input_method_ibus.h"
@@ -36,10 +37,11 @@ NativeWidgetViews::NativeWidgetViews(internal::NativeWidgetDelegate* delegate)
 NativeWidgetViews::~NativeWidgetViews() {
   delegate_->OnNativeWidgetDestroying();
 
-  // We must prevent the NativeWidgetView from attempting to delete us.
-  view_->set_delete_native_widget(false);
-  if (delete_native_view_)
+  if (view_ && delete_native_view_) {
+    // We must prevent the NativeWidgetView from attempting to delete us.
+    view_->set_delete_native_widget(false);
     delete view_;
+  }
 
   delegate_->OnNativeWidgetDestroyed();
   if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET)
@@ -55,26 +57,33 @@ const View* NativeWidgetViews::GetView() const {
 }
 
 void NativeWidgetViews::OnActivate(bool active) {
+  // TODO(oshima): find out if we should check toplevel here.
   if (active_ == active)
     return;
   active_ = active;
   delegate_->OnNativeWidgetActivationChanged(active);
-  InputMethod* input_method = GetInputMethodNative();
+
   // TODO(oshima): Focus change should be separated from window activation.
   // This will be fixed when we have WM API.
-  if (active) {
-    input_method->OnFocus();
-    // See description of got_initial_focus_in_ for details on this.
-    GetWidget()->GetFocusManager()->RestoreFocusedView();
-  } else {
-    input_method->OnBlur();
-    GetWidget()->GetFocusManager()->StoreFocusedView();
+  Widget* widget = GetWidget();
+  if (widget->is_top_level()) {
+    InputMethod* input_method = widget->GetInputMethod();
+    if (active) {
+      input_method->OnFocus();
+      // See description of got_initial_focus_in_ for details on this.
+      widget->GetFocusManager()->RestoreFocusedView();
+    } else {
+      input_method->OnBlur();
+      widget->GetFocusManager()->StoreFocusedView();
+    }
   }
   view_->SchedulePaint();
 }
 
 bool NativeWidgetViews::OnKeyEvent(const KeyEvent& key_event) {
-  GetInputMethodNative()->DispatchKeyEvent(key_event);
+  InputMethod* input_method = GetWidget()->GetInputMethod();
+  DCHECK(input_method);
+  input_method->DispatchKeyEvent(key_event);
   return true;
 }
 
@@ -147,6 +156,10 @@ gfx::NativeWindow NativeWidgetViews::GetNativeWindow() const {
 }
 
 Widget* NativeWidgetViews::GetTopLevelWidget() {
+  // This can get called when this is in the process of being destroyed, and
+  // view_ has already been unset.
+  if (!view_)
+    return GetWidget();
   if (view_->parent() == ViewsDelegate::views_delegate->GetDefaultParentView())
     return GetWidget();
   // During Widget destruction, this function may be called after |view_| is
@@ -181,12 +194,16 @@ void NativeWidgetViews::ViewRemoved(View* view) {
 }
 
 void NativeWidgetViews::SetNativeWindowProperty(const char* name, void* value) {
-  NOTIMPLEMENTED();
+  if (value)
+    window_properties_[name] = value;
+  else
+    window_properties_.erase(name);
 }
 
 void* NativeWidgetViews::GetNativeWindowProperty(const char* name) const {
-  NOTIMPLEMENTED();
-  return NULL;
+  std::map<const char*, void*>::const_iterator iter =
+      window_properties_.find(name);
+  return iter != window_properties_.end() ? iter->second : NULL;
 }
 
 TooltipManager* NativeWidgetViews::GetTooltipManager() const {
@@ -206,72 +223,39 @@ void NativeWidgetViews::SendNativeAccessibilityEvent(
 }
 
 void NativeWidgetViews::SetMouseCapture() {
-  View* parent_root_view = GetParentNativeWidget()->GetWidget()->GetRootView();
-  static_cast<internal::RootView*>(parent_root_view)->set_capture_view(view_);
-  GetParentNativeWidget()->SetMouseCapture();
+  WindowManager::Get()->SetMouseCapture(GetWidget());
 }
 
 void NativeWidgetViews::ReleaseMouseCapture() {
-  View* parent_root_view = GetParentNativeWidget()->GetWidget()->GetRootView();
-  static_cast<internal::RootView*>(parent_root_view)->set_capture_view(NULL);
-  GetParentNativeWidget()->ReleaseMouseCapture();
+  WindowManager::Get()->ReleaseMouseCapture(GetWidget());
 }
 
 bool NativeWidgetViews::HasMouseCapture() const {
-  // NOTE: we may need to tweak this to only return true if the parent native
-  // widget's RootView has us as the capture view.
-  const internal::NativeWidgetPrivate* parent_widget = GetParentNativeWidget();
-  if (!parent_widget)
-    return false;
-  const internal::RootView* parent_root =
-      static_cast<const internal::RootView*>(parent_widget->GetWidget()->
-                  GetRootView());
-  return parent_widget->HasMouseCapture() &&
-         view_ == parent_root->capture_view();
+  return WindowManager::Get()->HasMouseCapture(GetWidget());
 }
 
-void NativeWidgetViews::SetKeyboardCapture() {
-  GetParentNativeWidget()->SetKeyboardCapture();
-}
-
-void NativeWidgetViews::ReleaseKeyboardCapture() {
-  GetParentNativeWidget()->ReleaseKeyboardCapture();
-}
-
-bool NativeWidgetViews::HasKeyboardCapture() const {
-  return GetParentNativeWidget()->HasKeyboardCapture();
-}
-
-InputMethod* NativeWidgetViews::GetInputMethodNative() {
-  if (!input_method_.get()) {
+InputMethod* NativeWidgetViews::CreateInputMethod() {
 #if defined(HAVE_IBUS)
-    input_method_.reset(static_cast<InputMethod*>(new InputMethodIBus(this)));
+  InputMethod* input_method = new InputMethodIBus(this);
 #else
-    // TODO(suzhe|oshima): Figure out what to do on windows.
-    input_method_.reset(new MockInputMethod(this));
+  InputMethod* input_method = new MockInputMethod(this);
 #endif
-    input_method_->Init(GetWidget());
-  }
-  return input_method_.get();
-}
-
-void NativeWidgetViews::ReplaceInputMethod(InputMethod* input_method) {
-  CHECK(input_method);
-  input_method_.reset(input_method);
-  input_method->set_delegate(this);
   input_method->Init(GetWidget());
+  return input_method;
 }
 
 void NativeWidgetViews::CenterWindow(const gfx::Size& size) {
-  // TODO(beng): actually center.
-  GetView()->SetBounds(0, 0, size.width(), size.height());
+  const gfx::Size parent_size = GetView()->parent()->size();
+  GetView()->SetBounds((parent_size.width() - size.width())/2,
+                       (parent_size.height() - size.height())/2,
+                       size.width(), size.height());
 }
 
-void NativeWidgetViews::GetWindowBoundsAndMaximizedState(
+void NativeWidgetViews::GetWindowPlacement(
     gfx::Rect* bounds,
-    bool* maximized) const {
+    ui::WindowShowState* show_state) const {
   *bounds = GetView()->bounds();
-  *maximized = false;
+  *show_state = ui::SHOW_STATE_NORMAL;
 }
 
 void NativeWidgetViews::SetWindowTitle(const std::wstring& title) {
@@ -347,9 +331,6 @@ void NativeWidgetViews::Close() {
 }
 
 void NativeWidgetViews::CloseNow() {
-  // reset input_method before destroying widget.
-  input_method_.reset();
-
   delete view_;
   view_ = NULL;
 }
@@ -364,9 +345,11 @@ void NativeWidgetViews::Show() {
 
 void NativeWidgetViews::Hide() {
   view_->SetVisible(false);
+  if (HasMouseCapture())
+    ReleaseMouseCapture();
 }
 
-void NativeWidgetViews::ShowWithState(ShowState state) {
+void NativeWidgetViews::ShowWithWindowState(ui::WindowShowState show_state) {
   Show();
 }
 
@@ -381,11 +364,12 @@ bool NativeWidgetViews::IsVisible() const {
 
 void NativeWidgetViews::Activate() {
   // Enable WidgetObserverTest.ActivationChange when this is implemented.
-  NOTIMPLEMENTED();
+  MoveToTop();
+  OnActivate(true);
 }
 
 void NativeWidgetViews::Deactivate() {
-  NOTIMPLEMENTED();
+  OnActivate(false);
 }
 
 bool NativeWidgetViews::IsActive() const {
@@ -479,6 +463,7 @@ void NativeWidgetViews::SchedulePaintInRect(const gfx::Rect& rect) {
 }
 
 void NativeWidgetViews::SetCursor(gfx::NativeCursor cursor) {
+  view_->set_cursor(cursor);
   GetParentNativeWidget()->SetCursor(cursor);
 }
 
@@ -490,11 +475,32 @@ void NativeWidgetViews::FocusNativeView(gfx::NativeView native_view) {
   GetParentNativeWidget()->FocusNativeView(native_view);
 }
 
+bool NativeWidgetViews::ConvertPointFromAncestor(
+    const Widget* ancestor, gfx::Point* point) const {
+  // This method converts the point from ancestor's coordinates to
+  // this widget's coordinate using recursion as the widget hierachy
+  // is usually shallow.
+
+  if (ancestor == GetWidget())
+    return true;  // no conversion necessary
+
+  const Widget* parent_widget = view_->GetWidget();
+  if (!parent_widget)  // couldn't reach the ancestor.
+    return false;
+
+  if (parent_widget == ancestor ||
+      parent_widget->ConvertPointFromAncestor(ancestor, point)) {
+    View::ConvertPointToView(parent_widget->GetRootView(), GetView(), point);
+    return true;
+  }
+  return false;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetViews, private:
 
 internal::NativeWidgetPrivate* NativeWidgetViews::GetParentNativeWidget() {
-  Widget* containing_widget = view_->GetWidget();
+  Widget* containing_widget = view_ ? view_->GetWidget() : NULL;
   return containing_widget ? static_cast<internal::NativeWidgetPrivate*>(
       containing_widget->native_widget()) :
       NULL;
@@ -502,7 +508,7 @@ internal::NativeWidgetPrivate* NativeWidgetViews::GetParentNativeWidget() {
 
 const internal::NativeWidgetPrivate*
     NativeWidgetViews::GetParentNativeWidget() const {
-  const Widget* containing_widget = view_->GetWidget();
+  const Widget* containing_widget = view_ ? view_->GetWidget() : NULL;
   return containing_widget ? static_cast<const internal::NativeWidgetPrivate*>(
       containing_widget->native_widget()) :
       NULL;

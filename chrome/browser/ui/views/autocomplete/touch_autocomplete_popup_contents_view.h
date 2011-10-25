@@ -11,7 +11,6 @@
 
 class AutocompleteEditModel;
 class OmniboxView;
-class Profile;
 
 namespace gfx {
 class Canvas;
@@ -47,8 +46,7 @@ class TouchAutocompletePopupContentsView
   TouchAutocompletePopupContentsView(const gfx::Font& font,
                                      OmniboxView* omnibox_view,
                                      AutocompleteEditModel* edit_model,
-                                     Profile* profile,
-                                     const views::View* location_bar);
+                                     views::View* location_bar);
   virtual ~TouchAutocompletePopupContentsView();
 
   // AutocompletePopupContentsView:

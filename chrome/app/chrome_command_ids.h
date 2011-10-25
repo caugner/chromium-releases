@@ -69,6 +69,7 @@
 #define IDC_SAVE_PAGE                   35004
 #define IDC_ENCODING_MENU               35005
 #define IDC_EMAIL_PAGE_LOCATION         35006
+#define IDC_ADVANCED_PRINT              35007
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -161,17 +162,16 @@
 #define IDC_ABOUT                       40018
 #define IDC_HELP_PAGE                   40019
 #define IDC_SHOW_APP_MENU               40020
-#define IDC_MANAGE_EXTENSIONS           40022
-#define IDC_AUTOFILL_DEFAULT            40023
-#define IDC_DEV_TOOLS_INSPECT           40025
-#define IDC_UPGRADE_DIALOG              40026
-#define IDC_VIEW_INCOMPATIBILITIES      40027
-#define IDC_VIEW_BACKGROUND_PAGES       40028
-#define IDC_SHOW_KEYBOARD_OVERLAY       40029
-#define IDC_PROFILING_ENABLED           40030
-#define IDC_FILE_MANAGER                40031
-#define IDC_BOOKMARKS_MENU              40032
-#define IDC_SHOW_SYNC_SETUP             40033
+#define IDC_MANAGE_EXTENSIONS           40021
+#define IDC_DEV_TOOLS_INSPECT           40022
+#define IDC_UPGRADE_DIALOG              40023
+#define IDC_VIEW_INCOMPATIBILITIES      40024
+#define IDC_VIEW_BACKGROUND_PAGES       40025
+#define IDC_SHOW_KEYBOARD_OVERLAY       40026
+#define IDC_PROFILING_ENABLED           40027
+#define IDC_FILE_MANAGER                40028
+#define IDC_BOOKMARKS_MENU              40029
+#define IDC_SHOW_SYNC_SETUP             40030
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -205,6 +205,9 @@
 #define IDC_TRANSLATE_OPTIONS_ABOUT                 42004
 #define IDC_TRANSLATE_ORIGINAL_LANGUAGE_BASE        42100
 #define IDC_TRANSLATE_TARGET_LANGUAGE_BASE          42400
+
+// Speech input
+#define IDC_TOGGLE_SPEECH_INPUT         42500
 
 // Identifiers for platform-specific items.
 // Placed in a common file to help insure they never collide.
@@ -262,6 +265,7 @@
 #define IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS 50153
 #define IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY 50154
 #define IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS 50155
+#define IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION 50156
 // Frame items.
 #define IDC_CONTENT_CONTEXT_RELOADFRAME 50160
 #define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50161
@@ -286,6 +290,11 @@
 
 // Context menu items in the status tray
 #define IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND 51100
+
+// Context menu items for speech recognition
+#define IDC_SPEECH_INPUT_MENU 51200
+#define IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS 51201
+#define IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT 51202
 
 // Protocol handler menu entries
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST     52000

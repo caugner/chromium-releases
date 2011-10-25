@@ -19,6 +19,7 @@
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_groups.h"
+#include "content/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
@@ -43,16 +44,7 @@ using WebKit::WebView;
 static const char kUserScriptHead[] = "(function (unsafeWindow) {\n";
 static const char kUserScriptTail[] = "\n})(window);";
 
-// Sets up the chrome.extension module. This may be run multiple times per
-// context, but the init method deletes itself after the first time.
-static const char kInitExtension[] =
-  "if (chrome.initExtension) chrome.initExtension('%s', true, %s);";
-
-// static
-UserScriptSlave::IsolatedWorldMap UserScriptSlave::isolated_world_ids_;
-
-// static
-int UserScriptSlave::GetIsolatedWorldId(
+int UserScriptSlave::GetIsolatedWorldIdForExtension(
     const Extension* extension, WebFrame* frame) {
   static int g_next_isolated_world_id = 1;
 
@@ -78,6 +70,16 @@ int UserScriptSlave::GetIsolatedWorldId(
       new_id,
       WebSecurityOrigin::create(extension->url()));
   return new_id;
+}
+
+std::string UserScriptSlave::GetExtensionIdForIsolatedWorld(
+    int isolated_world_id) {
+  for (IsolatedWorldMap::iterator iter = isolated_world_ids_.begin();
+       iter != isolated_world_ids_.end(); ++iter) {
+    if (iter->second == isolated_world_id)
+      return iter->first;
+  }
+  return "";
 }
 
 // static
@@ -106,7 +108,6 @@ void UserScriptSlave::InitializeIsolatedWorld(
   }
 }
 
-// static
 void UserScriptSlave::RemoveIsolatedWorld(const std::string& extension_id) {
   isolated_world_ids_.erase(extension_id);
 }
@@ -191,6 +192,7 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
   }
 
   // Push user styles down into WebCore
+  RenderThread::current()->EnsureWebKitInitialized();
   WebView::removeAllUserContent();
   for (size_t i = 0; i < scripts_.size(); ++i) {
     UserScript* script = scripts_[i];
@@ -225,17 +227,6 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
   }
 
   return true;
-}
-
-// static
-void UserScriptSlave::InsertInitExtensionCode(
-    std::vector<WebScriptSource>* sources, const std::string& extension_id) {
-  DCHECK(sources);
-  bool incognito = ChromeRenderProcessObserver::is_incognito_process();
-  sources->insert(sources->begin(), WebScriptSource(WebString::fromUTF8(
-      base::StringPrintf(kInitExtension,
-                         extension_id.c_str(),
-                         incognito ? "true" : "false"))));
 }
 
 void UserScriptSlave::InjectScripts(WebFrame* frame,
@@ -290,6 +281,8 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
 
         // We add this dumb function wrapper for standalone user script to
         // emulate what Greasemonkey does.
+        // TODO(aa): I think that maybe "is_standalone" scripts don't exist
+        // anymore. Investigate.
         if (script->is_standalone() || script->emulate_greasemonkey()) {
           content.insert(0, kUserScriptHead);
           content += kUserScriptTail;
@@ -311,10 +304,9 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
 
       // Setup chrome.self to contain an Extension object with the correct
       // ID.
-      if (!script->extension_id().empty()) {
-        InsertInitExtensionCode(&sources, script->extension_id());
-        isolated_world_id = GetIsolatedWorldId(extension, frame);
-      }
+      // TODO(aa): Can extension_id() ever be empty anymore?
+      if (!script->extension_id().empty())
+        isolated_world_id = GetIsolatedWorldIdForExtension(extension, frame);
 
       PerfTimer exec_timer;
       frame->executeScriptInIsolatedWorld(

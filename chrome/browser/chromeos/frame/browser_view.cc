@@ -31,7 +31,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/theme_provider.h"
@@ -41,6 +41,7 @@
 #include "views/controls/button/image_button.h"
 #include "views/controls/menu/menu_delegate.h"
 #include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 #include "views/window/hit_test.h"
@@ -448,7 +449,9 @@ void BrowserView::ChildPreferredSizeChanged(View* child) {
   Layout();
 }
 
-bool BrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
+bool BrowserView::GetSavedWindowPlacement(
+    gfx::Rect* bounds,
+    ui::WindowShowState* show_state) const {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeosFrame)) {
     // Typically we don't request a full screen size. This means we'll request a
     // non-full screen size, layout/paint at that size, then the window manager
@@ -456,9 +459,10 @@ bool BrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
     // resize/paint. To avoid this we always request a full screen size.
     *bounds = gfx::Screen::GetMonitorWorkAreaNearestWindow(
         GTK_WIDGET(GetWidget()->GetNativeWindow()));
+    *show_state = ui::SHOW_STATE_NORMAL;
     return true;
   }
-  return ::BrowserView::GetSavedWindowBounds(bounds);
+  return ::BrowserView::GetSavedWindowPlacement(bounds, show_state);
 }
 
 void BrowserView::Cut() {
@@ -511,10 +515,11 @@ void BrowserView::ShowContextMenuForView(views::View* source,
   if (hit_test == HTCAPTION || hit_test == HTNOWHERE) {
     // rebuild menu so it reflects current application state
     InitSystemMenu();
-    system_menu_->RunMenuAt(source->GetWidget()->GetNativeWindow(), NULL,
-                            gfx::Rect(p, gfx::Size(0,0)),
-                            views::MenuItemView::TOPLEFT,
-                            true);
+    if (system_menu_runner_->RunMenuAt(source->GetWidget(), NULL,
+            gfx::Rect(p, gfx::Size(0,0)), views::MenuItemView::TOPLEFT,
+            views::MenuRunner::HAS_MNEMONICS) ==
+        views::MenuRunner::MENU_DELETED)
+      return;
   }
 }
 
@@ -620,14 +625,16 @@ void BrowserView::GetAccessiblePanes(
 // BrowserView private.
 
 void BrowserView::InitSystemMenu() {
-  system_menu_.reset(new views::MenuItemView(system_menu_delegate_.get()));
-  system_menu_->AppendDelegateMenuItem(IDC_RESTORE_TAB);
-
-  system_menu_->AppendMenuItemWithLabel(
+  views::MenuItemView* menu =
+      new views::MenuItemView(system_menu_delegate_.get());
+  // MenuRunner takes ownership of menu.
+  system_menu_runner_.reset(new views::MenuRunner(menu));
+  menu->AppendDelegateMenuItem(IDC_RESTORE_TAB);
+  menu->AppendMenuItemWithLabel(
       IDC_NEW_TAB,
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_NEW_TAB)));
-  system_menu_->AppendSeparator();
-  system_menu_->AppendMenuItemWithLabel(
+  menu->AppendSeparator();
+  menu->AppendMenuItemWithLabel(
       IDC_TASK_MANAGER,
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER)));
 }

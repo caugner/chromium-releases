@@ -21,6 +21,12 @@ TabContents* TabContentsDelegate::OpenURLFromTab(
     const GURL& referrer,
     WindowOpenDisposition disposition,
     PageTransition::Type transition) {
+  return OpenURLFromTab(source,
+                        OpenURLParams(url, referrer, disposition, transition));
+}
+
+TabContents* TabContentsDelegate::OpenURLFromTab(TabContents* source,
+                                                 const OpenURLParams& params) {
   return NULL;
 }
 
@@ -28,8 +34,8 @@ void TabContentsDelegate::NavigationStateChanged(const TabContents* source,
                                                  unsigned changed_flags) {
 }
 
-std::string TabContentsDelegate::GetNavigationHeaders(const GURL& url) {
-  return std::string();
+void TabContentsDelegate::AddNavigationHeaders(const GURL& url,
+                                               std::string* headers) {
 }
 
 void TabContentsDelegate::AddNewContents(TabContents* source,
@@ -73,6 +79,7 @@ void TabContentsDelegate::WillShowConstrainedWindow(TabContents* source) {
 }
 
 void TabContentsDelegate::UpdateTargetURL(TabContents* source,
+                                          int32 page_id,
                                           const GURL& url) {
 }
 
@@ -145,7 +152,7 @@ bool TabContentsDelegate::ExecuteContextMenuCommand(int command) {
   return false;
 }
 
-void TabContentsDelegate::ShowPageInfo(Profile* profile,
+void TabContentsDelegate::ShowPageInfo(content::BrowserContext* browser_context,
                                        const GURL& url,
                                        const NavigationEntry::SSLStatus& ssl,
                                        bool show_history) {
@@ -272,6 +279,58 @@ class JavaScriptDialogCreatorStub : public content::JavaScriptDialogCreator {
 content::JavaScriptDialogCreator*
 TabContentsDelegate::GetJavaScriptDialogCreator() {
   return JavaScriptDialogCreatorStub::GetInstance();
+}
+
+void TabContentsDelegate::RunFileChooser(
+  TabContents* tab, const ViewHostMsg_RunFileChooser_Params& params) {
+}
+
+void TabContentsDelegate::EnumerateDirectory(TabContents* tab, int request_id,
+                                             const FilePath& path) {
+}
+
+void TabContentsDelegate::ToggleFullscreenModeForTab(TabContents* tab,
+                                                     bool enter_fullscreen) {
+}
+
+void TabContentsDelegate::JSOutOfMemory(TabContents* tab) {
+}
+
+void TabContentsDelegate::RegisterProtocolHandler(TabContents* tab,
+                                                  const std::string& protocol,
+                                                  const GURL& url,
+                                                  const string16& title) {
+}
+
+void TabContentsDelegate::RegisterIntentHandler(TabContents* tab,
+                                                const string16& action,
+                                                const string16& type,
+                                                const string16& href,
+                                                const string16& title) {
+}
+
+void TabContentsDelegate::WebIntentDispatch(TabContents* tab,
+                                            int routing_id,
+                                            const string16& action,
+                                            const string16& type,
+                                            const string16& data,
+                                            int intent_id) {
+}
+
+void TabContentsDelegate::FindReply(TabContents* tab,
+                                    int request_id,
+                                    int number_of_matches,
+                                    const gfx::Rect& selection_rect,
+                                    int active_match_ordinal,
+                                    bool final_update) {
+}
+
+void TabContentsDelegate::CrashedPlugin(TabContents* tab,
+                                        const FilePath& plugin_path) {
+}
+
+void TabContentsDelegate::UpdatePreferredSize(TabContents* source,
+                                              const gfx::Size& pref_size) {
 }
 
 TabContentsDelegate::~TabContentsDelegate() {

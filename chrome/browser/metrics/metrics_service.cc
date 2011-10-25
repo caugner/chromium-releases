@@ -191,7 +191,7 @@
 #include "content/common/child_process_info.h"
 #include "content/common/notification_service.h"
 #include "webkit/plugins/npapi/plugin_list.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 
 // TODO(port): port browser_distribution.h.
 #if !defined(OS_POSIX)
@@ -235,7 +235,9 @@ static const int kInitializationDelaySeconds = 30;
 static const int kMaxHistogramGatheringWaitDuration = 60000;  // 60 seconds.
 
 // The maximum number of events in a log uploaded to the UMA server.
-static const int kEventLimit = 2400;
+// TBD(jar): hack test to NOT send any events, to see if this helps reduce
+// the number of bloated logs.
+static const int kEventLimit = 0;
 
 // If an upload fails, and the transmission was over this byte count, then we
 // will discard the log, and not try to retransmit it.  We also don't persist
@@ -266,6 +268,10 @@ static const size_t kMaxOngoingLogsPersisted = 8;
 // checksum of the elements.
 static const size_t kChecksumEntryCount = 2;
 
+// static
+MetricsService::ShutdownCleanliness MetricsService::clean_shutdown_status_ =
+    MetricsService::CLEANLY_SHUTDOWN;
+
 // This is used to quickly log stats from child process related notifications in
 // MetricsService::child_stats_buffer_.  The buffer's contents are transferred
 // out when Local State is periodically saved.  The information is then
@@ -282,9 +288,9 @@ struct MetricsService::ChildProcessStats {
   // an index for which no value has been assigned.
   ChildProcessStats()
       : process_launches(0),
-      process_crashes(0),
-      instances(0),
-      process_type(ChildProcessInfo::UNKNOWN_PROCESS) {}
+        process_crashes(0),
+        instances(0),
+        process_type(ChildProcessInfo::UNKNOWN_PROCESS) {}
 
   // The number of times that the given child process has been launched
   int process_launches;
@@ -321,7 +327,7 @@ class MetricsService::InitTaskComplete : public Task {
  public:
   explicit InitTaskComplete(
       const std::string& hardware_class,
-      const std::vector<webkit::npapi::WebPluginInfo>& plugins)
+      const std::vector<webkit::WebPluginInfo>& plugins)
       : hardware_class_(hardware_class), plugins_(plugins) {}
 
   virtual void Run() {
@@ -331,7 +337,7 @@ class MetricsService::InitTaskComplete : public Task {
 
  private:
   std::string hardware_class_;
-  std::vector<webkit::npapi::WebPluginInfo> plugins_;
+  std::vector<webkit::WebPluginInfo> plugins_;
 };
 
 class MetricsService::InitTask : public Task {
@@ -340,8 +346,8 @@ class MetricsService::InitTask : public Task {
       : callback_loop_(callback_loop) {}
 
   virtual void Run() {
-    std::vector<webkit::npapi::WebPluginInfo> plugins;
-    webkit::npapi::PluginList::Singleton()->GetPlugins(false, &plugins);
+    std::vector<webkit::WebPluginInfo> plugins;
+    webkit::npapi::PluginList::Singleton()->GetPlugins(&plugins);
     std::string hardware_class;  // Empty string by default.
 #if defined(OS_CHROMEOS)
     chromeos::system::StatisticsProvider::GetInstance()->GetMachineStatistic(
@@ -535,7 +541,7 @@ bool MetricsService::reporting_active() const {
 void MetricsService::SetUpNotifications(NotificationRegistrar* registrar,
                                         NotificationObserver* observer) {
     registrar->Add(observer, chrome::NOTIFICATION_BROWSER_OPENED,
-                   NotificationService::AllSources());
+                   NotificationService::AllBrowserContextsAndSources());
     registrar->Add(observer, chrome::NOTIFICATION_BROWSER_CLOSED,
                    NotificationService::AllSources());
     registrar->Add(observer, content::NOTIFICATION_USER_ACTION,
@@ -563,7 +569,7 @@ void MetricsService::SetUpNotifications(NotificationRegistrar* registrar,
     registrar->Add(observer, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
                    NotificationService::AllSources());
     registrar->Add(observer, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
-                   NotificationService::AllSources());
+                   NotificationService::AllBrowserContextsAndSources());
 }
 
 void MetricsService::Observe(int type,
@@ -731,10 +737,10 @@ void MetricsService::InitializeMetricsState() {
 
   if (!pref->GetBoolean(prefs::kStabilityExitedCleanly)) {
     IncrementPrefValue(prefs::kStabilityCrashCount);
+    // Reset flag, and wait until we call LogNeedForCleanShutdown() before
+    // monitoring.
+    pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
   }
-
-  // This will be set to 'true' if we exit cleanly.
-  pref->SetBoolean(prefs::kStabilityExitedCleanly, false);
 
   if (!pref->GetBoolean(prefs::kStabilitySessionEndCompleted)) {
     IncrementPrefValue(prefs::kStabilityIncompleteSessionEndCount);
@@ -794,7 +800,7 @@ void MetricsService::InitializeMetricsState() {
 
 void MetricsService::OnInitTaskComplete(
     const std::string& hardware_class,
-    const std::vector<webkit::npapi::WebPluginInfo>& plugins) {
+    const std::vector<webkit::WebPluginInfo>& plugins) {
   DCHECK(state_ == INIT_TASK_SCHEDULED);
   hardware_class_ = hardware_class;
   plugins_ = plugins;
@@ -859,11 +865,9 @@ void MetricsService::StopRecording() {
   if (!current_log_)
     return;
 
-  current_log_->set_hardware_class(hardware_class_);  // Adds to ongoing logs.
-
   // TODO(jar): Integrate bounds on log recording more consistently, so that we
   // can stop recording logs that are too big much sooner.
-  if (current_log_->num_events() > kEventLimit) {
+  if (current_log_->num_events() >= kEventLimit) {
     UMA_HISTOGRAM_COUNTS("UMA.Discarded Log Events",
                          current_log_->num_events());
     current_log_->CloseLog();
@@ -871,6 +875,8 @@ void MetricsService::StopRecording() {
     current_log_ = NULL;
     StartRecording();  // Start trivial log to hold our histograms.
   }
+
+  current_log_->set_hardware_class(hardware_class_);  // Adds to ongoing logs.
 
   // Put incremental data (histogram deltas, and realtime stats deltas) at the
   // end of all log transmissions (initial log handles this separately).
@@ -949,7 +955,7 @@ void MetricsService::StartScheduledUpload() {
   // Collect WebCore cache information to put into a histogram.
   for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance())
-    i.GetCurrentValue()->Send(new ViewMsg_GetCacheResourceStats());
+    i.GetCurrentValue()->Send(new ChromeViewMsg_GetCacheResourceStats());
 }
 
 void MetricsService::OnMemoryDetailCollectionDone() {
@@ -1134,7 +1140,7 @@ MetricsService::LogRecallStatus MetricsService::RecallUnsentLogsHelper(
       return MakeRecallStatusHistogram(LOG_STRING_CORRUPTION);
     }
 
-    base::MD5Update(&ctx, encoded_log.data(), encoded_log.length());
+    base::MD5Update(&ctx, encoded_log);
 
     if (!base::Base64Decode(encoded_log, &decoded_log)) {
       local_list->clear();
@@ -1200,7 +1206,7 @@ void MetricsService::StoreUnsentLogsHelper(
       list->Clear();
       return;
     }
-    base::MD5Update(&ctx, encoded_log.data(), encoded_log.length());
+    base::MD5Update(&ctx, encoded_log);
     list->Append(Value::CreateStringValue(encoded_log));
   }
 
@@ -1460,6 +1466,7 @@ void MetricsService::IncrementLongPrefsValue(const char* path) {
 }
 
 void MetricsService::LogLoadStarted() {
+  HISTOGRAM_ENUMERATION("Chrome.UmaPageloadCounter", 1, 2);
   IncrementPrefValue(prefs::kStabilityPageLoadCount);
   IncrementLongPrefsValue(prefs::kUninstallMetricsPageLoadCount);
   // We need to save the prefs, as page load count is a critical stat, and it
@@ -1478,7 +1485,42 @@ void MetricsService::LogRendererHang() {
   IncrementPrefValue(prefs::kStabilityRendererHangCount);
 }
 
+void MetricsService::LogNeedForCleanShutdown() {
+  PrefService* pref = g_browser_process->local_state();
+  pref->SetBoolean(prefs::kStabilityExitedCleanly, false);
+  // Redundant setting to be sure we call for a clean shutdown.
+  clean_shutdown_status_ = NEED_TO_SHUTDOWN;
+}
+
+bool MetricsService::UmaMetricsProperlyShutdown() {
+  CHECK(clean_shutdown_status_ == CLEANLY_SHUTDOWN ||
+        clean_shutdown_status_ == NEED_TO_SHUTDOWN);
+  return clean_shutdown_status_ == CLEANLY_SHUTDOWN;
+}
+
+// For use in hack in LogCleanShutdown.
+static void Signal(base::WaitableEvent* event) {
+  event->Signal();
+}
+
 void MetricsService::LogCleanShutdown() {
+  // Redundant hack to write pref ASAP.
+  PrefService* pref = g_browser_process->local_state();
+  pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  pref->SavePersistentPrefs();
+  // Hack: TBD: Remove this wait.
+  // We are so concerned that the pref gets written, we are now willing to stall
+  // the UI thread until we get assurance that a pref-writing task has
+  // completed.
+  base::WaitableEvent done_writing(false, false);
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+      NewRunnableFunction(Signal, &done_writing));
+  done_writing.TimedWait(base::TimeDelta::FromHours(1));
+
+  // Redundant setting to assure that we always reset this value at shutdown
+  // (and that we don't use some alternate path, and not call LogCleanShutdown).
+  clean_shutdown_status_ = CLEANLY_SHUTDOWN;
+
   RecordBooleanPrefValue(prefs::kStabilityExitedCleanly, true);
 }
 
@@ -1503,7 +1545,7 @@ void MetricsService::LogChildProcessChange(
     const NotificationSource& source,
     const NotificationDetails& details) {
   Details<ChildProcessInfo> child_details(details);
-  const std::wstring& child_name = child_details->name();
+  const string16& child_name = child_details->name();
 
   if (child_process_stats_buffer_.find(child_name) ==
       child_process_stats_buffer_.end()) {
@@ -1605,12 +1647,13 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
     }
 
     // TODO(viettrungluu): remove conversions
-    if (child_process_stats_buffer_.find(UTF8ToWide(plugin_name)) ==
-        child_process_stats_buffer_.end())
+    string16 name16 = UTF8ToUTF16(plugin_name);
+    if (child_process_stats_buffer_.find(name16) ==
+        child_process_stats_buffer_.end()) {
       continue;
+    }
 
-    ChildProcessStats stats =
-        child_process_stats_buffer_[UTF8ToWide(plugin_name)];
+    ChildProcessStats stats = child_process_stats_buffer_[name16];
     if (stats.process_launches) {
       int launches = 0;
       plugin_dict->GetInteger(prefs::kStabilityPluginLaunches, &launches);
@@ -1630,12 +1673,12 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
       plugin_dict->SetInteger(prefs::kStabilityPluginInstances, instances);
     }
 
-    child_process_stats_buffer_.erase(UTF8ToWide(plugin_name));
+    child_process_stats_buffer_.erase(name16);
   }
 
   // Now go through and add dictionaries for plugins that didn't already have
   // reports in Local State.
-  for (std::map<std::wstring, ChildProcessStats>::iterator cache_iter =
+  for (std::map<string16, ChildProcessStats>::iterator cache_iter =
            child_process_stats_buffer_.begin();
        cache_iter != child_process_stats_buffer_.end(); ++cache_iter) {
     ChildProcessStats stats = cache_iter->second;
@@ -1645,7 +1688,7 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
       continue;
 
     // TODO(viettrungluu): remove conversion
-    std::string plugin_name = WideToUTF8(cache_iter->first);
+    std::string plugin_name = UTF16ToUTF8(cache_iter->first);
 
     DictionaryValue* plugin_dict = new DictionaryValue;
 
@@ -1699,3 +1742,18 @@ void MetricsService::StartExternalMetrics() {
   external_metrics_->Start();
 }
 #endif
+
+// static
+bool MetricsServiceHelper::IsMetricsReportingEnabled() {
+  bool result = false;
+  const PrefService* local_state = g_browser_process->local_state();
+  if (local_state) {
+    const PrefService::Preference* uma_pref =
+        local_state->FindPreference(prefs::kMetricsReportingEnabled);
+    if (uma_pref) {
+      bool success = uma_pref->GetValue()->GetAsBoolean(&result);
+      DCHECK(success);
+    }
+  }
+  return result;
+}

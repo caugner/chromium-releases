@@ -89,6 +89,9 @@ need to be translated for each locale.-->
     <output filename="ui_strings_da.pak" type="data_package" lang="da" />
     <output filename="ui_strings_de.pak" type="data_package" lang="de" />
     <output filename="ui_strings_el.pak" type="data_package" lang="el" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="ui_strings_en-AU.pak" type="data_package" lang="en-AU" />
+    </if>
     <output filename="ui_strings_en-GB.pak" type="data_package" lang="en-GB" />
     <output filename="ui_strings_en-US.pak" type="data_package" lang="en" />
     <if expr="pp_ifdef('use_third_party_translations')">
@@ -101,6 +104,7 @@ need to be translated for each locale.-->
       <output filename="ui_strings_eu.pak" type="data_package" lang="eu" />
     </if>
     <output filename="ui_strings_fa.pak" type="data_package" lang="fa" />
+    <output filename="ui_strings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
     <output filename="ui_strings_fi.pak" type="data_package" lang="fi" />
     <output filename="ui_strings_fil.pak" type="data_package" lang="fil" />
     <output filename="ui_strings_fr.pak" type="data_package" lang="fr" />
@@ -114,6 +118,7 @@ need to be translated for each locale.-->
     <output filename="ui_strings_hu.pak" type="data_package" lang="hu" />
     <if expr="pp_ifdef('use_third_party_translations')">
       <output filename="ui_strings_hy.pak" type="data_package" lang="hy" />
+      <output filename="ui_strings_ia.pak" type="data_package" lang="ia" />
     </if>
     <output filename="ui_strings_id.pak" type="data_package" lang="id" />
     <output filename="ui_strings_it.pak" type="data_package" lang="it" />
@@ -131,6 +136,9 @@ need to be translated for each locale.-->
     <output filename="ui_strings_lv.pak" type="data_package" lang="lv" />
     <output filename="ui_strings_ml.pak" type="data_package" lang="ml" />
     <output filename="ui_strings_mr.pak" type="data_package" lang="mr" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="ui_strings_ms.pak" type="data_package" lang="ms" />
+    </if>
     <output filename="ui_strings_nl.pak" type="data_package" lang="nl" />
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
@@ -156,7 +164,6 @@ need to be translated for each locale.-->
     <output filename="ui_strings_vi.pak" type="data_package" lang="vi" />
     <output filename="ui_strings_zh-CN.pak" type="data_package" lang="zh-CN" />
     <output filename="ui_strings_zh-TW.pak" type="data_package" lang="zh-TW" />
-    <output filename="ui_strings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
   </outputs>
   <translations>
     <file path="ui_strings_am.xtb" lang="am" />
@@ -171,6 +178,7 @@ need to be translated for each locale.-->
     <file path="ui_strings_da.xtb" lang="da" />
     <file path="ui_strings_de.xtb" lang="de" />
     <file path="ui_strings_el.xtb" lang="el" />
+    <file path="../../../third_party/launchpad_translations/ui_strings_en-AU.xtb" lang="en-AU" />
     <file path="ui_strings_en-GB.xtb" lang="en-GB" />
     <file path="../../../third_party/launchpad_translations/ui_strings_eo.xtb" lang="eo" />
     <file path="ui_strings_es.xtb" lang="es" />
@@ -187,6 +195,7 @@ need to be translated for each locale.-->
     <file path="ui_strings_hr.xtb" lang="hr" />
     <file path="ui_strings_hu.xtb" lang="hu" />
     <file path="../../../third_party/launchpad_translations/ui_strings_hy.xtb" lang="hy" />
+    <file path="../../../third_party/launchpad_translations/ui_strings_ia.xtb" lang="ia" />
     <file path="ui_strings_id.xtb" lang="id" />
     <file path="ui_strings_it.xtb" lang="it" />
     <!-- The translation console uses 'iw' for Hebrew, but we use 'he'. -->
@@ -201,6 +210,7 @@ need to be translated for each locale.-->
     <file path="ui_strings_lv.xtb" lang="lv" />
     <file path="ui_strings_ml.xtb" lang="ml" />
     <file path="ui_strings_mr.xtb" lang="mr" />
+    <file path="../../../third_party/launchpad_translations/ui_strings_ms.xtb" lang="ms" />
     <file path="ui_strings_nl.xtb" lang="nl" />
     <file path="ui_strings_no.xtb" lang="no" />
     <file path="ui_strings_pl.xtb" lang="pl" />

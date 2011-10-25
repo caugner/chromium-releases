@@ -8,10 +8,15 @@
 
 #include "content/browser/tab_contents/tab_contents_observer.h"
 
+class PrintPreviewUI;
+class TabContentsWrapper;
+struct PrintHostMsg_DidGetPreviewPageCount_Params;
 struct PrintHostMsg_DidPreviewDocument_Params;
 struct PrintHostMsg_DidPreviewPage_Params;
 
 namespace printing {
+
+struct PageSizeMargins;
 
 // TabContents offloads print preview message handling to
 // PrintPreviewMessageHandler. This object has the same life time as the
@@ -26,19 +31,28 @@ class PrintPreviewMessageHandler : public TabContentsObserver {
   virtual void DidStartLoading();
 
  private:
-  // Gets the print preview tab associated with |owner_|.
-  TabContents* GetPrintPreviewTab();
+  // Gets the print preview tab associated with the TabContents being observed.
+  TabContentsWrapper* GetPrintPreviewTab();
+
+  // Helper function to return the TabContentsWrapper for tab_contents().
+  TabContentsWrapper* tab_contents_wrapper();
+
+  // Common code between failure handlers. Returns a PrintPreviewUI* if there
+  // exists a PrintPreviewUI to send messages to.
+  PrintPreviewUI* OnFailure(int document_cookie);
 
   // Message handlers.
   void OnRequestPrintPreview();
-  void OnDidGetPreviewPageCount(int document_cookie,
-                                int page_count,
-                                bool is_modifiable);
-  // |page_number| is 0-based.
+  void OnDidGetDefaultPageLayout(
+      const printing::PageSizeMargins& page_layout_in_points);
+  void OnDidGetPreviewPageCount(
+      const PrintHostMsg_DidGetPreviewPageCount_Params& params);
   void OnDidPreviewPage(const PrintHostMsg_DidPreviewPage_Params& params);
-  void OnPagesReadyForPreview(
+  void OnMetafileReadyForPrinting(
       const PrintHostMsg_DidPreviewDocument_Params& params);
   void OnPrintPreviewFailed(int document_cookie);
+  void OnPrintPreviewCancelled(int document_cookie);
+  void OnInvalidPrinterSettings(int document_cookie);
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewMessageHandler);
 };

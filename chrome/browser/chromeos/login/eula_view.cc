@@ -382,15 +382,15 @@ void EulaView::UpdateLocalizedStrings() {
   }
 
   // Load other labels from resources.
-  usage_statistics_checkbox_->SetLabel(
+  usage_statistics_checkbox_->SetText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_CHECKBOX_ENABLE_LOGGING)));
   learn_more_link_->SetText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_LEARN_MORE)));
   system_security_settings_link_->SetText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_SYSTEM_SECURITY_SETTING)));
-  continue_button_->SetLabel(UTF16ToWide(
+  continue_button_->SetText(UTF16ToWide(
       l10n_util::GetStringUTF16(IDS_EULA_ACCEPT_AND_CONTINUE_BUTTON)));
-  back_button_->SetLabel(
+  back_button_->SetText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_BACK_BUTTON)));
 }
 
@@ -441,7 +441,6 @@ void EulaView::LinkClicked(views::Link* source, int event_flags) {
     tpm_info_view_ = new TpmInfoView(this);
     tpm_info_view_->Init();
     views::Widget* window = browser::CreateViewsWindow(parent_window,
-                                                       gfx::Rect(),
                                                        tpm_info_view_);
     window->SetAlwaysOnTop(true);
     window->Show();
@@ -458,9 +457,12 @@ void EulaView::LinkClicked(views::Link* source, int event_flags) {
 static bool PublishTitleIfReady(const TabContents* contents,
                                 DOMView* eula_view,
                                 views::Label* eula_label) {
-  if (contents != eula_view->tab_contents())
+  if (!eula_view->dom_contents())
     return false;
-  eula_label->SetText(UTF16ToWide(eula_view->tab_contents()->GetTitle()));
+  TabContents* tab_contents = eula_view->dom_contents()->tab_contents();
+  if (contents != tab_contents)
+    return false;
+  eula_label->SetText(UTF16ToWide(tab_contents->GetTitle()));
   return true;
 }
 
@@ -488,7 +490,7 @@ void EulaView::LoadEulaView(DOMView* eula_view,
   eula_view->Init(profile,
                   SiteInstance::CreateSiteInstanceForURL(profile, eula_url));
   eula_view->LoadURL(eula_url);
-  eula_view->tab_contents()->set_delegate(this);
+  eula_view->dom_contents()->tab_contents()->set_delegate(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

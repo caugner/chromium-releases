@@ -16,6 +16,7 @@ body {
   font-family: 'Droid sans', Arial, sans-serif;
   margin:0;
   padding:0;
+  direction: __MSG_@@bidi_dir__;
 }
 
 button, input {
@@ -26,6 +27,7 @@ button, input {
 button {
   background: -webkit-linear-gradient(#fafafa, #f4f4f4 40%, #e5e5e5);
   border: 1px solid #aaa;
+  min-width: 72px;
   -webkit-border-radius: 2px;
   -webkit-box-shadow: 0px 1px 3px rgba(0, 0, 0, 0.1);
   -webkit-user-select: none;
@@ -38,7 +40,7 @@ button:hover {
   -webkit-box-shadow: 0px 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-button:active {
+button:active, .toggle-button-active, .toggle-button-active:hover {
   background: #ebebeb -webkit-linear-gradient(#f4f4f4, #efefef 40%, #dcdcdc);
   color: #333;
   -webkit-box-shadow: inset 0px 1px 3px rgba(0, 0, 0, 0.2);
@@ -54,7 +56,7 @@ button[disabled], .button[disabled]:hover {
 h1 {
   font-size: 24px;
   font-weight: normal;
-  margin-left: 10px;
+  margin-__MSG_@@bidi_start_edge__: 10px;
 }
 
 label {
@@ -70,16 +72,6 @@ label {
     displayed by the host.
   */
   padding: 0px 6px;
-}
-
-.auth-status-control {
-  /* Class used to denote controls that affect authorization status. */
-  margin: 10px auto auto 0px;
-}
-
-.auth-status-label {
-  color: black;
-  font-weight: bold;
 }
 
 .big-button {
@@ -102,7 +94,7 @@ label {
 .choice-header {
   font-size: 24px;
   font-weight: normal;
-  margin-left: 10px;
+  margin-__MSG_@@bidi_start_edge__: 10px;
 }
 
 .choice-footer {
@@ -114,19 +106,19 @@ label {
   padding-bottom: 20px;
 }
 
-.client-element {
-  /* Class used to denote client UI elements. */
-}
-
 .description {
   margin-bottom: 25px;
 }
 
-.display-inline {
-  /*
-    Class used to denote elements that should be displayed inline-block as
-    opposed to block.
-  */
+.error-state {
+  background-image: url('icon_warning.png');
+  background-repeat: no-repeat;
+  background-position: top __MSG_@@bidi_start_edge__;
+  padding-__MSG_@@bidi_start_edge__: 30px;
+  padding-top: 3px;
+  margin-bottom: 10px;
+  color: #900;
+  display: inline-block;
 }
 
 .expiring {
@@ -138,10 +130,6 @@ label {
 }
 
 
-.host-element {
-  /* Class used to denote host UI elements. */
-}
-
 .icon-label {
   display: inline-block;
   vertical-align: top;
@@ -149,13 +137,25 @@ label {
 
 .message {
   text-align:center;
+  margin-bottom: 10px;
 }
 
-.mode {
-  /*
-    Class used to denote different modes of a given UI.
-    e.g. "Connecting" is a mode of the client UI.
-  */
+.hide-scrollbars {
+  overflow-y: hidden;
+}
+
+.top-primary {
+  font-size: 14px;
+  position: absolute;
+  top: 0.5em;
+  __MSG_@@bidi_start_edge__: 0.5em;
+}
+
+.top-secondary {
+  font-size: 14px;
+  position: absolute;
+  top: 0.5em;
+  __MSG_@@bidi_end_edge__: 0.5em;
 }
 
 .waiting {
@@ -163,11 +163,6 @@ label {
 }
 
 /* Ids */
-#control-panel {
-  border-bottom: 2px solid gray;
-  padding: 5px 10px;
-}
-
 #access-code-countdown-container {
   height: 50px;
   text-align: center;
@@ -186,7 +181,7 @@ label {
   font-size: 18px;
   height: 25px;
   margin: 0 10px;
-  padding-left: 5px;
+  padding-__MSG_@@bidi_start_edge__: 5px;
   width: 12em;
 }
 
@@ -194,16 +189,8 @@ label {
   text-align: center;
 }
 
-#choice-mode {
-  color: rgb(115, 115, 115);
-  font-size: 16px;
-  margin: 100px auto 0 auto;
-  padding: 10px;
-  width: 640px;
-}
-
 #cancel-button {
-  float: right;
+  float: __MSG_@@bidi_end_edge__;
 }
 
 #client-footer-text, #host-footer-text {
@@ -223,7 +210,7 @@ label {
 }
 
 #email-status {
-  margin-right: 0.5ex;
+  margin-__MSG_@@bidi_end_edge__: 0.5ex;
 }
 
 #icon {
@@ -231,27 +218,27 @@ label {
   width: 64px;
 }
 
-#oauth2-entry {
-  width: 400px;
+#main {
+  color: rgb(115, 115, 115);
+  font-size: 16px;
+  margin: 100px auto 0 auto;
+  padding: 10px;
+  width: 640px;
 }
 
 #session-mode {
-  overflow: auto;
-  width: 100%;
+  position: absolute;
+  -webkit-box-shadow: 0 0 8px 0 black;
   -webkit-user-select: none;
 }
 
-#session-status-msg {
-  /*
-    clear: both; forces the session-controls div to size appropriately for
-    session-buttons.
-  */
-  clear: both;
-  font-family: monospace;
-  font-size: small;
-  margin: 5px;
+#session-client-plugin {
+  margin: 0 0 -4px 0;
 }
 
-#server-response {
-  font-weight: bolder;
+#toggle-scaling {
+  margin: 1px 0 0 0;
+  padding: 1px;
+  min-width: 0;
+  line-height: 0;
 }

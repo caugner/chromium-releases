@@ -4,6 +4,8 @@
 
 #include "remoting/protocol/connection_to_client.h"
 
+#include "base/bind.h"
+#include "base/message_loop_proxy.h"
 #include "google/protobuf/message.h"
 #include "net/base/io_buffer.h"
 #include "remoting/protocol/client_control_sender.h"
@@ -21,13 +23,16 @@ namespace protocol {
 // average update stream.
 static const size_t kAverageUpdateStream = 10;
 
-ConnectionToClient::ConnectionToClient(MessageLoop* message_loop,
+ConnectionToClient::ConnectionToClient(base::MessageLoopProxy* message_loop,
                                        EventHandler* handler)
-    : loop_(message_loop),
+    : message_loop_(message_loop),
       handler_(handler),
       host_stub_(NULL),
-      input_stub_(NULL) {
-  DCHECK(loop_);
+      input_stub_(NULL),
+      control_connected_(false),
+      input_connected_(false),
+      video_connected_(false) {
+  DCHECK(message_loop_);
   DCHECK(handler_);
 }
 
@@ -37,7 +42,7 @@ ConnectionToClient::~ConnectionToClient() {
 }
 
 void ConnectionToClient::Init(protocol::Session* session) {
-  DCHECK_EQ(loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
   session_.reset(session);
   session_->SetStateChangeCallback(
       NewCallback(this, &ConnectionToClient::OnSessionStateChange));
@@ -49,8 +54,8 @@ protocol::Session* ConnectionToClient::session() {
 
 void ConnectionToClient::Disconnect() {
   // This method can be called from main thread so perform threading switching.
-  if (MessageLoop::current() != loop_) {
-    loop_->PostTask(
+  if (!message_loop_->BelongsToCurrentThread()) {
+    message_loop_->PostTask(
         FROM_HERE,
         NewRunnableMethod(this, &ConnectionToClient::Disconnect));
     return;
@@ -85,36 +90,67 @@ void ConnectionToClient::set_input_stub(protocol::InputStub* input_stub) {
 }
 
 void ConnectionToClient::OnSessionStateChange(protocol::Session::State state) {
-  DCHECK_EQ(loop_, MessageLoop::current());
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   DCHECK(handler_);
   switch(state) {
     case protocol::Session::CONNECTING:
+      // Don't care about this message.
       break;
-    // Don't care about this message.
-    case protocol::Session::CONNECTED:
-      client_control_sender_.reset(
-          new ClientControlSender(session_->control_channel()));
-      video_writer_.reset(VideoWriter::Create(session_->config()));
-      video_writer_->Init(session_.get());
 
+    case protocol::Session::CONNECTED:
+      video_writer_.reset(
+          VideoWriter::Create(message_loop_, session_->config()));
+      video_writer_->Init(
+          session_.get(), base::Bind(&ConnectionToClient::OnVideoInitialized,
+                                     base::Unretained(this)));
+      break;
+
+    case protocol::Session::CONNECTED_CHANNELS:
+      client_control_sender_.reset(
+          new ClientControlSender(message_loop_, session_->control_channel()));
       dispatcher_.reset(new HostMessageDispatcher());
       dispatcher_->Initialize(this, host_stub_, input_stub_);
 
-      handler_->OnConnectionOpened(this);
+      control_connected_ = true;
+      input_connected_ = true;
+      NotifyIfChannelsReady();
       break;
+
     case protocol::Session::CLOSED:
       CloseChannels();
       handler_->OnConnectionClosed(this);
       break;
+
     case protocol::Session::FAILED:
-      CloseChannels();
-      handler_->OnConnectionFailed(this);
+      CloseOnError();
       break;
+
     default:
       // We shouldn't receive other states.
       NOTREACHED();
   }
+}
+
+void ConnectionToClient::OnVideoInitialized(bool successful) {
+  if (!successful) {
+    LOG(ERROR) << "Failed to connect video channel";
+    CloseOnError();
+    return;
+  }
+
+  video_connected_ = true;
+  NotifyIfChannelsReady();
+}
+
+void ConnectionToClient::NotifyIfChannelsReady() {
+  if (control_connected_ && input_connected_ && video_connected_)
+    handler_->OnConnectionOpened(this);
+}
+
+void ConnectionToClient::CloseOnError() {
+  CloseChannels();
+  handler_->OnConnectionFailed(this);
 }
 
 void ConnectionToClient::CloseChannels() {

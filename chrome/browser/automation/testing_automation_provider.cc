@@ -45,11 +45,15 @@
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/save_package_file_picker.h"
+#include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/importer/importer_host.h"
+#include "chrome/browser/importer/importer_list.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
@@ -58,7 +62,9 @@
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -77,6 +83,7 @@
 #include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/login/login_prompt.h"
@@ -101,6 +108,7 @@
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/common/common_param_traits.h"
 #include "content/common/notification_service.h"
+#include "content/common/view_types.h"
 #include "net/base/cookie_store.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "ui/base/events.h"
@@ -560,7 +568,8 @@ void TestingAutomationProvider::ShowCollectedCookiesDialog(
     NavigationController* controller = tab_tracker_->GetResource(handle);
     TabContents* tab_contents = controller->tab_contents();
     Browser* browser = Browser::GetBrowserForController(controller, NULL);
-    browser->ShowCollectedCookiesDialog(tab_contents);
+    browser->ShowCollectedCookiesDialog(
+        TabContentsWrapper::GetCurrentWrapperForContents(tab_contents));
     *success = true;
   }
 }
@@ -704,8 +713,9 @@ void TestingAutomationProvider::GetRedirectsFrom(int tab_handle,
     LOG(ERROR) << "Can only handle one redirect query at once.";
   } else if (tab_tracker_->ContainsHandle(tab_handle)) {
     NavigationController* tab = tab_tracker_->GetResource(tab_handle);
+    Profile* profile = Profile::FromBrowserContext(tab->browser_context());
     HistoryService* history_service =
-        tab->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+        profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
 
     DCHECK(history_service) << "Tab " << tab_handle << "'s profile " <<
                                "has no history service";
@@ -1287,6 +1297,30 @@ void TestingAutomationProvider::GetFullscreenBubbleVisibility(int handle,
   }
 }
 
+namespace {
+
+void ExecuteJavascriptInRenderViewFrame(
+    const string16& frame_xpath,
+    const string16& script,
+    IPC::Message* reply_message,
+    RenderViewHost* render_view_host) {
+  // Set the routing id of this message with the controller.
+  // This routing id needs to be remembered for the reverse
+  // communication while sending back the response of
+  // this javascript execution.
+  std::string set_automation_id;
+  base::SStringPrintf(&set_automation_id,
+                      "window.domAutomationController.setAutomationId(%d);",
+                      reply_message->routing_id());
+
+  render_view_host->ExecuteJavascriptInWebFrame(
+      frame_xpath, UTF8ToUTF16(set_automation_id));
+  render_view_host->ExecuteJavascriptInWebFrame(
+      frame_xpath, script);
+}
+
+}  // namespace
+
 void TestingAutomationProvider::ExecuteJavascript(
     int handle,
     const std::wstring& frame_xpath,
@@ -1299,20 +1333,10 @@ void TestingAutomationProvider::ExecuteJavascript(
     return;
   }
 
-  // Set the routing id of this message with the controller.
-  // This routing id needs to be remembered for the reverse
-  // communication while sending back the response of
-  // this javascript execution.
-  std::string set_automation_id;
-  base::SStringPrintf(&set_automation_id,
-                      "window.domAutomationController.setAutomationId(%d);",
-                      reply_message->routing_id());
-
   new DomOperationMessageSender(this, reply_message, false);
-  tab_contents->render_view_host()->ExecuteJavascriptInWebFrame(
-      WideToUTF16Hack(frame_xpath), UTF8ToUTF16(set_automation_id));
-  tab_contents->render_view_host()->ExecuteJavascriptInWebFrame(
-      WideToUTF16Hack(frame_xpath), WideToUTF16Hack(script));
+  ExecuteJavascriptInRenderViewFrame(WideToUTF16Hack(frame_xpath),
+                                     WideToUTF16Hack(script), reply_message,
+                                     tab_contents->render_view_host());
 }
 
 void TestingAutomationProvider::GetConstrainedWindowCount(int handle,
@@ -1344,8 +1368,9 @@ void TestingAutomationProvider::GetDownloadDirectory(
     int handle, FilePath* download_directory) {
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
-    DownloadManager* dlm = tab->profile()->GetDownloadManager();
-    *download_directory = dlm->download_prefs()->download_path();
+    DownloadManager* dlm = tab->browser_context()->GetDownloadManager();
+    *download_directory =
+        DownloadPrefs::FromDownloadManager(dlm)->download_path();
   }
 }
 
@@ -1862,7 +1887,7 @@ void TestingAutomationProvider::GetInfoBarCount(int handle, size_t* count) {
       TabContentsWrapper* wrapper =
           TabContentsWrapper::GetCurrentWrapperForContents(
               nav_controller->tab_contents());
-      *count = wrapper->infobar_count();
+      *count = wrapper->infobar_tab_helper()->infobar_count();
     }
   }
 }
@@ -1876,18 +1901,16 @@ void TestingAutomationProvider::ClickInfoBarAccept(
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* nav_controller = tab_tracker_->GetResource(handle);
     if (nav_controller) {
-      TabContentsWrapper* wrapper =
+      InfoBarTabHelper* infobar_helper =
           TabContentsWrapper::GetCurrentWrapperForContents(
-              nav_controller->tab_contents());
-      if (info_bar_index < wrapper->infobar_count()) {
+              nav_controller->tab_contents())->infobar_tab_helper();
+      if (info_bar_index < infobar_helper->infobar_count()) {
         if (wait_for_navigation) {
           new NavigationNotificationObserver(nav_controller, this,
                                              reply_message, 1, false, false);
         }
         InfoBarDelegate* delegate =
-            TabContentsWrapper::GetCurrentWrapperForContents(
-                nav_controller->tab_contents())->GetInfoBarDelegateAt(
-                    info_bar_index);
+            infobar_helper->GetInfoBarDelegateAt(info_bar_index);
         if (delegate->AsConfirmInfoBarDelegate())
           delegate->AsConfirmInfoBarDelegate()->Accept();
         success = true;
@@ -2159,6 +2182,8 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::NavigateToURL;
   handler_map["ExecuteJavascript"] =
       &TestingAutomationProvider::ExecuteJavascriptJSON;
+  handler_map["ExecuteJavascriptInRenderView"] =
+      &TestingAutomationProvider::ExecuteJavascriptInRenderView;
   handler_map["GoForward"] =
       &TestingAutomationProvider::GoForward;
   handler_map["GoBack"] =
@@ -2211,6 +2236,10 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::GetChromeDriverAutomationVersion;
   handler_map["UpdateExtensionsNow"] =
       &TestingAutomationProvider::UpdateExtensionsNow;
+  handler_map["CreateNewAutomationProvider"] =
+      &TestingAutomationProvider::CreateNewAutomationProvider;
+  handler_map["GetBrowserInfo"] =
+      &TestingAutomationProvider::GetBrowserInfo;
 #if defined(OS_CHROMEOS)
   handler_map["GetLoginInfo"] = &TestingAutomationProvider::GetLoginInfo;
   handler_map["ShowCreateAccountUI"] =
@@ -2227,6 +2256,8 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
 
   handler_map["GetNetworkInfo"] = &TestingAutomationProvider::GetNetworkInfo;
   handler_map["NetworkScan"] = &TestingAutomationProvider::NetworkScan;
+  handler_map["ToggleNetworkDevice"] =
+      &TestingAutomationProvider::ToggleNetworkDevice;
   handler_map["GetProxySettings"] =
       &TestingAutomationProvider::GetProxySettings;
   handler_map["SetProxySettings"] =
@@ -2255,6 +2286,11 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::FetchEnterprisePolicy;
   handler_map["GetEnterprisePolicyInfo"] =
       &TestingAutomationProvider::GetEnterprisePolicyInfo;
+  handler_map["EnrollEnterpriseDevice"] =
+      &TestingAutomationProvider::EnrollEnterpriseDevice;
+
+  handler_map["GetTimeInfo"] = &TestingAutomationProvider::GetTimeInfo;
+  handler_map["SetTimezone"] = &TestingAutomationProvider::SetTimezone;
 
   handler_map["GetUpdateInfo"] = &TestingAutomationProvider::GetUpdateInfo;
   handler_map["UpdateCheck"] = &TestingAutomationProvider::UpdateCheck;
@@ -2263,6 +2299,7 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
   handler_map["GetVolumeInfo"] = &TestingAutomationProvider::GetVolumeInfo;
   handler_map["SetVolume"] = &TestingAutomationProvider::SetVolume;
   handler_map["SetMute"] = &TestingAutomationProvider::SetMute;
+
 #endif  // defined(OS_CHROMEOS)
 
   std::map<std::string, BrowserJsonHandler> browser_handler_map;
@@ -2272,9 +2309,6 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::EnablePlugin;
   browser_handler_map["GetPluginsInfo"] =
       &TestingAutomationProvider::GetPluginsInfo;
-
-  browser_handler_map["GetBrowserInfo"] =
-      &TestingAutomationProvider::GetBrowserInfo;
 
   browser_handler_map["GetNavigationInfo"] =
       &TestingAutomationProvider::GetNavigationInfo;
@@ -2322,7 +2356,7 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
   browser_handler_map["GetDownloadsInfo"] =
       &TestingAutomationProvider::GetDownloadsInfo;
   browser_handler_map["WaitForAllDownloadsToComplete"] =
-      &TestingAutomationProvider::WaitForDownloadsToComplete;
+      &TestingAutomationProvider::WaitForAllDownloadsToComplete;
   browser_handler_map["PerformActionOnDownload"] =
       &TestingAutomationProvider::PerformActionOnDownload;
 
@@ -2374,6 +2408,8 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::GetAutofillProfile;
   browser_handler_map["FillAutofillProfile"] =
       &TestingAutomationProvider::FillAutofillProfile;
+  browser_handler_map["SubmitAutofillForm"] =
+      &TestingAutomationProvider::SubmitAutofillForm;
   browser_handler_map["AutofillTriggerSuggestions"] =
       &TestingAutomationProvider::AutofillTriggerSuggestions;
   browser_handler_map["AutofillHighlightSuggestion"] =
@@ -2426,18 +2462,32 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
   browser_handler_map["LaunchApp"] = &TestingAutomationProvider::LaunchApp;
   browser_handler_map["SetAppLaunchType"] =
       &TestingAutomationProvider::SetAppLaunchType;
+#if defined(OS_CHROMEOS)
+  browser_handler_map["CaptureProfilePhoto"] =
+      &TestingAutomationProvider::CaptureProfilePhoto;
+  browser_handler_map["GetTimeInfo"] = &TestingAutomationProvider::GetTimeInfo;
+#endif  // defined(OS_CHROMEOS)
 
-  if (handler_map.find(std::string(command)) != handler_map.end()) {
-    (this->*handler_map[command])(dict_value, reply_message);
-  } else if (browser_handler_map.find(std::string(command)) !=
+  // Look for command in handlers that take a Browser handle.
+  if (browser_handler_map.find(std::string(command)) !=
              browser_handler_map.end()) {
     Browser* browser = NULL;
+    // Get Browser object associated with handle.
     if (!browser_tracker_->ContainsHandle(handle) ||
         !(browser = browser_tracker_->GetResource(handle))) {
-      AutomationJSONReply(this, reply_message).SendError("No browser object.");
-      return;
+      // Browser not found; attempt to fallback to non-Browser handlers.
+      if (handler_map.find(std::string(command)) != handler_map.end())
+        (this->*handler_map[command])(dict_value, reply_message);
+      else
+        AutomationJSONReply(this, reply_message).SendError(
+            "No browser object.");
+    } else {
+      (this->*browser_handler_map[command])(browser, dict_value, reply_message);
     }
-    (this->*browser_handler_map[command])(browser, dict_value, reply_message);
+  // Look for command in handlers that don't take a Browser handle.
+  } else if (handler_map.find(std::string(command)) != handler_map.end()) {
+    (this->*handler_map[command])(dict_value, reply_message);
+  // Command has no handlers for it.
   } else {
     std::string error_string = "Unknown command. Options: ";
     for (std::map<std::string, JsonHandler>::const_iterator it =
@@ -2478,11 +2528,12 @@ void TestingAutomationProvider::SetWindowDimensions(
 ListValue* TestingAutomationProvider::GetInfobarsInfo(TabContents* tc) {
   // Each infobar may have different properties depending on the type.
   ListValue* infobars = new ListValue;
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tc);
-  for (size_t i = 0; i < wrapper->infobar_count(); ++i) {
+  InfoBarTabHelper* infobar_helper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tc)->
+          infobar_tab_helper();
+  for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
     DictionaryValue* infobar_item = new DictionaryValue;
-    InfoBarDelegate* infobar = wrapper->GetInfoBarDelegateAt(i);
+    InfoBarDelegate* infobar = infobar_helper->GetInfoBarDelegateAt(i);
     if (infobar->AsConfirmInfoBarDelegate()) {
       // Also covers ThemeInstalledInfoBarDelegate.
       infobar_item->SetString("type", "confirm_infobar");
@@ -2546,23 +2597,27 @@ void TestingAutomationProvider::PerformActionOnInfobar(
     reply.SendError("Invalid or missing args");
     return;
   }
+
   TabContentsWrapper* tab_contents =
       browser->GetTabContentsWrapperAt(tab_index);
   if (!tab_contents) {
     reply.SendError(StringPrintf("No such tab at index %d", tab_index));
     return;
   }
+  InfoBarTabHelper* infobar_helper = tab_contents->infobar_tab_helper();
+
   InfoBarDelegate* infobar = NULL;
   size_t infobar_index = static_cast<size_t>(infobar_index_int);
-  if (infobar_index >= tab_contents->infobar_count() ||
-      !(infobar = tab_contents->GetInfoBarDelegateAt(infobar_index))) {
+  if (infobar_index >= infobar_helper->infobar_count()) {
     reply.SendError(StringPrintf("No such infobar at index %" PRIuS,
                                  infobar_index));
     return;
   }
+  infobar = infobar_helper->GetInfoBarDelegateAt(infobar_index);
+
   if ("dismiss" == action) {
     infobar->InfoBarDismissed();
-    tab_contents->RemoveInfoBar(infobar);
+    infobar_helper->RemoveInfoBar(infobar);
     reply.SendSuccess(NULL);
     return;
   }
@@ -2574,10 +2629,10 @@ void TestingAutomationProvider::PerformActionOnInfobar(
     }
     if ("accept" == action) {
       if (confirm_infobar->Accept())
-        tab_contents->RemoveInfoBar(infobar);
+        infobar_helper->RemoveInfoBar(infobar);
     } else if ("cancel" == action) {
       if (confirm_infobar->Cancel())
-        tab_contents->RemoveInfoBar(infobar);
+        infobar_helper->RemoveInfoBar(infobar);
     }
     reply.SendSuccess(NULL);
     return;
@@ -2607,7 +2662,7 @@ class GetChildProcessHostInfoTask : public Task {
       }
       ChildProcessInfo* info = *iter;
       DictionaryValue* item = new DictionaryValue;
-      item->SetString("name", WideToUTF16Hack(info->name()));
+      item->SetString("name", info->name());
       item->SetString("type",
                       ChildProcessInfo::GetTypeNameInEnglish(info->type()));
       item->SetInteger("pid", base::GetProcId(info->handle()));
@@ -2629,7 +2684,6 @@ class GetChildProcessHostInfoTask : public Task {
 // Refer to GetBrowserInfo() in chrome/test/pyautolib/pyauto.py for
 // sample json output.
 void TestingAutomationProvider::GetBrowserInfo(
-    Browser* browser,
     DictionaryValue* args,
     IPC::Message* reply_message) {
   base::ThreadRestrictions::ScopedAllowIO allow_io;  // needed for PathService
@@ -2677,7 +2731,7 @@ void TestingAutomationProvider::GetBrowserInfo(
        it != BrowserList::end();
        ++it, ++windex) {
     DictionaryValue* browser_item = new DictionaryValue;
-    browser = *it;
+    Browser* browser = *it;
     browser_item->SetInteger("index", windex);
     // Window properties
     gfx::Rect rect = browser->window()->GetRestoredBounds();
@@ -2726,8 +2780,14 @@ void TestingAutomationProvider::GetBrowserInfo(
   }
   return_value->Set("windows", windows);
 
+#if defined(OS_LINUX)
+  int flags = ChildProcessHost::CHILD_ALLOW_SELF;
+#else
+  int flags = ChildProcessHost::CHILD_NORMAL;
+#endif
+
   return_value->SetString("child_process_path",
-                          ChildProcessHost::GetChildPath(true).value());
+                          ChildProcessHost::GetChildPath(flags).value());
   // Child processes are the processes for plugins and other workers.
   // Add all child processes in a list of dictionaries, one dictionary item
   // per child process.
@@ -2742,7 +2802,7 @@ void TestingAutomationProvider::GetBrowserInfo(
 
   // Add all extension processes in a list of dictionaries, one dictionary
   // item per extension process.
-  ListValue* extension_processes = new ListValue;
+  ListValue* extension_views = new ListValue;
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   std::vector<Profile*> profiles(profile_manager->GetLoadedProfiles());
   for (size_t i = 0; i < profiles.size(); ++i) {
@@ -2758,13 +2818,43 @@ void TestingAutomationProvider::GetBrowserInfo(
         continue;
       DictionaryValue* item = new DictionaryValue;
       item->SetString("name", ex_host->extension()->name());
+      item->SetString("extension_id", ex_host->extension()->id());
       item->SetInteger(
           "pid",
           base::GetProcId(ex_host->render_process_host()->GetHandle()));
-      extension_processes->Append(item);
+      DictionaryValue* view = new DictionaryValue;
+      view->SetInteger(
+          "render_process_id",
+          ex_host->render_process_host()->id());
+      view->SetInteger(
+          "render_view_id",
+          ex_host->render_view_host()->routing_id());
+      item->Set("view", view);
+      std::string type;
+      switch (ex_host->extension_host_type()) {
+        case ViewType::EXTENSION_BACKGROUND_PAGE:
+          type = "EXTENSION_BACKGROUND_PAGE";
+          break;
+        case ViewType::EXTENSION_POPUP:
+          type = "EXTENSION_POPUP";
+          break;
+        case ViewType::EXTENSION_INFOBAR:
+          type = "EXTENSION_INFOBAR";
+          break;
+        case ViewType::EXTENSION_DIALOG:
+          type = "EXTENSION_DIALOG";
+          break;
+        default:
+          type = "unknown";
+          break;
+      }
+      item->SetString("view_type", type);
+      item->SetString("url", ex_host->GetURL().spec());
+      item->SetBoolean("loaded", ex_host->did_stop_loading());
+      extension_views->Append(item);
     }
   }
-  return_value->Set("extension_processes", extension_processes);
+  return_value->Set("extension_views", extension_views);
   AutomationJSONReply(this, reply_message).SendSuccess(return_value.get());
 }
 
@@ -2914,34 +3004,27 @@ void TestingAutomationProvider::GetDownloadsInfo(Browser* browser,
   reply.SendSuccess(return_value.get());
 }
 
-void TestingAutomationProvider::WaitForDownloadsToComplete(
+void TestingAutomationProvider::WaitForAllDownloadsToComplete(
     Browser* browser,
     DictionaryValue* args,
     IPC::Message* reply_message) {
+  ListValue* pre_download_ids = NULL;
 
-  // Look for a quick return.
+  if (!args->GetList("pre_download_ids", &pre_download_ids)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError(StringPrintf("List of IDs of previous downloads required."));
+    return;
+  }
   if (!browser->profile()->HasCreatedDownloadManager()) {
-    // No download manager.
+    // No download manager, so no downloads to wait for.
     AutomationJSONReply(this, reply_message).SendSuccess(NULL);
     return;
   }
-  std::vector<DownloadItem*> downloads;
-  browser->profile()->GetDownloadManager()->
-      GetCurrentDownloads(FilePath(), &downloads);
-  if (downloads.empty()) {
-    AutomationJSONReply(this, reply_message).SendSuccess(NULL);
-    return;
-  }
-  // The observer owns itself.  When the last observed item pings, it
-  // deletes itself.
-  AutomationProviderDownloadItemObserver* item_observer =
-      new AutomationProviderDownloadItemObserver(
-          this, reply_message, downloads.size());
-  for (std::vector<DownloadItem*>::iterator i = downloads.begin();
-       i != downloads.end();
-       i++) {
-    (*i)->AddObserver(item_observer);
-  }
+
+  // This observer will delete itself.
+  new AllDownloadsCompleteObserver(
+      this, reply_message, browser->profile()->GetDownloadManager(),
+      pre_download_ids);
 }
 
 namespace {
@@ -2998,8 +3081,13 @@ void TestingAutomationProvider::PerformActionOnDownload(
             this, reply_message, true));
     selected_item->OpenDownload();
   } else if (action == "toggle_open_files_like_this") {
-    selected_item->OpenFilesBasedOnExtension(
-        !selected_item->ShouldOpenFileBasedOnExtension());
+    DownloadPrefs* prefs =
+        DownloadPrefs::FromDownloadManager(selected_item->download_manager());
+    FilePath path = selected_item->GetUserVerifiedFilePath();
+    if (!selected_item->ShouldOpenFileBasedOnExtension())
+      prefs->EnableAutoOpenBasedOnExtension(path);
+    else
+      prefs->DisableAutoOpenBasedOnExtension(path);
     AutomationJSONReply(this, reply_message).SendSuccess(NULL);
   } else if (action == "remove") {
     download_manager->AddObserver(
@@ -3384,10 +3472,11 @@ void TestingAutomationProvider::GetPluginsInfo(
                    this, browser, args, reply_message));
     return;
   }
-  std::vector<webkit::npapi::WebPluginInfo> plugins;
-  webkit::npapi::PluginList::Singleton()->GetPlugins(false, &plugins);
+  std::vector<webkit::WebPluginInfo> plugins;
+  webkit::npapi::PluginList::Singleton()->GetPlugins(&plugins);
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(browser->profile());
   ListValue* items = new ListValue;
-  for (std::vector<webkit::npapi::WebPluginInfo>::const_iterator it =
+  for (std::vector<webkit::WebPluginInfo>::const_iterator it =
            plugins.begin();
        it != plugins.end();
        ++it) {
@@ -3396,10 +3485,10 @@ void TestingAutomationProvider::GetPluginsInfo(
     item->SetString("path", it->path.value());
     item->SetString("version", it->version);
     item->SetString("desc", it->desc);
-    item->SetBoolean("enabled", webkit::npapi::IsPluginEnabled(*it));
+    item->SetBoolean("enabled", plugin_prefs->IsPluginEnabled(*it));
     // Add info about mime types.
     ListValue* mime_types = new ListValue();
-    for (std::vector<webkit::npapi::WebPluginMimeType>::const_iterator type_it =
+    for (std::vector<webkit::WebPluginMimeType>::const_iterator type_it =
              it->mime_types.begin();
          type_it != it->mime_types.end();
          ++type_it) {
@@ -3507,7 +3596,7 @@ void TestingAutomationProvider::SaveTabContents(
   }
   // The observer will delete itself when done.
   new SavePackageNotificationObserver(
-      tab_contents->save_package(), this, reply_message);
+      browser->profile()->GetDownloadManager(), this, reply_message);
 }
 
 // Refer to ImportSettings() in chrome/test/pyautolib/pyauto.py for sample
@@ -3744,7 +3833,7 @@ void TestingAutomationProvider::ClearBrowsingData(
   std::map<std::string, int> string_to_mask_value;
   string_to_mask_value["HISTORY"] = BrowsingDataRemover::REMOVE_HISTORY;
   string_to_mask_value["DOWNLOADS"] = BrowsingDataRemover::REMOVE_DOWNLOADS;
-  string_to_mask_value["COOKIES"] = BrowsingDataRemover::REMOVE_COOKIES;
+  string_to_mask_value["COOKIES"] = BrowsingDataRemover::REMOVE_SITE_DATA;
   string_to_mask_value["PASSWORDS"] = BrowsingDataRemover::REMOVE_PASSWORDS;
   string_to_mask_value["FORM_DATA"] = BrowsingDataRemover::REMOVE_FORM_DATA;
   string_to_mask_value["CACHE"] = BrowsingDataRemover::REMOVE_CACHE;
@@ -3812,10 +3901,11 @@ TabContentsWrapper* GetTabContentsWrapperFromDict(const Browser* browser,
 // Get the TranslateInfoBarDelegate from TabContents.
 TranslateInfoBarDelegate* GetTranslateInfoBarDelegate(
     TabContents* tab_contents) {
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
-  for (size_t i = 0; i < wrapper->infobar_count(); i++) {
-    InfoBarDelegate* infobar = wrapper->GetInfoBarDelegateAt(i);
+  InfoBarTabHelper* infobar_helper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents)->
+          infobar_tab_helper();
+  for (size_t i = 0; i < infobar_helper->infobar_count(); i++) {
+    InfoBarDelegate* infobar = infobar_helper->GetInfoBarDelegateAt(i);
     if (infobar->AsTranslateInfoBarDelegate())
       return infobar->AsTranslateInfoBarDelegate();
   }
@@ -4017,7 +4107,7 @@ void TestingAutomationProvider::SelectTranslateOption(
     // This is the function called when an infobar is dismissed or when the
     // user clicks the 'Nope' translate button.
     translate_bar->TranslationDeclined();
-    tab_contents_wrapper->RemoveInfoBar(translate_bar);
+    tab_contents_wrapper->infobar_tab_helper()->RemoveInfoBar(translate_bar);
     reply.SendSuccess(NULL);
   } else {
     reply.SendError("Invalid string found for option.");
@@ -4111,7 +4201,7 @@ ListValue* GetHostPermissions(const Extension* ext, bool effective_perm) {
   if (effective_perm)
     pattern_set = ext->GetEffectiveHostPermissions();
   else
-    pattern_set = ext->permission_set()->explicit_hosts();
+    pattern_set = ext->GetActivePermissions()->explicit_hosts();
 
   ListValue* permissions = new ListValue;
   for (URLPatternSet::const_iterator perm = pattern_set.begin();
@@ -4124,7 +4214,8 @@ ListValue* GetHostPermissions(const Extension* ext, bool effective_perm) {
 
 ListValue* GetAPIPermissions(const Extension* ext) {
   ListValue* permissions = new ListValue;
-  std::set<std::string> perm_list = ext->permission_set()->GetAPIsAsStrings();
+  std::set<std::string> perm_list =
+      ext->GetActivePermissions()->GetAPIsAsStrings();
   for (std::set<std::string>::const_iterator perm = perm_list.begin();
        perm != perm_list.end(); ++perm) {
     permissions->Append(new StringValue(perm->c_str()));
@@ -4294,7 +4385,8 @@ void TestingAutomationProvider::GetAutofillProfile(
     return;
   }
 
-  TabContents* tab_contents = browser->GetTabContentsAt(tab_index);
+  TabContentsWrapper* tab_contents =
+      browser->GetTabContentsWrapperAt(tab_index);
   if (tab_contents) {
     PersonalDataManager* pdm = tab_contents->profile()->GetOriginalProfile()
         ->GetPersonalDataManager();
@@ -4359,11 +4451,12 @@ void TestingAutomationProvider::FillAutofillProfile(
     return;
   }
 
-  TabContents* tab_contents = browser->GetTabContentsAt(tab_index);
+  TabContentsWrapper* tab_contents =
+      browser->GetTabContentsWrapperAt(tab_index);
 
   if (tab_contents) {
-    PersonalDataManager* pdm = tab_contents->profile()
-        ->GetPersonalDataManager();
+    PersonalDataManager* pdm =
+        tab_contents->profile()->GetPersonalDataManager();
     if (pdm) {
       if (profiles || cards) {
         // This observer will delete itself.
@@ -4388,6 +4481,64 @@ void TestingAutomationProvider::FillAutofillProfile(
     return;
   }
   AutomationJSONReply(this, reply_message).SendSuccess(NULL);
+}
+
+void TestingAutomationProvider::SubmitAutofillForm(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  if (SendErrorIfModalDialogActive(this, reply_message))
+    return;
+
+  int tab_index;
+  if (!args->GetInteger("tab_index", &tab_index)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'tab_index' missing or invalid.");
+    return;
+  }
+  TabContentsWrapper* tab_contents =
+      browser->GetTabContentsWrapperAt(tab_index);
+  if (!tab_contents) {
+    AutomationJSONReply(this, reply_message).SendError(
+        StringPrintf("No such tab at index %d", tab_index));
+    return;
+  }
+
+  string16 frame_xpath, javascript;
+  if (!args->GetString("frame_xpath", &frame_xpath)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'frame_xpath' missing or invalid.");
+    return;
+  }
+  if (!args->GetString("javascript", &javascript)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'javascript' missing or invalid.");
+    return;
+  }
+
+  PersonalDataManager* pdm = tab_contents->profile()->GetOriginalProfile()
+      ->GetPersonalDataManager();
+  if (!pdm) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("No PersonalDataManager.");
+    return;
+  }
+
+  // This observer will delete itself.
+  new AutofillFormSubmittedObserver(this, reply_message, pdm);
+
+  // Set the routing id of this message with the controller.
+  // This routing id needs to be remembered for the reverse
+  // communication while sending back the response of
+  // this javascript execution.
+  std::string set_automation_id;
+  base::SStringPrintf(&set_automation_id,
+                      "window.domAutomationController.setAutomationId(%d);",
+                      reply_message->routing_id());
+  tab_contents->render_view_host()->ExecuteJavascriptInWebFrame(
+      frame_xpath, UTF8ToUTF16(set_automation_id));
+  tab_contents->render_view_host()->ExecuteJavascriptInWebFrame(
+      frame_xpath, javascript);
 }
 
 void TestingAutomationProvider::AutofillTriggerSuggestions(
@@ -5703,20 +5854,49 @@ void TestingAutomationProvider::ExecuteJavascriptJSON(
     return;
   }
 
-  // Set the routing id of this message with the controller.
-  // This routing id needs to be remembered for the reverse
-  // communication while sending back the response of
-  // this javascript execution.
-  std::string set_automation_id;
-  base::SStringPrintf(&set_automation_id,
-                      "window.domAutomationController.setAutomationId(%d);",
-                      reply_message->routing_id());
+  new DomOperationMessageSender(this, reply_message, true);
+  ExecuteJavascriptInRenderViewFrame(frame_xpath, javascript, reply_message,
+                                     tab_contents->render_view_host());
+}
+
+void TestingAutomationProvider::ExecuteJavascriptInRenderView(
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  string16 frame_xpath, javascript, extension_id, url_text;
+  std::string error;
+  int render_process_id, render_view_id;
+  if (!args->GetString("frame_xpath", &frame_xpath)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'frame_xpath' missing or invalid");
+    return;
+  }
+  if (!args->GetString("javascript", &javascript)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'javascript' missing or invalid");
+    return;
+  }
+  if (!args->GetInteger("view.render_process_id", &render_process_id)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'view.render_process_id' missing or invalid");
+    return;
+  }
+  if (!args->GetInteger("view.render_view_id", &render_view_id)) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("'view.render_view_id' missing or invalid");
+    return;
+  }
+
+  RenderViewHost* rvh = RenderViewHost::FromID(render_process_id,
+                                               render_view_id);
+  if (!rvh) {
+    AutomationJSONReply(this, reply_message).SendError(
+            "A RenderViewHost object was not found with the given view ID.");
+    return;
+  }
 
   new DomOperationMessageSender(this, reply_message, true);
-  tab_contents->render_view_host()->ExecuteJavascriptInWebFrame(
-      frame_xpath, UTF8ToUTF16(set_automation_id));
-  tab_contents->render_view_host()->ExecuteJavascriptInWebFrame(
-      frame_xpath, javascript);
+  ExecuteJavascriptInRenderViewFrame(frame_xpath, javascript, reply_message,
+                                     rvh);
 }
 
 void TestingAutomationProvider::GoForward(
@@ -5986,6 +6166,31 @@ void TestingAutomationProvider::GetChromeDriverAutomationVersion(
   AutomationJSONReply(this, reply_message).SendSuccess(&reply_dict);
 }
 
+void TestingAutomationProvider::CreateNewAutomationProvider(
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  std::string channel_id;
+  if (!args->GetString("channel_id", &channel_id)) {
+    reply.SendError("'channel_id' missing or invalid");
+    return;
+  }
+
+  AutomationProvider* provider = new TestingAutomationProvider(profile_);
+  // TODO(kkania): Remove this when crbug.com/91311 is fixed.
+  // Named server channels should ideally be created and closed on the file
+  // thread, within the IPC channel code.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  if (!provider->InitializeChannel(
+          automation::kNamedInterfacePrefix + channel_id)) {
+    reply.SendError("Failed to initialize channel: " + channel_id);
+    return;
+  }
+  provider->SetExpectedTabCount(0);
+  g_browser_process->InitAutomationProviderList()->AddProvider(provider);
+  reply.SendSuccess(NULL);
+}
+
 void TestingAutomationProvider::WaitForTabCountToBecome(
     int browser_handle,
     int target_tab_count,
@@ -6085,7 +6290,7 @@ void TestingAutomationProvider::LoadBlockedPlugins(int tab_handle,
     if (!contents)
       return;
     RenderViewHost* host = contents->render_view_host();
-    host->Send(new ViewMsg_LoadBlockedPlugins(host->routing_id()));
+    host->Send(new ChromeViewMsg_LoadBlockedPlugins(host->routing_id()));
     *success = true;
   }
 }

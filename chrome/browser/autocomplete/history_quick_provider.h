@@ -40,18 +40,24 @@ class HistoryQuickProvider : public HistoryProvider {
   // Performs the autocomplete matching and scoring.
   void DoAutocomplete();
 
+  // Disable this provider. For unit testing purposes only. This is required
+  // because this provider is closely associated with the HistoryURLProvider
+  // and in order to properly test the latter the HistoryQuickProvider must
+  // be disabled.
+  // TODO(mrossetti): Eliminate this once the HUP has been refactored.
+  static void set_disabled(bool disabled) { disabled_ = disabled; }
+
  private:
   friend class HistoryQuickProviderTest;
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Spans);
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Relevance);
 
-  // The initial maximum allowable score for a match which cannot be inlined.
-  static const int kMaxNonInliningScore;
-
   // Creates an AutocompleteMatch from |history_match|. |max_match_score| gives
-  // the maximum possible score for the match.
+  // the maximum possible score for the match. |history_matches| is the full set
+  // of matches to compare each match to when calculating confidence.
   AutocompleteMatch QuickMatchToACMatch(
       const history::ScoredHistoryMatch& history_match,
+      const history::ScoredHistoryMatches& history_matches,
       bool prevent_inline_autocomplete,
       int* max_match_score);
 
@@ -81,6 +87,9 @@ class HistoryQuickProvider : public HistoryProvider {
 
   // Only used for testing.
   scoped_ptr<history::InMemoryURLIndex> index_for_testing_;
+
+  // This provider is disabled when true.
+  static bool disabled_;
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_QUICK_PROVIDER_H_

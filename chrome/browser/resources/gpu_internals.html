@@ -40,11 +40,6 @@ tabbox tabpanels {
 
 </style>
 <link rel="stylesheet" href="gpu_internals/info_view.css">
-<link rel="stylesheet" href="gpu_internals/overlay.css">
-<link rel="stylesheet" href="gpu_internals/profiling_view.css">
-<link rel="stylesheet" href="gpu_internals/timeline_view.css">
-<link rel="stylesheet" href="gpu_internals/timeline.css">
-<link rel="stylesheet" href="gpu_internals/tracing_controller.css">
 <link rel="stylesheet" href="chrome://resources/css/tabs.css">
 <script src="chrome://resources/js/cr.js"></script>
 <script src="chrome://resources/js/cr/event_target.js"></script>
@@ -66,9 +61,14 @@ tabbox tabpanels {
     </tabs>
     <tabpanels>
       <include src="gpu_internals/info_view.html">
-      <tabpanel id="profiling-view"</div>
+      <tabpanel id="profiling-view-link">
+        <div>
+          Profiling view has moved to <a
+            href="chrome://tracing">chrome://tracing</a>.
+        </div>
+      </tabpanel>
     </tabpanels>
-  </div>
+  </tabbox>
   <script src="chrome://resources/js/i18n_template.js"></script>
   <script src="chrome://resources/js/i18n_process.js"></script>
   <script src="chrome://resources/js/jstemplate_compiled.js"></script>

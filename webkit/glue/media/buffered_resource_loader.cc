@@ -7,12 +7,14 @@
 #include "base/format_macros.h"
 #include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "media/base/media_log.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -20,6 +22,7 @@ using WebKit::WebFrame;
 using WebKit::WebString;
 using WebKit::WebURLError;
 using WebKit::WebURLLoader;
+using WebKit::WebURLLoaderOptions;
 using WebKit::WebURLRequest;
 using WebKit::WebURLResponse;
 using webkit_glue::MultipartResponseDelegate;
@@ -32,16 +35,15 @@ static const int kHttpPartialContent = 206;
 // Define the number of bytes in a megabyte.
 static const size_t kMegabyte = 1024 * 1024;
 
-// Backward capacity of the buffer, by default 2MB.
-static const size_t kBackwardCapacity = 2 * kMegabyte;
+// Minimum capacity of the buffer in forward or backward direction.
+//
+// 2MB is an arbitrary limit; it just seems to be "good enough" in practice.
+static const size_t kMinBufferCapacity = 2 * kMegabyte;
 
-// Forward capacity of the buffer, by default 10MB.
-static const size_t kForwardCapacity = 10 * kMegabyte;
-
-// Maximum forward capacity of the buffer, by default 20MB. This is effectively
-// the largest single read teh code path can handle. 20MB is an arbitrary limit;
-// it just seems to be "good enough" in practice.
-static const size_t kMaxForwardCapacity = 20 * kMegabyte;
+// Maximum capacity of the buffer in forward or backward direction. This is
+// effectively the largest single read the code path can handle.
+// 20MB is an arbitrary limit; it just seems to be "good enough" in practice.
+static const size_t kMaxBufferCapacity = 20 * kMegabyte;
 
 // Maximum number of bytes outside the buffer we will wait for in order to
 // fulfill a read. If a read starts more than 2MB away from the data we
@@ -49,13 +51,60 @@ static const size_t kMaxForwardCapacity = 20 * kMegabyte;
 // location and will instead reset the request.
 static const int kForwardWaitThreshold = 2 * kMegabyte;
 
+// Computes the suggested backward and forward capacity for the buffer
+// if one wants to play at |playback_rate| * the natural playback speed.
+// Use a value of 0 for |bitrate| if it is unknown.
+static void ComputeTargetBufferWindow(float playback_rate, int bitrate,
+                                      size_t* out_backward_capacity,
+                                      size_t* out_forward_capacity) {
+  static const size_t kDefaultBitrate = 200 * 1024 * 8;  // 200 Kbps.
+  static const size_t kMaxBitrate = 20 * kMegabyte * 8;  // 20 Mbps.
+  static const float kMaxPlaybackRate = 25.0;
+  static const size_t kTargetSecondsBufferedAhead = 10;
+  static const size_t kTargetSecondsBufferedBehind = 2;
+
+  // Use a default bit rate if unknown and clamp to prevent overflow.
+  if (bitrate <= 0)
+    bitrate = kDefaultBitrate;
+  bitrate = std::min(static_cast<size_t>(bitrate), kMaxBitrate);
+
+  // Only scale the buffer window for playback rates greater than 1.0 in
+  // magnitude and clamp to prevent overflow.
+  bool backward_playback = false;
+  if (playback_rate < 0.0f) {
+    backward_playback = true;
+    playback_rate *= -1.0f;
+  }
+
+  playback_rate = std::max(playback_rate, 1.0f);
+  playback_rate = std::min(playback_rate, kMaxPlaybackRate);
+
+  size_t bytes_per_second = static_cast<size_t>(playback_rate * bitrate / 8.0);
+
+  // Clamp between kMinBufferCapacity and kMaxBufferCapacity.
+  *out_forward_capacity = std::max(
+      kTargetSecondsBufferedAhead * bytes_per_second, kMinBufferCapacity);
+  *out_backward_capacity = std::max(
+      kTargetSecondsBufferedBehind * bytes_per_second, kMinBufferCapacity);
+
+  *out_forward_capacity = std::min(*out_forward_capacity, kMaxBufferCapacity);
+  *out_backward_capacity = std::min(*out_backward_capacity, kMaxBufferCapacity);
+
+  if (backward_playback)
+    std::swap(*out_forward_capacity, *out_backward_capacity);
+}
+
+
 BufferedResourceLoader::BufferedResourceLoader(
     const GURL& url,
     int64 first_byte_position,
-    int64 last_byte_position)
-    : buffer_(new media::SeekableBuffer(kBackwardCapacity, kForwardCapacity)),
-      deferred_(false),
-      defer_strategy_(kReadThenDefer),
+    int64 last_byte_position,
+    DeferStrategy strategy,
+    int bitrate,
+    float playback_rate,
+    media::MediaLog* media_log)
+    : deferred_(false),
+      defer_strategy_(strategy),
       completed_(false),
       range_requested_(false),
       range_supported_(false),
@@ -74,7 +123,16 @@ BufferedResourceLoader::BufferedResourceLoader(
       read_buffer_(NULL),
       first_offset_(0),
       last_offset_(0),
-      keep_test_loader_(false) {
+      keep_test_loader_(false),
+      bitrate_(bitrate),
+      playback_rate_(playback_rate),
+      media_log_(media_log) {
+
+  size_t backward_capacity;
+  size_t forward_capacity;
+  ComputeTargetBufferWindow(
+      playback_rate_, bitrate_, &backward_capacity, &forward_capacity);
+  buffer_.reset(new media::SeekableBuffer(backward_capacity, forward_capacity));
 }
 
 BufferedResourceLoader::~BufferedResourceLoader() {
@@ -124,8 +182,13 @@ void BufferedResourceLoader::Start(net::CompletionCallback* start_callback,
       WebString::fromUTF8("identity;q=1, *;q=0"));
 
   // This flag is for unittests as we don't want to reset |url_loader|
-  if (!keep_test_loader_)
-    url_loader_.reset(frame->createAssociatedURLLoader());
+  if (!keep_test_loader_) {
+    WebURLLoaderOptions options;
+    options.allowCredentials = true;
+    options.crossOriginRequestPolicy =
+        WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+    url_loader_.reset(frame->createAssociatedURLLoader(options));
+  }
 
   // Start the resource loading.
   url_loader_->loadAsynchronously(request, this);
@@ -190,7 +253,7 @@ void BufferedResourceLoader::Read(int64 position,
 
   // Make sure |read_size_| is not too large for the buffer to ever be able to
   // fulfill the read request.
-  if (read_size_ > kMaxForwardCapacity) {
+  if (read_size_ > kMaxBufferCapacity) {
     DoneRead(net::ERR_FAILED);
     return;
   }
@@ -206,21 +269,43 @@ void BufferedResourceLoader::Read(int64 position,
     return;
   }
 
-  // If you're deferred and you can't fulfill the read because you don't have
-  // enough data, you will never fulfill the read.
-  // Update defer behavior to re-enable deferring if need be.
-  UpdateDeferBehavior();
-
-  // If we expect the read request to be fulfilled later, return
-  // and let more data to flow in.
+  // If we expect the read request to be fulfilled later, expand capacity as
+  // necessary and disable deferring.
   if (WillFulfillRead()) {
-    // If necessary, expand the forward capacity of the buffer to accomodate an
-    // unusually large read.
-    if (read_size_ > buffer_->forward_capacity()) {
+    // Advance offset as much as possible to create additional capacity.
+    int advance = std::min(first_offset_,
+                           static_cast<int>(buffer_->forward_bytes()));
+    bool ret = buffer_->Seek(advance);
+    DCHECK(ret);
+
+    offset_ += advance;
+    first_offset_ -= advance;
+    last_offset_ -= advance;
+
+    // Expand capacity to accomodate a read that extends past the normal
+    // capacity.
+    //
+    // This can happen when reading in a large seek index or when the
+    // first byte of a read request falls within kForwardWaitThreshold.
+    if (last_offset_ > static_cast<int>(buffer_->forward_capacity())) {
       saved_forward_capacity_ = buffer_->forward_capacity();
-      buffer_->set_forward_capacity(read_size_);
+      buffer_->set_forward_capacity(last_offset_);
     }
-   return;
+
+    // Make sure we stop deferring now that there's additional capacity.
+    //
+    // XXX: can we DCHECK(url_loader_.get()) at this point in time?
+    if (deferred_ && url_loader_.get()) {
+      deferred_ = false;
+
+      url_loader_->setDefersLoading(deferred_);
+      NotifyNetworkEvent();
+    }
+
+    DCHECK(!ShouldEnableDefer())
+        << "Capacity was not adjusted properly to prevent deferring.";
+
+    return;
   }
 
   // Make a callback to report failure.
@@ -392,6 +477,7 @@ void BufferedResourceLoader::didReceiveData(
 
   // Notify that we have received some data.
   NotifyNetworkEvent();
+  Log();
 }
 
 void BufferedResourceLoader::didDownloadData(
@@ -478,8 +564,47 @@ bool BufferedResourceLoader::HasSingleOrigin() const {
   return single_origin_;
 }
 
+void BufferedResourceLoader::UpdateDeferStrategy(DeferStrategy strategy) {
+  defer_strategy_ = strategy;
+  UpdateDeferBehavior();
+}
+
+void BufferedResourceLoader::SetPlaybackRate(float playback_rate) {
+  playback_rate_ = playback_rate;
+
+  // This is a pause so don't bother updating the buffer window as we'll likely
+  // get unpaused in the future.
+  if (playback_rate_ == 0.0)
+    return;
+
+  UpdateBufferWindow();
+}
+
+void BufferedResourceLoader::SetBitrate(int bitrate) {
+  DCHECK(bitrate >= 0);
+  bitrate_ = bitrate;
+  UpdateBufferWindow();
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Helper methods.
+
+void BufferedResourceLoader::UpdateBufferWindow() {
+  if (!buffer_.get())
+    return;
+
+  size_t backward_capacity;
+  size_t forward_capacity;
+  ComputeTargetBufferWindow(
+      playback_rate_, bitrate_, &backward_capacity, &forward_capacity);
+
+  // This does not evict data from the buffer if the new capacities are less
+  // than the current capacities; the new limits will be enforced after the
+  // existing excess buffered data is consumed.
+  buffer_->set_backward_capacity(backward_capacity);
+  buffer_->set_forward_capacity(forward_capacity);
+}
+
 void BufferedResourceLoader::UpdateDeferBehavior() {
   if (!url_loader_.get() || !buffer_.get())
     return;
@@ -490,11 +615,6 @@ void BufferedResourceLoader::UpdateDeferBehavior() {
     if (eventOccurred)
       NotifyNetworkEvent();
   }
-}
-
-void BufferedResourceLoader::UpdateDeferStrategy(DeferStrategy strategy) {
-  defer_strategy_ = strategy;
-  UpdateDeferBehavior();
 }
 
 bool BufferedResourceLoader::ShouldEnableDefer() {
@@ -587,7 +707,7 @@ bool BufferedResourceLoader::WillFulfillRead() {
     return false;
 
   // Trying to read too far ahead.
-  if (first_offset_ - static_cast<int>(buffer_->forward_bytes()) >
+  if (first_offset_ - static_cast<int>(buffer_->forward_bytes()) >=
       kForwardWaitThreshold)
     return false;
 
@@ -670,6 +790,7 @@ void BufferedResourceLoader::DoneRead(int error) {
   read_buffer_ = NULL;
   first_offset_ = 0;
   last_offset_ = 0;
+  Log();
 }
 
 void BufferedResourceLoader::DoneStart(int error) {
@@ -684,6 +805,16 @@ void BufferedResourceLoader::NotifyNetworkEvent() {
 
 bool BufferedResourceLoader::IsRangeRequest() const {
   return first_byte_position_ != kPositionNotSpecified;
+}
+
+void BufferedResourceLoader::Log() {
+  if (buffer_.get()) {
+    media_log_->AddEvent(
+        media_log_->CreateBufferedExtentsChangedEvent(
+            offset_ - buffer_->backward_bytes(),
+            offset_,
+            offset_ + buffer_->forward_bytes()));
+  }
 }
 
 }  // namespace webkit_glue

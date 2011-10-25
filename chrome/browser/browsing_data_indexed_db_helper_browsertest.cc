@@ -12,8 +12,9 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_helper_browsertest.h"
 #include "chrome/browser/browsing_data_indexed_db_helper.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/test/base/in_process_browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -21,21 +22,15 @@ typedef BrowsingDataHelperCallback<BrowsingDataIndexedDBHelper::IndexedDBInfo>
     TestCompletionCallback;
 
 class BrowsingDataIndexedDBHelperTest : public InProcessBrowserTest {
- protected:
-  TestingProfile testing_profile_;
 };
 
 IN_PROC_BROWSER_TEST_F(BrowsingDataIndexedDBHelperTest, CannedAddIndexedDB) {
   const GURL origin1("http://host1:1/");
   const GURL origin2("http://host2:1/");
   const string16 description(ASCIIToUTF16("description"));
-  const FilePath::CharType file1[] =
-      FILE_PATH_LITERAL("http_host1_1.indexeddb.leveldb");
-  const FilePath::CharType file2[] =
-      FILE_PATH_LITERAL("http_host2_1.indexeddb.leveldb");
 
   scoped_refptr<CannedBrowsingDataIndexedDBHelper> helper(
-      new CannedBrowsingDataIndexedDBHelper(&testing_profile_));
+      new CannedBrowsingDataIndexedDBHelper());
   helper->AddIndexedDB(origin1, description);
   helper->AddIndexedDB(origin2, description);
 
@@ -43,22 +38,23 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataIndexedDBHelperTest, CannedAddIndexedDB) {
   helper->StartFetching(
       NewCallback(&callback, &TestCompletionCallback::callback));
 
-  std::vector<BrowsingDataIndexedDBHelper::IndexedDBInfo> result =
+  std::list<BrowsingDataIndexedDBHelper::IndexedDBInfo> result =
       callback.result();
 
   ASSERT_EQ(2U, result.size());
-  EXPECT_EQ(FilePath(file1).value(), result[0].file_path.BaseName().value());
-  EXPECT_EQ(FilePath(file2).value(), result[1].file_path.BaseName().value());
+  std::list<BrowsingDataIndexedDBHelper::IndexedDBInfo>::iterator info =
+      result.begin();
+  EXPECT_EQ(origin1, info->origin);
+  info++;
+  EXPECT_EQ(origin2, info->origin);
 }
 
 IN_PROC_BROWSER_TEST_F(BrowsingDataIndexedDBHelperTest, CannedUnique) {
   const GURL origin("http://host1:1/");
   const string16 description(ASCIIToUTF16("description"));
-  const FilePath::CharType file[] =
-      FILE_PATH_LITERAL("http_host1_1.indexeddb.leveldb");
 
   scoped_refptr<CannedBrowsingDataIndexedDBHelper> helper(
-      new CannedBrowsingDataIndexedDBHelper(&testing_profile_));
+      new CannedBrowsingDataIndexedDBHelper());
   helper->AddIndexedDB(origin, description);
   helper->AddIndexedDB(origin, description);
 
@@ -66,10 +62,10 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataIndexedDBHelperTest, CannedUnique) {
   helper->StartFetching(
       NewCallback(&callback, &TestCompletionCallback::callback));
 
-  std::vector<BrowsingDataIndexedDBHelper::IndexedDBInfo> result =
+  std::list<BrowsingDataIndexedDBHelper::IndexedDBInfo> result =
       callback.result();
 
   ASSERT_EQ(1U, result.size());
-  EXPECT_EQ(FilePath(file).value(), result[0].file_path.BaseName().value());
+  EXPECT_EQ(origin, result.begin()->origin);
 }
 }  // namespace

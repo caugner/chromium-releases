@@ -89,6 +89,18 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * The accessor to "autoExpands" property of the list.
+     *
+     * @type {boolean}
+     */
+    get autoExpands() {
+      return this.list_.autoExpands;
+    },
+    set autoExpands(autoExpands) {
+      this.list_.autoExpands = autoExpands;
+    },
+
+    /**
      * Returns render function for row.
      * @return {Function(*, cr.ui.Table): HTMLElement} Render function.
      */

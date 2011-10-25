@@ -70,11 +70,11 @@ class ChooseMobileNetworkHandler
   virtual ~ChooseMobileNetworkHandler();
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
+  virtual void RegisterMessages() OVERRIDE;
 
   // NetworkDeviceObserver implementation.
-  virtual void OnNetworkDeviceFoundNetworks(NetworkLibrary* cros,
-                                            const NetworkDevice* device);
+  virtual void OnNetworkDeviceFoundNetworks(
+      NetworkLibrary* cros, const NetworkDevice* device) OVERRIDE;
 
  private:
   // Handlers for JS WebUI messages.
@@ -252,7 +252,8 @@ ChooseMobileNetworkUI::ChooseMobileNetworkUI(TabContents* contents)
   ChooseMobileNetworkHTMLSource* html_source =
       new ChooseMobileNetworkHTMLSource();
   // Set up the "chrome://choose-mobile-network" source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 
 }  // namespace chromeos

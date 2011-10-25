@@ -22,12 +22,22 @@ class WebView;
 }
 
 struct WebPreferences {
+  // Map of ISO 15924 four-letter script code to font family.  For example,
+  // "Arab" to "My Arabic Font".
+  typedef std::vector<std::pair<std::string, string16> > ScriptFontFamilyMap;
+
   string16 standard_font_family;
   string16 fixed_font_family;
   string16 serif_font_family;
   string16 sans_serif_font_family;
   string16 cursive_font_family;
   string16 fantasy_font_family;
+  ScriptFontFamilyMap standard_font_family_map;
+  ScriptFontFamilyMap fixed_font_family_map;
+  ScriptFontFamilyMap serif_font_family_map;
+  ScriptFontFamilyMap sans_serif_font_family_map;
+  ScriptFontFamilyMap cursive_font_family_map;
+  ScriptFontFamilyMap fantasy_font_family_map;
   int default_font_size;
   int default_fixed_font_size;
   int minimum_font_size;
@@ -79,6 +89,7 @@ struct WebPreferences {
   bool asynchronous_spell_checking_enabled;
   bool accelerated_compositing_enabled;
   bool force_compositing_mode;
+  bool allow_webui_compositing;
   bool composite_to_texture_enabled;
   bool accelerated_layers_enabled;
   bool accelerated_video_enabled;

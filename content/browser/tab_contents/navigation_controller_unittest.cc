@@ -16,8 +16,8 @@
 //  #include "chrome/browser/sessions/session_service_factory.h"
 //  #include "chrome/browser/sessions/session_service_test_helper.h"
 //  #include "chrome/browser/sessions/session_types.h"
-#include "chrome/test/test_notification_tracker.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/test_notification_tracker.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_controller.h"
@@ -1438,7 +1438,7 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
   GURL url("http://foo");
   std::vector<NavigationEntry*> entries;
   NavigationEntry* entry = NavigationController::CreateNavigationEntry(
-      url, GURL(), PageTransition::RELOAD, profile());
+      url, GURL(), PageTransition::RELOAD, std::string(), profile());
   entry->set_page_id(0);
   entry->set_title(ASCIIToUTF16("Title"));
   entry->set_content_state("state");
@@ -1447,15 +1447,23 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
   NavigationController& our_controller = our_contents.controller();
   our_controller.Restore(0, true, &entries);
   ASSERT_EQ(0u, entries.size());
-  our_controller.GoToIndex(0);
 
-  // We should now have one entry, and it should be "pending".
+  // Before navigating to the restored entry, it should have a restore_type
+  // and no SiteInstance.
+  EXPECT_EQ(NavigationEntry::RESTORE_LAST_SESSION,
+            our_controller.GetEntryAtIndex(0)->restore_type());
+  EXPECT_FALSE(our_controller.GetEntryAtIndex(0)->site_instance());
+
+  // After navigating, we should have one entry, and it should be "pending".
+  // It should now have a SiteInstance and no restore_type.
+  our_controller.GoToIndex(0);
   EXPECT_EQ(1, our_controller.entry_count());
   EXPECT_EQ(our_controller.GetEntryAtIndex(0),
             our_controller.pending_entry());
   EXPECT_EQ(0, our_controller.GetEntryAtIndex(0)->page_id());
-  EXPECT_EQ(NavigationEntry::RESTORE_LAST_SESSION,
+  EXPECT_EQ(NavigationEntry::RESTORE_NONE,
             our_controller.GetEntryAtIndex(0)->restore_type());
+  EXPECT_TRUE(our_controller.GetEntryAtIndex(0)->site_instance());
 
   // Say we navigated to that entry.
   ViewHostMsg_FrameNavigate_Params params;
@@ -1472,6 +1480,74 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
   // There should be no longer any pending entry and one committed one. This
   // means that we were able to locate the entry, assign its site instance, and
   // commit it properly.
+  EXPECT_EQ(1, our_controller.entry_count());
+  EXPECT_EQ(0, our_controller.last_committed_entry_index());
+  EXPECT_FALSE(our_controller.pending_entry());
+  EXPECT_EQ(url,
+            our_controller.GetLastCommittedEntry()->site_instance()->site());
+  EXPECT_EQ(NavigationEntry::RESTORE_NONE,
+            our_controller.GetEntryAtIndex(0)->restore_type());
+}
+
+// Tests that we can still navigate to a restored entry after a different
+// navigation fails and clears the pending entry.  http://crbug.com/90085
+TEST_F(NavigationControllerTest, RestoreNavigateAfterFailure) {
+  // Create a NavigationController with a restored set of tabs.
+  GURL url("http://foo");
+  std::vector<NavigationEntry*> entries;
+  NavigationEntry* entry = NavigationController::CreateNavigationEntry(
+      url, GURL(), PageTransition::RELOAD, std::string(), profile());
+  entry->set_page_id(0);
+  entry->set_title(ASCIIToUTF16("Title"));
+  entry->set_content_state("state");
+  entries.push_back(entry);
+  TabContents our_contents(profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
+  NavigationController& our_controller = our_contents.controller();
+  our_controller.Restore(0, true, &entries);
+  ASSERT_EQ(0u, entries.size());
+
+  // Before navigating to the restored entry, it should have a restore_type
+  // and no SiteInstance.
+  EXPECT_EQ(NavigationEntry::RESTORE_LAST_SESSION,
+            our_controller.GetEntryAtIndex(0)->restore_type());
+  EXPECT_FALSE(our_controller.GetEntryAtIndex(0)->site_instance());
+
+  // After navigating, we should have one entry, and it should be "pending".
+  // It should now have a SiteInstance and no restore_type.
+  our_controller.GoToIndex(0);
+  EXPECT_EQ(1, our_controller.entry_count());
+  EXPECT_EQ(our_controller.GetEntryAtIndex(0),
+            our_controller.pending_entry());
+  EXPECT_EQ(0, our_controller.GetEntryAtIndex(0)->page_id());
+  EXPECT_EQ(NavigationEntry::RESTORE_NONE,
+            our_controller.GetEntryAtIndex(0)->restore_type());
+  EXPECT_TRUE(our_controller.GetEntryAtIndex(0)->site_instance());
+
+  // This pending navigation may have caused a different navigation to fail,
+  // which causes the pending entry to be cleared.
+  TestRenderViewHost* rvh =
+      static_cast<TestRenderViewHost*>(our_contents.render_view_host());
+  rvh->TestOnMessageReceived(
+      ViewHostMsg_DidFailProvisionalLoadWithError(0,  // routing_id
+                                                  1,  // frame_id
+                                                  true,  // is_main_frame
+                                                  net::ERR_ABORTED,  // error
+                                                  url,  // url
+                                                  false));  // repost
+
+  // Now the pending restored entry commits.
+  ViewHostMsg_FrameNavigate_Params params;
+  params.page_id = 0;
+  params.url = url;
+  params.transition = PageTransition::LINK;
+  params.should_update_history = false;
+  params.gesture = NavigationGestureUser;
+  params.is_post = false;
+  params.content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
+  content::LoadCommittedDetails details;
+  our_controller.RendererDidNavigate(params, &details);
+
+  // There should be no pending entry and one committed one.
   EXPECT_EQ(1, our_controller.entry_count());
   EXPECT_EQ(0, our_controller.last_committed_entry_index());
   EXPECT_FALSE(our_controller.pending_entry());
@@ -1648,7 +1724,10 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   controller().GoToIndex(1);
   // The navigation should have been initiated, transient entry should be gone.
   EXPECT_EQ(url1, controller().GetActiveEntry()->url());
+  // Visible entry does not update for history navigations until commit.
+  EXPECT_EQ(url3, controller().GetVisibleEntry()->url());
   rvh()->SendNavigate(1, url1);
+  EXPECT_EQ(url1, controller().GetVisibleEntry()->url());
 
   // Add a transient and go to an entry after the current one.
   transient_entry = new NavigationEntry;
@@ -1658,9 +1737,11 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   controller().GoToIndex(3);
   // The navigation should have been initiated, transient entry should be gone.
   // Because of the transient entry that is removed, going to index 3 makes us
-  // land on url2.
+  // land on url2 (which is visible after the commit).
   EXPECT_EQ(url2, controller().GetActiveEntry()->url());
+  EXPECT_EQ(url1, controller().GetVisibleEntry()->url());
   rvh()->SendNavigate(2, url2);
+  EXPECT_EQ(url2, controller().GetVisibleEntry()->url());
 
   // Add a transient and go forward.
   transient_entry = new NavigationEntry;
@@ -1671,7 +1752,9 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   controller().GoForward();
   // We should have navigated, transient entry should be gone.
   EXPECT_EQ(url3, controller().GetActiveEntry()->url());
+  EXPECT_EQ(url2, controller().GetVisibleEntry()->url());
   rvh()->SendNavigate(3, url3);
+  EXPECT_EQ(url3, controller().GetVisibleEntry()->url());
 
   // Ensure the URLS are correct.
   EXPECT_EQ(controller().entry_count(), 5);
@@ -1850,7 +1933,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune) {
   other_contents->ExpectSetHistoryLengthAndPrune(
       other_controller.GetEntryAtIndex(0)->site_instance(), 2,
       other_controller.GetEntryAtIndex(0)->page_id());
-  other_controller.CopyStateFromAndPrune(&controller(), false);
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // other_controller should now contain the 3 urls: url1, url2 and url3.
 
@@ -1877,7 +1960,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune2) {
   scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
   NavigationController& other_controller = other_contents->controller();
   other_contents->ExpectSetHistoryLengthAndPrune(NULL, 1, -1);
-  other_controller.CopyStateFromAndPrune(&controller(), false);
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // other_controller should now contain the 1 url: url1.
 
@@ -1903,7 +1986,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
   NavigationController& other_controller = other_contents->controller();
   other_controller.LoadURL(url3, GURL(), PageTransition::TYPED);
   other_contents->ExpectSetHistoryLengthAndPrune(NULL, 1, -1);
-  other_controller.CopyStateFromAndPrune(&controller(), false);
+  other_controller.CopyStateFromAndPrune(&controller());
 
   // other_controller should now contain 1 entry for url1, and a pending entry
   // for url3.
@@ -1917,86 +2000,6 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
   // And there should be a pending entry for url3.
   ASSERT_TRUE(other_controller.pending_entry());
 
-  EXPECT_EQ(url3, other_controller.pending_entry()->url());
-}
-
-// Test CopyStateFromAndPrune with 1 url in source, nothing in target and
-// remove_first = true.
-TEST_F(NavigationControllerTest, CopyStateFromAndPrune4) {
-  const GURL url1("http://foo1");
-
-  NavigateAndCommit(url1);
-
-  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
-  NavigationController& other_controller = other_contents->controller();
-  other_contents->ExpectSetHistoryLengthAndPrune(NULL, 1, -1);
-  other_controller.CopyStateFromAndPrune(&controller(), true);
-
-  // other_controller should now contain 1 entry for url1.
-
-  ASSERT_EQ(1, other_controller.entry_count());
-
-  EXPECT_EQ(0, other_controller.GetCurrentEntryIndex());
-
-  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
-
-  // And there should be a pending entry for url3.
-  ASSERT_FALSE(other_controller.pending_entry());
-}
-
-// Test CopyStateFromAndPrune with 1 url in source, 1 in target and
-// remove_first = true.
-TEST_F(NavigationControllerTest, CopyStateFromAndPrune5) {
-  const GURL url1("http://foo1");
-  const GURL url2("http://foo2");
-
-  NavigateAndCommit(url1);
-
-  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
-  NavigationController& other_controller = other_contents->controller();
-  other_contents->NavigateAndCommit(url2);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      other_controller.GetEntryAtIndex(0)->site_instance(),
-      1,
-      other_controller.GetEntryAtIndex(0)->page_id() + 1);
-  other_controller.CopyStateFromAndPrune(&controller(), true);
-
-  // other_controller should now contain 1 entry, url1.
-
-  ASSERT_EQ(1, other_controller.entry_count());
-  EXPECT_EQ(0, other_controller.GetCurrentEntryIndex());
-  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
-
-  // And there should be a pending entry for url3.
-  ASSERT_FALSE(other_controller.pending_entry());
-}
-
-// Test CopyStateFromAndPrune with 1 url in source, 2 in target and
-// remove_first = true.
-TEST_F(NavigationControllerTest, CopyStateFromAndPrune6) {
-  const GURL url1("http://foo1");
-  const GURL url2("http://foo2");
-  const GURL url3("http://foo2");
-
-  NavigateAndCommit(url1);
-
-  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
-  NavigationController& other_controller = other_contents->controller();
-  other_contents->NavigateAndCommit(url2);
-  other_controller.LoadURL(url3, GURL(), PageTransition::TYPED);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      other_controller.GetEntryAtIndex(0)->site_instance(),
-      1,
-      other_controller.GetEntryAtIndex(0)->page_id() + 1);
-  other_controller.CopyStateFromAndPrune(&controller(), true);
-
-  // other_controller should now contain 2 entries: url1, and url3.
-  ASSERT_EQ(1, other_controller.entry_count());
-  EXPECT_EQ(0, other_controller.GetCurrentEntryIndex());
-  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
-
-  // And there should be a pending entry for url3.
-  ASSERT_TRUE(other_controller.pending_entry());
   EXPECT_EQ(url3, other_controller.pending_entry()->url());
 }
 

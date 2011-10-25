@@ -20,10 +20,11 @@
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/private/ppb_flash_file.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/resource.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -188,7 +189,7 @@ bool ModuleLocalThreadAdapter::Filter::OnMessageReceived(
 }
 
 ModuleLocalThreadAdapter::ModuleLocalThreadAdapter()
-    : main_thread_(base::MessageLoopProxy::CreateForCurrentThread()) {
+    : main_thread_(base::MessageLoopProxy::current()) {
 }
 
 void ModuleLocalThreadAdapter::AddInstanceRouting(PP_Instance instance,
@@ -599,7 +600,7 @@ void PPB_Flash_File_ModuleLocal_Proxy::OnMsgQueryFile(PP_Instance instance,
 void PPB_Flash_File_ModuleLocal_Proxy::OnMsgGetDirContents(
     PP_Instance instance,
     const std::string& path,
-    std::vector<pp::proxy::SerializedDirEntry>* entries,
+    std::vector<SerializedDirEntry>* entries,
     int32_t* result) {
   PP_DirContents_Dev* contents = NULL;
   *result = ppb_flash_file_module_local_target()->
@@ -623,13 +624,12 @@ namespace {
 int32_t OpenFileRefFile(PP_Resource file_ref_id,
                         int32_t mode,
                         PP_FileHandle* file) {
-  PluginResource* file_ref =
-      PluginResourceTracker::GetInstance()->GetResourceObject(file_ref_id);
+  Resource* file_ref =
+      PluginResourceTracker::GetInstance()->GetResource(file_ref_id);
   if (!file_ref)
     return PP_ERROR_BADRESOURCE;
 
-  PluginDispatcher* dispatcher =
-      PluginDispatcher::GetForInstance(file_ref->instance());
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForResource(file_ref);
   if (!dispatcher)
     return PP_ERROR_BADARGUMENT;
 
@@ -644,13 +644,12 @@ int32_t OpenFileRefFile(PP_Resource file_ref_id,
 
 int32_t QueryFileRefFile(PP_Resource file_ref_id,
                          PP_FileInfo* info) {
-  PluginResource* file_ref =
-      PluginResourceTracker::GetInstance()->GetResourceObject(file_ref_id);
+  Resource* file_ref =
+      PluginResourceTracker::GetInstance()->GetResource(file_ref_id);
   if (!file_ref)
     return PP_ERROR_BADRESOURCE;
 
-  PluginDispatcher* dispatcher =
-      PluginDispatcher::GetForInstance(file_ref->instance());
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForResource(file_ref);
   if (!dispatcher)
     return PP_ERROR_BADARGUMENT;
 
@@ -729,4 +728,4 @@ void PPB_Flash_File_FileRef_Proxy::OnMsgQueryFile(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

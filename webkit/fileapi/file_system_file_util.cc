@@ -5,10 +5,7 @@
 #include "webkit/fileapi/file_system_file_util.h"
 
 #include <stack>
-#include <vector>
 
-#include "base/file_util_proxy.h"
-#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "webkit/fileapi/file_system_operation_context.h"
 
@@ -29,141 +26,14 @@ bool ParentExists(FileSystemOperationContext* context,
 
 }  // namespace
 
-// static
-FileSystemFileUtil* FileSystemFileUtil::GetInstance() {
-  return Singleton<FileSystemFileUtil>::get();
+FileSystemFileUtil::FileSystemFileUtil() {
 }
 
-PlatformFileError FileSystemFileUtil::CreateOrOpen(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path, int file_flags,
-    PlatformFile* file_handle, bool* created) {
-  if (!file_util::DirectoryExists(file_path.DirName())) {
-    // If its parent does not exist, should return NOT_FOUND error.
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-  }
-  PlatformFileError error_code = base::PLATFORM_FILE_OK;
-  *file_handle = base::CreatePlatformFile(file_path, file_flags,
-                                          created, &error_code);
-  return error_code;
+FileSystemFileUtil::FileSystemFileUtil(FileSystemFileUtil* underlying_file_util)
+    : underlying_file_util_(underlying_file_util) {
 }
 
-PlatformFileError FileSystemFileUtil::Close(
-    FileSystemOperationContext* unused,
-    PlatformFile file_handle) {
-  if (!base::ClosePlatformFile(file_handle))
-    return base::PLATFORM_FILE_ERROR_FAILED;
-  return base::PLATFORM_FILE_OK;
-}
-
-PlatformFileError FileSystemFileUtil::EnsureFileExists(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path,
-    bool* created) {
-  if (!file_util::DirectoryExists(file_path.DirName()))
-    // If its parent does not exist, should return NOT_FOUND error.
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-  PlatformFileError error_code = base::PLATFORM_FILE_OK;
-  // Tries to create the |file_path| exclusively.  This should fail
-  // with base::PLATFORM_FILE_ERROR_EXISTS if the path already exists.
-  PlatformFile handle = base::CreatePlatformFile(
-      file_path,
-      base::PLATFORM_FILE_CREATE | base::PLATFORM_FILE_READ,
-      created, &error_code);
-  if (error_code == base::PLATFORM_FILE_ERROR_EXISTS) {
-    // Make sure created_ is false.
-    if (created)
-      *created = false;
-    error_code = base::PLATFORM_FILE_OK;
-  }
-  if (handle != base::kInvalidPlatformFileValue)
-    base::ClosePlatformFile(handle);
-  return error_code;
-}
-
-PlatformFileError FileSystemFileUtil::GetLocalFilePath(
-    FileSystemOperationContext* context,
-    const FilePath& virtual_path,
-    FilePath* local_path) {
-  *local_path = virtual_path;
-  return base::PLATFORM_FILE_OK;
-}
-
-PlatformFileError FileSystemFileUtil::GetFileInfo(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path,
-    base::PlatformFileInfo* file_info,
-    FilePath* platform_file_path) {
-  if (!file_util::PathExists(file_path))
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-  // TODO(rkc): Fix this hack once we have refactored file_util to handle
-  // symlinks correctly.
-  // http://code.google.com/p/chromium-os/issues/detail?id=15948
-  if (file_util::IsLink(file_path))
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-  if (!file_util::GetFileInfo(file_path, file_info))
-    return base::PLATFORM_FILE_ERROR_FAILED;
-  *platform_file_path = file_path;
-  return base::PLATFORM_FILE_OK;
-}
-
-PlatformFileError FileSystemFileUtil::ReadDirectory(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path,
-    std::vector<base::FileUtilProxy::Entry>* entries) {
-  // TODO(kkanetkar): Implement directory read in multiple chunks.
-  if (!file_util::DirectoryExists(file_path))
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-
-  file_util::FileEnumerator file_enum(
-      file_path, false, static_cast<file_util::FileEnumerator::FILE_TYPE>(
-      file_util::FileEnumerator::FILES |
-      file_util::FileEnumerator::DIRECTORIES));
-  FilePath current;
-  while (!(current = file_enum.Next()).empty()) {
-    base::FileUtilProxy::Entry entry;
-    file_util::FileEnumerator::FindInfo info;
-    file_enum.GetFindInfo(&info);
-    entry.is_directory = file_enum.IsDirectory(info);
-    // This will just give the entry's name instead of entire path
-    // if we use current.value().
-    entry.name = file_util::FileEnumerator::GetFilename(info).value();
-    entry.size = file_util::FileEnumerator::GetFilesize(info);
-    entry.last_modified_time =
-        file_util::FileEnumerator::GetLastModifiedTime(info);
-    // TODO(rkc): Fix this also once we've refactored file_util
-    // http://code.google.com/p/chromium-os/issues/detail?id=15948
-    // This currently just prevents a file from showing up at all
-    // if it's a link, hence preventing arbitary 'read' exploits.
-    if (!file_util::IsLink(file_path.Append(entry.name)))
-      entries->push_back(entry);
-  }
-  return base::PLATFORM_FILE_OK;
-}
-
-PlatformFileError FileSystemFileUtil::CreateDirectory(
-    FileSystemOperationContext* fs_context,
-    const FilePath& file_path,
-    bool exclusive,
-    bool recursive) {
-  if (fs_context->do_not_write_actually())
-    return base::PLATFORM_FILE_OK;
-
-  // If parent dir of file doesn't exist.
-  if (!recursive && !file_util::PathExists(file_path.DirName()))
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-
-  bool path_exists = file_util::PathExists(file_path);
-  if (exclusive && path_exists)
-    return base::PLATFORM_FILE_ERROR_EXISTS;
-
-  // If file exists at the path.
-  if (path_exists && !file_util::DirectoryExists(file_path))
-    return base::PLATFORM_FILE_ERROR_EXISTS;
-
-  if (!file_util::CreateDirectory(file_path))
-    return base::PLATFORM_FILE_ERROR_FAILED;
-  return base::PLATFORM_FILE_OK;
+FileSystemFileUtil::~FileSystemFileUtil() {
 }
 
 PlatformFileError FileSystemFileUtil::Copy(
@@ -217,36 +87,214 @@ PlatformFileError FileSystemFileUtil::Delete(
   }
 }
 
+PlatformFileError FileSystemFileUtil::CreateOrOpen(
+    FileSystemOperationContext* context,
+    const FilePath& file_path, int file_flags,
+    PlatformFile* file_handle, bool* created) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->CreateOrOpen(
+        context, file_path, file_flags, file_handle, created);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::Close(
+    FileSystemOperationContext* context,
+    PlatformFile file_handle) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->Close(context, file_handle);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::EnsureFileExists(
+    FileSystemOperationContext* context,
+    const FilePath& file_path,
+    bool* created) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->EnsureFileExists(context, file_path, created);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::CreateDirectory(
+    FileSystemOperationContext* context,
+    const FilePath& file_path,
+    bool exclusive,
+    bool recursive) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->CreateDirectory(
+        context, file_path, exclusive, recursive);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::GetFileInfo(
+    FileSystemOperationContext* context,
+    const FilePath& file_path,
+    base::PlatformFileInfo* file_info,
+    FilePath* platform_file_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->GetFileInfo(
+        context, file_path, file_info, platform_file_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::ReadDirectory(
+    FileSystemOperationContext* context,
+    const FilePath& file_path,
+    std::vector<base::FileUtilProxy::Entry>* entries) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->ReadDirectory(context, file_path, entries);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+FileSystemFileUtil::AbstractFileEnumerator*
+FileSystemFileUtil::CreateFileEnumerator(
+    FileSystemOperationContext* context,
+    const FilePath& root_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->CreateFileEnumerator(context, root_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return NULL;
+}
+
+PlatformFileError FileSystemFileUtil::GetLocalFilePath(
+    FileSystemOperationContext* context,
+    const FilePath& virtual_path,
+    FilePath* local_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->GetLocalFilePath(
+        context, virtual_path, local_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
 PlatformFileError FileSystemFileUtil::Touch(
-    FileSystemOperationContext* unused,
+    FileSystemOperationContext* context,
     const FilePath& file_path,
     const base::Time& last_access_time,
     const base::Time& last_modified_time) {
-  if (!file_util::TouchFile(
-          file_path, last_access_time, last_modified_time))
-    return base::PLATFORM_FILE_ERROR_FAILED;
-  return base::PLATFORM_FILE_OK;
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->Touch(
+        context, file_path, last_access_time, last_modified_time);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 PlatformFileError FileSystemFileUtil::Truncate(
-    FileSystemOperationContext* unused,
+    FileSystemOperationContext* context,
     const FilePath& file_path,
     int64 length) {
-  PlatformFileError error_code(base::PLATFORM_FILE_ERROR_FAILED);
-  PlatformFile file =
-      base::CreatePlatformFile(
-          file_path,
-          base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_WRITE,
-          NULL,
-          &error_code);
-  if (error_code != base::PLATFORM_FILE_OK) {
-    return error_code;
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->Truncate(context, file_path, length);
   }
-  DCHECK_NE(base::kInvalidPlatformFileValue, file);
-  if (!base::TruncatePlatformFile(file, length))
-    error_code = base::PLATFORM_FILE_ERROR_FAILED;
-  base::ClosePlatformFile(file);
-  return error_code;
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+
+bool FileSystemFileUtil::PathExists(
+    FileSystemOperationContext* context,
+    const FilePath& file_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->PathExists(context, file_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return false;
+}
+
+bool FileSystemFileUtil::DirectoryExists(
+    FileSystemOperationContext* context,
+    const FilePath& file_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->DirectoryExists(context, file_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return false;
+}
+
+bool FileSystemFileUtil::IsDirectoryEmpty(
+    FileSystemOperationContext* context,
+    const FilePath& file_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->IsDirectoryEmpty(context, file_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return false;
+}
+
+PlatformFileError FileSystemFileUtil::CopyOrMoveFile(
+    FileSystemOperationContext* context,
+    const FilePath& src_file_path,
+    const FilePath& dest_file_path,
+    bool copy) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->CopyOrMoveFile(
+        context, src_file_path, dest_file_path, copy);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::CopyInForeignFile(
+      FileSystemOperationContext* context,
+      const FilePath& src_file_path,
+      const FilePath& dest_file_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->CopyInForeignFile(
+        context, src_file_path, dest_file_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::DeleteFile(
+    FileSystemOperationContext* context,
+    const FilePath& file_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->DeleteFile(context, file_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
+}
+
+PlatformFileError FileSystemFileUtil::DeleteSingleDirectory(
+    FileSystemOperationContext* context,
+    const FilePath& file_path) {
+  if (underlying_file_util_.get()) {
+    return underlying_file_util_->DeleteSingleDirectory(context, file_path);
+  }
+  NOTREACHED() << "Subclasses must provide implementation if they have no"
+               << "underlying_file_util";
+  return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 PlatformFileError
@@ -257,23 +305,27 @@ FileSystemFileUtil::PerformCommonCheckAndPreparationForMoveAndCopy(
   bool same_file_system =
      (context->src_origin_url() == context->dest_origin_url()) &&
      (context->src_type() == context->dest_type());
-  FileSystemFileUtil* dest_util = context->dest_file_system_file_util();
+  FileSystemFileUtil* dest_util = context->dest_file_util();
   DCHECK(dest_util);
-  if (same_file_system)
-    DCHECK(context->src_file_system_file_util() ==
-         context->dest_file_system_file_util());
-  // All the single-path virtual FSFU methods expect the context information
-  // to be in the src_* variables, not the dest_* variables, so we have to
-  // make a new context if we want to call them on the dest_file_path.
-  scoped_ptr<FileSystemOperationContext> dest_context(
-      context->CreateInheritedContextForDest());
+  scoped_ptr<FileSystemOperationContext> local_dest_context;
+  FileSystemOperationContext* dest_context = NULL;
+  if (same_file_system) {
+    dest_context = context;
+    DCHECK(context->src_file_util() == context->dest_file_util());
+  } else {
+    local_dest_context.reset(context->CreateInheritedContextForDest());
+    // All the single-path virtual FSFU methods expect the context information
+    // to be in the src_* variables, not the dest_* variables, so we have to
+    // make a new context if we want to call them on the dest_file_path.
+    dest_context = local_dest_context.get();
+  }
 
   // Exits earlier if the source path does not exist.
   if (!PathExists(context, src_file_path))
     return base::PLATFORM_FILE_ERROR_NOT_FOUND;
 
   // The parent of the |dest_file_path| does not exist.
-  if (!ParentExists(dest_context.get(), dest_util, dest_file_path))
+  if (!ParentExists(dest_context, dest_util, dest_file_path))
     return base::PLATFORM_FILE_ERROR_NOT_FOUND;
 
   // It is an error to try to copy/move an entry into its child.
@@ -281,14 +333,14 @@ FileSystemFileUtil::PerformCommonCheckAndPreparationForMoveAndCopy(
     return base::PLATFORM_FILE_ERROR_INVALID_OPERATION;
 
   // Now it is ok to return if the |dest_file_path| does not exist.
-  if (!dest_util->PathExists(dest_context.get(), dest_file_path))
+  if (!dest_util->PathExists(dest_context, dest_file_path))
     return base::PLATFORM_FILE_OK;
 
   // |src_file_path| exists and is a directory.
   // |dest_file_path| exists and is a file.
   bool src_is_directory = DirectoryExists(context, src_file_path);
   bool dest_is_directory =
-      dest_util->DirectoryExists(dest_context.get(), dest_file_path);
+      dest_util->DirectoryExists(dest_context, dest_file_path);
   if (src_is_directory && !dest_is_directory)
     return base::PLATFORM_FILE_ERROR_INVALID_OPERATION;
 
@@ -307,39 +359,18 @@ FileSystemFileUtil::PerformCommonCheckAndPreparationForMoveAndCopy(
     // the file_util's Copy or Move method doesn't perform overwrite
     // on all platforms, so we delete the destination directory here.
     // TODO(kinuko): may be better to change the file_util::{Copy,Move}.
-    PlatformFileError error = dest_util->Delete(
-        dest_context.get(), dest_file_path, false /* recursive */);
-    context->ImportAllowedBytesGrowth(*dest_context);
-    if (base::PLATFORM_FILE_OK != error) {
-      if (!dest_util->IsDirectoryEmpty(dest_context.get(), dest_file_path))
+    if (base::PLATFORM_FILE_OK !=
+        dest_util->Delete(dest_context, dest_file_path,
+                          false /* recursive */)) {
+      if (!dest_util->IsDirectoryEmpty(dest_context, dest_file_path))
         return base::PLATFORM_FILE_ERROR_NOT_EMPTY;
       return base::PLATFORM_FILE_ERROR_FAILED;
     }
+    // Reflect changes in usage back to the original context.
+    if (!same_file_system)
+      context->set_allowed_bytes_growth(dest_context->allowed_bytes_growth());
   }
   return base::PLATFORM_FILE_OK;
-}
-
-PlatformFileError FileSystemFileUtil::CopyOrMoveFile(
-      FileSystemOperationContext* unused,
-      const FilePath& src_file_path,
-      const FilePath& dest_file_path,
-      bool copy) {
-  if (copy) {
-    if (file_util::CopyFile(src_file_path, dest_file_path))
-      return base::PLATFORM_FILE_OK;
-  } else {
-    DCHECK(!file_util::DirectoryExists(src_file_path));
-    if (file_util::Move(src_file_path, dest_file_path))
-      return base::PLATFORM_FILE_OK;
-  }
-  return base::PLATFORM_FILE_ERROR_FAILED;
-}
-
-PlatformFileError FileSystemFileUtil::CopyInForeignFile(
-      FileSystemOperationContext* context,
-      const FilePath& src_file_path,
-      const FilePath& dest_file_path) {
-  return CopyOrMoveFile(context, src_file_path, dest_file_path, true);
 }
 
 PlatformFileError FileSystemFileUtil::CopyOrMoveDirectory(
@@ -347,7 +378,10 @@ PlatformFileError FileSystemFileUtil::CopyOrMoveDirectory(
       const FilePath& src_file_path,
       const FilePath& dest_file_path,
       bool copy) {
-  FileSystemFileUtil* dest_util = context->dest_file_system_file_util();
+  FileSystemFileUtil* dest_util = context->dest_file_util();
+  // All the single-path virtual FSFU methods expect the context information to
+  // be in the src_* variables, not the dest_* variables, so we have to make a
+  // new context if we want to call them on the dest_file_path.
   scoped_ptr<FileSystemOperationContext> dest_context(
       context->CreateInheritedContextForDest());
 
@@ -362,9 +396,10 @@ PlatformFileError FileSystemFileUtil::CopyOrMoveDirectory(
   if (!dest_util->DirectoryExists(dest_context.get(), dest_file_path)) {
     PlatformFileError error = dest_util->CreateDirectory(dest_context.get(),
         dest_file_path, false, false);
-    context->ImportAllowedBytesGrowth(*dest_context);
     if (error != base::PLATFORM_FILE_OK)
       return error;
+    // Reflect changes in usage back to the original context.
+    context->set_allowed_bytes_growth(dest_context->allowed_bytes_growth());
   }
 
   scoped_ptr<AbstractFileEnumerator> file_enum(
@@ -375,21 +410,15 @@ PlatformFileError FileSystemFileUtil::CopyOrMoveDirectory(
     src_file_path.AppendRelativePath(src_file_path_each, &dest_file_path_each);
 
     if (file_enum->IsDirectory()) {
-      scoped_ptr<FileSystemOperationContext> new_directory_context(
-          dest_context->CreateInheritedContextWithNewVirtualPaths(
-              dest_file_path_each, FilePath()));
-      PlatformFileError error = dest_util->CreateDirectory(
-          new_directory_context.get(), dest_file_path_each, false, false);
-      context->ImportAllowedBytesGrowth(*new_directory_context);
+      PlatformFileError error = dest_util->CreateDirectory(dest_context.get(),
+          dest_file_path_each, false, false);
       if (error != base::PLATFORM_FILE_OK)
         return error;
+      // Reflect changes in usage back to the original context.
+      context->set_allowed_bytes_growth(dest_context->allowed_bytes_growth());
     } else {
-      scoped_ptr<FileSystemOperationContext> copy_context(
-          context->CreateInheritedContextWithNewVirtualPaths(
-              src_file_path_each, dest_file_path_each));
       PlatformFileError error = CopyOrMoveFileHelper(
-          copy_context.get(), src_file_path_each, dest_file_path_each, copy);
-      context->ImportAllowedBytesGrowth(*copy_context);
+          context, src_file_path_each, dest_file_path_each, copy);
       if (error != base::PLATFORM_FILE_OK)
         return error;
     }
@@ -400,6 +429,7 @@ PlatformFileError FileSystemFileUtil::CopyOrMoveDirectory(
     if (error != base::PLATFORM_FILE_OK)
       return error;
   }
+
   return base::PLATFORM_FILE_OK;
 }
 
@@ -411,8 +441,7 @@ PlatformFileError FileSystemFileUtil::CopyOrMoveFileHelper(
   // CopyOrMoveFile here is the virtual overridden member function.
   if ((context->src_origin_url() == context->dest_origin_url()) &&
       (context->src_type() == context->dest_type())) {
-    DCHECK(context->src_file_system_file_util() ==
-           context->dest_file_system_file_util());
+    DCHECK(context->src_file_util() == context->dest_file_util());
     return CopyOrMoveFile(context, src_file_path, dest_file_path, copy);
   }
   base::PlatformFileInfo file_info;
@@ -423,43 +452,12 @@ PlatformFileError FileSystemFileUtil::CopyOrMoveFileHelper(
   if (error_code != base::PLATFORM_FILE_OK)
     return error_code;
 
-  DCHECK(context->dest_file_system_file_util());
-  error_code = context->dest_file_system_file_util()->CopyInForeignFile(
+  DCHECK(context->dest_file_util());
+  error_code = context->dest_file_util()->CopyInForeignFile(
       context, platform_file_path, dest_file_path);
   if (copy || error_code != base::PLATFORM_FILE_OK)
     return error_code;
   return DeleteFile(context, src_file_path);
-}
-
-
-PlatformFileError FileSystemFileUtil::DeleteFile(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path) {
-  if (!file_util::PathExists(file_path))
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-  if (file_util::DirectoryExists(file_path))
-    return base::PLATFORM_FILE_ERROR_NOT_A_FILE;
-  if (!file_util::Delete(file_path, false))
-    return base::PLATFORM_FILE_ERROR_FAILED;
-  return base::PLATFORM_FILE_OK;
-}
-
-PlatformFileError FileSystemFileUtil::DeleteSingleDirectory(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path) {
-  if (!file_util::PathExists(file_path))
-    return base::PLATFORM_FILE_ERROR_NOT_FOUND;
-  if (!file_util::DirectoryExists(file_path)) {
-    // TODO(dmikurube): Check if this error code is appropriate.
-    return base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY;
-  }
-  if (!file_util::IsDirectoryEmpty(file_path)) {
-    // TODO(dmikurube): Check if this error code is appropriate.
-    return base::PLATFORM_FILE_ERROR_NOT_EMPTY;
-  }
-  if (!file_util::Delete(file_path, false))
-    return base::PLATFORM_FILE_ERROR_FAILED;
-  return base::PLATFORM_FILE_OK;
 }
 
 PlatformFileError FileSystemFileUtil::DeleteDirectoryRecursive(
@@ -475,12 +473,7 @@ PlatformFileError FileSystemFileUtil::DeleteDirectoryRecursive(
       directories.push(file_path_each);
     } else {
       // DeleteFile here is the virtual overridden member function.
-      scoped_ptr<FileSystemOperationContext> inherited_context(
-          context->CreateInheritedContextWithNewVirtualPaths(
-              file_path_each, FilePath()));
-      PlatformFileError error =
-          DeleteFile(inherited_context.get(), file_path_each);
-      context->ImportAllowedBytesGrowth(*inherited_context);
+      PlatformFileError error = DeleteFile(context, file_path_each);
       if (error == base::PLATFORM_FILE_ERROR_NOT_FOUND)
         return base::PLATFORM_FILE_ERROR_FAILED;
       else if (error != base::PLATFORM_FILE_OK)
@@ -489,12 +482,7 @@ PlatformFileError FileSystemFileUtil::DeleteDirectoryRecursive(
   }
 
   while (!directories.empty()) {
-    scoped_ptr<FileSystemOperationContext> inherited_context(
-        context->CreateInheritedContextWithNewVirtualPaths(
-            directories.top(), FilePath()));
-    PlatformFileError error =
-        DeleteSingleDirectory(inherited_context.get(), directories.top());
-    context->ImportAllowedBytesGrowth(*inherited_context);
+    PlatformFileError error = DeleteSingleDirectory(context, directories.top());
     if (error == base::PLATFORM_FILE_ERROR_NOT_FOUND)
       return base::PLATFORM_FILE_ERROR_FAILED;
     else if (error != base::PLATFORM_FILE_OK)
@@ -502,62 +490,6 @@ PlatformFileError FileSystemFileUtil::DeleteDirectoryRecursive(
     directories.pop();
   }
   return DeleteSingleDirectory(context, file_path);
-}
-
-bool FileSystemFileUtil::PathExists(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path) {
-  return file_util::PathExists(file_path);
-}
-
-bool FileSystemFileUtil::DirectoryExists(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path) {
-  return file_util::DirectoryExists(file_path);
-}
-
-bool FileSystemFileUtil::IsDirectoryEmpty(
-    FileSystemOperationContext* unused,
-    const FilePath& file_path) {
-  return file_util::IsDirectoryEmpty(file_path);
-}
-
-class FileSystemFileEnumerator
-    : public FileSystemFileUtil::AbstractFileEnumerator {
- public:
-  FileSystemFileEnumerator(const FilePath& root_path,
-                           bool recursive,
-                           file_util::FileEnumerator::FILE_TYPE file_type)
-    : file_enum_(root_path, recursive, file_type) {
-  }
-
-  ~FileSystemFileEnumerator() {}
-
-  virtual FilePath Next();
-  virtual bool IsDirectory();
-
- private:
-  file_util::FileEnumerator file_enum_;
-};
-
-FilePath FileSystemFileEnumerator::Next() {
-  return file_enum_.Next();
-}
-
-bool FileSystemFileEnumerator::IsDirectory() {
-  file_util::FileEnumerator::FindInfo file_util_info;
-  file_enum_.GetFindInfo(&file_util_info);
-  return file_util::FileEnumerator::IsDirectory(file_util_info);
-}
-
-FileSystemFileUtil::AbstractFileEnumerator*
-FileSystemFileUtil::CreateFileEnumerator(
-    FileSystemOperationContext* unused,
-    const FilePath& root_path) {
-  return new FileSystemFileEnumerator(
-      root_path, true, static_cast<file_util::FileEnumerator::FILE_TYPE>(
-      file_util::FileEnumerator::FILES |
-      file_util::FileEnumerator::DIRECTORIES));
 }
 
 }  // namespace fileapi

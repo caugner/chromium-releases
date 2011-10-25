@@ -14,6 +14,7 @@
 #include "base/values.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/language_state.h"
@@ -326,15 +327,19 @@ void TranslateManager::Observe(int type,
       break;
     }
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-      Profile* profile = Source<Profile>(source).ptr();
+      PrefService* pref_service = Source<Profile>(source).ptr()->GetPrefs();
       notification_registrar_.Remove(this,
                                      chrome::NOTIFICATION_PROFILE_DESTROYED,
                                      source);
-      size_t count = accept_languages_.erase(profile->GetPrefs());
+      size_t count = accept_languages_.erase(pref_service);
       // We should know about this profile since we are listening for
       // notifications on it.
-      DCHECK(count > 0);
-      pref_change_registrar_.Remove(prefs::kAcceptLanguages, this);
+      DCHECK(count == 1u);
+      PrefChangeRegistrar* pref_change_registrar =
+          pref_change_registrars_[pref_service];
+      count = pref_change_registrars_.erase(pref_service);
+      DCHECK(count == 1u);
+      delete pref_change_registrar;
       break;
     }
     case chrome::NOTIFICATION_PREF_CHANGED: {
@@ -438,11 +443,10 @@ TranslateManager::TranslateManager()
 
 void TranslateManager::InitiateTranslation(TabContents* tab,
                                            const std::string& page_lang) {
-  PrefService* prefs = tab->profile()->GetOriginalProfile()->GetPrefs();
+  Profile* profile = Profile::FromBrowserContext(tab->browser_context());
+  PrefService* prefs = profile->GetOriginalProfile()->GetPrefs();
   if (!prefs->GetBoolean(prefs::kEnableTranslate))
     return;
-
-  pref_change_registrar_.Init(prefs);
 
   // Allow disabling of translate from the command line to assist with
   // automated browser testing.
@@ -483,11 +487,16 @@ void TranslateManager::InitiateTranslation(TabContents* tab,
   // feature; the user will get an infobar, so they can control whether the
   // page's text is sent to the translate server.
   std::string auto_target_lang;
-  if (!tab->profile()->IsOffTheRecord() &&
+  if (!tab->browser_context()->IsOffTheRecord() &&
       TranslatePrefs::ShouldAutoTranslate(prefs, language_code,
           &auto_target_lang)) {
-    TranslatePage(tab, language_code, auto_target_lang);
-    return;
+    // We need to confirm that the saved target language is still supported.
+    // Also, GetLanguageCode will take care of removing country code if any.
+    auto_target_lang = GetLanguageCode(auto_target_lang);
+    if (IsSupportedLanguage(auto_target_lang)) {
+      TranslatePage(tab, language_code, auto_target_lang);
+      return;
+    }
   }
 
   TabContentsWrapper* wrapper =
@@ -504,9 +513,10 @@ void TranslateManager::InitiateTranslation(TabContents* tab,
   }
 
   // Prompts the user if he/she wants the page translated.
-  wrapper->AddInfoBar(TranslateInfoBarDelegate::CreateDelegate(
-      TranslateInfoBarDelegate::BEFORE_TRANSLATE, tab, language_code,
-      target_lang));
+  wrapper->infobar_tab_helper()->AddInfoBar(
+      TranslateInfoBarDelegate::CreateDelegate(
+        TranslateInfoBarDelegate::BEFORE_TRANSLATE, tab, language_code,
+        target_lang));
 }
 
 void TranslateManager::InitiateTranslationPosted(
@@ -561,7 +571,7 @@ void TranslateManager::RevertTranslation(TabContents* tab_contents) {
     NOTREACHED();
     return;
   }
-  tab_contents->render_view_host()->Send(new ViewMsg_RevertTranslation(
+  tab_contents->render_view_host()->Send(new ChromeViewMsg_RevertTranslation(
       tab_contents->render_view_host()->routing_id(), entry->page_id()));
 
   TranslateTabHelper* helper = TabContentsWrapper::GetCurrentWrapperForContents(
@@ -585,8 +595,9 @@ void TranslateManager::ReportLanguageDetectionError(TabContents* tab_contents) {
   report_error_url +=
       GetLanguageCode(g_browser_process->GetApplicationLocale());
   // Open that URL in a new tab so that the user can tell us more.
-  Browser* browser = BrowserList::GetLastActiveWithProfile(
-      tab_contents->profile());
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents->browser_context());
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
   if (!browser) {
     NOTREACHED();
     return;
@@ -612,7 +623,7 @@ void TranslateManager::DoTranslatePage(TabContents* tab,
 
   wrapper->translate_tab_helper()->language_state().set_translation_pending(
       true);
-  tab->render_view_host()->Send(new ViewMsg_TranslatePage(
+  tab->render_view_host()->Send(new ChromeViewMsg_TranslatePage(
       tab->render_view_host()->routing_id(), entry->page_id(), translate_script,
       source_lang, target_lang));
 
@@ -648,7 +659,9 @@ void TranslateManager::PageTranslated(TabContents* tab,
 
 bool TranslateManager::IsAcceptLanguage(TabContents* tab,
                                         const std::string& language) {
-  PrefService* pref_service = tab->profile()->GetOriginalProfile()->GetPrefs();
+  Profile* profile = Profile::FromBrowserContext(tab->browser_context());
+  profile = profile->GetOriginalProfile();
+  PrefService* pref_service = profile->GetPrefs();
   PrefServiceLanguagesMap::const_iterator iter =
       accept_languages_.find(pref_service);
   if (iter == accept_languages_.end()) {
@@ -656,9 +669,14 @@ bool TranslateManager::IsAcceptLanguage(TabContents* tab,
     // Listen for this profile going away, in which case we would need to clear
     // the accepted languages for the profile.
     notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                                Source<Profile>(tab->profile()));
+                                Source<Profile>(profile));
     // Also start listening for changes in the accept languages.
-    pref_change_registrar_.Add(prefs::kAcceptLanguages, this);
+    DCHECK(pref_change_registrars_.find(pref_service) ==
+           pref_change_registrars_.end());
+    PrefChangeRegistrar* pref_change_registrar = new PrefChangeRegistrar;
+    pref_change_registrar->Init(pref_service);
+    pref_change_registrar->Add(prefs::kAcceptLanguages, this);
+    pref_change_registrars_[pref_service] = pref_change_registrar;
 
     iter = accept_languages_.find(pref_service);
   }
@@ -747,9 +765,9 @@ void TranslateManager::ShowInfoBar(TabContents* tab,
     return;
   if (old_infobar) {
     // There already is a translate infobar, simply replace it.
-    wrapper->ReplaceInfoBar(old_infobar, infobar);
+    wrapper->infobar_tab_helper()->ReplaceInfoBar(old_infobar, infobar);
   } else {
-    wrapper->AddInfoBar(infobar);
+    wrapper->infobar_tab_helper()->AddInfoBar(infobar);
   }
 }
 
@@ -785,10 +803,11 @@ TranslateInfoBarDelegate* TranslateManager::GetTranslateInfoBarDelegate(
       TabContentsWrapper::GetCurrentWrapperForContents(tab);
   if (!wrapper)
     return NULL;
+  InfoBarTabHelper* infobar_helper = wrapper->infobar_tab_helper();
 
-  for (size_t i = 0; i < wrapper->infobar_count(); ++i) {
+  for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
     TranslateInfoBarDelegate* delegate =
-        wrapper->GetInfoBarDelegateAt(i)->AsTranslateInfoBarDelegate();
+        infobar_helper->GetInfoBarDelegateAt(i)->AsTranslateInfoBarDelegate();
     if (delegate)
       return delegate;
   }

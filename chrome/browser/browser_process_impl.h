@@ -19,10 +19,10 @@
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "content/browser/download/download_status_updater.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "ipc/ipc_message.h"
@@ -31,11 +31,11 @@ class BrowserOnlineStateObserver;
 class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
-class DevToolsHttpProtocolHandler;
 class DevToolsProtocolHandler;
 class FilePath;
 class NotificationService;
 class PluginDataRemover;
+class RemoteDebuggingServer;
 class TabCloseableStateWatcher;
 
 namespace policy{
@@ -81,6 +81,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual ThumbnailGenerator* GetThumbnailGenerator();
   virtual AutomationProviderList* InitAutomationProviderList();
   virtual void InitDevToolsHttpProtocolHandler(
+      Profile* profile,
       const std::string& ip,
       int port,
       const std::string& frontend_url);
@@ -96,6 +97,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual const std::string& GetApplicationLocale();
   virtual void SetApplicationLocale(const std::string& locale);
   virtual DownloadStatusUpdater* download_status_updater();
+  virtual DownloadRequestLimiter* download_request_limiter();
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher();
   virtual BackgroundModeManager* background_mode_manager();
   virtual StatusTray* status_tray();
@@ -122,6 +124,10 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   virtual MHTMLGenerationManager* mhtml_generation_manager();
+
+  virtual GpuBlacklistUpdater* gpu_blacklist_updater();
+
+  virtual ComponentUpdateService* component_updater();
 
  private:
   void CreateResourceDispatcherHost();
@@ -213,12 +219,12 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<ExtensionEventRouterForwarder>
       extension_event_router_forwarder_;
 
-  scoped_refptr<DevToolsHttpProtocolHandler> devtools_http_handler_;
+  scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
 
   scoped_refptr<DevToolsProtocolHandler> devtools_legacy_handler_;
 
   bool created_devtools_manager_;
-  scoped_refptr<DevToolsManager> devtools_manager_;
+  scoped_ptr<DevToolsManager> devtools_manager_;
 
   bool created_sidebar_manager_;
   scoped_refptr<SidebarManager> sidebar_manager_;
@@ -253,10 +259,6 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_safe_browsing_service_;
   scoped_refptr<SafeBrowsingService> safe_browsing_service_;
 
-  bool created_safe_browsing_detection_service_;
-  scoped_ptr<safe_browsing::ClientSideDetectionService>
-     safe_browsing_detection_service_;
-
   unsigned int module_ref_count_;
   bool did_start_;
 
@@ -276,6 +278,8 @@ class BrowserProcessImpl : public BrowserProcess,
   // are global per-application. DownloadStatusUpdater does no work in the ctor
   // so we don't have to worry about lazy initialization.
   DownloadStatusUpdater download_status_updater_;
+
+  scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
 
   // Ensures that the observers of plugin/print disable/enable state
   // notifications are properly added and removed.
@@ -315,6 +319,12 @@ class BrowserProcessImpl : public BrowserProcess,
 
   // Per-process listener for online state changes.
   scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
+
+  scoped_refptr<GpuBlacklistUpdater> gpu_blacklist_updater_;
+
+#if !defined(OS_CHROMEOS)
+  scoped_ptr<ComponentUpdateService> component_updater_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

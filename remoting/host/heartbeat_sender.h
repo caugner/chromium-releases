@@ -16,6 +16,10 @@
 #include "remoting/jingle_glue/iq_request.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
+namespace base {
+class MessageLoopProxy;
+}  // namespace base
+
 namespace remoting {
 
 class IqRequest;
@@ -58,7 +62,7 @@ class MutableHostConfig;
 // TODO(sergeyu): Is it enough to sign JID and nothing else?
 class HeartbeatSender : public HostStatusObserver {
  public:
-  HeartbeatSender(MessageLoop* main_loop,
+  HeartbeatSender(base::MessageLoopProxy* main_loop,
                   MutableHostConfig* config);
   virtual ~HeartbeatSender();
 
@@ -70,7 +74,10 @@ class HeartbeatSender : public HostStatusObserver {
   virtual void OnSignallingConnected(SignalStrategy* signal_strategy,
                                      const std::string& full_jid) OVERRIDE;
   virtual void OnSignallingDisconnected() OVERRIDE;
-  virtual void OnAuthenticatedClientsChanged(int clients) OVERRIDE;
+  virtual void OnClientAuthenticated(
+      remoting::protocol::ConnectionToClient* client) OVERRIDE;
+  virtual void OnClientDisconnected(
+      remoting::protocol::ConnectionToClient* client) OVERRIDE;
   virtual void OnAccessDenied() OVERRIDE;
   virtual void OnShutdown() OVERRIDE;
 
@@ -96,7 +103,7 @@ class HeartbeatSender : public HostStatusObserver {
   buzz::XmlElement* CreateSignature();
 
   State state_;
-  MessageLoop* message_loop_;
+  scoped_refptr<base::MessageLoopProxy> message_loop_;
   scoped_refptr<MutableHostConfig> config_;
   std::string host_id_;
   HostKeyPair key_pair_;

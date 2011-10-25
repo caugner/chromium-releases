@@ -73,7 +73,7 @@ class MessageLoopRelay
  public:
   MessageLoopRelay()
       : origin_message_loop_proxy_(
-            base::MessageLoopProxy::CreateForCurrentThread()),
+            base::MessageLoopProxy::current()),
         error_code_(base::PLATFORM_FILE_OK) {
   }
 
@@ -439,7 +439,7 @@ class RelayReadDirectory : public MessageLoopRelay {
     }
 
     file_util::FileEnumerator file_enum(
-        file_path_, false, static_cast<file_util::FileEnumerator::FILE_TYPE>(
+        file_path_, false, static_cast<file_util::FileEnumerator::FileType>(
         file_util::FileEnumerator::FILES |
         file_util::FileEnumerator::DIRECTORIES));
     FilePath current;
@@ -854,6 +854,10 @@ bool FileUtilProxy::Read(
     int64 offset,
     int bytes_to_read,
     ReadCallback* callback) {
+  if (bytes_to_read < 0) {
+    delete callback;
+    return false;
+  }
   return Start(FROM_HERE, message_loop_proxy,
                new RelayRead(file, offset, bytes_to_read, callback));
 }
@@ -866,6 +870,10 @@ bool FileUtilProxy::Write(
     const char* buffer,
     int bytes_to_write,
     WriteCallback* callback) {
+  if (bytes_to_write <= 0) {
+    delete callback;
+    return false;
+  }
   return Start(FROM_HERE, message_loop_proxy,
                new RelayWrite(file, offset, buffer, bytes_to_write, callback));
 }

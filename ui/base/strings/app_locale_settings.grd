@@ -78,6 +78,9 @@
     <output filename="app_locale_settings_da.pak" type="data_package" lang="da" />
     <output filename="app_locale_settings_de.pak" type="data_package" lang="de" />
     <output filename="app_locale_settings_el.pak" type="data_package" lang="el" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="app_locale_settings_en-AU.pak" type="data_package" lang="en-AU" />
+    </if>
     <output filename="app_locale_settings_en-GB.pak" type="data_package" lang="en-GB" />
     <output filename="app_locale_settings_en-US.pak" type="data_package" lang="en" />
     <if expr="pp_ifdef('use_third_party_translations')">
@@ -90,6 +93,7 @@
       <output filename="app_locale_settings_eu.pak" type="data_package" lang="eu" />
     </if>
     <output filename="app_locale_settings_fa.pak" type="data_package" lang="fa" />
+    <output filename="app_locale_settings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
     <output filename="app_locale_settings_fi.pak" type="data_package" lang="fi" />
     <output filename="app_locale_settings_fil.pak" type="data_package" lang="fil" />
     <output filename="app_locale_settings_fr.pak" type="data_package" lang="fr" />
@@ -103,6 +107,7 @@
     <output filename="app_locale_settings_hu.pak" type="data_package" lang="hu" />
     <if expr="pp_ifdef('use_third_party_translations')">
       <output filename="app_locale_settings_hy.pak" type="data_package" lang="hy" />
+      <output filename="app_locale_settings_ia.pak" type="data_package" lang="ia" />
     </if>
     <output filename="app_locale_settings_id.pak" type="data_package" lang="id" />
     <output filename="app_locale_settings_it.pak" type="data_package" lang="it" />
@@ -120,6 +125,9 @@
     <output filename="app_locale_settings_lv.pak" type="data_package" lang="lv" />
     <output filename="app_locale_settings_ml.pak" type="data_package" lang="ml" />
     <output filename="app_locale_settings_mr.pak" type="data_package" lang="mr" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="app_locale_settings_ms.pak" type="data_package" lang="ms" />
+    </if>
     <output filename="app_locale_settings_nl.pak" type="data_package" lang="nl" />
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
@@ -145,7 +153,6 @@
     <output filename="app_locale_settings_vi.pak" type="data_package" lang="vi" />
     <output filename="app_locale_settings_zh-CN.pak" type="data_package" lang="zh-CN" />
     <output filename="app_locale_settings_zh-TW.pak" type="data_package" lang="zh-TW" />
-    <output filename="app_locale_settings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
   </outputs>
   <translations>
     <file path="app_locale_settings_am.xtb" lang="am" />

@@ -85,7 +85,7 @@ class MetricsHandler : public WebUIMessageHandler {
   virtual ~MetricsHandler() {}
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
+  virtual void RegisterMessages() OVERRIDE;
 
   // Callback which records a user action.
   void HandleRecordAction(const ListValue* args);
@@ -121,19 +121,23 @@ void MetricsHandler::HandleRecordAction(const ListValue* args) {
 
 void MetricsHandler::HandleRecordInHistogram(const ListValue* args) {
   std::string histogram_name;
-  CHECK(args->GetString(0, &histogram_name));
-
   double value;
-  CHECK(args->GetDouble(1, &value));
-  int int_value = static_cast<int>(value);
-
   double boundary_value;
-  CHECK(args->GetDouble(2, &boundary_value));
-  int int_boundary_value = static_cast<int>(boundary_value);
+  if (!args->GetString(0, &histogram_name) ||
+      !args->GetDouble(1, &value) ||
+      !args->GetDouble(2, &boundary_value)) {
+    NOTREACHED();
+    return;
+  }
 
-  CHECK_LE(int_boundary_value, 4000);
-  CHECK_LE(int_value, int_boundary_value);
-  CHECK_LE(0, int_value);
+  int int_value = static_cast<int>(value);
+  int int_boundary_value = static_cast<int>(boundary_value);
+  if (int_boundary_value >= 4000 ||
+      int_value > int_boundary_value ||
+      int_value < 0) {
+    NOTREACHED();
+    return;
+  }
 
   int bucket_count = int_boundary_value;
   while (bucket_count >= 100) {
@@ -189,8 +193,7 @@ NewTabUI::NewTabUI(TabContents* contents)
   // Override some options on the Web UI.
   hide_favicon_ = true;
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4) &&
-      GetProfile()->GetPrefs()->GetBoolean(prefs::kEnableBookmarkBar) &&
+  if (GetProfile()->GetPrefs()->GetBoolean(prefs::kEnableBookmarkBar) &&
       browser_defaults::bookmarks_enabled) {
     set_force_bookmark_bar_visible(true);
   }
@@ -203,14 +206,6 @@ NewTabUI::NewTabUI(TabContents* contents)
   // highly. Note this means we're including clicks on not only most visited
   // thumbnails, but also clicks on recently bookmarked.
   link_transition_type_ = PageTransition::AUTO_BOOKMARK;
-
-  if (NewTabUI::FirstRunDisabled())
-    NewTabHTMLSource::set_first_run(false);
-
-  static bool first_view = true;
-  if (first_view) {
-    first_view = false;
-  }
 
   if (!GetProfile()->IsOffTheRecord()) {
     PrefService* pref_service = GetProfile()->GetPrefs();
@@ -231,7 +226,7 @@ NewTabUI::NewTabUI(TabContents* contents)
       AddMessageHandler((new AppLauncherHandler(service))->Attach(this));
 
     AddMessageHandler((new NewTabPageHandler())->Attach(this));
-    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4)) {
+    if (NTP4Enabled()) {
       AddMessageHandler((new BookmarksHandler())->Attach(this));
       AddMessageHandler((new FaviconWebUIHandler())->Attach(this));
     }
@@ -247,7 +242,8 @@ NewTabUI::NewTabUI(TabContents* contents)
   InitializeCSSCaches();
   NewTabHTMLSource* html_source =
       new NewTabHTMLSource(GetProfile()->GetOriginalProfile());
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 
   // Listen for theme installation.
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
@@ -274,14 +270,14 @@ void NewTabUI::PaintTimeout() {
     int load_time_ms = static_cast<int>(load_time.InMilliseconds());
     NotificationService::current()->Notify(
         chrome::NOTIFICATION_INITIAL_NEW_TAB_UI_LOAD,
-        NotificationService::AllSources(),
+        Source<Profile>(GetProfile()),
         Details<int>(&load_time_ms));
     UMA_HISTOGRAM_TIMES("NewTabUI load", load_time);
   } else {
     // Not enough quiet time has elapsed.
     // Some more paints must've occurred since we set the timeout.
     // Wait some more.
-    timer_.Start(base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
+    timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
                  &NewTabUI::PaintTimeout);
   }
 }
@@ -291,7 +287,7 @@ void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
   last_paint_ = start_;
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
       Source<RenderWidgetHost>(render_view_host));
-  timer_.Start(base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
+  timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
                &NewTabUI::PaintTimeout);
 
 }
@@ -322,10 +318,12 @@ void NewTabUI::Observe(int type,
               prefs::kEnableBookmarkBar)) {
         break;
       }
-      if (GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar))
-        CallJavascriptFunction("bookmarkBarAttached");
-      else
-        CallJavascriptFunction("bookmarkBarDetached");
+      if (!NTP4Enabled()) {
+        if (GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar))
+          CallJavascriptFunction("bookmarkBarAttached");
+        else
+          CallJavascriptFunction("bookmarkBarDetached");
+      }
       break;
     }
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT: {
@@ -353,6 +351,8 @@ void NewTabUI::RegisterUserPrefs(PrefService* prefs) {
   AppLauncherHandler::RegisterUserPrefs(prefs);
   MostVisitedHandler::RegisterUserPrefs(prefs);
   ShownSectionsHandler::RegisterUserPrefs(prefs);
+  if (NTP4Enabled())
+    BookmarksHandler::RegisterUserPrefs(prefs);
 
   UpdateUserPrefsVersion(prefs);
 }
@@ -373,12 +373,6 @@ void NewTabUI::MigrateUserPrefs(PrefService* prefs, int old_pref_version,
                                 int new_pref_version) {
   ShownSectionsHandler::MigrateUserPrefs(prefs, old_pref_version,
                                          current_pref_version());
-}
-
-// static
-bool NewTabUI::FirstRunDisabled() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return command_line->HasSwitch(switches::kDisableNewTabFirstRun);
 }
 
 // static
@@ -431,10 +425,17 @@ void NewTabUI::SetURLTitleAndDirection(DictionaryValue* dictionary,
   dictionary->SetString("direction", direction);
 }
 
+// static
+bool NewTabUI::NTP4Enabled() {
+#if defined(TOUCH_UI)
+  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage);
+#else
+  return !CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage);
+#endif
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // NewTabHTMLSource
-
-bool NewTabUI::NewTabHTMLSource::first_run_ = true;
 
 NewTabUI::NewTabHTMLSource::NewTabHTMLSource(Profile* profile)
     : DataSource(chrome::kChromeUINewTabHost, MessageLoop::current()),

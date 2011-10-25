@@ -14,8 +14,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 
 namespace {
 const char* kNPAPITestPluginMimeType = "application/vnd.npapi-test";
@@ -25,18 +25,6 @@ class PluginDataRemoverTest : public InProcessBrowserTest,
                               public base::WaitableEventWatcher::Delegate {
  public:
   PluginDataRemoverTest() : InProcessBrowserTest() { }
-
-  virtual void SetUpOnMainThread() {
-    old_plugin_data_remover_mime_type_ =
-        g_browser_process->plugin_data_remover_mime_type();
-    g_browser_process->set_plugin_data_remover_mime_type(
-        kNPAPITestPluginMimeType);
-  }
-
-  virtual void TearDownOnMainThread() {
-    g_browser_process->set_plugin_data_remover_mime_type(
-        old_plugin_data_remover_mime_type_);
-  }
 
   virtual void OnWaitableEventSignaled(base::WaitableEvent* waitable_event) {
     MessageLoop::current()->Quit();
@@ -50,24 +38,15 @@ class PluginDataRemoverTest : public InProcessBrowserTest,
                                    browser_directory.AppendASCII("plugins"));
 #endif
   }
-
- private:
-  std::string old_plugin_data_remover_mime_type_;
 };
 
 IN_PROC_BROWSER_TEST_F(PluginDataRemoverTest, RemoveData) {
-  scoped_refptr<PluginDataRemover> plugin_data_remover(new PluginDataRemover());
+  scoped_refptr<PluginDataRemover> plugin_data_remover(
+      new PluginDataRemover(browser()->profile()));
   plugin_data_remover->set_mime_type(kNPAPITestPluginMimeType);
   base::WaitableEventWatcher watcher;
   base::WaitableEvent* event =
       plugin_data_remover->StartRemoving(base::Time());
   watcher.StartWatching(event, this);
   ui_test_utils::RunMessageLoop();
-}
-
-IN_PROC_BROWSER_TEST_F(PluginDataRemoverTest, AtShutdown) {
-  browser()->profile()->GetPrefs()->SetBoolean(
-      prefs::kClearSiteDataOnExit, true);
-  g_browser_process->local_state()->SetBoolean(
-      prefs::kClearPluginLSODataEnabled, true);
 }

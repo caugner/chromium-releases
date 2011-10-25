@@ -24,7 +24,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/test_launcher_utils.h"
+#include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/ui/ui_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,7 +36,7 @@ namespace {
 // NewRunnableMethod class to run the StartChrome methods in many threads.
 class ChromeStarter : public base::RefCountedThreadSafe<ChromeStarter> {
  public:
-  explicit ChromeStarter(int timeout_ms, const FilePath& user_data_dir)
+  ChromeStarter(int timeout_ms, const FilePath& user_data_dir)
       : ready_event_(false /* manual */, false /* signaled */),
         done_event_(false /* manual */, false /* signaled */),
         process_handle_(base::kNullProcessHandle),

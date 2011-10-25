@@ -12,6 +12,7 @@ var NUMBER_MODE = 'number';
 var SYMBOL_MODE = 'symbol';
 var MODES = [ KEY_MODE, SHIFT_MODE, NUMBER_MODE, SYMBOL_MODE ];
 var currentMode = SHIFT_MODE;
+var enterShiftModeOnSpace = false;
 var MODE_TRANSITIONS = {};
 
 MODE_TRANSITIONS[KEY_MODE + SHIFT_MODE] = SHIFT_MODE;
@@ -22,6 +23,14 @@ MODE_TRANSITIONS[NUMBER_MODE + SHIFT_MODE] = SYMBOL_MODE;
 MODE_TRANSITIONS[NUMBER_MODE + NUMBER_MODE] = KEY_MODE;
 MODE_TRANSITIONS[SYMBOL_MODE + SHIFT_MODE] = NUMBER_MODE;
 MODE_TRANSITIONS[SYMBOL_MODE + NUMBER_MODE] = KEY_MODE;
+
+var KEYBOARDS = {};
+
+/**
+ * The long-press delay in milliseconds before long-press handler is invoked.
+ * @type {number}
+ */
+var LONGPRESS_DELAY_MSEC = 500;
 
 /**
  * The repeat delay in milliseconds before a key starts repeating. Use the same
@@ -84,33 +93,32 @@ function transitionMode(transition) {
 /**
  * Send the given key to chrome, via the experimental extension API.
  * @param {string} key The key to send.
- * @param {string=} opt_type The type of event to send (keydown or keyup). If
- *     omitted send both keydown and keyup events.
  * @return {void}
  */
-function sendKey(key, type) {
+function sendKey(key) {
   var keyEvent = {'keyIdentifier': key};
-  if (!type || type == 'keydown') {
-    // A keypress event is automatically generated for printable characters
-    // immediately following the keydown event.
+  // A keypress event is automatically generated for printable characters
+  // immediately following the keydown event.
+  if (chrome.experimental) {
     keyEvent.type = 'keydown';
-    if (chrome.experimental) {
-      chrome.experimental.input.sendKeyboardEvent(keyEvent);
-    }
-    // Exit shift mode after pressing any key but space.
-    if (currentMode == SHIFT_MODE && key != 'Spacebar') {
-      transitionMode(SHIFT_MODE);
-    }
-    // Enter shift mode after typing a period for a new sentence.
-    if (currentMode != SHIFT_MODE && key == '.') {
+    chrome.experimental.input.sendKeyboardEvent(keyEvent);
+    keyEvent.type = 'keyup';
+    chrome.experimental.input.sendKeyboardEvent(keyEvent);
+  }
+  // Exit shift mode after pressing any key but space.
+  if (currentMode == SHIFT_MODE && key != 'Spacebar') {
+    transitionMode(SHIFT_MODE);
+  }
+  // Enter shift mode after typing a closing punctuation and then a space for a
+  // new sentence.
+  if (enterShiftModeOnSpace) {
+    enterShiftModeOnSpace = false;
+    if (currentMode != SHIFT_MODE && key == 'Spacebar') {
       transitionMode(SHIFT_MODE);
     }
   }
-  if (!type || type == 'keyup') {
-    keyEvent.type = 'keyup';
-    if (chrome.experimental) {
-      chrome.experimental.input.sendKeyboardEvent(keyEvent);
-    }
+  if (currentMode != SHIFT_MODE && (key == '.' || key == '?' || key == '!')) {
+    enterShiftModeOnSpace = true;
   }
 }
 
@@ -148,12 +156,31 @@ function addContent(element, opt_textContent) {
  * the virtual keyboard.
  * @param {BaseKey} key The BaseKey object corresponding to this key.
  * @param {Element} element The top-level DOM Element to set event handlers on.
- * @param {function()} keyDownHandler The event handler called when the key is
- *     pressed. This will be called repeatedly when holding a repeating key.
- * @param {function()=} opt_keyUpHandler The event handler called when the key
- *     is released. This is only called once per actual key press.
+ * @param {Object.<string, function()>} handlers The object that contains key
+ *     event handlers in the following form.
+ *
+ *     { 'up': keyUpHandler,
+ *       'down': keyDownHandler,
+ *       'long': keyLongHandler }
+ *
+ *     keyUpHandler: Called when the key is pressed. This will be called
+ *         repeatedly when holding a repeating key.
+ *     keyDownHandler: Called when the keyis released. This is only called
+ *         once per actual key press.
+ *     keyLongHandler: Called when the key is long-pressed for
+ *         |LONGPRESS_DELAY_MSEC| milliseconds.
+ *
+ *     The object does not necessarily contain all the handlers above, but
+ *     needs to contain at least one of them.
  */
-function setupKeyEventHandlers(key, element, keyDownHandler, opt_keyUpHandler) {
+function setupKeyEventHandlers(key, element, handlers) {
+  var keyDownHandler = handlers['down'];
+  var keyUpHandler = handlers['up'];
+  var keyLongHandler = handlers['long'];
+  if (!(keyDownHandler || keyUpHandler || keyLongPressHandler)) {
+    throw new Error('Invalid handlers passed to setupKeyEventHandlers');
+  }
+
   /**
    * Handle a key down event on the virtual key.
    * @param {UIEvent} evt The UI event which triggered the key down.
@@ -185,6 +212,15 @@ function setupKeyEventHandlers(key, element, keyDownHandler, opt_keyUpHandler) {
                 }, REPEAT_INTERVAL_MSEC);
           }, Math.max(0, REPEAT_DELAY_MSEC - REPEAT_INTERVAL_MSEC));
     }
+
+    if (keyLongHandler) {
+      key.longPressTimer = setTimeout(function() {
+          keyLongHandler(evt),
+          clearTimeout(key.longPressTimer);
+          delete key.longPressTimer;
+          key.pressed = false;
+        }, LONGPRESS_DELAY_MSEC);
+    }
   };
 
   /**
@@ -192,6 +228,12 @@ function setupKeyEventHandlers(key, element, keyDownHandler, opt_keyUpHandler) {
    * @param {UIEvent} evt The UI event which triggered the key up.
    */
   var upHandler = function(evt) {
+    // Reset long-press timer.
+    if (key.longPressTimer) {
+      clearTimeout(key.longPressTimer);
+      delete key.longPressTimer
+    }
+
     // If they key was not actually pressed do not send a key up event.
     if (!key.pressed) {
       return;
@@ -203,31 +245,62 @@ function setupKeyEventHandlers(key, element, keyDownHandler, opt_keyUpHandler) {
       repeatKey.cancel();
     }
 
-    if (opt_keyUpHandler) {
-      opt_keyUpHandler();
+    if (keyUpHandler) {
+      keyUpHandler();
     }
     evt.preventDefault();
   };
 
+  var outHandler = function(evt) {
+    // Reset key press state if the point goes out of the element.
+    key.pressed = false;
+    // Reset long-press timer.
+    if (key.longPressTimer) {
+      clearTimeout(key.longPressTimer);
+      delete key.longPressTimer
+    }
+  }
+
   // Setup mouse event handlers.
   element.addEventListener('mousedown', downHandler);
   element.addEventListener('mouseup', upHandler);
-  element.addEventListener('mouseout', upHandler);
+  element.addEventListener('mouseout', outHandler);
 
   // Setup touch handlers.
   element.addEventListener('touchstart', downHandler);
   element.addEventListener('touchend', upHandler);
+  // TODO(mazda): Add a handler for touchleave once Webkit supports it.
+  // element.addEventListener('touchleave', outHandler);
 }
 
 /**
  * Create closure for the sendKey function.
  * @param {string} key The key paramater to sendKey.
- * @param {string=} type The type parameter to sendKey.
- * @return {function()} A function which calls sendKey(key, type).
+ * @return {function()} A function which calls sendKey(key).
  */
-function sendKeyFunction(key, type) {
+function sendKeyFunction(key) {
   return function() {
-    sendKey(key, type);
+    sendKey(key);
+  };
+}
+
+/**
+ * Show the popup keyboard.
+ * @param {string} name The name of the popup keyboard.
+ */
+function showPopupKeyboard(name) {
+  // TODO(mazda): Implement this function.
+  console.warn('Popup keyboard is not implemented yet.');
+}
+
+/**
+ * Create closure for the showPopupKeyboard function.
+ * @param {string} name The name paramater to showPopupKeyboard.
+ * @return {function()} A function which calls showPopupKeyboard(name).
+ */
+function showPopupKeyboardFunction(name) {
+  return function () {
+    showPopupKeyboard(name);
   };
 }
 
@@ -352,13 +425,19 @@ Key.prototype = {
 
   /** @inheritDoc */
   makeDOM: function(mode) {
+    if (!this.modes_[mode]) {
+      return null;
+    }
+
     this.modeElements_[mode] = document.createElement('div');
     this.modeElements_[mode].className = 'key';
     addContent(this.modeElements_[mode], this.modes_[mode].display);
 
+    // TODO(mazda): Set the long-press handler only if the key has characters
+    // to show on the popup keyboard.
     setupKeyEventHandlers(this, this.modeElements_[mode],
-        sendKeyFunction(this.modes_[mode].keyIdentifier, 'keydown'),
-        sendKeyFunction(this.modes_[mode].keyIdentifier, 'keyup'));
+        { 'up': sendKeyFunction(this.modes_[mode].keyIdentifier),
+          'long': showPopupKeyboardFunction('') });
 
     return this.modeElements_[mode];
   }
@@ -368,14 +447,16 @@ Key.prototype = {
  * A key which displays an SVG image.
  * @param {string} className The class that provides the image.
  * @param {string} keyId The key identifier for the key.
+ * @param {boolean} opt_repeat True if the key should repeat.
  * @constructor
  * @extends {BaseKey}
  */
-function SvgKey(className, keyId) {
+function SvgKey(className, keyId, opt_repeat) {
   this.modeElements_ = {};
   this.cellType_ = 'nc';
   this.className_ = className;
   this.keyId_ = keyId;
+  this.repeat_ = opt_repeat || false;
 }
 
 SvgKey.prototype = {
@@ -388,9 +469,10 @@ SvgKey.prototype = {
     this.modeElements_[mode].classList.add(this.className_);
     addContent(this.modeElements_[mode]);
 
-    setupKeyEventHandlers(this, this.modeElements_[mode],
-        sendKeyFunction(this.keyId_, 'keydown'),
-        sendKeyFunction(this.keyId_, 'keyup'));
+    // send the key event on key down if key repeat is enabled
+    var handler = this.repeat_ ? { 'down' : sendKeyFunction(this.keyId_) } :
+                                 { 'up' : sendKeyFunction(this.keyId_) };
+    setupKeyEventHandlers(this, this.modeElements_[mode], handler);
 
     return this.modeElements_[mode];
   }
@@ -422,8 +504,7 @@ SpecialKey.prototype = {
     addContent(this.modeElements_[mode], this.content_);
 
     setupKeyEventHandlers(this, this.modeElements_[mode],
-        sendKeyFunction(this.keyId_, 'keydown'),
-        sendKeyFunction(this.keyId_, 'keyup'));
+        { 'up': sendKeyFunction(this.keyId_) });
 
     return this.modeElements_[mode];
   }
@@ -464,9 +545,9 @@ ShiftKey.prototype = {
     }
 
     setupKeyEventHandlers(this, this.modeElements_[mode],
-        function() {
+        { 'down': function() {
           transitionMode(SHIFT_MODE);
-        });
+        }});
 
     return this.modeElements_[mode];
   },
@@ -503,9 +584,9 @@ SymbolKey.prototype = {
     }
 
     setupKeyEventHandlers(this, this.modeElements_[mode],
-        function() {
+        { 'down': function() {
           transitionMode(NUMBER_MODE);
-        });
+        }});
 
     return this.modeElements_[mode];
   }
@@ -531,12 +612,12 @@ DotComKey.prototype = {
     addContent(this.modeElements_[mode], '.com');
 
     setupKeyEventHandlers(this, this.modeElements_[mode],
-        function() {
+        { 'up': function() {
           sendKey('.');
           sendKey('c');
           sendKey('o');
           sendKey('m');
-        });
+        }});
 
     return this.modeElements_[mode];
   }
@@ -562,11 +643,11 @@ HideKeyboardKey.prototype = {
     addContent(this.modeElements_[mode]);
 
     setupKeyEventHandlers(this, this.modeElements_[mode],
-        function() {
+        { 'down': function() {
           if (chrome.experimental) {
             chrome.experimental.input.hideKeyboard();
           }
-        });
+        }});
 
     return this.modeElements_[mode];
   }
@@ -603,7 +684,10 @@ Row.prototype = {
     for (var j = 0; j < this.keys_.length; ++j) {
       var key = this.keys_[j];
       for (var i = 0; i < MODES.length; ++i) {
-        this.modeElements_[MODES[i]].appendChild(key.makeDOM(MODES[i]));
+        var keyDom = key.makeDOM(MODES[i]);
+        if (keyDom) {
+          this.modeElements_[MODES[i]].appendChild(keyDom);
+        }
       }
     }
 

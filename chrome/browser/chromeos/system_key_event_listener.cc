@@ -8,12 +8,13 @@
 #include <X11/XF86keysym.h>
 #include <X11/XKBlib.h>
 
+#include "chrome/browser/accessibility_events.h"
 #include "chrome/browser/chromeos/audio_handler.h"
 #include "chrome/browser/chromeos/brightness_bubble.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/volume_bubble.h"
 #include "content/browser/user_metrics.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 
 #if defined(TOUCH_UI)
 #include "base/message_pump_x.h"
@@ -25,6 +26,11 @@ namespace {
 
 // Percent by which the volume should be changed when a volume key is pressed.
 const double kStepPercentage = 4.0;
+
+// Percent to which the volume should be set when the "volume up" key is pressed
+// while we're muted and have the volume set to 0.  See
+// http://crosbug.com/13618.
+const double kVolumePercentOnVolumeUpWhileMuted = 25.0;
 
 }  // namespace
 
@@ -97,7 +103,6 @@ void SystemKeyEventListener::Stop() {
 #else
   gdk_window_remove_filter(NULL, GdkEventFilter, this);
 #endif
-  audio_handler_->Disconnect();
   stopped_ = true;
 }
 
@@ -109,7 +114,6 @@ void SystemKeyEventListener::RemoveCapsLockObserver(
     CapsLockObserver* observer) {
   caps_lock_observers_.RemoveObserver(observer);
 }
-
 
 void SystemKeyEventListener::ProcessWmMessage(const WmIpc::Message& message,
                                               GdkWindow* window) {
@@ -164,46 +168,66 @@ void SystemKeyEventListener::GrabKey(int32 key, uint32 mask) {
            True, GrabModeAsync, GrabModeAsync);
 }
 
-// TODO(davej): Move the ShowBubble() calls in to AudioHandler so that this
-// function returns faster without blocking on GetVolumePercent(), and still
-// guarantees that the volume displayed will be that after the adjustment.
-
-// TODO(davej): The IsMute() check can also be made non-blocking by changing to
-// an AdjustVolumeByPercentOrUnmute() function which can do the steps off of
-// this thread when ShowBubble() is moved in to AudioHandler.
-
 void SystemKeyEventListener::OnVolumeMute() {
+  if (!audio_handler_->IsInitialized())
+    return;
+
   // Always muting (and not toggling) as per final decision on
   // http://crosbug.com/3751
-  audio_handler_->SetMute(true);
-  VolumeBubble::GetInstance()->ShowBubble(0);
-  BrightnessBubble::GetInstance()->HideBubble();
+  audio_handler_->SetMuted(true);
+
+  SendAccessibilityVolumeNotification(
+      audio_handler_->GetVolumePercent(),
+      audio_handler_->IsMuted());
+
+  ShowVolumeBubble();
 }
 
 void SystemKeyEventListener::OnVolumeDown() {
-  if (audio_handler_->IsMute()) {
-    VolumeBubble::GetInstance()->ShowBubble(0);
-  } else {
+  if (!audio_handler_->IsInitialized())
+    return;
+
+  if (audio_handler_->IsMuted())
+    audio_handler_->SetVolumePercent(0.0);
+  else
     audio_handler_->AdjustVolumeByPercent(-kStepPercentage);
-    VolumeBubble::GetInstance()->ShowBubble(
-        audio_handler_->GetVolumePercent());
-  }
-  BrightnessBubble::GetInstance()->HideBubble();
+
+  SendAccessibilityVolumeNotification(
+      audio_handler_->GetVolumePercent(),
+      audio_handler_->IsMuted());
+
+  ShowVolumeBubble();
 }
 
 void SystemKeyEventListener::OnVolumeUp() {
-  if (audio_handler_->IsMute())
-    audio_handler_->SetMute(false);
-  else
+  if (!audio_handler_->IsInitialized())
+    return;
+
+  if (audio_handler_->IsMuted()) {
+    audio_handler_->SetMuted(false);
+    if (audio_handler_->GetVolumePercent() <= 0.1)  // float comparison
+      audio_handler_->SetVolumePercent(kVolumePercentOnVolumeUpWhileMuted);
+  } else {
     audio_handler_->AdjustVolumeByPercent(kStepPercentage);
-  VolumeBubble::GetInstance()->ShowBubble(
-      audio_handler_->GetVolumePercent());
-  BrightnessBubble::GetInstance()->HideBubble();
+  }
+
+  SendAccessibilityVolumeNotification(
+      audio_handler_->GetVolumePercent(),
+      audio_handler_->IsMuted());
+
+  ShowVolumeBubble();
 }
 
 void SystemKeyEventListener::OnCapsLock(bool enabled) {
   FOR_EACH_OBSERVER(
       CapsLockObserver, caps_lock_observers_, OnCapsLockChange(enabled));
+}
+
+void SystemKeyEventListener::ShowVolumeBubble() {
+  VolumeBubble::GetInstance()->ShowBubble(
+      audio_handler_->GetVolumePercent(),
+      !audio_handler_->IsMuted());
+  BrightnessBubble::GetInstance()->HideBubble();
 }
 
 bool SystemKeyEventListener::ProcessedXEvent(XEvent* xevent) {

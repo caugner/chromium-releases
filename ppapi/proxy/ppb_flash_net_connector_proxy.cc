@@ -10,7 +10,6 @@
 #include "ppapi/c/private/ppb_flash_net_connector.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
 #include "ppapi/thunk/enter.h"
@@ -22,7 +21,7 @@ using ppapi::thunk::EnterFunctionNoLock;
 using ppapi::thunk::PPB_Flash_NetConnector_API;
 using ppapi::thunk::ResourceCreationAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 std::string NetAddressToString(const PP_Flash_NetAddress& addr) {
@@ -49,12 +48,12 @@ class AbortCallbackTask : public Task {
 };
 
 class FlashNetConnector : public PPB_Flash_NetConnector_API,
-                          public PluginResource {
+                          public Resource {
  public:
   explicit FlashNetConnector(const HostResource& resource);
   virtual ~FlashNetConnector();
 
-  // ResourceObjectBase overrides.
+  // Resource overrides.
   virtual PPB_Flash_NetConnector_API* AsPPB_Flash_NetConnector_API() OVERRIDE;
 
   // PPB_Flash_NetConnector_API implementation.
@@ -91,7 +90,7 @@ class FlashNetConnector : public PPB_Flash_NetConnector_API,
 };
 
 FlashNetConnector::FlashNetConnector(const HostResource& resource)
-    : PluginResource(resource),
+    : Resource(resource),
       callback_(PP_BlockUntilComplete()),
       local_addr_out_(NULL),
       remote_addr_out_(NULL) {
@@ -162,7 +161,7 @@ int32_t FlashNetConnector::ConnectWithMessage(
     return PP_ERROR_INPROGRESS;  // Can only have one pending request.
 
   // Send the request, it will call us back via ConnectACK.
-  GetDispatcher()->Send(msg_deletor.release());
+  PluginDispatcher::GetForResource(this)->Send(msg_deletor.release());
 
   callback_ = callback;
   socket_out_ = socket_out;
@@ -229,9 +228,7 @@ PP_Resource PPB_Flash_NetConnector_Proxy::CreateProxyResource(
       INTERFACE_ID_PPB_FLASH_NETCONNECTOR, instance, &result));
   if (result.is_null())
     return 0;
-
-  linked_ptr<FlashNetConnector> object(new FlashNetConnector(result));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return (new FlashNetConnector(result))->GetReference();
 }
 
 bool PPB_Flash_NetConnector_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -265,7 +262,7 @@ void PPB_Flash_NetConnector_Proxy::OnMsgConnectTcp(
     const std::string& host,
     uint16_t port) {
   ConnectCallbackInfo* info = new ConnectCallbackInfo(resource);
-  CompletionCallback callback = callback_factory_.NewOptionalCallback(
+  pp::CompletionCallback callback = callback_factory_.NewOptionalCallback(
       &PPB_Flash_NetConnector_Proxy::OnCompleteCallbackInHost, info);
 
   EnterHostFromHostResource<PPB_Flash_NetConnector_API> enter(resource);
@@ -283,7 +280,7 @@ void PPB_Flash_NetConnector_Proxy::OnMsgConnectTcpAddress(
     const HostResource& resource,
     const std::string& net_address_as_string) {
   ConnectCallbackInfo* info = new ConnectCallbackInfo(resource);
-  CompletionCallback callback = callback_factory_.NewOptionalCallback(
+  pp::CompletionCallback callback = callback_factory_.NewOptionalCallback(
       &PPB_Flash_NetConnector_Proxy::OnCompleteCallbackInHost, info);
 
   PP_Flash_NetAddress net_address;
@@ -342,4 +339,4 @@ void PPB_Flash_NetConnector_Proxy::OnCompleteCallbackInHost(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

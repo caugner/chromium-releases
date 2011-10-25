@@ -46,6 +46,7 @@ class CloudPolicySubsystem
     BAD_DMTOKEN,           // The server rejected the DMToken.
     POLICY_LOCAL_ERROR,    // The policy cache encountered a local error.
     SIGNATURE_MISMATCH,    // The policy cache detected a signature mismatch.
+    BAD_SERIAL_NUMBER      // The serial number of the device is not valid.
   };
 
   class Observer {
@@ -88,9 +89,9 @@ class CloudPolicySubsystem
   PolicySubsystemState state();
   ErrorDetails error_details();
 
-  // Stops all auto-retrying error handling behavior inside the policy
-  // subsystem.
-  void StopAutoRetry();
+  // Resets the subsystem back to unenrolled state and cancels any pending
+  // retry operations.
+  void Reset();
 
   // Registers cloud policy related prefs.
   static void RegisterPrefs(PrefService* pref_service);
@@ -98,7 +99,7 @@ class CloudPolicySubsystem
   // Schedule initialization of the policy backend service.
   void ScheduleServiceInitialization(int64 delay_milliseconds);
 
-  // Only used in testing.
+  // Returns the CloudPolicyCacheBase associated with this CloudPolicySubsystem.
   CloudPolicyCacheBase* GetCloudPolicyCacheBase() const;
 
  private:

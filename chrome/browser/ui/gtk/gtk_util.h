@@ -27,50 +27,18 @@ class GURL;
 class Profile;
 struct RendererPreferences;  // from common/renderer_preferences.h
 
-const int kSkiaToGDKMultiplier = 257;
-
-// Define a macro for creating GdkColors from RGB values.  This is a macro to
-// allow static construction of literals, etc.  Use this like:
-//   GdkColor white = GDK_COLOR_RGB(0xff, 0xff, 0xff);
-#define GDK_COLOR_RGB(r, g, b) {0, r * kSkiaToGDKMultiplier, \
-        g * kSkiaToGDKMultiplier, b * kSkiaToGDKMultiplier}
-
 namespace event_utils {
 
-// Translates event flags into what kind of disposition they represent.
+// Translates GdkEvent state into what kind of disposition they represent.
 // For example, a middle click would mean to open a background tab.
-// event_flags are the state in the GdkEvent structure.
-WindowOpenDisposition DispositionFromEventFlags(guint state);
+WindowOpenDisposition DispositionFromGdkState(guint state);
+
+// Translates event flags into plaform independent event flags.
+int EventFlagsFromGdkState(guint state);
 
 }  // namespace event_utils
 
 namespace gtk_util {
-
-extern const GdkColor kGdkWhite;
-extern const GdkColor kGdkGray;
-extern const GdkColor kGdkBlack;
-extern const GdkColor kGdkGreen;
-
-// Constants relating to the layout of dialog windows:
-// (See http://library.gnome.org/devel/hig-book/stable/design-window.html.en)
-
-// Spacing between controls of the same group.
-const int kControlSpacing = 6;
-
-// Horizontal spacing between a label and its control.
-const int kLabelSpacing = 12;
-
-// Indent of the controls within each group.
-const int kGroupIndent = 12;
-
-// Space around the outside of a dialog's contents.
-const int kContentAreaBorder = 12;
-
-// Spacing between groups of controls.
-const int kContentAreaSpacing = 18;
-
-// Horizontal Spacing between controls in a form.
-const int kFormControlSpacing = 10;
 
 // Create a table of labeled controls, using proper spacing and alignment.
 // Arguments should be pairs of const char*, GtkWidget*, concluding with a
@@ -158,9 +126,6 @@ gfx::Size GetWidgetSize(GtkWidget* widget);
 // Converts a point in a widget to screen coordinates.  The point |p| is
 // relative to the widget's top-left origin.
 void ConvertWidgetPointToScreen(GtkWidget* widget, gfx::Point* p);
-
-// Initialize some GTK settings so that our dialogs are consistent.
-void InitRCStyles();
 
 // Stick the widget in the given hbox without expanding vertically. The widget
 // is packed at the start of the hbox. This is useful for widgets that would

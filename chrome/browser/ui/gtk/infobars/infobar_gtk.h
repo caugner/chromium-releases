@@ -12,11 +12,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/infobar.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 
 class CustomDrawButton;
 class GtkThemeService;
@@ -25,7 +25,7 @@ class InfoBarDelegate;
 class InfoBarGtk : public InfoBar,
                    public NotificationObserver {
  public:
-  explicit InfoBarGtk(TabContentsWrapper* owner, InfoBarDelegate* delegate);
+  InfoBarGtk(TabContentsWrapper* owner, InfoBarDelegate* delegate);
   virtual ~InfoBarGtk();
 
   // Get the top level native GTK widget for this infobar.
@@ -46,9 +46,9 @@ class InfoBarGtk : public InfoBar,
   // Retrieves the component colors for the infobar's background
   // gradient. (This varies by infobars and can be animated to change).
   virtual void GetTopColor(InfoBarDelegate::Type type,
-                           double* r, double* g, double *b);
+                           double* r, double* g, double* b);
   virtual void GetBottomColor(InfoBarDelegate::Type type,
-                              double* r, double* g, double *b);
+                              double* r, double* g, double* b);
 
  protected:
   // Spacing after message (and before buttons).
@@ -106,7 +106,7 @@ class InfoBarGtk : public InfoBar,
 
   // A GtkExpandedContainer that contains |bg_box_| so we can varry the height
   // of the infobar.
-  OwnedWidgetGtk widget_;
+  ui::OwnedWidgetGtk widget_;
 
   DISALLOW_COPY_AND_ASSIGN(InfoBarGtk);
 };

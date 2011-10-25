@@ -24,13 +24,13 @@ const FilePath::CharType* kBadExtension = FILE_PATH_LITERAL("bad");
 class FileThreadDeserializer
     : public base::RefCountedThreadSafe<FileThreadDeserializer> {
  public:
-  explicit FileThreadDeserializer(JsonPrefStore* delegate,
-                                  base::MessageLoopProxy* file_loop_proxy)
+  FileThreadDeserializer(JsonPrefStore* delegate,
+                         base::MessageLoopProxy* file_loop_proxy)
       : no_dir_(false),
         error_(PersistentPrefStore::PREF_READ_ERROR_NONE),
         delegate_(delegate),
         file_loop_proxy_(file_loop_proxy),
-        origin_loop_proxy_(base::MessageLoopProxy::CreateForCurrentThread()) {
+        origin_loop_proxy_(base::MessageLoopProxy::current()) {
   }
 
   void Start(const FilePath& path) {

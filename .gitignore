@@ -46,9 +46,12 @@ v8.log
 /chrome/app/theme/google_chrome
 /chrome/browser/autofill/internal
 /chrome/browser/extensions/default_extensions/chromeos
+/chrome/browser/spellchecker/internal
 /chrome/installer/linux
 /chrome/installer/mac/internal
 /chrome/installer/mac/third_party/xz/xz
+/chrome/test/chromeos/autotest/files/client/deps/chrome_test/test_src/
+/chrome/test/chromeos/autotest/files/client/deps/pyauto_dep/test_src/
 /chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin
 /chrome/test/data/firefox2_profile/searchplugins
 /chrome/test/data/firefox2_searchplugins
@@ -65,11 +68,11 @@ v8.log
 /data
 /googleurl
 /gpu/gles2_conform_test
+/gyp-mac-tool
 /native_client
 /net/Debug
 /net/Release
 /net/testserver.log
-/ninja
 /out
 /out_*
 /rlz
@@ -82,11 +85,13 @@ v8.log
 /third_party/WebKit
 /third_party/adobe/flash/binaries
 /third_party/angle
+/third_party/asan
 /third_party/bidichecker
 /third_party/cacheinvalidation/files
 /third_party/chromeos_login_manager
 /third_party/chromeos_text_input
 /third_party/cros
+/third_party/cros_system_api
 /third_party/cygwin
 /third_party/directxsdk
 /third_party/drmemory
@@ -98,6 +103,7 @@ v8.log
 /third_party/hunspell
 /third_party/hunspell_dictionaries
 /third_party/icu
+/third_party/leveldatabase/src
 /third_party/leveldb
 /third_party/libjingle/source
 /third_party/libjpeg_turbo
@@ -111,6 +117,7 @@ v8.log
 /third_party/llvm-build
 /third_party/mingw-w64
 /third_party/mkl
+/third_party/mozc
 /third_party/nss
 /third_party/openssl
 /third_party/ots
@@ -133,6 +140,8 @@ v8.log
 /third_party/snappy/src
 /third_party/speex
 /third_party/swig
+/third_party/syzygy/binaries
+/third_party/v8-i18n
 /third_party/valgrind
 /third_party/webdriver/python
 /third_party/webgl_conformance

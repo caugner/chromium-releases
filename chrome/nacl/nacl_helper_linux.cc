@@ -23,6 +23,7 @@
 #include "content/common/main_function_params.h"
 #include "content/common/unix_domain_socket_posix.h"
 #include "ipc/ipc_switches.h"
+#include "native_client/src/trusted/service_runtime/sel_memory.h"
 
 namespace {
 
@@ -116,6 +117,8 @@ void HandleForkRequest(const std::vector<int>& child_fds) {
 
 }  // namespace
 
+static const char kNaClHelperAtZero[] = "at-zero";
+
 int main(int argc, char *argv[]) {
   CommandLine::Init(argc, argv);
   base::AtExitManager exit_manager;
@@ -123,6 +126,10 @@ int main(int argc, char *argv[]) {
   std::vector<int> empty; // for SendMsg() calls
 
   g_suid_sandbox_active = (NULL != getenv("SBX_D"));
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(kNaClHelperAtZero)) {
+    g_nacl_prereserved_sandbox_addr = (void *) (uintptr_t) 0x10000;
+  }
 
   // Send the zygote a message to let it know we are ready to help
   if (!UnixDomainSocket::SendMsg(kNaClZygoteDescriptor,
@@ -163,4 +170,5 @@ int main(int argc, char *argv[]) {
       LOG(ERROR) << "*** send() to zygote failed";
     }
   }
+  CHECK(false);  // This routine must not return
 }

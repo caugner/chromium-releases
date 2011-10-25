@@ -93,15 +93,19 @@ const FilePath::CharType kHelperProcessExecutablePath[] = FPL("chrome");
 #if defined(OS_MACOSX)
 const FilePath::CharType kFrameworkName[] =
     FPL(PRODUCT_STRING " Framework.framework");
+
+const char* const kHelperFlavorSuffixes[] = {
+  FPL("EH"),  // Executable heap
+  FPL("NP"),  // No PIE
+  NULL
+};
 #endif  // OS_MACOSX
 
 const wchar_t kNaClAppName[] = L"nacl64";
 #if defined(GOOGLE_CHROME_BUILD)
 const wchar_t kBrowserAppName[] = L"Chrome";
-const char    kStatsFilename[] = "ChromeStats2";
 #else
 const wchar_t kBrowserAppName[] = L"Chromium";
-const char    kStatsFilename[] = "ChromiumStats2";
 #endif
 
 #if defined(OS_WIN)
@@ -111,7 +115,7 @@ const wchar_t kStatusTrayWindowClass[] = L"Chrome_StatusTrayWindow";
 const wchar_t kMessageWindowClass[] = L"Chrome_MessageWindow";
 const wchar_t kCrashReportLog[] = L"Reported Crashes.txt";
 const wchar_t kTestingInterfaceDLL[] = L"testing_interface.dll";
-const char    kNotSignedInProfile[] = "Default";
+const char    kInitialProfile[] = "Default";
 const char    kMultiProfileDirPrefix[] = "profile_";
 const wchar_t kBrowserResourcesDll[] = L"chrome.dll";
 const FilePath::CharType kExtensionFileExtension[] = FPL(".crx");
@@ -126,6 +130,7 @@ const FilePath::CharType kOffTheRecordMediaCacheDirname[] =
 const FilePath::CharType kAppCacheDirname[] = FPL("Application Cache");
 const FilePath::CharType kThemePackFilename[] = FPL("Cached Theme.pak");
 const FilePath::CharType kCookieFilename[] = FPL("Cookies");
+const FilePath::CharType kOBCertFilename[] = FPL("Origin Bound Certs");
 const FilePath::CharType kExtensionsCookieFilename[] = FPL("Extension Cookies");
 const FilePath::CharType kIsolatedAppStateDirname[] = FPL("Isolated Apps");
 const FilePath::CharType kFaviconsFilename[] = FPL("Favicons");
@@ -140,7 +145,6 @@ const FilePath::CharType kThumbnailsFilename[] = FPL("Thumbnails");
 const FilePath::CharType kNewTabThumbnailsFilename[] = FPL("Top Thumbnails");
 const FilePath::CharType kTopSitesFilename[] = FPL("Top Sites");
 const wchar_t kUserDataDirname[] = L"User Data";
-const FilePath::CharType kUserScriptsDirname[] = FPL("User Scripts");
 const FilePath::CharType kWebDataFilename[] = FPL("Web Data");
 const FilePath::CharType kBookmarksFileName[] = FPL("Bookmarks");
 const FilePath::CharType kHistoryBookmarksFileName[] =
@@ -151,9 +155,6 @@ const FilePath::CharType kLoginDataFileName[] = FPL("Login Data");
 const FilePath::CharType kJumpListIconDirname[] = FPL("JumpListIcons");
 const FilePath::CharType kWebAppDirname[] = FPL("Web Applications");
 const FilePath::CharType kServiceStateFileName[] = FPL("Service State");
-
-const int kStatsMaxThreads = 32;
-const int kStatsMaxCounters = 3000;
 
 // We don't enable record mode in the released product because users could
 // potentially be tricked into running a product in record mode without
@@ -175,6 +176,11 @@ const int kJavascriptMessageExpectedDelay = 1000;
 const bool kEnableTouchIcon = true;
 #else
 const bool kEnableTouchIcon = false;
+#endif
+
+#if defined(OS_LINUX)
+extern const int kLowestRendererOomScore = 300;
+extern const int kHighestRendererOomScore = 1000;
 #endif
 
 }  // namespace chrome

@@ -7,6 +7,8 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 
+#include <algorithm>
+
 #include "base/string_util.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/win/scoped_gdi_object.h"
@@ -21,6 +23,7 @@
 #include "ui/base/theme_provider.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/hwnd_util.h"
+#include "ui/base/win/mouse_wheel_util.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/compositor/compositor.h"
@@ -32,13 +35,13 @@
 #include "views/controls/native_control_win.h"
 #include "views/controls/textfield/native_textfield_views.h"
 #include "views/focus/accelerator_handler.h"
-#include "views/focus/focus_util_win.h"
 #include "views/focus/view_storage.h"
 #include "views/ime/input_method_win.h"
 #include "views/views_delegate.h"
 #include "views/widget/aero_tooltip_manager.h"
 #include "views/widget/child_window_message_processor.h"
 #include "views/widget/drop_target_win.h"
+#include "views/widget/monitor_win.h"
 #include "views/widget/native_widget_delegate.h"
 #include "views/widget/native_widget_views.h"
 #include "views/widget/root_view.h"
@@ -285,19 +288,6 @@ bool GetMonitorAndRects(const RECT& rect,
   return true;
 }
 
-// Returns true if edge |edge| (one of ABE_LEFT, TOP, RIGHT, or BOTTOM) of
-// monitor |monitor| has an auto-hiding taskbar that's always-on-top.
-bool EdgeHasTopmostAutoHideTaskbar(UINT edge, HMONITOR monitor) {
-  APPBARDATA taskbar_data = { 0 };
-  taskbar_data.cbSize = sizeof APPBARDATA;
-  taskbar_data.uEdge = edge;
-  HWND taskbar = reinterpret_cast<HWND>(SHAppBarMessage(ABM_GETAUTOHIDEBAR,
-                                                        &taskbar_data));
-  return ::IsWindow(taskbar) && (monitor != NULL) &&
-      (MonitorFromWindow(taskbar, MONITOR_DEFAULTTONULL) == monitor) &&
-      (GetWindowLong(taskbar, GWL_EXSTYLE) & WS_EX_TOPMOST);
-}
-
 // Links the HWND to its NativeWidget.
 const char* const kNativeWidgetKey = "__VIEWS_NATIVE_WIDGET__";
 
@@ -337,6 +327,10 @@ bool NativeWidgetWin::screen_reader_active_ = false;
 // associated Window's lock and unlock functions as it is created and destroyed.
 // See documentation in those methods for the technique used.
 //
+// The lock only has an effect if the window was visible upon lock creation, as
+// it doesn't guard against direct visiblility changes, and multiple locks may
+// exist simultaneously to handle certain nested Windows messages.
+//
 // IMPORTANT: Do not use this scoping object for large scopes or periods of
 //            time! IT WILL PREVENT THE WINDOW FROM BEING REDRAWN! (duh).
 //
@@ -344,17 +338,32 @@ bool NativeWidgetWin::screen_reader_active_ = false;
 // list of other messages that this applies to ;-)
 class NativeWidgetWin::ScopedRedrawLock {
  public:
-  explicit ScopedRedrawLock(NativeWidgetWin* widget) : widget_(widget) {
-    widget_->LockUpdates();
+  explicit ScopedRedrawLock(NativeWidgetWin* widget)
+    : widget_(widget),
+      native_view_(widget_->GetNativeView()),
+      was_visible_(widget_->IsVisible()),
+      cancel_unlock_(false) {
+    if (was_visible_ && ::IsWindow(native_view_))
+      widget_->LockUpdates();
   }
 
   ~ScopedRedrawLock() {
-    widget_->UnlockUpdates();
+    if (!cancel_unlock_ && was_visible_ && ::IsWindow(native_view_))
+      widget_->UnlockUpdates();
   }
+
+  // Cancel the unlock operation, call this if the Widget is being destroyed.
+  void CancelUnlockOperation() { cancel_unlock_ = true; }
 
  private:
   // The widget having its style changed.
   NativeWidgetWin* widget_;
+  // The widget's native view, cached to avoid action after window destruction.
+  gfx::NativeView native_view_;
+  // Records the widget visibility at the time of creation.
+  bool was_visible_;
+  // A flag indicating that the unlock operation was canceled.
+  bool cancel_unlock_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -373,22 +382,23 @@ NativeWidgetWin::NativeWidgetWin(internal::NativeWidgetDelegate* delegate)
       accessibility_view_events_index_(-1),
       accessibility_view_events_(kMaxAccessibilityViewEvents),
       previous_cursor_(NULL),
-      is_input_method_win_(false),
       fullscreen_(false),
       force_hidden_count_(0),
-      lock_updates_(false),
+      lock_updates_count_(0),
       saved_window_style_(0),
       ignore_window_pos_changes_(false),
       ignore_pos_changes_factory_(this),
       last_monitor_(NULL),
       is_right_mouse_pressed_on_caption_(false),
-      restored_enabled_(false) {
+      restored_enabled_(false),
+      destroyed_(NULL),
+      has_non_client_view_(false) {
 }
 
 NativeWidgetWin::~NativeWidgetWin() {
-  // We need to delete the input method before calling DestroyRootView(),
-  // because it'll set focus_manager_ to NULL.
-  input_method_.reset();
+  if (destroyed_ != NULL)
+    *destroyed_ = true;
+
   if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET)
     delete delegate_;
   else
@@ -625,30 +635,13 @@ bool NativeWidgetWin::HasMouseCapture() const {
   return GetCapture() == hwnd();
 }
 
-void NativeWidgetWin::SetKeyboardCapture() {
-  // Windows doesn't really support keyboard grabs.
-}
-
-void NativeWidgetWin::ReleaseKeyboardCapture() {
-  // Windows doesn't really support keyboard grabs.
-}
-
-bool NativeWidgetWin::HasKeyboardCapture() const {
-  // Windows doesn't really support keyboard grabs.
-  return false;
-}
-
-InputMethod* NativeWidgetWin::GetInputMethodNative() {
-  return input_method_.get();
-}
-
-void NativeWidgetWin::ReplaceInputMethod(InputMethod* input_method) {
-  input_method_.reset(input_method);
-  if (input_method) {
-    input_method->set_delegate(this);
+InputMethod* NativeWidgetWin::CreateInputMethod() {
+  if (views::Widget::IsPureViews()) {
+    InputMethod* input_method = new InputMethodWin(this);
     input_method->Init(GetWidget());
+    return input_method;
   }
-  is_input_method_win_ = false;
+  return NULL;
 }
 
 void NativeWidgetWin::CenterWindow(const gfx::Size& size) {
@@ -658,11 +651,12 @@ void NativeWidgetWin::CenterWindow(const gfx::Size& size) {
   ui::CenterAndSizeWindow(parent, GetNativeView(), size, false);
 }
 
-void NativeWidgetWin::GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
-                                                       bool* maximized) const {
+void NativeWidgetWin::GetWindowPlacement(
+    gfx::Rect* bounds,
+    ui::WindowShowState* show_state) const {
   WINDOWPLACEMENT wp;
   wp.length = sizeof(wp);
-  const bool succeeded = !!GetWindowPlacement(GetNativeView(), &wp);
+  const bool succeeded = !!::GetWindowPlacement(GetNativeView(), &wp);
   DCHECK(succeeded);
 
   if (bounds != NULL) {
@@ -677,8 +671,14 @@ void NativeWidgetWin::GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
                    mi.rcWork.top - mi.rcMonitor.top);
   }
 
-  if (maximized != NULL)
-    *maximized = (wp.showCmd == SW_SHOWMAXIMIZED);
+  if (show_state != NULL) {
+    if (wp.showCmd == SW_SHOWMAXIMIZED)
+      *show_state = ui::SHOW_STATE_MAXIMIZED;
+    else if (wp.showCmd == SW_SHOWMINIMIZED)
+      *show_state = ui::SHOW_STATE_MINIMIZED;
+    else
+      *show_state = ui::SHOW_STATE_NORMAL;
+  }
 }
 
 void NativeWidgetWin::SetWindowTitle(const std::wstring& title) {
@@ -712,13 +712,10 @@ void NativeWidgetWin::SetAccessibleName(const std::wstring& name) {
   base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
   HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
       IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
-  if (SUCCEEDED(hr)) {
-    VARIANT var;
-    var.vt = VT_BSTR;
-    var.bstrVal = SysAllocString(name.c_str());
-    hr = pAccPropServices->SetHwndProp(GetNativeView(), OBJID_CLIENT,
-                                       CHILDID_SELF, PROPID_ACC_NAME, var);
-  }
+  if (SUCCEEDED(hr))
+    hr = pAccPropServices->SetHwndPropStr(GetNativeView(), OBJID_CLIENT,
+                                          CHILDID_SELF, PROPID_ACC_NAME,
+                                          name.c_str());
 }
 
 void NativeWidgetWin::SetAccessibleRole(ui::AccessibilityTypes::Role role) {
@@ -743,6 +740,7 @@ void NativeWidgetWin::SetAccessibleState(ui::AccessibilityTypes::State state) {
   if (SUCCEEDED(hr)) {
     VARIANT var;
     if (state) {
+      var.vt = VT_I4;
       var.lVal = NativeViewAccessibilityWin::MSAAState(state);
       hr = pAccPropServices->SetHwndProp(GetNativeView(), OBJID_CLIENT,
                                          CHILDID_SELF, PROPID_ACC_STATE, var);
@@ -782,7 +780,7 @@ gfx::Rect NativeWidgetWin::GetRestoredBounds() const {
     return gfx::Rect(saved_window_info_.window_rect);
 
   gfx::Rect bounds;
-  GetWindowBoundsAndMaximizedState(&bounds, NULL);
+  GetWindowPlacement(&bounds, NULL);
   return bounds;
 }
 
@@ -854,11 +852,6 @@ void NativeWidgetWin::Close() {
 }
 
 void NativeWidgetWin::CloseNow() {
-  // Destroys the input method before closing the window so that it can be
-  // detached from the widget correctly.
-  input_method_.reset();
-  is_input_method_win_ = false;
-
   // We may already have been destroyed if the selection resulted in a tab
   // switch which will have reactivated the browser window and closed us, so
   // we need to check to see if we're still a window before trying to destroy
@@ -903,14 +896,17 @@ void NativeWidgetWin::ShowMaximizedWithBounds(
   SetWindowPlacement(hwnd(), &placement);
 }
 
-void NativeWidgetWin::ShowWithState(ShowState state) {
+void NativeWidgetWin::ShowWithWindowState(ui::WindowShowState show_state) {
   DWORD native_show_state;
-  switch (state) {
-    case SHOW_INACTIVE:
+  switch (show_state) {
+    case ui::SHOW_STATE_INACTIVE:
       native_show_state = SW_SHOWNOACTIVATE;
       break;
-    case SHOW_MAXIMIZED:
+    case ui::SHOW_STATE_MAXIMIZED:
       native_show_state = SW_SHOWMAXIMIZED;
+      break;
+    case ui::SHOW_STATE_MINIMIZED:
+      native_show_state = SW_SHOWMINIMIZED;
       break;
     default:
       native_show_state = GetShowState();
@@ -952,6 +948,8 @@ void NativeWidgetWin::Maximize() {
 
 void NativeWidgetWin::Minimize() {
   ExecuteSystemMenuCommand(SC_MINIMIZE);
+
+  delegate_->OnNativeBlur(NULL);
 }
 
 bool NativeWidgetWin::IsMaximized() const {
@@ -1085,7 +1083,7 @@ void NativeWidgetWin::SchedulePaintInRect(const gfx::Rect& rect) {
 }
 
 void NativeWidgetWin::SetCursor(gfx::NativeCursor cursor) {
-  if(cursor) {
+  if (cursor) {
     previous_cursor_ = ::SetCursor(cursor);
   } else if (previous_cursor_) {
     ::SetCursor(previous_cursor_);
@@ -1101,6 +1099,12 @@ void NativeWidgetWin::FocusNativeView(gfx::NativeView native_view) {
   // Only reset focus if hwnd is not already focused.
   if (native_view && ::GetFocus() != native_view)
     ::SetFocus(native_view);
+}
+
+bool NativeWidgetWin::ConvertPointFromAncestor(
+    const Widget* ancestor, gfx::Point* point) const {
+  NOTREACHED();
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1140,9 +1144,14 @@ LRESULT NativeWidgetWin::OnWndProc(UINT message, WPARAM w_param,
     MessageLoopForUI::current()->RemoveObserver(this);
     OnFinalMessage(window);
   }
-  if (message == WM_ACTIVATE)
+
+  // Only top level widget should store/restore focus.
+  if (message == WM_ACTIVATE && GetWidget()->is_top_level())
     PostProcessActivateMessage(this, LOWORD(w_param));
   if (message == WM_ENABLE && restore_focus_when_enabled_) {
+    // This path should be executed only for top level as
+    // restore_focus_when_enabled_ is set in PostProcessActivateMessage.
+    DCHECK(GetWidget()->is_top_level());
     restore_focus_when_enabled_ = false;
     GetWidget()->GetFocusManager()->RestoreFocusedView();
   }
@@ -1164,9 +1173,9 @@ void NativeWidgetWin::OnActivateApp(BOOL active, DWORD thread_id) {
     // Another application was activated, we should reset any state that
     // disables inactive rendering now.
     delegate_->EnableInactiveRendering();
-    // Update the native frame too, since it could be rendering the non-client
-    // area.
-    CallDefaultNCActivateHandler(FALSE);
+    // Also update the native frame if it is rendering the non-client area.
+    if (GetWidget()->ShouldUseNativeFrame())
+      DefWindowProcWithRedrawLock(WM_NCACTIVATE, FALSE, 0);
   }
 }
 
@@ -1214,7 +1223,7 @@ LRESULT NativeWidgetWin::OnCreate(CREATESTRUCT* create_struct) {
   if (!IsAccessibleWidget())
     NotifyWinEvent(EVENT_SYSTEM_ALERT, hwnd(), kCustomObjectID, CHILDID_SELF);
 
-  props_.push_back(SetWindowSupportsRerouteMouseWheel(hwnd()));
+  props_.push_back(ui::SetWindowSupportsRerouteMouseWheel(hwnd()));
 
   drop_target_ = new DropTargetWin(
       static_cast<internal::RootView*>(GetWidget()->GetRootView()));
@@ -1273,14 +1282,6 @@ LRESULT NativeWidgetWin::OnCreate(CREATESTRUCT* create_struct) {
 
   delegate_->OnNativeWidgetCreated();
 
-  // delegate_->OnNativeWidgetCreated() creates the focus manager for top-level
-  // widget. Only top-level widget should have an input method.
-  if (delegate_->HasFocusManager() && views::Widget::IsPureViews()) {
-    input_method_.reset(new InputMethodWin(this));
-    input_method_->Init(GetWidget());
-    is_input_method_win_ = true;
-  }
-
   // Get access to a modifiable copy of the system menu.
   GetSystemMenu(hwnd(), false);
   return 0;
@@ -1293,8 +1294,6 @@ void NativeWidgetWin::OnDestroy() {
     RevokeDragDrop(hwnd());
     drop_target_ = NULL;
   }
-
-  props_.reset();
 }
 
 void NativeWidgetWin::OnDisplayChange(UINT bits_per_pixel, CSize screen_size) {
@@ -1395,39 +1394,15 @@ void NativeWidgetWin::OnHScroll(int scroll_type,
 LRESULT NativeWidgetWin::OnImeMessages(UINT message,
                                        WPARAM w_param,
                                        LPARAM l_param) {
-  if (!is_input_method_win_) {
+  InputMethod* input_method = GetWidget()->GetInputMethodDirect();
+  if (!input_method || input_method->IsMock()) {
     SetMsgHandled(FALSE);
     return 0;
   }
 
-  InputMethodWin* ime = static_cast<InputMethodWin*>(input_method_.get());
+  InputMethodWin* ime_win = static_cast<InputMethodWin*>(input_method);
   BOOL handled = FALSE;
-  LRESULT result = 0;
-  switch (message) {
-    case WM_IME_SETCONTEXT:
-      result = ime->OnImeSetContext(message, w_param, l_param, &handled);
-      break;
-    case WM_IME_STARTCOMPOSITION:
-      result = ime->OnImeStartComposition(message, w_param, l_param, &handled);
-      break;
-    case WM_IME_COMPOSITION:
-      result = ime->OnImeComposition(message, w_param, l_param, &handled);
-      break;
-    case WM_IME_ENDCOMPOSITION:
-      result = ime->OnImeEndComposition(message, w_param, l_param, &handled);
-      break;
-    case WM_CHAR:
-    case WM_SYSCHAR:
-      result = ime->OnChar(message, w_param, l_param, &handled);
-      break;
-    case WM_DEADCHAR:
-    case WM_SYSDEADCHAR:
-      result = ime->OnDeadChar(message, w_param, l_param, &handled);
-      break;
-    default:
-      NOTREACHED() << "Unknown IME message:" << message;
-      break;
-  }
+  LRESULT result = ime_win->OnImeMessages(message, w_param, l_param, &handled);
 
   SetMsgHandled(handled);
   return result;
@@ -1460,8 +1435,10 @@ void NativeWidgetWin::OnInitMenuPopup(HMENU menu,
 
 void NativeWidgetWin::OnInputLangChange(DWORD character_set,
                                         HKL input_language_id) {
-  if (is_input_method_win_) {
-    static_cast<InputMethodWin*>(input_method_.get())->OnInputLangChange(
+  InputMethod* input_method = GetWidget()->GetInputMethodDirect();
+
+  if (input_method && !input_method->IsMock()) {
+    static_cast<InputMethodWin*>(input_method)->OnInputLangChange(
         character_set, input_language_id);
   }
 }
@@ -1471,8 +1448,9 @@ LRESULT NativeWidgetWin::OnKeyEvent(UINT message,
                                     LPARAM l_param) {
   MSG msg = { hwnd(), message, w_param, l_param };
   KeyEvent key(msg);
-  if (input_method_.get())
-    input_method_->DispatchKeyEvent(key);
+  InputMethod* input_method = GetWidget()->GetInputMethodDirect();
+  if (input_method)
+    input_method->DispatchKeyEvent(key);
   else
     DispatchKeyEventPostIME(key);
   return 0;
@@ -1480,8 +1458,9 @@ LRESULT NativeWidgetWin::OnKeyEvent(UINT message,
 
 void NativeWidgetWin::OnKillFocus(HWND focused_window) {
   delegate_->OnNativeBlur(focused_window);
-  if (input_method_.get())
-    input_method_->OnBlur();
+  InputMethod* input_method = GetWidget()->GetInputMethodDirect();
+  if (input_method)
+    input_method->OnBlur();
   SetMsgHandled(FALSE);
 }
 
@@ -1546,24 +1525,6 @@ LRESULT NativeWidgetWin::OnMouseRange(UINT message,
     SetMouseCapture();
   }
 
-  /*
-  TODO(beng): This fixes some situations where the windows-classic appearance
-              non-client area is rendered over our custom frame, however it
-              causes mouse-releases to the non-client area to be eaten, so it
-              can't be enabled.
-  if (message == WM_NCLBUTTONDOWN) {
-    // NativeWidgetWin::OnNCLButtonDown set the message as un-handled. This
-    // normally means NativeWidgetWin::ProcessWindowMessage will pass it to
-    // DefWindowProc. Sadly, DefWindowProc for WM_NCLBUTTONDOWN does weird
-    // non-client painting, so we need to call it directly here inside a
-    // scoped update lock.
-    ScopedRedrawLock lock(this);
-    NativeWidgetWin::OnMouseRange(message, w_param, l_param);
-    DefWindowProc(GetNativeView(), WM_NCLBUTTONDOWN, w_param, l_param);
-    SetMsgHandled(TRUE);
-  }
-  */
-
   MSG msg = { hwnd(), message, w_param, l_param, 0,
               { GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param) } };
   MouseEvent event(msg);
@@ -1585,11 +1546,23 @@ LRESULT NativeWidgetWin::OnMouseRange(UINT message,
     active_mouse_tracking_flags_ = 0;
   } else if (event.type() == ui::ET_MOUSEWHEEL) {
     // Reroute the mouse wheel to the window under the pointer if applicable.
-    return (views::RerouteMouseWheel(hwnd(), w_param, l_param) ||
+    return (ui::RerouteMouseWheel(hwnd(), w_param, l_param) ||
             delegate_->OnMouseEvent(MouseWheelEvent(msg))) ? 0 : 1;
   }
 
-  SetMsgHandled(delegate_->OnMouseEvent(event));
+  bool handled = delegate_->OnMouseEvent(event);
+
+  if (!handled && message == WM_NCLBUTTONDOWN && w_param != HTSYSMENU &&
+      !GetWidget()->ShouldUseNativeFrame()) {
+    // TODO(msw): Eliminate undesired painting, or re-evaluate this workaround.
+    // DefWindowProc for WM_NCLBUTTONDOWN does weird non-client painting, so we
+    // need to call it inside a ScopedRedrawLock. This may cause other negative
+    // side-effects (ex/ stifling non-client mouse releases).
+    DefWindowProcWithRedrawLock(message, w_param, l_param);
+    handled = true;
+  }
+
+  SetMsgHandled(handled);
   return 0;
 }
 
@@ -1638,7 +1611,14 @@ LRESULT NativeWidgetWin::OnNCActivate(BOOL active) {
   if (IsActive())
     delegate_->EnableInactiveRendering();
 
-  return CallDefaultNCActivateHandler(inactive_rendering_disabled || active);
+  // Avoid DefWindowProc non-client rendering over our custom frame.
+  if (!GetWidget()->ShouldUseNativeFrame()) {
+    SetMsgHandled(TRUE);
+    return TRUE;
+  }
+
+  return DefWindowProcWithRedrawLock(WM_NCACTIVATE,
+                                     inactive_rendering_disabled || active, 0);
 }
 
 LRESULT NativeWidgetWin::OnNCCalcSize(BOOL mode, LPARAM l_param) {
@@ -1652,7 +1632,7 @@ LRESULT NativeWidgetWin::OnNCCalcSize(BOOL mode, LPARAM l_param) {
   }
 
   RECT* client_rect = mode ?
-      &reinterpret_cast<NCCALCSIZE_PARAMS*>(l_param)->rgrc[0] :
+      &(reinterpret_cast<NCCALCSIZE_PARAMS*>(l_param)->rgrc[0]) :
       reinterpret_cast<RECT*>(l_param);
   client_rect->left += insets.left();
   client_rect->top += insets.top();
@@ -1682,9 +1662,9 @@ LRESULT NativeWidgetWin::OnNCCalcSize(BOOL mode, LPARAM l_param) {
         return 0;
       }
     }
-    if (EdgeHasTopmostAutoHideTaskbar(ABE_LEFT, monitor))
+    if (GetTopmostAutoHideTaskbarForEdge(ABE_LEFT, monitor))
       client_rect->left += kAutoHideTaskbarThicknessPx;
-    if (EdgeHasTopmostAutoHideTaskbar(ABE_TOP, monitor)) {
+    if (GetTopmostAutoHideTaskbarForEdge(ABE_TOP, monitor)) {
       if (GetWidget()->ShouldUseNativeFrame()) {
         // Tricky bit.  Due to a bug in DwmDefWindowProc()'s handling of
         // WM_NCHITTEST, having any nonclient area atop the window causes the
@@ -1700,9 +1680,9 @@ LRESULT NativeWidgetWin::OnNCCalcSize(BOOL mode, LPARAM l_param) {
         client_rect->top += kAutoHideTaskbarThicknessPx;
       }
     }
-    if (EdgeHasTopmostAutoHideTaskbar(ABE_RIGHT, monitor))
+    if (GetTopmostAutoHideTaskbarForEdge(ABE_RIGHT, monitor))
       client_rect->right -= kAutoHideTaskbarThicknessPx;
-    if (EdgeHasTopmostAutoHideTaskbar(ABE_BOTTOM, monitor))
+    if (GetTopmostAutoHideTaskbarForEdge(ABE_BOTTOM, monitor))
       client_rect->bottom -= kAutoHideTaskbarThicknessPx;
 
     // We cannot return WVR_REDRAW when there is nonclient area, or Windows
@@ -1901,30 +1881,32 @@ LRESULT NativeWidgetWin::OnReflectedMessage(UINT msg,
 LRESULT NativeWidgetWin::OnSetCursor(UINT message,
                                      WPARAM w_param,
                                      LPARAM l_param) {
-  // This shouldn't hurt even if we're using the native frame.
-  ScopedRedrawLock lock(this);
-  return DefWindowProc(GetNativeView(), message, w_param, l_param);
+  // Using ScopedRedrawLock here frequently allows content behind this window to
+  // paint in front of this window, causing glaring rendering artifacts.
+  // If omitting ScopedRedrawLock here triggers caption rendering artifacts via
+  // DefWindowProc message handling, we'll need to find a better solution.
+  SetMsgHandled(FALSE);
+  return 0;
 }
 
 void NativeWidgetWin::OnSetFocus(HWND focused_window) {
   delegate_->OnNativeFocus(focused_window);
-  if (input_method_.get())
-    input_method_->OnFocus();
+  InputMethod* input_method = GetWidget()->GetInputMethodDirect();
+  if (input_method)
+    input_method->OnFocus();
   SetMsgHandled(FALSE);
 }
 
 LRESULT NativeWidgetWin::OnSetIcon(UINT size_type, HICON new_icon) {
   // This shouldn't hurt even if we're using the native frame.
-  ScopedRedrawLock lock(this);
-  return DefWindowProc(GetNativeView(), WM_SETICON, size_type,
-                       reinterpret_cast<LPARAM>(new_icon));
+  return DefWindowProcWithRedrawLock(WM_SETICON, size_type,
+                                     reinterpret_cast<LPARAM>(new_icon));
 }
 
 LRESULT NativeWidgetWin::OnSetText(const wchar_t* text) {
   // This shouldn't hurt even if we're using the native frame.
-  ScopedRedrawLock lock(this);
-  return DefWindowProc(GetNativeView(), WM_SETTEXT, NULL,
-                       reinterpret_cast<LPARAM>(text));
+  return DefWindowProcWithRedrawLock(WM_SETTEXT, NULL,
+                                     reinterpret_cast<LPARAM>(text));
 }
 
 void NativeWidgetWin::OnSettingChange(UINT flags, const wchar_t* section) {
@@ -1970,11 +1952,10 @@ void NativeWidgetWin::OnSysCommand(UINT notification_code, CPoint click) {
       GetWidget()->non_client_view()->ResetWindowControls();
     } else if ((notification_code & sc_mask) == SC_MOVE ||
                (notification_code & sc_mask) == SC_SIZE) {
-      if (lock_updates_) {
-        // We were locked, before entering a resize or move modal loop. Now that
-        // we've begun to move the window, we need to unlock updates so that the
-        // sizing/moving feedback can be continuous.
-        UnlockUpdates();
+      if (!IsVisible()) {
+        // Circumvent ScopedRedrawLocks and force visibility before entering a
+        // resize or move modal loop to get continuous sizing/moving feedback.
+        SetWindowLong(GWL_STYLE, GetWindowLong(GWL_STYLE) | WS_VISIBLE);
       }
     }
   }
@@ -2078,6 +2059,18 @@ void NativeWidgetWin::OnWindowPosChanging(WINDOWPOS* window_pos) {
     window_pos->flags &= ~SWP_SHOWWINDOW;
   }
 
+  // When WM_WINDOWPOSCHANGING message is handled by DefWindowProc, it will
+  // enforce (cx, cy) not to be smaller than (6, 6) for any non-popup window.
+  // We work around this by changing cy back to our intended value.
+  if (!GetParent() && ~(window_pos->flags & SWP_NOSIZE) && window_pos->cy < 6) {
+    LONG old_cy = window_pos->cy;
+    DefWindowProc(GetNativeView(), WM_WINDOWPOSCHANGING, 0,
+        reinterpret_cast<LPARAM>(window_pos));
+    window_pos->cy = old_cy;
+    SetMsgHandled(TRUE);
+    return;
+  }
+
   SetMsgHandled(FALSE);
 }
 
@@ -2092,6 +2085,9 @@ void NativeWidgetWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
 }
 
 void NativeWidgetWin::OnFinalMessage(HWND window) {
+  // We don't destroy props in WM_DESTROY as we may still get messages after
+  // WM_DESTROY that assume the properties are still valid (such as WM_CLOSE).
+  props_.reset();
   delegate_->OnNativeWidgetDestroyed();
   if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET)
     delete this;
@@ -2107,7 +2103,7 @@ int NativeWidgetWin::GetShowState() const {
 gfx::Insets NativeWidgetWin::GetClientAreaInsets() const {
   // Returning an empty Insets object causes the default handling in
   // NativeWidgetWin::OnNCCalcSize() to be invoked.
-  if (!GetWidget()->non_client_view() || GetWidget()->ShouldUseNativeFrame())
+  if (!has_non_client_view_ || GetWidget()->ShouldUseNativeFrame())
     return gfx::Insets();
 
   if (IsMaximized()) {
@@ -2179,10 +2175,7 @@ void NativeWidgetWin::ExecuteSystemMenuCommand(int command) {
 // static
 void NativeWidgetWin::PostProcessActivateMessage(NativeWidgetWin* widget,
                                                  int activation_state) {
-  if (!widget->delegate_->HasFocusManager()) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK(widget->GetWidget()->is_top_level());
   FocusManager* focus_manager = widget->GetWidget()->GetFocusManager();
   if (WA_INACTIVE == activation_state) {
     // We might get activated/inactivated without being enabled, so we need to
@@ -2218,8 +2211,10 @@ void NativeWidgetWin::SetInitParams(const Widget::InitParams& params) {
   // Set type-independent style attributes.
   if (params.child)
     style |= WS_CHILD | WS_VISIBLE;
-  if (params.maximize)
+  if (params.show_state == ui::SHOW_STATE_MAXIMIZED)
     style |= WS_MAXIMIZE;
+  if (params.show_state == ui::SHOW_STATE_MINIMIZED)
+    style |= WS_MINIMIZE;
   if (!params.accept_events)
     ex_style |= WS_EX_TRANSPARENT;
   if (!params.can_activate)
@@ -2276,6 +2271,8 @@ void NativeWidgetWin::SetInitParams(const Widget::InitParams& params) {
   set_initial_class_style(class_style);
   set_window_style(window_style() | style);
   set_window_ex_style(window_ex_style() | ex_style);
+
+  has_non_client_view_ = Widget::RequiresNonClientView(params.type);
 }
 
 void NativeWidgetWin::RedrawInvalidRect() {
@@ -2315,24 +2312,28 @@ void NativeWidgetWin::RedrawLayeredWindowContents() {
 }
 
 void NativeWidgetWin::LockUpdates() {
-  lock_updates_ = true;
-
   // We skip locked updates when Aero is on for two reasons:
   // 1. Because it isn't necessary
   // 2. Because toggling the WS_VISIBLE flag may occur while the GPU process is
   //    attempting to present a child window's backbuffer onscreen. When these
   //    two actions race with one another, the child window will either flicker
   //    or will simply stop updating entirely.
-  if (!IsAeroGlassEnabled()) {
-    saved_window_style_ = GetWindowLong(GWL_STYLE);
-    SetWindowLong(GWL_STYLE, saved_window_style_ & ~WS_VISIBLE);
+  if (!IsAeroGlassEnabled() && ++lock_updates_count_ == 1) {
+    SetWindowLong(GWL_STYLE, GetWindowLong(GWL_STYLE) & ~WS_VISIBLE);
   }
+  // TODO(msw): Remove nested LockUpdates VLOG info for crbug.com/93530.
+  VLOG_IF(1, (lock_updates_count_ > 1)) << "Nested LockUpdates call: "
+      << lock_updates_count_ << " locks for widget " << this;
 }
 
 void NativeWidgetWin::UnlockUpdates() {
-  if (!IsAeroGlassEnabled())
-    SetWindowLong(GWL_STYLE, saved_window_style_);
-  lock_updates_ = false;
+  // TODO(msw): Remove nested LockUpdates VLOG info for crbug.com/93530.
+  VLOG_IF(1, (lock_updates_count_ > 1)) << "Nested UnlockUpdates call: "
+      << lock_updates_count_ << " locks for widget " << this;
+  if (!IsAeroGlassEnabled() && --lock_updates_count_ <= 0) {
+    SetWindowLong(GWL_STYLE, GetWindowLong(GWL_STYLE) | WS_VISIBLE);
+    lock_updates_count_ = 0;
+  }
 }
 
 bool NativeWidgetWin::WidgetSizeIsClientSize() const {
@@ -2349,7 +2350,7 @@ void NativeWidgetWin::ClientAreaSizeChanged() {
   gfx::Size s(std::max(0, static_cast<int>(r.right - r.left)),
               std::max(0, static_cast<int>(r.bottom - r.top)));
   if (compositor_.get())
-    compositor_->OnWidgetSizeChanged(s);
+    compositor_->WidgetSizeChanged(s);
   delegate_->OnNativeWidgetSizeChanged(s);
   if (use_layered_buffer_) {
     layered_window_contents_.reset(
@@ -2400,12 +2401,20 @@ void NativeWidgetWin::ResetWindowRegion(bool force) {
   DeleteObject(current_rgn);
 }
 
-LRESULT NativeWidgetWin::CallDefaultNCActivateHandler(BOOL active) {
-  // The DefWindowProc handling for WM_NCACTIVATE renders the classic-look
-  // window title bar directly, so we need to use a redraw lock here to prevent
-  // it from doing so.
+LRESULT NativeWidgetWin::DefWindowProcWithRedrawLock(UINT message,
+                                                     WPARAM w_param,
+                                                     LPARAM l_param) {
   ScopedRedrawLock lock(this);
-  return DefWindowProc(GetNativeView(), WM_NCACTIVATE, active, 0);
+  // The Widget and HWND can be destroyed in the call to DefWindowProc, so use
+  // the |destroyed_| flag to avoid unlocking (and crashing) after destruction.
+  bool destroyed = false;
+  destroyed_ = &destroyed;
+  LRESULT result = DefWindowProc(GetNativeView(), message, w_param, l_param);
+  if (destroyed)
+    lock.CancelUnlockOperation();
+  else
+    destroyed_ = NULL;
+  return result;
 }
 
 void NativeWidgetWin::RestoreEnabledIfNecessary() {
@@ -2514,6 +2523,16 @@ NativeWidgetPrivate* NativeWidgetPrivate::GetTopLevelNativeWidget(
 
   // Second, try to locate the last Widget window in the parent hierarchy.
   HWND parent_hwnd = native_view;
+  // If we fail to find the native widget pointer for the root then it probably
+  // means that the root belongs to a different process in which case we walk up
+  // the native view chain looking for a parent window which corresponds to a
+  // valid native widget. We only do this if we fail to find the native widget
+  // for the current native view which means it is being destroyed.
+  if (!widget && !GetNativeWidgetForNativeView(native_view)) {
+    parent_hwnd = ::GetAncestor(parent_hwnd, GA_PARENT);
+    if (!parent_hwnd)
+      return NULL;
+  }
   NativeWidgetPrivate* parent_widget;
   do {
     parent_widget = GetNativeWidgetForNativeView(parent_hwnd);

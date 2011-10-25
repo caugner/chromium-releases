@@ -8,6 +8,7 @@ var chrome = chrome || {};
   native function AttachEvent(eventName);
   native function DetachEvent(eventName);
   native function GetExternalFileEntry(fileDefinition);
+  native function Print();
 
   var chromeHidden = GetChromeHidden();
 
@@ -231,8 +232,10 @@ var chrome = chrome || {};
   chromeHidden.onLoad = new chrome.Event();
   chromeHidden.onUnload = new chrome.Event();
 
-  chromeHidden.dispatchOnLoad = function(extensionId) {
-    chromeHidden.onLoad.dispatch(extensionId);
+  chromeHidden.dispatchOnLoad = function(extensionId, isExtensionProcess,
+                                         isIncognitoContext) {
+    chromeHidden.onLoad.dispatch(extensionId, isExtensionProcess,
+                                 isIncognitoContext);
   };
 
   chromeHidden.dispatchOnUnload = function() {

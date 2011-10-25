@@ -16,6 +16,11 @@
 #include "grit/webkit_strings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 
+// See http://openradar.appspot.com/9896491. This SPI has been tested on 10.5,
+// 10.6, and 10.7. It allows accessibility clients to observe events posted on
+// this object.
+extern "C" void NSAccessibilityUnregisterUniqueIdForUIElement(id element);
+
 typedef WebAccessibility::IntAttribute IntAttribute;
 typedef WebAccessibility::StringAttribute StringAttribute;
 
@@ -113,8 +118,9 @@ static const MapEntry roles[] = {
   { WebAccessibility::ROLE_ROW_HEADER, @"AXCell" },
   { WebAccessibility::ROLE_RULER, NSAccessibilityRulerRole },
   { WebAccessibility::ROLE_RULER_MARKER, NSAccessibilityRulerMarkerRole },
-  { WebAccessibility::ROLE_SCROLLAREA, NSAccessibilityScrollAreaRole },
-  { WebAccessibility::ROLE_SCROLLBAR, NSAccessibilityScrollBarRole },
+  // TODO(dtseng): we don't correctly support the attributes for these roles.
+  // { WebAccessibility::ROLE_SCROLLAREA, NSAccessibilityScrollAreaRole },
+  // { WebAccessibility::ROLE_SCROLLBAR, NSAccessibilityScrollBarRole },
   { WebAccessibility::ROLE_SHEET, NSAccessibilitySheetRole },
   { WebAccessibility::ROLE_SLIDER, NSAccessibilitySliderRole },
   { WebAccessibility::ROLE_SLIDER_THUMB, NSAccessibilityGroupRole },
@@ -192,6 +198,7 @@ static const AttributeToMethodNameEntry attributeToMethodNameContainer[] = {
   { NSAccessibilityValueAttribute, @"value" },
   { NSAccessibilityVisibleCharacterRangeAttribute, @"visibleCharacterRange" },
   { NSAccessibilityWindowAttribute, @"window" },
+  { @"AXLoaded", @"loaded" },
   { @"AXVisited", @"visited" },
 };
 
@@ -247,6 +254,7 @@ NSDictionary* attributeToMethodNameMap = nil;
 // Deletes our associated BrowserAccessibilityMac.
 - (void)dealloc {
   if (browserAccessibility_) {
+    NSAccessibilityUnregisterUniqueIdForUIElement(self);
     delete browserAccessibility_;
     browserAccessibility_ = NULL;
   }
@@ -276,10 +284,16 @@ NSDictionary* attributeToMethodNameMap = nil;
          i < browserAccessibility_->indirect_child_ids().size();
          ++i) {
       int32 child_id = browserAccessibility_->indirect_child_ids()[i];
-      BrowserAccessibilityCocoa* child =
-          browserAccessibility_->manager()->GetFromRendererID(child_id)->
-              toBrowserAccessibilityCocoa();
-      [children_ addObject:child];
+      BrowserAccessibility* child =
+          browserAccessibility_->manager()->GetFromRendererID(child_id);
+
+      // This only became necessary as a result of crbug.com/93095. It should be
+      // a DCHECK in the future.
+      if (child) {
+        BrowserAccessibilityCocoa* child_cocoa =
+            child->toBrowserAccessibilityCocoa();
+        [children_ addObject:child_cocoa];
+      }
     }
   }
   return children_;
@@ -369,11 +383,6 @@ NSDictionary* attributeToMethodNameMap = nil;
       static_cast<WebAccessibility::Role>( browserAccessibility_->role());
 
   // Roles that we only determine at runtime.
-  if (browserAccessibilityRole == WebAccessibility::ROLE_TEXT_FIELD &&
-      GetState(browserAccessibility_, WebAccessibility::STATE_PROTECTED)) {
-    return @"AXSecureTextField";
-  }
-
   std::map<WebAccessibility::Role, NSString*>::iterator it =
       webAccessibilityToNativeRole.find(browserAccessibilityRole);
 
@@ -447,13 +456,18 @@ NSDictionary* attributeToMethodNameMap = nil;
 
 // Returns a subrole based upon the role.
 - (NSString*) subrole {
-  // TODO: support password field -> NSAccessibilitySecureTextFieldSubrole
   // TODO: support attachments
   // TODO: support lists -> NSAccessibilityContentListSubrole ||
   //                        NSAccessibilityDefinitionListSubrole
 
   WebAccessibility::Role browserAccessibilityRole =
       static_cast<WebAccessibility::Role>( browserAccessibility_->role());
+
+  if (browserAccessibilityRole == WebAccessibility::ROLE_TEXT_FIELD &&
+      GetState(browserAccessibility_, WebAccessibility::STATE_PROTECTED)) {
+    return @"AXSecureTextField";
+  }
+
 
   std::map<WebAccessibility::Role, NSString*>::iterator it =
       webAccessibilityToNativeSubrole.find(browserAccessibilityRole);
@@ -828,6 +842,10 @@ NSDictionary* attributeToMethodNameMap = nil;
   if (!browserAccessibility_)
     return [super hash];
   return browserAccessibility_->renderer_id();
+}
+
+- (BOOL)accessibilityShouldUseUniqueId {
+  return YES;
 }
 
 @end

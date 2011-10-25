@@ -9,9 +9,10 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/scoped_temp_dir.h"
-#include "chrome/test/in_process_browser_test.h"
+#include "chrome/test/base/in_process_browser_test.h"
 #include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_observer.h"
@@ -51,6 +52,9 @@ class ExtensionBrowserTest
                                     expected_change);
   }
 
+  // Installs extension as if it came from the Chrome Webstore.
+  bool InstallExtensionFromWebstore(const FilePath& path, int expected_change);
+
   // Same as above but passes an id to CrxInstaller and does not allow a
   // privilege increase.
   bool UpdateExtension(const std::string& id, const FilePath& path,
@@ -69,7 +73,7 @@ class ExtensionBrowserTest
                                          int expected_change,
                                          Profile* profile) {
     return InstallOrUpdateExtension("", path, INSTALL_UI_TYPE_AUTO_CONFIRM,
-                                    expected_change, profile);
+                                    expected_change, profile, false);
   }
 
   // Begins install process but simulates a user cancel.
@@ -111,7 +115,7 @@ class ExtensionBrowserTest
   // NotificationObserver
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   bool loaded_;
   bool installed_;
@@ -140,7 +144,8 @@ class ExtensionBrowserTest
   bool InstallOrUpdateExtension(const std::string& id, const FilePath& path,
                                 InstallUIType ui_type,
                                 int expected_change,
-                                Profile* profile);
+                                Profile* profile,
+                                bool from_webstore);
 
   bool WaitForExtensionHostsToLoad();
 

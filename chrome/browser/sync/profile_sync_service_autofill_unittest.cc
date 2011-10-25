@@ -21,7 +21,6 @@
 #include "chrome/browser/autofill/autofill_common_test.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/engine/model_changing_syncer_command.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/autofill_change_processor.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_model_associator.h"
@@ -29,6 +28,10 @@
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_profile_model_associator.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/read_transaction.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
@@ -37,13 +40,13 @@
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
+#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
-#include "chrome/test/sync/engine/test_id_factory.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_source.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -578,9 +581,6 @@ class FakeServerUpdater: public base::RefCountedThreadSafe<FakeServerUpdater> {
     entry_ = entry;
     scoped_ptr<Callback0::Type> c(NewCallback((FakeServerUpdater *)this,
                                               &FakeServerUpdater::Update));
-    std::vector<browser_sync::ModelSafeWorker*> workers;
-    service_->GetBackendForTest()->GetWorkers(&workers);
-
     ASSERT_FALSE(BrowserThread::CurrentlyOn(BrowserThread::DB));
     if (!BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
          NewRunnableMethod(this, &FakeServerUpdater::Update))) {
@@ -593,9 +593,6 @@ class FakeServerUpdater: public base::RefCountedThreadSafe<FakeServerUpdater> {
     entry_ = entry;
     scoped_ptr<Callback0::Type> c(NewCallback((FakeServerUpdater *)this,
                                               &FakeServerUpdater::Update));
-    std::vector<browser_sync::ModelSafeWorker*> workers;
-    service_->GetBackendForTest()->GetWorkers(&workers);
-
     ASSERT_FALSE(BrowserThread::CurrentlyOn(BrowserThread::DB));
     is_finished_.Reset();
     if (!BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,

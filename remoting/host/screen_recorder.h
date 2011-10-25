@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -16,6 +17,10 @@
 #include "remoting/base/encoder.h"
 #include "remoting/host/capturer.h"
 #include "remoting/proto/video.pb.h"
+
+namespace base {
+class MessageLoopProxy;
+}  // namespace base
 
 namespace remoting {
 
@@ -74,7 +79,7 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   // This object does not own capturer but owns encoder.
   ScreenRecorder(MessageLoop* capture_loop,
                  MessageLoop* encode_loop,
-                 MessageLoop* network_loop,
+                 base::MessageLoopProxy* network_loop,
                  Capturer* capturer,
                  Encoder* encoder);
 
@@ -85,7 +90,7 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
 
   // Stop the recording session. |done_task| is executed when recording is fully
   // stopped. This object cannot be used again after |task| is executed.
-  void Stop(Task* done_task);
+  void Stop(const base::Closure& done_task);
 
   // Set the maximum capture rate. This is denoted by number of updates
   // in one second. The actual system may run in a slower rate than the maximum
@@ -114,8 +119,6 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   // Capturer thread ----------------------------------------------------------
 
   void DoStart();
-  void DoStop(Task* done_task);
-
   void DoSetMaxRate(double max_rate);
 
   // Hepler method to schedule next capture using the current rate.
@@ -140,7 +143,7 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   void DoRemoveAllClients();
 
   // Signal network thread to cease activities.
-  void DoStopOnNetworkThread(Task* done_task);
+  void DoStopOnNetworkThread(const base::Closure& done_task);
 
   // Callback for the last packet in one update. Deletes |packet| and
   // schedules next screen capture.
@@ -151,7 +154,7 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   void DoEncode(scoped_refptr<CaptureData> capture_data);
 
   // Perform stop operations on encode thread.
-  void DoStopOnEncodeThread(Task* done_task);
+  void DoStopOnEncodeThread(const base::Closure& done_task);
 
   // EncodedDataAvailableCallback takes ownership of |packet|.
   void EncodedDataAvailableCallback(VideoPacket* packet);
@@ -160,7 +163,7 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   // Message loops used by this class.
   MessageLoop* capture_loop_;
   MessageLoop* encode_loop_;
-  MessageLoop* network_loop_;
+  scoped_refptr<base::MessageLoopProxy> network_loop_;
 
   // Reference to the capturer. This member is always accessed on the capture
   // thread.
@@ -180,9 +183,10 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   // be used on the capture thread.
   bool is_recording_;
 
-  // Flag that indicates network is being stopped. This variable should only
-  // be used on the network thread.
+  // Per-thread flags that are set when the ScreenRecorder is
+  // stopped. They must be used on the corresponding threads only.
   bool network_stopped_;
+  bool encoder_stopped_;
 
   // Timer that calls DoCapture.
   base::RepeatingTimer<ScreenRecorder> capture_timer_;

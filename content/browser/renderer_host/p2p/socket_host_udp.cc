@@ -16,6 +16,8 @@ const int kReadBufferSize = 65536;
 
 }  // namespace
 
+namespace content {
+
 P2PSocketHostUdp::P2PSocketHostUdp(IPC::Message::Sender* message_sender,
                                    int routing_id, int id)
     : P2PSocketHost(message_sender, routing_id, id),
@@ -97,11 +99,11 @@ void P2PSocketHostUdp::DidCompleteRead(int result) {
   if (result > 0) {
     std::vector<char> data(recv_buffer_->data(), recv_buffer_->data() + result);
 
-    if (authorized_peers_.find(recv_address_) == authorized_peers_.end()) {
+    if (connected_peers_.find(recv_address_) == connected_peers_.end()) {
       P2PSocketHost::StunMessageType type;
       bool stun = GetStunPacketType(&*data.begin(), data.size(), &type);
       if (stun && IsRequestOrResponse(type)) {
-        authorized_peers_.insert(recv_address_);
+        connected_peers_.insert(recv_address_);
       } else if (!stun || type == STUN_DATA_INDICATION) {
         LOG(ERROR) << "Received unexpected data packet from "
                    << recv_address_.ToString()
@@ -132,7 +134,7 @@ void P2PSocketHostUdp::Send(const net::IPEndPoint& to,
     return;
   }
 
-  if (authorized_peers_.find(to) == authorized_peers_.end()) {
+  if (connected_peers_.find(to) == connected_peers_.end()) {
     P2PSocketHost::StunMessageType type;
     bool stun = GetStunPacketType(&*data.begin(), data.size(), &type);
     if (!stun || type == STUN_DATA_INDICATION) {
@@ -169,3 +171,5 @@ P2PSocketHost* P2PSocketHostUdp::AcceptIncomingTcpConnection(
   OnError();
   return NULL;
 }
+
+}  // namespace content

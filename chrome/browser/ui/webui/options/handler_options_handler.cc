@@ -33,6 +33,7 @@ void HandlerOptionsHandler::GetLocalizedValues(
       { "handlers_site_column_header", IDS_HANDLERS_SITE_COLUMN_HEADER },
       { "handlers_remove_link", IDS_HANDLERS_REMOVE_HANDLER_LINK },
       { "handlers_none_handler", IDS_HANDLERS_NONE_HANDLER },
+      { "handlers_active_heading", IDS_HANDLERS_ACTIVE_HEADING },
       { "handlers_ignored_heading", IDS_HANDLERS_IGNORED_HEADING },
   };
   RegisterTitle(localized_strings, "handlersPage",
@@ -44,7 +45,7 @@ void HandlerOptionsHandler::Initialize() {
   UpdateHandlerList();
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-      NotificationService::AllSources());
+      Source<Profile>(Profile::FromWebUI(web_ui_)));
 }
 
 void HandlerOptionsHandler::RegisterMessages() {
@@ -63,7 +64,7 @@ void HandlerOptionsHandler::RegisterMessages() {
 
 ProtocolHandlerRegistry* HandlerOptionsHandler::GetProtocolHandlerRegistry() {
   DCHECK(web_ui_);
-  return web_ui_->GetProfile()->GetProtocolHandlerRegistry();
+  return Profile::FromWebUI(web_ui_)->GetProtocolHandlerRegistry();
 }
 
 static void GetHandlersAsListValue(

@@ -11,9 +11,8 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_item.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/custom_drag.h"
@@ -23,6 +22,8 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -222,9 +223,10 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
     // Create the ok button.
     GtkWidget* dangerous_accept = gtk_button_new_with_label(
         l10n_util::GetStringUTF8(
-            download_model->download()->is_extension_install() ?
-                IDS_CONTINUE_EXTENSION_DOWNLOAD :
-                IDS_CONFIRM_DOWNLOAD).c_str());
+            ChromeDownloadManagerDelegate::IsExtensionDownload(
+                download_model->download()) ?
+                    IDS_CONTINUE_EXTENSION_DOWNLOAD :
+                    IDS_CONFIRM_DOWNLOAD).c_str());
     g_signal_connect(dangerous_accept, "clicked",
                      G_CALLBACK(OnDangerousAcceptThunk), this);
     gtk_util::CenterWidgetInHBox(dangerous_hbox_.get(), dangerous_accept, false,
@@ -422,7 +424,7 @@ void DownloadItemGtk::UpdateDownloadProgress() {
 void DownloadItemGtk::StartDownloadProgress() {
   if (progress_timer_.IsRunning())
     return;
-  progress_timer_.Start(
+  progress_timer_.Start(FROM_HERE,
       base::TimeDelta::FromMilliseconds(download_util::kProgressRateMs), this,
       &DownloadItemGtk::UpdateDownloadProgress);
 }
@@ -556,7 +558,7 @@ void DownloadItemGtk::UpdateDangerWarning() {
       // It's a dangerous file type (e.g.: an executable).
       DCHECK(get_download()->GetDangerType() ==
              DownloadItem::DANGEROUS_FILE);
-      if (get_download()->is_extension_install()) {
+      if (ChromeDownloadManagerDelegate::IsExtensionDownload(get_download())) {
         dangerous_warning =
             l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
       } else {

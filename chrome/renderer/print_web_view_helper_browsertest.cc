@@ -5,7 +5,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/print_messages.h"
 #include "chrome/renderer/print_web_view_helper.h"
-#include "chrome/test/render_view_test.h"
+#include "chrome/test/base/render_view_test.h"
 #include "printing/print_job_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -29,6 +29,10 @@ const char kHelloWorldHTML[] = "<body><p>Hello World!</p></body>";
 const char kPrintWithJSHTML[] =
     "<body>Hello<script>window.print()</script>World</body>";
 
+// A longer web page.
+const char kLongPageHTML[] =
+    "<body><img src=\"\" width=10 height=10000 /></body>";
+
 // A web page to simulate the print preview page.
 const char kPrintPreviewHTML[] =
     "<body><p id=\"pdf-viewer\">Hello World!</p></body>";
@@ -36,12 +40,17 @@ const char kPrintPreviewHTML[] =
 void CreatePrintSettingsDictionary(DictionaryValue* dict) {
   dict->SetBoolean(printing::kSettingLandscape, false);
   dict->SetBoolean(printing::kSettingCollate, false);
-  dict->SetBoolean(printing::kSettingColor, false);
+  dict->SetInteger(printing::kSettingColor, printing::GRAY);
   dict->SetBoolean(printing::kSettingPrintToPDF, true);
   dict->SetInteger(printing::kSettingDuplexMode, printing::SIMPLEX);
   dict->SetInteger(printing::kSettingCopies, 1);
   dict->SetString(printing::kSettingDeviceName, "dummy");
+  dict->SetString(printing::kPreviewUIAddr, "0xb33fbeef");
   dict->SetInteger(printing::kPreviewRequestID, 12345);
+  dict->SetBoolean(printing::kIsFirstRequest, true);
+  dict->SetBoolean(printing::kSettingDefaultMarginsSelected, true);
+  dict->SetBoolean(printing::kSettingHeaderFooterEnabled, false);
+  dict->SetBoolean(printing::kSettingGenerateDraftData, true);
 }
 
 }  // namespace
@@ -101,12 +110,6 @@ class PrintWebViewHelperTest : public PrintWebViewHelperTestBase {
   virtual ~PrintWebViewHelperTest() {}
 
   virtual void SetUp() {
-    // Append the print preview switch before creating the PrintWebViewHelper.
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kDisablePrintPreview);
-#endif
-
     RenderViewTest::SetUp();
   }
 
@@ -302,15 +305,20 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
 
   virtual void SetUp() {
     // Append the print preview switch before creating the PrintWebViewHelper.
-#if !defined(GOOGLE_CHROME_BUILD)
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnablePrintPreview);
-#endif
 
     RenderViewTest::SetUp();
   }
 
  protected:
+  void VerifyPrintPreviewCancelled(bool did_cancel) {
+    bool print_preview_cancelled =
+        (render_thread_.sink().GetUniqueMessageMatching(
+            PrintHostMsg_PrintPreviewCancelled::ID) != NULL);
+    EXPECT_EQ(did_cancel, print_preview_cancelled);
+  }
+
   void VerifyPrintPreviewFailed(bool did_fail) {
     bool print_preview_failed = (render_thread_.sink().GetUniqueMessageMatching(
         PrintHostMsg_PrintPreviewFailed::ID) != NULL);
@@ -320,12 +328,12 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
   void VerifyPrintPreviewGenerated(bool generated_preview) {
     const IPC::Message* preview_msg =
         render_thread_.sink().GetUniqueMessageMatching(
-            PrintHostMsg_PagesReadyForPreview::ID);
+            PrintHostMsg_MetafileReadyForPrinting::ID);
     bool did_get_preview_msg = (NULL != preview_msg);
     ASSERT_EQ(generated_preview, did_get_preview_msg);
     if (did_get_preview_msg) {
-      PrintHostMsg_PagesReadyForPreview::Param preview_param;
-      PrintHostMsg_PagesReadyForPreview::Read(preview_msg, &preview_param);
+      PrintHostMsg_MetafileReadyForPrinting::Param preview_param;
+      PrintHostMsg_MetafileReadyForPrinting::Read(preview_msg, &preview_param);
       EXPECT_NE(0, preview_param.a.document_cookie);
       EXPECT_NE(0, preview_param.a.expected_pages_count);
       EXPECT_NE(0U, preview_param.a.data_size);
@@ -336,6 +344,35 @@ class PrintWebViewHelperPreviewTest : public PrintWebViewHelperTestBase {
     bool print_failed = (render_thread_.sink().GetUniqueMessageMatching(
         PrintHostMsg_PrintingFailed::ID) != NULL);
     EXPECT_EQ(did_fail, print_failed);
+  }
+
+  void VerifyPrintPreviewInvalidPrinterSettings(bool settings_invalid) {
+    bool print_preview_invalid_printer_settings =
+        (render_thread_.sink().GetUniqueMessageMatching(
+            PrintHostMsg_PrintPreviewInvalidPrinterSettings::ID) != NULL);
+    EXPECT_EQ(settings_invalid, print_preview_invalid_printer_settings);
+  }
+
+  // |page_number| is 0-based.
+  void VerifyDidPreviewPage(bool generate_draft_pages, int page_number) {
+    bool msg_found = false;
+    size_t msg_count = render_thread_.sink().message_count();
+    for (size_t i = 0; i < msg_count; ++i) {
+      const IPC::Message* msg = render_thread_.sink().GetMessageAt(i);
+      if (msg->type() == PrintHostMsg_DidPreviewPage::ID) {
+        PrintHostMsg_DidPreviewPage::Param page_param;
+        PrintHostMsg_DidPreviewPage::Read(msg, &page_param);
+        if (page_param.a.page_number == page_number) {
+          msg_found = true;
+          if (generate_draft_pages)
+            EXPECT_NE(0U, page_param.a.data_size);
+          else
+            EXPECT_EQ(0U, page_param.a.data_size);
+          break;
+        }
+      }
+    }
+    ASSERT_EQ(generate_draft_pages, msg_found);
   }
 
   DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelperPreviewTest);
@@ -352,14 +389,42 @@ TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreview) {
   CreatePrintSettingsDictionary(&dict);
   PrintWebViewHelper::Get(view_)->OnPrintPreview(dict);
 
-  // Need to finish simulating print preview.
-  // Generate the page and finalize it.
-  PrintWebViewHelper::Get(view_)->OnContinuePreview(
-      printing::INVALID_PAGE_INDEX);
-  PrintWebViewHelper::Get(view_)->OnContinuePreview(
-      printing::INVALID_PAGE_INDEX);
-
   EXPECT_EQ(0, render_thread_.print_preview_pages_remaining());
+  VerifyPrintPreviewCancelled(false);
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(true);
+  VerifyPagesPrinted(false);
+}
+
+// Test to verify that complete metafile is generated for a subset of pages
+// without creating draft pages.
+TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewForSelectedPages) {
+  LoadHTML(kHelloWorldHTML);
+
+  PrintWebViewHelper::Get(view_)->OnInitiatePrintPreview();
+  // Fill in some dummy values.
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+
+  // Set a page range and update the dictionary to generate only the complete
+  // metafile with the selected pages. Page numbers used in the dictionary
+  // are 1-based.
+  DictionaryValue* page_range = new DictionaryValue();
+  page_range->SetInteger(printing::kSettingPageRangeFrom, 1);
+  page_range->SetInteger(printing::kSettingPageRangeTo, 1);
+
+  ListValue* page_range_array = new ListValue();
+  page_range_array->Append(page_range);
+
+  dict.Set(printing::kSettingPageRange, page_range_array);
+  dict.SetBoolean(printing::kSettingGenerateDraftData, false);
+
+  PrintWebViewHelper::Get(view_)->OnPrintPreview(dict);
+
+  // Verify that we did not create the draft metafile for the first page.
+  VerifyDidPreviewPage(false, 0);
+
+  VerifyPrintPreviewCancelled(false);
   VerifyPrintPreviewFailed(false);
   VerifyPrintPreviewGenerated(true);
   VerifyPagesPrinted(false);
@@ -376,7 +441,27 @@ TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewFail) {
   PrintWebViewHelper::Get(view_)->OnPrintPreview(empty_dict);
 
   EXPECT_EQ(0, render_thread_.print_preview_pages_remaining());
+  VerifyPrintPreviewCancelled(false);
   VerifyPrintPreviewFailed(true);
+  VerifyPrintPreviewGenerated(false);
+  VerifyPagesPrinted(false);
+}
+
+// Tests that cancelling print preview works.
+TEST_F(PrintWebViewHelperPreviewTest, OnPrintPreviewCancel) {
+  LoadHTML(kLongPageHTML);
+
+  const int kCancelPage = 3;
+  render_thread_.set_print_preview_cancel_page_number(kCancelPage);
+  PrintWebViewHelper::Get(view_)->OnInitiatePrintPreview();
+  // Fill in some dummy values.
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  PrintWebViewHelper::Get(view_)->OnPrintPreview(dict);
+
+  EXPECT_EQ(kCancelPage, render_thread_.print_preview_pages_remaining());
+  VerifyPrintPreviewCancelled(true);
+  VerifyPrintPreviewFailed(false);
   VerifyPrintPreviewGenerated(false);
   VerifyPagesPrinted(false);
 }
@@ -407,4 +492,45 @@ TEST_F(PrintWebViewHelperPreviewTest, OnPrintForPrintPreviewFail) {
   VerifyPrintFailed(true);
   VerifyPagesPrinted(false);
 }
+
+// Tests that when default printer has invalid printer settings, print preview
+// receives error message.
+TEST_F(PrintWebViewHelperPreviewTest,
+       OnPrintPreviewUsingInvalidPrinterSettings) {
+  LoadHTML(kPrintPreviewHTML);
+
+  PrintWebViewHelper::Get(view_)->OnInitiatePrintPreview();
+
+  // Set mock printer to provide invalid settings.
+  render_thread_.printer()->UseInvalidSettings();
+
+  // Fill in some dummy values.
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  PrintWebViewHelper::Get(view_)->OnPrintPreview(dict);
+
+  // We should have received invalid printer settings from |printer_|.
+  VerifyPrintPreviewInvalidPrinterSettings(true);
+  EXPECT_EQ(0, render_thread_.print_preview_pages_remaining());
+
+  // It should receive the invalid printer settings message only.
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(false);
+}
+
+TEST_F(PrintWebViewHelperPreviewTest,
+       OnPrintForPrintPreviewUsingInvalidPrinterSettings) {
+  LoadHTML(kPrintPreviewHTML);
+
+  // Set mock printer to provide invalid settings.
+  render_thread_.printer()->UseInvalidSettings();
+
+  // Fill in some dummy values.
+  DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  PrintWebViewHelper::Get(view_)->OnPrintForPrintPreview(dict);
+
+  VerifyPagesPrinted(false);
+}
+
 #endif  // !defined(OS_CHROMEOS)

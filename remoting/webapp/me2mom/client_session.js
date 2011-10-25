@@ -13,6 +13,7 @@
 
 'use strict';
 
+/** @suppress {duplicate} */
 var remoting = remoting || {};
 
 (function() {
@@ -23,12 +24,14 @@ var remoting = remoting || {};
  * @param {string} accessCode The access code for the IT2Me connection.
  * @param {string} email The username for the talk network.
  * @param {function(remoting.ClientSession.State):void} onStateChange
- *     The callback to invoke when the session changes state.
+ *     The callback to invoke when the session changes state. This callback
+ *     occurs after the state changes and is passed the previous state; the
+ *     new state is accessible via ClientSession's |state| property.
  * @constructor
  */
 remoting.ClientSession = function(hostJid, hostPublicKey, accessCode, email,
                                   onStateChange) {
-  this.state = remoting.ClientSession.CREATED;
+  this.state = remoting.ClientSession.State.CREATED;
 
   this.hostJid = hostJid;
   this.hostPublicKey = hostPublicKey;
@@ -63,6 +66,7 @@ remoting.ClientSession.prototype.state = remoting.ClientSession.State.UNKNOWN;
  * compatible.
  *
  * @const
+ * @private
  */
 remoting.ClientSession.prototype.API_VERSION_ = 2;
 
@@ -71,6 +75,7 @@ remoting.ClientSession.prototype.API_VERSION_ = 2;
  * connections.
  *
  * @const
+ * @private
  */
 remoting.ClientSession.prototype.HTTP_XMPP_PROXY_ =
     'https://chromoting-httpxmpp-oauth2-dev.corp.google.com';
@@ -81,6 +86,7 @@ remoting.ClientSession.prototype.HTTP_XMPP_PROXY_ =
  * compatibility with older API versions.
  *
  * @const
+ * @private
  */
 remoting.ClientSession.prototype.API_MIN_VERSION_ = 1;
 
@@ -96,7 +102,7 @@ remoting.ClientSession.prototype.PLUGIN_ID = 'session-client-plugin';
  *
  * @type {function(remoting.ClientSession.State):void}
  */
-remoting.ClientSession.prototype.onStateChange = null;
+remoting.ClientSession.prototype.onStateChange = function(state) { };
 
 /**
  * Adds <embed> element to |container| and readies the sesion object.
@@ -107,16 +113,19 @@ remoting.ClientSession.prototype.onStateChange = null;
  */
 remoting.ClientSession.prototype.createPluginAndConnect =
     function(container, oauth2AccessToken) {
-  this.plugin = document.createElement('embed');
+  this.plugin = /** @type {remoting.ViewerPlugin} */
+      document.createElement('embed');
   this.plugin.id = this.PLUGIN_ID;
   this.plugin.src = 'about://none';
   this.plugin.type = 'pepper-application/x-chromoting';
+  this.plugin.width = 0;
+  this.plugin.height = 0;
   container.appendChild(this.plugin);
 
   if (!this.isPluginVersionSupported_(this.plugin)) {
     // TODO(ajwong): Remove from parent.
     delete this.plugin;
-    this.setState_(remoting.ClientSession.BAD_PLUGIN_VERSION);
+    this.setState_(remoting.ClientSession.State.BAD_PLUGIN_VERSION);
     return;
   }
 
@@ -139,12 +148,28 @@ remoting.ClientSession.prototype.createPluginAndConnect =
 
   // TODO(garykac): Clean exit if |connect| isn't a function.
   if (typeof this.plugin.connect === 'function') {
-    this.registerConnection_(oauth2AccessToken);
+    this.connectPluginToWcs_(oauth2AccessToken);
   } else {
     remoting.debug.log('ERROR: remoting plugin not loaded');
-    this.setState_(remoting.ClientSession.UNKNOWN_PLUGIN_ERROR);
+    this.setState_(remoting.ClientSession.State.UNKNOWN_PLUGIN_ERROR);
   }
 };
+
+/**
+ * Deletes the <embed> element from the container, without sending a
+ * session_terminate request.  This is to be called when the session was
+ * disconnected by the Host.
+ *
+ * @return {void} Nothing.
+ */
+remoting.ClientSession.prototype.removePlugin = function() {
+  var plugin = document.getElementById(this.PLUGIN_ID);
+  if (plugin) {
+    var parentNode = this.plugin.parentNode;
+    parentNode.removeChild(plugin);
+    plugin = null;
+  }
+}
 
 /**
  * Deletes the <embed> element from the container and disconnects.
@@ -152,98 +177,58 @@ remoting.ClientSession.prototype.createPluginAndConnect =
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.disconnect = function() {
-  var plugin = document.getElementById(this.PLUGIN_ID);
-  if (plugin) {
-    plugin.parentNode.removeChild(plugin);
+  if (remoting.wcs) {
+    remoting.wcs.setOnIq(function(stanza) {});
   }
-  var parameters = {
-    'to': this.hostJid,
-    'payload_xml':
-        '<jingle xmlns="urn:xmpp:jingle:1"' +
-               ' action="session-terminate"' +
-               ' initiator="' + this.clientJid + '"' +
-               ' sid="' + this.sessionId + '">' +
+  this.removePlugin();
+  this.sendIq_(
+      '<cli:iq ' +
+          'to="' + this.hostJid + '" ' +
+          'type="set" ' +
+          'id="session-terminate" ' +
+          'xmlns:cli="jabber:client">' +
+        '<jingle ' +
+            'xmlns="urn:xmpp:jingle:1" ' +
+            'action="session-terminate" ' +
+            'initiator="' + this.clientJid + '" ' +
+            'sid="' + this.sessionId + '">' +
           '<reason><success/></reason>' +
-        '</jingle>',
-    'id': 'session_terminate',
-    'type': 'set',
-    'host_jid': this.hostJid
-  };
-  this.sendIqWithParameters_(parameters);
-}
+        '</jingle>' +
+      '</cli:iq>');
+};
 
 /**
  * Sends an IQ stanza via the http xmpp proxy.
  *
+ * @private
  * @param {string} msg XML string of IQ stanza to send to server.
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.sendIq_ = function(msg) {
   remoting.debug.log('Sending Iq: ' + msg);
-
-  // Extract the top level fields of the Iq packet.
-  // TODO(ajwong): Can the plugin just return these fields broken out.
+  // Extract the session id, so we can close the session later.
   var parser = new DOMParser();
   var iqNode = parser.parseFromString(msg, 'text/xml').firstChild;
   var jingleNode = iqNode.firstChild;
-  var serializer = new XMLSerializer();
-  var parameters = {
-    'to': iqNode.getAttribute('to') || "",
-    'payload_xml': serializer.serializeToString(jingleNode),
-    'id': iqNode.getAttribute('id') || '1',
-    'type': iqNode.getAttribute('type'),
-    'host_jid': this.hostJid
-  };
+  if (jingleNode) {
+    var action = jingleNode.getAttribute('action');
+    if (jingleNode.nodeName == 'jingle' && action == 'session-initiate') {
+      this.sessionId = jingleNode.getAttribute('sid');
+    }
+  }
 
-  this.sendIqWithParameters_(parameters);
-
-  var action = jingleNode.getAttribute('action');
-  if (jingleNode.nodeName == 'jingle' && action == 'session-initiate') {
-    // The session id is needed in order to close the session later.
-    this.sessionId = jingleNode.getAttribute('sid');
+  // Send the stanza.
+  if (remoting.wcs) {
+    remoting.wcs.sendIq(msg);
+  } else {
+    remoting.debug.log('Tried to send IQ before WCS was ready.');
+    this.setState_(remoting.ClientSession.State.CONNECTION_FAILED);
   }
 };
 
 /**
- * Sends an IQ stanza via the http xmpp proxy.
- *
- * @param {(string|Object.<string>)} paramters Parameters to include.
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.sendIqWithParameters_ = function(parameters) {
-  remoting.xhr.post(this.HTTP_XMPP_PROXY_ + '/sendIq', function(xhr) {},
-                    parameters, {}, true);
-}
-
-/**
- * Executes a poll loop on the server for more IQ packet to feed to the plugin.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.feedIq_ = function() {
-  var that = this;
-
-  var onIq = function(xhr) {
-    if (xhr.status == 200) {
-      remoting.debug.log('Receiving Iq: --' + xhr.responseText + '--');
-      that.plugin.onIq(xhr.responseText);
-    }
-    if (xhr.status == 200 || xhr.status == 204) {
-      // Poll again.
-      that.feedIq_();
-    } else {
-      remoting.debug.log('HttpXmpp gateway returned code: ' + xhr.status);
-      that.plugin.disconnect();
-      that.setState_(remoting.ClientSession.CONNECTION_FAILED);
-    }
-  }
-
-  remoting.xhr.get(this.HTTP_XMPP_PROXY_ + '/readIq', onIq,
-                   {'host_jid': this.hostJid}, {}, true);
-};
-
-/**
- * @param {Element} plugin The embed element for the plugin.
+ * @private
+ * @param {remoting.ViewerPlugin} plugin The embed element for the plugin.
  * @return {boolean} True if the plugin and web-app versions are compatible.
  */
 remoting.ClientSession.prototype.isPluginVersionSupported_ = function(plugin) {
@@ -252,43 +237,25 @@ remoting.ClientSession.prototype.isPluginVersionSupported_ = function(plugin) {
 };
 
 /**
- * Registers a new connection with the HttpXmpp proxy.
+ * Connects the plugin to WCS.
  *
+ * @private
  * @param {string} oauth2AccessToken A valid OAuth2 access token.
  * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.registerConnection_ =
+remoting.ClientSession.prototype.connectPluginToWcs_ =
     function(oauth2AccessToken) {
-  var parameters = {
-    'host_jid': this.hostJid,
-    'username': this.email,
-    'password': oauth2AccessToken
-  };
-
+  this.clientJid = remoting.wcs.getJid();
+  if (this.clientJid == '') {
+    remoting.debug.log('Tried to connect without a full JID.');
+  }
   var that = this;
-  var onRegistered = function(xhr) {
-    if (xhr.status != 200) {
-      remoting.debug.log('FailedToConnect: --' + xhr.responseText +
-                         '-- (status=' + xhr.status + ')');
-      that.setState_(remoting.ClientSession.CONNECTION_FAILED);
-      return;
-    }
-
-    remoting.debug.log('Receiving Iq: --' + xhr.responseText + '--');
-    that.clientJid = xhr.responseText;
-
-    // TODO(ajwong): Remove old version support.
-    if (that.plugin.apiVersion >= 2) {
-      that.plugin.connect(that.hostJid, that.hostPublicKey, that.clientJid,
-                          that.accessCode);
-    } else {
-      that.plugin.connect(that.hostJid, that.clientJid, that.accessCode);
-    }
-    that.feedIq_();
-  };
-
-  remoting.xhr.post(this.HTTP_XMPP_PROXY_ + '/newConnection',
-                    onRegistered, parameters, {}, true);
+  remoting.wcs.setOnIq(function(stanza) {
+      remoting.debug.log('Receiving Iq: ' + stanza);
+      that.plugin.onIq(stanza);
+  });
+  that.plugin.connect(this.hostJid, this.hostPublicKey, this.clientJid,
+                      this.accessCode);
 };
 
 /**
@@ -316,75 +283,88 @@ remoting.ClientSession.prototype.connectionInfoUpdateCallback = function() {
 };
 
 /**
+ * @private
  * @param {remoting.ClientSession.State} state The new state for the session.
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.setState_ = function(state) {
+  var oldState = this.state;
   this.state = state;
   if (this.onStateChange) {
-    this.onStateChange(this.state);
+    this.onStateChange(oldState);
   }
 };
 
 /**
- * This is a callback that gets called when the desktop size contained in the
- * the plugin has changed.
+ * This is a callback that gets called when the window is resized.
  *
+ * @private
  * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.onDesktopSizeChanged_ = function() {
-  var width = this.plugin.desktopWidth;
-  var height = this.plugin.desktopHeight;
-  remoting.debug.log('desktop size changed: ' + width + 'x' + height);
-  this.plugin.width = width;
-  this.plugin.height = height;
+remoting.ClientSession.prototype.onWindowSizeChanged = function() {
+  remoting.debug.log('window size changed: ' +
+                     window.innerWidth + 'x' +
+                     window.innerHeight);
+  this.updateDimensions();
 };
 
 /**
- * Informs the plugin that it should scale itself.
+ * This is a callback that gets called when the plugin notifies us of a change
+ * in the size of the remote desktop.
+ *
+ * @private
+ * @return {void} Nothing.
+ */
+remoting.ClientSession.prototype.onDesktopSizeChanged_ = function() {
+  remoting.debug.log('desktop size changed: ' +
+                     this.plugin.desktopWidth + 'x' +
+                     this.plugin.desktopHeight);
+  this.updateDimensions();
+};
+
+/**
+ * Refreshes the plugin's dimensions, taking into account the sizes of the
+ * remote desktop and client window, and the current scale-to-fit setting.
  *
  * @param {boolean} shouldScale If the plugin should scale itself.
  * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.toggleScaleToFit = function (shouldScale) {
-  if (shouldScale) {
-    remoting.debug.log('scale to fit is turned on.');
+remoting.ClientSession.prototype.updateDimensions = function() {
+  if (this.plugin.desktopWidth == 0 ||
+      this.plugin.desktopHeight == 0)
+    return;
 
-    if (this.plugin.desktopWidth == 0 ||
-        this.plugin.desktopHeight == 0) {
-      remoting.debug.log('desktop size is not known yet.');
-      return;
-    }
+  var windowWidth = window.innerWidth;
+  var windowHeight = window.innerHeight;
+  var scale = 1.0;
 
-    // Make sure both width and height are multiples of two.
-    var width = window.innerWidth;
-    var height = window.innerHeight;
-    if (width % 2 == 1)
-      --width;
-    if (height % 2 == 1)
-      --height;
-
-    var scale = 1.0;
-    if (width < height)
-      scale = 1.0 * height / this.plugin.desktopHeight;
-    else
-      scale = 1.0 * width / this.plugin.desktopWidth;
-
-    if (scale > 1.0) {
-      remoting.debug.log('scale up is not supported');
-      return;
-    }
-
-    this.plugin.width = this.plugin.desktopWidth * scale;
-    this.plugin.height = this.plugin.desktopHeight * scale;
-  } else {
-    remoting.debug.log('scale to fit is turned off.');
-    this.plugin.width = this.plugin.desktopWidth;
-    this.plugin.height = this.plugin.desktopHeight;
+  if (remoting.scaleToFit) {
+    var scaleFitHeight = 1.0 * windowHeight / this.plugin.desktopHeight;
+    var scaleFitWidth = 1.0 * windowWidth / this.plugin.desktopWidth;
+    scale = Math.min(1.0, scaleFitHeight, scaleFitWidth);
   }
-  remoting.debug.log('plugin size is now: ' +
-                     this.plugin.width + " x " + this.plugin.height + '.');
-  this.plugin.setScaleToFit(shouldScale);
+
+  // Resize the plugin if necessary.
+  this.plugin.width = this.plugin.desktopWidth * scale;
+  this.plugin.height = this.plugin.desktopHeight * scale;
+
+  // Position the container.
+  // TODO(wez): We should take into account scrollbars when positioning.
+  var parentNode = this.plugin.parentNode;
+  if (this.plugin.width < windowWidth)
+    parentNode.style.left = (windowWidth - this.plugin.width) / 2 + 'px';
+  else
+    parentNode.style.left = 0;
+  if (this.plugin.height < windowHeight)
+    parentNode.style.top = (windowHeight - this.plugin.height) / 2 + 'px';
+  else
+    parentNode.style.top = 0;
+
+  remoting.debug.log('plugin dimensions: ' +
+                     parentNode.style.left + ',' +
+                     parentNode.style.top + '-' +
+                     this.plugin.width + 'x' + this.plugin.height + '.');
+  this.plugin.setScaleToFit(remoting.scaleToFit);
 };
 
 /**

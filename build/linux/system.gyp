@@ -90,16 +90,12 @@
                 '../../third_party/zlib/zlib.gyp:zlib',
               ],
               'direct_dependent_settings': {
-                'cflags': [
+                'include_dirs+': [
                   # We need for our local copies of the libssl3 headers to come
-                  # first, otherwise the code will build, but will fallback to
-                  # the set of features advertised in the system headers.
-                  # Unfortunately, there's no include path that we can filter
-                  # out of $(pkg-config --cflags nss) and GYP include paths
-                  # come after cflags on the command line. So we have these
-                  # bodges:
-                  '-Inet/third_party/nss/ssl',                         # for make
-                  '-ISource/WebKit/chromium/net/third_party/nss/ssl',  # for make in webkit
+                  # before other includes, as we are shadowing system headers.
+                  '<(DEPTH)/net/third_party/nss/ssl',
+                ],
+                'cflags': [
                   '<!@(<(pkg-config) --cflags nss)',
                 ],
               },
@@ -430,6 +426,23 @@
       },
     },
     {
+      'target_name': 'glib',
+      'type': 'settings',
+      'direct_dependent_settings': {
+        'cflags': [
+          '<!@(<(pkg-config) --cflags glib-2.0)',
+        ],
+      },
+      'link_settings': {
+        'ldflags': [
+          '<!@(<(pkg-config) --libs-only-L --libs-only-other glib-2.0)',
+        ],
+        'libraries': [
+          '<!@(<(pkg-config) --libs-only-l glib-2.0)',
+        ],
+      },
+    },
+    {
       'target_name': 'libresolv',
       'type': 'settings',
       'link_settings': {
@@ -458,6 +471,30 @@
             ],
             'libraries': [
               '<!@(<(pkg-config) --libs-only-l "ibus-1.0 >= <(ibus_min_version)")',
+            ],
+          },
+        }],
+      ],
+    },
+    {
+      'target_name': 'wayland',
+      'type': 'settings',
+      'conditions': [
+        ['use_wayland == 1', {
+          'cflags': [
+            '<!@(<(pkg-config) --cflags cairo wayland-client wayland-egl xkbcommon)',
+          ],
+          'direct_dependent_settings': {
+            'cflags': [
+              '<!@(<(pkg-config) --cflags cairo wayland-client wayland-egl xkbcommon)',
+            ],
+          },
+          'link_settings': {
+            'ldflags': [
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other wayland-client wayland-egl xkbcommon)',
+            ],
+            'libraries': [
+              '<!@(<(pkg-config) --libs-only-l wayland-client wayland-egl xkbcommon)',
             ],
           },
         }],

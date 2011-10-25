@@ -22,7 +22,6 @@
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/common/content_settings_types.h"
 #include "content/common/notification_observer.h"
@@ -32,6 +31,7 @@
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class OmniboxViewGtk;
@@ -41,7 +41,6 @@ class ContentSettingImageModel;
 class ContentSettingBubbleGtk;
 class ExtensionAction;
 class GtkThemeService;
-class Profile;
 class SkBitmap;
 class TabContents;
 class ToolbarModel;
@@ -55,8 +54,6 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual ~LocationBarViewGtk();
 
   void Init(bool popup_window_mode);
-
-  void SetProfile(Profile* profile);
 
   // Returns the widget the caller should host.  You must call Init() first.
   GtkWidget* widget() { return hbox_.get(); }
@@ -111,30 +108,30 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual TabContentsWrapper* GetTabContentsWrapper() const OVERRIDE;
 
   // Implement the LocationBar interface.
-  virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type);
+  virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type) OVERRIDE;
   virtual void SetSuggestedText(const string16& text,
-                                InstantCompleteBehavior behavior);
-  virtual std::wstring GetInputString() const;
-  virtual WindowOpenDisposition GetWindowOpenDisposition() const;
-  virtual PageTransition::Type GetPageTransition() const;
-  virtual void AcceptInput();
-  virtual void FocusLocation(bool select_all);
-  virtual void FocusSearch();
-  virtual void UpdateContentSettingsIcons();
-  virtual void UpdatePageActions();
-  virtual void InvalidatePageActions();
-  virtual void SaveStateToContents(TabContents* contents);
-  virtual void Revert();
-  virtual const OmniboxView* location_entry() const;
-  virtual OmniboxView* location_entry();
-  virtual LocationBarTesting* GetLocationBarForTesting();
+                                InstantCompleteBehavior behavior) OVERRIDE;
+  virtual string16 GetInputString() const OVERRIDE;
+  virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
+  virtual PageTransition::Type GetPageTransition() const OVERRIDE;
+  virtual void AcceptInput() OVERRIDE;
+  virtual void FocusLocation(bool select_all) OVERRIDE;
+  virtual void FocusSearch() OVERRIDE;
+  virtual void UpdateContentSettingsIcons() OVERRIDE;
+  virtual void UpdatePageActions() OVERRIDE;
+  virtual void InvalidatePageActions() OVERRIDE;
+  virtual void SaveStateToContents(TabContents* contents) OVERRIDE;
+  virtual void Revert() OVERRIDE;
+  virtual const OmniboxView* location_entry() const OVERRIDE;
+  virtual OmniboxView* location_entry() OVERRIDE;
+  virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
 
   // Implement the LocationBarTesting interface.
-  virtual int PageActionCount();
-  virtual int PageActionVisibleCount();
-  virtual ExtensionAction* GetPageAction(size_t index);
-  virtual ExtensionAction* GetVisiblePageAction(size_t index);
-  virtual void TestPageActionPressed(size_t index);
+  virtual int PageActionCount() OVERRIDE;
+  virtual int PageActionVisibleCount() OVERRIDE;
+  virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
+  virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
+  virtual void TestPageActionPressed(size_t index) OVERRIDE;
 
   // Implement the NotificationObserver interface.
   virtual void Observe(int type,
@@ -149,13 +146,10 @@ class LocationBarViewGtk : public AutocompleteEditController,
                                      public ui::AnimationDelegate {
    public:
     ContentSettingImageViewGtk(ContentSettingsType content_type,
-                               const LocationBarViewGtk* parent,
-                               Profile* profile);
+                               const LocationBarViewGtk* parent);
     virtual ~ContentSettingImageViewGtk();
 
     GtkWidget* widget() { return alignment_.get(); }
-
-    void set_profile(Profile* profile) { profile_ = profile; }
 
     bool IsVisible();
     void UpdateFromTabContents(TabContents* tab_contents);
@@ -184,19 +178,16 @@ class LocationBarViewGtk : public AutocompleteEditController,
     scoped_ptr<ContentSettingImageModel> content_setting_image_model_;
 
     // The widgets for this content settings view.
-    OwnedWidgetGtk alignment_;
-    OwnedWidgetGtk event_box_;
+    ui::OwnedWidgetGtk alignment_;
+    ui::OwnedWidgetGtk event_box_;
     GtkWidget* hbox_;
-    OwnedWidgetGtk image_;
+    ui::OwnedWidgetGtk image_;
 
     // Explanatory text ("popup blocked").
-    OwnedWidgetGtk label_;
+    ui::OwnedWidgetGtk label_;
 
     // The owning LocationBarViewGtk.
     const LocationBarViewGtk* parent_;
-
-    // The currently active profile.
-    Profile* profile_;
 
     // The currently shown bubble if any.
     ContentSettingBubbleGtk* content_setting_bubble_;
@@ -215,9 +206,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   class PageActionViewGtk : public ImageLoadingTracker::Observer,
                             public ExtensionContextMenuModel::PopupDelegate {
    public:
-    PageActionViewGtk(
-        LocationBarViewGtk* owner, Profile* profile,
-        ExtensionAction* page_action);
+    PageActionViewGtk(LocationBarViewGtk* owner, ExtensionAction* page_action);
     virtual ~PageActionViewGtk();
 
     GtkWidget* widget() { return event_box_.get(); }
@@ -258,9 +247,6 @@ class LocationBarViewGtk : public AutocompleteEditController,
     // The location bar view that owns us.
     LocationBarViewGtk* owner_;
 
-    // The current profile (not owned by us).
-    Profile* profile_;
-
     // The PageAction that this view represents. The PageAction is not owned by
     // us, it resides in the extension of this particular profile.
     ExtensionAction* page_action_;
@@ -280,8 +266,8 @@ class LocationBarViewGtk : public AutocompleteEditController,
     ImageLoadingTracker tracker_;
 
     // The widgets for this page action.
-    OwnedWidgetGtk event_box_;
-    OwnedWidgetGtk image_;
+    ui::OwnedWidgetGtk event_box_;
+    ui::OwnedWidgetGtk image_;
 
     // The tab id we are currently showing the icon for.
     int current_tab_id_;
@@ -364,10 +350,10 @@ class LocationBarViewGtk : public AutocompleteEditController,
   bool ShouldOnlyShowLocation();
 
   // The outermost widget we want to be hosted.
-  OwnedWidgetGtk hbox_;
+  ui::OwnedWidgetGtk hbox_;
 
   // Star button.
-  OwnedWidgetGtk star_;
+  ui::OwnedWidgetGtk star_;
   GtkWidget* star_image_;
   bool starred_;
 
@@ -382,11 +368,11 @@ class LocationBarViewGtk : public AutocompleteEditController,
   GtkWidget* security_info_label_;
 
   // Content setting icons.
-  OwnedWidgetGtk content_setting_hbox_;
+  ui::OwnedWidgetGtk content_setting_hbox_;
   ScopedVector<ContentSettingImageViewGtk> content_setting_views_;
 
   // Extension page action icons.
-  OwnedWidgetGtk page_action_hbox_;
+  ui::OwnedWidgetGtk page_action_hbox_;
   ScopedVector<PageActionViewGtk> page_action_views_;
 
   // The widget that contains our tab hints and the location bar.
@@ -410,7 +396,6 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // Alignment used to wrap |location_entry_|.
   GtkWidget* location_entry_alignment_;
 
-  Profile* profile_;
   CommandUpdater* command_updater_;
   ToolbarModel* toolbar_model_;
   Browser* browser_;
@@ -418,7 +403,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // When we get an OnAutocompleteAccept notification from the autocomplete
   // edit, we save the input string so we can give it back to the browser on
   // the LocationBar interface via GetInputString().
-  std::wstring location_input_;
+  string16 location_input_;
 
   // The user's desired disposition for how their input should be opened.
   WindowOpenDisposition disposition_;

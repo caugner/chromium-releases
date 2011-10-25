@@ -16,11 +16,10 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_browser_process.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
-#include "content/common/test_url_fetcher_factory.h"
+#include "content/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,7 +32,7 @@
 // . The URL created by using the search term keyword_term_ with keyword_t_url_
 //   is added to history.
 // . test_factory_ is set as the URLFetcher::Factory.
-class SearchProviderTest : public TestingBrowserProcessTest,
+class SearchProviderTest : public testing::Test,
                            public AutocompleteProvider::ACProviderListener {
  public:
   SearchProviderTest()
@@ -151,12 +150,6 @@ void SearchProviderTest::SetUp() {
   profile_.BlockUntilHistoryProcessesPendingRequests();
 
   provider_ = new SearchProvider(this, &profile_);
-
-  URLFetcher::set_factory(&test_factory_);
-
-  // Prevent the Instant field trial from kicking in.
-  PrefService* service = profile_.GetPrefs();
-  service->SetBoolean(prefs::kInstantEnabledOnce, true);
 }
 
 void SearchProviderTest::OnProviderUpdate(bool updated_matches) {
@@ -208,8 +201,6 @@ void SearchProviderTest::QueryForInputAndSetWYTMatch(
 
 void SearchProviderTest::TearDown() {
   message_loop_.RunAllPending();
-
-  URLFetcher::set_factory(NULL);
 
   // Shutdown the provider before the profile.
   provider_ = NULL;
@@ -646,4 +637,30 @@ TEST_F(SearchProviderTest, UpdateKeywordDescriptions) {
   EXPECT_FALSE(result.match_at(1).description.empty());
   EXPECT_NE(result.match_at(0).description,
             result.match_at(1).description);
+}
+
+// Verifies Navsuggest results don't set a TemplateURL (which instant relies
+// on).
+TEST_F(SearchProviderTest, NoTemplateURLForNavsuggest) {
+  QueryForInput(ASCIIToUTF16("a.c"), false);
+
+  // Make sure the default providers suggest service was queried.
+  TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+      SearchProvider::kDefaultProviderURLFetcherID);
+  ASSERT_TRUE(fetcher);
+
+  // Tell the SearchProvider the suggest query is done.
+  fetcher->delegate()->OnURLFetchComplete(
+      fetcher, GURL(), net::URLRequestStatus(), 200, net::ResponseCookies(),
+      "[\"a.c\",[\"a.com\"],[\"\"],[],"
+      "{\"google:suggesttype\":[\"NAVIGATION\"]}]");
+  fetcher = NULL;
+
+  // Run till the history results complete.
+  RunTillProviderDone();
+
+  // Make sure there is a match for 'a.com' and it doesn't have a template_url.
+  AutocompleteMatch nav_match;
+  EXPECT_TRUE(FindMatchWithDestination(GURL("http://a.com"), &nav_match));
+  EXPECT_FALSE(nav_match.template_url);
 }

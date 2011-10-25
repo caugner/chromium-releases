@@ -14,6 +14,7 @@ from distutils import archive_util
 import hashlib
 import os
 import platform
+import signal
 import subprocess
 import sys
 import tempfile
@@ -43,12 +44,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 
 
-def DataDir():
-  """Returns the path to the data dir chrome/test/data."""
-  return os.path.normpath(
-    os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, "data"))
-
-
 def GetFileURLForPath(path):
   """Get file:// url for the given path.
   Also quotes the url using urllib.quote().
@@ -75,6 +70,14 @@ def IsLinux():
 
 def IsMac():
   return sys.platform.startswith('darwin')
+
+
+def Kill(pid):
+  """Terminate the given pid."""
+  if IsWindows():
+    subprocess.call(['taskkill.exe', '/T', '/F', '/PID', str(pid)])
+  else:
+    os.kill(pid, signal.SIGTERM)
 
 
 class Request(urllib2.Request):
@@ -241,7 +244,7 @@ class NativeInputTest(ChromeDriverTest):
     q.send_keys('toukyou')
     # Now turning it off.
     q.send_keys(Keys.F7)
-    self.assertEqual(q.value, "\xe6\x9d\xb1\xe4\xba\xac")
+    self.assertEqual(q.get_attribute('value'), "\xe6\x9d\xb1\xe4\xba\xac")
 
 
 class DesiredCapabilitiesTest(ChromeDriverTest):
@@ -278,7 +281,7 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     capabilities = {'chrome.binary': binary_path}
     self.GetNewDriver(capabilities)
 
-  def DISABLED_testUserProfile(self):
+  def testUserProfile(self):
     """Test starting WebDriver session with custom profile."""
 
     # Open a new session and save the user profile.
@@ -294,13 +297,15 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     driver.add_cookie(cookie_dict)
     driver.quit()
 
-    user_profile_zip = archive_util.make_archive('profile', 'zip',
-                                                 root_dir=profile_dir,
-                                                 base_dir='Default')
-    f = open(user_profile_zip, 'r')
+    profile_zip = archive_util.make_archive(os.path.join(profile_dir,
+                                                         'profile'),
+                                            'zip',
+                                            root_dir=profile_dir,
+                                            base_dir='Default')
+    f = open(profile_zip, 'rb')
     base64_user_profile = binascii.b2a_base64(f.read()).strip()
     f.close()
-    os.remove(user_profile_zip)
+    os.remove(profile_zip)
 
     # Start new session with the saved user profile.
     capabilities = {'chrome.profile': base64_user_profile}
@@ -310,6 +315,48 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     self.assertNotEqual(cookie_dict, None)
     self.assertEqual(cookie_dict['value'], 'chrome profile')
     driver.quit()
+
+  def testInstallExtensions(self):
+    """Test starting web driver with multiple extensions."""
+    extensions = ['ext_test_1.crx', 'ext_test_2.crx']
+    base64_extensions = []
+    for ext in extensions:
+      f = open(os.path.join(test_paths.TestDir(), ext), 'rb')
+      base64_ext = (binascii.b2a_base64(f.read()).strip())
+      base64_extensions.append(base64_ext)
+      f.close()
+    capabilities = {'chrome.extensions': base64_extensions}
+    driver = self.GetNewDriver(capabilities)
+    # Assert the extensions are installed.
+    driver.get('chrome://extensions/')
+    self.assertNotEqual(-1, driver.page_source.find('ExtTest1'))
+    self.assertNotEqual(-1, driver.page_source.find('ExtTest2'))
+    driver.quit()
+
+
+class DetachProcessTest(unittest.TestCase):
+
+  def setUp(self):
+    self._server = ChromeDriverLauncher(test_paths.CHROMEDRIVER_EXE).Launch()
+    self._factory = ChromeDriverFactory(self._server)
+
+  def tearDown(self):
+    self._server.Kill()
+
+  # TODO(kkania): Remove this when Chrome 15 is stable.
+  def testDetachProcess(self):
+    # This is a weak test. Its purpose is to just make sure we can start
+    # Chrome successfully in detached mode. There's not an easy way to know
+    # if Chrome is shutting down due to the channel error when the client
+    # disconnects.
+    driver = self._factory.GetNewDriver({'chrome.detach': True})
+    driver.get('about:memory')
+    pid = int(driver.find_elements_by_xpath('//*[@jscontent="pid"]')[0].text)
+    self._server.Kill()
+    try:
+      Kill(pid)
+    except OSError:
+      self.fail('Chrome quit after detached chromedriver server was killed')
 
 
 class CookieTest(ChromeDriverTest):
@@ -352,7 +399,7 @@ class ScreenshotTest(ChromeDriverTest):
       return
 
     # Create a red square of 2000x2000 pixels.
-    url = GetFileURLForPath(os.path.join(DataDir(),
+    url = GetFileURLForPath(os.path.join(test_paths.DataDir(),
                                          self.REDBOX))
     url += "?2000,2000"
     self._driver.get(url)
@@ -460,6 +507,11 @@ class MouseTest(ChromeDriverTest):
     self._driver.get(GetTestDataUrl() + '/test_page.html')
     self._driver.find_element_by_name('wrapped').click()
     self.assertTrue(self._driver.execute_script('return window.success'))
+
+  def testThrowErrorIfNotClickable(self):
+    self._driver.get(GetTestDataUrl() + '/not_clickable.html')
+    elem = self._driver.find_element_by_name('click')
+    self.assertRaises(WebDriverException, elem.click)
 
 
 class TypingTest(ChromeDriverTest):
@@ -607,7 +659,8 @@ class LoggingTest(unittest.TestCase):
     log = req.read()
     self.assertTrue(':INFO:' not in log, ':INFO: in log: ' + log)
 
-  def testVerboseLogging(self):
+  # crbug.com/94470
+  def DISABLED_testVerboseLogging(self):
     driver = self._factory.GetNewDriver({'chrome.verbose': True})
     url = self._factory.GetServer().GetUrl()
     driver.execute_script('console.log("HI")')
@@ -633,7 +686,7 @@ class FileUploadControlTest(ChromeDriverTest):
     multiple = fileupload_single.get_attribute('multiple')
     self.assertEqual('false', multiple)
     fileupload_single.send_keys(file.name)
-    path = fileupload_single.value
+    path = fileupload_single.get_attribute('value')
     self.assertTrue(path.endswith(os.path.basename(file.name)))
 
   def testSetMultipleFilePathsToFileuploadControlWithoutMultipleWillFail(self):
@@ -655,7 +708,7 @@ class FileUploadControlTest(ChromeDriverTest):
     multiple = fileupload_single.get_attribute('multiple')
     self.assertEqual('false', multiple)
     self.assertRaises(WebDriverException, fileupload_single.send_keys,
-                      filepaths[0], filepaths[1], filepaths[2], filepaths[3])
+                      '\n'.join(filepaths))
 
   def testSetMultipleFilePathsToFileUploadControl(self):
     """Verify multiple file paths are set to the file upload control."""
@@ -674,8 +727,7 @@ class FileUploadControlTest(ChromeDriverTest):
     fileupload_multi = self._driver.find_element_by_name('fileupload_multi')
     multiple = fileupload_multi.get_attribute('multiple')
     self.assertEqual('true', multiple)
-    fileupload_multi.send_keys(filepaths[0], filepaths[1], filepaths[2],
-                               filepaths[3])
+    fileupload_multi.send_keys('\n'.join(filepaths))
 
     files_on_element = self._driver.execute_script(
         'return document.getElementById("fileupload_multi").files;')
@@ -777,6 +829,13 @@ class AlertTest(ChromeDriverTest):
     self.assertRaises(WebDriverException, driver.forward)
     self.assertRaises(WebDriverException, driver.get_screenshot_as_base64)
 
+  def testCanHandleAlertInSubframe(self):
+    driver = self.GetNewDriver()
+    driver.get(GetTestDataUrl() + '/alerts.html')
+    driver.switch_to_frame('subframe')
+    driver.execute_async_script('arguments[0](); window.alert("ok")')
+    driver.switch_to_alert().accept()
+
 
 """Chrome functional test section. All implementation tests of ChromeDriver
 should go above.
@@ -819,7 +878,7 @@ class AutofillTest(ChromeDriverTest):
 
     for country_code in test_data:
       query = self._SelectOptionXpath(country_code)
-      driver.find_element_by_id('country').find_element_by_xpath(query).select()
+      driver.find_element_by_id('country').find_element_by_xpath(query).click()
       # Compare postal labels.
       actual_postal_label = driver.find_element_by_id(
           'postal-code-label').text
@@ -849,9 +908,9 @@ class AutofillTest(ChromeDriverTest):
     query_year = self._SelectOptionXpath(
         creditcard_data['CREDIT_CARD_EXP_4_DIGIT_YEAR'])
     driver.find_element_by_id('expiration-month').find_element_by_xpath(
-        query_month).select()
+        query_month).click()
     driver.find_element_by_id('expiration-year').find_element_by_xpath(
-        query_year).select()
+        query_year).click()
     driver.find_element_by_id(
         'autofill-edit-credit-card-apply-button').click()
     # Refresh the page to ensure the UI is up-to-date.

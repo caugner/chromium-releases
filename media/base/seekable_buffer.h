@@ -41,7 +41,7 @@
 
 namespace media {
 
-class SeekableBuffer {
+class MEDIA_EXPORT SeekableBuffer {
  public:
   // Constructs an instance with |forward_capacity| and |backward_capacity|.
   // The values are in bytes.
@@ -101,6 +101,11 @@ class SeekableBuffer {
   // Sets the forward_capacity to |new_forward_capacity| bytes.
   void set_forward_capacity(size_t new_forward_capacity) {
     forward_capacity_ = new_forward_capacity;
+  }
+
+  // Sets the backward_capacity to |new_backward_capacity| bytes.
+  void set_backward_capacity(size_t new_backward_capacity) {
+    backward_capacity_ = new_backward_capacity;
   }
 
   // Returns the maximum number of bytes that should be kept in the forward

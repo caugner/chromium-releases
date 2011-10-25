@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -28,8 +28,6 @@
 // --memoryusage: prints out memory usage when visiting each page.
 // --endurl=url: visits the specified url in the end.
 // --logfile=filepath: saves the visit log to the specified path.
-// --timeout=millisecond: time out as specified in millisecond during each
-//                        page load.
 // --nopagedown: won't simulate page down key presses after page load.
 // --noclearprofile: do not clear profile dir before firing up each time.
 // --savedebuglog: save Chrome, V8, and test debug log for each page loaded.
@@ -67,6 +65,7 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/reliability/page_load_test.h"
 #include "chrome/test/ui/ui_test.h"
+#include "content/common/notification_service.h"
 #include "net/base/net_util.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "v8/include/v8-testing.h"
@@ -85,7 +84,6 @@ const char kContinuousLoadSwitch[] = "continuousload";
 const char kMemoryUsageSwitch[] = "memoryusage";
 const char kEndURLSwitch[] = "endurl";
 const char kLogFileSwitch[] = "logfile";
-const char kTimeoutSwitch[] = "timeout";
 const char kNoPageDownSwitch[] = "nopagedown";
 const char kNoClearProfileSwitch[] = "noclearprofile";
 const char kSaveDebugLogSwitch[] = "savedebuglog";
@@ -118,7 +116,6 @@ bool g_page_down = true;
 bool g_clear_profile = true;
 std::string g_end_url;
 FilePath g_log_file_path;
-int g_timeout_ms = -1;
 bool g_save_debug_log = false;
 FilePath g_chrome_log_path;
 FilePath g_v8_log_path;
@@ -363,17 +360,12 @@ class PageLoadTest : public UITest {
             test_page_url, log_file, NULL, g_continuous_load, false);
       }
     } else {
-      // Don't run if single process mode.
-      // Also don't run if running as a standalone program which is for
-      // distributed testing, to avoid mistakenly hitting web sites with many
-      // instances.
-      if (ProxyLauncher::in_process_renderer() || g_stand_alone)
+      // Don't run if running as a standalone program which is for distributed
+      // testing, to avoid mistakenly hitting web sites with many instances.
+      if (g_stand_alone)
         return;
       // For usage 1
       NavigationMetrics metrics;
-      if (g_timeout_ms == -1)
-        g_timeout_ms = 2000;
-
       // Though it would be nice to test the page down code path in usage 1,
       // enabling page down adds several seconds to the test and does not seem
       // worth the tradeoff. It is also potentially disruptive when running the
@@ -785,14 +777,6 @@ void SetPageRange(const CommandLine& parsed_command_line) {
 
   if (parsed_command_line.HasSwitch(kLogFileSwitch))
     g_log_file_path = parsed_command_line.GetSwitchValuePath(kLogFileSwitch);
-
-  if (parsed_command_line.HasSwitch(kTimeoutSwitch)) {
-    ASSERT_TRUE(
-        base::StringToInt(parsed_command_line.GetSwitchValueASCII(
-                          kTimeoutSwitch),
-                          &g_timeout_ms));
-    ASSERT_GT(g_timeout_ms, 0);
-  }
 
   if (parsed_command_line.HasSwitch(kNoPageDownSwitch))
     g_page_down = false;

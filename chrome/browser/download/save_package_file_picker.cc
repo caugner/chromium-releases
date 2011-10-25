@@ -4,10 +4,14 @@
 
 #include "chrome/browser/download/save_package_file_picker.h"
 
-#include "chrome/browser/download/download_manager.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/pref_names.h"
+#include "content/browser/download/download_manager.h"
 #include "content/browser/download/save_package.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
@@ -50,10 +54,9 @@ const int kIndexToIDS[] = {
 SavePackageFilePicker::SavePackageFilePicker(
     const base::WeakPtr<SavePackage>& save_package,
     const FilePath& suggested_path,
-    bool can_save_as_complete)
+    bool can_save_as_complete,
+    DownloadPrefs* download_prefs)
     : save_package_(save_package) {
-  DownloadPrefs* download_prefs = save_package->tab_contents()->profile()->
-      GetDownloadManager()->download_prefs();
   int file_type_index = SavePackageTypeToIndex(
       static_cast<SavePackage::SavePackageType>(
           download_prefs->save_file_type()));
@@ -149,8 +152,31 @@ void SavePackageFilePicker::FileSelected(const FilePath& path,
   DCHECK(index >= kSelectFileHtmlOnlyIndex &&
          index <= kSelectFileCompleteIndex);
 
-  if (save_package_)
-    save_package_->OnPathPicked(path, kIndexToSaveType[index]);
+  if (save_package_) {
+    TabContents* tab_contents = save_package_->tab_contents();
+    SavePackage::SavePackageType save_type = kIndexToSaveType[index];
+    Profile* profile =
+        Profile::FromBrowserContext(tab_contents->browser_context());
+    PrefService* prefs = profile->GetPrefs();
+    prefs->SetInteger(prefs::kSaveFileType, save_type);
+
+    StringPrefMember save_file_path;
+    save_file_path.Init(prefs::kSaveFileDefaultDirectory, prefs, NULL);
+#if defined(OS_POSIX)
+    std::string path_string = path.DirName().value();
+#elif defined(OS_WIN)
+    std::string path_string = WideToUTF8(path.DirName().value());
+#endif
+    // If user change the default saving directory, we will remember it just
+    // like IE and FireFox.
+    if (!tab_contents->browser_context()->IsOffTheRecord() &&
+        save_file_path.GetValue() != path_string) {
+      save_file_path.SetValue(path_string);
+    }
+
+    save_package_->OnPathPicked(path, save_type);
+  }
+
   delete this;
 }
 

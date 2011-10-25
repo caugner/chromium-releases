@@ -19,17 +19,14 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/time_conversion.h"
 
-using ppapi::TimeToPPTime;
-using ppapi::TimeTicksToPPTimeTicks;
-
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
 
 base::MessageLoopProxy* GetMainThreadMessageLoop() {
   static scoped_refptr<base::MessageLoopProxy> proxy(
-      base::MessageLoopProxy::CreateForCurrentThread());
+      base::MessageLoopProxy::current());
   return proxy.get();
 }
 
@@ -39,14 +36,6 @@ void AddRefResource(PP_Resource resource) {
 
 void ReleaseResource(PP_Resource resource) {
   PluginResourceTracker::GetInstance()->ReleaseResource(resource);
-}
-
-void* MemAlloc(uint32_t num_bytes) {
-  return malloc(num_bytes);
-}
-
-void MemFree(void* ptr) {
-  free(ptr);
 }
 
 double GetTime() {
@@ -126,13 +115,13 @@ bool PPB_Core_Proxy::OnMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
-void PPB_Core_Proxy::OnMsgAddRefResource(HostResource resource) {
+void PPB_Core_Proxy::OnMsgAddRefResource(const HostResource& resource) {
   ppb_core_target()->AddRefResource(resource.host_resource());
 }
 
-void PPB_Core_Proxy::OnMsgReleaseResource(HostResource resource) {
+void PPB_Core_Proxy::OnMsgReleaseResource(const HostResource& resource) {
   ppb_core_target()->ReleaseResource(resource.host_resource());
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

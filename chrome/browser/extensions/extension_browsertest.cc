@@ -25,7 +25,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 
@@ -90,7 +90,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithOptions(
   // The call to OnExtensionInstalled ensures the other extension prefs
   // are set up with the defaults.
   service->extension_prefs()->OnExtensionInstalled(
-      extension, Extension::ENABLED, false);
+      extension, Extension::ENABLED, false, 0);
 
   // Toggling incognito or file access will reload the extension, so wait for
   // the reload and grab the new extension instance. The default state is
@@ -214,19 +214,27 @@ class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
   }
 };
 
+bool ExtensionBrowserTest::InstallExtensionFromWebstore(const FilePath& path,
+                                                        int expected_change) {
+  return InstallOrUpdateExtension("", path, INSTALL_UI_TYPE_NONE,
+                                  expected_change, browser()->profile(),
+                                  true);
+}
+
 bool ExtensionBrowserTest::InstallOrUpdateExtension(const std::string& id,
                                                     const FilePath& path,
                                                     InstallUIType ui_type,
                                                     int expected_change) {
   return InstallOrUpdateExtension(id, path, ui_type, expected_change,
-                                  browser()->profile());
+                                  browser()->profile(), false);
 }
 
 bool ExtensionBrowserTest::InstallOrUpdateExtension(const std::string& id,
                                                     const FilePath& path,
                                                     InstallUIType ui_type,
                                                     int expected_change,
-                                                    Profile* profile) {
+                                                    Profile* profile,
+                                                    bool from_webstore) {
   ExtensionService* service = profile->GetExtensionService();
   service->set_show_extensions_prompts(false);
   size_t num_before = service->extensions()->size();
@@ -260,6 +268,7 @@ bool ExtensionBrowserTest::InstallOrUpdateExtension(const std::string& id,
     scoped_refptr<CrxInstaller> installer(
         service->MakeCrxInstaller(install_ui));
     installer->set_expected_id(id);
+    installer->set_is_gallery_install(from_webstore);
     installer->InstallCrx(crx_path);
 
     ui_test_utils::RunMessageLoop();
@@ -297,7 +306,7 @@ void ExtensionBrowserTest::ReloadExtension(const std::string& extension_id) {
 
 void ExtensionBrowserTest::UnloadExtension(const std::string& extension_id) {
   ExtensionService* service = browser()->profile()->GetExtensionService();
-  service->UnloadExtension(extension_id, UnloadedExtensionInfo::DISABLE);
+  service->UnloadExtension(extension_id, extension_misc::UNLOAD_REASON_DISABLE);
 }
 
 void ExtensionBrowserTest::UninstallExtension(const std::string& extension_id) {

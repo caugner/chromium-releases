@@ -25,6 +25,7 @@
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_base.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_helper.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
@@ -39,13 +40,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "v8/include/v8.h"
 #include "webkit/glue/webkit_glue.h"
 
-using bindings_utils::GetStringResource;
 using bindings_utils::GetPendingRequestMap;
 using bindings_utils::PendingRequest;
 using bindings_utils::PendingRequestMap;
-using bindings_utils::ExtensionBase;
 using WebKit::WebFrame;
 using WebKit::WebView;
 
@@ -109,7 +109,7 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
  private:
   // Called on each view found matching the search criteria.  Returns false
   // to terminate the iteration.
-  bool OnMatchedView(const v8::Local<v8::Value>& view_window) {
+  bool OnMatchedView(v8::Local<v8::Value> view_window) {
     views_->Set(v8::Integer::New(index_), view_window);
     index_++;
 
@@ -175,11 +175,6 @@ class ExtensionImpl : public ExtensionBase {
     } else if (name->Equals(v8::String::New("SetIconCommon"))) {
       return v8::FunctionTemplate::New(SetIconCommon,
                                        v8::External::New(this));
-    } else if (name->Equals(v8::String::New("IsExtensionProcess"))) {
-      return v8::FunctionTemplate::New(IsExtensionProcess,
-                                       v8::External::New(this));
-    } else if (name->Equals(v8::String::New("IsIncognitoProcess"))) {
-      return v8::FunctionTemplate::New(IsIncognitoProcess);
     } else if (name->Equals(v8::String::New("GetUniqueSubEventName"))) {
       return v8::FunctionTemplate::New(GetUniqueSubEventName);
     } else if (name->Equals(v8::String::New("GetLocalFileSystem"))) {
@@ -230,7 +225,7 @@ class ExtensionImpl : public ExtensionBase {
 
     ExtensionImpl* v8_extension = GetFromArguments<ExtensionImpl>(args);
     const ::Extension* extension =
-        v8_extension->GetExtensionForCurrentContext();
+        v8_extension->GetExtensionForCurrentRenderView();
     if (!extension)
       return v8::Undefined();
 
@@ -266,15 +261,9 @@ class ExtensionImpl : public ExtensionBase {
     std::string path(*v8::String::Utf8Value(args[1]));
 
     WebFrame* webframe = WebFrame::frameForCurrentContext();
-#ifdef WEB_FILE_SYSTEM_TYPE_EXTERNAL
     return webframe->createFileSystem(WebKit::WebFileSystem::TypeExternal,
             WebKit::WebString::fromUTF8(name.c_str()),
             WebKit::WebString::fromUTF8(path.c_str()));
-#else
-    return webframe->createFileSystem(fileapi::kFileSystemTypeExternal,
-            WebKit::WebString::fromUTF8(name.c_str()),
-            WebKit::WebString::fromUTF8(path.c_str()));
-#endif
   }
 
   // Decodes supplied JPEG byte array to image pixel array.
@@ -290,7 +279,7 @@ class ExtensionImpl : public ExtensionBase {
 
     ExtensionImpl* v8_extension = GetFromArguments<ExtensionImpl>(args);
     const ::Extension* extension =
-        v8_extension->GetExtensionForCurrentContext();
+        v8_extension->GetExtensionForCurrentRenderView();
     if (!extension)
       return v8::Undefined();
     if (allowed_ids.end() == std::find(
@@ -338,8 +327,8 @@ class ExtensionImpl : public ExtensionBase {
     // Compose output array. This API call only accepts kARGB_8888_Config images
     // so we rely on each pixel occupying 4 bytes.
     // Note(mnaganov): to speed this up, you may use backing store
-    // technique from CreateExternalArray() of samples/shell.cc.
-    v8::Local<v8::Object> bitmap_array = v8::Array::New(width * height);
+    // technique from CreateExternalArray() of v8/src/d8.cc.
+    v8::Local<v8::Array> bitmap_array(v8::Array::New(width * height));
     for (int i = 0; i != width * height; ++i) {
       bitmap_array->Set(v8::Integer::New(i),
                         v8::Integer::New(pixels[i] & 0xFFFFFF));
@@ -351,7 +340,7 @@ class ExtensionImpl : public ExtensionBase {
   static v8::Handle<v8::Value> OpenChannelToTab(const v8::Arguments& args) {
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
-    RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
+    RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -391,7 +380,9 @@ class ExtensionImpl : public ExtensionBase {
     const ::Extension* extension =
         v8_extension->extension_dispatcher_->extensions()->GetByID(
             extension_id);
-    CHECK(extension);
+    CHECK(!extension_id.empty());
+    if (!extension)
+      return v8::Undefined();
 
     v8::Local<v8::Array> page_action_vector = v8::Array::New();
     if (extension->page_action()) {
@@ -412,7 +403,7 @@ class ExtensionImpl : public ExtensionBase {
 
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
-    RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
+    RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -424,7 +415,7 @@ class ExtensionImpl : public ExtensionBase {
       return v8::Undefined();
     }
 
-    if (!v8_extension->CheckPermissionForCurrentContext(name))
+    if (!v8_extension->CheckPermissionForCurrentRenderView(name))
       return v8::Undefined();
 
     GURL source_url;
@@ -515,7 +506,7 @@ class ExtensionImpl : public ExtensionBase {
     // Construct the Value object.
     IPC::Message bitmap_pickle;
     IPC::WriteParam(&bitmap_pickle, bitmap);
-    *bitmap_value = BinaryValue::CreateWithCopiedBuffer(
+    *bitmap_value = base::BinaryValue::CreateWithCopiedBuffer(
         static_cast<const char*>(bitmap_pickle.data()), bitmap_pickle.size());
 
     return true;
@@ -549,21 +540,10 @@ class ExtensionImpl : public ExtensionBase {
   }
 
   static v8::Handle<v8::Value> GetRenderViewId(const v8::Arguments& args) {
-    RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
+    RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
     return v8::Integer::New(renderview->routing_id());
-  }
-
-  static v8::Handle<v8::Value> IsExtensionProcess(const v8::Arguments& args) {
-    ExtensionImpl* v8_extension = GetFromArguments<ExtensionImpl>(args);
-    return v8::Boolean::New(
-        v8_extension->extension_dispatcher_->is_extension_process());
-  }
-
-  static v8::Handle<v8::Value> IsIncognitoProcess(const v8::Arguments& args) {
-    return v8::Boolean::New(
-        ChromeRenderProcessObserver::is_incognito_process());
   }
 };
 
@@ -572,6 +552,8 @@ class ExtensionImpl : public ExtensionBase {
 v8::Extension* ExtensionProcessBindings::Get(
     ExtensionDispatcher* extension_dispatcher) {
   static v8::Extension* extension = new ExtensionImpl(extension_dispatcher);
+  CHECK_EQ(extension_dispatcher,
+           static_cast<ExtensionImpl*>(extension)->extension_dispatcher());
   return extension;
 }
 

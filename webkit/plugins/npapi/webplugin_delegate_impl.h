@@ -123,7 +123,6 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   virtual void DidReceiveManualData(const char* buffer, int length);
   virtual void DidFinishManualLoading();
   virtual void DidManualLoadFail();
-  virtual void InstallMissingPlugin();
   virtual WebPluginResourceClient* CreateResourceClient(
       unsigned long resource_id, const GURL& url, int notify_id);
   virtual WebPluginResourceClient* CreateSeekableResourceClient(
@@ -175,6 +174,10 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 #endif
   // Informs the delegate that the plugin set a Cocoa NSCursor.
   void SetNSCursor(NSCursor* cursor);
+
+  // Indicates that the windowless plugins will draw directly to the window
+  // context instead of a buffer context.
+  void SetNoBufferContext();
 
 #ifndef NP_NO_CARBON
   // Indicates that it's time to send the plugin a null event.
@@ -428,6 +431,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   void UpdateIdleEventRate();
 #endif  // !NP_NO_CARBON
 
+  bool use_buffer_context_;
   CGContextRef buffer_context_;  // Weak ref.
 
 #ifndef NP_NO_CARBON

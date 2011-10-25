@@ -24,6 +24,7 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "content/common/notification_service.h"
 #include "net/base/net_util.h"
 
 class MetricsServiceTest : public UITest {
@@ -37,6 +38,11 @@ class MetricsServiceTest : public UITest {
   void OpenTabs() {
     scoped_refptr<BrowserProxy> window = automation()->GetBrowserWindow(0);
     ASSERT_TRUE(window.get());
+
+    // The Instant field trial causes a preload of the default search engine,
+    // which messes up the expected page load count. Setting this preference
+    // disables the field trial.
+    ASSERT_TRUE(window->SetBooleanPreference(prefs::kInstantEnabledOnce, true));
 
     FilePath page1_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &page1_path));
@@ -79,10 +85,6 @@ TEST_F(MetricsServiceTest, CloseRenderersNormally) {
 }
 
 TEST_F(MetricsServiceTest, DISABLED_CrashRenderers) {
-  // This doesn't make sense to test in single process mode.
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   OpenTabs();
 
   {

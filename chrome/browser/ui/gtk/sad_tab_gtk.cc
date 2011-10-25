@@ -4,16 +4,15 @@
 
 #include "chrome/browser/ui/gtk/sad_tab_gtk.h"
 
-#include <string>
-
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
-#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -42,7 +41,7 @@ GtkWidget* MakeWhiteMarkupLabel(const char* format, const std::string& str) {
   gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
 
   // Set text to white.
-  GdkColor white = gtk_util::kGdkWhite;
+  GdkColor white = ui::kGdkWhite;
   gtk_widget_modify_fg(label, GTK_STATE_NORMAL, &white);
 
   return label;
@@ -109,15 +108,42 @@ SadTabGtk::SadTabGtk(TabContents* tab_contents, Kind kind)
   gtk_box_pack_start(GTK_BOX(vbox), spacer, FALSE, FALSE, 0);
 
   if (tab_contents_ != NULL) {
-    // Add the learn-more link and center-align it in an alignment.
-    GtkWidget* link = gtk_chrome_link_button_new(
-        l10n_util::GetStringUTF8(IDS_LEARN_MORE).c_str());
+    // Create the help link and alignment.
+    std::string link_text(l10n_util::GetStringUTF8(
+        kind == CRASHED ? IDS_SAD_TAB_HELP_LINK : IDS_LEARN_MORE));
+    GtkWidget* link = gtk_chrome_link_button_new(link_text.c_str());
     gtk_chrome_link_button_set_normal_color(GTK_CHROME_LINK_BUTTON(link),
-                                            &gtk_util::kGdkWhite);
+                                            &ui::kGdkWhite);
     g_signal_connect(link, "clicked", G_CALLBACK(OnLinkButtonClickThunk), this);
-    GtkWidget* link_alignment = gtk_alignment_new(0.5, 0.5, 0.0, 0.0);
-    gtk_container_add(GTK_CONTAINER(link_alignment), link);
-    gtk_box_pack_start(GTK_BOX(vbox), link_alignment, FALSE, FALSE, 0);
+    GtkWidget* help_alignment = gtk_alignment_new(0.5, 0.5, 0.0, 0.0);
+
+    if (kind == CRASHED) {
+      // Use a horizontal box to contain the help text and link.
+      GtkWidget* help_hbox = gtk_hbox_new(FALSE, 0);
+      gtk_container_add(GTK_CONTAINER(vbox), help_hbox);
+
+      size_t offset = 0;
+      string16 help_text(l10n_util::GetStringFUTF16(IDS_SAD_TAB_HELP_MESSAGE,
+                                                    string16(), &offset));
+      std::string help_prefix_text(UTF16ToUTF8(help_text.substr(0, offset)));
+      std::string help_suffix_text(UTF16ToUTF8(help_text.substr(offset)));
+
+      GtkWidget* help_prefix = MakeWhiteMarkupLabel(
+          "<span style=\"normal\">%s</span>", help_prefix_text);
+      GtkWidget* help_suffix = MakeWhiteMarkupLabel(
+          "<span style=\"normal\">%s</span>", help_suffix_text);
+
+      // Add the help link and text to the horizontal box.
+      gtk_box_pack_start(GTK_BOX(help_hbox), help_prefix, FALSE, FALSE, 0);
+      GtkWidget* link_alignment = gtk_alignment_new(0.5, 0.5, 0.0, 0.0);
+      gtk_container_add(GTK_CONTAINER(link_alignment), link);
+      gtk_box_pack_start(GTK_BOX(help_hbox), link_alignment, FALSE, FALSE, 0);
+      gtk_box_pack_start(GTK_BOX(help_hbox), help_suffix, FALSE, FALSE, 0);
+    } else {
+      // Add just the help link to a centered alignment.
+      gtk_container_add(GTK_CONTAINER(help_alignment), link);
+    }
+    gtk_box_pack_start(GTK_BOX(vbox), help_alignment, FALSE, FALSE, 0);
   }
 
   gtk_widget_show_all(event_box_.get());
@@ -134,6 +160,7 @@ void SadTabGtk::OnLinkButtonClick(GtkWidget* sender) {
             kind_ == CRASHED ?
             chrome::kCrashReasonURL :
             chrome::kKillReasonURL));
-    tab_contents_->OpenURL(help_url, GURL(), CURRENT_TAB, PageTransition::LINK);
+    tab_contents_->OpenURL(OpenURLParams(
+        help_url, GURL(), CURRENT_TAB, PageTransition::LINK));
   }
 }

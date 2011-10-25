@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "net/test/test_server.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -162,8 +162,10 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
   EXPECT_TRUE(ASCIIToUTF16("a") == find_bar->GetFindSelectedText());
 
   // Open another tab (tab B).
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
   browser()->AddSelectedTabWithURL(url, PageTransition::TYPED);
-  ASSERT_TRUE(ui_test_utils::WaitForNavigationInCurrentTab(browser()));
+  observer.Wait();
 
   // Make sure Find box is open.
   browser()->Find();
@@ -274,7 +276,14 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, PrepopulateRespectBlank) {
   Checkpoint("Test done", start_time);
 }
 
-IN_PROC_BROWSER_TEST_F(FindInPageTest, PasteWithoutTextChange) {
+// Flaky on Win. http://crbug.com/92467
+#if defined(OS_WIN)
+#define MAYBE_PasteWithoutTextChange FLAKY_PasteWithoutTextChange
+#else
+#define MAYBE_PasteWithoutTextChange PasteWithoutTextChange
+#endif
+
+IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_PasteWithoutTextChange) {
   ASSERT_TRUE(test_server()->Start());
 
   // Make sure Chrome is in the foreground, otherwise sending input

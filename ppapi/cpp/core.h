@@ -26,7 +26,8 @@ class Core {
   /// AddRefResource() increments the reference count for the provided
   /// <code>resource</code>.
   ///
-  /// @param[in] resource A <code>PP_Resource</code> containing the resource.
+  /// @param[in] resource A <code>PP_Resource</code> corresponding to a
+  /// resource.
   void AddRefResource(PP_Resource resource) {
     interface_->AddRefResource(resource);
   }
@@ -35,7 +36,8 @@ class Core {
   /// <code>resource</code>. The resource will be deallocated if the
   /// reference count reaches zero.
   ///
-  /// @param[in] resource A <code>PP_Resource</code> containing the resource.
+  /// @param[in] resource A <code>PP_Resource</code> corresponding to a
+  /// resource.
   void ReleaseResource(PP_Resource resource) {
     interface_->ReleaseResource(resource);
   }
@@ -51,7 +53,7 @@ class Core {
 
   /// GetTimeTicks() returns the "tick time" according to the browser.
   /// This clock is used by the browser when passing some event times to the
-  /// plugin (for example, using the
+  /// module (for example, using the
   /// <code>PP_InputEvent::time_stamp_seconds</code> field). It is not
   /// correlated to any actual wall clock time (like GetTime()). Because
   /// of this, it will not change if the user changes their computer clock.
@@ -67,7 +69,7 @@ class Core {
   /// back as soon as possible.
   ///
   /// The |result| parameter will just be passed as the second argument to the
-  /// callback. Many applications won't need this, but it allows a plugin to
+  /// callback. Many applications won't need this, but it allows a module to
   /// emulate calls of some callbacks which do use this value.
   ///
   /// <strong>Note:</strong> CallOnMainThread(), even when used from the main
@@ -94,8 +96,8 @@ class Core {
   /// This function is useful for implementing sanity checks, and deciding if
   /// dispatching using CallOnMainThread() is required.
   ///
-  /// @return A bool containing true if the current thread is
-  /// the main pepper thread, otherwise false.
+  /// @return true if the current thread is the main pepper thread, otherwise
+  /// false.
   bool IsMainThread();
 
  private:

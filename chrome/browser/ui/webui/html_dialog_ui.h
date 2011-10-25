@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/string16.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "content/common/property_bag.h"
 #include "googleurl/src/gurl.h"
@@ -30,7 +31,7 @@ class HtmlDialogUIDelegate {
   virtual bool IsDialogModal() const = 0;
 
   // Returns the title of the dialog.
-  virtual std::wstring GetDialogTitle() const = 0;
+  virtual string16 GetDialogTitle() const = 0;
 
   // Get the HTML file path for the content to load in the dialog.
   virtual GURL GetDialogContentURL() const = 0;
@@ -49,12 +50,10 @@ class HtmlDialogUIDelegate {
   virtual std::string GetDialogArgs() const = 0;
 
   // A callback to notify the delegate that the dialog closed.
+  // IMPORTANT: Implementations should delete |this| here (unless they've
+  // arranged for the delegate to be deleted in some other way, e.g. by
+  // registering it as a message handler in the WebUI object).
   virtual void OnDialogClosed(const std::string& json_retval) = 0;
-
-  // Notifies the delegate that the dialog's containing window has been
-  // closed, and that OnDialogClosed() will be called shortly.
-  // TODO(jamescook): Make this pure virtual.
-  virtual void OnWindowClosed();
 
   // A callback to notify the delegate that the contents have gone
   // away. Only relevant if your dialog hosts code that calls
@@ -107,7 +106,7 @@ class HtmlDialogUI : public ChromeWebUI {
 
  private:
   // WebUI
-  virtual void RenderViewCreated(RenderViewHost* render_view_host);
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
 
   // JS message handler.
   void OnDialogClosed(const base::ListValue* args);

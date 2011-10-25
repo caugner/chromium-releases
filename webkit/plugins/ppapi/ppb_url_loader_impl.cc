@@ -15,7 +15,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
@@ -29,8 +29,10 @@
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
 #include "webkit/plugins/ppapi/ppb_url_response_info_impl.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 
 using appcache::WebApplicationCacheHostImpl;
+using ppapi::Resource;
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_URLLoader_API;
 using ppapi::thunk::PPB_URLRequestInfo_API;
@@ -51,7 +53,18 @@ using WebKit::WebURLResponse;
 namespace webkit {
 namespace ppapi {
 
-PPB_URLLoader_Impl::PPB_URLLoader_Impl(PluginInstance* instance,
+namespace {
+
+WebFrame* GetFrameForResource(const Resource* resource) {
+  PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(resource);
+  if (!plugin_instance)
+    return NULL;
+  return plugin_instance->container()->element().document().frame();
+}
+
+}  // namespace
+
+PPB_URLLoader_Impl::PPB_URLLoader_Impl(PP_Instance instance,
                                        bool main_document_loader)
     : Resource(instance),
       main_document_loader_(main_document_loader),
@@ -76,13 +89,18 @@ PPB_URLLoader_API* PPB_URLLoader_Impl::AsPPB_URLLoader_API() {
   return this;
 }
 
-void PPB_URLLoader_Impl::ClearInstance() {
-  Resource::ClearInstance();
+void PPB_URLLoader_Impl::InstanceWasDeleted() {
+  Resource::InstanceWasDeleted();
   loader_.reset();
 }
 
 int32_t PPB_URLLoader_Impl::Open(PP_Resource request_id,
                                  PP_CompletionCallback callback) {
+  // Main document loads are already open, so don't allow people to open them
+  // again.
+  if (main_document_loader_)
+    return PP_ERROR_INPROGRESS;
+
   EnterResourceNoLock<PPB_URLRequestInfo_API> enter_request(request_id, true);
   if (enter_request.failed())
     return PP_ERROR_BADARGUMENT;
@@ -99,10 +117,17 @@ int32_t PPB_URLLoader_Impl::Open(PP_Resource request_id,
   if (loader_.get())
     return PP_ERROR_INPROGRESS;
 
-  WebFrame* frame = instance()->container()->element().document().frame();
+  WebFrame* frame = GetFrameForResource(this);
   if (!frame)
     return PP_ERROR_FAILED;
-  WebURLRequest web_request(request->ToWebURLRequest(frame));
+  WebURLRequest web_request;
+  if (!request->ToWebURLRequest(frame, &web_request))
+    return PP_ERROR_FAILED;
+
+  // Save a copy of the request info so the plugin can continue to use and
+  // change it while we're doing the request without affecting us. We must do
+  // this after ToWebURLRequest since that fills out the file refs.
+  request_data_ = request->GetData();
 
   WebURLLoaderOptions options;
   if (has_universal_access_) {
@@ -110,11 +135,11 @@ int32_t PPB_URLLoader_Impl::Open(PP_Resource request_id,
     options.crossOriginRequestPolicy =
         WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
     options.allowCredentials = true;
-  } else if (request->allow_cross_origin_requests()) {
+  } else if (request_data_.allow_cross_origin_requests) {
     // Otherwise, allow cross-origin requests with access control.
     options.crossOriginRequestPolicy =
         WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
-    options.allowCredentials = request->allow_credentials();
+    options.allowCredentials = request_data_.allow_credentials;
   }
 
   is_asynchronous_load_suspended_ = false;
@@ -123,8 +148,6 @@ int32_t PPB_URLLoader_Impl::Open(PP_Resource request_id,
     return PP_ERROR_FAILED;
 
   loader_->loadAsynchronously(web_request, this);
-
-  request_info_ = scoped_refptr<PPB_URLRequestInfo_Impl>(request);
 
   // Notify completion when we receive a redirect or response headers.
   RegisterCallback(callback);
@@ -138,7 +161,7 @@ int32_t PPB_URLLoader_Impl::FollowRedirect(PP_CompletionCallback callback) {
 
   WebURL redirect_url = GURL(response_info_->redirect_url());
 
-  loader_->setDefersLoading(false);  // Allow the redirect to continue.
+  SetDefersLoading(false);  // Allow the redirect to continue.
   RegisterCallback(callback);
   return PP_OK_COMPLETIONPENDING;
 }
@@ -215,10 +238,8 @@ int32_t PPB_URLLoader_Impl::FinishStreamingToFile(
     return done_status_;
 
   is_streaming_to_file_ = true;
-  if (is_asynchronous_load_suspended_) {
-    loader_->setDefersLoading(false);
-    is_asynchronous_load_suspended_ = false;
-  }
+  if (is_asynchronous_load_suspended_)
+    SetDefersLoading(false);
 
   // Wait for didFinishLoading / didFail.
   RegisterCallback(callback);
@@ -226,12 +247,10 @@ int32_t PPB_URLLoader_Impl::FinishStreamingToFile(
 }
 
 void PPB_URLLoader_Impl::Close() {
-  if (loader_.get()) {
+  if (loader_.get())
     loader_->cancel();
-  } else if (main_document_loader_) {
-    WebFrame* frame = instance()->container()->element().document().frame();
-    frame->stopLoading();
-  }
+  else if (main_document_loader_)
+    GetFrameForResource(this)->stopLoading();
   // TODO(viettrungluu): Check what happens to the callback (probably the
   // wrong thing). May need to post abort here. crbug.com/69457
 }
@@ -249,9 +268,9 @@ void PPB_URLLoader_Impl::willSendRequest(
     WebURLLoader* loader,
     WebURLRequest& new_request,
     const WebURLResponse& redirect_response) {
-  if (!request_info_->follow_redirects()) {
+  if (!request_data_.follow_redirects) {
     SaveResponse(redirect_response);
-    loader_->setDefersLoading(true);
+    SetDefersLoading(true);
     RunCallback(PP_OK);
   }
 }
@@ -287,7 +306,9 @@ void PPB_URLLoader_Impl::didReceiveData(WebURLLoader* loader,
                                         const char* data,
                                         int data_length,
                                         int encoded_data_length) {
+  // Note that |loader| will be NULL for document loads.
   bytes_received_ += data_length;
+  UpdateStatus();
 
   buffer_.insert(buffer_.end(), data, data + data_length);
   if (user_buffer_) {
@@ -299,17 +320,14 @@ void PPB_URLLoader_Impl::didReceiveData(WebURLLoader* loader,
   // To avoid letting the network stack download an entire stream all at once,
   // defer loading when we have enough buffer.
   // Check the buffer size after potentially moving some to the user buffer.
-  DCHECK(!request_info_ ||
-         (request_info_->prefetch_buffer_lower_threshold() <
-          request_info_->prefetch_buffer_upper_threshold()));
+  DCHECK(request_data_.prefetch_buffer_lower_threshold <
+         request_data_.prefetch_buffer_upper_threshold);
   if (!is_streaming_to_file_ &&
       !is_asynchronous_load_suspended_ &&
-      request_info_ &&
       (buffer_.size() >= static_cast<size_t>(
-          request_info_->prefetch_buffer_upper_threshold()))) {
+          request_data_.prefetch_buffer_upper_threshold))) {
     DVLOG(1) << "Suspending async load - buffer size: " << buffer_.size();
-    loader->setDefersLoading(true);
-    is_asynchronous_load_suspended_ = true;
+    SetDefersLoading(true);
   }
 }
 
@@ -338,6 +356,16 @@ void PPB_URLLoader_Impl::didFail(WebURLLoader* loader,
   FinishLoading(pp_error);
 }
 
+void PPB_URLLoader_Impl::SetDefersLoading(bool defers_loading) {
+  if (loader_.get()) {
+    loader_->setDefersLoading(defers_loading);
+    is_asynchronous_load_suspended_ = defers_loading;
+  }
+
+  // TODO(brettw) bug 96770: We need a way to set the defers loading flag on
+  // main document loads (when the loader_ is null).
+}
+
 void PPB_URLLoader_Impl::FinishLoading(int32_t done_status) {
   done_status_ = done_status;
   // If the client hasn't called any function that takes a callback since
@@ -362,10 +390,12 @@ void PPB_URLLoader_Impl::RegisterCallback(PP_CompletionCallback callback) {
   DCHECK(callback.func);
   DCHECK(!pending_callback_.get() || pending_callback_->completed());
 
-  PP_Resource resource_id = GetReferenceNoAddRef();
-  CHECK(resource_id);
+  PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
+  if (!plugin_module)
+    return;
+
   pending_callback_ = new TrackedCompletionCallback(
-      instance()->module()->GetCallbackTracker(), resource_id, callback);
+      plugin_module->GetCallbackTracker(), pp_resource(), callback);
 }
 
 void PPB_URLLoader_Impl::RunCallback(int32_t result) {
@@ -389,13 +419,11 @@ size_t PPB_URLLoader_Impl::FillUserBuffer() {
   buffer_.erase(buffer_.begin(), buffer_.begin() + bytes_to_copy);
 
   // If the buffer is getting too empty, resume asynchronous loading.
-  DCHECK(!is_asynchronous_load_suspended_ || request_info_);
   if (is_asynchronous_load_suspended_ &&
       buffer_.size() <= static_cast<size_t>(
-          request_info_->prefetch_buffer_lower_threshold())) {
+          request_data_.prefetch_buffer_lower_threshold)) {
     DVLOG(1) << "Resuming async load - buffer size: " << buffer_.size();
-    loader_->setDefersLoading(false);
-    is_asynchronous_load_suspended_ = false;
+    SetDefersLoading(false);
   }
 
   // Reset for next time.
@@ -406,7 +434,7 @@ size_t PPB_URLLoader_Impl::FillUserBuffer() {
 
 void PPB_URLLoader_Impl::SaveResponse(const WebURLResponse& response) {
   scoped_refptr<PPB_URLResponseInfo_Impl> response_info(
-      new PPB_URLResponseInfo_Impl(instance()));
+      new PPB_URLResponseInfo_Impl(pp_instance()));
   if (response_info->Initialize(response))
     response_info_ = response_info;
 }
@@ -414,33 +442,26 @@ void PPB_URLLoader_Impl::SaveResponse(const WebURLResponse& response) {
 void PPB_URLLoader_Impl::UpdateStatus() {
   if (status_callback_ &&
       (RecordDownloadProgress() || RecordUploadProgress())) {
-    PP_Resource pp_resource = GetReferenceNoAddRef();
-    if (pp_resource) {
-      // The PP_Resource on the plugin will be NULL if the plugin has no
-      // reference to this object. That's fine, because then we don't need to
-      // call UpdateStatus.
-      //
-      // Here we go through some effort to only send the exact information that
-      // the requestor wanted in the request flags. It would be just as
-      // efficient to send all of it, but we don't want people to rely on
-      // getting download progress when they happen to set the upload progress
-      // flag.
-      status_callback_(
-          instance()->pp_instance(), pp_resource,
-          RecordUploadProgress() ? bytes_sent_ : -1,
-          RecordUploadProgress() ?  total_bytes_to_be_sent_ : -1,
-          RecordDownloadProgress() ? bytes_received_ : -1,
-          RecordDownloadProgress() ? total_bytes_to_be_received_ : -1);
-    }
+    // Here we go through some effort to only send the exact information that
+    // the requestor wanted in the request flags. It would be just as
+    // efficient to send all of it, but we don't want people to rely on
+    // getting download progress when they happen to set the upload progress
+    // flag.
+    status_callback_(
+        pp_instance(), pp_resource(),
+        RecordUploadProgress() ? bytes_sent_ : -1,
+        RecordUploadProgress() ?  total_bytes_to_be_sent_ : -1,
+        RecordDownloadProgress() ? bytes_received_ : -1,
+        RecordDownloadProgress() ? total_bytes_to_be_received_ : -1);
   }
 }
 
 bool PPB_URLLoader_Impl::RecordDownloadProgress() const {
-  return request_info_ && request_info_->record_download_progress();
+  return request_data_.record_download_progress;
 }
 
 bool PPB_URLLoader_Impl::RecordUploadProgress() const {
-  return request_info_ && request_info_->record_upload_progress();
+  return request_data_.record_upload_progress;
 }
 
 }  // namespace ppapi

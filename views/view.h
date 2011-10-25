@@ -91,7 +91,7 @@ class RootView;
 //   accessed from the main thread.
 //
 /////////////////////////////////////////////////////////////////////////////
-class View : public AcceleratorTarget {
+class VIEWS_EXPORT View : public AcceleratorTarget {
  public:
   typedef std::vector<View*> Views;
 
@@ -144,12 +144,15 @@ class View : public AcceleratorTarget {
   Views::const_reverse_iterator children_rend() { return children_.rend(); }
   int child_count() const { return static_cast<int>(children_.size()); }
   bool has_children() const { return !children_.empty(); }
-  View* child_at(int index) {
+
+  // Returns the child view at |index|.
+  const View* child_at(int index) const {
+    DCHECK_GE(index, 0);
     DCHECK_LT(index, child_count());
     return children_[index];
   }
-  const View* child_at(int index) const {
-    return const_cast<View*>(const_cast<const View*>(this))->child_at(index);
+  View* child_at(int index) {
+    return const_cast<View*>(const_cast<const View*>(this)->child_at(index));
   }
 
   // Returns the parent view.
@@ -249,6 +252,12 @@ class View : public AcceleratorTarget {
 
   // Returns whether the view is enabled.
   virtual bool IsEnabled() const;
+
+  // This indicates that the view completely fills its bounds in an opaque
+  // color.
+  // This doesn't affect compositing but is a hint to the compositor to optimize
+  // painting.
+  void SetFillsBoundsOpaquely(bool fills_bounds_opaquely);
 
   // Transformations -----------------------------------------------------------
 
